@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -183,7 +184,7 @@ module Woods
         @module_discovery = StandaloneModuleDiscovery.new
         swept_files.each_with_object({}) do |file, result|
           # Without the keyword the file declares no module; skip the parse.
-          next unless File.read(file).match?(/\bmodule\s/)
+          next unless SourceFile.read(file).match?(/\bmodule\s/)
 
           units = extract_standalone_module_file(file)
           result[file] = units unless units.empty?
@@ -247,14 +248,14 @@ module Woods
       end
 
       def skip_inputs(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         analysis = collector.call(source)
         declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
         [source, analysis, declarations]
       end
 
       def extract_units(file_path, ar_names, fallback:)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         return [] if family_owned_file?(file_path, source)
 
         analysis = collector.call(source)
@@ -292,7 +293,7 @@ module Woods
       end
 
       def extract_standalone_module_file(file)
-        source = File.read(file)
+        source = SourceFile.read(file)
         analysis = collector.call(source)
         units = @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
         swept_path?(file) ? mark(units, SWEEP_MARKER) : units

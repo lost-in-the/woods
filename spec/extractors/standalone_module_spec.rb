@@ -27,6 +27,51 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
     described_class.new.extract_all
   end
 
+  describe 'multibyte module source under a US-ASCII default external encoding' do
+    let(:source) { "# Ledger codec — encodes entries\nmodule StandaloneFixture::LedgerCodec\n  def self.encode(value) = value\nend\n" }
+
+    it 'extracts the module' do
+      path = load_source('ledger_codec', source)
+
+      values = with_posix_default_external { described_class.new.extract_poro_units(path) }
+
+      expect(values.map(&:identifier)).to eq(['StandaloneFixture::LedgerCodec'])
+    end
+
+    it 'recomputes the module for includer reconciliation' do
+      path = load_source('ledger_codec', source)
+
+      modules = with_posix_default_external { described_class.new.standalone_modules }
+
+      expect(modules.fetch(path).map(&:identifier)).to eq(['StandaloneFixture::LedgerCodec'])
+    end
+
+    it 'keeps a singleton method its own file declares but another file redefines' do
+      load_source('rewrapping', <<~RUBY, directory: 'lib')
+        module StandaloneFixture::Rewrapping
+          def self.wrap(mod, name)
+            original = mod.method(name)
+            mod.singleton_class.send(:define_method, name) { |*a| original.call(*a) }
+          end
+        end
+      RUBY
+      load_source('ledger_lookup', <<~RUBY)
+        # Ledger lookup — by id
+        module StandaloneFixture::LedgerLookup
+          class << self
+            def call(id) = id
+          end
+          StandaloneFixture::Rewrapping.wrap(self, :call)
+        end
+      RUBY
+
+      values = with_posix_default_external { units }
+
+      lookup = values.find { |unit| unit.identifier == 'StandaloneFixture::LedgerLookup' }
+      expect(lookup.metadata).to include(ruby_kind: 'module', class_methods: ['call'])
+    end
+  end
+
   it 'discovers an ordinary module singleton method without invoking it' do
     path = load_source('encryption', <<~RUBY)
       module StandaloneFixture::Encryption

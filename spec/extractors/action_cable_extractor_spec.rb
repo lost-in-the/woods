@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
 require 'woods/extracted_unit'
 require 'woods/extractors/action_cable_extractor'
 
@@ -11,6 +12,20 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
     stub_const('Woods::ModelNameCache',
                double('ModelNameCache', model_names_regex: /\b(?:User|Post|Room)\b/))
     stub_rails_root('/rails')
+  end
+
+  describe '#read_source' do
+    it 'reads a multibyte channel file as valid UTF-8 under a US-ASCII default external encoding' do
+      Dir.mktmpdir do |dir|
+        path = File.join(dir, 'ledger_channel.rb')
+        File.write(path, "# Ledger channel — live totals\nclass LedgerChannel < ApplicationCable::Channel\nend\n")
+
+        source = with_posix_default_external { extractor.send(:read_source, path) }
+
+        expect(source).to be_valid_encoding
+        expect(source).to include('Ledger channel — live totals')
+      end
+    end
   end
 
   describe '#extract_all' do
@@ -476,7 +491,8 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
         )
         allow(File).to receive(:exist?).with('/rails/app/channels/bad_channel.rb').and_return(true)
         allow(File).to receive(:file?).with('/rails/app/channels/bad_channel.rb').and_return(true)
-        allow(File).to receive(:read).with('/rails/app/channels/bad_channel.rb').and_return('class BadChannel; end')
+        allow(File).to receive(:read).with('/rails/app/channels/bad_channel.rb',
+                                           encoding: Encoding::UTF_8).and_return('class BadChannel; end')
         stub_application_cable_channel(base, [@bad_channel, @good_channel])
       end
 
@@ -605,7 +621,7 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
 
     allow(File).to receive(:exist?).with(source_location).and_return(true)
     allow(File).to receive(:file?).with(source_location).and_return(true)
-    allow(File).to receive(:read).with(source_location).and_return(source)
+    allow(File).to receive(:read).with(source_location, encoding: Encoding::UTF_8).and_return(source)
   end
 
   # A base channel with no application source file, so the extractor skips it

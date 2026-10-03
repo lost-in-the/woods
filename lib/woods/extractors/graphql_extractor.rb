@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -147,7 +148,7 @@ module Woods
       #   does not contain a recognizable GraphQL class
       def extract_graphql_file(file_path)
         SourceInputs::ConsumerErrors.record(self) unless runtime_discovery_complete?
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = extract_class_name(file_path, source)
 
         return nil unless class_name
@@ -205,7 +206,7 @@ module Woods
         return nil unless current_runtime_class?(type_class) && graphql_runtime_class?(type_class)
 
         file_path = source_file_for_class(type_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
         unit_type = classify_runtime_type(type_class)
 
         unit = ExtractedUnit.new(

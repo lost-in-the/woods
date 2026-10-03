@@ -25,6 +25,20 @@ RSpec.describe Woods::Extractors::PoroExtractor do
     stub_const('ActiveRecord::Base', ar_base)
   end
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/models/ledger_entry.rb',
+                  source: "# Ledger entry — one posting\nclass LedgerEntry\n  attr_reader :amount\nend\n",
+                  identifier: 'LedgerEntry'
+
+  it 'reports a multibyte namespace-only file under a US-ASCII default external encoding' do
+    path = create_file('app/models/ledger_space.rb',
+                       "# Ledger — namespace\nmodule LedgerSpace\n  module Entries; end\nend\n")
+
+    reason = with_posix_default_external { described_class.new.static_skip_reason(path) }
+
+    expect(reason).to eq('namespace_only')
+  end
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

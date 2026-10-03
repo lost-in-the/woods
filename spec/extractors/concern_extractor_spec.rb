@@ -10,6 +10,12 @@ require 'woods/extractors/concern_extractor'
 RSpec.describe Woods::Extractors::ConcernExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/models/concerns/postable.rb',
+                  source: "# Postable — posting rules\nmodule Postable\n  extend ActiveSupport::Concern\n\n  " \
+                          "def post!\n    true\n  end\nend\n",
+                  identifier: 'Postable'
+
   describe 'runtime model mixins' do
     let(:model) { Class.new }
 
