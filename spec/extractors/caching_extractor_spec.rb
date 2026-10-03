@@ -681,9 +681,10 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       RUBY
 
       key = "\"widget/\#{id}\""
+      origin = 'WidgetConnection.cache_store'
       write = { type: :write, key_pattern: key, ttl: '10.minutes', options: { expires_in: '10.minutes' },
-                store: 'store' }
-      fetch = { type: :fetch, key_pattern: key, ttl: nil, options: {}, store: 'store' }
+                store: 'store', store_origin: origin }
+      fetch = { type: :fetch, key_pattern: key, ttl: nil, options: {}, store: 'store', store_origin: origin }
       expect(unit.metadata[:cache_calls]).to eq([write, fetch])
       expect(unit.metadata[:cache_strategy]).to eq(:low_level)
     end
@@ -701,6 +702,7 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       calls = unit.metadata[:cache_calls]
       expect(calls.map { |c| c[:type] }).to eq(%i[read delete exist])
       expect(calls.map { |c| c[:store] }.uniq).to eq(['LEDGER_CACHE'])
+      expect(calls.map { |c| c[:store_origin] }.uniq).to eq(['ActiveSupport::Cache.lookup_store(:memory_store)'])
     end
 
     it 'records calls on a memoizing method and its ivar' do
@@ -718,13 +720,14 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       calls = unit.metadata[:cache_calls]
       expect(calls.map { |c| [c[:type], c[:store], c[:ttl]] }).to eq([[:fetch, 'label_cache', '1.hour'],
                                                                       [:delete, '@label_cache', nil]])
+      expect(calls.map { |c| c[:store_origin] }.uniq).to eq(['ActiveSupport::Cache::MemoryStore.new(size: 1.megabyte)'])
     end
 
     it 'records a call chained straight onto the store expression' do
       calls = extract("WidgetConnection.cache_store.write('widget/all', 1)\n").metadata[:cache_calls]
 
       expect(calls).to eq([{ type: :write, key_pattern: "'widget/all'", ttl: nil, options: {},
-                             store: 'WidgetConnection.cache_store' }])
+                             store: 'WidgetConnection.cache_store', store_origin: 'WidgetConnection.cache_store' }])
     end
 
     it 'orders store calls after Rails.cache calls and excludes a bare key method argument' do
@@ -736,7 +739,93 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       RUBY
 
       expect(calls.map { |c| c[:type] }).to eq(%i[fetch fetch])
-      expect(calls.last[:store]).to eq('(store = WidgetConnection.cache_store)')
+      expect(calls.last.values_at(:store, :store_origin)).to eq(['(store = WidgetConnection.cache_store)'] * 2)
+    end
+
+    it 'records an injected store with a factory fallback read through attr_reader' do
+      unit = extract(<<~RUBY)
+        class ThrottleCache
+          attr_reader :store, :ttl
+          def initialize(store: nil)
+            @store = store || LedgerConnection.cache_store(namespace: self.class.to_s)
+          end
+          def remember_failure(key) = store.write(key, FAILURE_MARKER, expires_in: FAILURE_TTL)
+          def remember(key, result) = store.write(key, Snapshot.dump(result), expires_in: TTL)
+          def lookup(key) = store.read(key)
+        end
+      RUBY
+
+      calls = unit.metadata[:cache_calls]
+      expect(calls.map { |c| [c[:type], c[:key_pattern], c[:ttl], c[:store]] }).to eq(
+        [[:write, 'key', 'FAILURE_TTL', 'store'], [:write, 'key', 'TTL', 'store'], [:read, 'key', nil, 'store']]
+      )
+      origin = 'LedgerConnection.cache_store(namespace: self.class.to_s)'
+      expect(calls.map { |c| c[:store_origin] }.uniq).to eq([origin])
+      expect(unit.metadata[:cache_strategy]).to eq(:low_level)
+    end
+
+    it 'treats a cache_store factory call with arguments as a store' do
+      calls = extract(<<~RUBY).metadata[:cache_calls]
+        class Widget
+          def lookup(key)
+            store = WidgetConnection.cache_store(namespace: "widgets")
+            store.read(key)
+          end
+        end
+      RUBY
+
+      expect(calls.map { |c| c.values_at(:type, :store, :store_origin) }).to eq(
+        [[:read, 'store', 'WidgetConnection.cache_store(namespace: "widgets")']]
+      )
+    end
+
+    it 'treats a fallback with a store on either side as a store' do
+      calls = extract(<<~RUBY).metadata[:cache_calls]
+        class Widget
+          def initialize(given) = @cache = given || ActiveSupport::Cache.lookup_store(:memory_store)
+          def other(given) = (given or WidgetConnection.cache_store).fetch("widget")
+          def lookup(key) = @cache.read(key)
+        end
+      RUBY
+
+      expect(calls.map { |c| c.values_at(:type, :store, :store_origin) }).to eq(
+        [[:fetch, '(given or WidgetConnection.cache_store)', '(given or WidgetConnection.cache_store)'],
+         [:read, '@cache', 'ActiveSupport::Cache.lookup_store(:memory_store)']]
+      )
+    end
+
+    it 'follows readers, hand-written readers, and aliases of a bound instance variable' do
+      calls = extract(<<~RUBY).metadata[:cache_calls]
+        class Widget
+          attr_accessor :cache
+          attr_reader :other
+          alias_method "kv", "cache"
+          alias kv2 kv
+          def initialize = @cache = WidgetConnection.cache_store
+          def backing = @cache
+          def a(key) = cache.read(key)
+          def b(key) = kv.read(key)
+          def c(key) = kv2.read(key)
+          def d(key) = backing.read(key)
+          def e(key) = other.read(key)
+        end
+      RUBY
+
+      expect(calls.map { |c| c[:store] }).to eq(%w[cache kv kv2 backing])
+      expect(calls.map { |c| c[:store_origin] }.uniq).to eq(['WidgetConnection.cache_store'])
+    end
+
+    it 'takes the first binding in source order as the origin, and truncates it' do
+      long = "WidgetConnection.cache_store(namespace: #{'x' * 150})"
+      calls = extract(<<~RUBY).metadata[:cache_calls]
+        class Widget
+          def first = @cache = #{long}
+          def second = @cache = ActiveSupport::Cache.lookup_store(:memory_store)
+          def lookup(key) = @cache.read(key)
+        end
+      RUBY
+
+      expect(calls.map { |c| c[:store_origin] }).to eq([long[0, 120]])
     end
 
     it 'ignores write-like calls on receivers that are not cache stores' do
@@ -979,7 +1068,12 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       'store bindings' => ["#{Array.new(repeats) { |i| "s#{i} = Widget.cache_store\n" }.join}s1.read(1)\n", 1],
       'deep nesting near a store' => ["#{store}x = #{'[' * 5_000}#{']' * 5_000}\nCACHE.read(1)\n", 1],
       'a long call chain off a store' => ["#{store}CACHE#{'.itself' * repeats}.read(1)\nCACHE.read(1)\n", 1],
-      'write calls on other receivers' => ["#{store}#{"record.write(1)\n" * repeats}CACHE.read(1)\n", 1]
+      'write calls on other receivers' => ["#{store}#{"record.write(1)\n" * repeats}CACHE.read(1)\n", 1],
+      'an alias chain declared in reverse' => [
+        "#{store}#{Array.new(repeats) { |i| "alias_method :a#{repeats - i}, :a#{repeats - i - 1}\n" }.join}" \
+        "def a0 = CACHE\na#{repeats}.read(1)\n", 1
+      ],
+      'attr readers' => ["@kv = Widget.cache_store\n#{"attr_reader :kv\n" * repeats}kv.read(1)\n", 1]
     }.each do |label, (source, count)|
       it "finds custom store calls in linear time: #{label}" do
         path = create_file('app/models/widget.rb', source)
