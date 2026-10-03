@@ -2,8 +2,6 @@
 
 require 'strscan'
 
-require_relative '../console/credential_scanner'
-
 module Woods
   module Extractors
     # Guards for configuration source that is published verbatim: boot files,
@@ -24,7 +22,8 @@ module Woods
     # shape, held under a name that says nothing, cannot be told from any
     # other string.
     module ConfigSourceGuard
-      REDACTED = Console::CredentialScanner::REDACTED
+      # Same marker as Woods::Console::CredentialScanner::REDACTED.
+      REDACTED = '[REDACTED]'
 
       # `scheme://userinfo@`, where userinfo runs to the first `@` before any
       # path, space or quote. A token-only userinfo has no `:`.
@@ -61,7 +60,10 @@ module Woods
       #
       # @return [Console::CredentialScanner]
       def scanner
-        @scanner ||= Console::CredentialScanner.new(disabled_patterns: [:pem_private_key_block])
+        @scanner ||= begin
+          require_relative '../console/credential_scanner'
+          Console::CredentialScanner.new(disabled_patterns: [:pem_private_key_block])
+        end
       end
 
       # Replace each private key block, header to footer, with one marker

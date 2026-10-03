@@ -6,7 +6,6 @@ require 'strscan'
 require 'woods'
 
 require_relative '../source_inputs/consumer_errors'
-require_relative '../console/credential_scanner'
 
 module Woods
   module Extractors
@@ -72,7 +71,8 @@ module Woods
       GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
       ERB_PLACEHOLDER = '__WOODS_ERB__'
       ERB_MARKER = '[ERB]'
-      REDACTED = Console::CredentialScanner::REDACTED
+      # Same marker as Woods::Console::CredentialScanner::REDACTED.
+      REDACTED = '[REDACTED]'
       ENV_REFERENCE = /ENV(?:\.fetch\(|\[)\s*+["']([A-Za-z_][A-Za-z0-9_]*+)["']/
       # `scheme://user:password@host` in any scheme, which the scanner's
       # database-URL pattern covers for database schemes only.
@@ -118,6 +118,9 @@ module Woods
       end
 
       def initialize
+        # Loaded here, not at require time: the dispatch rules and the reload
+        # policy name this class without ever scanning a value.
+        require_relative '../console/credential_scanner'
         @root = Rails.root.to_s
         @scanner = Console::CredentialScanner.new
       end

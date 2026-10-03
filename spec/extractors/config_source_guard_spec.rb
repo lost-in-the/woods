@@ -6,6 +6,14 @@ require 'fileutils'
 require 'woods/extractors/config_source_guard'
 
 RSpec.describe Woods::Extractors::ConfigSourceGuard do
+  it 'uses the Console scanner marker' do
+    require 'woods/console/credential_scanner'
+    require 'woods/extractors/config_file_extractor'
+
+    expect(described_class::REDACTED).to eq(Woods::Console::CredentialScanner::REDACTED)
+    expect(Woods::Extractors::ConfigFileExtractor::REDACTED).to eq(Woods::Console::CredentialScanner::REDACTED)
+  end
+
   describe '.redact' do
     it 'replaces credential-shaped text and leaves the rest of the source alone' do
       source = <<~RUBY
