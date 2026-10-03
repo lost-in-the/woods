@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'migration_declaration'
+require_relative 'table_catalog'
 
 module Woods
   module Extractors
@@ -13,7 +14,9 @@ module Woods
     # Scans `db/migrate/*.rb` for migration files and produces one
     # ExtractedUnit per migration. Extracts DDL metadata (tables, columns,
     # indexes, references), reversibility, risk indicators (data migrations,
-    # raw SQL), and links to affected models via table name classification.
+    # raw SQL), and links every table it names to that table's unit. A model
+    # edge is kept only where a model owns the table today, as the live
+    # schema reports it; no class name is guessed from a table name.
     #
     # @example
     #   extractor = MigrationExtractor.new
@@ -24,17 +27,6 @@ module Woods
     class MigrationExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
-
-      # Rails internal tables that should not generate model dependencies
-      INTERNAL_TABLES = %w[
-        schema_migrations
-        ar_internal_metadata
-        active_storage_blobs
-        active_storage_attachments
-        active_storage_variant_records
-        action_text_rich_texts
-        action_mailbox_inbound_emails
-      ].freeze
 
       # DDL operations that take a table name as the first symbol argument
       TABLE_OPERATIONS = %w[
@@ -86,7 +78,20 @@ module Woods
         /\.destroy_all\b/
       ].freeze
 
-      def initialize
+      # A table name written as a symbol or a string literal.
+      TABLE_NAME = '(?::(\\w++)|["\'](\\w++)["\'])'
+
+      # Tables named as the second argument of a two-table operation.
+      SECOND_TABLE_PATTERN = /(?:add|remove)_foreign_key\s*+\(?\s*+[:"']\w++["']?\s*+,\s*+#{TABLE_NAME}/
+
+      # An explicit foreign key target: `foreign_key: { to_table: :owners }`.
+      TO_TABLE_PATTERN = /\bto_table:\s*+#{TABLE_NAME}/
+
+      JOIN_TABLE_PATTERN = /create_join_table\s*+\(?\s*+#{TABLE_NAME}\s*+,\s*+#{TABLE_NAME}/
+
+      # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
+      def initialize(table_catalog: nil)
+        @table_catalog = table_catalog
         @migrate_dir = Rails.root.join('db/migrate')
         @has_directory = @migrate_dir.directory?
       end
@@ -141,6 +146,9 @@ module Woods
       def extract_metadata(source, file_path)
         tables = extract_tables_affected(source)
         direction = detect_direction(source)
+        references_added = extract_references_added(source)
+        references_removed = extract_references_removed(source)
+        referenced = extract_tables_referenced(source, references_added + references_removed)
 
         {
           migration_version: extract_migration_version(file_path),
@@ -148,12 +156,14 @@ module Woods
           reversible: %w[change up_down].include?(direction),
           direction: direction,
           tables_affected: tables,
+          tables_referenced: referenced,
+          tables_unresolved: unresolved_tables(tables + referenced),
           columns_added: extract_columns_added(source),
           columns_removed: extract_columns_removed(source),
           indexes_added: extract_indexes_added(source),
           indexes_removed: extract_indexes_removed(source),
-          references_added: extract_references_added(source),
-          references_removed: extract_references_removed(source),
+          references_added: references_added,
+          references_removed: references_removed,
           operations: extract_operations(source),
           has_data_migration: data_migration?(source),
           has_execute_sql: source.match?(/\bexecute\s/),
@@ -216,10 +226,12 @@ module Woods
         tables = []
 
         TABLE_OPERATIONS.each do |op|
-          source.scan(/#{op}\s+:(\w+)/).each do |match|
-            tables << match[0]
+          source.scan(/#{op}\s*+\(?\s*+#{TABLE_NAME}/).each do |symbol, string|
+            tables << (symbol || string)
           end
         end
+
+        source.scan(JOIN_TABLE_PATTERN).each { |match| tables << match.compact.sort.join('_') }
 
         # rename_table has two table arguments
         source.scan(/rename_table\s+:\w+\s*,\s*:(\w+)/).each do |match|
@@ -227,6 +239,36 @@ module Woods
         end
 
         tables.uniq
+      end
+
+      # Tables a migration points at without changing them: reference and
+      # foreign key targets, and the two sides of a join table.
+      #
+      # @param source [String] Ruby source code
+      # @param references [Array<Hash>] reference hashes with :reference
+      # @return [Array<String>] sorted, deduplicated table names
+      def extract_tables_referenced(source, references)
+        tables = references.map { |ref| ref[:reference].pluralize }
+        [SECOND_TABLE_PATTERN, TO_TABLE_PATTERN, JOIN_TABLE_PATTERN].each do |pattern|
+          source.scan(pattern).each { |match| tables.concat(match.compact) }
+        end
+        tables.uniq.sort
+      end
+
+      # Named tables the live schema does not have: dropped since, renamed,
+      # or a reference whose table is not the plural of its name.
+      #
+      # @param tables [Array<String>]
+      # @return [Array<String>] sorted
+      def unresolved_tables(tables)
+        tables.uniq.reject do |table|
+          TableCatalog::INTERNAL_TABLES.include?(table) || table_catalog.named(table).any?
+        end.sort
+      end
+
+      # @return [TableCatalog]
+      def table_catalog
+        @table_catalog ||= TableCatalog.from_runtime
       end
 
       # Extract columns added via add_column and create_table block columns.
@@ -417,31 +459,34 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
+      # Every named table resolves through the live table catalog. A table
+      # the schema no longer has yields no edge at all, so a migration never
+      # points at a model that was renamed or removed.
+      #
       # @param source [String] Ruby source code
       # @param metadata [Hash] Extracted metadata
       # @return [Array<Hash>] Dependency hashes
       def extract_dependencies(source, metadata)
-        deps = []
+        affected = metadata[:tables_affected].flat_map { |name| table_catalog.named(name) }
+        referenced = metadata[:tables_referenced].flat_map { |name| table_catalog.named(name) }
 
-        # Link tables to models via classify
-        metadata[:tables_affected].each do |table|
-          next if INTERNAL_TABLES.include?(table)
-
-          model_name = table.classify
-          deps << { type: :model, target: model_name, via: :table_name }
+        deps = (affected + referenced).map(&:identifier).uniq.sort.map do |identifier|
+          { type: :database_table, target: identifier, via: :migrates }
         end
-
-        # Link references to models
-        all_refs = (metadata[:references_added] + metadata[:references_removed]).uniq
-        all_refs.each do |ref|
-          model_name = ref[:reference].classify
-          deps << { type: :model, target: model_name, via: :reference }
-        end
+        deps.concat(model_dependencies(affected, :table_name))
+        deps.concat(model_dependencies(referenced, :reference))
 
         # Scan data migration code for common dependencies
         deps.concat(scan_common_dependencies(source))
 
         consolidate_dependencies(deps)
+      end
+
+      # @param tables [Array<TableCatalog::Table>]
+      # @param via [Symbol]
+      # @return [Array<Hash>] one edge per owning model, sorted by name
+      def model_dependencies(tables, via)
+        tables.filter_map(&:model).uniq.sort.map { |model| { type: :model, target: model, via: via } }
       end
     end
   end
