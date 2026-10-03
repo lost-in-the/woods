@@ -4,6 +4,8 @@ require 'fileutils'
 require 'open3'
 require 'tmpdir'
 
+require_relative 'quiet_git'
+
 # Builds a throwaway git repository holding a canned changelog and canned fenced
 # documents, so `release:prepare` and the release-state fences can be exercised
 # end to end without reading this checkout.
@@ -96,6 +98,7 @@ module ReleaseRepositoryHelper
     release_git(root, 'config', 'user.email', 'release-test@example.invalid')
     release_git(root, 'config', 'user.name', 'Release Test')
     release_git(root, 'config', 'commit.gpgsign', 'false')
+    QuietGit.configure(root)
     release_git(root, 'add', '.')
     release_git(root, 'commit', '-m', 'release fixture')
   end
