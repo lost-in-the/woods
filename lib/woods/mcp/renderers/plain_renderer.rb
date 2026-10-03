@@ -154,6 +154,8 @@ module Woods
             items.each do |item|
               lines << if item.is_a?(Hash) && item.key?('from')
                          "  #{plain_edge_line(item)}"
+                       elsif item.is_a?(Hash) && item.key?('route')
+                         "  #{item['route']} -> #{route_target(item)}"
                        elsif item.is_a?(Hash)
                          "  #{item['identifier']} (#{item['type']}) - #{item['dependent_count']} dependents"
                        else

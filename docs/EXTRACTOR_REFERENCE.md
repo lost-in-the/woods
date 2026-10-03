@@ -209,22 +209,26 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### ControllerExtractor
 
-**What it captures:** Every `ApplicationController` and `ActionController::API` descendant. Route context is prepended to the source, each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
+**What it captures:** Every app-defined `ActionController::Base`, `ActionController::API` and `ActionController::Metal` descendant. Route context is prepended to the source, each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
 
 **Key details:**
-- Discovers controllers via `ApplicationController.descendants` (and `ActionController::API.descendants` if present)
+- Discovers controllers via the descendants of `ActionController::Base`, `ActionController::API` and `ActionController::Metal` (each when present), keeping classes whose source file is application source
 - Builds a routes map from `Rails.application.routes` at initialization time
 - Route context is inlined in `source_code` as a comment header, not just in metadata
-- Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
+- Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
+- `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
 - Inline callbacks use stable source-site labels in filter metadata, controller annotations and action chunks: `#<Proc app/controllers/posts_controller.rb:12>` (or `lambda`). The controller filter metadata and annotations use the same labels for `if`/`unless` procs. App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Labels describe the callable location and kind, not captured closure state, and never execute callbacks.
 - Route helper resolution accepts every live named controller/action route, including `file_path`, `image_url`, `download_path`, and `root_path`. Unknown filesystem/asset helpers produce no edge; matching names are conservative source references, not proof a call executes.
 - Extracts `redirect_to` navigation edges: named route helpers (`posts_path`, `users_url`) are resolved to controller targets via `RouteHelperResolver`, producing `:redirect_to` dependency edges (gated by `extract_navigation_edges` config)
 
 **Edge cases:**
 - API-only controllers (`ActionController::API` descendants) are included when the gem is present
+- `metadata.parent_class` is the runtime superclass name (`ApplicationController`, `ActionController::Metal`, or a gem controller such as `Rails::WelcomeController`)
+- Controllers built on `ActionController::Metal` alone carry `metadata.metal: true` (every other controller carries `false`). Their actions follow the same admission rule; a Metal controller without a callbacks module has an empty filter chain, and the ancestor list stops at `ActionController::Metal`
 - Controllers with no corresponding routes still get extracted (they may be base classes)
+- Lists derived from reflection are sorted so repeat extractions are byte-identical: `actions`, the keys of `action_sources`, `inherited_gem_actions` and `routes`, filter `only`/`except` lists, action chunks, and included concerns. The filter chain keeps execution order, `ancestors` keeps superclass order, and each action's routes keep route-table order
 
 **Example output (abbreviated):**
 

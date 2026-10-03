@@ -190,6 +190,8 @@ module Woods
             items.each do |item|
               lines << if item.is_a?(Hash) && item.key?('from')
                          graph_edge_line(item, bold: true)
+                       elsif item.is_a?(Hash) && item.key?('route')
+                         "- **#{item['route']}** -> #{route_target(item)}"
                        elsif item.is_a?(Hash) && item.key?('score')
                          "- **#{item['identifier']}** (#{item['type']}) — score: #{item['score']}"
                        elsif item.is_a?(Hash)

@@ -1,0 +1,1 @@
+- Controller units now record `metadata.parent_class`, the runtime superclass name: `ApplicationController` for most controllers, `ActionController::Metal` for a Metal controller, or the gem class a controller inherits from.

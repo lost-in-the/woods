@@ -55,6 +55,7 @@ Identifiers are namespaced and typed. Never invent one from a filename when
 | Check a join or foreign key across databases before writing it | `graph_analysis` with `analysis: "cross_database_edges"` | `lookup` on both models |
 | Find dependencies that change faster than their dependents | `graph_analysis` with `analysis: "volatile_dependencies"` | `recent_changes` |
 | See a Packwerk boundary before calling across it | `graph_analysis` with `analysis: "undeclared_package_edges"` | `lookup` on the package unit |
+| Find dead routes (no controller unit, or an action the controller lacks) | `graph_analysis` with `analysis: "unresolvable_routes"` | `lookup` on the controller |
 | Find central or high-impact units | `pagerank` | `dependents` |
 | Ask a conceptual question | `codebase_retrieve` after checking its retrieval mode and data | `lookup` and graph tools |
 | Refresh after a published extraction | `reload` | `woods_status` |

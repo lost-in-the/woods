@@ -7,8 +7,11 @@ require 'fileutils'
 require 'active_support/concern'
 require 'active_support/core_ext/string/inflections'
 require 'active_support/core_ext/object/blank'
+require 'active_support/core_ext/class/subclasses'
 require 'woods'
 require 'woods/extractors/controller_extractor'
+require 'woods/dependency_graph'
+require 'woods/graph_analyzer'
 
 # Which public methods count as a controller's actions, and where each one
 # is defined.
@@ -49,6 +52,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     app_double = double('Application', routes: routes_double)
     stub_const('Rails', double('Rails', application: app_double, root: Pathname.new(app_root),
                                         logger: double('Logger', error: nil, warn: nil, debug: nil, info: nil)))
+    stub_const('ActionController::Metal', ActionFixtures::FrameworkMetal)
     stub_const('ActionController::Base', ActionFixtures::FrameworkBase)
     stub_const('ActionController::API', ActionFixtures::FrameworkBase)
     described_class.new
@@ -56,15 +60,33 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
 
   before do
     stub_const('ActionFixtures', Module.new)
-    framework = Class.new do
+    # The bare Rack-level root, like ActionController::Metal: it has actions
+    # but no callback chain until a callbacks module is included.
+    metal = Class.new do
       def self.action_methods
-        (public_instance_methods(true) - ActionFixtures::FrameworkBase.public_instance_methods(true))
+        (public_instance_methods(true) - ActionFixtures::FrameworkMetal.public_instance_methods(true))
           .to_set(&:to_s)
       end
-
+    end
+    ActionFixtures.const_set(:FrameworkMetal, metal)
+    framework = Class.new(metal) do
       def self._process_action_callbacks = []
     end
     ActionFixtures.const_set(:FrameworkBase, framework)
+
+    # A gem module in the style of AbstractController::Callbacks: including
+    # it gives a Metal controller a callback chain and a public helper.
+    load write(gem_root, 'lib/fake_callbacks.rb', <<~RUBY)
+      module ActionFixtures
+        module FakeCallbacks
+          def self.included(base)
+            base.define_singleton_method(:_process_action_callbacks) { [] }
+          end
+
+          def performed? = false
+        end
+      end
+    RUBY
 
     # A gem DSL in the style of decent_exposure: define_method from a file
     # outside the app root creates a public reader and writer.
@@ -181,17 +203,97 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         end
       end
     RUBY
+
+    # A gem controller in the style of an authentication engine's
+    # sessions controller, and an app controller that inherits from it.
+    load write(gem_root, 'app/controllers/action_fixtures/vault/sessions_controller.rb', <<~RUBY)
+      module ActionFixtures::Vault; end
+
+      class ActionFixtures::Vault::SessionsController < ActionFixtures::FrameworkBase
+        def new = nil
+        def create = nil
+        def destroy = nil
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/members/sessions_controller.rb', <<~RUBY)
+      module ActionFixtures::Members; end
+
+      class ActionFixtures::Members::SessionsController < ActionFixtures::Vault::SessionsController
+        def new = super
+      end
+    RUBY
+
+    load_app('app/controllers/concerns/action_fixtures/throttling.rb', <<~RUBY)
+      module ActionFixtures::Throttling
+        extend ActiveSupport::Concern
+      end
+    RUBY
+
+    load_app('app/controllers/concerns/action_fixtures/auditing.rb', <<~RUBY)
+      module ActionFixtures::Auditing
+        extend ActiveSupport::Concern
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/shipments_controller.rb', <<~RUBY)
+      class ActionFixtures::ShipmentsController < ActionFixtures::BaseController
+        include ActionFixtures::Throttling
+        include ActionFixtures::Auditing
+
+        def update = nil
+        def index = nil
+        def archive = nil
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/ledger_reports_controller.rb', <<~RUBY)
+      class ActionFixtures::LedgerReportsController < ActionFixtures::BaseController
+        attr_reader :ledger, :period
+
+        def show = nil
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/health_controller.rb', <<~RUBY)
+      class ActionFixtures::HealthController < ActionFixtures::FrameworkMetal
+        def show
+          [200, { 'content-type' => 'text/plain' }, ['ok']]
+        end
+
+        private def checks = []
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/ping_controller.rb', <<~RUBY)
+      class ActionFixtures::PingController < ActionFixtures::FrameworkMetal
+        include ActionFixtures::FakeCallbacks
+
+        def index = [204, {}, []]
+      end
+    RUBY
+  end
+
+  let(:routes) do
+    [
+      route('action_fixtures/sso_google', 'create'),
+      route('action_fixtures/confirmations', 'new'),
+      route('action_fixtures/confirmations', 'create'),
+      route('action_fixtures/modern/confirmations', 'create'),
+      route('action_fixtures/sales_reports', 'show'),
+      route('action_fixtures/ledgers', 'totals'),
+      route('action_fixtures/health', 'show'),
+      route('action_fixtures/members/sessions', 'new'),
+      route('action_fixtures/members/sessions', 'create'),
+      route('action_fixtures/widgets', 'widget'),
+      route('action_fixtures/shipments', 'update'),
+      route('action_fixtures/shipments', 'index'),
+      route('action_fixtures/shipments', 'archive')
+    ]
   end
 
   let(:extractor) do
-    build_extractor([
-                      route('action_fixtures/sso_google', 'create'),
-                      route('action_fixtures/confirmations', 'new'),
-                      route('action_fixtures/confirmations', 'create'),
-                      route('action_fixtures/modern/confirmations', 'create'),
-                      route('action_fixtures/sales_reports', 'show'),
-                      route('action_fixtures/ledgers', 'totals')
-                    ], named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
+    build_extractor(routes, named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
   end
 
   def unit_for(name)
@@ -312,6 +414,195 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
 
     it 'counts only admitted actions' do
       expect(unit.metadata[:action_count]).to eq(1)
+    end
+  end
+
+  describe 'Metal controllers defined in app source' do
+    it 'are discovered alongside Base and API controllers' do
+      expect(extractor.discoverable_classes).to include(ActionFixtures::HealthController, ActionFixtures::PingController)
+    end
+
+    it 'become controller units flagged as metal, with actions per the admission rule' do
+      unit = unit_for('HealthController')
+
+      expect(unit.type).to eq(:controller)
+      expect(unit.metadata).to include(metal: true, actions: ['show'], filters: [], filter_count: 0)
+    end
+
+    it 'stop the ancestor chain at the Metal root' do
+      expect(unit_for('HealthController').metadata[:ancestors]).to eq(['ActionFixtures::HealthController'])
+    end
+
+    it 'chunk their actions without a callback chain' do
+      expect(unit_for('HealthController').chunks.map { |chunk| chunk[:identifier] })
+        .to eq(['ActionFixtures::HealthController#show'])
+    end
+
+    it 'admit an own-file action but not the public helper an included gem module adds' do
+      expect(unit_for('PingController').metadata).to include(metal: true, actions: ['index'])
+    end
+
+    it 'leave Base controllers unflagged' do
+      expect(unit_for('WidgetsController').metadata[:metal]).to be(false)
+    end
+
+    it 'resolve the routes that dispatch to them' do
+      graph = Woods::DependencyGraph.new
+      graph.register(unit_for('HealthController'))
+      graph.register(Woods::ExtractedUnit.new(type: :route, identifier: 'GET /health', file_path: nil).tap do |route|
+        route.metadata = { controller: 'action_fixtures/health', action: 'show' }
+        route.dependencies = [{ type: :controller, target: 'ActionFixtures::HealthController', via: :route_dispatch }]
+      end)
+
+      expect(Woods::GraphAnalyzer.new(graph).unresolvable_routes).to eq([])
+    end
+  end
+
+  describe 'routed actions whose body is gem code' do
+    subject(:unit) { unit_for('Members::SessionsController') }
+
+    def route_unit(identifier, controller, action)
+      Woods::ExtractedUnit.new(type: :route, identifier: identifier, file_path: nil).tap do |route|
+        route.metadata = { controller: controller.underscore.delete_suffix('_controller'), action: action }
+        route.dependencies = [{ type: :controller, target: controller, via: :route_dispatch }]
+      end
+    end
+
+    def graph_with(*units)
+      Woods::DependencyGraph.new.tap { |graph| units.each { |unit| graph.register(unit) } }
+    end
+
+    it 'are not admitted as actions, while the controller’s own override is' do
+      expect(unit.metadata[:actions]).to eq(['new'])
+    end
+
+    it 'are recorded with their gem owner, leaving unrouted gem actions out' do
+      expect(unit.metadata[:inherited_gem_actions]).to eq(
+        'create' => { owner: 'ActionFixtures::Vault::SessionsController' }
+      )
+    end
+
+    it 'add no edge into the gem class' do
+      expect(unit.dependencies.map { |dep| dep[:target] }).not_to include('ActionFixtures::Vault::SessionsController')
+    end
+
+    it 'include a routed reader a gem DSL defines on the controller itself' do
+      expect(unit_for('WidgetsController').metadata[:inherited_gem_actions]).to eq(
+        'widget' => { owner: 'ActionFixtures::WidgetsController' }
+      )
+    end
+
+    it 'record an empty set on a controller with none' do
+      expect(unit_for('LedgersController').metadata[:inherited_gem_actions]).to eq({})
+    end
+
+    it 'keep a route to them out of the unresolvable-route report' do
+      controller = 'ActionFixtures::Members::SessionsController'
+      graph = graph_with(unit, route_unit('POST /members/sessions', controller, 'create'),
+                         route_unit('DELETE /members/sessions', controller, 'reset'))
+      restored = Woods::DependencyGraph.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      [graph, restored].each do |candidate|
+        expect(Woods::GraphAnalyzer.new(candidate).unresolvable_routes)
+          .to eq([{ route: 'DELETE /members/sessions', controller: controller, action: 'reset',
+                    reason: 'missing_action' }])
+      end
+    end
+  end
+
+  describe 'per-action chunks' do
+    def chunk_actions(name)
+      unit_for(name).chunks.map { |chunk| chunk[:metadata][:action] }
+    end
+
+    it 'map one to one onto the admitted actions of every controller' do
+      ActionFixtures.constants.map { |name| ActionFixtures.const_get(name) }
+                    .select { |constant| constant.is_a?(Class) && extractor.discoverable_classes.include?(constant) }
+                    .each do |controller|
+        unit = extractor.extract_controller(controller)
+        expect(unit.chunks.map { |chunk| chunk[:metadata][:action] }).to eq(unit.metadata[:actions]), controller.name
+      end
+    end
+
+    it 'give an attr_reader action an action chunk holding its declaring line' do
+      unit = unit_for('LedgerReportsController')
+      chunk = unit.chunks.find { |candidate| candidate[:metadata][:action] == 'ledger' }
+
+      expect(unit.metadata[:actions]).to eq(%w[ledger period show])
+      expect(chunk).to include(chunk_type: :action, identifier: 'ActionFixtures::LedgerReportsController#ledger')
+      expect(chunk[:content]).to include('attr_reader :ledger, :period')
+      expect(chunk[:metadata][:declaration_line]).to eq(2)
+    end
+
+    it 'mark only declaration chunks with a declaration line' do
+      show = unit_for('LedgerReportsController').chunks.find { |chunk| chunk[:metadata][:action] == 'show' }
+
+      expect(show[:metadata]).not_to have_key(:declaration_line)
+    end
+
+    it 'cover exactly the admitted actions, leaving out gem-inherited ones' do
+      expect(chunk_actions('Members::SessionsController')).to contain_exactly('new')
+    end
+
+    it 'leave out gem DSL readers and setters' do
+      expect(chunk_actions('WidgetsController')).to contain_exactly('index')
+    end
+
+    it 'leave out unrouted mixin helpers while keeping a routed inherited action' do
+      expect(chunk_actions('SsoGoogleController')).to contain_exactly('create')
+      expect(chunk_actions('SalesReportsController')).to contain_exactly('show')
+    end
+  end
+
+  describe 'output order' do
+    # A before filter whose only: list is a Set, as ActionFilter holds it.
+    def filter_only(*actions)
+      condition = Object.new.tap { |cond| cond.instance_variable_set(:@actions, actions.to_set) }
+      Object.new.tap do |callback|
+        callback.define_singleton_method(:kind) { :before }
+        callback.define_singleton_method(:filter) { :load_shipment }
+        callback.instance_variable_set(:@if, [condition])
+        callback.instance_variable_set(:@unless, [])
+      end
+    end
+
+    def serialized(unit)
+      JSON.generate(unit.to_h.except(:extracted_at))
+    end
+
+    let(:controller) { ActionFixtures::ShipmentsController }
+
+    it 'sorts actions, action sources, routes, filter action lists and chunks' do
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('update', 'archive')])
+      unit = extractor.extract_controller(controller)
+
+      expect(unit.metadata[:actions]).to eq(%w[archive index update])
+      expect(unit.metadata[:action_sources].keys).to eq(%w[archive index update])
+      expect(unit.metadata[:routes].keys).to eq(%w[archive index update])
+      expect(unit.metadata[:filters].first[:only]).to eq(%w[archive update])
+      expect(unit.chunks.map { |chunk| chunk[:metadata][:action] }).to eq(%w[archive index update])
+      expect(unit.metadata[:included_concerns]).to eq(%w[ActionFixtures::Auditing ActionFixtures::Throttling])
+    end
+
+    it 'is byte-identical when reflection and the route table answer in another order' do
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('update', 'archive')])
+      first = serialized(extractor.extract_controller(controller))
+
+      reordered = build_extractor(routes.reverse)
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('archive', 'update')])
+      allow(controller).to(receive(:action_methods).and_wrap_original { |original| original.call.to_a.reverse.to_set })
+      allow(controller).to(receive(:included_modules).and_wrap_original { |original| original.call.reverse })
+
+      expect(serialized(reordered.extract_controller(controller))).to eq(first)
+    end
+  end
+
+  describe 'parent class' do
+    it 'is the runtime superclass name for every controller, Metal or not' do
+      expect(unit_for('HealthController').metadata[:parent_class]).to eq('ActionFixtures::FrameworkMetal')
+      expect(unit_for('SalesReportsController').metadata[:parent_class]).to eq('ActionFixtures::BaseReportsController')
+      expect(unit_for('Members::SessionsController').metadata[:parent_class])
+        .to eq('ActionFixtures::Vault::SessionsController')
     end
   end
 end

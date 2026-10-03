@@ -385,7 +385,9 @@ module Woods
     #   defined by a gem or engine, which the index does not extract) skips
     #   the route instead.
     # - `missing_action`: the controller node's `actions` lack the action.
-    #   A controller node with no recorded `actions` is not judged.
+    #   A controller node with no recorded `actions` is not judged, and an
+    #   action in the node's `inherited_gem_actions` (a routed action Rails
+    #   dispatches to a gem-defined body) resolves.
     #
     # Routes with no controller or action (mounts, redirects, Rack
     # endpoints) carry no `route_action` and are never reported.
@@ -463,7 +465,10 @@ module Woods
       end
 
       actions = node[:actions]
-      actions.is_a?(Array) && !actions.include?(action) ? 'missing_action' : nil
+      return nil unless actions.is_a?(Array)
+      return nil if actions.include?(action) || Array(node[:inherited_gem_actions]).include?(action)
+
+      'missing_action'
     end
 
     # ──────────────────────────────────────────────────────────────────────

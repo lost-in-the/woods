@@ -201,7 +201,7 @@ persisted rather than every hub in the graph.
 | `cross_database_edges` | `stats.cross_database_edge_count` | no | every crossing edge |
 | `volatile_dependencies` | `stats.volatile_dependency_count`, `stats.volatile_dependencies_limit`; optional `stats.volatile_dependencies_limit_per_target`, `stats.volatile_dependency_reported_count` | yes, optional per-target cap followed by top 20 by the dependency's PageRank | count is every qualifying edge before caps; reported count is the final array length and appears only when the per-target cap is enabled |
 | `undeclared_package_edges` | `stats.undeclared_package_edge_count` | no | every undeclared crossing |
-| `unresolvable_routes` | `stats.unresolvable_route_count` | no | every route whose controller has no unit (`missing_controller`, skipping controllers a gem or engine defines) or whose action is not in the controller's `actions` (`missing_action`); routes without a controller and action are never listed. `woods:validate` prints each as a warning |
+| `unresolvable_routes` | `stats.unresolvable_route_count` | no | every route whose controller has no unit (`missing_controller`, skipping controllers a gem or engine defines) or whose action is in neither the controller's `actions` nor its `inherited_gem_actions` (`missing_action`); routes without a controller and action are never listed. `woods:validate` prints each as a warning |
 
 A capped section means the array on disk is a page, not the population.
 `volatile_dependencies` publishes both numbers and `cycles` publishes a

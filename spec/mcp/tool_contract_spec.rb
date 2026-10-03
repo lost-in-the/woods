@@ -109,7 +109,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                      'analysis' => enum_contract(
                                        %w[orphans dead_ends hubs cycles bridges
                                           cross_database_edges volatile_dependencies
-                                          undeclared_package_edges all], nil, 10_000
+                                          undeclared_package_edges unresolvable_routes all], nil, 10_000
                                      ),
                                      'limit' => integer_contract(1, 1_000),
                                      'offset' => integer_contract(0, 1_000_000)
@@ -513,7 +513,8 @@ RSpec.describe 'Index MCP tool contracts' do
     {
       'orphan_count' => 1, 'dead_end_count' => 1, 'hub_count' => 3, 'cycle_count' => 0,
       'cross_database_edge_count' => 2, 'volatile_dependency_count' => 1,
-      'volatile_dependencies_limit' => 20, 'undeclared_package_edge_count' => 2
+      'volatile_dependencies_limit' => 20, 'undeclared_package_edge_count' => 2,
+      'unresolvable_route_count' => 1
     }
   end
 
@@ -531,6 +532,10 @@ RSpec.describe 'Index MCP tool contracts' do
       'cross_database_edges' => expected_cross_database_edges,
       'volatile_dependencies' => expected_volatile_dependencies,
       'undeclared_package_edges' => expected_undeclared_package_edges,
+      'unresolvable_routes' => [
+        { 'route' => 'DELETE /posts/:id', 'controller' => 'PostsController', 'action' => 'destroy',
+          'reason' => 'missing_action' }
+      ],
       'stats' => expected_graph_stats
     }
   end

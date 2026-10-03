@@ -22,6 +22,7 @@ module Woods
       GRAPH_ANALYSIS_SECTIONS = %w[
         orphans dead_ends hubs cycles bridges
         cross_database_edges volatile_dependencies undeclared_package_edges
+        unresolvable_routes
       ].freeze
 
       # Factory method to build the appropriate renderer for a format.
@@ -69,6 +70,14 @@ module Woods
       end
 
       private
+
+      # The dispatch target and verdict of an `unresolvable_routes` entry.
+      #
+      # @param item [Hash] `{ 'route', 'controller', 'action', 'reason' }`
+      # @return [String] e.g. `PostsController#destroy (missing_action)`
+      def route_target(item)
+        "#{item['controller']}##{item['action']} (#{item['reason']})"
+      end
 
       def traversal_coverage_lines(data)
         coverage = fetch_key(data, :graph_coverage)

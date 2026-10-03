@@ -32,12 +32,13 @@ module Woods
     # package: any app-owned unit under a Packwerk package (Task 8)
     # enforce_dependencies: package units (Task 7)
     # commit_count, change_frequency: git enrichment (Task 5)
-    # actions: controller units; route_action: route units that dispatch to a
-    # controller action. Together they let the analyzer report routes that
+    # actions, inherited_gem_actions: controller units (the second holds routed
+    # actions whose body is gem code); route_action: route units that dispatch
+    # to a controller action. Together they let the analyzer report routes that
     # do not resolve without re-running the route extractor on controller edits.
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
-      actions route_action
+      actions inherited_gem_actions route_action
     ].freeze
 
     # These extractors describe a whole source file rather than one constant.
@@ -566,19 +567,20 @@ module Woods
     # same target twice (say once as `:belongs_to` and once as
     # `:code_reference`) contributes two entries in a full extraction, so
     # reconstructing this list incrementally has to do the same or the two
-    # paths produce different unit JSON. Order is registration order and is
-    # not guaranteed to match a full extraction's; callers comparing the two
-    # should compare as multisets.
+    # paths produce different unit JSON. Entries are sorted by identifier,
+    # then type, the order {ExtractedUnit#to_h} serializes a full
+    # extraction's dependents in, so neither depends on registration order.
     #
     # @param identifier [String] Unit identifier
     # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
     def dependents_detail(identifier)
-      (@reverse[identifier] || []).flat_map do |source|
+      entries = (@reverse[identifier] || []).flat_map do |source|
         sorted_nodes(@nodes[source] || {}).flat_map do |type, node|
           edge_count = Array(@edges[source]&.[](type)).count { |e| e[:target] == identifier }
           Array.new(edge_count) { { type: node[:type], identifier: source } }
         end
       end
+      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s] }
     end
 
     # Get all units of a specific type
@@ -677,6 +679,10 @@ module Woods
       end
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
       attrs[:actions] = metadata[:actions] if unit.type == :controller && metadata[:actions].is_a?(Array)
+      gem_actions = metadata[:inherited_gem_actions]
+      if unit.type == :controller && gem_actions.is_a?(Hash) && gem_actions.any?
+        attrs[:inherited_gem_actions] = gem_actions.keys
+      end
       attrs[:route_action] = metadata[:action] if unit.type == :route && metadata[:controller] && metadata[:action]
       if unit.type == :package && !metadata[:enforce_dependencies].nil?
         attrs[:enforce_dependencies] = metadata[:enforce_dependencies]
@@ -1019,7 +1025,7 @@ module Woods
     # @return [Object]
     def self.normalize_node_attribute(key, value)
       case key
-      when :source_paths, :foreign_key_tables, :actions then Array(value).map(&:to_s).uniq.sort
+      when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions then Array(value).map(&:to_s).uniq.sort
       when :commit_count then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
       else value.to_s

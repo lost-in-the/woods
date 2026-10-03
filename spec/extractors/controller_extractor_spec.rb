@@ -896,6 +896,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
           action_methods: Set.new,
           _process_action_callbacks: [],
           ancestors: [],
+          superclass: nil,
           included_modules: modules
         )
         controller

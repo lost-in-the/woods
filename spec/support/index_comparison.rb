@@ -11,7 +11,7 @@ require 'woods/generation'
 # so the harness spec can stay about *operations*, and so the definition is
 # stated once, in one place, with its exclusions justified.
 #
-# Three kinds of difference are deliberately tolerated, and nothing else:
+# Two kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
 #    `generated_at` in `graph_analysis.json`, and `generated_at` inside each
@@ -19,15 +19,13 @@ require 'woods/generation'
 #    left alone keeps an older stamp. `graph_sha` is *not* excluded: it
 #    digests `dependency_graph.json`, whose serialization is a pure function
 #    of graph content (B-180), so the two runs must publish the same digest.
-# 2. **Ordering inside `dependents`** — a full extraction appends in
-#    extractor-iteration order, an incremental one in graph order. Both are
-#    the same multiset.
-# 3. **PageRank beyond {PAGERANK_PRECISION} decimal places** — an iterative
+# 2. **PageRank beyond {PAGERANK_PRECISION} decimal places** — an iterative
 #    float computation, accumulated in whatever order each run registered
 #    nodes. Scores are compared as *values*, not just keys; only the last bits
 #    are forgiven.
 #
-# Everything else — unit sets, unit content, `_index.json`, graph nodes,
+# Everything else — unit sets, unit content (including the order of
+# `dependents`, which both paths serialize sorted), `_index.json`, graph nodes,
 # edges, reverse edges, file map, type index, stats, PageRank scores, manifest
 # counts, and SUMMARY.md's totals against the manifest of the same index —
 # must match exactly.
@@ -201,7 +199,6 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       next if File.basename(File.dirname(path)) == 'flows'
 
       data = JSON.parse(File.read(path)).except(*VOLATILE_UNIT_KEYS)
-      data['dependents'] = (data['dependents'] || []).sort_by(&:to_a)
       snapshot["#{File.basename(File.dirname(path))}/#{File.basename(path)}"] = data
     end
   end

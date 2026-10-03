@@ -343,6 +343,15 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(resolving.unresolvable_routes).to eq([])
     end
 
+    it 'resolves a routed action the controller dispatches to a gem-defined body' do
+      gem_actions = { 'create' => { owner: 'Vault::SessionsController' } }
+      graph.register(make_unit(type: :controller, identifier: 'Members::SessionsController',
+                               metadata: { actions: ['new'], inherited_gem_actions: gem_actions }))
+      graph.register(route('POST /members/sessions', 'Members::SessionsController', 'create'))
+
+      expect(analyzer.unresolvable_routes).to eq([])
+    end
+
     it 'skips routes that carry no controller or action' do
       graph.register(make_unit(type: :route, identifier: 'MOUNT /widgets', file_path: nil, metadata: {}))
 

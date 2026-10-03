@@ -757,6 +757,71 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   end
 end
 
+RSpec.describe 'Controllers outside ActionController::Base, in a real Rails process', :booted_app do
+  def controller_lines
+    script = File.expand_path('../fixtures/controller_runtime/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    output.lines.grep(/\A\{/)
+  end
+
+  def extract_controllers
+    controller_lines.to_h { |line| JSON.parse(line).then { |unit| [unit['identifier'], unit] } }
+  end
+
+  it 'emits byte-identical controller units from two independent boots' do
+    first = controller_lines
+
+    expect(first.size).to eq(4)
+    expect(controller_lines).to eq(first)
+  end
+
+  it 'indexes ActionController::Metal controllers as metal controller units with their own actions' do
+    units = extract_controllers
+
+    expect(units.fetch('HealthController')['metadata']).to include('metal' => true, 'actions' => ['show'],
+                                                                   'filters' => [], 'ancestors' => ['HealthController'])
+    expect(units.fetch('PingController')['metadata']).to include(
+      'metal' => true, 'actions' => ['index'], 'filters' => [{ 'kind' => 'before', 'filter' => 'stamp' }]
+    )
+  end
+
+  it 'records each controller’s runtime parent class' do
+    units = extract_controllers
+
+    expect(units.transform_values { |unit| unit['metadata']['parent_class'] }).to eq(
+      'GreetingsController' => 'Rails::WelcomeController',
+      'HealthController' => 'ActionController::Metal',
+      'LedgerReportsController' => 'ActionController::Base',
+      'PingController' => 'ActionController::Metal'
+    )
+  end
+
+  it 'chunks only admitted actions, not the public methods a framework module adds' do
+    units = extract_controllers
+
+    expect(units.fetch('PingController')['chunks'].map { |chunk| chunk['identifier'] }).to eq(['PingController#index'])
+    expect(units.fetch('GreetingsController')['chunks']).to eq([])
+  end
+
+  it 'gives an attr_reader action a chunk holding its declaring line' do
+    unit = extract_controllers.fetch('LedgerReportsController')
+    chunks = unit['chunks'].to_h { |chunk| [chunk['metadata']['action'], chunk] }
+
+    expect(chunks.keys).to eq(unit['metadata']['actions'])
+    expect(chunks.keys).to eq(%w[ledger show])
+    expect(chunks['ledger']['content']).to include('attr_reader :ledger')
+    expect(chunks['ledger']['metadata']['declaration_line']).to eq(4)
+  end
+
+  it 'records a routed action inherited from a gem controller without admitting its body' do
+    metadata = extract_controllers.fetch('GreetingsController')['metadata']
+
+    expect(metadata).to include('actions' => [],
+                                'inherited_gem_actions' => { 'index' => { 'owner' => 'Rails::WelcomeController' } })
+  end
+end
+
 RSpec.describe 'Pgvector generator dimension boundaries', :booted_app do
   before do
     require 'active_record'

@@ -60,16 +60,17 @@ module Woods
       # The controller classes this extractor would extract from the running
       # app. Shared with the incremental path's class reconciliation (#164).
       #
-      # Discovery walks +ActionController::Base.descendants+ and
-      # +ActionController::API.descendants+ — not
+      # Discovery walks the descendants of +ActionController::Base+,
+      # +ActionController::API+ and +ActionController::Metal+ — not
       # +ApplicationController.descendants+, which excludes the receiver
       # (Class#descendants never includes the class itself, so
       # ApplicationController — usually the richest controller in the app —
       # was never indexed) and misses controllers inheriting straight from
-      # +ActionController::Base+ (#200). Each base is guarded with
-      # +defined?+ so a host missing one, or both (no NameError on hosts
-      # without an ApplicationController constant), simply contributes
-      # nothing.
+      # +ActionController::Base+ (#200). Metal is walked too because a
+      # controller built on the bare Rack layer (a health check, a webhook
+      # endpoint) descends from neither of the other two. Each base is
+      # guarded with +defined?+ so a host missing any of them simply
+      # contributes nothing.
       #
       # Framework-internal descendants (Rails::InfoController,
       # ActiveStorage controllers, engine controllers) share this ancestry
@@ -86,6 +87,7 @@ module Woods
         controllers = []
         controllers.concat(ActionController::Base.descendants) if defined?(ActionController::Base)
         controllers.concat(ActionController::API.descendants) if defined?(ActionController::API)
+        controllers.concat(ActionController::Metal.descendants) if defined?(ActionController::Metal)
         controllers.uniq.select { |controller| app_defined_controller?(controller) }
       end
 
@@ -135,7 +137,9 @@ module Woods
       # Route Mapping
       # ──────────────────────────────────────────────────────────────────────
 
-      # Build a map of controller -> action -> route info from Rails routes
+      # Build a map of controller -> action -> route info from Rails routes.
+      # Actions are key-sorted; each action's routes stay in route-table
+      # order, which is the order Rails matches them in.
       def build_routes_map
         routes = {}
 
@@ -155,7 +159,7 @@ module Woods
           }
         end
 
-        routes
+        routes.transform_values { |actions| actions.sort.to_h }
       end
 
       def extract_verb(route)
@@ -274,16 +278,51 @@ module Woods
       end
 
       def extract_filter_chain(controller)
-        controller._process_action_callbacks.map do |callback|
+        process_action_callbacks(controller).map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
           result = { kind: callback.kind, filter: callback_filter(callback) }
-          result[:only] = only if only.any?
-          result[:except] = except if except.any?
+          result[:only] = only.sort if only.any?
+          result[:except] = except.sort if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
         end
+      end
+
+      # A Metal controller has no callback chain until it includes a
+      # callbacks module, so the chain is read only where it exists.
+      #
+      # @param controller [Class]
+      # @return [Array<ActiveSupport::Callbacks::Callback>]
+      def process_action_callbacks(controller)
+        return [] unless controller.respond_to?(:_process_action_callbacks)
+
+        controller._process_action_callbacks.to_a
+      end
+
+      # Whether a controller is built on the bare Rack layer rather than on
+      # +ActionController::Base+ or +ActionController::API+.
+      #
+      # @param controller [Class]
+      # @return [Boolean]
+      def metal_controller?(controller)
+        %w[Base API].filter_map { |name| action_controller_class(name) }.none? { |base| controller <= base }
+      end
+
+      # The framework classes the ancestor chain stops at.
+      #
+      # @return [Array<Class>]
+      def framework_roots
+        %w[Base API Metal].filter_map { |name| action_controller_class(name) }
+      end
+
+      # @param name [String] a class directly under ActionController
+      # @return [Class, nil] nil when the host does not define it
+      def action_controller_class(name)
+        return nil unless defined?(ActionController) && ActionController.const_defined?(name, false)
+
+        ActionController.const_get(name, false)
       end
 
       # Override only controller Proc conditions; the shared model/mailer
@@ -307,9 +346,9 @@ module Woods
       # the concern's effects (filters) were captured.
       #
       # @param controller [Class] The controller class
-      # @return [Array<Module>] App-defined concern modules
+      # @return [Array<Module>] App-defined concern modules, sorted by name
       def detect_included_concerns(controller)
-        controller.included_modules.select { |mod| app_concern_module?(mod) }
+        controller.included_modules.select { |mod| app_concern_module?(mod) }.sort_by(&:name)
       end
 
       # Whether a module included in a controller is an application-defined
@@ -511,15 +550,14 @@ module Woods
       #
       # @param controller [Class] The controller class
       # @return [Hash{String => Hash}] action name to
-      #   +{ owner:, defined_in:, file:, line: }+. +file+ is relative to
-      #   Rails.root; +defined_in+ is the indexed unit whose source holds the
-      #   method body, or nil when no unit does.
+      #   +{ owner:, defined_in:, file:, line: }+, sorted by action name.
+      #   +file+ is relative to Rails.root; +defined_in+ is the indexed unit
+      #   whose source holds the method body, or nil when no unit does.
       def resolve_action_sources(controller)
-        routed = (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
+        routed = routed_actions(controller)
         own_file = source_file_for(controller)
 
-        controller.action_methods.each_with_object({}) do |name, sources|
-          name = name.to_s
+        action_method_names(controller).each_with_object({}) do |name, sources|
           next if name.end_with?('=')
 
           method = controller.instance_method(name)
@@ -534,6 +572,44 @@ module Woods
             line: line
           }
         end
+      end
+
+      # Routed actions Rails can dispatch whose body is gem code: inherited
+      # from a gem superclass, mixed in from a gem module, or defined onto the
+      # class by a gem DSL. They are not admitted as actions (the index holds
+      # no unit for the body, so there is nothing to chunk or trace), but a
+      # route to one resolves at runtime and must not read as a dead route.
+      #
+      # @param controller [Class] The controller class
+      # @return [Hash{String => Hash}] action name to +{ owner: }+, the name
+      #   of the module or class that defines the method, sorted by action
+      def resolve_inherited_gem_actions(controller)
+        routed = routed_actions(controller)
+
+        action_method_names(controller).each_with_object({}) do |name, actions|
+          next if name.end_with?('=') || !routed.include?(name)
+
+          method = controller.instance_method(name)
+          next if app_action_source?(method.source_location&.first)
+
+          actions[name] = { owner: method.owner.name }
+        end
+      end
+
+      # Rails' +action_methods+ is a Set whose order follows method
+      # definition and inclusion order, so it is sorted before anything
+      # derived from it is emitted.
+      #
+      # @param controller [Class]
+      # @return [Array<String>]
+      def action_method_names(controller)
+        controller.action_methods.map(&:to_s).sort
+      end
+
+      # @param controller [Class]
+      # @return [Set<String>] actions a route dispatches to on this controller
+      def routed_actions(controller)
+        (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
       end
 
       # Whether a method body lives in application source: under Rails.root,
@@ -635,17 +711,24 @@ module Woods
           # Actions and routes
           actions: actions,
           action_sources: action_sources,
+          inherited_gem_actions: resolve_inherited_gem_actions(controller),
           routes: @routes_map[controller.name] || {},
 
           # Filter chain
           filters: extract_filter_chain(controller),
 
+          # Runtime superclass, e.g. ApplicationController or ActionController::Metal
+          parent_class: controller.superclass&.name,
+
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
-                               .take_while { |a| a != ActionController::Base && a != ActionController::API }
+                               .take_while { |a| !framework_roots.include?(a) }
                                .grep(Class)
                                .map(&:name)
                                .compact,
+
+          # Built on ActionController::Metal rather than Base or API
+          metal: metal_controller?(controller),
 
           # Concerns included (detected by membership, not name — #175)
           included_concerns: extract_included_concerns(controller),
@@ -658,7 +741,7 @@ module Woods
 
           # Metrics
           action_count: actions.size,
-          filter_count: controller._process_action_callbacks.count,
+          filter_count: process_action_callbacks(controller).count,
 
           # Strong parameters if definable
           permitted_params: extract_permitted_params(controller, source)
@@ -853,15 +936,17 @@ module Woods
       # Per-Action Chunking
       # ──────────────────────────────────────────────────────────────────────
 
-      # Build per-action chunks for precise retrieval
+      # Build per-action chunks for precise retrieval, one per admitted
+      # action (+metadata[:actions]+). Rails' +action_methods+ also lists
+      # gem DSL methods, setters, unrouted mixin helpers and gem-inherited
+      # actions, none of which is an indexed action.
       def build_action_chunks(controller, unit)
-        controller.action_methods.filter_map do |action|
+        Array(unit.metadata[:actions]).filter_map do |action|
           route_info = @routes_map.dig(controller.name, action.to_s)
           filters = applicable_filters(controller, action)
 
-          # Extract just this action's source
-          action_source = extract_action_source(controller, action)
-          next if action_source.nil? || action_source.strip.empty?
+          action_source, declaration_line = chunk_source(controller, action)
+          next unless action_source
 
           route_desc = if route_info&.any?
                          route_info.map { |r| "#{r[:verb]} #{r[:path]}" }.join(', ')
@@ -878,26 +963,58 @@ module Woods
             #{action_source}
           ACTION
 
+          metadata = {
+            parent: unit.identifier,
+            action: action.to_s,
+            route: route_info,
+            filters: filters,
+            http_methods: route_info&.map { |r| r[:verb] }&.uniq || []
+          }
+          metadata[:declaration_line] = declaration_line if declaration_line
+
           {
             chunk_type: :action,
             identifier: "#{controller.name}##{action}",
             content: chunk_content,
             content_hash: Digest::SHA256.hexdigest(chunk_content),
-            metadata: {
-              parent: unit.identifier,
-              action: action.to_s,
-              route: route_info,
-              filters: filters,
-              http_methods: route_info&.map { |r| r[:verb] }&.uniq || []
-            }
+            metadata: metadata
           }
         end
+      end
+
+      # The source an action chunk holds: the action's +def+ body, or, for
+      # an action with no +def+ (an +attr_reader+, or a method a DSL defines
+      # from its own file), the line Ruby reports as its definition site.
+      #
+      # @param controller [Class]
+      # @param action [String]
+      # @return [Array(String, Integer), Array(String, nil), Array(nil, nil)]
+      #   the source and, for a declaration, its line number
+      def chunk_source(controller, action)
+        body = extract_action_source(controller, action)
+        return [body, nil] if body && !body.strip.empty?
+
+        file, line = controller.instance_method(action).source_location
+        declaration = declaration_line_text(file, line)
+        declaration ? [declaration, line] : [nil, nil]
+      rescue NameError
+        [nil, nil]
+      end
+
+      # @param file [String, nil]
+      # @param line [Integer, nil]
+      # @return [String, nil] the stripped line, or nil when it cannot be read
+      def declaration_line_text(file, line)
+        return nil unless file && line && File.exist?(file)
+
+        text = (@declaration_lines ||= {})[file] ||= File.readlines(file)
+        text[line - 1]&.strip.presence
       end
 
       def applicable_filters(controller, action)
         action_name = action.to_s
 
-        applicable = controller._process_action_callbacks.select do |cb|
+        applicable = process_action_callbacks(controller).select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
         applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }

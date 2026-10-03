@@ -54,7 +54,7 @@ module Woods
         source_code: source_code,
         metadata: metadata,
         dependencies: dependencies,
-        dependents: dependents,
+        dependents: sorted_dependents,
         chunks: chunks,
         extracted_at: Time.now.iso8601,
         source_hash: Digest::SHA256.hexdigest(source_code || '')
@@ -100,6 +100,19 @@ module Woods
     # @return [Boolean]
     def needs_chunking?(threshold: 1500)
       estimated_tokens > threshold
+    end
+
+    private
+
+    # Dependents sorted by identifier, then type: the order
+    # {DependencyGraph#dependents_detail} rebuilds them in on an incremental
+    # run, so the unit JSON does not depend on extractor or unit order.
+    #
+    # @return [Array<Hash>]
+    def sorted_dependents
+      Array(dependents).sort_by do |entry|
+        [(entry[:identifier] || entry['identifier']).to_s, (entry[:type] || entry['type']).to_s]
+      end
     end
   end
 end

@@ -846,6 +846,23 @@ RSpec.describe Woods::DependencyGraph do
     it 'ignores dependents that are not registered nodes' do
       expect(graph.dependents_detail('Nobody')).to be_empty
     end
+
+    it 'lists dependents in canonical order, whatever order the units registered in' do
+      units = [
+        make_unit(type: :model, identifier: 'Ledger'),
+        make_unit(type: :service, identifier: 'Shipment', dependencies: [{ target: 'Ledger', via: :code_reference }]),
+        make_unit(type: :job, identifier: 'Audit', dependencies: [{ target: 'Ledger', via: :code_reference }]),
+        make_unit(type: :model, identifier: 'Widget', dependencies: [{ target: 'Ledger', via: :belongs_to }])
+      ]
+      forward = described_class.new.tap { |built| units.each { |unit| built.register(unit) } }
+      backward = described_class.new.tap { |built| units.reverse_each { |unit| built.register(unit) } }
+
+      expect(forward.dependents_detail('Ledger')).to eq([{ type: :job, identifier: 'Audit' },
+                                                         { type: :service, identifier: 'Shipment' },
+                                                         { type: :model, identifier: 'Widget' }])
+      expect(backward.dependents_detail('Ledger')).to eq(forward.dependents_detail('Ledger'))
+      expect(JSON.generate(backward.to_h)).to eq(JSON.generate(forward.to_h))
+    end
   end
 
   # #166 — the index has to be readable off the machine that wrote it. Extraction
