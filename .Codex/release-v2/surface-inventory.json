@@ -117,6 +117,8 @@
     "unblocked_collection_id=",
     "unblocked_repo_url",
     "unblocked_repo_url=",
+    "unclaimed_ruby_paths",
+    "unclaimed_ruby_paths=",
     "vector_store",
     "vector_store=",
     "vector_store_options",
