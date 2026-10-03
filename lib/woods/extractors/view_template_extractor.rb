@@ -6,6 +6,7 @@ require 'set'
 require_relative 'route_helper_resolver'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
+require_relative 'view_engines/haml'
 
 module Woods
   module Extractors
@@ -40,7 +41,7 @@ module Woods
       # engine whose {ViewEngines::Base#handles?} returns true for a file
       # wins — place more specific engines before more general ones if
       # overlap is ever introduced.
-      ENGINES = [ViewEngines::Erb].freeze
+      ENGINES = [ViewEngines::Erb, ViewEngines::Haml].freeze
 
       # Template engine names the extraction pipeline currently
       # understands — aggregated from {ENGINES} so the list stays honest
