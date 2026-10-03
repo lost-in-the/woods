@@ -181,6 +181,14 @@ RSpec.describe Woods::PathDispatcher do
       end
     end
 
+    it 'triggers a scheduled-job re-run on a Ruby source that can register periodic jobs' do
+      %w[config/initializers/sidekiq.rb config/initializers/jobs/periodic.rb
+         config/environments/production.rb config/application.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:scheduled_jobs)
+      end
+      expect(dispatcher.whole_app_keys_for('config/initializers/inflections.yml')).not_to include(:scheduled_jobs)
+    end
+
     it 'triggers state-machine and event re-runs on a model change' do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).to include(:state_machines, :events)
     end

@@ -142,7 +142,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { [[ "$path" == config/recurring.yml ]] || [[ "$path" == config/sidekiq_cron.yml ]] || [[ "$path" == config/schedule.rb ]] || { false; }; }; then
+  if { [[ "$path" == config/recurring.yml ]] || [[ "$path" == config/sidekiq_cron.yml ]] || [[ "$path" == config/schedule.rb ]] || [[ "$path" == config/application.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
