@@ -195,10 +195,12 @@ module Woods
 
       # Resolve a rendered partial to the template file that exists on disk
       # under any registered engine, so a partial rendered across engines
-      # points at a real unit. Among several matches the renderer's format
-      # wins, then a format-less partial, then the renderer's own engine,
-      # then {ENGINES} order. With no match the engine's own identifier is
-      # kept as the edge target.
+      # points at a real unit. A relative name missing from the template's
+      # own directory is looked up through the controller's view prefixes.
+      # Among several matches the renderer's format wins, then a
+      # format-less partial, then the renderer's own engine, then {ENGINES}
+      # order. With no match the engine's own identifier is kept as the
+      # edge target.
       #
       # @param engine [ViewEngines::Base] Engine of the rendering template
       # @param partial_name [String] Partial name from the render call
@@ -207,6 +209,9 @@ module Woods
       def resolve_partial(engine, partial_name, identifier)
         fallback = engine.resolve_partial_identifier(partial_name, identifier)
         candidates = existing_partial_identifiers(fallback)
+        if candidates.empty? && !partial_name.include?('/')
+          candidates = inherited_partial_identifiers(engine, partial_name, identifier)
+        end
         return fallback if candidates.empty?
 
         renderer_format = template_format(identifier)
@@ -216,6 +221,38 @@ module Woods
            @engines.index(engine_for(candidate)),
            candidate]
         end
+      end
+
+      # Rails resolves a relative partial through the rendering
+      # controller's `_prefixes`: its own path, each parent controller's,
+      # then "application". A template with no controller (a layout, a
+      # shared partial) still reaches "application". The first prefix
+      # holding the partial wins.
+      #
+      # @param engine [ViewEngines::Base]
+      # @param partial_name [String] Relative partial name, e.g. "show"
+      # @param identifier [String] Identifier of the rendering template
+      # @return [Array<String>]
+      def inherited_partial_identifiers(engine, partial_name, identifier)
+        own_dir = File.dirname(identifier)
+        (controller_prefixes(own_dir) + ['application']).uniq.each do |prefix|
+          next if prefix == own_dir
+
+          found = existing_partial_identifiers(engine.resolve_partial_identifier("#{prefix}/#{partial_name}", identifier))
+          return found if found.any?
+        end
+        []
+      end
+
+      # View prefixes of the runtime class that owns a view directory.
+      #
+      # @param dir [String] View directory, "." for the views root
+      # @return [Array<String>]
+      def controller_prefixes(dir)
+        klass = view_owner(dir == '.' ? nil : dir)&.dig(:klass)
+        klass.respond_to?(:_prefixes) ? Array(klass._prefixes) : []
+      rescue StandardError
+        []
       end
 
       # Identifiers of existing files that share the partial's directory
