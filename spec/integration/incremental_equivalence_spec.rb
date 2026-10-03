@@ -1697,6 +1697,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Object.send(:remove_const, :NewHybridHost) if Object.const_defined?(:NewHybridHost, false)
   end
 
+  it 'discovers a new markerless descendant of an application serializer base' do
+    base = write_file('app/serializers/ledger_base_serializer.rb', <<~RUBY)
+      class LedgerBaseSerializer
+        def as_json(*) = { processor: processor }
+      end
+    RUBY
+    load app_path(base)
+    index = full_extraction
+    view = write_file('app/serializers/ledger_cash_view.rb', <<~RUBY)
+      class LedgerCashView < LedgerBaseSerializer
+        def processor = 'cash'
+      end
+    RUBY
+    load app_path(view)
+
+    touched = Woods::Extractor.new(output_dir: index).extract_changed([view])
+
+    expect(touched).to include('LedgerCashView')
+    expect(differences(index, full_extraction)).to be_empty
+  ensure
+    %i[LedgerCashView LedgerBaseSerializer].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
+  end
+
   describe 'nested hybrid ownership moves out of a surviving model file' do
     [false, true].each do |new_first|
       it "moves a nested job in either changed-path order, new first=#{new_first}" do

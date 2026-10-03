@@ -94,17 +94,6 @@ module Woods
           source.match?(/def\s+validate\(/)
       end
 
-      # @param source [String] Ruby source code
-      # @param class_name [String] the file's selected identity
-      # @return [Boolean] whether that identity is a class declaration, not a module
-      def declares_class?(source, class_name)
-        each_declaration(source) do |kind, _name, qualified|
-          return true if kind == 'class' && qualified == class_name
-        end
-
-        false
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Source Annotation
       # ──────────────────────────────────────────────────────────────────────
