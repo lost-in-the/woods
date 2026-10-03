@@ -984,6 +984,13 @@ Use `[]` to keep the PORO extractor on `app/models` only. The setter rejects a
 value that is not an Array and any entry that is not a non-empty, relative glob
 without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
 
+A glob can also name template files (`config/**/*.erb`). Templates are never
+swept as Ruby. Each ERB, HAML, Jbuilder, or Slim file a glob matches that no
+unit covers is listed in `skipped_files.json`: `non_view_template` outside the
+view directories (a crontab template), `unsupported_template_engine` or
+`rejected_by:view_templates` inside them. A template beside the Ruby file of a
+unit, such as a component sidecar, counts as covered.
+
 **Changing `unclaimed_ruby_paths` needs a full extraction.** The value is not
 part of any incremental fingerprint. Incremental runs dispatch with the current
 globs, so a file outside the changed set keeps its old classification until

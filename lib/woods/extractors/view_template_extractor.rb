@@ -44,6 +44,13 @@ module Woods
         app/views
       ].freeze
 
+      # Where the classes that own view directories live. A change here can
+      # move a view directory's owner or its view prefixes.
+      OWNER_DIRECTORIES = %w[
+        app/controllers
+        app/mailers
+      ].freeze
+
       # Registered view-template engines, in precedence order. The first
       # engine whose {ViewEngines::Base#handles?} returns true for a file
       # wins — place more specific engines before more general ones if
@@ -129,6 +136,10 @@ module Woods
 
       private
 
+      # The full pass is kept for the life of this extractor, which reads
+      # one state of the tree: an incremental run re-extracts each template
+      # that renders a changed partial, and each would repeat it.
+      #
       # @param file_path [String]
       # @return [ExtractedUnit, nil] The unit with its caller-dependent partials resolved
       def extract_resolved_template(file_path)
@@ -136,7 +147,8 @@ module Woods
         unit = extract_view_template_file(file_path, pending: pending)
         return unit if unit.nil? || pending.empty?
 
-        resolved = extract_all.find { |candidate| candidate.identifier == unit.identifier }
+        @resolved_templates ||= extract_all.to_h { |candidate| [candidate.identifier, candidate] }
+        resolved = @resolved_templates[unit.identifier]
         return resolved if resolved
 
         resolve_caller_partials([unit], pending)

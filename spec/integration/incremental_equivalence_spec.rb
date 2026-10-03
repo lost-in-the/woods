@@ -1702,6 +1702,80 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'caller-dependent partials' do
+    def navigation_unit(index)
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      Dir[File.join(payload, 'view_templates', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == 'shared/_navigation.html.erb' }
+    end
+
+    def render_targets(index)
+      navigation_unit(index).fetch('dependencies').select { |dep| dep['via'] == 'render' }.map { |dep| dep['target'] }
+    end
+
+    it 'follows the callers of an unchanged partial as pages and partials come and go' do
+      navigation = "<%= render 'account_head' %>\n"
+      index = run_sequence([
+                             -> { write_file('app/views/shared/_navigation.html.erb', navigation) },
+                             -> { write_file('app/views/posts/index.html.erb', "<%= render 'shared/navigation' %>\n") },
+                             -> { write_file('app/views/posts/_account_head.html.erb', "<p>posts</p>\n") }
+                           ])
+      expect(render_targets(index)).to eq(['posts/_account_head.html.erb'])
+
+      [
+        lambda {
+          [write_file('app/views/profiled/index.html.erb', "<%= render 'shared/navigation' %>\n"),
+           write_file('app/views/profiled/_account_head.html.erb', "<p>profiled</p>\n")]
+        },
+        -> { delete_file('app/views/posts/index.html.erb') },
+        -> { delete_file('app/views/profiled/_account_head.html.erb') }
+      ].each_with_index do |operation, step|
+        Woods::Extractor.new(output_dir: index).extract_changed(Array(operation.call))
+        found = differences(index, full_extraction)
+        expect(found).to be_empty, "diverged after step #{step + 4}:\n  #{found.join("\n  ")}"
+      end
+
+      expect(render_targets(index)).to eq([])
+      expect(navigation_unit(index).dig('metadata', 'unresolved_partials'))
+        .to eq([{ 'kind' => 'caller_prefix', 'name' => 'account_head', 'candidates' => [] }])
+    end
+
+    it 'follows a view directory gaining its controller' do
+      write_file('app/views/shared/_navigation.html.erb', "<%= render 'account_head' %>\n")
+      write_file('app/views/posts/index.html.erb', "<%= render 'shared/navigation' %>\n")
+      write_file('app/views/posts/_account_head.html.erb', "<p>posts</p>\n")
+      write_file('app/views/ledger_books/index.html.erb', "<%= render 'shared/navigation' %>\n")
+      write_file('app/views/ledger_books/_account_head.html.erb', "<p>ledger books</p>\n")
+
+      index = run_sequence([
+                             lambda {
+                               write_file('app/controllers/ledger_books_controller.rb', <<~RUBY)
+                                 class LedgerBooksController < ApplicationController
+                                   def index; end
+                                 end
+                               RUBY
+                               load app_path('app/controllers/ledger_books_controller.rb')
+                               'app/controllers/ledger_books_controller.rb'
+                             }
+                           ])
+
+      expect(render_targets(index)).to eq([])
+      expect(navigation_unit(index).dig('metadata', 'unresolved_partials', 0, 'candidates'))
+        .to eq(%w[ledger_books/_account_head.html.erb posts/_account_head.html.erb])
+    end
+
+    # The controller stays loaded for the rest of the process, so its file
+    # joins the pristine tree and the runtime keeps agreeing with the tree.
+    after do
+      controller = app_path('app/controllers/ledger_books_controller.rb')
+      next unless File.exist?(controller)
+
+      FileUtils.cp(controller, File.join(@pristine_root, 'app/controllers/ledger_books_controller.rb'))
+    end
+  end
+
   describe 'package mutations (B-178)' do
     def package_unit(index_dir, type, identifier)
       unit_snapshot(index_dir).values.find do |unit|

@@ -212,6 +212,14 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { { { [[ "$path" == *.html.erb ]] || [[ "$path" == *.erb ]] || [[ "$path" == *.html.haml ]] || [[ "$path" == *.haml ]] || [[ "$path" == *.json.jbuilder ]] || [[ "$path" == *.jbuilder ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/controllers/* ]] || [[ "$path" == app/mailers/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
