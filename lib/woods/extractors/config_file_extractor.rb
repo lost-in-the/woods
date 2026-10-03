@@ -23,8 +23,11 @@ module Woods
     # ERB source are replaced by a marker.
     #
     # Secret-bearing files ({.secret_path?}) are never opened, whatever the
-    # configured globs say. ERB is never evaluated and YAML is read as a syntax
-    # tree, so no object is instantiated from file content.
+    # configured globs say. The check runs on the path a file resolves to as
+    # well as the path it was found at, so a symlink cannot rename a secret
+    # into the index, and a file that resolves outside the application root is
+    # refused. ERB is never evaluated and YAML is read as a syntax tree, so no
+    # object is instantiated from file content.
     #
     # @example
     #   units = ConfigFileExtractor.new.extract_all
@@ -42,13 +45,15 @@ module Woods
 
       # Directory segments and basename fragments that mark a secret-bearing file.
       SECRET_DIRECTORIES = %w[config/credentials/].freeze
-      SECRET_BASENAME_FRAGMENTS = %w[credential secret].freeze
+      SECRET_BASENAME_FRAGMENTS = %w[
+        credential secret password passwd token private_key api_key apikey keystore
+      ].freeze
       SECRET_SUFFIXES = %w[.enc .key].freeze
 
       # Key-name fragments whose values are never stored.
       SENSITIVE_KEY_FRAGMENTS = %w[
-        password passwd passphrase secret token api_key apikey access_key private_key
-        credential auth signature salt dsn key_base encrypt cert
+        pass pwd secret token key credential auth sign salt dsn encrypt cert private
+        bearer cookie session hmac jwt license webhook otp
       ].freeze
 
       ENVIRONMENT_NAMES = %w[development test staging production].freeze
@@ -65,6 +70,12 @@ module Woods
       ERB_MARKER = '[ERB]'
       REDACTED = Console::CredentialScanner::REDACTED
       ENV_REFERENCE = /ENV(?:\.fetch\(|\[)\s*+["']([A-Za-z_][A-Za-z0-9_]*+)["']/
+      # `scheme://user:password@host` in any scheme, which the scanner's
+      # database-URL pattern covers for database schemes only.
+      URL_USERINFO = %r{://[^\s/:@]++:[^\s/@]++@}
+      # An unbroken run this long that mixes letters and digits reads as a
+      # generated token, not a setting.
+      OPAQUE_RUN = %r{[A-Za-z0-9+/=_-]{20,}+}
       TOP_LEVEL_KEY = /\A([A-Za-z_:][\w.-]*+):(?:\s|\z)/
 
       class << self
@@ -76,7 +87,8 @@ module Woods
         # @return [Boolean]
         def config_file_path?(relative_path)
           path = relative_path.to_s
-          EXTENSIONS.any? { |extension| path.end_with?(extension) } &&
+          !path.start_with?('/') && !path.split('/').include?('..') &&
+            EXTENSIONS.any? { |extension| path.end_with?(extension) } &&
             EXCLUDED_PREFIXES.none? { |prefix| path.start_with?(prefix) } &&
             !secret_path?(path) &&
             configured_paths.any? { |glob| File.fnmatch?(glob, path, GLOB_FLAGS) }
@@ -119,15 +131,59 @@ module Woods
       # @return [ExtractedUnit, nil] nil when the path is not an indexable config file
       def extract_config_file(file_path)
         relative = file_path.to_s.delete_prefix("#{@root}/")
-        return nil unless self.class.config_file_path?(relative) && File.file?(file_path)
+        return nil unless self.class.config_file_path?(relative) && readable_target?(file_path.to_s)
 
         build_unit(file_path.to_s, relative)
       rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract config file #{relative}: #{e.message}")
+        # The class only: a parser message can quote the text it failed on.
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract config file #{relative}: #{e.class}")
         nil
       end
 
+      # @param name [String] raw key text
+      # @return [String] the key as published: ERB marked, credential shapes redacted
+      def display_key(name)
+        text = name.to_s
+        return REDACTED if text.bytesize > MAX_VALUE_SCAN_BYTES
+
+        text = text.gsub(ERB_PLACEHOLDER, ERB_MARKER) if text.include?(ERB_PLACEHOLDER)
+        @scanner.scan(text).first == text ? text : REDACTED
+      end
+
+      # @param name [String] raw key text
+      # @return [Boolean] whether values under this key are withheld
+      def sensitive_key?(name)
+        key = name.to_s.downcase
+        SENSITIVE_KEY_FRAGMENTS.any? { |fragment| key.include?(fragment) }
+      end
+
+      # @param value [String] raw scalar text
+      # @param sensitive [Boolean] whether a key on the path is credential-named
+      # @return [String] a single-line, redacted rendering of the value
+      def display_value(value, sensitive)
+        text = value.to_s
+        return REDACTED if sensitive || text.bytesize > MAX_VALUE_SCAN_BYTES
+        return ERB_MARKER if text.include?(ERB_PLACEHOLDER)
+        return REDACTED unless @scanner.scan(text).first == text
+        return REDACTED if text.match?(URL_USERINFO) || opaque?(text)
+
+        text.gsub(/\s+/, ' ')[0, MAX_VALUE_DISPLAY]
+      end
+
       private
+
+      # Whether the file a path resolves to may be opened: a regular file
+      # inside the application root that is not secret-bearing under its
+      # resolved name either.
+      def readable_target?(file_path)
+        return false unless File.file?(file_path)
+
+        root = File.realpath(@root)
+        target = File.realpath(file_path)
+        target.start_with?("#{root}/") && !self.class.secret_path?(target.delete_prefix("#{root}/"))
+      rescue SystemCallError
+        false
+      end
 
       def candidates
         globs = self.class.configured_paths
@@ -219,6 +275,10 @@ module Woods
         keys.map { |key| display_key(key) }.uniq
       end
 
+      def opaque?(text)
+        text.scan(OPAQUE_RUN).any? { |run| run.match?(/[A-Za-z]/) && run.match?(/\d/) }
+      end
+
       def render_source(relative, outline)
         metadata = outline.fetch(:metadata)
         values = outline.fetch(:values)
@@ -228,38 +288,6 @@ module Woods
         lines << "# ERB environment variables: #{metadata[:env_vars].join(', ')}" if metadata[:env_vars].any?
         metadata[:key_paths].each { |path| lines << (values.key?(path) ? "#{path} = #{values[path]}" : path) }
         lines.join("\n")
-      end
-
-      public
-
-      # @param name [String] raw key text
-      # @return [String] the key as published: ERB marked, credential shapes redacted
-      def display_key(name)
-        text = name.to_s
-        return REDACTED if text.bytesize > MAX_VALUE_SCAN_BYTES
-
-        text = text.gsub(ERB_PLACEHOLDER, ERB_MARKER) if text.include?(ERB_PLACEHOLDER)
-        @scanner.scan(text).first == text ? text : REDACTED
-      end
-
-      # @param name [String] raw key text
-      # @return [Boolean] whether values under this key are withheld
-      def sensitive_key?(name)
-        key = name.to_s.downcase
-        key == 'key' || key.end_with?('_key', '-key') ||
-          SENSITIVE_KEY_FRAGMENTS.any? { |fragment| key.include?(fragment) }
-      end
-
-      # @param value [String] raw scalar text
-      # @param sensitive [Boolean] whether a key on the path is credential-named
-      # @return [String] a single-line, redacted rendering of the value
-      def display_value(value, sensitive)
-        text = value.to_s
-        return REDACTED if sensitive || text.bytesize > MAX_VALUE_SCAN_BYTES
-        return ERB_MARKER if text.include?(ERB_PLACEHOLDER)
-        return REDACTED unless @scanner.scan(text).first == text
-
-        text.gsub(/\s+/, ' ')[0, MAX_VALUE_DISPLAY]
       end
 
       # One pass over a parsed YAML stream. Aliases and merge keys are followed

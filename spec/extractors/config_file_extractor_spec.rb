@@ -174,6 +174,7 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
       config/credentials.yml.enc config/credentials.yml config/credentials/production.yml
       config/credentials/production.key config/master.key config/secrets.yml
       config/secrets.yml.enc config/widget_secrets.yml config/settings/credentials.production.yml
+      config/api_tokens.yml config/passwords.yml config/private_keys.yml config/keystore.yml
     ]
 
     secret_files.each do |relative|
@@ -192,6 +193,58 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
         expect(File).not_to have_received(:read).with(path, any_args)
         expect(File).not_to have_received(:open).with(path, any_args)
       end
+    end
+
+    it 'never opens a secret-bearing file reached through an innocently named symlink' do
+      target = create_file('config/secrets.yml', "token: plaintext-marker\n")
+      link = File.join(tmp_dir, 'config/widgets.yml')
+      File.symlink(target, link)
+      allow(File).to receive(:read).and_call_original
+      extractor = described_class.new
+
+      expect(extractor.extract_all).to be_empty
+      expect(extractor.extract_config_file(link)).to be_nil
+      expect(File).not_to have_received(:read).with(link, any_args)
+      expect(File).not_to have_received(:read).with(target, any_args)
+    end
+
+    it 'never opens a file outside the application root' do
+      outside = Dir.mktmpdir
+      target = File.join(outside, 'widgets.yml')
+      File.write(target, "token: plaintext-marker\n")
+      link = File.join(tmp_dir, 'config/widgets.yml')
+      FileUtils.mkdir_p(File.dirname(link))
+      File.symlink(target, link)
+      FileUtils.mkdir_p(File.join(tmp_dir, 'config/linked'))
+      File.symlink(outside, File.join(tmp_dir, 'config/linked/directory'))
+      allow(File).to receive(:read).and_call_original
+      extractor = described_class.new
+
+      expect(extractor.extract_all).to be_empty
+      expect(extractor.extract_config_file(link)).to be_nil
+      expect(extractor.extract_config_file(File.join(tmp_dir, 'config/linked/directory/widgets.yml'))).to be_nil
+      expect(extractor.extract_config_file(File.join(tmp_dir, "config/../../#{File.basename(outside)}/widgets.yml")))
+        .to be_nil
+      expect(extractor.extract_config_file(target)).to be_nil
+      expect(File).not_to have_received(:read)
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+
+    it 'follows a symlink that stays inside the application root' do
+      target = create_file('config/shared/widgets.yml', "rate: 1\n")
+      File.symlink(target, File.join(tmp_dir, 'config/widgets.yml'))
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[config/shared/widgets.yml config/widgets.yml])
+    end
+
+    it 'keeps exception text out of the log, since a parser message can quote the file' do
+      create_file('config/settings.yml', "a: 1\n")
+      allow(Psych).to receive(:parse_stream).and_raise(ArgumentError, 'near plaintext-marker')
+
+      expect(unit_for('config/settings.yml')).to be_nil
+      expect(logger).not_to have_received(:error).with(/marker/)
+      expect(logger).not_to have_received(:warn).with(/marker/)
     end
 
     it 'stores key paths only, never a value or a comment' do
@@ -258,6 +311,35 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
         expect(unit.source_code).to include('ledger.endpoint = [REDACTED]')
         expect(serialized(unit)).not_to include('marker')
         expect(serialized(unit)).not_to include('sk_live_')
+      end
+
+      it 'redacts userinfo in any URL and opaque token-like values' do
+        create_file('config/settings.yml', <<~YAML)
+          hooks:
+            callback: https://ledger:plaintext-url-marker@hooks.example/x
+            label: 9f8e7d6c5b4a39281706f5e4d3c2b1a0
+            region: north-east-2
+            retries: 3
+            release: 2026-10-03
+        YAML
+
+        unit = unit_for('config/settings.yml')
+
+        expect(unit.source_code).to include('hooks.callback = [REDACTED]', 'hooks.label = [REDACTED]')
+        expect(unit.source_code).to include('hooks.region = north-east-2', 'hooks.retries = 3',
+                                            'hooks.release = 2026-10-03')
+        expect(serialized(unit)).not_to include('marker')
+      end
+
+      it 'withholds values under broadly credential-named keys' do
+        names = %w[db_pass pwd bearer session_cookie hmac jwt license_code private_part webhook_url signing otp_seed
+                   encryption_key ssh_key]
+        create_file('config/settings.yml', names.map { |name| "#{name}: plaintext-marker-#{name}\n" }.join)
+
+        unit = unit_for('config/settings.yml')
+
+        names.each { |name| expect(unit.source_code).to include("#{name} = [REDACTED]") }
+        expect(serialized(unit)).not_to include('marker')
       end
 
       it 'never stores ERB source as a value' do
