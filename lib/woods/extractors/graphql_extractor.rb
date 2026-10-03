@@ -6,6 +6,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative '../source_references/runtime_lookup'
+require_relative 'graphql_ancestry'
 
 module Woods
   module Extractors
@@ -293,29 +294,14 @@ module Woods
       end
 
       def graphql_runtime_class?(klass)
-        return false unless defined?(GraphQL::Schema) && @runtime_lookup.module_object?(klass)
-
-        ancestors = @runtime_lookup.reflect(klass, :ancestors)
-        return true if ancestors.include?(GraphQL::Schema) && klass != GraphQL::Schema
-
-        %i[Object InputObject Enum Union Scalar Mutation Resolver Interface].any? do |name|
-          GraphQL::Schema.const_defined?(name, false) && ancestors.include?(GraphQL::Schema.const_get(name, false))
-        end
+        GraphQLAncestry.schema_class?(klass, @runtime_lookup)
       end
 
       # Older file discovery admitted ordinary Resolvers::Base subclasses.
       # Keep those application helpers under their historical graphql_type
-      # identity even though schema introspection cannot discover them. Verify
-      # real inheritance; directory names and example strings are not evidence.
+      # identity even though schema introspection cannot discover them.
       def ruby_resolver_helper?(klass)
-        return false unless @runtime_lookup.class_object?(klass)
-
-        base = loaded_graphql_constant('Resolvers::Base')
-        return false unless @runtime_lookup.class_object?(base)
-
-        @runtime_lookup.reflect(klass, :ancestors).drop(1).any? do |ancestor|
-          SourceReferences::RuntimeLookup::CORE_EQUAL.bind(ancestor).call(base)
-        end
+        GraphQLAncestry.resolver_helper?(klass, @runtime_lookup)
       end
 
       # Locate the file this type was defined in, or nil when there is none.

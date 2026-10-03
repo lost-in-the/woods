@@ -3,6 +3,7 @@
 require_relative '../source_references/runtime_lookup'
 require_relative 'phlex_extractor'
 require_relative 'serializer_extractor'
+require_relative 'graphql_ancestry'
 
 module Woods
   module Extractors
@@ -24,8 +25,12 @@ module Woods
         view_components: %w[ViewComponent::Base ViewComponent::Preview],
         components: PhlexExtractor::PHLEX_BASES,
         jobs: %w[ActiveJob::Base Sidekiq::Job Sidekiq::Worker],
-        serializers: SerializerExtractor::BASE_CLASSES.keys,
-        graphql: %w[GraphQL::Schema::Member]
+        serializers: SerializerExtractor::BASE_CLASSES.keys
+      }.freeze
+
+      # Extractor key => the predicate that extractor itself uses to admit a class.
+      PREDICATES = {
+        graphql: ->(klass, lookup) { GraphQLAncestry.admitted?(klass, lookup) }
       }.freeze
 
       CORE_LE = Module.instance_method(:<=)
@@ -42,7 +47,7 @@ module Woods
             return key if lookup.module_object?(base) && CORE_LE.bind(klass).call(base)
           end
         end
-        nil
+        PREDICATES.find { |_key, admitted| admitted.call(klass, lookup) }&.first
       end
     end
   end

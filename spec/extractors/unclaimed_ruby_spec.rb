@@ -203,6 +203,85 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
       expect(extractor.extract_fallback_units(reopen)).to eq([])
     end
 
+    context 'with GraphQL helpers the graphql extractor does not admit' do
+      before do
+        stub_const('GraphQL::Schema', Class.new)
+        stub_const('GraphQL::Schema::Object', Class.new)
+        stub_const('GraphQL::Schema::Field', Class.new)
+        stub_const('GraphQL::Batch::Loader', Class.new)
+      end
+
+      def fallback(relative, source)
+        described_class.new.extract_fallback_units(load_source(relative, source)).map(&:identifier)
+      end
+
+      it 'keeps batch loaders, custom fields, and a superclass-less resolver base' do
+        expect(fallback('app/graphql/sweep_fixture/association_loader.rb', <<~RUBY)).to eq(['SweepFixture::AssociationLoader'])
+          class SweepFixture::AssociationLoader < GraphQL::Batch::Loader
+            def initialize(model, assoc) = nil
+          end
+        RUBY
+        expect(fallback('app/graphql/sweep_fixture/authorized_field.rb', <<~RUBY)).to eq(['SweepFixture::AuthorizedField'])
+          class SweepFixture::AuthorizedField < GraphQL::Schema::Field
+            def initialize(*args, required_permission: nil, **kwargs, &block) = nil
+          end
+        RUBY
+        stub_const('Resolvers', Module.new)
+        resolver_base = "class Resolvers::Base\n  def initialize(a = nil) = nil\nend\n"
+        expect(fallback('app/graphql/resolvers/base.rb', resolver_base))
+          .to eq(['Resolvers::Base'])
+      end
+
+      it 'leaves schema types and Resolvers::Base subclasses to the graphql extractor' do
+        stub_const('Resolvers', Module.new)
+        load_source('app/graphql/resolvers/base.rb', "class Resolvers::Base\n  def initialize(a = nil) = nil\nend\n")
+        orders = "class Resolvers::Orders < Resolvers::Base\n  def x = 1\nend\n"
+        expect(fallback('app/graphql/resolvers/orders.rb', orders))
+          .to eq([])
+        expect(fallback('app/graphql/sweep_fixture/order_type.rb', <<~RUBY)).to eq([])
+          class SweepFixture::OrderType < GraphQL::Schema::Object
+            def id = 1
+          end
+        RUBY
+      end
+
+      it 'keeps plain and nested GraphQL mixins' do
+        expect(fallback('app/graphql/sweep_fixture/version_capabilities.rb', <<~RUBY)).to eq(['SweepFixture::VersionCapabilities'])
+          module SweepFixture::VersionCapabilities
+            def self.supports?(cap, version) = true
+          end
+        RUBY
+        stub_const('Types', Module.new)
+        expect(fallback('app/graphql/types/positive_number_concern.rb', <<~RUBY)).to eq(['Types::PositiveNumberConcern'])
+          module Types
+            module PositiveNumberConcern
+              def check_positive(value) = value.positive?
+            end
+          end
+        RUBY
+      end
+    end
+
+    it 'keeps module_function and deeply nested service modules' do
+      units = described_class.new.extract_fallback_units(load_source('app/services/sweep_fixture/consumer.rb', <<~RUBY))
+        module SweepFixture
+          module Products
+            module Files
+              module LinkNormalizer
+                def self.allowed?(url) = true
+              end
+            end
+          end
+          module AnalyticsConsumer
+            module_function
+            def all = []
+          end
+        end
+      RUBY
+      expect(units.map(&:identifier)).to contain_exactly('SweepFixture::Products::Files::LinkNormalizer',
+                                                         'SweepFixture::AnalyticsConsumer')
+    end
+
     it 'leaves the sweep and app/models scans unchanged' do
       load_source('app/services/sweep_fixture/checkout.rb', "class SweepFixture::Checkout\n  def call = nil\nend\n")
       expect(identifiers).to eq([])
