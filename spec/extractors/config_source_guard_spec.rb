@@ -25,6 +25,59 @@ RSpec.describe Woods::Extractors::ConfigSourceGuard do
       expect(described_class.redact(source)).to eq("source 'https://[REDACTED]@gems.example/private'\n")
     end
 
+    it 'replaces a token-only userinfo, which carries no password separator' do
+      source = "source 'https://plaintext-marker@gems.example/private'\n"
+
+      expect(described_class.redact(source)).to eq("source 'https://[REDACTED]@gems.example/private'\n")
+    end
+
+    it 'replaces a base64-wrapped credential' do
+      wrapped = ["sk_live_#{'a1B2' * 8}"].pack('m0')
+
+      expect(described_class.redact("KEY = '#{wrapped}'\n")).to eq("KEY = '[REDACTED]'\n")
+    end
+
+    {
+      'a keyword argument' => ['connect(password: "plaintext-marker")', 'connect(password: "[REDACTED]")'],
+      'a hash rocket' => ["{ :api_token => 'plaintext-marker' }", "{ :api_token => '[REDACTED]' }"],
+      'a string key' => ['{ "client_secret" => "plaintext-marker" }', '{ "client_secret" => "[REDACTED]" }'],
+      'an attribute assignment' => ["config.secret_key_base = 'plaintext-marker'",
+                                    "config.secret_key_base = '[REDACTED]'"],
+      'an ENV assignment' => ["ENV['API_TOKEN'] = 'plaintext-marker'", "ENV['API_TOKEN'] = '[REDACTED]'"],
+      'an ENV fallback' => ['ENV.fetch("LEDGER_PASSWORD", "plaintext-marker")',
+                            'ENV.fetch("LEDGER_PASSWORD", "[REDACTED]")'],
+      'an or-default' => ["token = ENV['LEDGER_TOKEN'] || 'plaintext-marker'",
+                          "token = ENV['LEDGER_TOKEN'] || '[REDACTED]'"],
+      'a deploy setting' => ['set :password, "plaintext-marker"', 'set :password, "[REDACTED]"'],
+      'a comparison' => ['password == "plaintext-marker"', 'password == "[REDACTED]"'],
+      'a commented assignment' => ['# passphrase = "plaintext-marker"', '# passphrase = "[REDACTED]"'],
+      'an escaped quote in the value' => ['secret = "plaintext\\"marker"', 'secret = "[REDACTED]"']
+    }.each do |label, (source, expected)|
+      it "replaces a literal assigned to a credential-named key: #{label}" do
+        expect(described_class.redact("#{source}\n")).to eq("#{expected}\n")
+      end
+    end
+
+    it 'withholds the rest of a line whose credential value never closes its quote' do
+      redacted = described_class.redact("secret = \"plaintext-marker\nnext = 1\n")
+
+      expect(redacted).to eq("secret = \"[REDACTED]\nnext = 1\n")
+      expect(described_class.redact("label = \"it's a password\n")).to eq("label = \"it's a password\n")
+    end
+
+    it 'leaves literals that are not assigned to a credential-named key' do
+      source = <<~RUBY
+        get '/tokens', to: 'tokens#index'
+        resources :password_resets, only: %i[new create], path: 'reset'
+        validates :password, presence: true
+        secret = Rails.application.credentials.ledger
+        label = 'password'
+        pin 'application'
+      RUBY
+
+      expect(described_class.redact(source)).to eq(source)
+    end
+
     it 'replaces a database URL carrying a password' do
       redacted = described_class.redact("url = 'postgres://ledger:plaintext-marker@db.example/ledger'\n")
 

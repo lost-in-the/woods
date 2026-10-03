@@ -119,7 +119,15 @@ RSpec.describe 'Config source scan complexity' do
     'repeated dotted token near-matches' => 'eyJa.eyJa ' * 5_000,
     'repeated database URL openers' => 'postgres://a:' * 4_000,
     'repeated key prefixes' => 'sk_live_' * 6_000,
-    'a long word' => word
+    'a long word' => word,
+    'a credential-named line with an unterminated quote' => "password = \"#{word}",
+    'a credential-named line of repeated literals' => "password #{"'a' " * 12_000}",
+    'a credential-named line of repeated separators' => "password = '#{'=' * 50_000}",
+    'a credential-named line of escaped quotes' => "secret = \"#{'\\"' * 25_000}",
+    'a credential-named line of lone backslashes' => "secret = \"#{'\\' * 50_001}",
+    'many credential-named lines' => "token = 'a'\n" * 5_000,
+    'a long base64-like run with separators' => 'a/' * 25_000,
+    'repeated percent escapes' => '%5F' * 16_000
   }.each do |label, source|
     it "source redaction stays within #{budget_seconds}s on #{label}" do
       within_budget(budget_seconds) { Woods::Extractors::ConfigSourceGuard.redact(source) }
