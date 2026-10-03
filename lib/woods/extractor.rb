@@ -2531,13 +2531,13 @@ module Woods
     # Rewrite the report only when it differs from the one this payload holds.
     #
     # @param unit_paths [Enumerable<String, nil>] every unit file_path
-    # @return [Boolean] whether the report changed
+    # @return [Hash, nil] the report written, or nil when it was unchanged
     def refresh_skipped_files(unit_paths)
       report = SkippedFiles.new(root: Rails.root).build(unit_paths)
-      return false if report == SkippedFiles.read(payload_dir)
+      return if report == SkippedFiles.read(payload_dir)
 
       SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
-      true
+      report
     end
 
     def write_graph_analysis
