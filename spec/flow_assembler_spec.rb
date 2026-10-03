@@ -950,8 +950,14 @@ RSpec.describe Woods::FlowAssembler do
     end
 
     it 'translates the statement line of a call laid out over several lines' do
-      original = "class ShipmentsController < ApplicationController\n  def create\n" \
-                 "    Courier\n      .book!(params)\n  end\nend\n"
+      original = <<~RUBY
+        class ShipmentsController < ApplicationController
+          def create
+            Courier
+              .book!(params)
+          end
+        end
+      RUBY
       write_annotated('ShipmentsController', original)
 
       op = described_class.new(graph: graph, extracted_dir: extracted_dir)
