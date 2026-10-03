@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 require_relative '../source_references/runtime_lookup'
 require_relative 'schedule_literals'
@@ -187,7 +188,7 @@ module Woods
       # @param format [Symbol] :solid_queue or :sidekiq_cron
       # @return [Array<ExtractedUnit>]
       def extract_yaml_schedule(file_path, format)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         data = if format == :solid_queue
                  # Match Solid Queue's trusted Rails configuration loader: ERB
                  # executes with its real filename (including require_relative).
@@ -212,7 +213,7 @@ module Woods
 
       def load_recurring_configuration(file_path, source)
         if defined?(ActiveSupport::ConfigurationFile)
-          ActiveSupport::ConfigurationFile.parse(file_path)
+          utf8_configuration_file.parse(file_path)
         else
           # Rails 6.0: preserve the same filename-aware ERB evaluation while
           # retaining the existing scalar/hash YAML policy.
@@ -220,6 +221,24 @@ module Woods
           erb = ERB.new(source)
           erb.filename = file_path
           YAML.safe_load(erb.result, permitted_classes: [Symbol], aliases: true)
+        end
+      end
+
+      # ActiveSupport::ConfigurationFile with its private reader swapped for
+      # {SourceFile.read}. The stock reader is a bare File.read followed by an
+      # `include?(" ")` check, which raises on multibyte YAML under a
+      # US-ASCII default external encoding. ERB rendering and YAML loading
+      # stay Rails' own. The reader's signature is unchanged since Rails 6.1,
+      # the first version with ConfigurationFile.
+      #
+      # @return [Class] a ConfigurationFile subclass
+      def utf8_configuration_file
+        @utf8_configuration_file ||= Class.new(ActiveSupport::ConfigurationFile) do
+          private
+
+          def read(content_path)
+            SourceFile.read(content_path)
+          end
         end
       end
 
@@ -312,7 +331,7 @@ module Woods
       # @param format [Symbol] :sidekiq_schedule or :sidekiq_scheduler
       # @return [Array<ExtractedUnit>]
       def extract_scheduler_yaml(file_path, format)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         # Most Sidekiq configs carry no schedule; skip the parse for them.
         return [] if format == :sidekiq_scheduler && !source.include?('schedule')
 
@@ -376,7 +395,7 @@ module Woods
       # @param file_path [String] Path to the schedule.rb file
       # @return [Array<ExtractedUnit>]
       def extract_whenever_schedule(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         blocks = parse_whenever_blocks(source)
 
         blocks.each_with_index.map do |block, index|
@@ -494,7 +513,7 @@ module Woods
       # @param file_path [String] Path to a Ruby config source
       # @return [Array<ExtractedUnit>]
       def extract_ruby_schedule(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         return [] unless source.match?(RUBY_SCHEDULE_HINT)
 
         program = ScheduleLiterals.parse(source)

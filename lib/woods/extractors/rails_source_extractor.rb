@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative '../extracted_unit'
@@ -232,7 +233,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_framework_file(component, file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         relative = file_path.sub(%r{.*/gems/[^/]+/}, '')
 
         # Create a meaningful identifier
@@ -275,7 +276,7 @@ module Woods
       end
 
       def extract_gem_file(gem_name, priority, file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         relative = file_path.sub(%r{.*/gems/[^/]+/}, '')
 
         identifier = "gems/#{gem_name}/#{relative}"
