@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require_relative 'source_nesting'
+require_relative 'lexical_constant'
+
 module Woods
   module Extractors
     # Regexes for "this source references that class", shared by every site
@@ -79,14 +82,76 @@ module Woods
         while (chain = CONSTANT_CHAIN.match(source, position))
           finish, follower_end = last_qualifying_end(source, chain, segment, follower)
           if finish
-            found << source[chain.begin(0)...finish]
+            found << [source[chain.begin(0)...finish], chain.begin(0)]
             position = follower_end
           else
             position = chain.end(0)
           end
         end
-        found
+        resolve_lexically(source, found)
       end
+
+      # Name each reference the way Ruby's constant lookup at its call site
+      # would: `PingJob` inside `class Shipment` is `Shipment::PingJob` when
+      # that constant exists. A reference stays as written outside any class
+      # or module, after an explicit `::`, or when no candidate is loaded.
+      #
+      # @param source [String]
+      # @param found [Array<Array(String, Integer)>] reference text and the
+      #   character offset it starts at
+      # @return [Array<String>]
+      def resolve_lexically(source, found)
+        return [] if found.empty?
+
+        nesting = NestingSweep.new(SourceNesting.lexical_scopes(source) || [])
+        modules = {}
+        resolved = {}
+        found.map do |text, offset|
+          innermost, scopes = nesting.at(offset)
+          next text if scopes.empty? || (offset >= 2 && source[offset - 2, 2] == '::')
+
+          resolved[[text, innermost.object_id]] ||= LexicalConstant.resolve(text, scopes, modules: modules)
+        end
+      end
+
+      # The scopes open at ascending offsets, in one pass over scopes listed
+      # outer-before-inner in source order (the order
+      # {SourceNesting.lexical_scopes} returns).
+      class NestingSweep
+        # @param scopes [Array<Array(Integer, Integer, String)>]
+        def initialize(scopes)
+          @scopes = scopes
+          @next = 0
+          @open = []
+          @names = {}.compare_by_identity
+        end
+
+        # @param offset [Integer] no smaller than the previous call's
+        # @return [Array(Array, Array<String>)] the innermost scope containing
+        #   +offset+ (nil at the top level), and the names of every scope
+        #   containing it, innermost first
+        def at(offset)
+          while @next < @scopes.size && @scopes[@next][0] <= offset
+            enter(@scopes[@next])
+            @next += 1
+          end
+          close_before(offset)
+          innermost = @open.last
+          [innermost, @names[innermost] ||= @open.reverse.map(&:last)]
+        end
+
+        private
+
+        def enter(scope)
+          close_before(scope[0])
+          @open << scope
+        end
+
+        def close_before(offset)
+          @open.pop while @open.any? && @open.last[1] <= offset
+        end
+      end
+      private_constant :NestingSweep
 
       # @return [Array(Integer, Integer), nil] Source offsets where the
       #   reference and its follower end

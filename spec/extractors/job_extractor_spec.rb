@@ -627,6 +627,27 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(job_deps.first[:via]).to eq(:job_enqueue)
     end
 
+    it 'targets the job nested in the enclosing class for a bare enqueue' do
+      stub_const('Shipment', Class.new)
+      stub_const('Shipment::PingJob', Class.new)
+      stub_const('Shipment::SweepJob', Class.new)
+      path = create_file('app/jobs/shipment/sweep_job.rb', <<~RUBY)
+        class Shipment
+          class SweepJob < ApplicationJob
+            def perform(id)
+              PingJob.perform_in(5, id)
+              SweepJob.perform_in(60, id)
+            end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+
+      expect(unit.dependencies.select { |d| d[:type] == :job })
+        .to eq([{ type: :job, target: 'Shipment::PingJob', via: :job_enqueue }])
+    end
+
     it 'detects perform_async enqueue as a :job dependency' do
       path = create_file('app/jobs/dispatch_job.rb', <<~RUBY)
         class DispatchJob < ApplicationJob

@@ -64,6 +64,43 @@ module Woods
       # popped.
       END_LINE = /\Aend\b/
 
+      # Every class and module body in the source, with the character range
+      # it spans, for asking what `Module.nesting` is at a position.
+      #
+      # A scope's name is its declaration joined onto the enclosing scopes'
+      # names, as written: `class Fleet::Shipment` inside `module Ops` is
+      # +Ops::Fleet::Shipment+, and contributes one nesting entry, not two.
+      #
+      # @param source [String] Ruby source code
+      # @return [Array<Array(Integer, Integer, String)>, nil] start and end
+      #   character offsets and qualified name, outer scopes before the ones
+      #   they enclose; nil when the source does not parse
+      def self.lexical_scopes(source)
+        parsed = Prism.parse(source)
+        return nil unless parsed.success?
+
+        scopes = []
+        collect_scopes(parsed.value, [], scopes)
+        scopes
+      end
+
+      # @return [void]
+      def self.collect_scopes(node, namespace, scopes)
+        return unless node
+
+        if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
+          declaration = DECLARATION_PATTERN.match(node.location.slice)
+          return unless declaration
+
+          nesting = [*namespace, declaration[2]]
+          scopes << [node.location.start_character_offset, node.location.end_character_offset, nesting.join('::')]
+          collect_scopes(node.body, nesting, scopes)
+        else
+          node.compact_child_nodes.each { |child| collect_scopes(child, namespace, scopes) }
+        end
+      end
+      private_class_method :collect_scopes
+
       # Fully-qualified name of the first +class+ declaration in the source.
       #
       # Enclosing modules still open at that position are joined with the
