@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'table_catalog'
 
 module Woods
   module Extractors
@@ -25,17 +26,6 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
 
-      # Rails internal tables that should not generate model dependencies
-      INTERNAL_TABLES = %w[
-        schema_migrations
-        ar_internal_metadata
-        active_storage_blobs
-        active_storage_attachments
-        active_storage_variant_records
-        action_text_rich_texts
-        action_mailbox_inbound_emails
-      ].freeze
-
       # SQL keywords that are not table names
       SQL_KEYWORDS = %w[
         select from where join inner outer left right full cross
@@ -45,7 +35,9 @@ module Woods
         returning exists any some
       ].freeze
 
-      def initialize
+      # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
+      def initialize(table_catalog: nil)
+        @table_catalog = table_catalog
         @views_dir = Rails.root.join('db/views')
         @has_directory = @views_dir.directory?
       end
@@ -256,24 +248,30 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      # Build the dependency array by linking referenced tables to models.
-      #
-      # Uses the same table → model classify pattern as MigrationExtractor.
+      # Link each source table to its table unit, and to the model that
+      # owns it today. Sources resolve through the live table catalog: a name
+      # that is not a live table (another view, a dropped table) yields no
+      # edge, and no class name is guessed from a table name.
       #
       # @param source [String] SQL source
       # @param metadata [Hash] Extracted metadata
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def extract_dependencies(_source, metadata)
-        deps = []
+        tables = metadata[:tables_referenced].flat_map { |name| table_catalog.named(name) }
 
-        metadata[:tables_referenced].each do |table|
-          next if INTERNAL_TABLES.include?(table)
-
-          model_name = table.classify
-          deps << { type: :model, target: model_name, via: :table_name }
+        deps = tables.map(&:identifier).uniq.sort.map do |identifier|
+          { type: :database_table, target: identifier, via: :view_source }
+        end
+        tables.filter_map(&:model).uniq.sort.each do |model|
+          deps << { type: :model, target: model, via: :table_name }
         end
 
         consolidate_dependencies(deps)
+      end
+
+      # @return [TableCatalog]
+      def table_catalog
+        @table_catalog ||= TableCatalog.from_runtime
       end
     end
   end

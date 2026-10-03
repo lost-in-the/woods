@@ -245,39 +245,55 @@ RSpec.describe Woods::Extractors::DatabaseViewExtractor do
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependencies' do
-    it 'creates model dependencies from referenced tables via classify' do
-      path = create_file('db/views/active_users_v01.sql',
-                         'SELECT id FROM users WHERE active = true')
+    let(:catalog_class) { Woods::Extractors::TableCatalog }
 
-      unit = described_class.new.extract_view_file(path)
-      user_dep = unit.dependencies.find { |d| d[:target] == 'User' }
-      expect(user_dep).not_to be_nil
-      expect(user_dep[:type]).to eq(:model)
-      expect(user_dep[:via]).to eq(:table_name)
+    def table(name, model: nil, database: nil, qualified: false)
+      catalog_class::Table.new(name: name, database: database, models: Array(model), qualified: qualified)
     end
 
-    it 'creates model dependencies for all JOIN tables' do
-      path = create_file('db/views/user_orders_v01.sql',
-                         'SELECT u.id FROM users u JOIN orders o ON u.id = o.user_id')
+    let(:catalog) { catalog_class.new([table('widgets', model: 'Widget'), table('ledger_entries')]) }
 
-      unit = described_class.new.extract_view_file(path)
-      targets = unit.dependencies.map { |d| d[:target] }
-      expect(targets).to include('User', 'Order')
+    def extract(sql, catalog: self.catalog)
+      path = create_file('db/views/widget_report_v01.sql', sql)
+      described_class.new(table_catalog: catalog).extract_view_file(path)
     end
 
-    it 'excludes internal Rails tables from dependencies' do
-      path = create_file('db/views/schema_check_v01.sql',
-                         'SELECT * FROM schema_migrations WHERE version > 0')
+    it 'points at the table unit of every source table' do
+      unit = extract('SELECT w.id FROM widgets w JOIN ledger_entries l ON l.widget_id = w.id')
 
-      unit = described_class.new.extract_view_file(path)
-      targets = unit.dependencies.map { |d| d[:target] }
-      expect(targets).not_to include('SchemaMigration')
+      expect(unit.dependencies.select { |dep| dep[:via] == :view_source }).to eq(
+        [{ type: :database_table, target: 'table:ledger_entries', via: :view_source },
+         { type: :database_table, target: 'table:widgets', via: :view_source }]
+      )
     end
 
-    it 'returns empty dependencies when no tables referenced' do
-      path = create_file('db/views/computed_v01.sql', 'SELECT 1 + 1 AS result')
-      unit = described_class.new.extract_view_file(path)
+    it 'keeps the model edge only for a source table a model owns today' do
+      unit = extract('SELECT w.id FROM widgets w JOIN ledger_entries l ON l.widget_id = w.id')
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :model }).to eq(
+        [{ type: :model, target: 'Widget', via: :table_name }]
+      )
+    end
+
+    it 'emits no edge for a source that is not a live table' do
+      unit = extract('SELECT id FROM other_view JOIN schema_migrations ON true')
+
       expect(unit.dependencies).to eq([])
+    end
+
+    it 'points at the table in every database that has one of that name' do
+      multi = catalog_class.new([table('widgets', database: 'primary', qualified: true),
+                                 table('widgets', database: 'billing', qualified: true)])
+
+      unit = extract('SELECT id FROM widgets', catalog: multi)
+
+      expect(unit.dependencies.map { |dep| dep[:target] }).to eq(%w[table:billing.widgets table:primary.widgets])
+    end
+
+    it 'emits no dependency without a database connection' do
+      path = create_file('db/views/widget_report_v01.sql', 'SELECT id FROM widgets')
+
+      expect(described_class.new.extract_view_file(path).dependencies).to eq([])
     end
   end
 
