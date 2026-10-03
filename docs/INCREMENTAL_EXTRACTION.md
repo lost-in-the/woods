@@ -373,6 +373,7 @@ automatically.
 | `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins also dispatch to concerns |
 | `app/controllers/**/*.rb` | caching |
 | `app/views/**/*.erb` | view_templates, caching |
+| `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates |
 | `config/locales/**/*.yml` | i18n |
 | `config/initializers`, `config/environments` | configurations |
 | `db/migrate/*.rb` (top level only) | migrations |
@@ -802,6 +803,13 @@ edit does not establish that a day of commits is below the crossover.
   metadata from the last run that did, which goes stale as commits land on
   other files. The same holds for the node attributes `commit_count` and
   `change_frequency` that feed the `volatile_dependencies` report.
+- **View partial targets are fixed when the rendering template is extracted.**
+  A render edge is resolved against the partial files on disk and the
+  rendering controller's runtime `_prefixes`. Changing a controller's
+  superclass does not re-extract the templates under it, and creating a
+  partial that a template already renders, under another engine's extension
+  or a parent controller's directory, does not retarget the existing edge.
+  Editing the rendering template, or a full extraction, picks up both.
 - **Snapshots stay full-extraction-only.** They hash the full unit set, and an
   incremental run only holds changed units in memory.
 - **A divergence floor is still worth keeping.** Incremental correctness is a

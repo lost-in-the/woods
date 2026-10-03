@@ -2,6 +2,7 @@
 
 require 'set'
 require_relative 'base'
+require_relative '../form_action_scan'
 
 module Woods
   module Extractors
@@ -24,11 +25,9 @@ module Woods
         # has no dependency on that module, so it keeps its own copy.
         ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
-        # Matches form_with / form_for calls whose action is a named
-        # route helper. ERB-flavored (`[^%]*?` stops at the next `%`
-        # which appears at ERB tag terminators and HAML tag starts) —
-        # when HAML/Slim land they will define their own form pattern.
-        FORM_ACTION_HELPER = /form_(with|for)\b[^%]*?(\w+)_(path|url)/
+        # Where a form call's argument span ends: the `%` of an ERB tag
+        # terminator. See {FormActionScan}.
+        FORM_SPAN_STOP = /%/
 
         # Common Rails view helper methods to detect in template source.
         COMMON_HELPERS = %w[
@@ -132,13 +131,13 @@ module Woods
           if partial_name.include?('/')
             dir = File.dirname(partial_name)
             base = File.basename(partial_name)
-            "#{dir}/_#{base}.html.erb"
+            "#{dir}/_#{base}#{partial_extension}"
           else
             dir = File.dirname(current_identifier)
             if dir == '.'
-              "_#{partial_name}.html.erb"
+              "_#{partial_name}#{partial_extension}"
             else
-              "#{dir}/_#{partial_name}.html.erb"
+              "#{dir}/_#{partial_name}#{partial_extension}"
             end
           end
         end
@@ -148,10 +147,43 @@ module Woods
           link_to_candidates = source.scan(ROUTE_HELPER_PATTERN).map do |route_name, suffix|
             { helper: "#{route_name}_#{suffix}", via: :link_to }
           end
-          form_candidates = source.scan(FORM_ACTION_HELPER).map do |_form_kind, route_name, suffix|
+          link_to_candidates + form_action_candidates(source)
+        end
+
+        private
+
+        # Extension {#resolve_partial_identifier} appends to a partial name.
+        #
+        # @return [String]
+        def partial_extension
+          '.html.erb'
+        end
+
+        # Form-action candidates, one per form call that reaches a route
+        # helper before the next `%`.
+        #
+        # @param source [String]
+        # @return [Array<Hash>]
+        def form_action_candidates(source)
+          FormActionScan.route_helpers(source, stop: FORM_SPAN_STOP).map do |route_name, suffix|
             { helper: "#{route_name}_#{suffix}", via: :form_action }
           end
-          link_to_candidates + form_candidates
+        end
+
+        # Source lines joined into Ruby statements: a line ending in a comma
+        # continues on the next line. One linear pass, so callers can scan a
+        # call's arguments with anchored patterns instead of a lazy span.
+        #
+        # @param source [String]
+        # @return [Array<String>]
+        def statements(source)
+          joined = []
+          continued = false
+          source.each_line do |line|
+            continued ? joined.last << line : joined << line.dup
+            continued = line.rstrip.end_with?(',')
+          end
+          joined
         end
       end
     end

@@ -395,7 +395,7 @@ module Woods
 
       # Scan source for job class enqueue calls and return the list of enqueued job names.
       #
-      # Shares {ReferencePatterns::JOB_ENQUEUE} with the scanner and
+      # Shares {ReferencePatterns.job_enqueues} with the scanner and
       # CallbackAnalyzer so all three sites agree on what an enqueue looks
       # like — `*Worker` classes and namespaced jobs included (EXTA-2/EXTA-4).
       #
@@ -403,7 +403,7 @@ module Woods
       # @param current_class_name [String, nil] The current job class name (excluded from results)
       # @return [Array<String>] Unique list of enqueued job class names
       def extract_enqueued_jobs(source, current_class_name = nil)
-        job_names = source.scan(ReferencePatterns::JOB_ENQUEUE).flatten.uniq
+        job_names = ReferencePatterns.job_enqueues(source).uniq
         job_names.reject { |name| name == current_class_name }
       end
     end

@@ -408,7 +408,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### ViewTemplateExtractor
 
-**What it captures:** ERB view templates from `app/views`. Extracts render calls (partials and components), instance variable references, and helper method usage.
+**What it captures:** ERB, HAML, and jbuilder view templates from `app/views`. Extracts render calls (partials and components), instance variable references, and helper method usage.
 
 **Key details:**
 - File-based scanning, no Rails boot needed for the actual file reading
@@ -417,8 +417,12 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
+- A rendered partial resolves to the file that exists under any registered engine, so an ERB layout rendering a HAML partial gets an edge to the `.html.haml` unit. The renderer's format wins when several exist; with no file on disk the engine's own extension is used.
+- A relative partial (`render 'show'`) missing from the template's own directory is looked up through the runtime controller's `_prefixes` (its parents' view paths, then `application/`), as Rails does. Templates with no controller, such as layouts, still reach `application/`.
+- The `view_render` edge exists only when the controller the directory names is a runtime `ActionController::Base` or `ActionController::API` subclass. Mailer view directories link to their `ActionMailer::Base` subclass with a `:mailer` edge.
+- Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
 
-**Template engine coverage.** ERB only as a parsed template engine, HAML, Slim, and Turbo Streams are not parsed at all; an app using HAML or Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, HAML / Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier`, and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials`), and append the class to `ENGINES`.
 
 ---
 

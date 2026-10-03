@@ -86,7 +86,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.html.erb ]] || [[ "$path" == *.erb ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
+  if { { { [[ "$path" == *.html.erb ]] || [[ "$path" == *.erb ]] || [[ "$path" == *.html.haml ]] || [[ "$path" == *.haml ]] || [[ "$path" == *.json.jbuilder ]] || [[ "$path" == *.jbuilder ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

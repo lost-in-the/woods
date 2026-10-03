@@ -6,6 +6,8 @@ require 'set'
 require_relative 'route_helper_resolver'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
+require_relative 'view_engines/haml'
+require_relative 'view_engines/jbuilder'
 
 module Woods
   module Extractors
@@ -40,7 +42,11 @@ module Woods
       # engine whose {ViewEngines::Base#handles?} returns true for a file
       # wins — place more specific engines before more general ones if
       # overlap is ever introduced.
-      ENGINES = [ViewEngines::Erb].freeze
+      ENGINES = [ViewEngines::Erb, ViewEngines::Haml, ViewEngines::Jbuilder].freeze
+
+      # Marks a partial name built by Ruby string interpolation, whose real
+      # path is only known at runtime.
+      INTERPOLATION_MARKER = '#{'
 
       # Template engine names the extraction pipeline currently
       # understands — aggregated from {ENGINES} so the list stays honest
@@ -91,8 +97,8 @@ module Woods
 
         unit.namespace = namespace
         unit.source_code = source
-        partials = engine.scan_partials(source)
-        unit.metadata = build_metadata(engine, source, file_path, partials)
+        interpolated, partials = engine.scan_partials(source).partition { |name| name.include?(INTERPOLATION_MARKER) }
+        unit.metadata = build_metadata(engine, source, file_path, partials, interpolated)
         unit.dependencies = build_dependencies(engine, source, file_path, identifier, partials)
 
         unit
@@ -130,15 +136,18 @@ module Woods
         dir == '.' ? nil : dir
       end
 
-      # Build metadata hash for the template.
+      # Build metadata hash for the template. `unresolved_partials` is
+      # present only when a partial name is interpolated or the engine
+      # reports runtime-built partials.
       #
       # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
-      # @param partials [Array<String>] Pre-extracted partial names
+      # @param partials [Array<String>] Literal partial names
+      # @param interpolated [Array<String>] Partial names built by interpolation
       # @return [Hash]
-      def build_metadata(engine, source, file_path, partials)
-        {
+      def build_metadata(engine, source, file_path, partials, interpolated)
+        metadata = {
           template_engine: engine.name.to_s,
           is_partial: partial?(file_path),
           partials_rendered: partials,
@@ -146,6 +155,10 @@ module Woods
           helpers_called: engine.scan_helpers(source),
           loc: source.lines.count { |l| l.strip.length.positive? }
         }
+        unresolved = interpolated.map { |name| { kind: 'interpolation', name: name } } +
+                     engine.scan_unresolved_partials(source)
+        metadata[:unresolved_partials] = unresolved if unresolved.any?
+        metadata
       end
 
       # Check if a template is a partial (filename starts with _).
@@ -168,16 +181,114 @@ module Woods
         deps = []
 
         partials.each do |partial_name|
-          partial_identifier = engine.resolve_partial_identifier(partial_name, identifier)
+          partial_identifier = resolve_partial(engine, partial_name, identifier)
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
 
-        controller = infer_controller(file_path)
-        deps << { type: :controller, target: controller, via: :view_render } if controller
+        owner = view_owner(extract_view_namespace(file_path))
+        deps << { type: owner[:type], target: owner[:name], via: :view_render } if owner
 
         deps.concat(resolve_navigation_candidates(engine, source))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
+      end
+
+      # Resolve a rendered partial to the template file that exists on disk
+      # under any registered engine, so a partial rendered across engines
+      # points at a real unit. A relative name missing from the template's
+      # own directory is looked up through the controller's view prefixes.
+      # Among several matches the renderer's format wins, then a
+      # format-less partial, then the renderer's own engine, then {ENGINES}
+      # order. With no match the engine's own identifier is kept as the
+      # edge target.
+      #
+      # @param engine [ViewEngines::Base] Engine of the rendering template
+      # @param partial_name [String] Partial name from the render call
+      # @param identifier [String] Identifier of the rendering template
+      # @return [String] Partial template identifier
+      def resolve_partial(engine, partial_name, identifier)
+        fallback = engine.resolve_partial_identifier(partial_name, identifier)
+        candidates = existing_partial_identifiers(fallback)
+        if candidates.empty? && !partial_name.include?('/')
+          candidates = inherited_partial_identifiers(engine, partial_name, identifier)
+        end
+        return fallback if candidates.empty?
+
+        renderer_format = template_format(identifier)
+        candidates.min_by do |candidate|
+          [format_rank(template_format(candidate), renderer_format),
+           engine.handles?(candidate) ? 0 : 1,
+           @engines.index(engine_for(candidate)),
+           candidate]
+        end
+      end
+
+      # Rails resolves a relative partial through the rendering
+      # controller's `_prefixes`: its own path, each parent controller's,
+      # then "application". A template with no controller (a layout, a
+      # shared partial) still reaches "application". The first prefix
+      # holding the partial wins.
+      #
+      # @param engine [ViewEngines::Base]
+      # @param partial_name [String] Relative partial name, e.g. "show"
+      # @param identifier [String] Identifier of the rendering template
+      # @return [Array<String>]
+      def inherited_partial_identifiers(engine, partial_name, identifier)
+        own_dir = File.dirname(identifier)
+        (controller_prefixes(own_dir) + ['application']).uniq.each do |prefix|
+          next if prefix == own_dir
+
+          found = existing_partial_identifiers(engine.resolve_partial_identifier("#{prefix}/#{partial_name}", identifier))
+          return found if found.any?
+        end
+        []
+      end
+
+      # View prefixes of the runtime class that owns a view directory.
+      #
+      # @param dir [String] View directory, "." for the views root
+      # @return [Array<String>]
+      def controller_prefixes(dir)
+        klass = view_owner(dir == '.' ? nil : dir)&.dig(:klass)
+        klass.respond_to?(:_prefixes) ? Array(klass._prefixes) : []
+      rescue StandardError
+        []
+      end
+
+      # Identifiers of existing files that share the partial's directory
+      # and name stem and that some registered engine handles.
+      #
+      # @param partial_identifier [String] e.g. "ledgers/_summary.html.erb"
+      # @return [Array<String>]
+      def existing_partial_identifiers(partial_identifier)
+        dir = File.dirname(partial_identifier)
+        prefix = "#{File.basename(partial_identifier).split('.', 2).first}."
+        @directories.flat_map do |root|
+          path = dir == '.' ? root : root.join(dir)
+          next [] unless path.directory?
+
+          Dir.children(path).select { |name| name.start_with?(prefix) && engine_for(name) }
+             .map { |name| dir == '.' ? name : "#{dir}/#{name}" }
+        end.uniq
+      end
+
+      # Format segment of a template identifier ("html" for
+      # "show.html+phone.erb"), or nil when the name carries none.
+      #
+      # @param identifier [String]
+      # @return [String, nil]
+      def template_format(identifier)
+        parts = File.basename(identifier).split('.')
+        parts.size >= 3 ? parts[-2].split('+').first : nil
+      end
+
+      # @param candidate_format [String, nil]
+      # @param renderer_format [String, nil]
+      # @return [Integer] 0 same format, 1 format-less, 2 other format
+      def format_rank(candidate_format, renderer_format)
+        return 0 if candidate_format == renderer_format
+
+        candidate_format.nil? ? 1 : 2
       end
 
       # Ask the engine for route-helper candidates and resolve each to a
@@ -204,18 +315,71 @@ module Woods
         end
       end
 
-      # Infer the controller class from the template's directory path.
+      # The class that renders templates from a view directory: the
+      # controller the directory names, or the mailer for a mailer view
+      # directory. Only a class that exists at runtime counts, so a
+      # directory such as `shared/` or `layouts/` has no owner.
       #
-      # @param file_path [String] Path to the template
-      # @return [String, nil] Controller class name
-      def infer_controller(file_path)
-        namespace = extract_view_namespace(file_path)
-        return nil unless namespace
-        return nil if namespace == 'layouts'
+      # @param namespace [String, nil] View directory, e.g. "admin/users"
+      # @return [Hash, nil] `{ type: :controller | :mailer, name:, klass: }`
+      def view_owner(namespace)
+        return nil if namespace.nil? || namespace == 'layouts'
 
-        parts = namespace.split('/')
-        controller_name = parts.map { |p| p.split('_').map(&:capitalize).join }.join('::')
-        "#{controller_name}Controller"
+        @view_owners ||= {}
+        return @view_owners[namespace] if @view_owners.key?(namespace)
+
+        @view_owners[namespace] = find_view_owner(camelize_path(namespace))
+      end
+
+      # @param base_name [String] e.g. "Admin::Users"
+      # @return [Hash, nil]
+      def find_view_owner(base_name)
+        controller = runtime_constant("#{base_name}Controller")
+        if subclass_of_any?(controller, %w[ActionController::Base ActionController::API])
+          return { type: :controller, name: "#{base_name}Controller", klass: controller }
+        end
+
+        mailer = runtime_constant(base_name)
+        { type: :mailer, name: base_name, klass: mailer } if subclass_of_any?(mailer, %w[ActionMailer::Base])
+      end
+
+      # @param klass [Object, nil]
+      # @param base_names [Array<String>]
+      # @return [Boolean]
+      def subclass_of_any?(klass, base_names)
+        return false unless klass.is_a?(Class)
+
+        base_names.any? do |base_name|
+          base = runtime_constant(base_name)
+          base.is_a?(Class) && klass < base
+        end
+      end
+
+      # Look a constant up one segment at a time without inheritance, so a
+      # missing `Shared::SvgController` never resolves to a top-level
+      # `SvgController`.
+      #
+      # @param name [String]
+      # @return [Object, nil]
+      def runtime_constant(name)
+        name.split('::').reduce(Object) do |scope, part|
+          return nil unless scope.is_a?(Module) && scope.const_defined?(part, false)
+
+          scope.const_get(part, false)
+        end
+      rescue StandardError
+        nil
+      end
+
+      # "admin/user_accounts" -> "Admin::UserAccounts", honoring host
+      # inflections when ActiveSupport is loaded.
+      #
+      # @param path [String]
+      # @return [String]
+      def camelize_path(path)
+        return path.camelize if path.respond_to?(:camelize)
+
+        path.split('/').map { |p| p.split('_').map(&:capitalize).join }.join('::')
       end
     end
   end

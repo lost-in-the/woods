@@ -53,8 +53,6 @@ module Woods
         [w, /\b#{Regexp.escape(w)}\s*\(([^)]+)\)/m]
       end.freeze
 
-      ASYNC_PATTERN = ReferencePatterns::JOB_ENQUEUE
-
       DB_READ_PATTERNS = DB_READ_METHODS.to_h do |m|
         [m, /\.#{Regexp.escape(m)}\b/]
       end.freeze
@@ -209,7 +207,7 @@ module Woods
       # @param method_source [String]
       # @return [Array<String>]
       def detect_jobs_enqueued(method_source)
-        method_source.scan(ASYNC_PATTERN).flatten.uniq.sort
+        ReferencePatterns.job_enqueues(method_source).uniq.sort
       end
 
       # Detect service objects called by the callback method.
@@ -220,7 +218,7 @@ module Woods
       # @param method_source [String]
       # @return [Array<String>]
       def detect_services_called(method_source)
-        method_source.scan(ReferencePatterns::SERVICE_REFERENCE).flatten.uniq.sort
+        ReferencePatterns.service_references(method_source).uniq.sort
       end
 
       # Detect mailers triggered by the callback method.
@@ -231,7 +229,7 @@ module Woods
       # @param method_source [String]
       # @return [Array<String>]
       def detect_mailers_triggered(method_source)
-        method_source.scan(ReferencePatterns::MAILER_REFERENCE).flatten.uniq.sort
+        ReferencePatterns.mailer_references(method_source).uniq.sort
       end
 
       # Detect database read operations in the callback method.

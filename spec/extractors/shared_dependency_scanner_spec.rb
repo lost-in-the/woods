@@ -599,6 +599,100 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
     end
   end
 
+  describe 'form action rules' do
+    let(:form_scanner) do
+      Class.new do
+        include Woods::Extractors::SharedDependencyScanner
+        include Woods::Extractors::RouteHelperResolver
+
+        def initialize(route_map)
+          @route_helper_map = route_map
+        end
+      end.new(%w[a b c ledger_path shipments widgets ledgers z].to_h { |name| [name, { controller: name }] })
+    end
+
+    before do
+      Woods.configure unless Woods.configuration
+      allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+    end
+
+    def form_targets(source)
+      form_scanner.scan_form_dependencies(source).map { |d| d[:target] }
+    end
+
+    it 'takes the last _path/_url suffix inside one word' do
+      expect(form_targets('<%= form_with url: ledger_path_url %>')).to eq(['ledger_path'])
+    end
+
+    it 'matches a suffix followed by more word characters' do
+      expect(form_targets('<%= form_with url: shipments_paths %>')).to eq(['shipments'])
+    end
+
+    it 'needs a word character before the suffix' do
+      expect(form_targets('<%= form_with url: _path, x: a_url %>')).to eq(['a'])
+    end
+
+    it 'matches a form call embedded in a longer word' do
+      expect(form_targets('<%= my_form_with url: widgets_path %>')).to eq(['widgets'])
+    end
+
+    it 'tries the next form call when one reaches its block first' do
+      expect(form_targets('<%= form_with model: @w do |f| %><%= form_with url: ledgers_path %>')).to eq(['ledgers'])
+    end
+
+    it 'resumes after a matched helper, so one helper serves one form call' do
+      expect(form_targets('<%= form_with url: a_path, form_for b_path, c_path %>')).to eq(%w[a b])
+    end
+
+    it 'does not stop at a bare % or at words that only contain do or end' do
+      expect(form_targets('form_with data: { pct: x % y, done: 1, ender: 2 }, url: z_path')).to eq(['z'])
+    end
+
+    it 'stops at an end keyword' do
+      expect(form_targets("form_with model: @w\nend\nz_path")).to be_empty
+    end
+  end
+
+  describe 'reference chain rules' do
+    def targets(method, source)
+      scanner.public_send(method, source).map { |d| d[:target] }
+    end
+
+    it 'takes the last Service segment of a chain that is followed by . or ::' do
+      expect(targets(:scan_service_dependencies, 'A::B::CService::DService.call')).to eq(['A::B::CService::DService'])
+      expect(targets(:scan_service_dependencies, 'FooService::BarService::baz')).to eq(['FooService::BarService'])
+      expect(targets(:scan_service_dependencies, 'Billing::ChargeService::VERSION')).to eq(['Billing::ChargeService'])
+    end
+
+    it 'needs a word character before the suffix and the suffix at the segment end' do
+      expect(targets(:scan_service_dependencies, 'Service.call; FooServiceX.call')).to be_empty
+    end
+
+    it 'keeps word characters before the class and starts after other characters' do
+      expect(targets(:scan_service_dependencies, 'my_PaymentService.call x:BillingService.call'))
+        .to eq(%w[my_PaymentService BillingService])
+    end
+
+    it 'accepts :: followed by a non-word character' do
+      expect(targets(:scan_service_dependencies, 'Foo::BarService:::x')).to eq(['Foo::BarService'])
+    end
+
+    it 'reads job enqueues through the whole chain and the method prefix' do
+      source = 'A::BJob::CJob.perform_later; HardWorker.perform_async; SyncJob.perform_laterx; ' \
+               'OtherJob.set(wait: 1); SettingsJob.settings'
+      expect(targets(:scan_job_dependencies, source)).to eq(%w[A::BJob::CJob HardWorker SyncJob OtherJob])
+    end
+
+    it 'resumes after the enqueue method, even inside the next word' do
+      expect(targets(:scan_job_dependencies, 'AJob.perform_laterBJob.perform_later')).to eq(%w[AJob BJob])
+    end
+
+    it 'reads mailers followed by a dot only' do
+      expect(targets(:scan_mailer_dependencies, 'A::BMailer::CMailer.welcome; ReceiptMailer::x'))
+        .to eq(['A::BMailer::CMailer'])
+    end
+  end
+
   # ── Graph resolution: constantize + short names (fills a graph gap where
   #    bare short-name / string-literal refs produced zero dependents) ──
 

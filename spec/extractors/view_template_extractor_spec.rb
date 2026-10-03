@@ -48,7 +48,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
   describe '.supported_template_engines' do
     it 'returns the engine names currently wired into the orchestrator' do
-      expect(described_class.supported_template_engines).to eq([:erb])
+      expect(described_class.supported_template_engines).to eq(%i[erb haml jbuilder])
     end
 
     it 'is aggregated from ENGINES — adding an engine extends the list' do
@@ -94,6 +94,38 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     it 'returns nil from #extract_view_template_file for unregistered extensions' do
       unit = described_class.new.extract_view_template_file('/path/to/thing.unknown')
       expect(unit).to be_nil
+    end
+  end
+
+  describe 'partial resolution across engines' do
+    before do
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
+      )
+    end
+
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it 'resolves to the partial file that exists under another engine' do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'ledgers/summary' %>")
+      create_file('app/views/ledgers/_summary.fake', 'fake source')
+      expect(render_targets('widgets/show.html.erb')).to eq(['ledgers/_summary.fake'])
+    end
+
+    it "prefers the renderer's own format when partials exist under several engines" do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'summary' %>")
+      create_file('app/views/widgets/_summary.fake', 'fake source')
+      create_file('app/views/widgets/_summary.html.erb', '<p>summary</p>')
+      expect(render_targets('widgets/show.html.erb')).to eq(['widgets/_summary.html.erb'])
+    end
+
+    it "falls back to the engine's own identifier when no partial file exists" do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'shipments/missing' %>")
+      expect(render_targets('widgets/show.html.erb')).to eq(['shipments/_missing.html.erb'])
     end
   end
 
@@ -220,6 +252,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
     context 'with controller inference' do
       before do
+        stub_const('ActionController::Base', Class.new)
+        stub_const('Admin::UsersController', Class.new(ActionController::Base))
         create_file('app/views/admin/users/index.html.erb', '<h1>Admin Users</h1>')
       end
 
@@ -236,13 +270,13 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       end
     end
 
-    context 'with non-ERB files mixed in' do
+    context 'with files no registered engine handles mixed in' do
       before do
         create_file('app/views/home/index.html.erb', '<h1>Home</h1>')
-        create_file('app/views/home/show.html.haml', '%h1 Show')
+        create_file('app/views/home/show.html.slim', 'h1 Show')
       end
 
-      it 'only processes ERB files' do
+      it 'only processes files a registered engine handles' do
         units = described_class.new.extract_all
         expect(units.size).to eq(1)
         expect(units.first.identifier).to eq('home/index.html.erb')
@@ -306,6 +340,145 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       end
     end
 
+    context 'with HAML templates' do
+      before do
+        stub_const('ActionController::Base', Class.new)
+        stub_const('WidgetsController', Class.new(ActionController::Base))
+        create_file('app/views/widgets/index.html.haml', <<~HAML)
+          %h1 Widgets
+          - @widgets.each do |widget|
+            = render partial: 'widget', locals: { widget: widget }
+          = render 'shared/footer'
+        HAML
+        create_file('app/views/widgets/_widget.html.haml', "%li= link_to widget.name, widget\n")
+      end
+
+      let(:index_unit) { described_class.new.extract_all.find { |u| u.identifier == 'widgets/index.html.haml' } }
+
+      it 'extracts one view_template unit per HAML file' do
+        identifiers = described_class.new.extract_all.map(&:identifier)
+        expect(identifiers).to contain_exactly('widgets/index.html.haml', 'widgets/_widget.html.haml')
+      end
+
+      it 'records haml as the template engine' do
+        expect(index_unit.metadata[:template_engine]).to eq('haml')
+      end
+
+      it 'records partials, instance variables, and helpers' do
+        expect(index_unit.metadata).to include(
+          partials_rendered: contain_exactly('widget', 'shared/footer'),
+          instance_variables: ['@widgets'],
+          helpers_called: ['render']
+        )
+      end
+
+      it 'creates render edges to the HAML partials and a view_render edge to the controller' do
+        deps = index_unit.dependencies
+        expect(deps).to include(
+          { type: :view_template, target: 'widgets/_widget.html.haml', via: :render },
+          { type: :view_template, target: 'shared/_footer.html.haml', via: :render },
+          { type: :controller, target: 'WidgetsController', via: :view_render }
+        )
+      end
+    end
+
+    context 'with jbuilder templates' do
+      before do
+        create_file('app/views/api/widgets/index.json.jbuilder', <<~RUBY)
+          json.array! @widgets, partial: 'api/widgets/widget', as: :widget
+          json.meta do
+            json.partial! versioned_template_path(:meta), ledger: @ledger
+            json.partial! @order.customer
+          end
+        RUBY
+        create_file('app/views/api/widgets/_widget.json.jbuilder', "json.id widget.id\n")
+        create_file('app/views/api/widgets/_widget.html.erb', '<p><%= widget.name %></p>')
+      end
+
+      let(:units) { described_class.new.extract_all }
+      let(:index_unit) { units.find { |u| u.identifier == 'api/widgets/index.json.jbuilder' } }
+
+      it 'records jbuilder as the template engine' do
+        expect(index_unit.metadata[:template_engine]).to eq('jbuilder')
+      end
+
+      it 'records literal partials and instance variables' do
+        expect(index_unit.metadata).to include(
+          partials_rendered: ['api/widgets/widget'],
+          instance_variables: %w[@ledger @order @widgets]
+        )
+      end
+
+      it 'records runtime-built partial references as metadata, not edges' do
+        expect(index_unit.metadata[:unresolved_partials]).to eq(
+          [{ kind: 'helper', name: 'versioned_template_path' }, { kind: 'object', name: '@order.customer' }]
+        )
+        render_targets = index_unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+        expect(render_targets).to eq(['api/widgets/_widget.json.jbuilder'])
+      end
+
+      it 'leaves unresolved_partials out of metadata when there are none' do
+        erb_partial = units.find { |u| u.identifier == 'api/widgets/_widget.html.erb' }
+        expect(erb_partial.metadata).not_to have_key(:unresolved_partials)
+      end
+    end
+
+    context 'with interpolated partial names' do
+      before do
+        create_file('app/views/api/receipts/show.json.jbuilder', <<~'RUBY')
+          json.partial! "api/receipts/_#{@order.kind}", order: @order
+          json.partial! 'api/receipts/total', order: @order
+        RUBY
+        create_file('app/views/ledgers/show.html.erb', <<~'ERB')
+          <%= render "ledgers/#{@ledger.kind}_row" %>
+        ERB
+        create_file('app/views/widgets/show.html.haml', <<~'HAML')
+          = render partial: "widgets/#{@widget.style}"
+        HAML
+      end
+
+      let(:units) { described_class.new.extract_all }
+
+      def unit_for(identifier)
+        units.find { |u| u.identifier == identifier }
+      end
+
+      def render_targets(unit)
+        unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+      end
+
+      it 'records an interpolated jbuilder partial as unresolved and creates no edge for it' do
+        unit = unit_for('api/receipts/show.json.jbuilder')
+        expect(unit.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "api/receipts/_\#{@order.kind}" }])
+        expect(unit.metadata[:partials_rendered]).to eq(['api/receipts/total'])
+        expect(render_targets(unit)).to eq(['api/receipts/_total.json.jbuilder'])
+      end
+
+      it 'records interpolated ERB and HAML partials as unresolved and creates no edge for them' do
+        erb = unit_for('ledgers/show.html.erb')
+        haml = unit_for('widgets/show.html.haml')
+        expect(erb.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "ledgers/\#{@ledger.kind}_row" }])
+        expect(haml.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "widgets/\#{@widget.style}" }])
+        expect(render_targets(erb) + render_targets(haml)).to be_empty
+      end
+    end
+
+    context 'with a partial rendered across engines' do
+      before do
+        create_file('app/views/layouts/application.html.erb', "<%= render 'shared/banner' %>\n<%= yield %>")
+        create_file('app/views/shared/_banner.html.haml', "%div.banner= @ledger.name\n")
+      end
+
+      it 'points the ERB render edge at the existing HAML partial' do
+        layout = described_class.new.extract_all.find { |u| u.identifier == 'layouts/application.html.erb' }
+        render_targets = layout.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+        expect(render_targets).to eq(['shared/_banner.html.haml'])
+      end
+    end
+
     context 'with layouts directory' do
       before do
         create_file('app/views/layouts/application.html.erb', <<~ERB)
@@ -321,6 +494,107 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
         controller_dep = deps.find { |d| d[:via] == :view_render }
         expect(controller_dep).to be_nil
       end
+    end
+  end
+
+  describe 'relative partials through controller view prefixes' do
+    before do
+      stub_const('ActionController::Base', Class.new)
+      stub_const('ProfileController', Class.new(ActionController::Base))
+      stub_const('Profile::PasswordController', Class.new(ProfileController) do
+        def self._prefixes
+          %w[profile/password profile application]
+        end
+      end)
+      create_file('app/views/profile/password/edit.html.haml', "= render 'show'\n")
+    end
+
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it "finds the partial under a parent controller's prefix" do
+      create_file('app/views/profile/_show.html.haml', '%p show')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/_show.html.haml'])
+    end
+
+    it 'prefers the earlier prefix when several prefixes hold the partial' do
+      create_file('app/views/profile/_show.html.haml', '%p show')
+      create_file('app/views/application/_show.html.haml', '%p app')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/_show.html.haml'])
+    end
+
+    it "keeps the template's own directory first" do
+      create_file('app/views/profile/password/_show.html.haml', '%p own')
+      create_file('app/views/profile/_show.html.haml', '%p parent')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    end
+
+    it 'falls back to application/ for a template with no controller' do
+      create_file('app/views/layouts/application.html.haml', "= render 'flash_messages'\n= yield\n")
+      create_file('app/views/application/_flash_messages.html.haml', '%div flash')
+      expect(render_targets('layouts/application.html.haml')).to eq(['application/_flash_messages.html.haml'])
+    end
+
+    it 'does not walk prefixes for a partial name that has a directory' do
+      create_file('app/views/profile/password/show.html.haml', "= render 'cards/show'\n")
+      create_file('app/views/application/_show.html.haml', '%p app')
+      expect(render_targets('profile/password/show.html.haml')).to eq(['cards/_show.html.haml'])
+    end
+
+    it "keeps the engine's own identifier when no prefix holds the partial" do
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    end
+  end
+
+  describe 'view_render edges' do
+    before { stub_const('ActionController::Base', Class.new) }
+
+    def view_render_deps(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :view_render }
+    end
+
+    it 'links a template to the controller its directory names when that controller exists' do
+      stub_const('Ledgers::EntriesController', Class.new(ActionController::Base))
+      create_file('app/views/ledgers/entries/index.html.erb', '<h1>Entries</h1>')
+      expect(view_render_deps('ledgers/entries/index.html.erb'))
+        .to eq([{ type: :controller, target: 'Ledgers::EntriesController', via: :view_render }])
+    end
+
+    it 'links an ActionController::API controller' do
+      stub_const('ActionController::API', Class.new)
+      stub_const('Api::WidgetsController', Class.new(ActionController::API))
+      create_file('app/views/api/widgets/show.json.jbuilder', 'json.id 1')
+      expect(view_render_deps('api/widgets/show.json.jbuilder'))
+        .to eq([{ type: :controller, target: 'Api::WidgetsController', via: :view_render }])
+    end
+
+    it 'emits no edge when no controller constant exists for the directory' do
+      create_file('app/views/shared/svg/_icon.html.haml', '%svg')
+      expect(view_render_deps('shared/svg/_icon.html.haml')).to be_empty
+    end
+
+    it 'does not fall back to a top-level controller sharing the last name segment' do
+      stub_const('Shared', Module.new)
+      stub_const('SvgController', Class.new(ActionController::Base))
+      create_file('app/views/shared/svg/_icon.html.haml', '%svg')
+      expect(view_render_deps('shared/svg/_icon.html.haml')).to be_empty
+    end
+
+    it 'emits no edge when the constant is not a controller' do
+      stub_const('ShipmentsController', Class.new)
+      create_file('app/views/shipments/index.html.erb', '<h1>Shipments</h1>')
+      expect(view_render_deps('shipments/index.html.erb')).to be_empty
+    end
+
+    it 'links a mailer view to its mailer class' do
+      stub_const('ActionMailer::Base', Class.new)
+      stub_const('ReceiptMailer', Class.new(ActionMailer::Base))
+      create_file('app/views/receipt_mailer/sent.html.erb', '<p>Sent</p>')
+      expect(view_render_deps('receipt_mailer/sent.html.erb'))
+        .to eq([{ type: :mailer, target: 'ReceiptMailer', via: :view_render }])
     end
   end
 
@@ -370,6 +644,17 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       deps = units.first.dependencies
       nav_targets = deps.select { |d| d[:via] == :link_to }.map { |d| d[:target] }
       expect(nav_targets).to contain_exactly('PostsController', 'UsersController')
+    end
+
+    it 'extracts link_to navigation edges from a HAML template' do
+      create_file('app/views/home/index.html.haml', <<~HAML)
+        = link_to t('home.posts'),
+          posts_path,
+          class: 'nav'
+      HAML
+
+      nav_deps = nav_extractor.extract_all.first.dependencies.select { |d| d[:via] == :link_to }
+      expect(nav_deps).to eq([{ type: :controller, target: 'PostsController', via: :link_to }])
     end
 
     it 'returns no navigation edges when config is disabled' do
@@ -468,6 +753,17 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(form_deps).to include(a_hash_including(target: 'PostsController'))
     end
 
+    it 'extracts a HAML form_with continued over comma-terminated lines' do
+      create_file('app/views/posts/new.html.haml', <<~HAML)
+        = form_with model: @post,
+          url: posts_path do |f|
+          = f.submit
+      HAML
+
+      form_deps = form_extractor.extract_all.first.dependencies.select { |d| d[:via] == :form_action }
+      expect(form_deps).to eq([{ type: :controller, target: 'PostsController', via: :form_action }])
+    end
+
     it 'returns no form edges when config is disabled' do
       allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
       create_file('app/views/posts/new.html.erb', '<%= form_with url: posts_path do |f| %><% end %>')
@@ -492,7 +788,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
 
     it 'returns nil for files no registered engine handles' do
-      unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.haml')
+      unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.slim')
       expect(unit).to be_nil
     end
   end
