@@ -170,6 +170,10 @@ RSpec.describe Woods::Extractors::ConstantPaths do
       expect(described_class.resolve('Depot::Crate', ['Unloaded::Scope']).target).to eq('Depot::Crate')
     end
 
+    it 'skips an unloaded scope and keeps resolving through the loaded ones' do
+      expect(described_class.resolve('Crate', ['Depot::Unloaded', 'Depot']).target).to eq('Depot::Crate')
+    end
+
     it 'follows an alias to the constant it names' do
       expect(described_class.resolve('Depot::Box', []).target).to eq('Depot::Crate')
     end

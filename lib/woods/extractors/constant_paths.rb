@@ -24,7 +24,8 @@ module Woods
       # +status+ is +:resolved+ for a loaded class or module, +:value+ for any
       # other constant, +:unresolved+ when nothing loaded answers to the path.
       # +source_file+ is nil for a constant no Ruby file defines.
-      Resolution = Struct.new(:target, :status, :source_file, keyword_init: true)
+      # +value+ is the resolved class or module itself.
+      Resolution = Struct.new(:target, :status, :source_file, :value, keyword_init: true)
 
       # The mixin module ActiveSupport::Concern extends onto an including class.
       CLASS_METHODS_SUFFIX = '::ClassMethods'
@@ -74,15 +75,25 @@ module Woods
       #   path when nothing loaded answers to it
       def resolve(path, nesting = [], lookup: SourceReferences::RuntimeLookup.new)
         result = lookup.call(path, nesting: nesting, allow_private: true)
-        result = lookup.call("::#{normalize(path)}", allow_private: true) if result[:reason] == 'unloaded_scope'
+        if result[:reason] == 'unloaded_scope'
+          nesting = loaded_scopes(nesting, lookup)
+          result = lookup.call(path, nesting: nesting, allow_private: true)
+        end
         result = aliased(path, nesting, lookup) || result if result[:reason] == 'constant_alias'
 
         case result[:status] == :resolved ? :resolved : result[:reason]
-        when :resolved then Resolution.new(target: result[:target], status: :resolved,
+        when :resolved then Resolution.new(target: result[:target], status: :resolved, value: result[:value],
                                            source_file: source_file(result[:target]))
         when 'non_module_constant' then Resolution.new(target: normalize(path), status: :value)
         else Resolution.new(target: normalize(path), status: :unresolved)
         end
+      end
+
+      # A scope that is not loaded declares no constants to find.
+      #
+      # @return [Array<String>]
+      def loaded_scopes(nesting, lookup)
+        nesting.select { |scope| lookup.module_object?(lookup.call("::#{scope}", allow_private: true)[:value]) }
       end
 
       # @return [Hash, nil] the lookup result for the constant an alias names
@@ -188,7 +199,7 @@ module Woods
         found
       end
 
-      private_class_method :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
+      private_class_method :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
                            :constant_node?, :constant?, :token_references
     end
   end
