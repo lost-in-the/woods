@@ -107,7 +107,7 @@ module Woods
         support = @support_catalog.references(source)
         unit.source_code = source
         unit.metadata = extract_metadata(source, file_path, framework).merge(support_metadata(support))
-        unit.metadata[:routes_exercised] = routes_exercised(source, unit.metadata[:test_type])
+        unit.metadata.merge!(route_metadata(source, unit.metadata[:test_type]))
         unit.dependencies = consolidate_dependencies(
           coverage_dependencies(unit.metadata, file_path), support.dependencies,
           unit.metadata[:routes_exercised].map { |route| { type: :route, target: route, via: :exercises_route } }
@@ -161,15 +161,20 @@ module Woods
         metadata
       end
 
-      # Routes a navigating test exercises; other test types are not scanned.
+      # Routes a navigating test exercises, asserts about, or could be
+      # exercising; other test types are not scanned.
       #
       # @param source [String] File source code
       # @param test_type [Symbol]
-      # @return [Array<String>] sorted route unit identifiers
-      def routes_exercised(source, test_type)
-        return [] unless NAVIGATING_TEST_TYPES.include?(test_type)
+      # @return [Hash] routes_exercised, routes_asserted, routes_ambiguous
+      def route_metadata(source, test_type)
+        unless NAVIGATING_TEST_TYPES.include?(test_type)
+          return { routes_exercised: [], routes_asserted: [], routes_ambiguous: [] }
+        end
 
-        (@route_resolver ||= TestRouteResolver.new).exercised(source)
+        analysis = (@route_resolver ||= TestRouteResolver.new).analyze(source)
+        { routes_exercised: analysis.exercised, routes_asserted: analysis.asserted,
+          routes_ambiguous: analysis.ambiguous }
       end
 
       # Names of the test support this file refers to, as written. A name is

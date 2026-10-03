@@ -886,6 +886,32 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
       expect(unit.metadata[:routes_exercised]).to eq(['GET /widgets', 'GET /widgets/:id'])
     end
 
+    it 'records asserted and ambiguous routes in metadata without edges' do
+      stub_route_set(
+        [route_double(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index', name: 'widgets'),
+         route_double(verb: 'GET', path: '/:id', controller: 'shops', action: 'show',
+                      constraints: { subdomain: 'shop' }),
+         route_double(verb: 'GET', path: '/:slug', controller: 'pages', action: 'show')],
+        root: rails_root, logger: logger
+      )
+      path = create_file('spec/features/pages_spec.rb', <<~RUBY)
+        RSpec.feature 'Pages' do
+          scenario 'browsing' do
+            visit "/pricing"
+            expect(page).to have_current_path(widgets_path)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(route_edges(unit)).to eq([])
+      expect(unit.metadata).to include(
+        routes_exercised: [],
+        routes_asserted: ['GET /widgets'],
+        routes_ambiguous: [{ request: 'GET /pricing', candidates: ['GET /:id [subdomain=shop]', 'GET /:slug'] }]
+      )
+    end
+
     it 'links a request spec by verb' do
       path = create_file('spec/requests/widgets_spec.rb', <<~RUBY)
         RSpec.describe 'Widgets API' do

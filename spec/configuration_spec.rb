@@ -764,6 +764,34 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#test_subdomain_helpers' do
+    it 'defaults to common subdomain-switching helper names' do
+      expect(described_class.new.test_subdomain_helpers)
+        .to eq(%w[with_subdomain use_subdomain using_subdomain set_subdomain switch_to_subdomain on_subdomain])
+    end
+
+    it 'accepts and freezes a list of method names' do
+      config = described_class.new
+      config.test_subdomain_helpers = %w[on_storefront visit_shop!]
+
+      expect(config.test_subdomain_helpers).to eq(%w[on_storefront visit_shop!])
+      expect(config.test_subdomain_helpers).to be_frozen
+    end
+
+    it 'rejects a non-array and anything that is not a method name, keeping the previous value' do
+      config = described_class.new
+      config.test_subdomain_helpers = ['on_storefront']
+
+      expect { config.test_subdomain_helpers = 'with_subdomain' }
+        .to raise_error(Woods::ConfigurationError, /test_subdomain_helpers must be an Array/)
+      ['', 'With', 'a b', 'x.y', '(a|b)', nil, :sym].each do |name|
+        expect { config.test_subdomain_helpers = [name] }
+          .to raise_error(Woods::ConfigurationError, /test_subdomain_helpers\[0\] must be a method name/)
+      end
+      expect(config.test_subdomain_helpers).to eq(['on_storefront'])
+    end
+  end
+
   describe '#unclaimed_ruby_paths' do
     it 'defaults to every Ruby file under app/' do
       expect(described_class.new.unclaimed_ruby_paths).to eq(['app/**/*.rb'])

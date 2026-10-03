@@ -4,10 +4,12 @@
 # without booting Rails.
 module RouteDoubles
   # @return [RSpec::Mocks::Double] a stand-in for ActionDispatch::Journey::Route
-  def route_double(verb:, path:, controller:, action:, name: nil, constraints: {})
+  def route_double(verb:, path:, controller:, action:, name: nil, constraints: {}, callable: false)
     spec = double('PathSpec', to_s: "#{path}(.:format)")
+    # A `constraints ->(request) { ... }` block wraps the endpoint.
+    app = double('Endpoint', constraints: callable ? [proc { true }] : [])
     double('Route', verb: verb, path: double('Path', spec: spec), name: name, constraints: constraints,
-                    defaults: { controller: controller, action: action })
+                    defaults: { controller: controller, action: action }, app: app)
   end
 
   # Replace the Rails double with one whose application serves +routes+.

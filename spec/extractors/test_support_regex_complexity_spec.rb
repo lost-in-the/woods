@@ -108,6 +108,22 @@ RSpec.describe 'test support and test mapping regex complexity' do
       expect(exercised.call("visit \"/files/x/#{'a-' * 200}b\"\n" * 2_000)).to eq(['GET /files/*path/:a-:b'])
       expect(exercised.call("visit \"/#{'a' * 50_000}")).to eq([])
       expect(exercised.call("visit widget_path(w)\n" * 10_000)).to eq(['GET /widgets/:id'])
+      source = "redirect_to #{'(' * 50_000}\nhave_current_path(widget_path(w))\n" * 2
+      analysis = Woods::Extractors::TestRouteResolver.new.analyze(source)
+      expect(analysis.asserted).to eq(['GET /widgets/:id'])
+    end
+  end
+
+  it 'reads request hosts and subdomain helpers in linear time' do
+    host = Woods::Extractors::TestRequestHost
+    within_budget do
+      expect(host.subdomain("host! \"#{'a' * 50_000}")).to be_nil
+      expect(host.subdomain("host! #{'(' * 50_000}")).to be_nil
+      expect(host.subdomain("app_host = \"http://#{'a' * 50_000}")).to eq('')
+      expect(host.subdomain("subdomain: #{' ' * 50_000}")).to be_nil
+      expect(host.subdomain('with_subdomain ' * 20_000)).to be_nil
+      expect(host.subdomain("host! \"#{'a.' * 20_000}example.test\"")).to eq("#{'a.' * 19_999}a")
+      expect(host.subdomain("with_subdomain 'shop'\n" * 10_000)).to eq('shop')
     end
   end
 

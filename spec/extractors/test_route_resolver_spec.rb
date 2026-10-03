@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
+require 'woods'
 require 'woods/extractors/test_route_resolver'
 
 RSpec.describe Woods::Extractors::TestRouteResolver do
@@ -107,6 +108,122 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
     RUBY
 
     expect(exercised(source)).to eq([])
+  end
+
+  describe 'subdomain-constrained routes' do
+    let(:routes) do
+      [
+        route_double(verb: 'GET', path: '/settings', controller: 'settings', action: 'show',
+                     constraints: { subdomain: 'app' }),
+        route_double(verb: 'GET', path: '/:id', controller: 'shops', action: 'show',
+                     constraints: { subdomain: 'shop' }),
+        route_double(verb: 'GET', path: '/status', controller: 'api/status', action: 'show',
+                     constraints: { subdomain: /\Aapi\d*\z/ }),
+        route_double(verb: 'GET', path: '/about', controller: 'pages', action: 'about', name: 'about'),
+        route_double(verb: 'GET', path: '/:slug', controller: 'pages', action: 'show')
+      ]
+    end
+
+    def analysis(source)
+      described_class.new.analyze(source)
+    end
+
+    it 'prefers the one static route over wildcard routes on other subdomains when the subdomain is unknown' do
+      result = analysis(%(visit "/settings"\nvisit "/about"\n))
+
+      expect(result.exercised).to eq(['GET /about', 'GET /settings [subdomain=app]'])
+      expect(result.ambiguous).to eq([])
+    end
+
+    it 'records candidates and emits nothing when only wildcard routes compete' do
+      result = analysis(%(visit "/pricing"\n))
+
+      expect(result.exercised).to eq([])
+      expect(result.ambiguous).to eq(
+        [{ request: 'GET /pricing', candidates: ['GET /:id [subdomain=shop]', 'GET /:slug'] }]
+      )
+    end
+
+    it 'follows route order among the routes a known subdomain satisfies' do
+      shop = analysis(%(host! "shop.example.test"\nvisit "/settings"\nvisit "/about"\n))
+      app = analysis(%(before { host!("app.example.test") }\nvisit "/settings"\nvisit "/pricing"\n))
+
+      expect(shop.exercised).to eq(['GET /:id [subdomain=shop]'])
+      expect(app.exercised).to eq(['GET /:slug', 'GET /settings [subdomain=app]'])
+      expect(shop.ambiguous + app.ambiguous).to eq([])
+    end
+
+    it 'reads the subdomain from an option, a helper call, and the Capybara app host' do
+      ['visit root_url(subdomain: "shop")', 'get "/x", :subdomain => :shop', 'with_subdomain("shop") { }',
+       'use_subdomain :shop', 'Capybara.app_host = "http://shop.example.test:3000"'].each do |line|
+        expect(analysis(%(#{line}\nvisit "/pricing"\n)).exercised).to eq(['GET /:id [subdomain=shop]']), line
+      end
+    end
+
+    it 'matches a known subdomain against a pattern constraint' do
+      expect(analysis(%(host! "api2.example.test"\nvisit "/status"\n)).exercised)
+        .to eq(['GET /status [subdomain=\\Aapi\\d*\\z]'])
+      expect(analysis(%(host! "app.example.test"\nvisit "/status"\n)).exercised).to eq(['GET /:slug'])
+    end
+
+    it 'treats a host without a subdomain as known, matching only unconstrained routes' do
+      expect(analysis(%(host! "example.test"\nvisit "/settings"\n)).exercised).to eq(['GET /:slug'])
+    end
+
+    it 'treats the subdomain as unknown when the file names several or interpolates one' do
+      several = analysis(%(host! "shop.example.test"\nhost! "app.example.test"\nvisit "/pricing"\n))
+      dynamic = analysis("host! \"\#{shop.subdomain}.example.test\"\nvisit \"/pricing\"\n")
+
+      expect(several.exercised + dynamic.exercised).to eq([])
+      expect(several.ambiguous.size).to eq(1)
+      expect(dynamic.ambiguous.size).to eq(1)
+    end
+
+    it 'follows config.test_subdomain_helpers' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.test_subdomain_helpers = ['on_storefront']
+
+      expect(analysis(%(on_storefront "shop"\nvisit "/pricing"\n)).exercised).to eq(['GET /:id [subdomain=shop]'])
+      expect(analysis(%(with_subdomain "shop"\nvisit "/pricing"\n)).exercised).to eq([])
+    ensure
+      Woods.configuration = original
+    end
+  end
+
+  describe 'routes behind a callable constraint' do
+    let(:routes) do
+      [
+        route_double(verb: 'GET', path: '/dashboard', controller: 'staff/dashboards', action: 'show', callable: true),
+        route_double(verb: 'GET', path: '/dashboard', controller: 'dashboards', action: 'show'),
+        route_double(verb: 'GET', path: '/reports', controller: 'reports', action: 'index', callable: true)
+      ]
+    end
+
+    it 'does not guess whether the constraint passes' do
+      result = described_class.new.analyze(%(visit "/dashboard"\nvisit "/reports"\n))
+
+      expect(result.exercised).to eq(['GET /reports [constraint=proc]'])
+      expect(result.ambiguous).to eq(
+        [{ request: 'GET /dashboard', candidates: ['GET /dashboard', 'GET /dashboard [constraint=proc]'] }]
+      )
+    end
+  end
+
+  describe 'paths inside assertions' do
+    it 'records an asserted route without counting it as exercised' do
+      source = <<~RUBY
+        get widgets_path
+        expect(response).to redirect_to(new_widget_path)
+        expect(page).to have_current_path("/widgets/7")
+        assert_redirected_to widget_url(widget)
+        expect(page).to have_current_path(ghost_path)
+      RUBY
+
+      result = described_class.new.analyze(source)
+      expect(result.exercised).to eq(['GET /widgets'])
+      expect(result.asserted).to eq(['GET /widgets/:id', 'GET /widgets/new'])
+    end
   end
 
   it 'returns nothing when the route set is unavailable' do

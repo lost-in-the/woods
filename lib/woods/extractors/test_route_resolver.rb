@@ -3,6 +3,7 @@
 require 'strscan'
 
 require_relative 'route_extractor'
+require_relative 'test_request_host'
 
 module Woods
   module Extractors
@@ -21,9 +22,16 @@ module Woods
     # The result depends on the route table: the test mapping extractor is a
     # route consumer and re-runs when routes change.
     #
-    # Not modeled, deliberately: segment constraints (a literal matches the
-    # first route whose shape fits), the second and later verbs of a
-    # multi-verb `match` route, and routes drawn inside mounted engines.
+    # A literal can fit several routes when routes are constrained by
+    # subdomain or by a callable. See {#decide}: the file's subdomain is used
+    # when {TestRequestHost} can read it, a lone static route beats parameter
+    # and glob routes, and a request that stays undecided is reported as
+    # ambiguous with no edge. A path inside an assertion (`redirect_to`,
+    # `have_current_path`) is reported as asserted, never as exercised.
+    #
+    # Not modeled, deliberately: segment constraints, the second and later
+    # verbs of a multi-verb `match` route, and routes drawn inside mounted
+    # engines.
     #
     # @example
     #   TestRouteResolver.new.exercised(%(visit "/widgets/#{widget.id}"\npost widgets_path))
@@ -43,7 +51,21 @@ module Woods
       # Longest literal worth matching; bounds the work of a path pattern.
       MAX_LITERAL_LENGTH = 512
 
-      Route = Struct.new(:identifier, :verb, :path, :name, :prefix, keyword_init: true)
+      # A path inside an assertion is a claim about a response, not a request.
+      ASSERTION = %r{
+        (?<![\w.])(?:redirect_to|have_current_path|assert_redirected_to|assert_current_path)
+        [ \t(]+
+        (?:(?:main_app\.)?([a-z_]\w*_(?:path|url))\b|"(/[^"\n]*)"|'(/[^'\n]*)')
+      }x
+
+      Route = Struct.new(:identifier, :verb, :path, :name, :prefix, :subdomain, :callable, :static,
+                         keyword_init: true)
+
+      # What one source does with the route table.
+      #
+      # +exercised+ and +asserted+ are sorted route identifiers. +ambiguous+
+      # lists requests several routes could serve: `{ request:, candidates: }`.
+      Analysis = Struct.new(:exercised, :asserted, :ambiguous, keyword_init: true)
 
       def initialize
         @routes = load_routes
@@ -58,23 +80,43 @@ module Woods
       # @param source [String] Ruby source of a test file
       # @return [Array<String>] sorted, unique route identifiers
       def exercised(source)
-        return [] if @routes.empty?
+        analyze(source).exercised
+      end
 
-        source.each_line.flat_map do |line|
-          next [] if line.match?(COMMENT_LINE)
+      # Resolve every navigation call and asserted path in the source.
+      #
+      # @param source [String] Ruby source of a test file
+      # @return [Analysis]
+      def analyze(source)
+        return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
-          line.scan(NAVIGATION).filter_map { |captures| resolve(*captures) }
-        end.uniq.sort
+        subdomain = TestRequestHost.subdomain(source)
+        requests = []
+        asserted = []
+        source.each_line do |line|
+          next if line.match?(COMMENT_LINE)
+
+          line.scan(NAVIGATION) { |captures| requests << resolve(subdomain, *captures) }
+          line.scan(ASSERTION) { |captures| asserted << resolve(subdomain, 'get', nil, *captures) }
+        end
+        build_analysis(requests.compact, asserted.compact)
       end
 
       private
 
-      def resolve(verb, receiver_visit, helper, interpolated, literal)
+      def build_analysis(requests, asserted)
+        ambiguous, exercised = requests.partition { |outcome| outcome.is_a?(Hash) }
+        Analysis.new(exercised: exercised.uniq.sort, asserted: asserted.grep(String).uniq.sort,
+                     ambiguous: ambiguous.uniq.sort_by { |entry| entry[:request] })
+      end
+
+      # @return [String, Hash, nil] a route identifier, an ambiguity record, or nil
+      def resolve(subdomain, verb, receiver_visit, helper, interpolated, literal)
         verb = (verb || receiver_visit) == 'visit' ? 'GET' : verb.upcase
         return helper_route(verb, helper) if helper
 
         path = normalize(interpolated || literal, interpolated: !interpolated.nil?)
-        path && literal_route(verb, path)
+        path && literal_route(verb, path, subdomain)
       end
 
       # @return [String, nil] the route with the helper's path and this verb
@@ -99,13 +141,53 @@ module Woods
         path.empty? ? '/' : path
       end
 
-      def literal_route(verb, path)
-        key = [verb, path]
+      def literal_route(verb, path, subdomain)
+        key = [verb, path, subdomain]
         return @literals[key] if @literals.key?(key)
 
-        @literals[key] = @routes.find do |route|
+        matches = @routes.select do |route|
           route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
-        end&.identifier
+        end
+        @literals[key] = decide(matches, subdomain, "#{verb} #{path}")
+      end
+
+      # Rails serves the first route, in table order, whose constraints the
+      # request satisfies. Which constraints a test's request satisfies is
+      # only partly knowable, so the winner is computed for every possibility
+      # ("world"): each subdomain the request could be on, with callable
+      # constraints passing and failing. One winner across all worlds is the
+      # answer. Otherwise a single fully static winner beats parameter and
+      # glob routes, and anything else is recorded as ambiguous.
+      #
+      # @return [String, Hash, nil]
+      def decide(matches, subdomain, request)
+        winners = worlds(matches, subdomain).filter_map do |host, callables_pass|
+          matches.find { |route| satisfied?(route, host, callables_pass) }
+        end.uniq
+        return winners.first&.identifier if winners.size <= 1
+
+        static = winners.select(&:static)
+        return static.first.identifier if static.one?
+
+        { request: request, candidates: winners.map(&:identifier).sort }
+      end
+
+      # @return [Array<Array>] `[subdomain world, callables pass]` pairs. A
+      #   subdomain world is the known subdomain, or each constraint among the
+      #   matches plus nil (a host that meets none of them).
+      def worlds(matches, subdomain)
+        hosts = subdomain ? [subdomain] : matches.map(&:subdomain).uniq | [nil]
+        hosts.product(matches.any?(&:callable) ? [true, false] : [true])
+      end
+
+      def satisfied?(route, host, callables_pass)
+        return false if route.callable && !callables_pass
+
+        constraint = route.subdomain
+        return true if constraint.nil? || constraint.equal?(host)
+        return false unless host.is_a?(String)
+
+        constraint.is_a?(Regexp) ? constraint.match?(host) : constraint == host
       end
 
       def pattern_for(route_path)
@@ -137,12 +219,19 @@ module Woods
           metadata = unit.metadata
           next unless metadata[:action] && metadata[:path]
 
-          path = metadata[:path].to_s
-          Route.new(identifier: unit.identifier, verb: metadata[:http_method].to_s, path: path,
-                    name: metadata[:route_name]&.to_s, prefix: path[/\A[^:*(]*/].chomp('/'))
+          build_route(unit.identifier, metadata, metadata[:path].to_s)
         end
       rescue StandardError
         []
+      end
+
+      def build_route(identifier, metadata, path)
+        constraint = (metadata[:constraints] || {})[:subdomain]
+        constraint = constraint.to_s unless constraint.nil? || constraint.is_a?(Regexp)
+        Route.new(identifier: identifier, verb: metadata[:http_method].to_s, path: path,
+                  name: metadata[:route_name]&.to_s, prefix: path[/\A[^:*(]*/].chomp('/'),
+                  subdomain: constraint, callable: identifier.include?('constraint=proc'),
+                  static: !path.match?(/[:*]/))
       end
     end
   end
