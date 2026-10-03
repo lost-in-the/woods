@@ -36,7 +36,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Set up trusted Ruby
-        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
         with:
           ruby-version: '3.3'
       - name: Validate the named CI run through the GitHub API
@@ -82,7 +82,7 @@ jobs:
           ref: ${{ needs.release-context.outputs.release-sha }}
           persist-credentials: false
       - name: Set up Ruby ${{ matrix.ruby }}
-        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
         with:
           ruby-version: ${{ matrix.ruby }}
       - name: Download the exact release artifact
@@ -167,7 +167,7 @@ jobs:
           ref: ${{ github.sha }}
           fetch-depth: 0
       - name: Set up Ruby
-        uses: ruby/setup-ruby@a0102e0972be65f351c307e2d64b9314a57c8073 # v1
+        uses: ruby/setup-ruby@14594264cd68ce8a2345dd349bc3d138a4ef85c8 # v1
         with:
           ruby-version: '3.3'
       - name: Download the tested release artifact
