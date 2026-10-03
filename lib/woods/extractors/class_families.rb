@@ -39,15 +39,27 @@ module Woods
 
       module_function
 
+      # The loaded base classes, resolved once so a run can reuse them for
+      # every class it asks about.
+      #
+      # @param lookup [SourceReferences::RuntimeLookup]
+      # @return [Array<Array(Symbol, Module)>] extractor key and base, in check order
+      def resolve_bases(lookup = SourceReferences::RuntimeLookup.new)
+        BASES.flat_map do |key, names|
+          names.filter_map do |name|
+            base = lookup.call("::#{name}")[:value]
+            [key, base] if lookup.module_object?(base)
+          end
+        end
+      end
+
       # @param klass [Class] a loaded application class
       # @param lookup [SourceReferences::RuntimeLookup]
+      # @param bases [Array<Array(Symbol, Module)>, nil] {resolve_bases} output to reuse
       # @return [Symbol, nil] the extractor key that owns +klass+, if any
-      def owner_of(klass, lookup = SourceReferences::RuntimeLookup.new)
-        BASES.each do |key, names|
-          names.each do |name|
-            base = lookup.call("::#{name}")[:value]
-            return key if lookup.module_object?(base) && CORE_LE.bind(klass).call(base)
-          end
+      def owner_of(klass, lookup = SourceReferences::RuntimeLookup.new, bases: nil)
+        (bases || resolve_bases(lookup)).each do |key, base|
+          return key if CORE_LE.bind(klass).call(base)
         end
         PREDICATES.find { |_key, admitted| admitted.call(klass, lookup) }&.first
       end

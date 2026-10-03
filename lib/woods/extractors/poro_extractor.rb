@@ -314,7 +314,9 @@ module Woods
       def runtime_family(identifier)
         @lookup ||= SourceReferences::RuntimeLookup.new
         value = @lookup.call("::#{identifier}", allow_private: true)[:value]
-        ClassFamilies.owner_of(value, @lookup) if @lookup.class_object?(value)
+        return unless @lookup.class_object?(value)
+
+        ClassFamilies.owner_of(value, @lookup, bases: (@family_bases ||= ClassFamilies.resolve_bases(@lookup)))
       end
 
       # Outside app/models, a class unit needs the same canonical-ownership

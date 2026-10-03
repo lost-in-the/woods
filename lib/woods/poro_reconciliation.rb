@@ -86,9 +86,10 @@ module Woods
     # @return [Set<String>] identifiers removed
     def prune_family_owned_poros(affected_types)
       lookup = SourceReferences::RuntimeLookup.new
+      bases = Extractors::ClassFamilies.resolve_bases(lookup)
       @dependency_graph.units_of_type(:poro).each_with_object(Set.new) do |identifier, touched|
         value = lookup.call("::#{identifier}", allow_private: true)[:value]
-        next unless lookup.class_object?(value) && Extractors::ClassFamilies.owner_of(value, lookup)
+        next unless lookup.class_object?(value) && Extractors::ClassFamilies.owner_of(value, lookup, bases: bases)
 
         touched.add(identifier) if remove_unit(identifier, affected_types, type: :poro)
       end
