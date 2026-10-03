@@ -8,7 +8,6 @@ require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
 require_relative 'assigned_value_discovery'
-require_relative 'job_ancestry'
 require_relative '../source_references/runtime_lookup'
 require_relative 'class_families'
 require_relative 'constant_assignments'
@@ -182,15 +181,6 @@ module Woods
 
       private
 
-      # A class the job family admits is a job unit, not also a PORO.
-      #
-      # @param class_name [String]
-      # @return [Boolean]
-      def job_owned?(class_name)
-        klass = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
-        JobAncestry.admitted?(klass, app_root: Rails.root.to_s)
-      end
-
       def extract_units(file_path, ar_names, fallback:)
         source = File.read(file_path)
         analysis = collector.call(source)
@@ -243,7 +233,6 @@ module Woods
         class_name = infer_class_name(file_path, source, analysis)
         return nil unless class_name
         return nil if ar_names.include?(class_name)
-        return nil if job_owned?(class_name)
         return nil if analysis.fetch('declarations').any? do |declaration|
           declaration['owner'] == class_name && declaration['kind'] == 'module'
         end

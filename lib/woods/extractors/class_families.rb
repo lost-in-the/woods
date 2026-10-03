@@ -4,6 +4,7 @@ require_relative '../source_references/runtime_lookup'
 require_relative 'phlex_extractor'
 require_relative 'serializer_extractor'
 require_relative 'graphql_ancestry'
+require_relative 'job_ancestry'
 
 module Woods
   module Extractors
@@ -11,9 +12,10 @@ module Woods
     # than by path. The PORO sweep never emits a class one of these owns,
     # whatever directory declares it.
     #
-    # Ancestry is a superset of each extractor's `discoverable_classes` (those
-    # filter descendants further), so the sweep cannot duplicate a typed unit.
-    # It is a property of the constant alone, so full and incremental runs
+    # For base-class families, ancestry is a superset of the extractor's
+    # `discoverable_classes`, so the sweep cannot duplicate a typed unit. Jobs
+    # and GraphQL use the predicate their own extractor admits by. Either way
+    # the answer depends on the constant alone, so full and incremental runs
     # agree without reading any extractor's output.
     module ClassFamilies
       # Extractor key => base constant names, checked in order.
@@ -24,13 +26,13 @@ module Woods
         action_cable_channels: %w[ActionCable::Channel::Base],
         view_components: %w[ViewComponent::Base ViewComponent::Preview],
         components: PhlexExtractor::PHLEX_BASES,
-        jobs: %w[ActiveJob::Base Sidekiq::Job Sidekiq::Worker],
         serializers: SerializerExtractor::BASE_CLASSES.keys
       }.freeze
 
       # Extractor key => the predicate that extractor itself uses to admit a class.
       PREDICATES = {
-        graphql: ->(klass, lookup) { GraphQLAncestry.admitted?(klass, lookup) }
+        graphql: ->(klass, lookup) { GraphQLAncestry.admitted?(klass, lookup) },
+        jobs: ->(klass, _lookup) { JobAncestry.admitted?(klass, app_root: Rails.root.to_s) }
       }.freeze
 
       CORE_LE = Module.instance_method(:<=)
