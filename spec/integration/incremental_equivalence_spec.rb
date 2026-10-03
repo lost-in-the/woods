@@ -1276,6 +1276,244 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'JavaScript modules and the names templates reference them by (#679)' do
+    def unit_json(dir, type_dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type_dir, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == identifier }
+    end
+
+    def js_edges(dir, type_dir, identifier)
+      unit_json(dir, type_dir, identifier).fetch('dependencies')
+                                          .select { |dep| dep['type'] == 'js_module' }
+                                          .map { |dep| dep.values_at('target', 'via') }
+    end
+
+    def write_consumers
+      write_file('app/views/posts/panel.html.erb', <<~ERB)
+        <div x-data="dropdown({ open: false })" data-controller="clipboard">
+          <x-shipment-card sku="1"></x-shipment-card>
+        </div>
+      ERB
+      write_file('app/views/posts/_badge.html.haml', "%span{ data: { controller: \"clipboard\" } }\n")
+      write_file('app/components/badge_component.rb', <<~RUBY)
+        class BadgeComponent < ApplicationComponent
+          def initialize(label:)
+            @label = label
+            super()
+          end
+
+          def call
+            div(x_data: "dropdown", data_controller: "clipboard") { @label.to_s }
+          end
+        end
+      RUBY
+    end
+
+    stimulus = "import { Controller } from \"@hotwired/stimulus\"\nexport default class extends Controller {}\n"
+
+    it 'links unchanged templates and components as modules appear, move, and disappear' do
+      write_consumers
+
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/controllers/clipboard_controller.js', stimulus) },
+          lambda {
+            [write_file('app/javascript/alpine/dropdown.js', "export default () => ({ open: false })\n"),
+             write_file('app/javascript/application.js',
+                        "import dropdown from \"./alpine/dropdown\"\nAlpine.data(\"dropdown\", dropdown)\n")]
+          },
+          # A body edit: no name moves, so no consumer is re-run wholesale.
+          -> { write_file('app/javascript/alpine/dropdown.js', "export default () => ({ open: true })\n") },
+          # The registration becomes inline: the name moves to the registering module.
+          -> { write_file('app/javascript/application.js', "Alpine.data(\"dropdown\", () => ({}))\n") },
+          lambda {
+            write_file('app/javascript/components/shipment-card.tsx',
+                       "@Component({ tag: \"x-shipment-card\" })\nexport class ShipmentCard {}\n")
+          },
+          # A rename is a delete plus an add: the convention name changes with the path.
+          lambda {
+            [delete_file('app/javascript/controllers/clipboard_controller.js'),
+             write_file('app/javascript/controllers/copier_controller.js', stimulus)]
+          },
+          -> { write_file('app/views/posts/_badge.html.haml', "%span{ data: { controller: \"copier\" } }\n") }
+        ]
+      )
+
+      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq(
+        [['app/javascript/application.js', 'alpine_data'],
+         ['app/javascript/components/shipment-card.tsx', 'custom_element']]
+      )
+      expect(unit_json(index, 'view_templates', 'posts/panel.html.erb').dig('metadata', 'unresolved_frontend_references'))
+        .to eq([{ 'kind' => 'stimulus_controller', 'name' => 'clipboard' }])
+      expect(js_edges(index, 'view_templates', 'posts/_badge.html.haml'))
+        .to eq([['app/javascript/controllers/copier_controller.js', 'stimulus_controller']])
+      expect(js_edges(index, 'components', 'BadgeComponent')).to eq([['app/javascript/application.js', 'alpine_data']])
+      expect(unit_json(index, 'js_modules', 'app/javascript/application.js').fetch('dependents').map { |d| d['identifier'] })
+        .to include('BadgeComponent', 'posts/panel.html.erb')
+    end
+
+    it 'drops every edge and unit when the last module is deleted' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+      index = run_sequence([-> { delete_file('app/javascript/controllers/clipboard_controller.js') }])
+
+      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq([])
+      expect(unit_json(index, 'js_modules', 'app/javascript/controllers/clipboard_controller.js')).to be_nil
+    end
+
+    it 'tracks import edges as the imported module is deleted, recreated and re-pointed' do
+      write_file('app/javascript/entry.js', "import total from \"./ledger/total\"\nexport default total\n")
+      write_file('app/javascript/ledger/total.js', "export default 1\n")
+
+      index = run_sequence(
+        [
+          -> { delete_file('app/javascript/ledger/total.js') },
+          -> { write_file('app/javascript/ledger/total.ts', "export default 2\n") },
+          -> { write_file('app/javascript/ledger/index.js', "export { default } from \"./total\"\n") },
+          -> { write_file('app/javascript/entry.js', "import total from \"./ledger\"\nexport default total\n") }
+        ]
+      )
+
+      expect(js_edges(index, 'js_modules', 'app/javascript/entry.js')).to eq([['app/javascript/ledger/index.js', 'import']])
+    end
+
+    it 'omits and restores source as a module crosses the size cap' do
+      big = "export const big = 1\n#{"// padding\n" * 20_000}"
+
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/big.js', big) },
+          -> { write_file('app/javascript/big.js', "export const big = 1\n") },
+          -> { write_file('app/javascript/big.js', big) }
+        ]
+      )
+
+      expect(unit_json(index, 'js_modules', 'app/javascript/big.js')).to include('source_code' => '')
+      expect(unit_json(index, 'js_modules', 'app/javascript/big.js').fetch('metadata')).to include('source_omitted' => true)
+    end
+
+    it 'ignores vendored and generated JavaScript in both modes' do
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/vendor/chart.js', "window.dropdown = function () {}\n") },
+          -> { write_file('app/assets/javascripts/builds/application.js', "Alpine.data(\"dropdown\", () => ({}))\n") },
+          -> { write_file('app/assets/javascripts/legacy.js', "window.dropdown = function () { return {} }\n") }
+        ]
+      )
+
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      expect(JSON.parse(File.read(File.join(payload, 'js_modules', '_index.json'))).map { |u| u['identifier'] })
+        .to eq(['app/assets/javascripts/legacy.js'])
+    end
+
+    it 'agrees with a full extraction when a name moves outside a capped blast radius' do
+      Woods.configuration.incremental_blast_radius_depth = 1
+      write_consumers
+      write_file('app/javascript/alpine/a.js', "export default () => ({})\n")
+      write_file('app/javascript/alpine/b.js', "export default () => ({})\n")
+      write_file('app/javascript/application.js',
+                 "import dropdown from \"./alpine/a\"\nAlpine.data(\"dropdown\", dropdown)\n")
+
+      index = run_sequence(
+        [
+          lambda {
+            write_file('app/javascript/application.js',
+                       "import dropdown from \"./alpine/b\"\nAlpine.data(\"dropdown\", dropdown)\n")
+          }
+        ]
+      )
+
+      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq([['app/javascript/alpine/b.js', 'alpine_data']])
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = nil
+    end
+
+    it 're-runs the name consumers wholesale only when the name map moved' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+      write_file('app/javascript/util.js', "export const one = 1\n")
+      index = full_extraction
+      reruns = []
+      allow_any_instance_of(Woods::Extractors::ViewTemplateExtractor).to receive(:extract_all).and_wrap_original do |original|
+        reruns << :view_templates
+        original.call
+      end
+
+      write_file('app/javascript/util.js', "export const one = 2\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/javascript/util.js'])
+      expect(reruns).to eq([])
+
+      write_file('app/javascript/util.js', "Alpine.data(\"dropdown\", () => ({}))\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/javascript/util.js'])
+      expect(reruns).to eq([:view_templates])
+      allow_any_instance_of(Woods::Extractors::ViewTemplateExtractor).to receive(:extract_all).and_call_original
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'refreshes js_modules by name and re-resolves the consumers' do
+      write_consumers
+      index = full_extraction
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+      result = Woods::Extractor.new(output_dir: index).refresh(:js_modules)
+
+      expect(result[:types]).to eq(%i[js_modules components view_components view_templates])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'is byte-identical across repeat full extractions' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+      write_file('app/javascript/application.js', "import \"./controllers/clipboard_controller\"\n")
+
+      first = full_extraction
+      second = full_extraction
+
+      expect(differences(first, second)).to be_empty
+      %w[js_modules/_index.json view_templates/_index.json].each do |relative|
+        files = [first, second].map { |dir| File.read(Woods::Generation.new(output_dir: dir).payload_dir.join(relative)) }
+        expect(files.first).to eq(files.last)
+      end
+    end
+
+    describe 'with configured javascript_paths' do
+      around do |example|
+        Woods.configuration.javascript_paths = ['frontend/**/*.{ts,tsx}']
+        example.run
+      ensure
+        Woods.configuration.javascript_paths = Woods::JavascriptPaths::DEFAULT_GLOBS
+      end
+
+      it 'indexes a configured root and ignores the default one, through create, edit and delete' do
+        write_consumers
+        write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+        index = run_sequence(
+          [
+            lambda {
+              write_file('frontend/components/shipment-card.tsx',
+                         "@Component({ tag: \"x-shipment-card\" })\nexport class ShipmentCard {}\n")
+            },
+            lambda {
+              write_file('frontend/components/shipment-card.tsx',
+                         "@Component({ tag: \"x-parcel-card\" })\nexport class ShipmentCard {}\n")
+            },
+            -> { write_file('frontend/controllers/clipboard_controller.ts', stimulus) },
+            -> { delete_file('frontend/components/shipment-card.tsx') }
+          ]
+        )
+
+        expect(js_edges(index, 'view_templates', 'posts/panel.html.erb'))
+          .to eq([['frontend/controllers/clipboard_controller.ts', 'stimulus_controller']])
+        expect(unit_json(index, 'js_modules', 'app/javascript/controllers/clipboard_controller.js')).to be_nil
+      end
+    end
+  end
+
   describe 'gap 2 — deleted files' do
     it 'prunes a service that was deleted' do
       write_file('app/services/temp_service.rb', service_source('TempService'))
