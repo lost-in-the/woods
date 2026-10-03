@@ -48,7 +48,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
   describe '.supported_template_engines' do
     it 'returns the engine names currently wired into the orchestrator' do
-      expect(described_class.supported_template_engines).to eq([:erb])
+      expect(described_class.supported_template_engines).to eq(%i[erb haml])
     end
 
     it 'is aggregated from ENGINES — adding an engine extends the list' do
@@ -268,13 +268,13 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       end
     end
 
-    context 'with non-ERB files mixed in' do
+    context 'with files no registered engine handles mixed in' do
       before do
         create_file('app/views/home/index.html.erb', '<h1>Home</h1>')
-        create_file('app/views/home/show.html.haml', '%h1 Show')
+        create_file('app/views/home/show.html.slim', 'h1 Show')
       end
 
-      it 'only processes ERB files' do
+      it 'only processes files a registered engine handles' do
         units = described_class.new.extract_all
         expect(units.size).to eq(1)
         expect(units.first.identifier).to eq('home/index.html.erb')
@@ -335,6 +335,59 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
         units = described_class.new.extract_all
         unit = units.first
         expect(unit.metadata[:partials_rendered]).to include('header')
+      end
+    end
+
+    context 'with HAML templates' do
+      before do
+        create_file('app/views/widgets/index.html.haml', <<~HAML)
+          %h1 Widgets
+          - @widgets.each do |widget|
+            = render partial: 'widget', locals: { widget: widget }
+          = render 'shared/footer'
+        HAML
+        create_file('app/views/widgets/_widget.html.haml', "%li= link_to widget.name, widget\n")
+      end
+
+      let(:index_unit) { described_class.new.extract_all.find { |u| u.identifier == 'widgets/index.html.haml' } }
+
+      it 'extracts one view_template unit per HAML file' do
+        identifiers = described_class.new.extract_all.map(&:identifier)
+        expect(identifiers).to contain_exactly('widgets/index.html.haml', 'widgets/_widget.html.haml')
+      end
+
+      it 'records haml as the template engine' do
+        expect(index_unit.metadata[:template_engine]).to eq('haml')
+      end
+
+      it 'records partials, instance variables, and helpers' do
+        expect(index_unit.metadata).to include(
+          partials_rendered: contain_exactly('widget', 'shared/footer'),
+          instance_variables: ['@widgets'],
+          helpers_called: ['render']
+        )
+      end
+
+      it 'creates render edges to the HAML partials and a view_render edge to the controller' do
+        deps = index_unit.dependencies
+        expect(deps).to include(
+          { type: :view_template, target: 'widgets/_widget.html.haml', via: :render },
+          { type: :view_template, target: 'shared/_footer.html.haml', via: :render },
+          { type: :controller, target: 'WidgetsController', via: :view_render }
+        )
+      end
+    end
+
+    context 'with a partial rendered across engines' do
+      before do
+        create_file('app/views/layouts/application.html.erb', "<%= render 'shared/banner' %>\n<%= yield %>")
+        create_file('app/views/shared/_banner.html.haml', "%div.banner= @ledger.name\n")
+      end
+
+      it 'points the ERB render edge at the existing HAML partial' do
+        layout = described_class.new.extract_all.find { |u| u.identifier == 'layouts/application.html.erb' }
+        render_targets = layout.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+        expect(render_targets).to eq(['shared/_banner.html.haml'])
       end
     end
 
@@ -402,6 +455,17 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       deps = units.first.dependencies
       nav_targets = deps.select { |d| d[:via] == :link_to }.map { |d| d[:target] }
       expect(nav_targets).to contain_exactly('PostsController', 'UsersController')
+    end
+
+    it 'extracts link_to navigation edges from a HAML template' do
+      create_file('app/views/home/index.html.haml', <<~HAML)
+        = link_to t('home.posts'),
+          posts_path,
+          class: 'nav'
+      HAML
+
+      nav_deps = nav_extractor.extract_all.first.dependencies.select { |d| d[:via] == :link_to }
+      expect(nav_deps).to eq([{ type: :controller, target: 'PostsController', via: :link_to }])
     end
 
     it 'returns no navigation edges when config is disabled' do
@@ -500,6 +564,17 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(form_deps).to include(a_hash_including(target: 'PostsController'))
     end
 
+    it 'extracts a HAML form_with continued over comma-terminated lines' do
+      create_file('app/views/posts/new.html.haml', <<~HAML)
+        = form_with model: @post,
+          url: posts_path do |f|
+          = f.submit
+      HAML
+
+      form_deps = form_extractor.extract_all.first.dependencies.select { |d| d[:via] == :form_action }
+      expect(form_deps).to eq([{ type: :controller, target: 'PostsController', via: :form_action }])
+    end
+
     it 'returns no form edges when config is disabled' do
       allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(false)
       create_file('app/views/posts/new.html.erb', '<%= form_with url: posts_path do |f| %><% end %>')
@@ -524,7 +599,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
 
     it 'returns nil for files no registered engine handles' do
-      unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.haml')
+      unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.slim')
       expect(unit).to be_nil
     end
   end

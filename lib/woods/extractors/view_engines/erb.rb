@@ -132,13 +132,13 @@ module Woods
           if partial_name.include?('/')
             dir = File.dirname(partial_name)
             base = File.basename(partial_name)
-            "#{dir}/_#{base}.html.erb"
+            "#{dir}/_#{base}#{partial_extension}"
           else
             dir = File.dirname(current_identifier)
             if dir == '.'
-              "_#{partial_name}.html.erb"
+              "_#{partial_name}#{partial_extension}"
             else
-              "#{dir}/_#{partial_name}.html.erb"
+              "#{dir}/_#{partial_name}#{partial_extension}"
             end
           end
         end
@@ -152,6 +152,15 @@ module Woods
             { helper: "#{route_name}_#{suffix}", via: :form_action }
           end
           link_to_candidates + form_candidates
+        end
+
+        private
+
+        # Extension {#resolve_partial_identifier} appends to a partial name.
+        #
+        # @return [String]
+        def partial_extension
+          '.html.erb'
         end
       end
     end

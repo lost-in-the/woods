@@ -67,6 +67,10 @@ RSpec.describe Woods::PathDispatcher do
       expect(keys_for('app/views/posts/index.html.erb')).to contain_exactly(:view_templates, :caching)
     end
 
+    it 'routes haml templates to the view template extractor' do
+      expect(keys_for('app/views/widgets/show.html.haml')).to eq([:view_templates])
+    end
+
     it 'routes spec and test files to test mappings by their suffix' do
       expect(keys_for('spec/models/post_spec.rb')).to eq([:test_mappings])
       expect(keys_for('test/models/post_test.rb')).to eq([:test_mappings])
