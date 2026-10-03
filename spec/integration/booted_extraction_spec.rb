@@ -153,6 +153,21 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(metadata.fetch('callback_count')).to eq(metadata.fetch('callbacks').length)
   end
 
+  it 'attributes side effects to a public model method without touching its callback entry' do
+    metadata = find_unit(:models, 'Post').fetch('metadata')
+
+    expect(metadata.fetch('method_effects')).to eq(
+      'normalize_title' => {
+        'jobs_enqueued' => [], 'mail_sent' => [], 'services_called' => [], 'columns_written' => ['title'],
+        'events_published' => [], 'external_calls' => []
+      }
+    )
+    expect(metadata).not_to have_key('method_effects_truncated')
+    callback = metadata.fetch('callbacks').find { |entry| entry['filter'] == 'normalize_title' }
+    expect(callback.fetch('side_effects').keys)
+      .to eq(%w[columns_written jobs_enqueued services_called mailers_triggered database_reads operations])
+  end
+
   it 'reflects real Rails callback kinds and the separate before_commit event' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
