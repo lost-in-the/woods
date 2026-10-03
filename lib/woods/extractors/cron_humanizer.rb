@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'strscan'
+
 module Woods
   module Extractors
     # Describes standard cron lines in words for `frequency_human_readable`.
@@ -40,7 +42,12 @@ module Woods
         [0, 7, DAYS.each_with_index.to_h { |name, index| [name[0, 3].downcase, index] }]
       ].freeze
 
-      TIME_ZONE = %r{\A(?:UTC|GMT|Z|[A-Za-z_]+(?:/[A-Za-z0-9_+-]+)+)\z}
+      TIME_ZONE = %r{\A(?:UTC|GMT|Z|[A-Za-z_]++(?:/[A-Za-z0-9_+-]++)++)\z}
+
+      # Possessive and anchored by StringScanner, so a long digit run is read once.
+      DURATION_COUNT = /\d++/
+      DURATION_UNIT = /[yMwdhms]/
+      PAIR_SEPARATOR = / ++/
 
       DURATION_UNITS = {
         'y' => 'year', 'M' => 'month', 'w' => 'week', 'd' => 'day', 'h' => 'hour', 'm' => 'minute', 's' => 'second'
@@ -67,12 +74,28 @@ module Woods
         return nil if duration.nil?
 
         text = duration.to_s.strip
-        parts = text.scan(/(\d+)([yMwdhms])/)
-        return "every #{text}" unless parts.any? && parts.join == text.delete(' ')
+        parts = duration_parts(text)
+        return "every #{text}" unless parts
 
         return "every #{DURATION_UNITS.fetch(parts.first.last)}" if parts.one? && parts.first.first == '1'
 
         "every #{parts.map { |count, unit| "#{count} #{DURATION_UNITS.fetch(unit)}#{'s' unless count == '1'}" }.join(' ')}"
+      end
+
+      # `1h 30m` => [["1", "h"], ["30", "m"]]; nil unless the whole text is count/unit
+      # pairs, optionally separated by spaces.
+      def duration_parts(text)
+        scanner = StringScanner.new(text)
+        parts = []
+        until scanner.eos?
+          scanner.skip(PAIR_SEPARATOR) unless parts.empty?
+          count = scanner.scan(DURATION_COUNT)
+          unit = count && scanner.scan(DURATION_UNIT)
+          return nil unless unit
+
+          parts << [count, unit]
+        end
+        parts.empty? ? nil : parts
       end
 
       def describe_with_seconds(fields)
@@ -84,7 +107,7 @@ module Woods
         return nil unless rest.all?('*')
         return 'every second' if seconds == '*'
 
-        step = seconds[%r{\A\*/(\d+)\z}, 1]&.to_i
+        step = seconds[%r{\A\*/(\d++)\z}, 1]&.to_i
         step&.between?(1, 59) ? quantity(step, 'second', every: true) : nil
       end
 
@@ -115,7 +138,7 @@ module Woods
       def parse(field, (min, max, names))
         return :any if field == '*'
 
-        if (step = field[%r{\A\*/(\d+)\z}, 1])
+        if (step = field[%r{\A\*/(\d++)\z}, 1])
           step = step.to_i
           return step.between?(1, max) ? [:step, step] : nil
         end
@@ -136,7 +159,7 @@ module Woods
       end
 
       def value(text, names)
-        return text.to_i if text.match?(/\A\d+\z/)
+        return text.to_i if text.match?(/\A\d++\z/)
 
         names[text.downcase]
       end
@@ -291,7 +314,7 @@ module Woods
         "#{words[0..-2].join(', ')} and #{words.last}"
       end
 
-      private_class_method :describe_with_seconds, :describe, :parse, :parse_item, :value, :singles,
+      private_class_method :duration_parts, :describe_with_seconds, :describe, :parse, :parse_item, :value, :singles,
                            :clock_times, :recurring_phrase, :stepped_hours, :hour_range, :minutes_within_hour,
                            :past_the_hour, :clock, :month_phrase, :day_phrase,
                            :weekday_phrase, :month_day_phrase, :yearly_phrase, :clock_sentence,
