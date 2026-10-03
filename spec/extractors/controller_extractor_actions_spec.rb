@@ -563,4 +563,13 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       expect(serialized(reordered.extract_controller(controller))).to eq(first)
     end
   end
+
+  describe 'parent class' do
+    it 'is the runtime superclass name for every controller, Metal or not' do
+      expect(unit_for('HealthController').metadata[:parent_class]).to eq('ActionFixtures::FrameworkMetal')
+      expect(unit_for('SalesReportsController').metadata[:parent_class]).to eq('ActionFixtures::BaseReportsController')
+      expect(unit_for('Members::SessionsController').metadata[:parent_class])
+        .to eq('ActionFixtures::Vault::SessionsController')
+    end
+  end
 end

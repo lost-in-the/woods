@@ -717,6 +717,9 @@ module Woods
           # Filter chain
           filters: extract_filter_chain(controller),
 
+          # Runtime superclass, e.g. ApplicationController or ActionController::Metal
+          parent_class: controller.superclass&.name,
+
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
                                .take_while { |a| !framework_roots.include?(a) }

@@ -225,6 +225,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Edge cases:**
 - API-only controllers (`ActionController::API` descendants) are included when the gem is present
+- `metadata.parent_class` is the runtime superclass name (`ApplicationController`, `ActionController::Metal`, or a gem controller such as `Rails::WelcomeController`)
 - Controllers built on `ActionController::Metal` alone carry `metadata.metal: true` (every other controller carries `false`). Their actions follow the same admission rule; a Metal controller without a callbacks module has an empty filter chain, and the ancestor list stops at `ActionController::Metal`
 - Controllers with no corresponding routes still get extracted (they may be base classes)
 - Lists derived from reflection are sorted so repeat extractions are byte-identical: `actions`, the keys of `action_sources`, `inherited_gem_actions` and `routes`, filter `only`/`except` lists, action chunks, and included concerns. The filter chain keeps execution order, `ancestors` keeps superclass order, and each action's routes keep route-table order

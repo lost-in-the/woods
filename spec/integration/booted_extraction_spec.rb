@@ -786,6 +786,16 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
     )
   end
 
+  it 'records each controller’s runtime parent class' do
+    units = extract_controllers
+
+    expect(units.transform_values { |unit| unit['metadata']['parent_class'] }).to eq(
+      'GreetingsController' => 'Rails::WelcomeController',
+      'HealthController' => 'ActionController::Metal',
+      'PingController' => 'ActionController::Metal'
+    )
+  end
+
   it 'chunks only admitted actions, not the public methods a framework module adds' do
     units = extract_controllers
 
