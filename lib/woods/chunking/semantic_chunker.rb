@@ -47,8 +47,10 @@ module Woods
     module LineDepthTracking
       # Multi-line `do` block opener — `items.each do |item|`. Anchored
       # to end-of-line (optionally through block args and a trailing
-      # comment) so prose containing "do" mid-line doesn't count.
-      DO_BLOCK_PATTERN = /\bdo\s*(?:\|[^|]*\|)?\s*(?:#.*)?\z/
+      # comment) so prose containing "do" mid-line doesn't count. Applied
+      # to one stripped line, so a `#` after the opener runs to its end.
+      # Possessive throughout: no position is ever rescanned.
+      DO_BLOCK_PATTERN = /\bdo(?:\s*+\|[^|]*+\|)?\s*+(?:\z|#)/
 
       # Keywords that open an `end`-terminated body only in statement
       # position: at line start, or directly after an assignment
