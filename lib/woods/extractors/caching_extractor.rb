@@ -107,7 +107,9 @@ module Woods
       # @param file_type [Symbol] :controller, :model, or :view
       # @return [ExtractedUnit, nil] The unit or nil if no cache usage
       def extract_caching_file(file_path, file_type = nil)
-        source = File.read(file_path)
+        # UTF-8 whatever the process locale: under a POSIX locale a bare read
+        # tags the source US-ASCII and the byte-offset scans then fail.
+        source = File.read(file_path, encoding: Encoding::UTF_8)
         # Cache calls are read from the code only: commented-out calls never run.
         code = CommentBlanking.blank(source, file_path)
         store_calls = File.extname(file_path.to_s) == '.rb' ? CacheStoreCalls.find(code) : []

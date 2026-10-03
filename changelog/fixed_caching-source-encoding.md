@@ -1,0 +1,1 @@
+- `CachingExtractor` reads source files as UTF-8 whatever the process locale. Under a POSIX locale (`LANG=C`), a file containing any non-ASCII character was read as US-ASCII and its caching unit was silently dropped.

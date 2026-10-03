@@ -659,6 +659,33 @@ RSpec.describe Woods::Extractors::CachingExtractor do
     end
   end
 
+  # ── Source encoding ──────────────────────────────────────────────────
+
+  # Under a POSIX locale a bare File.read tags source as US-ASCII, and a
+  # multibyte template then fails the byte-offset scan.
+  describe 'source encoding' do
+    it 'reads a multibyte source the same under a POSIX default external encoding' do
+      path = create_file('app/views/widgets/show.html.haml', <<~HAML)
+        -# Ünïcødé ☃ comment
+        - cache [@widget, "☃"] do
+          %p= Rails.cache.read("widget/☃")
+      HAML
+
+      original_encoding = Encoding.default_external
+      original_verbose = $VERBOSE
+      begin
+        $VERBOSE = nil # Ruby warns when the default external encoding is reassigned.
+        Encoding.default_external = Encoding::US_ASCII
+        calls = described_class.new.extract_caching_file(path)&.metadata&.fetch(:cache_calls)
+      ensure
+        Encoding.default_external = original_encoding
+        $VERBOSE = original_verbose
+      end
+
+      expect(calls&.map { |c| c[:key_pattern] }).to eq(['"widget/☃"', '[@widget, "☃"]'])
+    end
+  end
+
   # ── Custom cache stores ──────────────────────────────────────────────
 
   # A store a file obtains itself (from `.cache_store`,
