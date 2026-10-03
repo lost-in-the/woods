@@ -881,7 +881,7 @@ namespace.
 **What it captures:** Cache usage patterns across controllers, models, and view templates.
 
 **Key details:**
-- Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`). Slim views are not scanned.
+- Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`, derived from `ViewTemplateExtractor::ENGINES`, so a newly registered engine is scanned too). Slim views are not scanned.
 - Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
 - Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
