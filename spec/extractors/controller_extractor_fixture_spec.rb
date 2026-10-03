@@ -373,6 +373,16 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
   # ── Multibyte source under a POSIX locale ─────────────────────────────
 
   describe 'multibyte source under a US-ASCII default external encoding' do
+    it 'locates filter declarations in a multibyte file' do
+      path = create_file('app/controllers/shipments_controller.rb',
+                         "# Shipments — dispatch\nclass ShipmentsController < ApplicationController\n  " \
+                         "before_action :load_ledger # ledger — current\nend\n")
+
+      sites = with_posix_default_external { extractor.send(:filter_declarations, path) }
+
+      expect(sites).to eq([:before, 'load_ledger'] => 3)
+    end
+
     let(:source_path) do
       create_file('app/controllers/ledgers_controller.rb', <<~RUBY)
         # Ledgers — reconciliation screens

@@ -361,7 +361,7 @@ module Woods
       #   line of its first declaration
       def filter_declarations(path)
         (@filter_declarations ||= {})[path] ||= begin
-          parsed = Prism.parse(File.read(path))
+          parsed = Prism.parse(SourceFile.read(path))
           sites = {}
           collect_filter_declarations(parsed.value, sites) if parsed.success?
           sites
