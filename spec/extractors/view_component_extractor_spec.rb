@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
+require 'fileutils'
 require 'set'
 require 'woods'
 require 'woods/extractors/view_component_extractor'
@@ -278,6 +280,21 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
       expect(unit.metadata[:sidecar_template]).to eq('app/components/button_component.html.erb')
     end
+
+    context 'with a haml sidecar in the component directory' do
+      let(:file_system) do
+        {
+          '/rails/app/components/button_component.rb' => "class ButtonComponent < ViewComponent::Base\nend\n",
+          '/rails/app/components/button_component/button_component.html.haml' => '%button= content'
+        }
+      end
+
+      it 'detects the directory-form haml sidecar' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.metadata[:sidecar_template]).to eq('app/components/button_component/button_component.html.haml')
+      end
+    end
   end
 
   # ── Preview class detection ───────────────────────────────────────────
@@ -520,6 +537,63 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       stub_const('ViewComponent::Base', base)
 
       expect(described_class.new.discoverable_classes).to eq([real])
+    end
+  end
+
+  # Host runs showed the same multiset in a different order between runs:
+  # `public_instance_methods` and `descendants` carry no ordering guarantee.
+  # Real files: the File stubs above return UTF-8 literals whatever the locale.
+  describe 'source encoding' do
+    let(:rails_root) { Pathname.new(Dir.mktmpdir) }
+    let(:component) { build_component(name: 'WidgetComponent') }
+
+    before do
+      allow(File).to receive(:exist?).and_call_original
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      # Discovery's directory walk needs a booted autoloader; descendants are stubbed below.
+      allow_any_instance_of(described_class).to receive(:load_component_files)
+      FileUtils.mkdir_p(rails_root.join('app/components'))
+      File.write(rails_root.join('app/components/widget_component.rb'), <<~RUBY)
+        class WidgetComponent < ViewComponent::Base
+          # Ünïcødé ☃
+          renders_one :header
+        end
+      RUBY
+      base = build_view_component_base(descendants: [component])
+      component.define_singleton_method(:superclass) { base }
+      stub_const('ViewComponent::Base', base)
+    end
+
+    after { FileUtils.rm_rf(rails_root) }
+
+    it 'reads a multibyte component source the same under a POSIX default external encoding' do
+      unit = with_posix_default_external { described_class.new.extract_all.first }
+
+      expect(unit&.source_code).to include('# Ünïcødé ☃')
+    end
+  end
+
+  describe 'deterministic ordering' do
+    let(:widget) { build_component(name: 'WidgetComponent', methods: %i[title call badge]) }
+    let(:alert) { build_component(name: 'AlertComponent') }
+
+    before do
+      file_system['/rails/app/components/widget_component.rb'] = 'class WidgetComponent; end'
+      file_system['/rails/app/components/alert_component.rb'] = 'class AlertComponent; end'
+      base = build_view_component_base(descendants: [widget, alert])
+      [widget, alert].each { |klass| klass.define_singleton_method(:superclass) { base } }
+      stub_const('ViewComponent::Base', base)
+    end
+
+    it 'sorts public_methods' do
+      unit = described_class.new.extract_all.find { |u| u.identifier == 'WidgetComponent' }
+
+      expect(unit.metadata[:public_methods]).to eq(%i[badge call title])
+    end
+
+    it 'emits components in name order' do
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[AlertComponent WidgetComponent])
     end
   end
 end

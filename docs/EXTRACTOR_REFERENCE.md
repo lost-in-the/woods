@@ -314,7 +314,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - **Included in Woods 2.1:** discovers all app-owned `ActionMailer::Base.descendants`, including parallel abstract bases and direct subclasses even when `ApplicationMailer` exists. An app without ActionMailer contributes no mailer units.
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
-- Each mailer action corresponds to an email template, template paths are recorded in metadata
+- Each mailer action corresponds to an email template, template paths are recorded in metadata. Discovery checks `<action>.html` and `<action>.text` in every engine of `Woods::Extractors::TemplateExtensions::DETECTED` (`.erb`, `.haml`, `.jbuilder`, `.slim`).
 - Extracts `default from:`, `layout`, and per-action subject patterns
 - Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
 - Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
@@ -391,6 +391,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
 - Slots and sub-component composition are extracted from the `view_template` method
+- `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 
 ---
 
@@ -401,7 +402,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ViewComponent classes from `app/components`. Extracts slots, template paths, preview class references, and collection rendering support.
 
 **Key details:**
-- Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`)
+- Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`), next to the component or inside its sidecar directory (`button_component/button_component.html.haml`), for every engine in `Woods::Extractors::TemplateExtensions::DETECTED`
+- `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 - **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
@@ -876,11 +878,19 @@ namespace.
 
 ### CachingExtractor
 
-**What it captures:** Cache usage patterns across controllers, models, and ERB view templates.
+**What it captures:** Cache usage patterns across controllers, models, and view templates.
 
 **Key details:**
-- Scans controllers, models, and `.erb` view files
+- Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`, derived from `ViewTemplateExtractor::ENGINES`, so a newly registered engine is scanned too). Slim views are not scanned.
+- Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
+- Records calls on cache stores a Ruby file obtains itself (`Woods::Extractors::CacheStoreCalls`). A store expression is `X.cache_store(...)` (X not `config`), `ActiveSupport::Cache.lookup_store(...)`, `ActiveSupport::Cache::*Store.new(...)`, or an `||`/`or` with a store on either side. A receiver is a store when it is a local, instance or class variable, or constant assigned from one; a method that returns one, assigns one, or reads a bound variable; an `attr_reader`/`attr_accessor` of a bound instance variable; a forwarder or alias of such a method; or a store expression chained directly. Their `read`, `write`, `fetch`, `delete`, and `exist?` calls are recorded like `Rails.cache` calls, plus `store` (the receiver at the call site) and `store_origin` (the store expression it was first bound from, up to 120 characters), and count as low-level caching. Binding is per file and by name, not by scope.
+- Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependencies are still scanned from the full source, as in every other extractor.
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
+- Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
+  - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
+  - `ttl`: the `expires_in:` expression, literal or not.
+  - `options`: `expires_in`, `race_condition_ttl`, `if`, and `unless`, only where the value is a literal (number, string, symbol, boolean, `nil`, or a `1.hour`-style duration).
+- `cache_key`, `cache_key_with_version`, and `cache_version` count as cache signals, except a bare identifier inside another cache call's arguments (`json.cache! cache_key do`), which is that call's key
 - The `file_type` parameter on `extract_caching_file` defaults to `nil` (auto-detected from path)
 
 ---

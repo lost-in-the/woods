@@ -1,0 +1,1 @@
+- `ViewComponentExtractor` and `PhlexExtractor` sort `metadata.public_methods` and emit units in component-name order, so repeated extractions of an unchanged app produce identical output.

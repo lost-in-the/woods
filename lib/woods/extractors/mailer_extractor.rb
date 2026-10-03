@@ -7,6 +7,7 @@ require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
+require_relative 'template_extensions'
 
 module Woods
   module Extractors
@@ -67,7 +68,7 @@ module Woods
           file_path: file_path
         )
 
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? File.read(file_path, encoding: Encoding::UTF_8) : ''
 
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)
@@ -219,12 +220,9 @@ module Woods
         mailer_path = mailer.name.underscore
 
         actions.each do |action|
-          view_paths = [
-            Rails.root.join("app/views/#{mailer_path}/#{action}.html.erb"),
-            Rails.root.join("app/views/#{mailer_path}/#{action}.text.erb"),
-            Rails.root.join("app/views/#{mailer_path}/#{action}.html.slim"),
-            Rails.root.join("app/views/#{mailer_path}/#{action}.text.slim")
-          ]
+          view_paths = TemplateExtensions::DETECTED.flat_map do |ext|
+            %w[html text].map { |format| Rails.root.join("app/views/#{mailer_path}/#{action}.#{format}#{ext}") }
+          end
 
           found = view_paths.select { |p| File.exist?(p) }
                             .map { |p| p.to_s.sub("#{Rails.root}/", '') }

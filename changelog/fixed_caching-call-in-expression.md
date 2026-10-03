@@ -1,0 +1,1 @@
+- `CachingExtractor` reads the key, TTL, and options of a cache call that sits inside a larger expression, such as `<%= Rails.cache.read(key) || fallback %>` in an HTML attribute, `<% elsif Rails.cache.read(key).present? %>`, a ternary, `&.`, `&&`, or a chained block. Those calls previously reported `key_pattern: nil`.

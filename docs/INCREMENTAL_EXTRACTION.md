@@ -372,7 +372,7 @@ automatically.
 | `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins also dispatch to concerns |
 | `app/controllers/**/*.rb` | caching |
 | `app/views/**/*.erb` | view_templates, caching |
-| `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates |
+| `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates, caching |
 | `config/locales/**/*.yml` | i18n |
 | `config/initializers`, `config/environments` | configurations |
 | `db/migrate/*.rb` (top level only) | migrations |

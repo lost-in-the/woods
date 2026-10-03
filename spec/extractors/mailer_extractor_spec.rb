@@ -313,6 +313,22 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
   # ── Template Discovery ────────────────────────────────────────────────
 
+  describe 'source encoding' do
+    it 'reads a multibyte mailer source the same under a POSIX default external encoding' do
+      mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
+      create_file('app/mailers/shipment_mailer.rb', <<~RUBY)
+        class ShipmentMailer < ApplicationMailer
+          # Ünïcødé ☃
+          def dispatched = mail(subject: '☃ dispatched')
+        end
+      RUBY
+
+      unit = with_posix_default_external { described_class.new.extract_mailer(mailer) }
+
+      expect(unit&.source_code).to include("mail(subject: '☃ dispatched')")
+    end
+  end
+
   describe 'template discovery' do
     it 'discovers HTML and text templates' do
       mailer = build_mailer(name: 'UserMailer', actions: %w[welcome_email])
@@ -339,6 +355,21 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
       templates = unit.metadata[:templates]
       expect(templates['welcome_email']).to include('app/views/user_mailer/welcome_email.html.slim')
+    end
+
+    it 'discovers haml templates' do
+      mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
+
+      create_file('app/mailers/shipment_mailer.rb', "class ShipmentMailer < ApplicationMailer\nend\n")
+      create_file('app/views/shipment_mailer/dispatched.html.haml', '%h1 Dispatched')
+      create_file('app/views/shipment_mailer/dispatched.text.haml', 'Dispatched')
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:templates]['dispatched']).to contain_exactly(
+        'app/views/shipment_mailer/dispatched.html.haml',
+        'app/views/shipment_mailer/dispatched.text.haml'
+      )
     end
 
     it 'returns empty hash when no templates found' do

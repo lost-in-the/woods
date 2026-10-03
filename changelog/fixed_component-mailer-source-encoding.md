@@ -1,0 +1,1 @@
+- `MailerExtractor`, `ViewComponentExtractor`, and `PhlexExtractor` read source files as UTF-8 whatever the process locale. Under a POSIX locale (`LANG=C`), a mailer or component whose source contained any non-ASCII character was read as US-ASCII and silently dropped.

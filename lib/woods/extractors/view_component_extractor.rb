@@ -6,6 +6,7 @@ require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
+require_relative 'template_extensions'
 
 module Woods
   module Extractors
@@ -14,7 +15,7 @@ module Woods
     # ViewComponent components are Ruby classes that encapsulate view logic.
     # We can extract:
     # - Slot definitions (renders_one, renders_many)
-    # - Sidecar template paths (.html.erb files next to the .rb file)
+    # - Sidecar template paths (.html.erb/.haml/.jbuilder/.slim next to the .rb file)
     # - Initialize parameters (the component's API)
     # - Preview classes (ViewComponent::Preview subclasses)
     # - Collection support
@@ -67,7 +68,7 @@ module Woods
         # "addition", extract it, get nil, and dirty the dependents pass for
         # nothing. Anonymous classes go too: `extract_component` rejects a nil
         # name for the same reason.
-        @component_base.descendants.select { |component| app_component?(component) }
+        @component_base.descendants.select { |component| app_component?(component) }.sort_by(&:name)
       end
 
       # Extract a single ViewComponent component
@@ -146,7 +147,7 @@ module Woods
       def read_source(file_path)
         return '' unless file_path && File.exist?(file_path)
 
-        File.read(file_path)
+        File.read(file_path, encoding: Encoding::UTF_8)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -157,7 +158,7 @@ module Woods
         {
           slots: extract_slots(source),
           initialize_params: extract_initialize_params(component),
-          public_methods: component.public_instance_methods(false),
+          public_methods: component.public_instance_methods(false).sort,
           parent_component: component.superclass.name,
           sidecar_template: detect_sidecar_template(component),
           preview_class: detect_preview_class(component),
@@ -221,20 +222,19 @@ module Woods
         []
       end
 
-      # Detect sidecar template file (.html.erb next to the .rb file)
+      # Detect a sidecar template next to the .rb file, in any
+      # {TemplateExtensions::DETECTED} engine
       #
       # @param component [Class]
       # @return [String, nil] App-relative path to sidecar template if found
       def detect_sidecar_template(component)
         base_path = Rails.root.join("app/components/#{component.name.underscore}")
+        sidecar_dir_path = "#{base_path}/#{component.name.demodulize.underscore}"
 
-        # Check common sidecar template patterns
-        candidates = [
-          "#{base_path}.html.erb",
-          "#{base_path}.html.haml",
-          "#{base_path}.html.slim",
-          "#{base_path}/#{component.name.demodulize.underscore}.html.erb"
-        ]
+        # Sibling sidecars first, then the sidecar-directory form
+        candidates = [base_path, sidecar_dir_path].flat_map do |path|
+          TemplateExtensions::DETECTED.map { |ext| "#{path}.html#{ext}" }
+        end
 
         candidates.find { |path| File.exist?(path) }&.delete_prefix(File.join(Rails.root.to_s, ''))
       rescue StandardError
