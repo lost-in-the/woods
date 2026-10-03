@@ -46,6 +46,12 @@ module Woods
     # that a unit is a profile, and an unmarked unit need not name a constant.
     FILE_PROFILE_TYPES = %i[caching configuration test_mapping rails_source gem_source].freeze
 
+    # Unit types that describe the database rather than application code.
+    # Every migration and model points at a table, so ranking these would
+    # reorder the code the rankings describe. They score zero in {#pagerank}
+    # and stay out of {GraphAnalyzer}'s hub, orphan and dead-end lists.
+    SCHEMA_UNIT_TYPES = %i[database_table external_consumer].freeze
+
     # Optional edge keys beyond target and via. `through` is the through
     # association name; `through_db` is the through model's resolved
     # database, emitted only when present; `disable_joins` is emitted only
@@ -610,19 +616,29 @@ module Woods
     # @param iterations [Integer] Number of iterations (default: 20)
     # @return [Hash<String, Float>] Identifier => PageRank score
     def pagerank(damping: 0.85, iterations: 20)
-      n = @nodes.size
-      return {} if n.zero?
+      return {} if @nodes.empty?
 
-      node_ids = @nodes.keys
+      node_ids, unranked = @nodes.keys.partition { |id| ranked?(id) }
       weights = resolvable_edge_weights
-      base_score = 1.0 / n
+      base_score = node_ids.empty? ? 0.0 : 1.0 / node_ids.size
       scores = node_ids.to_h { |id| [id, base_score] }
 
       iterations.times do
         scores = pagerank_step(node_ids, scores, weights, damping)
       end
 
+      unranked.each { |id| scores[id] = 0.0 }
       scores
+    end
+
+    # Whether an identifier is a schema unit under every type it is
+    # registered as. See {SCHEMA_UNIT_TYPES}.
+    #
+    # @param identifier [String]
+    # @return [Boolean]
+    def schema_unit?(identifier)
+      types = @nodes[identifier]
+      !types.nil? && types.each_key.all? { |type| SCHEMA_UNIT_TYPES.include?(type) }
     end
 
     private
@@ -695,6 +711,11 @@ module Woods
       attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
     end
 
+    # A registered node that takes part in PageRank: anything but a schema unit.
+    def ranked?(identifier)
+      @nodes.key?(identifier) && !schema_unit?(identifier)
+    end
+
     # One PageRank power iteration over precomputed resolvable-edge weights.
     #
     # Iteration order (node insertion order, reverse-Set insertion order) is
@@ -739,10 +760,12 @@ module Woods
     # @return [Hash{String => Array(Hash{String => Integer}, Integer)}]
     def resolvable_edge_weights
       @edges.each_with_object({}) do |(src, by_type), weights|
+        next unless ranked?(src)
+
         counts = nil
         by_type.each_value do |edges|
           edges.each do |edge|
-            next unless @nodes.key?(edge[:target])
+            next unless ranked?(edge[:target])
 
             (counts ||= Hash.new(0))[edge[:target]] += 1
           end

@@ -101,7 +101,7 @@ module Woods
       @orphans ||= begin
         nodes = graph_nodes
         nodes.each_with_object([]) do |(identifier, meta), result|
-          next if EXCLUDED_ORPHAN_TYPES.include?(meta[:type])
+          next if EXCLUDED_ORPHAN_TYPES.include?(meta[:type]) || @graph.schema_unit?(identifier)
 
           dependents = @graph.dependents_of(identifier)
           result << identifier if dependents.empty?
@@ -119,6 +119,8 @@ module Woods
       @dead_ends ||= begin
         nodes = graph_nodes
         nodes.each_with_object([]) do |(identifier, _meta), result|
+          next if @graph.schema_unit?(identifier)
+
           dependencies = @graph.dependencies_of(identifier)
           result << identifier if dependencies.empty?
         end.sort
@@ -136,7 +138,9 @@ module Woods
     def hubs(limit: 20)
       nodes = graph_nodes
 
-      identifiers_with_dependents = nodes.map do |identifier, meta|
+      identifiers_with_dependents = nodes.filter_map do |identifier, meta|
+        next if @graph.schema_unit?(identifier)
+
         dependents = @graph.dependents_of(identifier)
         {
           identifier: identifier,
@@ -279,7 +283,7 @@ module Woods
         entries = nodes.keys.sort.flat_map do |identifier|
           meta = nodes[identifier]
           from_db = meta[:database]
-          next [] unless from_db
+          next [] if from_db.nil? || @graph.schema_unit?(identifier)
 
           association_crossings(identifier, from_db, nodes) +
             foreign_key_crossings(identifier, from_db, meta, owners)
@@ -400,6 +404,17 @@ module Woods
       end
     end
 
+    # Tables no model reads: legacy tables, another application's tables,
+    # join and backup tables. A reviewer's cue that the table is reached by
+    # raw SQL or from outside this application.
+    #
+    # @return [Array<String>] table unit identifiers, sorted
+    def unmodelled_tables
+      @unmodelled_tables ||= @graph.units_of_type(:database_table).sort.select do |identifier|
+        @graph.dependents_of(identifier, via: :table).empty?
+      end
+    end
+
     # Full analysis report combining all structural metrics.
     #
     # @return [Hash] Complete analysis with :orphans, :dead_ends, :hubs,
@@ -414,6 +429,7 @@ module Woods
       computed_volatile = volatile_dependencies
       computed_undeclared = undeclared_package_edges
       computed_unresolvable = unresolvable_routes
+      computed_unmodelled = unmodelled_tables
 
       {
         orphans: computed_orphans,
@@ -425,6 +441,7 @@ module Woods
         volatile_dependencies: computed_volatile,
         undeclared_package_edges: computed_undeclared,
         unresolvable_routes: computed_unresolvable,
+        unmodelled_tables: computed_unmodelled,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
@@ -434,7 +451,8 @@ module Woods
           cross_database_edge_count: computed_cross_database.size,
           **volatile_dependency_stats(computed_volatile),
           undeclared_package_edge_count: computed_undeclared.size,
-          unresolvable_route_count: computed_unresolvable.size
+          unresolvable_route_count: computed_unresolvable.size,
+          unmodelled_table_count: computed_unmodelled.size
         }
       }
     end
