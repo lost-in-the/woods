@@ -3,6 +3,7 @@
 require 'strscan'
 require_relative 'source_nesting'
 require_relative 'lexical_constant'
+require_relative 'comment_blanking'
 
 module Woods
   module Extractors
@@ -86,6 +87,9 @@ module Woods
       # counted from the string's start on every call, which made this loop
       # quadratic in the size of ordinary text.
       #
+      # Comments are blanked first ({CommentBlanking.ruby}), which keeps
+      # every byte offset, so a reference named only in a comment is not found.
+      #
       # @param source [String]
       # @param segment [Regexp] Anchored test for one chain segment
       # @param follower [Regexp] `\G`-anchored test at the segment's end
@@ -93,6 +97,7 @@ module Woods
       # @return [Array<String>]
       def references(source, segment:, follower:, enclosing: [])
         found = []
+        source = CommentBlanking.ruby(source)
         scanner = StringScanner.new(source)
         while scanner.skip_until(CONSTANT_CHAIN)
           chain = scanner.matched

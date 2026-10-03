@@ -199,6 +199,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(source)
+        source = CommentBlanking.ruby(source)
         deps = scan_common_dependencies(source)
 
         # Interactors

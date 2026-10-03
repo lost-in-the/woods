@@ -6,10 +6,12 @@ require_relative 'view_engines/haml'
 
 module Woods
   module Extractors
-    # Blanks the comments of a Ruby or template source so a scan for calls
-    # never reads commented-out code. Every comment byte except a newline
-    # becomes a space, so line structure is kept and the result can be
-    # scanned exactly like the original.
+    # Blanks the comments of a Ruby or template source so a scan never reads
+    # a comment: a reference that appears only in a comment is prose, and
+    # prose never produces a dependency edge. Every dependency scan reads its
+    # source through this module. Every comment byte except a newline becomes
+    # a space, so line structure and byte offsets are kept and the result can
+    # be scanned exactly like the original.
     #
     # Comment forms, chosen by file extension:
     # - `.rb`, `.jbuilder`: Ruby `#` comments and `=begin`/`=end`, via Prism
@@ -39,6 +41,19 @@ module Woods
                  when '.haml' then haml_comments(source)
                  else []
                  end
+        ranges.empty? ? source : splice(source, ranges)
+      end
+
+      # Blanks `#` comments and `=begin`/`=end` blocks. A `#` in a string,
+      # a heredoc, or an interpolation is not a comment and is kept.
+      #
+      # @param source [String] Ruby source, a whole file or an excerpt
+      # @return [String] The source with its comments blanked: the same
+      #   object when it holds none
+      def ruby(source)
+        return source unless source.include?('#') || source.include?('=begin')
+
+        ranges = ruby_comments(source)
         ranges.empty? ? source : splice(source, ranges)
       end
 

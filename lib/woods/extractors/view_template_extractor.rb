@@ -7,6 +7,7 @@ require 'set'
 require_relative 'route_helper_resolver'
 require_relative 'helper_catalog'
 require_relative 'helper_call_scan'
+require_relative 'comment_blanking'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
 require_relative 'view_engines/haml'
@@ -101,9 +102,10 @@ module Woods
 
         unit.namespace = namespace
         unit.source_code = source
-        interpolated, partials = engine.scan_partials(source).partition { |name| name.include?(INTERPOLATION_MARKER) }
-        unit.metadata = build_metadata(engine, source, file_path, partials, interpolated)
-        unit.dependencies = build_dependencies(engine, source, file_path, identifier, partials)
+        code = CommentBlanking.blank(source, file_path)
+        interpolated, partials = engine.scan_partials(code).partition { |name| name.include?(INTERPOLATION_MARKER) }
+        unit.metadata = build_metadata(engine, source, code, file_path, partials, interpolated)
+        unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials)
         apply_helper_calls(unit, engine, source, namespace)
 
         unit
@@ -147,11 +149,12 @@ module Woods
       #
       # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
+      # @param code [String] The source with its comments blanked
       # @param file_path [String] Path to the template
       # @param partials [Array<String>] Literal partial names
       # @param interpolated [Array<String>] Partial names built by interpolation
       # @return [Hash]
-      def build_metadata(engine, source, file_path, partials, interpolated)
+      def build_metadata(engine, source, code, file_path, partials, interpolated)
         metadata = {
           template_engine: engine.name.to_s,
           is_partial: partial?(file_path),
@@ -161,7 +164,7 @@ module Woods
           loc: source.lines.count { |l| l.strip.length.positive? }
         }
         unresolved = interpolated.map { |name| { kind: 'interpolation', name: name } } +
-                     engine.scan_unresolved_partials(source)
+                     engine.scan_unresolved_partials(code)
         metadata[:unresolved_partials] = unresolved if unresolved.any?
         metadata
       end
@@ -177,12 +180,12 @@ module Woods
       # Build dependencies for the template.
       #
       # @param engine [ViewEngines::Base] Engine that matched this file
-      # @param source [String] Template source code
+      # @param code [String] Template source with its comments blanked
       # @param file_path [String] Path to the template
       # @param identifier [String] Template identifier
       # @param partials [Array<String>] Pre-extracted partial names
       # @return [Array<Hash>]
-      def build_dependencies(engine, source, file_path, identifier, partials)
+      def build_dependencies(engine, code, file_path, identifier, partials)
         deps = []
 
         partials.each do |partial_name|
@@ -193,7 +196,7 @@ module Woods
         owner = view_owner(extract_view_namespace(file_path))
         deps << { type: owner[:type], target: owner[:name], via: :view_render } if owner
 
-        deps.concat(resolve_navigation_candidates(engine, source))
+        deps.concat(resolve_navigation_candidates(engine, code))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
       end

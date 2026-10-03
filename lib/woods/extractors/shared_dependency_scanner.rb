@@ -3,6 +3,7 @@
 require 'set'
 require_relative '../model_name_cache'
 require_relative 'line_neutralizer'
+require_relative 'comment_blanking'
 require_relative 'reference_patterns'
 require_relative 'form_action_scan'
 require_relative 'route_helper_resolver'
@@ -51,17 +52,11 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_model_dependencies(source, via: :code_reference)
-        # Strip `#` line comments before scanning so references inside
-        # YARD docstrings / TODO comments don't generate ghost edges.
-        # Applied to ALL passes — a commented `Library::Book` should not
-        # produce an edge through the full-name pass. Stripping is
-        # string-literal-aware: a `#` inside a `"..."`/`'...'` literal is
-        # NOT a comment, so a line like `link_to "Tag #ruby", Article.recent`
-        # keeps its `Article` reference (a plain `#...` regex would have
-        # eaten the rest of the line and dropped the edge). String
-        # interpolation (`"Book: #{Library::Book.new}"`) is preserved for the
-        # same reason — the `#{...}` lives inside the literal.
-        scannable = strip_ruby_line_comments(source)
+        # Comments are blanked before every pass, so a model named only in
+        # a YARD docstring, a TODO, or a `=begin` block produces no edge.
+        # A `#` in a string, a heredoc, or an interpolation is not a comment:
+        # `link_to "Tag #ruby", Article.recent` keeps its `Article` reference.
+        scannable = CommentBlanking.ruby(source)
 
         targets = Set.new
         scannable.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
@@ -243,12 +238,13 @@ module Woods
       # Gated by +Woods.configuration.extract_navigation_edges+.
       # Requires {RouteHelperResolver} to be included and initialized.
       #
-      # @param source [String] Ruby/ERB/HAML source code to scan
+      # @param source [String] Ruby source code to scan; its comments are not read
       # @param via_type [Symbol] Relationship label (default: :link_to)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_navigation_dependencies(source, via_type: :link_to)
         return [] unless Woods.configuration&.extract_navigation_edges
 
+        source = CommentBlanking.ruby(source)
         seen_helpers = source.scan(ROUTE_HELPER_SHAPED_DEF).flatten.to_set
         seen_targets = Set.new
         deps = []
@@ -274,14 +270,14 @@ module Woods
       # Gated by +Woods.configuration.extract_navigation_edges+.
       # Requires {RouteHelperResolver} to be included and initialized.
       #
-      # @param source [String] Template/Ruby source code
+      # @param source [String] Ruby source code; its comments are not read
       # @return [Array<Hash>] Dependency hashes with via: :form_action
       def scan_form_dependencies(source)
         return [] unless Woods.configuration&.extract_navigation_edges
 
         seen = Set.new
         deps = []
-        FormActionScan.route_helpers(source, stop: FORM_SPAN_STOP).each do |route_name, suffix|
+        FormActionScan.route_helpers(CommentBlanking.ruby(source), stop: FORM_SPAN_STOP).each do |route_name, suffix|
           resolved = resolve_route_helper("#{route_name}_#{suffix}")
           next unless resolved
 

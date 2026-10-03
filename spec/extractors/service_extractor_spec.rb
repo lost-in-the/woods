@@ -646,6 +646,21 @@ RSpec.describe Woods::Extractors::ServiceExtractor do
       expect(unit.dependencies).to include({ type: :external, target: :http_api, via: :external_call })
     end
 
+    it 'records no edge for a library, client, or interactor named only in a comment' do
+      path = create_file('app/services/widget_sync_service.rb', <<~RUBY)
+        class WidgetSyncService
+          # Was Faraday.post via LedgerClient.new, cached in Redis.current,
+          # then handed to ShipmentInteractor.call
+          def call
+            true
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.dependencies).to eq([])
+    end
+
     it 'detects Redis dependencies' do
       path = create_file('app/services/cache_service.rb', <<~RUBY)
         class CacheService
