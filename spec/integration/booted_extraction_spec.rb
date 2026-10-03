@@ -757,6 +757,25 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   end
 end
 
+RSpec.describe 'Controllers outside ActionController::Base, in a real Rails process', :booted_app do
+  def extract_controllers
+    script = File.expand_path('../fixtures/controller_runtime/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    output.lines.grep(/\A\{/).to_h { |line| JSON.parse(line).then { |unit| [unit['identifier'], unit] } }
+  end
+
+  it 'indexes ActionController::Metal controllers as metal controller units with their own actions' do
+    units = extract_controllers
+
+    expect(units.fetch('HealthController')['metadata']).to include('metal' => true, 'actions' => ['show'],
+                                                                   'filters' => [], 'ancestors' => ['HealthController'])
+    expect(units.fetch('PingController')['metadata']).to include(
+      'metal' => true, 'actions' => ['index'], 'filters' => [{ 'kind' => 'before', 'filter' => 'stamp' }]
+    )
+  end
+end
+
 RSpec.describe 'Pgvector generator dimension boundaries', :booted_app do
   before do
     require 'active_record'

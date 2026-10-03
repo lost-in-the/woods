@@ -7,8 +7,11 @@ require 'fileutils'
 require 'active_support/concern'
 require 'active_support/core_ext/string/inflections'
 require 'active_support/core_ext/object/blank'
+require 'active_support/core_ext/class/subclasses'
 require 'woods'
 require 'woods/extractors/controller_extractor'
+require 'woods/dependency_graph'
+require 'woods/graph_analyzer'
 
 # Which public methods count as a controller's actions, and where each one
 # is defined.
@@ -49,6 +52,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     app_double = double('Application', routes: routes_double)
     stub_const('Rails', double('Rails', application: app_double, root: Pathname.new(app_root),
                                         logger: double('Logger', error: nil, warn: nil, debug: nil, info: nil)))
+    stub_const('ActionController::Metal', ActionFixtures::FrameworkMetal)
     stub_const('ActionController::Base', ActionFixtures::FrameworkBase)
     stub_const('ActionController::API', ActionFixtures::FrameworkBase)
     described_class.new
@@ -56,15 +60,33 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
 
   before do
     stub_const('ActionFixtures', Module.new)
-    framework = Class.new do
+    # The bare Rack-level root, like ActionController::Metal: it has actions
+    # but no callback chain until a callbacks module is included.
+    metal = Class.new do
       def self.action_methods
-        (public_instance_methods(true) - ActionFixtures::FrameworkBase.public_instance_methods(true))
+        (public_instance_methods(true) - ActionFixtures::FrameworkMetal.public_instance_methods(true))
           .to_set(&:to_s)
       end
-
+    end
+    ActionFixtures.const_set(:FrameworkMetal, metal)
+    framework = Class.new(metal) do
       def self._process_action_callbacks = []
     end
     ActionFixtures.const_set(:FrameworkBase, framework)
+
+    # A gem module in the style of AbstractController::Callbacks: including
+    # it gives a Metal controller a callback chain and a public helper.
+    load write(gem_root, 'lib/fake_callbacks.rb', <<~RUBY)
+      module ActionFixtures
+        module FakeCallbacks
+          def self.included(base)
+            base.define_singleton_method(:_process_action_callbacks) { [] }
+          end
+
+          def performed? = false
+        end
+      end
+    RUBY
 
     # A gem DSL in the style of decent_exposure: define_method from a file
     # outside the app root creates a public reader and writer.
@@ -181,6 +203,24 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         end
       end
     RUBY
+
+    load_app('app/controllers/action_fixtures/health_controller.rb', <<~RUBY)
+      class ActionFixtures::HealthController < ActionFixtures::FrameworkMetal
+        def show
+          [200, { 'content-type' => 'text/plain' }, ['ok']]
+        end
+
+        private def checks = []
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/ping_controller.rb', <<~RUBY)
+      class ActionFixtures::PingController < ActionFixtures::FrameworkMetal
+        include ActionFixtures::FakeCallbacks
+
+        def index = [204, {}, []]
+      end
+    RUBY
   end
 
   let(:extractor) do
@@ -190,7 +230,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
                       route('action_fixtures/confirmations', 'create'),
                       route('action_fixtures/modern/confirmations', 'create'),
                       route('action_fixtures/sales_reports', 'show'),
-                      route('action_fixtures/ledgers', 'totals')
+                      route('action_fixtures/ledgers', 'totals'),
+                      route('action_fixtures/health', 'show')
                     ], named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
   end
 
@@ -312,6 +353,47 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
 
     it 'counts only admitted actions' do
       expect(unit.metadata[:action_count]).to eq(1)
+    end
+  end
+
+  describe 'Metal controllers defined in app source' do
+    it 'are discovered alongside Base and API controllers' do
+      expect(extractor.discoverable_classes).to include(ActionFixtures::HealthController, ActionFixtures::PingController)
+    end
+
+    it 'become controller units flagged as metal, with actions per the admission rule' do
+      unit = unit_for('HealthController')
+
+      expect(unit.type).to eq(:controller)
+      expect(unit.metadata).to include(metal: true, actions: ['show'], filters: [], filter_count: 0)
+    end
+
+    it 'stop the ancestor chain at the Metal root' do
+      expect(unit_for('HealthController').metadata[:ancestors]).to eq(['ActionFixtures::HealthController'])
+    end
+
+    it 'chunk their actions without a callback chain' do
+      expect(unit_for('HealthController').chunks.map { |chunk| chunk[:identifier] })
+        .to eq(['ActionFixtures::HealthController#show'])
+    end
+
+    it 'admit an own-file action but not the public helper an included gem module adds' do
+      expect(unit_for('PingController').metadata).to include(metal: true, actions: ['index'])
+    end
+
+    it 'leave Base controllers unflagged' do
+      expect(unit_for('WidgetsController').metadata[:metal]).to be(false)
+    end
+
+    it 'resolve the routes that dispatch to them' do
+      graph = Woods::DependencyGraph.new
+      graph.register(unit_for('HealthController'))
+      graph.register(Woods::ExtractedUnit.new(type: :route, identifier: 'GET /health', file_path: nil).tap do |route|
+        route.metadata = { controller: 'action_fixtures/health', action: 'show' }
+        route.dependencies = [{ type: :controller, target: 'ActionFixtures::HealthController', via: :route_dispatch }]
+      end)
+
+      expect(Woods::GraphAnalyzer.new(graph).unresolvable_routes).to eq([])
     end
   end
 end

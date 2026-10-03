@@ -209,10 +209,10 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### ControllerExtractor
 
-**What it captures:** Every `ApplicationController` and `ActionController::API` descendant. Route context is prepended to the source, each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
+**What it captures:** Every app-defined `ActionController::Base`, `ActionController::API` and `ActionController::Metal` descendant. Route context is prepended to the source, each controller gets a header block showing which HTTP verb + path maps to each action. Before/after filter chains are resolved per action.
 
 **Key details:**
-- Discovers controllers via `ApplicationController.descendants` (and `ActionController::API.descendants` if present)
+- Discovers controllers via the descendants of `ActionController::Base`, `ActionController::API` and `ActionController::Metal` (each when present), keeping classes whose source file is application source
 - Builds a routes map from `Rails.application.routes` at initialization time
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each action becomes a `:action` chunk with its applicable filters and route
@@ -224,6 +224,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Edge cases:**
 - API-only controllers (`ActionController::API` descendants) are included when the gem is present
+- Controllers built on `ActionController::Metal` alone carry `metadata.metal: true` (every other controller carries `false`). Their actions follow the same admission rule; a Metal controller without a callbacks module has an empty filter chain, and the ancestor list stops at `ActionController::Metal`
 - Controllers with no corresponding routes still get extracted (they may be base classes)
 
 **Example output (abbreviated):**

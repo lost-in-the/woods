@@ -60,16 +60,17 @@ module Woods
       # The controller classes this extractor would extract from the running
       # app. Shared with the incremental path's class reconciliation (#164).
       #
-      # Discovery walks +ActionController::Base.descendants+ and
-      # +ActionController::API.descendants+ — not
+      # Discovery walks the descendants of +ActionController::Base+,
+      # +ActionController::API+ and +ActionController::Metal+ — not
       # +ApplicationController.descendants+, which excludes the receiver
       # (Class#descendants never includes the class itself, so
       # ApplicationController — usually the richest controller in the app —
       # was never indexed) and misses controllers inheriting straight from
-      # +ActionController::Base+ (#200). Each base is guarded with
-      # +defined?+ so a host missing one, or both (no NameError on hosts
-      # without an ApplicationController constant), simply contributes
-      # nothing.
+      # +ActionController::Base+ (#200). Metal is walked too because a
+      # controller built on the bare Rack layer (a health check, a webhook
+      # endpoint) descends from neither of the other two. Each base is
+      # guarded with +defined?+ so a host missing any of them simply
+      # contributes nothing.
       #
       # Framework-internal descendants (Rails::InfoController,
       # ActiveStorage controllers, engine controllers) share this ancestry
@@ -86,6 +87,7 @@ module Woods
         controllers = []
         controllers.concat(ActionController::Base.descendants) if defined?(ActionController::Base)
         controllers.concat(ActionController::API.descendants) if defined?(ActionController::API)
+        controllers.concat(ActionController::Metal.descendants) if defined?(ActionController::Metal)
         controllers.uniq.select { |controller| app_defined_controller?(controller) }
       end
 
@@ -274,7 +276,7 @@ module Woods
       end
 
       def extract_filter_chain(controller)
-        controller._process_action_callbacks.map do |callback|
+        process_action_callbacks(controller).map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
           result = { kind: callback.kind, filter: callback_filter(callback) }
@@ -284,6 +286,41 @@ module Woods
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
         end
+      end
+
+      # A Metal controller has no callback chain until it includes a
+      # callbacks module, so the chain is read only where it exists.
+      #
+      # @param controller [Class]
+      # @return [Array<ActiveSupport::Callbacks::Callback>]
+      def process_action_callbacks(controller)
+        return [] unless controller.respond_to?(:_process_action_callbacks)
+
+        controller._process_action_callbacks.to_a
+      end
+
+      # Whether a controller is built on the bare Rack layer rather than on
+      # +ActionController::Base+ or +ActionController::API+.
+      #
+      # @param controller [Class]
+      # @return [Boolean]
+      def metal_controller?(controller)
+        %w[Base API].filter_map { |name| action_controller_class(name) }.none? { |base| controller <= base }
+      end
+
+      # The framework classes the ancestor chain stops at.
+      #
+      # @return [Array<Class>]
+      def framework_roots
+        %w[Base API Metal].filter_map { |name| action_controller_class(name) }
+      end
+
+      # @param name [String] a class directly under ActionController
+      # @return [Class, nil] nil when the host does not define it
+      def action_controller_class(name)
+        return nil unless defined?(ActionController) && ActionController.const_defined?(name, false)
+
+        ActionController.const_get(name, false)
       end
 
       # Override only controller Proc conditions; the shared model/mailer
@@ -642,10 +679,13 @@ module Woods
 
           # Parent chain for understanding inherited behavior
           ancestors: controller.ancestors
-                               .take_while { |a| a != ActionController::Base && a != ActionController::API }
+                               .take_while { |a| !framework_roots.include?(a) }
                                .grep(Class)
                                .map(&:name)
                                .compact,
+
+          # Built on ActionController::Metal rather than Base or API
+          metal: metal_controller?(controller),
 
           # Concerns included (detected by membership, not name — #175)
           included_concerns: extract_included_concerns(controller),
@@ -658,7 +698,7 @@ module Woods
 
           # Metrics
           action_count: actions.size,
-          filter_count: controller._process_action_callbacks.count,
+          filter_count: process_action_callbacks(controller).count,
 
           # Strong parameters if definable
           permitted_params: extract_permitted_params(controller, source)
@@ -897,7 +937,7 @@ module Woods
       def applicable_filters(controller, action)
         action_name = action.to_s
 
-        applicable = controller._process_action_callbacks.select do |cb|
+        applicable = process_action_callbacks(controller).select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
         applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }
