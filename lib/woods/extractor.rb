@@ -62,6 +62,7 @@ require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
 require_relative 'module_reconciliation'
 require_relative 'skipped_files'
+require_relative 'source_references/memo_collector'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -438,6 +439,7 @@ module Woods
       # package added between the two runs.
       @package_resolver = nil
       @incremental_extractors = nil
+      @source_collector = nil
       @persisted_index_stats = nil
       @graph_sha = nil
       profile_phase('payload seed') { begin_payload! }
@@ -849,6 +851,7 @@ module Woods
       @flow_scope = nil
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
+      @source_collector = nil
       @hybrid_discovery_keys = Set.new
       @active_record_names = nil
       @package_resolver = nil
@@ -1364,7 +1367,7 @@ module Woods
         Rails.logger.info "[Woods] Extracting #{type}..."
         start_time = Time.current
 
-        extractor = extractor_class.new
+        extractor = share_source_collector(extractor_class.new)
         @extractors[type] = extractor
         units = extractor.extract_all
 
@@ -1406,7 +1409,7 @@ module Woods
           Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
           start_time = Time.current
 
-          extractor = extractor_class.new
+          extractor = share_source_collector(extractor_class.new)
           results_mutex.synchronize { @extractors[type] = extractor }
 
           units = extractor.extract_all
@@ -2927,12 +2930,25 @@ module Woods
       @incremental_extractors ||= {}
       return @incremental_extractors[key] if @incremental_extractors.key?(key)
 
-      @incremental_extractors[key] = EXTRACTORS[key]&.new
+      @incremental_extractors[key] = EXTRACTORS[key]&.new&.then { |extractor| share_source_collector(extractor) }
     rescue StandardError => e
       (@failed_consumers ||= Set.new).add(key)
       @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
       @incremental_extractors[key] = nil
+    end
+
+    # One parser per run, shared by the PORO extractor and the source-reference
+    # pass, so a file both read is parsed once.
+    #
+    # @return [SourceReferences::MemoCollector]
+    def source_collector
+      @source_collector ||= SourceReferences::MemoCollector.new
+    end
+
+    def share_source_collector(extractor)
+      extractor.collector = source_collector if extractor.respond_to?(:collector=)
+      extractor
     end
 
     # ActiveRecord model names, needed by PoroExtractor to tell a plain class

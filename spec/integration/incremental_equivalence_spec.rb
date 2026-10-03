@@ -1733,6 +1733,21 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    it 'parses each PORO source once per full extraction' do
+      write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
+      parses = Hash.new(0)
+      collector = Woods::SourceReferences::Collector
+      allow_any_instance_of(collector).to receive(:call).and_wrap_original do |original, source|
+        parses[source] += 1
+        original.call(source)
+      end
+      index = full_extraction
+      poro_sources = unit_snapshot(index).values.select { |unit| unit['type'] == 'poro' }
+                                         .map { |unit| File.read(app_path(unit['file_path'])) }.uniq
+      expect(poro_sources).not_to be_empty
+      expect(poro_sources.to_h { |source| [source[0, 40], parses[source]] }.values.uniq).to eq([1])
+    end
+
     it 'publishes swept units and a nested class from a namespace file in a full extraction' do
       write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
       write_and_load('app/lib/sweep_mapper.rb', <<~RUBY)
