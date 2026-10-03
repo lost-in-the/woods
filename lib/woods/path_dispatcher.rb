@@ -201,6 +201,22 @@ module Woods
         Woods::Extractors::ConfigFileExtractor.config_file_path?(relative_path)
       end
 
+      # Can this path change the table set or a table's owning model?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def database_schema_path?(relative_path)
+        Woods::Extractors::DatabaseTableExtractor.trigger_path?(relative_path)
+      end
+
+      # Is this the declared external consumers file?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def external_consumers_path?(relative_path)
+        Woods::Extractors::ExternalConsumerExtractor.trigger_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -365,6 +381,16 @@ module Woods
                         matcher: :graphql_document_path?)]
       end
 
+      # Named predicates, read at call time: the schema-dump globs live with
+      # the table extractor, and the consumers file is configuration. The
+      # directories and exact paths restate the table predicate for the shell
+      # hook projection, which cannot call it.
+      def schema_unit_rules
+        [whole_app_rule(:database_tables, %w[db/migrate app/models],
+                        exact_paths: %w[db/schema.rb db/structure.sql], matcher: :database_schema_path?),
+         whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -381,6 +407,7 @@ module Woods
                          extensions: %w[.rb]),
           whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
           *graphql_operation_rules,
+          *schema_unit_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

@@ -115,6 +115,9 @@ module Woods
       # `spec/reload_policy_spec.rb` asserts that, which is how the first draft
       # of this list got caught.
       %r{\Aconfig/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml\z},
+      # Per-database schema dumps (`db/billing_schema.rb`), for the same
+      # reason as `db/schema.rb` above.
+      %r{\Adb/[^/]+_(schema\.rb|structure\.sql)\z},
       /\A\.env(\..+)?\z/
     ].freeze
 
@@ -226,13 +229,20 @@ module Woods
 
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
-        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) || config_file?(path)
+        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
+        config_file?(path) || declared_consumers_file?(path)
     end
 
     # YAML under the configured `config_file_paths` that boot does not
     # capture: ConfigFileExtractor reads its key structure as bytes.
     def config_file?(path)
       Extractors::ConfigFileExtractor.config_file_path?(path)
+    end
+
+    # The declared external consumers file is read as bytes on every run.
+    def declared_consumers_file?(path)
+      declared = Woods.respond_to?(:configuration) ? Woods.configuration&.external_table_consumers_path : nil
+      !declared.nil? && declared == path
     end
 
     def under?(path, directories)

@@ -48,6 +48,8 @@ require_relative 'extractors/decorator_extractor'
 require_relative 'extractors/database_view_extractor'
 require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/database_table_extractor'
+require_relative 'extractors/external_consumer_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -144,6 +146,8 @@ module Woods
       events: Extractors::EventExtractor,
       decorators: Extractors::DecoratorExtractor,
       database_views: Extractors::DatabaseViewExtractor,
+      database_tables: Extractors::DatabaseTableExtractor,
+      external_consumers: Extractors::ExternalConsumerExtractor,
       caching: Extractors::CachingExtractor,
       factories: Extractors::FactoryExtractor,
       test_mappings: Extractors::TestMappingExtractor,
@@ -191,6 +195,8 @@ module Woods
       event: :events,
       decorator: :decorators,
       database_view: :database_views,
+      database_table: :database_tables,
+      external_consumer: :external_consumers,
       caching: :caching,
       factory: :factories,
       test_mapping: :test_mappings,
@@ -347,6 +353,11 @@ module Woods
       # than of each file independently: dispatching db/views/foo_v01.sql to
       # the per-file method would index a version a full extraction drops.
       database_views: :database_view,
+      # Table units are a function of the live schema and of which models
+      # claim each table; declared consumers are a function of the
+      # declaration. Neither has a per-file entry point.
+      database_tables: :database_table,
+      external_consumers: :external_consumer,
       # Framework/gem sources are a function of the installed dependency set,
       # so `Gemfile.lock` is their trigger path (#169). Before this the only
       # incremental writer was `woods:extract_framework`, which hand-wrote
@@ -389,6 +400,13 @@ module Woods
       view_components
       view_templates
     ].freeze
+
+    # Extractors that resolve table names through the live table catalog, and
+    # so go stale when the table set or a table's owning model changes even
+    # though none of their own files did. Re-run wholesale with the tables.
+    #
+    # @return [Array<Symbol>] extractor keys
+    TABLE_CONSUMER_EXTRACTORS = %i[migrations database_views external_consumers].freeze
 
     # Payload artifacts that live at the top of a payload directory rather
     # than inside a per-type directory. Used when seeding a payload from a
@@ -730,6 +748,7 @@ module Woods
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
 
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
+      known += TABLE_CONSUMER_EXTRACTORS if known.include?(:database_tables)
       known.uniq!
 
       prepare_incremental_run(operation: 'refresh')
@@ -3447,6 +3466,7 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
+      keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
       # A routes re-run replaces every controller, and a flow document
       # carries the route itself, which no dependency edge connects to the
       # controller. Nothing about that is reachable by a graph walk, so the
