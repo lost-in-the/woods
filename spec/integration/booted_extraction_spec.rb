@@ -687,7 +687,10 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
                                               'root demotion full/incremental equivalence',
                                               'GraphQL refresh full equivalence',
                                               'plain Ruby resolver helper retains historical identity and source',
-                                              'helper edit full/incremental equivalence')
+                                              'helper edit full/incremental equivalence',
+                                              'unchanged GraphQL type targets a constant created later',
+                                              'later GraphQL reference target full/incremental equivalence',
+                                              'unchanged GraphQL type withdraws the edge with its target')
   end
 end
 

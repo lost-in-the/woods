@@ -512,6 +512,94 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'component reference callers (#655)' do
+    def unit_dependencies(index, type, identifier)
+      require 'woods/mcp/index_reader'
+      Woods::MCP::IndexReader.new(index).find_unit(identifier, type: type).fetch('dependencies')
+    end
+
+    def reverse_edges(index, target)
+      read_json(index, 'dependency_graph.json').fetch('reverse').fetch(target, [])
+    end
+
+    def reference(type, target)
+      { 'type' => type, 'target' => target, 'via' => 'code_reference' }
+    end
+
+    let(:card_path) { 'app/views/ui/card_component.rb' }
+    let(:pristine_card) { File.read(app_path(card_path), encoding: 'UTF-8') }
+
+    def write_card(call_body)
+      write_file(card_path, <<~RUBY)
+        module Ui
+          class CardComponent < ApplicationComponent
+            def initialize(title:, subtitle: nil)
+              @title = title
+              @subtitle = subtitle
+              super()
+            end
+
+            def call
+              #{call_body}
+            end
+          end
+        end
+      RUBY
+      load app_path(card_path)
+    end
+
+    it 'adds and withdraws the edges of a component that gains and loses a model reference' do
+      index = full_extraction
+      expect(unit_dependencies(index, 'component', 'Ui::CardComponent'))
+        .not_to include(hash_including('via' => 'code_reference'))
+
+      pristine = pristine_card
+      write_card('[@title, Post.count, SignatureService.name, BadgeComponent.name].join')
+      Woods::Extractor.new(output_dir: index).extract_changed([card_path])
+      edges = unit_dependencies(index, 'component', 'Ui::CardComponent')
+      expect(edges).to include(reference('model', 'Post'), reference('service', 'SignatureService'))
+      expect(edges).not_to include(reference('component', 'BadgeComponent'))
+      expect(reverse_edges(index, 'SignatureService')).to include('Ui::CardComponent')
+      expect(reverse_edges(index, 'Post')).to include('Ui::CardComponent')
+      expect(differences(index, full_extraction)).to be_empty
+
+      write_file(card_path, pristine)
+      load app_path(card_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([card_path])
+      expect(unit_dependencies(index, 'component', 'Ui::CardComponent'))
+        .not_to include(hash_including('via' => 'code_reference'))
+      expect(reverse_edges(index, 'SignatureService')).not_to include('Ui::CardComponent')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retargets an unchanged component when the service it names appears and disappears' do
+      write_card('LaterCardQuote.for(@title)')
+      index = full_extraction
+      expect(unit_dependencies(index, 'component', 'Ui::CardComponent')).not_to include(
+        hash_including('target' => 'LaterCardQuote')
+      )
+
+      quote_path = write_file('app/services/later_card_quote.rb',
+                              "class LaterCardQuote\n  def self.for(title) = title\nend\n")
+      load app_path(quote_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([quote_path])
+      expect(unit_dependencies(index, 'component', 'Ui::CardComponent'))
+        .to include(reference('service', 'LaterCardQuote'))
+      expect(reverse_edges(index, 'LaterCardQuote')).to include('Ui::CardComponent')
+      expect(differences(index, full_extraction)).to be_empty
+
+      delete_file(quote_path)
+      Object.send(:remove_const, :LaterCardQuote)
+      Woods::Extractor.new(output_dir: index).extract_changed([quote_path])
+      expect(unit_dependencies(index, 'component', 'Ui::CardComponent')).not_to include(
+        hash_including('target' => 'LaterCardQuote')
+      )
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Object.send(:remove_const, :LaterCardQuote) if Object.const_defined?(:LaterCardQuote, false)
+    end
+  end
+
   describe 'standalone application modules (#552)' do
     def write_module_bundle
       path = write_file('app/models/ownership_bundle.rb', <<~RUBY)

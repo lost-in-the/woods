@@ -15,8 +15,16 @@ module Woods
       TYPES = Registry::TYPES
       ALL = :all
 
+      # Families whose extractors already publish their internal relationships
+      # (`render`/`slot`, `type_reference`/`field_resolver`). A second
+      # `code_reference` edge inside the family would only duplicate those.
+      COMPONENT_TYPES = %i[component view_component].freeze
+      GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
+
       # Caller type to the target types it may reference.
-      DEFAULTS = %i[model controller service poro lib concern job].to_h { |type| [type, ALL] }.freeze
+      DEFAULTS = TYPES.to_h { |type| [type, ALL] }
+                      .merge(COMPONENT_TYPES.to_h { |type| [type, (TYPES - COMPONENT_TYPES).freeze] },
+                             GRAPHQL_TYPES.to_h { |type| [type, (TYPES - GRAPHQL_TYPES).freeze] }).freeze
 
       class << self
         # @param overrides [Hash, nil] caller type to +:all+, +false+ or target types

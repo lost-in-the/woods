@@ -10,6 +10,37 @@ RSpec.describe Woods::SourceReferences::CallerPolicy do
 
   let(:types) { Woods::SourceReferences::Registry::TYPES }
 
+  describe 'defaults' do
+    let(:component_types) { %w[component view_component] }
+    let(:graphql_types) { %w[graphql_type graphql_mutation graphql_resolver graphql_query] }
+
+    it 'admits every constant-owned unit type as a caller' do
+      expect(types.reject { |type| policy.caller?(type) }).to be_empty
+    end
+
+    it 'lets a component reference everything except another component' do
+      component_types.each do |caller|
+        expect(types.reject { |target| policy.permits?(caller, target) }.map(&:to_s)).to match_array(component_types)
+      end
+      expect(policy.permits?('component', 'model')).to be(true)
+      expect(policy.permits?('view_component', 'service')).to be(true)
+    end
+
+    it 'lets a GraphQL unit reference everything except another GraphQL unit' do
+      graphql_types.each do |caller|
+        expect(types.reject { |target| policy.permits?(caller, target) }.map(&:to_s)).to match_array(graphql_types)
+      end
+      expect(policy.permits?('graphql_resolver', 'model')).to be(true)
+    end
+
+    it 'leaves every other caller type unfiltered' do
+      unfiltered = types.map(&:to_s) - component_types - graphql_types
+      unfiltered.each do |caller|
+        expect(types.reject { |target| policy.permits?(caller, target) }).to be_empty
+      end
+    end
+  end
+
   describe 'overrides' do
     it 'changes only the caller types it names' do
       policy = described_class.new(service: %i[model])

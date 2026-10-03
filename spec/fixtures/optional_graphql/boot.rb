@@ -45,6 +45,15 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
     end
   RUBY
   write(root, 'app/models/discovery_caller.rb', 'class DiscoveryCaller; def call; DiscoveryPromotedType; end; end')
+  write(root, 'app/graphql/discovery_ledger_type.rb', <<~RUBY)
+    class DiscoveryLedgerType < GraphQL::Schema::Object
+      field :total, Integer, null: false
+      def total
+        raise 'extraction executed a field' if ENV['GRAPHQL_DISCOVERY_NO_EXECUTION']
+        DiscoveryLaterTotals.for(object) + DiscoveryPromotedType.name.size
+      end
+    end
+  RUBY
   write(root, 'app/graphql/discovery_authorized_resolver.rb', <<~RUBY)
     class DiscoveryAuthorizedResolver < GraphQL::Schema::Resolver
       type String, null: false
@@ -241,6 +250,30 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
   change.call([added])
   assert_fact(report, 'incremental resolver deletion') { reader.find_unit('DiscoveryAddedResolver').nil? }
   compare.call('resolver deletion full/incremental equivalence')
+
+  ledger_type = File.join(root, 'app/graphql/discovery_ledger_type.rb')
+  ledger_bytes = File.binread(ledger_type)
+  later_edge = { 'type' => 'poro', 'target' => 'DiscoveryLaterTotals', 'via' => 'code_reference' }
+  ledger_edges = -> { reader.find_unit('DiscoveryLedgerType')['dependencies'] }
+  assert_fact(report, 'GraphQL caller publishes no edge to a missing constant or to another GraphQL unit') do
+    ledger_edges.call.none? { |edge| %w[DiscoveryLaterTotals DiscoveryPromotedType].include?(edge['target']) }
+  end
+  later = write(root, 'app/models/discovery_later_totals.rb',
+                "class DiscoveryLaterTotals\n  def self.for(_row) = 1\nend\n")
+  change.call([later])
+  assert_fact(report, 'unchanged GraphQL type targets a constant created later') do
+    File.binread(ledger_type) == ledger_bytes && ledger_edges.call.include?(later_edge) &&
+      reader.find_unit('DiscoveryLaterTotals')['dependents'].any? do |dependent|
+        dependent['identifier'] == 'DiscoveryLedgerType'
+      end
+  end
+  compare.call('later GraphQL reference target full/incremental equivalence')
+  File.unlink(later)
+  change.call([later])
+  assert_fact(report, 'unchanged GraphQL type withdraws the edge with its target') do
+    !ledger_edges.call.include?(later_edge)
+  end
+  compare.call('withdrawn GraphQL reference target full/incremental equivalence')
 
   promotion = write(root, 'app/graphql/discovery_added_schema.rb',
                     'class DiscoveryAddedSchema < GraphQL::Schema; query DiscoveryPromotedType; end')
