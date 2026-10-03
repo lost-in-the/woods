@@ -38,8 +38,9 @@ module Woods
       # Root-relative globs scanned when `config_file_paths` is not set.
       DEFAULT_PATHS = %w[config/*.yml config/**/*.yml app/data/**/*.yml].freeze
 
-      # Directories the default globs live under.
+      # Directories and extension the default globs cover.
       DEFAULT_ROOTS = %w[config app/data].freeze
+      DEFAULT_EXTENSIONS = %w[.yml].freeze
 
       # Locale files belong to I18nExtractor.
       EXCLUDED_PREFIXES = %w[config/locales/].freeze
@@ -52,6 +53,10 @@ module Woods
         credential secret password passwd token private_key api_key apikey keystore
       ].freeze
       SECRET_SUFFIXES = %w[.enc .key].freeze
+
+      # Path fragments a static projection of {.config_file_path?} excludes.
+      # Wider than the real check, which reads the basename only.
+      PROJECTED_EXCLUSIONS = (EXCLUDED_PREFIXES + SECRET_DIRECTORIES + SECRET_BASENAME_FRAGMENTS).freeze
 
       # Key-name fragments whose values are never stored.
       SENSITIVE_KEY_FRAGMENTS = %w[

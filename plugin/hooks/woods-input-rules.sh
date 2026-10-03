@@ -70,7 +70,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.yml ]] || [[ "$path" == *.yaml ]]; } && { [[ "$path" == config/* ]] || [[ "$path" == app/data/* ]]; }; }; }; then
+  if { { [[ "$path" != *config/locales/* ]] && [[ "$path" != *config/credentials/* ]] && [[ "$path" != *credential* ]] && [[ "$path" != *secret* ]] && [[ "$path" != *password* ]] && [[ "$path" != *passwd* ]] && [[ "$path" != *token* ]] && [[ "$path" != *private_key* ]] && [[ "$path" != *api_key* ]] && [[ "$path" != *apikey* ]] && [[ "$path" != *keystore* ]] && { [[ "$path" == *.yml ]]; } && { [[ "$path" == config/* ]] || [[ "$path" == app/data/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
