@@ -4,6 +4,7 @@ require 'set'
 require_relative '../model_name_cache'
 require_relative 'line_neutralizer'
 require_relative 'reference_patterns'
+require_relative 'form_action_scan'
 require_relative 'route_helper_resolver'
 
 module Woods
@@ -133,7 +134,7 @@ module Woods
 
       # Scan for service object references (e.g., FooService.call, FooService::new).
       #
-      # Targets keep their namespace ({ReferencePatterns::SERVICE_REFERENCE}):
+      # Targets keep their namespace ({ReferencePatterns.service_references}):
       # `Billing::ChargeService.call` records the fully-qualified name the
       # service's own unit is identified by.
       #
@@ -141,7 +142,7 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_service_dependencies(source, via: :code_reference)
-        source.scan(ReferencePatterns::SERVICE_REFERENCE).flatten.uniq.map do |service|
+        ReferencePatterns.service_references(source).uniq.map do |service|
           { type: :service, target: service, via: via }
         end
       end
@@ -153,7 +154,7 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_job_dependencies(source, via: :code_reference)
-        source.scan(ReferencePatterns::JOB_ENQUEUE).flatten.uniq.map do |job|
+        ReferencePatterns.job_enqueues(source).uniq.map do |job|
           { type: :job, target: job, via: via }
         end
       end
@@ -164,7 +165,7 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_mailer_dependencies(source, via: :code_reference)
-        source.scan(ReferencePatterns::MAILER_REFERENCE).flatten.uniq.map do |mailer|
+        ReferencePatterns.mailer_references(source).uniq.map do |mailer|
           { type: :mailer, target: mailer, via: via }
         end
       end
@@ -210,16 +211,13 @@ module Woods
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
-      # Match form_with/form_for with a named route helper as the action/url.
-      # Scans only within the form opening tag (up to the first `do`, `%>`, or
-      # `end`) to avoid matching unrelated _path/_url helpers that appear
-      # after the form. The negative lookahead (rather than a `[^%]`
-      # character class) is what actually enforces that boundary: a
-      # `[^%]*?` scan has nothing bounding it in plain-Ruby sources (Phlex,
-      # ViewComponent, mailers) that contain no `%` at all, so a
-      # `form_with` with no route-helper argument ran past its own `do`
-      # block and matched the next unrelated `_path` call in the method.
-      FORM_ACTION_HELPER = /form_(with|for)\b(?:(?!%>|\bdo\b|\bend\b)[\s\S])*?(\w+)_(path|url)/
+      # Where a form_with/form_for call's arguments end: the first `do`, `%>`,
+      # or `end`, so an unrelated _path/_url helper after the form is not
+      # taken as its action. A `%` alone cannot bound plain-Ruby sources
+      # (Phlex, ViewComponent, mailers), where a `form_with` with no
+      # route-helper argument would run past its own `do` block into the
+      # next `_path` call in the method. See {FormActionScan}.
+      FORM_SPAN_STOP = /%>|\bdo\b|\bend\b/
 
       # Scan source for named route helpers and resolve them to controller targets.
       #
@@ -264,7 +262,7 @@ module Woods
 
         seen = Set.new
         deps = []
-        source.scan(FORM_ACTION_HELPER).each do |_, route_name, suffix|
+        FormActionScan.route_helpers(source, stop: FORM_SPAN_STOP).each do |route_name, suffix|
           resolved = resolve_route_helper("#{route_name}_#{suffix}")
           next unless resolved
 

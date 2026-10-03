@@ -2,6 +2,7 @@
 
 require 'set'
 require_relative 'base'
+require_relative '../form_action_scan'
 
 module Woods
   module Extractors
@@ -24,16 +25,9 @@ module Woods
         # has no dependency on that module, so it keeps its own copy.
         ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
-        # A form_with / form_for call. Its action is the first route helper
-        # after it and before the next `%`, the ERB tag terminator. See
-        # {#form_action_candidates}, which finds it in one linear pass.
-        FORM_CALL = /form_(?:with|for)\b/
-
-        # A run of word characters; a route helper is read from one run.
-        WORD_RUN = /\w+/
-
-        # A route-helper suffix inside a word run.
-        ROUTE_SUFFIX = /_(?:path|url)/
+        # Where a form call's argument span ends: the `%` of an ERB tag
+        # terminator. See {FormActionScan}.
+        FORM_SPAN_STOP = /%/
 
         # Common Rails view helper methods to detect in template source.
         COMMON_HELPERS = %w[
@@ -166,64 +160,14 @@ module Woods
         end
 
         # Form-action candidates, one per form call that reaches a route
-        # helper before the next `%`. A helper serves one form call, and a
-        # form call inside a consumed helper word is skipped. Equivalent to
-        # scanning `form_(with|for)\b[^%]*?(\w+)_(path|url)`, without that
-        # pattern's polynomial backtracking.
+        # helper before the next `%`.
         #
         # @param source [String]
         # @return [Array<Hash>]
         def form_action_candidates(source)
-          return [] unless source.match?(FORM_CALL)
-
-          helpers = route_helper_words(source)
-          percents = positions(source, /%/)
-          candidates = []
-          resume = helper_index = percent_index = 0
-          positions(source, FORM_CALL, with_end: true).each do |call_start, call_end|
-            next if call_start < resume
-
-            helper_index += 1 while helper_index < helpers.size && helpers[helper_index][0] < call_end
-            percent_index += 1 while percent_index < percents.size && percents[percent_index] < call_end
-            start, finish, helper = helpers[helper_index]
-            next unless start && (percent_index == percents.size || start < percents[percent_index])
-
-            candidates << { helper: helper, via: :form_action }
-            resume = finish
+          FormActionScan.route_helpers(source, stop: FORM_SPAN_STOP).map do |route_name, suffix|
+            { helper: "#{route_name}_#{suffix}", via: :form_action }
           end
-          candidates
-        end
-
-        # Every word run that holds a route-helper suffix after its first
-        # character, as `[start, end_of_suffix, helper]`. The last suffix in
-        # the run wins, as a greedy `(\w+)_(path|url)` would choose.
-        #
-        # @param source [String]
-        # @return [Array<Array>]
-        def route_helper_words(source)
-          positions(source, WORD_RUN, with_end: true).filter_map do |start, finish|
-            word = source[start...finish]
-            at = word.rindex(ROUTE_SUFFIX)
-            next unless at&.positive?
-
-            suffix = word[at + 1, 4] == 'path' ? 'path' : 'url'
-            [start, start + at + 1 + suffix.length, "#{word[0...at]}_#{suffix}"]
-          end
-        end
-
-        # Character offsets of every match of a pattern.
-        #
-        # @param source [String]
-        # @param pattern [Regexp]
-        # @param with_end [Boolean] Return `[start, end]` pairs
-        # @return [Array]
-        def positions(source, pattern, with_end: false)
-          found = []
-          source.scan(pattern) do
-            match = Regexp.last_match
-            found << (with_end ? [match.begin(0), match.end(0)] : match.begin(0))
-          end
-          found
         end
 
         # Source lines joined into Ruby statements: a line ending in a comma
