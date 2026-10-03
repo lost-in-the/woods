@@ -634,6 +634,23 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       expect(calls.map { |c| c[:type] }).to eq([:fetch])
     end
 
+    {
+      'output tag in an attribute with a fallback' => '<i data-token="<%= Rails.cache.read(KEY) || fallback %>"></i>',
+      'ternary' => '<i data-token="<%= Rails.cache.read(KEY) ? token : nil %>"></i>',
+      'chained call' => '<i data-token="<%= Rails.cache.read(KEY).to_s %>"></i>',
+      'safe navigation' => '<i data-token="<%= Rails.cache.read(KEY)&.token %>"></i>',
+      'elsif condition' => "<% if a %>\n<% elsif Rails.cache.read(KEY).present? %>\n<% end %>",
+      'compound condition' => "<% if Rails.cache.read(KEY) && ready? %>\n<% end %>",
+      'chained block' => '<%= Rails.cache.fetch(KEY) { 1 }.to_s %>'
+    }.each do |shape, template|
+      it "reads the key of a call inside a larger expression: #{shape}" do
+        key = '"widget-token-#{current_owner.id}"'
+        calls = calls_for('app/views/widgets/show.html.erb', "#{template.sub('KEY', key)}\n")
+
+        expect(calls.map { |c| c[:key_pattern] }).to eq([key])
+      end
+    end
+
     it 'truncates a long key expression to 120 characters' do
       key = "[#{Array.new(40) { |i| "part_#{i}" }.join(', ')}]"
       calls = calls_for('app/views/widgets/index.html.haml', "- cache #{key} do\n  %p hi\n")

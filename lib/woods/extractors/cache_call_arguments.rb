@@ -22,6 +22,12 @@ module Woods
       # Calls whose first positional argument is a condition, not the key.
       CONDITIONAL_CALLS = %i[cache_if cache_unless cache_if! cache_unless!].freeze
 
+      # Names of the calls this module reads. The call at an occurrence may
+      # sit inside a larger expression (`Rails.cache.read(k).present?`,
+      # `Rails.cache.read(k) || fallback`), so it is found by name among the
+      # nodes that start where the occurrence starts.
+      CALL_NAMES = (%i[fetch read write delete exist? cache cache! caches_action] + CONDITIONAL_CALLS).freeze
+
       # `1.hour`-style duration calls count as literals.
       DURATION_METHODS = %i[
         second seconds minute minutes hour hours day days week weeks fortnight fortnights month months year years
@@ -64,15 +70,25 @@ module Woods
         candidates.each do |snippet|
           [snippet, "#{snippet}\nend"].each do |code|
             parsed = Prism.parse(code)
-            return leading_call(parsed) if parsed.success?
+            return call_at_start(parsed) if parsed.success?
           end
         end
-        candidates.first && leading_call(Prism.parse(candidates.first))
+        candidates.first && call_at_start(Prism.parse(candidates.first))
       end
 
-      def leading_call(parsed)
-        node = parsed.value.statements.body.first
-        node if node.is_a?(Prism::CallNode)
+      # The outermost call named in {CALL_NAMES} among the nodes that begin
+      # at the snippet start. Only nodes starting at offset 0 are followed,
+      # so the walk is bounded by the snippet and never recurses.
+      def call_at_start(parsed)
+        pending = [parsed.value.statements.body.first].compact
+        until pending.empty?
+          node = pending.shift
+          next unless node.location.start_offset.zero?
+          return node if node.is_a?(Prism::CallNode) && CALL_NAMES.include?(node.name)
+
+          pending.concat(node.compact_child_nodes)
+        end
+        nil
       end
 
       # Candidate call texts, shortest first, cut at the end of an ERB tag.
@@ -118,7 +134,7 @@ module Woods
         node.is_a?(Prism::CallNode) && DURATION_METHODS.include?(node.name) && node.arguments.nil? &&
           (node.receiver.is_a?(Prism::IntegerNode) || node.receiver.is_a?(Prism::FloatNode))
       end
-      private_class_method :parse_call, :leading_call, :snippets, :argument_range, :positional_arguments, :key_expression,
+      private_class_method :parse_call, :call_at_start, :snippets, :argument_range, :positional_arguments, :key_expression,
                            :keyword_options, :literal?
     end
   end
