@@ -756,6 +756,51 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       expect(periodic_units.map { |u| u.metadata[:job_class] }).to eq(['Shipment::SweepWorker'])
     end
 
+    it 'reads registrations made through a numbered block parameter' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.periodic do
+            _1.register('0 7 * * *', 'Ledger::PurgeWorker')
+          end
+        end
+      RUBY
+
+      expect(periodic_units.map { |u| [u.metadata[:job_class], u.metadata[:line]] })
+        .to eq([['Ledger::PurgeWorker', 3]])
+    end
+
+    it 'reads registrations made through the it block parameter' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.periodic { it.register('35 * * * *', Shipment::SweepWorker) }
+        end
+      RUBY
+
+      expect(periodic_units.map { |u| u.metadata[:job_class] }).to eq(['Shipment::SweepWorker'])
+    end
+
+    it 'ignores _1 and it outside the periodic block they belong to' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.periodic do |mgr|
+            [1].each { _1.register('0 7 * * *', 'Ledger::PurgeWorker') }
+          end
+          config.periodic { [2].each { |n| n.register('0 8 * * *', 'Ledger::RefreshRatesWorker') } }
+        end
+      RUBY
+
+      expect(periodic_units).to eq([])
+    end
+
+    it 'keeps a registration whose cron is not a literal and records its source' do
+      periodic_initializer("mgr.register(ENV.fetch('PURGE_CRON'), 'Ledger::PurgeWorker')\n")
+
+      metadata = periodic_units.first.metadata
+      expect(metadata).to include(cron_expression: nil, cron_source: "ENV.fetch('PURGE_CRON')",
+                                  frequency_human_readable: nil, job_class: 'Ledger::PurgeWorker')
+      expect(logger).to have_received(:warn).with(/sidekiq\.rb:3.*cron is not a literal/)
+    end
+
     it 'ignores register calls whose receiver is not the periodic block parameter' do
       create_file('config/initializers/registry.rb', <<~RUBY)
         Widget.registry.register('0 7 * * *', 'Ledger::PurgeWorker')

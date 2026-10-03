@@ -706,8 +706,10 @@ expanded mailer and schedule identities in an existing index.
 - Reads Sidekiq Enterprise periodic registrations (`mgr.register(cron, job_class, options)` inside a
   `periodic` block, format `:sidekiq_periodic`) from `config/initializers/**/*.rb`,
   `config/environments/*.rb` and `config/application.rb` with a static Prism scan; the code is never run.
-  Files that never mention `periodic` are not parsed. The job class may be a string or a constant;
-  options are kept in `metadata[:options]`. A class that is not loaded is logged as a warning and the
+  Files that never mention `periodic` are not parsed. The block parameter may be named, `_1`, or `it`.
+  The job class may be a string or a constant; options are kept in `metadata[:options]`. A computed
+  cron keeps the unit with `cron_expression: nil` and its source in `metadata[:cron_source]`, and is
+  logged as a warning. A class that is not loaded is logged as a warning and the
   unit is kept with `job_class_resolved: false`. Identifiers are `scheduled:<job_class.underscore>`;
   repeat registrations of one class are numbered `:2`, `:3` by file and line.
 - Extracts job class name, cron expression, queue, and any arguments

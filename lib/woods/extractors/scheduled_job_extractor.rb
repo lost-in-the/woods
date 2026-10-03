@@ -421,6 +421,10 @@ module Woods
         unless resolved
           Rails.logger.warn("[Woods] Periodic registration at #{location} names #{job_class}, which is not a loaded class")
         end
+        if registration[:cron_source]
+          Rails.logger.warn("[Woods] Periodic registration at #{location}: cron is not a literal " \
+                            "(#{registration[:cron_source]})")
+        end
 
         unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{job_class.underscore}",
                                  file_path: file_path)
@@ -437,6 +441,7 @@ module Woods
           line: registration[:line],
           frequency_human_readable: humanize_frequency(registration[:cron], :sidekiq_periodic)
         }
+        unit.metadata[:cron_source] = registration[:cron_source] if registration[:cron_source]
         unit.dependencies = build_dependencies(job_class)
         unit
       end
