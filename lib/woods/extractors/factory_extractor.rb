@@ -2,6 +2,7 @@
 
 require_relative '../source_inputs/consumer_errors'
 
+require_relative 'factory_calls'
 require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -96,7 +97,11 @@ module Woods
         by_name = factories.each_with_object({}) do |factory, names|
           [factory[:name], *factory[:aliases]].each { |name| names[name] ||= factory }
         end
-        factories.each { |factory| factory[:class_name] = inherited_class(factory, by_name) }
+        factories.each do |factory|
+          factory[:class_name] = inherited_class(factory, by_name)
+          parent = factory[:parent_factory]
+          factory[:parent_target] = (by_name[parent] || {}).fetch(:name, parent) if parent
+        end
       end
 
       # Walk the parent chain to the nearest explicit class. An unknown parent
@@ -141,6 +146,7 @@ module Woods
         in_transient = false
         transient_depth = nil
         scannable = LineNeutralizer.neutralize_lines(source)
+        calls = FactoryCalls.by_line(source)
 
         source.lines.each_with_index do |line, index|
           stripped = line.strip
@@ -153,11 +159,14 @@ module Woods
           # complete as soon as it is parsed. Requiring a block used to drop
           # those silently, which is the very shape the parent-inheritance
           # parsing below exists to support.
-          if (factory_data = match_factory(stripped, depth, index + 1))
+          if (factory_data = factory_at(calls, stripped, code, depth, index + 1))
             factory_data[:parent_factory] ||= factory_stack.last&.fetch(:name)
-            if opens_block?(code)
+            opening = factory_data.delete(:block_line)
+            if opening
               factory_stack.push(factory_data)
-              depth += 1
+              # A block opened on a continuation line is counted there, by
+              # the generic opener check, when the loop reaches that line.
+              depth += 1 if opening == index + 1
             else
               completed << factory_data
             end
@@ -224,6 +233,33 @@ module Woods
         completed
       end
 
+      # The factory defined on this line, if any. Read from the parsed call
+      # when the file parses; from the line itself when it does not.
+      #
+      # @param calls [Hash{Integer => Hash}, nil] {FactoryCalls.by_line}
+      # @param stripped [String] Stripped source line
+      # @param code [String] The same line, neutralized
+      # @param depth [Integer] Current block depth
+      # @param line_number [Integer] 1-based line number
+      # @return [Hash, nil] factory data with `:block_line` set when it opens a block
+      def factory_at(calls, stripped, code, depth, line_number)
+        unless calls
+          data = match_factory(stripped, depth, line_number)
+          data[:block_line] = (line_number if opens_block?(code)) if data
+          return data
+        end
+
+        facts = calls[line_number]
+        facts && new_factory(facts, depth, line_number)
+      end
+
+      # @param facts [Hash] name, explicit_class, parent_factory, aliases, block_line
+      # @return [Hash] factory data for the parser's stack
+      def new_factory(facts, depth, line_number)
+        facts.merge(open_depth: depth, line_number: line_number, traits: [], associations: [],
+                    sequences: [], callbacks: [], transient_attributes: [])
+      end
+
       # Try to match a factory definition line and return initialized factory data.
       #
       # Handles:
@@ -260,19 +296,9 @@ module Woods
           options[:parent] = parent_match[1]
         end
 
-        {
-          name: name,
-          explicit_class: options[:class_name],
-          aliases: line[/\baliases:\s*\[([^\]\n]*)\]/, 1].to_s.scan(/:(\w+)/).flatten,
-          parent_factory: options[:parent],
-          open_depth: depth,
-          line_number: line_number,
-          traits: [],
-          associations: [],
-          sequences: [],
-          callbacks: [],
-          transient_attributes: []
-        }
+        new_factory({ name: name, explicit_class: options[:class_name], parent_factory: options[:parent],
+                      aliases: line[/\baliases:\s*\[([^\]\n]*)\]/, 1].to_s.scan(/:(\w+)/).flatten },
+                    depth, line_number)
       end
 
       # Convert a snake_case factory name to a CamelCase class name.
@@ -355,6 +381,7 @@ module Woods
           associations: factory_data[:associations],
           sequences: factory_data[:sequences],
           parent_factory: factory_data[:parent_factory],
+          aliases: factory_data[:aliases],
           callbacks: factory_data[:callbacks].uniq,
           transient_attributes: factory_data[:transient_attributes],
           line_number: factory_data[:line_number]
@@ -376,7 +403,7 @@ module Woods
         deps << { type: :model, target: factory_data[:class_name], via: :factory_for }
 
         if factory_data[:parent_factory]
-          deps << { type: :factory, target: factory_data[:parent_factory], via: :factory_parent }
+          deps << { type: :factory, target: factory_data[:parent_target], via: :factory_parent }
         end
 
         factory_data[:associations].each do |assoc|
