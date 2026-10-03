@@ -190,6 +190,16 @@ RSpec.describe Woods::Extractors::HelperCatalog do
         .to eq([{ type: :controller, target: 'ApplicationController', via: :helper_method }])
     end
 
+    it 'does not attribute a framework base module to the application class that inherits it' do
+      base_helpers = Module.new { def protect_against_forgery? = true }
+      base = context_class('ActionController::Base', helpers: base_helpers)
+      application = context_class('ApplicationController', parent: base, helpers: base_helpers)
+      catalog = described_class.new(root: rails_root, contexts: [application], default_context: application)
+
+      expect(catalog.names).to be_empty
+      expect(catalog.declared_helper_methods(application)).to eq([])
+    end
+
     it 'does not resolve a name the context cannot reach' do
       expect(catalog.resolve('current_widget', ledgers)).to eq([])
     end

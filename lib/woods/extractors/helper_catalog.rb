@@ -309,12 +309,20 @@ module Woods
         app_file?(constant_file(klass.name))
       end
 
-      # Each class's `_helpers` module, keyed by identity. A subclass that
-      # shares its parent's module is not an owner: parents come first.
+      # Each class's `_helpers` module, keyed by identity. A class that
+      # shares its superclass's module declares nothing of its own, and so
+      # is not an owner. This also keeps a framework base's module (and the
+      # `helper_method` names Rails declares on it) off the application
+      # class that inherits it unchanged.
       def helpers_owners
         @helpers_owners ||= contexts.each_with_object({}.compare_by_identity) do |klass, owners|
-          owners[klass._helpers] ||= klass
+          owners[klass._helpers] ||= klass if own_helpers?(klass)
         end
+      end
+
+      def own_helpers?(klass)
+        parent = klass.superclass
+        !parent.respond_to?(:_helpers) || !parent._helpers.equal?(klass._helpers)
       end
 
       # @return [Hash{Class => Set<String>}] names each owner's `_helpers`
