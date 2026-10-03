@@ -160,6 +160,7 @@ module Woods
 
         # children[0] = condition, children[1] = then, children[2] = else
         children = node.children || []
+        walk_predicate(children[0], operations)
         walk(children[1], then_ops) if children[1].is_a?(Ast::Node)
         walk(children[2], else_ops) if children[2].is_a?(Ast::Node)
 
@@ -185,6 +186,7 @@ module Woods
       # being switched on. Mirrors {#handle_conditional}.
       def handle_case(node, operations)
         children = node.children || []
+        walk_predicate(children[0], operations)
         branch_ops = []
         children.drop(1).each { |child| walk(child, branch_ops) if child.is_a?(Ast::Node) }
 
@@ -198,6 +200,16 @@ module Woods
           then_ops: branch_ops,
           else_ops: []
         }
+      end
+
+      # Walk a conditional's predicate into the enclosing operations, ahead
+      # of the conditional itself: it runs before either branch, whichever
+      # is taken (`if @widget.save`, `case Router.pick(request)`).
+      #
+      # @param predicate [Ast::Node, String, nil]
+      # @param operations [Array<Hash>] the conditional's own level
+      def walk_predicate(predicate, operations)
+        walk(predicate, operations) if predicate.is_a?(Ast::Node)
       end
 
       # Source text for a conditional's predicate child, which the parser may

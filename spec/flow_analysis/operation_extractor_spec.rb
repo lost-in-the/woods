@@ -325,6 +325,80 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       end
     end
 
+    # A predicate runs before either branch, so its calls belong at the
+    # level the conditional sits at, ahead of it. `if @widget.save` is the
+    # side effect of a typical create action; dropping it left only the
+    # conditional and its responses.
+    describe 'conditional predicates' do
+      it 'emits a call in an if predicate ahead of the conditional' do
+        source = <<~RUBY
+          def create
+            if @widget.save
+              redirect_to @widget
+            else
+              render :new
+            end
+          end
+        RUBY
+
+        ops = extract_method_ops(source, 'create')
+
+        expect(ops.map { |o| o[:type] }).to eq(%i[call conditional])
+        expect(ops.first).to include(target: '@widget', method: 'save', line: 2)
+      end
+
+      it 'keeps the predicate call out of the branches' do
+        source = <<~RUBY
+          def create
+            if Ledger.post!(entry)
+              Audit.record(entry)
+            end
+          end
+        RUBY
+
+        cond = extract_method_ops(source, 'create').find { |o| o[:type] == :conditional }
+
+        expect(cond[:then_ops].map { |o| o[:target] }).to eq(['Audit'])
+      end
+
+      it 'emits the predicate call of a conditional whose branches have no operations' do
+        source = <<~RUBY
+          def show
+            return unless Policy.allowed?(user)
+
+            @widget
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'show').map { |o| [o[:target], o[:method]] })
+          .to eq([%w[Policy allowed?]])
+      end
+
+      it 'emits the call a case statement switches on ahead of the conditional' do
+        source = <<~RUBY
+          def route
+            case Classifier.classify(payload)
+            when :urgent then UrgentWorker.perform_async(payload.id)
+            end
+          end
+        RUBY
+
+        ops = extract_method_ops(source, 'route')
+
+        expect(ops.map { |o| [o[:type], o[:target]] }).to eq([[:call, 'Classifier'], [:conditional, nil]])
+      end
+
+      it 'emits an enqueue in a predicate as an async operation' do
+        source = <<~RUBY
+          def create
+            render :queued if SyncJob.perform_later(widget.id)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').first).to include(type: :async, target: 'SyncJob')
+      end
+    end
+
     it 'skips conditionals with no significant ops' do
       source = <<~RUBY
         def show
