@@ -232,4 +232,130 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
     load_source('populated_extension', 'module StandaloneFixture::EmptyOwner; def self.call; end; end')
     expect(units).to eq([])
   end
+
+  describe 'module shapes without plain own methods (#673)' do
+    before { require 'active_support/concern' }
+
+    def only_unit
+      values = units
+      expect(values.size).to eq(1)
+      values.first
+    end
+
+    it 'extracts a concern no model includes as a module unit listing its ClassMethods' do
+      load_source('studio/configurable', <<~RUBY)
+        module StandaloneFixture::Configurable
+          extend ActiveSupport::Concern
+          class_methods do
+            def configurable(*) = nil
+          end
+        end
+      RUBY
+      unit = only_unit
+      expect(unit.identifier).to eq('StandaloneFixture::Configurable')
+      expect(unit.metadata).to include(ruby_kind: 'module', active_support_concern: true,
+                                       class_methods: ['configurable'], public_methods: [], method_count: 1)
+    end
+
+    it 'treats an included block as concern behavior even without any method' do
+      load_source('stamped', <<~RUBY)
+        module StandaloneFixture::Stamped
+          extend ActiveSupport::Concern
+          included do
+            attr_accessor :stamp
+          end
+        end
+      RUBY
+      expect(only_unit.metadata).to include(ruby_kind: 'module', active_support_concern: true, method_count: 0)
+    end
+
+    it 'keeps singleton methods wrapped by a memoizer defined in another file' do
+      load_source('memo', <<~RUBY, directory: 'lib')
+        module StandaloneFixture::Memo
+          def memoize(name)
+            wrapper = Module.new
+            wrapper.define_method(name) { |*args| (@memo ||= {})[[name, args]] ||= super(*args) }
+            prepend wrapper
+            name
+          end
+        end
+      RUBY
+      path = load_source('standalone_fixture/preference', <<~RUBY)
+        module StandaloneFixture
+          module Preference
+            module UrlMapper
+              class << self
+                extend StandaloneFixture::Memo
+                memoize def for(path) = Base.new(path)
+              end
+
+              class Base
+                def initialize(path) = @path = path
+              end
+            end
+          end
+        end
+      RUBY
+      values = described_class.new.extract_poro_units(path)
+      expect(values.map(&:identifier)).to contain_exactly('StandaloneFixture::Preference::UrlMapper',
+                                                          'StandaloneFixture::Preference::UrlMapper::Base')
+      mapper = values.find { |unit| unit.identifier.end_with?('UrlMapper') }
+      expect(mapper.metadata).to include(ruby_kind: 'module', class_methods: ['for'])
+      base = values.find { |unit| unit.identifier.end_with?('Base') }
+      expect(base.metadata).not_to have_key(:ruby_kind)
+      expect(base.source_code).to include('def initialize(path)')
+      expect(base.source_code).not_to include('memoize def for')
+    end
+
+    it 'keeps a singleton method its own file declares but another file redefines' do
+      load_source('wrapping', <<~RUBY, directory: 'lib')
+        module StandaloneFixture::Wrapping
+          def self.wrap(mod, name)
+            original = mod.method(name)
+            mod.singleton_class.send(:define_method, name) { |*a| original.call(*a) }
+          end
+        end
+      RUBY
+      load_source('lookup', <<~RUBY)
+        module StandaloneFixture::Lookup
+          class << self
+            def call(id) = id
+          end
+          StandaloneFixture::Wrapping.wrap(self, :call)
+        end
+      RUBY
+      expect(only_unit.metadata).to include(ruby_kind: 'module', class_methods: ['call'])
+    end
+
+    it 'extracts a constant-only module with its constants in metadata' do
+      load_source('email_pattern', <<~RUBY)
+        module StandaloneFixture::EmailPattern
+          REGEX = /\\A[^@\\s]+@[^@\\s]+\\z/
+        end
+      RUBY
+      unit = only_unit
+      expect(unit.identifier).to eq('StandaloneFixture::EmailPattern')
+      expect(unit.metadata).to include(ruby_kind: 'module', constants: ['REGEX'], method_count: 0)
+    end
+
+    it 'does not count a nested module constant as module content' do
+      load_source('billing', <<~RUBY)
+        module StandaloneFixture::Billing
+          module Inner; end
+        end
+      RUBY
+      expect(units).to eq([])
+    end
+
+    it 'still leaves a bodiless nested exception class out of a namespace file' do
+      path = load_source('standalone_fixture/errors', <<~RUBY)
+        module StandaloneFixture
+          module Errors
+            class Missing < StandardError; end
+          end
+        end
+      RUBY
+      expect(described_class.new.extract_poro_units(path)).to eq([])
+    end
+  end
 end

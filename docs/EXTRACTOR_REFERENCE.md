@@ -499,8 +499,22 @@ loaded module whose canonical declaration and own methods are defined under
 `class << self` methods and plain instance-method mixins. Discovery uses runtime
 ownership and source locations without calling those methods.
 
-Namespace-only wrappers, aliases, unloaded constants, gem-owned modules and
-methods supplied only by another file do not establish standalone ownership.
+Three more module shapes produce a unit:
+
+| Shape | Evidence | Metadata |
+|---|---|---|
+| An `ActiveSupport::Concern` no live model includes | A `ClassMethods` method defined in the file, or an `included` / `prepended` block | `active_support_concern: true`; `ClassMethods` names join `class_methods` |
+| A method wrapped by a helper from another file | A prepended wrapper (a memoizer) is skipped through the super chain; a method redefined in place still counts when this module body declares it with `def` | Same as any module |
+| A constant-only module | Non-module constants declared inside the module body | `constants: [...]` |
+
+When a namespace file's governed constant is a module, classes nested in it are
+units too, if each defines at least one method and is canonically declared in
+that file. A bodiless helper such as `class Error < StandardError; end` stays
+inside its owner's source.
+
+Namespace-only wrappers (no methods, no constants, no hook), aliases, unloaded
+constants, gem-owned modules and methods supplied only by another file do not
+establish standalone ownership.
 An app module included by a live model belongs to `ConcernExtractor`; a library
 module remains owned by `LibExtractor`. Separate callable modules sharing a
 source file retain their own identities. Ordinary class PORO identifiers stay unchanged.

@@ -84,10 +84,11 @@ module Woods
       def extract_poro_units(file_path, ar_names: Set.new)
         source = File.read(file_path)
         analysis = SourceReferences::Collector.new.call(source)
-        primary = extract_class_unit(file_path, source, ar_names, analysis)
         discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        primary = extract_class_unit(file_path, source, ar_names, analysis)
+        nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)
         modules = discovery.call(file_path, analysis: analysis).map { |record| module_unit(file_path, source, record) }
-        [primary, *modules].compact
+        [primary, *nested, *modules].compact
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
         []
@@ -146,6 +147,37 @@ module Woods
         unit.source_code = annotate_source(source, class_name, parent_class)
         unit.metadata = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
+        unit
+      end
+
+      # A namespace file's governed constant is a module, so no class is
+      # primary. Classes nested only in modules, with a method of their own
+      # and canonically declared here, are units; bodiless helpers
+      # (`class Error < StandardError; end`) are not.
+      def nested_class_units(file_path, source, ar_names, analysis)
+        declarations = analysis.fetch('declarations')
+        modules = declarations.select { |declaration| declaration['kind'] == 'module' }.to_set { |d| d['owner'] }
+        lines = source.lines
+        candidates = declarations.select do |declaration|
+          declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero? &&
+            !declaration['constructor'] && !modules.include?(declaration['owner']) &&
+            !ar_names.include?(declaration['owner']) &&
+            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) } &&
+            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(/^\s*def\s/)
+        end
+        @module_discovery.owned_classes(file_path, candidates).map do |identifier|
+          declaration = candidates.find { |candidate| candidate['owner'] == identifier }
+          nested_class_unit(file_path, source, identifier, lines[(declaration['line'] - 1)...declaration['end_line']].join)
+        end
+      end
+
+      def nested_class_unit(file_path, source, identifier, body)
+        unit = ExtractedUnit.new(type: :poro, identifier: identifier, file_path: file_path)
+        parent_class = extract_parent_class(source, identifier)
+        unit.namespace = extract_namespace(identifier)
+        unit.source_code = annotate_source(body, identifier, parent_class)
+        unit.metadata = extract_metadata(body, parent_class)
+        unit.dependencies = extract_dependencies(body)
         unit
       end
 
