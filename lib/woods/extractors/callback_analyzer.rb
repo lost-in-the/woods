@@ -231,7 +231,7 @@ module Woods
       #
       # @return [Array<Integer>]
       def line_starts
-        @line_starts ||= @source_code.each_line.each_with_object([0]) do |text, starts|
+        @line_starts ||= @source_code.each_line.with_object([0]) do |text, starts|
           starts << (starts.last + text.length)
         end
       end
