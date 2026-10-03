@@ -256,7 +256,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 | `route` | `config/routes.rb` |
 | `engine` | `config/routes.rb`, `Gemfile.lock` |
 | `middleware` | `config/application.rb`, `Gemfile.lock`, any file under `config/initializers`/`config/environments` |
-| `scheduled_job` | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/application.rb`, any `.rb` under `config/initializers`/`config/environments` |
+| `scheduled_job` | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml`, `config/application.rb`, any `.rb` under `config/initializers`/`config/environments` |
 | `state_machine` | any `.rb` change under the scanned model directories |
 | `factory` | any `.rb` change under `spec/factories`/`test/factories` |
 | `event` | any `.rb` change under `app/` |

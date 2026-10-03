@@ -702,7 +702,14 @@ expanded mailer and schedule identities in an existing index.
 **What it captures:** Scheduled job definitions from cron-style config files. Supports multiple scheduling backends.
 
 **Key details:**
-- Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
+- Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever),
+  `config/schedule.yml` (format `:sidekiq_schedule`: Sidekiq-Cron's default schedule file, and a common
+  separate file for a sidekiq-scheduler schedule), and the `:scheduler: :schedule:` section of
+  `config/sidekiq.yml` (format `:sidekiq_scheduler`; a legacy root `:schedule:` and a section for the
+  current environment are honoured, and a `config/sidekiq.yml` that never mentions `schedule` is not
+  parsed). Both new files take the sidekiq-scheduler shape described below (schedule types, the name
+  as class when `class` is omitted); `config/schedule.yml` also selects an environment section like
+  the other YAML formats.
 - Reads Sidekiq Enterprise periodic registrations (`mgr.register(cron, job_class, options)` inside a
   `periodic` block, format `:sidekiq_periodic`) from `config/initializers/**/*.rb`,
   `config/environments/*.rb` and `config/application.rb` with a static Prism scan; the code is never run.
@@ -743,12 +750,13 @@ expanded mailer and schedule identities in an existing index.
 - Environment-wrapped task maps select the current Rails environment, including
   custom names; an absent environment falls back to the first section, while an
   explicitly empty section stays empty. Flat task maps remain supported.
-- Sidekiq-Cron remains safe-loaded YAML; Whenever remains a static DSL scan.
+- Sidekiq-Cron, `config/schedule.yml` and `config/sidekiq.yml` are safe-loaded YAML (ERB is not
+  run); Whenever remains a static DSL scan.
   Invalid YAML/ERB, missing required files and runtime configuration errors are
   logged and omit that schedule file. Source remains the original file text.
 - No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes.
-  The Ruby config sources are restart-sensitive: incremental extraction refuses them and a full
-  `woods:extract` picks up changed periodic registrations.
+  The Ruby config sources and `config/sidekiq.yml` are restart-sensitive: incremental extraction
+  refuses them and a full `woods:extract` picks up changed registrations and schedules.
 
 ---
 

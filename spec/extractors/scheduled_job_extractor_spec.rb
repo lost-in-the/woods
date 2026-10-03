@@ -1160,6 +1160,139 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
     end
   end
 
+  # ── Shared schedule YAML (config/schedule.yml, config/sidekiq.yml) ──
+
+  describe 'config/schedule.yml' do
+    before do
+      stub_const('LedgerJob', Class.new)
+      stub_const('SweepWorker', Class.new)
+    end
+
+    def schedule_units
+      described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_schedule }
+    end
+
+    it 'reads Sidekiq-Cron and sidekiq-scheduler entries' do
+      path = create_file('config/schedule.yml', <<~YAML)
+        morning_ledger:
+          cron: "0 7 * * *"
+          class: LedgerJob
+          queue: low
+          args: [1]
+        sweep:
+          every: ["45m", { first_in: "10s" }]
+          class: SweepWorker
+      YAML
+
+      ledger, sweep = schedule_units
+      expect(ledger.identifier).to eq('scheduled:morning_ledger')
+      expect(ledger.file_path).to eq(path)
+      expect(ledger.source_code).to eq(File.read(path))
+      expect(ledger.metadata).to include(task_name: 'morning_ledger', job_class: 'LedgerJob', schedule_type: :cron,
+                                         cron_expression: '0 7 * * *', queue: 'low', args: [1],
+                                         frequency_human_readable: 'daily at 07:00')
+      expect(ledger.dependencies).to eq([{ type: :job, target: 'LedgerJob', via: :scheduled }])
+      expect(sweep.metadata).to include(schedule_type: :every, every: ['45m', { 'first_in' => '10s' }],
+                                        frequency_human_readable: 'every 45 minutes')
+    end
+
+    it 'uses the entry name as the class when class is omitted' do
+      create_file('config/schedule.yml', "SweepWorker:\n  cron: '0 */5 * * * *'\n")
+
+      expect(schedule_units.first.metadata).to include(job_class: 'SweepWorker', job_class_inferred: true)
+    end
+
+    it 'selects the current environment section' do
+      allow(Rails).to receive(:env).and_return('production')
+      create_file('config/schedule.yml', <<~YAML)
+        development:
+          sweep:
+            cron: "* * * * *"
+            class: SweepWorker
+        production:
+          sweep:
+            cron: "0 * * * *"
+            class: SweepWorker
+      YAML
+
+      expect(schedule_units.map { |u| u.metadata[:cron_expression] }).to eq(['0 * * * *'])
+    end
+
+    it 'qualifies a name shared with config/sidekiq_cron.yml' do
+      create_file('config/schedule.yml', "sweep:\n  cron: '0 * * * *'\n  class: SweepWorker\n")
+      create_file('config/sidekiq_cron.yml', "sweep:\n  cron: '0 1 * * *'\n  class: SweepWorker\n")
+
+      expect(described_class.new.extract_all.map(&:identifier))
+        .to contain_exactly('scheduled:sidekiq_schedule:sweep', 'scheduled:sidekiq_cron:sweep')
+    end
+
+    it 'logs and omits an unparseable file' do
+      create_file('config/schedule.yml', "sweep: [unfinished\n")
+
+      expect(described_class.new.extract_all).to eq([])
+      expect(logger).to have_received(:error).with(/schedule\.yml/)
+    end
+  end
+
+  describe 'config/sidekiq.yml scheduler section' do
+    before { stub_const('SweepWorker', Class.new) }
+
+    def scheduler_units
+      described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_scheduler }
+    end
+
+    it 'reads :scheduler: :schedule: entries' do
+      create_file('config/sidekiq.yml', <<~YAML)
+        :concurrency: 5
+        :queues:
+          - default
+        :scheduler:
+          :dynamic: true
+          :schedule:
+            sweep:
+              cron: "0 30 6 * * 1 Europe/Stockholm"
+              class: SweepWorker
+            heartbeat:
+              interval: ["1m"]
+              class: SweepWorker
+      YAML
+
+      described = scheduler_units.map do |u|
+        [u.identifier, u.metadata[:schedule_type], u.metadata[:frequency_human_readable]]
+      end
+      expect(described).to eq([['scheduled:sweep', :cron, 'weekly on Monday at 06:30 (Europe/Stockholm)'],
+                               ['scheduled:heartbeat', :interval, 'every minute']])
+    end
+
+    it 'reads a legacy top-level :schedule: section' do
+      create_file('config/sidekiq.yml', ":schedule:\n  sweep:\n    every: 1h\n    class: SweepWorker\n")
+
+      expect(scheduler_units.map(&:identifier)).to eq(['scheduled:sweep'])
+    end
+
+    it 'prefers the current environment section' do
+      allow(Rails).to receive(:env).and_return('production')
+      create_file('config/sidekiq.yml', <<~YAML)
+        :scheduler:
+          :schedule:
+            sweep: { cron: "* * * * *", class: SweepWorker }
+        production:
+          :scheduler:
+            :schedule:
+              sweep: { cron: "0 3 * * *", class: SweepWorker }
+      YAML
+
+      expect(scheduler_units.map { |u| u.metadata[:cron_expression] }).to eq(['0 3 * * *'])
+    end
+
+    it 'emits nothing and logs nothing for a Sidekiq config without a schedule' do
+      create_file('config/sidekiq.yml', ":concurrency: <%= ENV.fetch('SIDEKIQ_CONCURRENCY', 5) %>\n")
+
+      expect(described_class.new.extract_all).to eq([])
+      expect(logger).not_to have_received(:error)
+    end
+  end
+
   # ── Human-readable frequency ───────────────────────────────────────
 
   describe 'human-readable frequency' do

@@ -396,7 +396,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
-| `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb` | scheduled_jobs |
+| `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
 | `app/models/**/*.rb` | state_machines |
 | `app/**/*.rb` | events |
 | `spec/factories/**`, `test/factories/**` | factories |
@@ -645,8 +645,11 @@ set.
 The exact additional boot-captured YAML set is `config/settings.yml`,
 `config/settings/*.yml`, and `config/{cable,storage,sidekiq,puma,cache,queue}.yml`
 (including `.yaml` spellings). Scheduled-job sources such as
-`config/recurring.yml` and `config/sidekiq_cron.yml` remain `:reextract` inputs,
-not restart triggers. `lib/woods/reload_policy.rb` is authoritative.
+`config/recurring.yml`, `config/sidekiq_cron.yml` and `config/schedule.yml` remain
+`:reextract` inputs, not restart triggers. `config/sidekiq.yml` is both: Sidekiq
+reads it at boot, so it stays a restart trigger even though its
+`:scheduler: :schedule:` section is a scheduled-job source.
+`lib/woods/reload_policy.rb` is authoritative.
 
 Two version-sensitive behaviours sit *behind* the classification rather than in
 it, and belong to whoever implements the reload step:

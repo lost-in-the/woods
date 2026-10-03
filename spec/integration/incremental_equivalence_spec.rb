@@ -1218,6 +1218,40 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .to raise_error(Woods::ExtractionError, /fresh Rails process/)
     end
 
+    it 'refreshes Sidekiq schedule entries when config/schedule.yml is edited and deleted' do
+      write_file('config/schedule.yml', "publish:\n  cron: '0 7 * * *'\n  class: PublishPostJob\n")
+      expect(read_json(full_extraction, 'dependency_graph.json').fetch('reverse').fetch('PublishPostJob'))
+        .to include('scheduled:publish')
+
+      run_sequence([
+                     lambda {
+                       write_file('config/schedule.yml', <<~YAML)
+                         publish:
+                           every: 45m
+                           class: PublishPostJob
+                         PublishPostJob:
+                           cron: '0 8 * * 0'
+                       YAML
+                     },
+                     -> { delete_file('config/schedule.yml') }
+                   ])
+    end
+
+    it 'publishes a config/sidekiq.yml schedule on a full run and leaves its edits to one' do
+      schedule = lambda do |cron|
+        ":scheduler:\n  :schedule:\n    publish:\n      cron: '#{cron}'\n      class: PublishPostJob\n"
+      end
+      path = write_file('config/sidekiq.yml', schedule.call('0 7 * * *'))
+
+      index = full_extraction
+      expect(read_json(index, 'dependency_graph.json').fetch('reverse').fetch('PublishPostJob'))
+        .to include('scheduled:publish')
+
+      write_file(path, schedule.call('0 9 * * *'))
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([path]) }
+        .to raise_error(Woods::ExtractionError, /fresh Rails process/)
+    end
+
     it 'leaves the manifest timestamp alone when a run changes nothing' do
       index_dir = Dir.mktmpdir('woods_diff_noop')
       (@scratch_dirs ||= []) << index_dir
