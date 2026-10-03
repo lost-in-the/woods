@@ -134,6 +134,16 @@ module Woods
       # @return [Array<String>] absolute directories to walk, nested entries
       #   collapsed into their ancestor so no file is handed over twice
       def component_directories
+        ComponentDiscovery.component_directories
+      end
+
+      # @return [Array<String>] directories to scan, relative to Rails.root
+      def component_paths
+        ComponentDiscovery.component_paths
+      end
+
+      # @see #component_directories
+      def self.component_directories
         present = component_paths
                   .map { |relative| File.join(Rails.root.to_s, relative) }
                   .uniq
@@ -148,9 +158,19 @@ module Woods
       # nothing", which is how an app opts out of the walk entirely.
       #
       # @return [Array<String>] directories to scan, relative to Rails.root
-      def component_paths
+      def self.component_paths
         configured = Woods.configuration&.component_paths
         configured.nil? ? DEFAULT_COMPONENT_PATHS : Array(configured)
+      end
+
+      # Whether a changed path can define or rename a component: a Ruby file
+      # under one of the component directories.
+      #
+      # @param path [String] absolute path
+      # @return [Boolean]
+      def self.component_source_path?(path)
+        path.end_with?('.rb') &&
+          component_directories.any? { |directory| path.start_with?("#{directory}#{File::SEPARATOR}") }
       end
 
       private
