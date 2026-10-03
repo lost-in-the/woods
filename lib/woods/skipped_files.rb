@@ -8,6 +8,7 @@ require_relative 'extractors/poro_extractor'
 require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/lib_extractor'
 require_relative 'graphql_document_paths'
+require_relative 'extractors/template_extensions'
 
 module Woods
   # Ruby files under the configured sweep roots, and GraphQL operation
@@ -35,6 +36,16 @@ module Woods
   # * +schema_definitions+ — the file holds type definitions (an SDL dump), not operations
   # * +parse_error+ — graphql-ruby could not parse the file
   #
+  # Template files (ERB, HAML, Jbuilder, Slim) are listed when a configured
+  # sweep glob names them. Nothing sweeps them as Ruby, so they would
+  # otherwise sit outside every unit with no record:
+  # * +non_view_template+ — a template outside the view directories, such as
+  #   a `config/*.erb` crontab
+  # * +unsupported_template_engine+ — a view no registered engine reads
+  # * +rejected_by:view_templates+ — a view its extractor emitted nothing for
+  # A template beside the Ruby file of a unit (a component sidecar) counts as
+  # covered by that unit.
+  #
   # The report is a pure function of the tree and the published unit paths,
   # so full and incremental runs produce the same bytes.
   class SkippedFiles
@@ -52,8 +63,9 @@ module Woods
     # @return [Hash] +total+, +counts+ by reason, and +files+ sorted by path
     def build(unit_paths)
       covered = unit_paths.compact.to_set { |path| relativize(path.to_s) }
-      files = candidates.reject { |relative| covered.include?(relative) }.map do |relative|
-        { 'path' => relative, 'reason' => reason_for(relative) }
+      templates = template_candidates.reject { |relative| sidecar_of_unit?(relative, covered) }
+      files = (candidates + templates).uniq.sort.reject { |relative| covered.include?(relative) }.map do |relative|
+        { 'path' => relative, 'reason' => skip_reason(relative) }
       end
       counts = files.map { |entry| entry['reason'] }.tally.sort.to_h
       { 'total' => files.size, 'counts' => counts, 'files' => files }
@@ -118,6 +130,42 @@ module Woods
 
       key = PathDispatcher.claiming_key_for(relative)
       key ? "rejected_by:#{key}" : @poro.skip_reason(path)
+    end
+
+    # Configuration sources are YAML or Ruby, so no path takes both branches.
+    def skip_reason(relative)
+      template?(relative) ? template_reason(relative) : reason_for(relative)
+    end
+
+    # Template files the configured globs name.
+    def template_candidates
+      globs = Woods.configuration&.unclaimed_ruby_paths || []
+      globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }.uniq
+           .select { |relative| listable_template?(relative) }
+    end
+
+    def listable_template?(relative)
+      template?(relative) && PathDispatcher::UNSWEPT_PREFIXES.none? { |prefix| relative.start_with?(prefix) } &&
+        File.file?(File.join(@root, relative))
+    end
+
+    def template?(relative)
+      Extractors::TemplateExtensions::DETECTED.any? { |extension| relative.end_with?(extension) }
+    end
+
+    def template_reason(relative)
+      key = PathDispatcher.claiming_key_for(relative)
+      return "rejected_by:#{key}" if key
+
+      view = Extractors::ViewTemplateExtractor::VIEW_DIRECTORIES.any? { |dir| relative.start_with?("#{dir}/") }
+      view ? 'unsupported_template_engine' : 'non_view_template'
+    end
+
+    # A sidecar sits beside a Ruby file of the same name, or in a directory
+    # named for one.
+    def sidecar_of_unit?(relative, covered)
+      directory = File.dirname(relative)
+      covered.include?("#{directory}/#{File.basename(relative)[/\A[^.]+/]}.rb") || covered.include?("#{directory}.rb")
     end
 
     def relativize(path)
