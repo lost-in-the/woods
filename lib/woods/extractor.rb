@@ -53,6 +53,7 @@ require_relative 'extractors/external_consumer_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
+require_relative 'extractors/test_support_extractor'
 require_relative 'extractors/poro_extractor'
 require_relative 'extractors/lib_extractor'
 require_relative 'extractors/package_extractor'
@@ -151,6 +152,7 @@ module Woods
       caching: Extractors::CachingExtractor,
       factories: Extractors::FactoryExtractor,
       test_mappings: Extractors::TestMappingExtractor,
+      test_support: Extractors::TestSupportExtractor,
       rails_source: Extractors::RailsSourceExtractor,
       poros: Extractors::PoroExtractor,
       libs: Extractors::LibExtractor,
@@ -200,6 +202,7 @@ module Woods
       caching: :caching,
       factory: :factories,
       test_mapping: :test_mappings,
+      test_support: :test_support,
       rails_source: :rails_source,
       # RailsSourceExtractor emits BOTH :rails_source and :gem_source units
       # into the rails_source/ output directory. Without this entry the
@@ -347,6 +350,14 @@ module Woods
       scheduled_jobs: :scheduled_job,
       state_machines: :state_machine,
       factories: :factory,
+      # Shared examples, shared contexts, matchers and helper modules are
+      # referenced by name across files, and a helper's `included_for` reads
+      # every support file's `config.include` lines: the support units, and
+      # the test mappings that resolve those names (and rake task names), are
+      # functions of the whole support set. A changed test file alone still
+      # dispatches per file.
+      test_support: :test_support,
+      test_mappings: :test_mapping,
       events: :event,
       # DatabaseViewExtractor keeps only the highest `_vNN` of each Scenic
       # view, so its unit set is a function of the whole directory rather
@@ -399,6 +410,7 @@ module Woods
       components
       view_components
       view_templates
+      test_mappings
     ].freeze
 
     # Extractors that resolve table names through the live table catalog, and

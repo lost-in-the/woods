@@ -396,7 +396,7 @@ automatically.
 | YAML under `config.config_file_paths` (default `config/**/*.yml`, `app/data/**/*.yml`; never `config/locales` or a secret-bearing file) | config_files |
 | `db/migrate/*.rb` (top level only) | migrations |
 | `lib/**/*.rb` (outside `tasks/` and generator templates) | libs |
-| `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
+| `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings (that file's unit; see the wholesale triggers below) |
 
 A path can match several rules, `app/policies` is claimed by both
 `PolicyExtractor` and `PunditExtractor`, `app/decorators` by both the
@@ -411,14 +411,15 @@ cheap, which is what makes wholesale replacement the right shape.
 
 | Trigger | Re-runs |
 |---|---|
-| `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task) |
-| `config/routes.rb`, `config/routes/**` | routes (route units and the `route_file` unit of each draw file), engines, **and** controllers, mailers, components, view components, view templates |
+| `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task), test_mappings |
+| `config/routes.rb`, `config/routes/**` | routes (route units and the `route_file` unit of each draw file), engines, **and** controllers, mailers, components, view components, view templates, test mappings |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
 | `app/models/**/*.rb` | state_machines |
 | `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
-| `spec/factories/**`, `test/factories/**` | factories |
+| `spec/factories/**`, `test/factories/**` | factories, test_support |
+| files under `config.test_support_paths` (default `spec/support/**`, `spec/*_helper.rb`, `spec/lib/**`, and the same under `test/`; never the test files `test_mappings` claims) | test_support, test_mappings |
 | `db/views/**/*.sql` | database_views |
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`), `app/graphql/**/*.rb` | graphql_operations |
 | `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` | database_tables, **and** migrations, database_views, external_consumers |
@@ -444,6 +445,20 @@ Five of these deserve a note:
   name a fragment in another document. So a document change and a server-side
   change under `app/graphql` both re-run the whole family. The document trigger
   is a named matcher over `config.graphql_document_paths`, read at call time.
+- **Test mappings resolve names that live in other files.** A spec's
+  `it_behaves_like 'an accessible page'`, `include_context`, custom matcher
+  call, `include HelperModule`, or `describe 'ledger'` over a rake namespace
+  points at a unit some *other* file defines, and a helper's `included_for`
+  reads every support file. Two designs keep that equivalent to a full run: a
+  post-pass that re-resolves cached references against the unit registry, or a
+  wholesale re-run whenever a lookup input changes. Woods takes the wholesale
+  re-run. `TestMappingExtractor` reads the names from source itself (through
+  `TestSupportCatalog` and the rake files), never from another extractor's
+  published units, so the only thing to get right is the trigger set: a test
+  support file, a `.rake` file, or the route table. A changed test file alone
+  still dispatches per file, which is what keeps a watch cycle on one spec
+  edit to one unit. The cost is a re-read of every test file when support
+  changes; unit files whose bytes do not change are not rewritten.
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
@@ -664,6 +679,7 @@ same question as "what has to happen before re-reading it is worth anything".
 |---|---|---|
 | `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
+| `:reextract` (from configuration) | `.rb` files under `config.test_support_paths` outside `spec/` and `test/`, such as `features/support/**` | Test support is read as bytes. The defaults are already under `spec/` and `test/`. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:restart` (daemon, from its own boot) | Ruby under `config/` the watch daemon's process loaded at boot | Only the booted process knows which helpers it required; the classifier ignores generic `config/*.rb` so a fresh-process hook does not restart over files nothing loads (F3). |

@@ -230,7 +230,19 @@ module Woods
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
         REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
-        configured_bytes_input?(path)
+        configured_bytes_input?(path) || configured_test_support?(path)
+    end
+
+    # Test support under a configured root outside spec/ and test/
+    # (`features/support/**`). Read as bytes, like every other test file.
+    # Without a loaded configuration nothing extra matches.
+    def configured_test_support?(path)
+      return false unless path.end_with?('.rb') && !path.end_with?('_spec.rb', '_test.rb')
+      return false unless Woods.respond_to?(:configuration) && Woods.configuration.respond_to?(:test_support_paths)
+
+      Woods.configuration.test_support_paths.any? do |glob|
+        File.fnmatch?(glob, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
+      end
     end
 
     # Configuration that boot does not capture and Woods reads as bytes on

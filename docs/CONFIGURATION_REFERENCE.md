@@ -688,7 +688,13 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
+<<<<<<< HEAD
 not implemented**. All 39 extractors always run during a full extraction,
+||||||| parent of d78659fe (feat(extractor): register test support and make test mappings follow their inputs)
+not implemented**. All 35 extractors always run during a full extraction,
+=======
+not implemented**. All 36 extractors always run during a full extraction,
+>>>>>>> d78659fe (feat(extractor): register test support and make test mappings follow their inputs)
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
@@ -737,7 +743,8 @@ Leave it at its default. The full list of what always runs:
 | `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
-| `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
+| `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
+| `:test_support` | TestSupportExtractor | Helper modules, shared examples/contexts, matchers, suite configuration |
 | `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
@@ -987,6 +994,7 @@ part of any incremental fingerprint. Incremental runs dispatch with the current
 globs, so a file outside the changed set keeps its old classification until
 `woods:extract` runs.
 
+<<<<<<< HEAD
 ### GraphQL document paths
 
 | Option | Type | Default | Description |
@@ -1045,6 +1053,34 @@ malformed one and keeps the previous value.
 **Changing any of the three needs a full extraction.** The values are not part
 of any incremental fingerprint.
 
+||||||| parent of d78659fe (feat(extractor): register test support and make test mappings follow their inputs)
+=======
+### Test support paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `test_support_paths` | Array&lt;String&gt; | `["spec/support/**/*.rb", "spec/*_helper.rb", "spec/lib/**/*.rb", "test/support/**/*.rb", "test/*_helper.rb", "test/lib/**/*.rb"]` | Globs, relative to `Rails.root`, whose Ruby files `TestSupportExtractor` indexes as `test_support` units. |
+
+Files ending in `_spec.rb` or `_test.rb` are never test support, whatever the
+globs match: they stay test mappings. Glob syntax is the same as
+`unclaimed_ruby_paths`.
+
+```ruby
+Woods.configure do |config|
+  config.test_support_paths += ['features/support/**/*.rb']
+end
+```
+
+The setter rejects a value that is not an Array and any entry that is not a
+non-empty, relative glob without `..`, raising `Woods::ConfigurationError` and
+keeping the previous value.
+
+**Changing `test_support_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint. The hook predicate knows only the default
+locations, so an edit under an added root outside `spec/` and `test/` is picked
+up by `woods:incremental` and the watch daemon, not by the editor hook.
+
+>>>>>>> d78659fe (feat(extractor): register test support and make test mappings follow their inputs)
 ## Console MCP options
 
 These options configure the Console MCP server (live database queries via

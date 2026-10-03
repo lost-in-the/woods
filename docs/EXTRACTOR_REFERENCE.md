@@ -1108,6 +1108,9 @@ namespace.
 **Key details:**
 - Scans `spec/factories` and `test/factories`
 - Produces one unit per factory definition (including trait sub-factories)
+- `metadata[:model_class]` and the `:factory_for` edge name the modeled class: an explicit `class:` (a leading `::` is dropped), else the class of the `parent:` factory or of the factory whose block encloses it, else the classified factory name. Parents and `aliases:` resolve across files in a full run
+- A nested factory records its enclosing factory as `parent_factory`, with a `:factory_parent` edge
+- A file in a factory directory that declares no factory (`FactoryBot.define { after(:build) { ... } }`) is indexed by `TestSupportExtractor` instead
 - Useful for understanding test data structure and available factory combinations
 - No per-file mapping, so incremental re-extraction re-runs `FactoryExtractor` wholesale on any `.rb` change under the factory directories
 
@@ -1120,10 +1123,62 @@ namespace.
 **Key details:**
 - Scans `spec/` and `test/` directories
 - Maps each spec file to its subject class by convention (e.g., `spec/models/user_spec.rb` → `User`)
-- The first `describe` or `feature` block names the subject. Only a constant path (`Widget`, `'Ledger::Entry'`) becomes `subject_class` and a `:test_coverage` edge; free text (`'Widget checkout'`) is stored as `metadata[:description]` with no edge. Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-name string (`'ledger:rebuild_balances'`) also names its subject. A quoted `feature` title is always a description
-- `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`type: :system` on the first group decides, else `:unit`
-- Records test count and whether RSpec or Minitest is detected
+- The first `describe` or `feature` block names the subject. Only a constant path (`Widget`, `'Ledger::Entry'`) becomes `subject_class` and a `:test_coverage` edge; free text (`'Widget checkout'`) is stored as `metadata[:description]` with no edge. A quoted `feature` title is always a description
+- Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-shaped string is checked against the application's rake tasks. A task name (`'ledger:rebuild_balances'`) becomes `subject_class` with a `:test_coverage` edge to that `rake_task` unit. A namespace (`'ledger'`) is recorded as `metadata[:rake_namespace]` with one edge per `ledger:*` task. Anything else is a description with no edge
+- `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`:system`/`:request` on the first group decides, else `:unit`
+- Records test count (`it`, `specify`, `example`, `scenario`; `test "..."` and `def test_` for Minitest) and whether RSpec or Minitest is detected
 - These directories are outside `app/` so no eager loading is needed
+
+**Test support edges.** References to test support resolve by name to the `test_support` unit that defines them. A name no support file defines yields no edge; the names as written stay in metadata.
+
+| Reference in the test | Edge `via` | Metadata |
+|---|---|---|
+| `it_behaves_like`, `include_examples`, `it_should_behave_like` | `:behaves_like` | `shared_examples_used` |
+| `include_context` | `:includes_context` | `shared_contexts_used` |
+| `include HelperModule` (also `extend`, `prepend`) | `:includes_helper` | `helpers_included` |
+| A call to a custom matcher (`have_combobox`) | `:uses_matcher` | `matchers_used` |
+
+A target carries one edge: when a test refers to one support file several ways, the first row above that applies wins.
+
+**Route coverage.** In `:feature`, `:system` and `:request` tests, `visit`, `get`, `post`, `put`, `patch`, `delete` and `head` become `:exercises_route` edges to route units, listed in `metadata[:routes_exercised]`:
+
+- A route helper (`visit new_widget_path`, `post widgets_url`) resolves through the live named-route map to the route with that path and the call's verb
+- A literal path (`get "/widgets/42"`) is matched against each route's path pattern in route order. An interpolation (`"/widgets/#{widget.id}"`) stands for one segment value; the query string, fragment, format and a trailing slash are ignored
+- Unknown helpers, unrouted paths and verbs a path does not accept yield no edge
+- Not modeled: segment constraints, the second and later verbs of a multi-verb `match` route, and routes drawn inside mounted engines
+
+**Incremental behavior.** A changed test file dispatches per file. The names and routes a test refers to live in other files, so `TestMappingExtractor` also re-runs wholesale when a test support file, a `.rake` file, or the route table changes. See [INCREMENTAL_EXTRACTION.md](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
+
+---
+
+### TestSupportExtractor
+
+**What it captures:** The files a test suite is built from that are not tests: helper modules, shared examples and contexts, custom matchers, suite configuration, support classes and scripts.
+
+**Key details:**
+- One `test_support` unit per file, identified by its root-relative path (`spec/support/analytics_helpers.rb`)
+- Scans `config.test_support_paths`: by default `spec/support/**/*.rb`, `spec/*_helper.rb`, `spec/lib/**/*.rb` and the same three under `test/`. `*_spec.rb` and `*_test.rb` files are never test support
+- Also indexes a factory-directory file that declares no factory
+- A symlink that resolves outside the application root is not read
+- Pure source analysis: nothing is loaded or evaluated
+
+**Metadata:**
+
+| Key | Meaning |
+|---|---|
+| `kind` | The most specific of `shared_examples`, `shared_context`, `matcher`, `helper_module`, `class`, `configuration`, `script` (in that order) |
+| `kinds` | Every kind the file has, in the same order |
+| `names` | Every name the file defines |
+| `shared_examples`, `shared_contexts`, `matchers` | Names as declared (`RSpec.shared_examples`, `shared_examples_for`, `RSpec.shared_context`, `RSpec::Matchers.define`, `define_negated_matcher`, `alias_matcher`) |
+| `helper_modules`, `classes` | Qualified constant names declared in the file |
+| `methods` | Method names defined in the file |
+| `includes` | `config.include`/`extend`/`prepend` lines: `{ module, scope, types }` |
+| `included_for` | Test types the file's helper modules are included for by any support file; `["all"]` when an include is untyped |
+| `test_framework` | `"minitest"` under `test/`, else `"rspec"` |
+
+**Edges:** a support file links to the support it uses itself, with the same `via` values as test mappings (a configuration file's `config.include AnalyticsHelpers` is an `:includes_helper` edge).
+
+**Incremental behavior.** `included_for` reads every support file, so any change under the configured globs or the factory directories re-runs the extractor wholesale.
 
 ---
 
@@ -1203,7 +1258,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 44 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer` |
+| `type` | Symbol | Unit category, one of the 45 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

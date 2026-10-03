@@ -1087,6 +1087,19 @@ RSpec.describe Woods::Extractor do
 
     # Controllers and friends embed the route table, so refreshing routes
     # without them would leave their metadata describing the old route set.
+    # Feature, system and request test mappings carry exercises_route edges
+    # resolved from the route table, so they go stale with it.
+    it 'counts test mappings among the route consumers' do
+      expect(described_class::ROUTE_CONSUMER_EXTRACTORS).to include(:test_mappings)
+    end
+
+    it 'registers test support as a whole-app extractor with its own unit type' do
+      expect(described_class::EXTRACTORS[:test_support]).to eq(Woods::Extractors::TestSupportExtractor)
+      expect(described_class::TYPE_TO_EXTRACTOR_KEY[:test_support]).to eq(:test_support)
+      expect(described_class::WHOLE_APP_EXTRACTORS).to include(test_support: :test_support,
+                                                               test_mappings: :test_mapping)
+    end
+
     it 'cascades a routes refresh to the extractors that embed the route table' do
       stub_extractor(:routes, [])
 
