@@ -100,15 +100,26 @@ module Woods
           sorted_map(pairs)
         end
 
+        # The published name map, read only when a change set touches a
+        # module. An incremental run takes this snapshot before it rewrites
+        # any unit, then compares it with {names_changed?}.
+        #
+        # @param payload_dir [String, Pathname] generation payload directory
+        # @param relative_paths [Enumerable<String>] the run's changed paths
+        # @return [Hash, nil] nil when no changed path is a module
+        def published_names_for(payload_dir, relative_paths)
+          published_name_map(payload_dir) if relative_paths.any? { |path| JavascriptPaths.source?(path) }
+        end
+
         # Would a component or template resolve any name differently than it
         # did against the published index? Decides whether a JavaScript change
         # must re-run the extractors that reference modules by name.
         #
-        # @param payload_dir [String, Pathname] generation payload directory
+        # @param published [Hash, nil] a {published_name_map}; nil when unknown
         # @param root [String, Pathname] application root
-        # @return [Boolean]
-        def names_changed_since?(payload_dir, root = Rails.root)
-          published_name_map(payload_dir) != current(root).name_map
+        # @return [Boolean] true when the maps differ or the published one is unknown
+        def names_changed?(published, root = Rails.root)
+          published.nil? || published != current(root).name_map
         end
 
         # @param pairs [Array<Array(String, String, String)>] kind, name, module path

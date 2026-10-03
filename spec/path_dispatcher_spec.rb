@@ -386,6 +386,46 @@ RSpec.describe Woods::PathDispatcher do
       end
     end
 
+    describe 'the js_modules rule' do
+      def js_rule
+        described_class.whole_app_rules.find { |rule| rule.extractor_key == :js_modules }
+      end
+
+      before { Woods.configuration = Woods::Configuration.new }
+
+      it 'triggers a js_modules re-run on a module under the default roots' do
+        %w[app/javascript/controllers/clipboard_controller.js app/javascript/widgets/picker.tsx
+           app/assets/javascripts/legacy.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).to eq([:js_modules]), path
+          expect(dispatcher).to be_relevant(path)
+        end
+      end
+
+      it 'does not trigger on vendored, generated, minified or non-module files' do
+        %w[app/javascript/vendor/chart.js app/assets/javascripts/builds/application.js
+           app/javascript/widgets/picker.min.js app/javascript/types.d.ts app/javascript/site.css
+           node_modules/pkg/index.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).not_to include(:js_modules), path
+        end
+      end
+
+      it 'follows configured javascript_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(dispatcher.whole_app_keys_for('frontend/widgets/picker.ts')).to include(:js_modules)
+        expect(dispatcher.whole_app_keys_for('app/javascript/entry.js')).not_to include(:js_modules)
+      end
+
+      it 'serializes as plain data naming the configured roots, with a named matcher and no Proc' do
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(JSON.parse(JSON.generate(js_rule.to_h)))
+          .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?', 'extensions' => %w[.js .ts .jsx .tsx .mjs])
+        expect(js_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
+      end
+    end
+
     it 'triggers a factory re-run on a factory file' do
       expect(dispatcher.whole_app_keys_for('spec/factories/posts.rb')).to include(:factories)
     end

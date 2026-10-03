@@ -57,6 +57,14 @@ module Woods
       end
     end
 
+    # Path fragments that disqualify a module, for consumers that can only
+    # test substrings (the generated shell predicate).
+    #
+    # @return [Array<String>]
+    def excluded_fragments
+      EXCLUDED_DIRECTORIES.map { |directory| "/#{directory}/" } + EXCLUDED_SUFFIXES
+    end
+
     # The literal directory each glob starts from. Bare specifiers such as
     # `controllers/clipboard_controller` resolve against these.
     #

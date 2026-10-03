@@ -7,6 +7,7 @@ require_relative 'git_source_filter'
 # resident process (the watch daemon, a rake task) loads this file without them.
 require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/configuration_extractor'
+require_relative 'javascript_paths'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -243,6 +244,15 @@ module Woods
         Woods::Extractors::TestSupportCatalog.support_path?(relative_path)
       end
 
+      # Is this a JavaScript/TypeScript module the js_module extractor indexes?
+      # Reads the configured globs at call time.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def js_module_path?(relative_path)
+        JavascriptPaths.source?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -263,7 +273,7 @@ module Woods
       #
       # @return [Array<Rule>]
       def whole_app_rules
-        roots = event_roots
+        roots = [event_roots, JavascriptPaths.globs]
         @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
         @whole_app_rules_event_roots = roots
         require_rule_extractors
@@ -459,6 +469,12 @@ module Woods
           *graphql_operation_rules,
           *schema_unit_rules,
           *test_support_rules,
+          # A module's registered names come from other files, so any module
+          # change re-runs the type. The matcher is authoritative; the
+          # directories and extensions describe it for the hook projection.
+          whole_app_rule(:js_modules, JavascriptPaths.directories, extensions: JavascriptPaths::EXTENSIONS,
+                                                                   exclude: JavascriptPaths.excluded_fragments,
+                                                                   matcher: :js_module_path?),
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

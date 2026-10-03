@@ -52,6 +52,7 @@ require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/database_table_extractor'
 require_relative 'extractors/external_consumer_extractor'
+require_relative 'extractors/js_module_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -160,7 +161,8 @@ module Woods
       libs: Extractors::LibExtractor,
       packages: Extractors::PackageExtractor,
       graphql_operations: Extractors::GraphQLOperationExtractor,
-      config_files: Extractors::ConfigFileExtractor
+      config_files: Extractors::ConfigFileExtractor,
+      js_modules: Extractors::JsModuleExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -220,7 +222,8 @@ module Woods
       graphql_operation: :graphql_operations,
       config_file: :config_files,
       # RouteExtractor emits a route_file unit per draw file beside its routes.
-      route_file: :routes
+      route_file: :routes,
+      js_module: :js_modules
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -390,8 +393,19 @@ module Woods
       # Operation documents resolve selections against the booted schema and
       # fragments across documents, so their units are a function of every
       # document plus app/graphql, not of each file.
-      graphql_operations: :graphql_operation
+      graphql_operations: :graphql_operation,
+      # A module's kind and registered names come from other files (an index
+      # that registers it), so the type is a function of the whole tree.
+      js_modules: :js_module
     }.freeze
+
+    # Extractors whose units reference JavaScript modules by name (x-data,
+    # data-controller, custom element tags). Their edges are a function of
+    # their own source and the name-to-module map, so they re-run wholesale
+    # when a module change moves that map, and only then.
+    #
+    # @return [Array<Symbol>] extractor keys
+    JS_NAME_CONSUMER_EXTRACTORS = %i[components view_components view_templates].freeze
 
     # Extractors whose output embeds the route table, and which therefore go
     # stale when routes change even though none of their own files did.
@@ -648,6 +662,8 @@ module Woods
       prepare_incremental_run(operation: 'incremental')
       @changed_source_paths = change_set.absolute_paths.to_set
       affected_types = Set.new
+      # Read before any unit is rewritten: the map the published units resolved against.
+      @published_js_names = Extractors::JsModuleRegistry.published_names_for(payload_dir, change_set.relative_paths)
 
       # Blast radius from the pre-change graph, bounded by
       # `incremental_blast_radius_depth` (nil = the unbounded closure).
@@ -764,6 +780,7 @@ module Woods
 
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
       known += TABLE_CONSUMER_EXTRACTORS if known.include?(:database_tables)
+      known += JS_NAME_CONSUMER_EXTRACTORS if known.include?(:js_modules)
       known.uniq!
 
       prepare_incremental_run(operation: 'refresh')
@@ -3493,6 +3510,9 @@ module Woods
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
       keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
+      if keys.include?(:js_modules) && Extractors::JsModuleRegistry.names_changed?(@published_js_names)
+        keys += JS_NAME_CONSUMER_EXTRACTORS
+      end
       # A routes re-run replaces every controller, and a flow document
       # carries the route itself, which no dependency edge connects to the
       # controller. Nothing about that is reachable by a graph walk, so the
