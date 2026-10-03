@@ -14,9 +14,10 @@ module Woods
       # continues on the next line, and the patterns below follow that rule.
       #
       # Filter bodies other than `:ruby` and `:erb` (`:plain`, `:javascript`,
-      # `:css`, ...) and `-#` silent-comment bodies are not Ruby, so partial,
-      # helper, and route-helper scans skip them. The instance-variable scan
-      # reads the raw source, as {Erb} does.
+      # `:css`, ...) are not Ruby, so partial, helper, and route-helper scans
+      # skip their text but read each `#{...}` interpolation, which HAML
+      # evaluates. `-#` silent-comment bodies are skipped entirely. The
+      # instance-variable scan reads the raw source, as {Erb} does.
       #
       # Inherits the helper vocabulary and instance-variable scan from {Erb};
       # partial and form-action scans are HAML-specific.
@@ -100,30 +101,71 @@ module Woods
           '.html.haml'
         end
 
-        # The source with non-Ruby filter bodies and silent-comment bodies
-        # removed. A block is the opening line plus every following line
-        # that is blank or indented deeper than it.
+        # The source with silent-comment bodies removed and non-Ruby filter
+        # bodies replaced by their interpolations. A block is the opening
+        # line plus every following line that is blank or indented deeper
+        # than it.
         #
         # @param source [String]
         # @return [String]
         def scannable_source(source)
-          block_indent = nil
-          source.each_line.reject do |line|
+          block = nil
+          source.each_line.with_object(+'') do |line, code|
             indent = line[/\A[ \t]*/].length
-            next true if block_indent && (line.strip.empty? || indent > block_indent)
+            if block && (line.strip.empty? || indent > block[:indent])
+              code << interpolations(line) if block[:filter]
+              next
+            end
 
-            block_indent = opaque_block_start?(line) ? indent : nil
-            !block_indent.nil?
-          end.join
+            block = opaque_block(line, indent)
+            code << line unless block
+          end
         end
 
         # @param line [String]
-        # @return [Boolean]
-        def opaque_block_start?(line)
-          return true if line.match?(SILENT_COMMENT)
+        # @param indent [Integer]
+        # @return [Hash, nil] `{ indent:, filter: }` when the line opens a
+        #   block whose body is not Ruby
+        def opaque_block(line, indent)
+          return { indent: indent, filter: false } if line.match?(SILENT_COMMENT)
 
           filter = line[FILTER_LINE, 1]
-          !filter.nil? && !RUBY_FILTERS.include?(filter)
+          { indent: indent, filter: true } if filter && !RUBY_FILTERS.include?(filter)
+        end
+
+        # The Ruby inside each `#{...}` of a line of filter text, one per
+        # line. Braces nest, so `#{f { 1 }}` yields `f { 1 }`; an
+        # interpolation left open on the line yields nothing.
+        #
+        # @param text [String]
+        # @return [String]
+        def interpolations(text)
+          code = +''
+          start = 0
+          while (open = text.index('#{', start))
+            close = matching_brace(text, open + 2)
+            break unless close
+
+            code << text[(open + 2)...close] << "\n"
+            start = close + 1
+          end
+          code
+        end
+
+        # @param text [String]
+        # @param from [Integer] Index just after an opening brace
+        # @return [Integer, nil] Index of the brace that closes it
+        def matching_brace(text, from)
+          depth = 1
+          (from...text.length).each do |index|
+            case text[index]
+            when '{' then depth += 1
+            when '}'
+              depth -= 1
+              return index if depth.zero?
+            end
+          end
+          nil
         end
       end
     end
