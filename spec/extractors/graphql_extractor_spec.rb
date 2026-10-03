@@ -926,6 +926,23 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
         expect(deps.map { |dep| dep[:target] }).not_to include('Create', 'Shipment', '::Depot::Shipment')
       end
 
+      it 'records the class a field is wired to by mutation: or resolver:' do
+        deps = dependencies_of('app/graphql/types/mutation_type.rb', <<~RUBY)
+          module Types
+            class MutationType < Types::BaseObject
+              field :ship_widget, mutation: Mutations::ShipWidget
+              field :widgets,
+                    resolver: Resolvers::Depot::Widgets
+            end
+          end
+        RUBY
+
+        expect(deps).to include(
+          { type: :graphql_mutation, target: 'Mutations::ShipWidget', via: :field_resolver },
+          { type: :graphql_resolver, target: 'Resolvers::Depot::Widgets', via: :field_resolver }
+        )
+      end
+
       it 'records a nested type path whole' do
         deps = dependencies_of('app/graphql/mutations/draft_widget.rb', <<~RUBY)
           module Mutations

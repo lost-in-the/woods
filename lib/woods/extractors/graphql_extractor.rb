@@ -54,6 +54,9 @@ module Woods
       # Unit types the conventional graphql-ruby namespaces hold.
       NAMESPACE_UNIT_TYPES = { 'Resolvers' => :graphql_resolver, 'Mutations' => :graphql_mutation }.freeze
 
+      # Field options that hand a field to a class, and the unit type it is.
+      FIELD_WIRING = { 'resolver' => :graphql_resolver, 'mutation' => :graphql_mutation }.freeze
+
       def initialize
         @graphql_dir = defined?(Rails) ? Rails.root.join(GRAPHQL_DIRECTORY) : nil
         @runtime_lookup = SourceReferences::RuntimeLookup.new
@@ -894,7 +897,7 @@ module Woods
           next if target.nil? || target == identifier
 
           via = reference_via(reference, target)
-          { type: reference_type(target, via), target: target, via: via } if via
+          { type: reference_type(reference, target, via), target: target, via: via } if via
         end
       end
 
@@ -938,7 +941,7 @@ module Woods
 
       # @return [Symbol, nil] the edge label, or nil when the reference is not an edge
       def reference_via(reference, target)
-        return :field_resolver if reference.keyword == 'resolver'
+        return :field_resolver if FIELD_WIRING.key?(reference.keyword)
 
         segments = target.split('::')
         return :type_reference if segments[0...-1].include?('Types')
@@ -948,9 +951,9 @@ module Woods
       end
 
       # @return [Symbol] the unit type an edge with this label points at
-      def reference_type(target, via)
+      def reference_type(reference, target, via)
         case via
-        when :field_resolver then :graphql_resolver
+        when :field_resolver then FIELD_WIRING.fetch(reference.keyword)
         when :type_reference then :graphql_type
         else NAMESPACE_UNIT_TYPES.fetch(target.split('::').first, :model)
         end
