@@ -94,6 +94,7 @@ Dir.mktmpdir('woods_components') do |root|
             render APICard.new
             render PanelComponent.new
             render Ghost.new
+            render ExternalPhlex.new
             form_with(model: nil) { }
             render partial("x")
           end
@@ -148,7 +149,8 @@ Dir.mktmpdir('woods_components') do |root|
       page = reader.find_unit('Ui::KitPage', type: 'component')
       renders = page['dependencies'].select { |dep| dep['via'] == 'render' }.map { |dep| dep['target'] }
       renders == %w[Ui::APICard Ui::CardComponent Ui::PanelComponent] &&
-        page.dig('metadata', 'unresolved_renders') == [{ 'name' => 'Ghost', 'reason' => 'constant_missing' }]
+        page.dig('metadata', 'unresolved_renders') == [{ 'name' => 'Ghost', 'reason' => 'constant_missing' }] &&
+        page.dig('metadata', 'external_renders') == [{ 'name' => 'ExternalPhlex', 'gem' => nil }]
     end
     legacy = false
     Woods::Extractor.new(output_dir: output).extract_changed([])

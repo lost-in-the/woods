@@ -373,7 +373,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
     let(:file_system) do
       {
-        '/rails/app/components/page_component.rb' => <<~RUBY
+        '/rails/app/components/page_component.rb' => <<~RUBY,
           class PageComponent < ViewComponent::Base
             renders_one :header, HeaderComponent
             renders_many :cards, CardComponent
@@ -385,6 +385,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
             end
           end
         RUBY
+        '/rails/app/components/footer_component.rb' => ''
       }
     end
 
@@ -392,7 +393,9 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       base = build_view_component_base(descendants: [component_class])
       component_class.define_singleton_method(:superclass) { base }
       stub_const('ViewComponent::Base', base)
-      stub_const('FooterComponent', Class.new(ViewComponent::Base))
+      # The base double fakes `name`, and its subclasses inherit the fake.
+      footer = Class.new(ViewComponent::Base) { define_singleton_method(:name) { 'FooterComponent' } }
+      stub_const('FooterComponent', footer)
     end
 
     it 'detects rendered sub-components' do
@@ -464,7 +467,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
   describe 'render target resolution' do
     let(:file_system) do
       {
-        '/rails/app/components/ledger/page_component.rb' => <<~RUBY
+        '/rails/app/components/ledger/page_component.rb' => <<~RUBY,
           module Ledger
             class PageComponent < ViewComponent::Base
               def call
@@ -476,6 +479,8 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
             end
           end
         RUBY
+        '/rails/app/components/ledger/summary_component.rb' => '',
+        '/rails/app/components/ledger/row_component.rb' => ''
       }
     end
 
@@ -501,6 +506,14 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
     it 'records a capitalized render that names no component instead of emitting an edge' do
       expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+    end
+
+    it 'records a component no application file defines as external and emits no edge' do
+      file_system.delete('/rails/app/components/ledger/row_component.rb')
+
+      expect(unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] })
+        .to eq(['Ledger::SummaryComponent'])
+      expect(unit.metadata[:external_renders]).to eq([{ name: 'Ledger::RowComponent', gem: nil }])
     end
   end
 

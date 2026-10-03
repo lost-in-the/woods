@@ -37,13 +37,16 @@ module Woods
     #   result = RenderTargetResolver.new.call(Billing::V2::ManagePage, source)
     #   result.targets    # => ["Billing::V2::TierGrid", "Ui::Header"]
     #   result.unresolved # => [{ name: "Ghost", reason: "constant_missing" }]
+    #   result.external   # => [{ name: "ShelfUi::Button", gem: "shelf_ui" }]
     #
     class RenderTargetResolver
       # @!attribute targets
       #   @return [Array<String>] sorted identifiers of the components rendered
       # @!attribute unresolved
       #   @return [Array<Hash>] sorted `{ name:, reason: }` for calls that name no component
-      Result = Struct.new(:targets, :unresolved, keyword_init: true)
+      # @!attribute external
+      #   @return [Array<Hash>] sorted `{ name:, gem: }` for component classes no unit represents
+      Result = Struct.new(:targets, :unresolved, :external, keyword_init: true)
 
       # Classes whose descendants are components. Those not loaded are skipped.
       COMPONENT_BASES = %w[
@@ -58,8 +61,12 @@ module Woods
       private_constant :SINGLETON_CLASS, :METHOD_DEFINED, :PRIVATE_METHOD_DEFINED, :IS_A, :IDENTICAL
 
       # @param runtime [SourceReferences::RuntimeLookup]
-      def initialize(runtime: SourceReferences::RuntimeLookup.new)
+      # @param ownership [#call] given a component class, answers +:app+ when
+      #   the application defines it, otherwise the name of the gem that does,
+      #   or nil when no gem is known
+      def initialize(runtime: SourceReferences::RuntimeLookup.new, ownership: ->(_component) { :app })
         @runtime = runtime
+        @ownership = ownership
       end
 
       # @param component [Class] the rendering component
@@ -72,14 +79,24 @@ module Woods
         RenderCallScan.call(source).each { |candidate| resolve(candidate, run) }
         run[:yielded].each { |candidate| record(run, candidate.name, yielded_verdict(candidate, run)) }
 
-        own_name = component.name
-        Result.new(
-          targets: run[:targets].keys.reject { |name| name == own_name }.sort,
-          unresolved: run[:unresolved].sort.map { |name, reason| { name: name, reason: reason } }
-        )
+        result(run)
       end
 
       private
+
+      # A component class the application does not define has no unit, so an
+      # edge to it would point at nothing. It is reported instead.
+      def result(run)
+        own_name = run[:component].name
+        owners = run[:targets].sort.reject { |name, _klass| name == own_name }
+                              .map { |name, klass| [name, @ownership.call(klass)] }
+        owned, external = owners.partition { |_name, owner| owner == :app }
+        Result.new(
+          targets: owned.map(&:first),
+          unresolved: run[:unresolved].sort.map { |name, reason| { name: name, reason: reason } },
+          external: external.map { |name, gem| { name: name, gem: gem } }
+        )
+      end
 
       def resolve(candidate, run)
         case candidate.kind

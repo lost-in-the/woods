@@ -78,7 +78,25 @@ module Woods
       # @return [RenderTargetResolver::Result]
       def resolve_render_targets(component, source)
         load_component_files unless @component_files_loaded
-        (@render_target_resolver ||= RenderTargetResolver.new).call(component, source)
+        @render_target_resolver ||= RenderTargetResolver.new(ownership: method(:render_target_owner))
+        @render_target_resolver.call(component, source)
+      end
+
+      # Who defines a rendered component class.
+      #
+      # The test is the one both component families apply to their own units:
+      # an application file defines it. Anything else has no unit to point at.
+      #
+      # @param component [Class]
+      # @return [Symbol, String, nil] +:app+, the owning gem's name, or nil
+      #   when no loaded gem contains the definition
+      def render_target_owner(component)
+        path = source_file_for(component)
+        return :app if app_source_file?(path)
+        return nil unless path
+
+        absolute = File.expand_path(path)
+        gem_roots.find { |root, _name| absolute.start_with?(root) }&.last
       end
 
       # Whether a class still owns its name.
@@ -179,6 +197,17 @@ module Woods
           return name if name
         end
         nil
+      end
+
+      # @return [Array<Array(String, String)>] loaded gem roots with their
+      #   names, longest root first so a nested gem wins over its container
+      def gem_roots
+        @gem_roots ||= begin
+          roots = Gem.loaded_specs.values.map do |spec|
+            ["#{File.expand_path(spec.full_gem_path)}#{File::SEPARATOR}", spec.name]
+          end
+          roots.sort_by { |root, name| [-root.length, name] }
+        end
       end
 
       # Every directory Zeitwerk resolves constants against, longest first so a

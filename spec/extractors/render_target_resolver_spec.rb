@@ -215,6 +215,30 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
     end
   end
 
+  describe 'components the application does not own' do
+    subject(:resolver) do
+      described_class.new(ownership: lambda { |klass|
+        { Ui::Header => 'shelf_ui', Ui::NavMenu => nil }.fetch(klass, :app)
+      })
+    end
+
+    it 'reports them as external with their gem and emits no target' do
+      result = resolve('Header(title: "x"); render Ui::NavMenu.new; render TierGrid.new')
+
+      expect(result.targets).to eq(['Billing::V2::TierGrid'])
+      expect(result.external).to eq([{ name: 'Ui::Header', gem: 'shelf_ui' }, { name: 'Ui::NavMenu', gem: nil }])
+      expect(result.unresolved).to eq([])
+    end
+
+    it 'still resolves a yielded call through the Kits of an external component' do
+      stub_const('Billing::V2::ManagePage', Class.new(ApplicationView))
+
+      result = resolve('render Ui::NavMenu.new { |m| m.NavItem("a") }')
+
+      expect(result.targets).to eq(['Ui::NavItem'])
+    end
+  end
+
   it 'never reports a lowercase helper call' do
     result = resolve('form_with(model: @x) { }; t(".title"); partial("x"); render partial("x")')
 

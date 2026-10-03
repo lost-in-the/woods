@@ -85,7 +85,9 @@ module Woods
         unit.namespace = extract_namespace(component)
         unit.source_code = read_source(unit.file_path)
         renders = resolve_render_targets(component, unit.source_code)
-        unit.metadata = extract_metadata(component, unit.source_code).merge(unresolved_renders: renders.unresolved)
+        unit.metadata = extract_metadata(component, unit.source_code).merge(
+          unresolved_renders: renders.unresolved, external_renders: renders.external
+        )
         unit.dependencies = extract_dependencies(unit.source_code, renders.targets)
 
         unit
