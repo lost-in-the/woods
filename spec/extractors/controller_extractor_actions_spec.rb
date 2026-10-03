@@ -471,4 +471,23 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end
     end
   end
+
+  describe 'per-action chunks' do
+    def chunk_actions(name)
+      unit_for(name).chunks.map { |chunk| chunk[:metadata][:action] }
+    end
+
+    it 'cover exactly the admitted actions, leaving out gem-inherited ones' do
+      expect(chunk_actions('Members::SessionsController')).to contain_exactly('new')
+    end
+
+    it 'leave out gem DSL readers and setters' do
+      expect(chunk_actions('WidgetsController')).to contain_exactly('index')
+    end
+
+    it 'leave out unrouted mixin helpers while keeping a routed inherited action' do
+      expect(chunk_actions('SsoGoogleController')).to contain_exactly('create')
+      expect(chunk_actions('SalesReportsController')).to contain_exactly('show')
+    end
+  end
 end

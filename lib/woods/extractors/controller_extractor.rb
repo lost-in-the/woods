@@ -923,9 +923,12 @@ module Woods
       # Per-Action Chunking
       # ──────────────────────────────────────────────────────────────────────
 
-      # Build per-action chunks for precise retrieval
+      # Build per-action chunks for precise retrieval, one per admitted
+      # action (+metadata[:actions]+). Rails' +action_methods+ also lists
+      # gem DSL methods, setters, unrouted mixin helpers and gem-inherited
+      # actions, none of which is an indexed action.
       def build_action_chunks(controller, unit)
-        controller.action_methods.filter_map do |action|
+        Array(unit.metadata[:actions]).filter_map do |action|
           route_info = @routes_map.dig(controller.name, action.to_s)
           filters = applicable_filters(controller, action)
 

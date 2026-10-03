@@ -775,6 +775,13 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
     )
   end
 
+  it 'chunks only admitted actions, not the public methods a framework module adds' do
+    units = extract_controllers
+
+    expect(units.fetch('PingController')['chunks'].map { |chunk| chunk['identifier'] }).to eq(['PingController#index'])
+    expect(units.fetch('GreetingsController')['chunks']).to eq([])
+  end
+
   it 'records a routed action inherited from a gem controller without admitting its body' do
     metadata = extract_controllers.fetch('GreetingsController')['metadata']
 
