@@ -308,34 +308,36 @@ module Woods
 
         # The Ruby inside each `#{...}` of a line of filter text, one per
         # line. Braces nest, so `#{f { 1 }}` yields `f { 1 }`; an
-        # interpolation left open on the line yields nothing.
+        # interpolation left open on the line yields nothing. Offsets are
+        # bytes, so a line of multibyte text is still read in one pass.
         #
         # @param text [String]
         # @return [String]
         def interpolations(text)
+          bytes = text.b
           code = +''
           start = 0
-          while (open = text.index('#{', start))
-            close = matching_brace(text, open + 2)
+          while (open = bytes.index('#{', start))
+            close = matching_brace(bytes, open + 2)
             break unless close
 
-            code << text[(open + 2)...close] << "\n"
+            code << bytes.byteslice((open + 2)...close).force_encoding(text.encoding) << "\n"
             start = close + 1
           end
           code
         end
 
-        # @param text [String]
-        # @param from [Integer] Index just after an opening brace
-        # @return [Integer, nil] Index of the brace that closes it
-        def matching_brace(text, from)
+        # @param bytes [String] Binary copy of the text
+        # @param from [Integer] Byte offset just after an opening brace
+        # @return [Integer, nil] Byte offset of the brace that closes it
+        def matching_brace(bytes, from)
           depth = 1
-          (from...text.length).each do |index|
-            case text[index]
-            when '{' then depth += 1
-            when '}'
+          (from...bytes.bytesize).each do |offset|
+            case bytes.getbyte(offset)
+            when 123 then depth += 1
+            when 125
               depth -= 1
-              return index if depth.zero?
+              return offset if depth.zero?
             end
           end
           nil
