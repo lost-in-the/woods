@@ -83,6 +83,23 @@ Dir.mktmpdir('woods_components') do |root|
     write_source(root, 'app/views/ui/panel_component.rb',
                  'module Ui; class PanelComponent < ViewComponent::Base; end; end')
     write_source(root, 'app/views/ui/api_panel.rb', 'module Ui; class APIPanel < ViewComponent::Base; end; end')
+    # A real Phlex Kit: its components include it, so a Kit call, a sibling
+    # render and a cross-family render all have to land on qualified units.
+    write_source(root, 'app/views/ui.rb', 'module Ui; extend Phlex::Kit; end')
+    write_source(root, 'app/views/ui/kit_page.rb', <<~CODE)
+      module Ui
+        class KitPage < Phlex::HTML
+          def view_template
+            CardComponent()
+            render APICard.new
+            render PanelComponent.new
+            render Ghost.new
+            form_with(model: nil) { }
+            render partial("x")
+          end
+        end
+      end
+    CODE
 
     app = Class.new(Rails::Application)
     Object.const_set(:ComponentOwnershipApplication, app)
@@ -126,6 +143,12 @@ Dir.mktmpdir('woods_components') do |root|
     assert_fact(checks, 'inflected components under an autoload-only views root are discovered') do
       %w[Ui::CardComponent Ui::APICard].all? { |identifier| reader.find_unit(identifier, type: 'component') } &&
         %w[Ui::PanelComponent Ui::APIPanel].all? { |identifier| reader.find_unit(identifier, type: 'view_component') }
+    end
+    assert_fact(checks, 'Kit calls and sibling renders target qualified component units') do
+      page = reader.find_unit('Ui::KitPage', type: 'component')
+      renders = page['dependencies'].select { |dep| dep['via'] == 'render' }.map { |dep| dep['target'] }
+      renders == %w[Ui::APICard Ui::CardComponent Ui::PanelComponent] &&
+        page.dig('metadata', 'unresolved_renders') == [{ 'name' => 'Ghost', 'reason' => 'constant_missing' }]
     end
     legacy = false
     Woods::Extractor.new(output_dir: output).extract_changed([])
