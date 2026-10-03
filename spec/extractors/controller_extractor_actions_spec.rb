@@ -92,6 +92,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         def create
           Ledger.verify!
         end
+
+        def paginate_params = {}
       end
     RUBY
 
@@ -145,6 +147,27 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end
     RUBY
 
+    # An app-side DSL in lib/ that defines methods on the controller from
+    # its own file.
+    load_app('lib/action_fixtures/report_dsl.rb', <<~RUBY)
+      module ActionFixtures
+        module ReportDsl
+          def report_columns(*names)
+            names.each { |name| define_method(name) { name } }
+          end
+        end
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/ledgers_controller.rb', <<~RUBY)
+      class ActionFixtures::LedgersController < ActionFixtures::BaseController
+        extend ActionFixtures::ReportDsl
+        report_columns :summary, :totals
+
+        def index = nil
+      end
+    RUBY
+
     load_app('app/controllers/action_fixtures/widgets_controller.rb', <<~RUBY)
       class ActionFixtures::WidgetsController < ActionFixtures::BaseController
         extend ActionFixtures::FakeExposure
@@ -164,7 +187,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
                       route('action_fixtures/confirmations', 'new'),
                       route('action_fixtures/confirmations', 'create'),
                       route('action_fixtures/modern/confirmations', 'create'),
-                      route('action_fixtures/sales_reports', 'show')
+                      route('action_fixtures/sales_reports', 'show'),
+                      route('action_fixtures/ledgers', 'totals')
                     ])
   end
 
@@ -175,7 +199,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
   describe 'an action from an included app concern' do
     subject(:unit) { unit_for('SsoGoogleController') }
 
-    it 'is an action of the including controller' do
+    it 'is an action of the including controller when routed, unlike the concern’s unrouted helper' do
       expect(unit.metadata[:actions]).to contain_exactly('create')
     end
 
@@ -198,8 +222,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       expect(unit_for('ConfirmationsController').metadata[:actions]).to contain_exactly('new', 'create')
     end
 
-    it 'are actions of the controller that holds the module, routed or not' do
-      expect(unit_for('Modern::ConfirmationsController').metadata[:actions]).to contain_exactly('new', 'create')
+    it 'are actions of the controller that holds the module only where routed' do
+      expect(unit_for('Modern::ConfirmationsController').metadata[:actions]).to contain_exactly('create')
     end
 
     it 'resolve to the controller whose file holds the module' do
@@ -250,6 +274,12 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     it 'keeps unrouted public methods of the controller that defines them' do
       expect(unit_for('BaseReportsController').metadata[:actions]).to contain_exactly('show', 'export')
       expect(unit_for('BaseController').metadata[:actions]).to contain_exactly('current_ledger')
+    end
+  end
+
+  describe 'methods an app DSL defines on the controller from another file' do
+    it 'are actions only when routed, while methods in the controller’s own file are actions regardless' do
+      expect(unit_for('LedgersController').metadata[:actions]).to contain_exactly('index', 'totals')
     end
   end
 

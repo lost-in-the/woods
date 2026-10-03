@@ -502,11 +502,12 @@ module Woods
       # Starts from Rails' own +action_methods+ and admits a method only when
       # its body is application source: methods a gem DSL defines on the
       # class (+define_method+ from a gem file) and setters are not actions.
-      # A method owned by the class or by a module it includes or prepends
-      # itself is admitted whether or not a route reaches it. A method owned
-      # further up the superclass chain is admitted only when routed to this
-      # controller, otherwise every public helper on a base controller would
-      # become an action of each subclass.
+      # A method the class owns and defines in its own file is admitted
+      # whether or not a route reaches it. Every other method (from an
+      # included or prepended module, from the superclass chain, or defined
+      # onto the class from another file) is admitted only when routed to
+      # this controller: Rails counts the public helpers of every mixin and
+      # base controller as actions, but they are not endpoints.
       #
       # @param controller [Class] The controller class
       # @return [Hash{String => Hash}] action name to
@@ -515,7 +516,7 @@ module Woods
       #   method body, or nil when no unit does.
       def resolve_action_sources(controller)
         routed = (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
-        own = own_ancestors(controller)
+        own_file = source_file_for(controller)
 
         controller.action_methods.each_with_object({}) do |name, sources|
           name = name.to_s
@@ -524,7 +525,7 @@ module Woods
           method = controller.instance_method(name)
           file, line = method.source_location
           next unless app_action_source?(file)
-          next unless own.include?(method.owner) || routed.include?(name)
+          next unless routed.include?(name) || (method.owner == controller && same_file?(file, own_file))
 
           sources[name] = {
             owner: method.owner.name,
@@ -533,17 +534,6 @@ module Woods
             line: line
           }
         end
-      end
-
-      # The class and the modules it includes or prepends itself: every
-      # ancestor before its superclass.
-      #
-      # @param controller [Class]
-      # @return [Set<Module>]
-      def own_ancestors(controller)
-        ancestors = controller.ancestors
-        boundary = ancestors.index(controller.superclass) || ancestors.size
-        ancestors.first(boundary).to_set
       end
 
       # Whether a method body lives in application source: under Rails.root,
