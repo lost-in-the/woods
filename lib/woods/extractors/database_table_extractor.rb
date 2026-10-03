@@ -152,12 +152,12 @@ module Woods
       end
 
       # A foreign key cannot leave its database, so the target is the table of
-      # that name on the same connection.
+      # that name in the same database.
       def foreign_key_dependencies(table, foreign_keys, catalog)
         targets = foreign_keys.filter_map do |key|
           next if key[:to_table] == table.name
 
-          catalog.named(key[:to_table]).find { |candidate| candidate.pool.equal?(table.pool) }&.identifier
+          catalog.named(key[:to_table]).find { |candidate| candidate.database == table.database }&.identifier
         end
         targets.uniq.sort.map { |identifier| { type: :database_table, target: identifier, via: :foreign_key } }
       end

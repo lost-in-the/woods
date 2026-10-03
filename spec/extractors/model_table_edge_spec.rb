@@ -6,8 +6,7 @@ require 'woods/extractors/model_extractor'
 
 RSpec.describe Woods::Extractors::ModelExtractor, 'table edge' do
   let(:catalog_class) { Woods::Extractors::TableCatalog }
-  let(:pool) { double('Pool') }
-  let(:other_pool) { double('OtherPool') }
+  let(:pool) { double('Pool', db_config: double('DbConfig', name: 'billing')) }
 
   before do
     stub_const('Rails', double('Rails', root: Pathname.new('/app'), logger: double(error: nil)))
@@ -26,7 +25,7 @@ RSpec.describe Woods::Extractors::ModelExtractor, 'table edge' do
   end
 
   it 'links a model to the unit of the table it reads' do
-    catalog = catalog_class.new([catalog_class::Table.new(name: 'widgets', models: ['Widget'], pool: pool)])
+    catalog = catalog_class.new([catalog_class::Table.new(name: 'widgets', database: 'billing', models: ['Widget'])])
 
     expect(table_edges(catalog, model_on(pool, 'widgets'))).to eq(
       [{ type: :database_table, target: 'table:widgets', via: :table }]
@@ -35,15 +34,15 @@ RSpec.describe Woods::Extractors::ModelExtractor, 'table edge' do
 
   it 'targets the table on the model own database when two databases share the name' do
     catalog = catalog_class.new(
-      [catalog_class::Table.new(name: 'widgets', database: 'primary', qualified: true, pool: other_pool),
-       catalog_class::Table.new(name: 'widgets', database: 'billing', qualified: true, pool: pool)]
+      [catalog_class::Table.new(name: 'widgets', database: 'primary', qualified: true),
+       catalog_class::Table.new(name: 'widgets', database: 'billing', qualified: true)]
     )
 
     expect(table_edges(catalog, model_on(pool, 'widgets')).map { |dep| dep[:target] }).to eq(['table:billing.widgets'])
   end
 
   it 'emits no table edge when the name is not a live table' do
-    catalog = catalog_class.new([catalog_class::Table.new(name: 'gadgets', models: [], pool: pool)])
+    catalog = catalog_class.new([catalog_class::Table.new(name: 'gadgets', database: 'billing', models: [])])
 
     expect(table_edges(catalog, model_on(pool, 'widget_report_view'))).to eq([])
   end

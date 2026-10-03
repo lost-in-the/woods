@@ -99,6 +99,18 @@ RSpec.describe Woods::Extractors::TableCatalog do
       expect(catalog.for_model(copy).identifier).to eq('table:billing.widgets')
       expect(catalog.for_model(view_backed)).to be_nil
     end
+
+    it 'reads a database once when several classes hold their own pool on it' do
+      own_pool = pool_double('primary', %w[widgets ledger_entries])
+      widget = model_double('Widget', 'widgets', primary)
+      entry = model_double('LedgerEntry', 'ledger_entries', own_pool)
+
+      catalog = described_class.from_runtime(connection_classes: [widget, entry])
+
+      expect(catalog.tables.map(&:identifier)).to eq(%w[table:ledger_entries table:widgets])
+      expect(catalog.named('ledger_entries').first.model).to eq('LedgerEntry')
+      expect(catalog.for_model(entry).identifier).to eq('table:ledger_entries')
+    end
   end
 
   describe '.new' do

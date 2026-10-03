@@ -33,7 +33,7 @@ module Woods
       # @!attribute qualified
       #   @return [Boolean] whether the identifier carries the database name
       # @!attribute pool
-      #   @return [Object, nil] connection pool to read the table's schema through
+      #   @return [Object, nil] a connection pool on that database, to read the table's schema through
       Table = Struct.new(:name, :database, :models, :qualified, :pool, keyword_init: true) do
         # @return [String] the table unit's identifier
         def identifier
@@ -59,13 +59,29 @@ module Woods
           owners = owners_by_table(classes)
           qualified = pools.size > 1
 
-          tables = pools.flat_map do |pool, database|
+          tables = pools.flat_map do |database, pool|
             table_names(pool).map do |name|
-              Table.new(name: name, database: database, models: owners.fetch([pool, name], []),
+              Table.new(name: name, database: database, models: owners.fetch([database, name], []),
                         qualified: qualified, pool: pool)
             end
           end
           new(tables)
+        end
+
+        # The database configuration a pool connects to. Rails 6.1+ names the
+        # configuration on the pool. Rails 6.0 names the connection
+        # specification instead, which is the owning class for a `connects_to`
+        # pool, so the configuration is found by its connection settings.
+        #
+        # @param pool [Object] a connection pool
+        # @return [String, nil]
+        def database_name(pool)
+          return pool.db_config.name.to_s if pool.respond_to?(:db_config)
+          return nil unless pool.respond_to?(:spec)
+
+          legacy_configuration_name(pool.spec) || pool.spec.name.to_s
+        rescue StandardError
+          nil
         end
 
         private
@@ -76,13 +92,17 @@ module Woods
           [ActiveRecord::Base, *ActiveRecord::Base.descendants]
         end
 
-        # @return [Hash{Object => String, nil}] pool => database name, identity-keyed
+        # One pool per database: several classes can hold their own pool on
+        # the same configuration (`ActiveRecord::Base` and an abstract class
+        # that `connects_to` it).
+        #
+        # @return [Hash{String, nil => Object}] database name => pool
         def writable_pools(classes)
-          classes.each_with_object({}.compare_by_identity) do |klass, pools|
+          classes.each_with_object({}) do |klass, pools|
             pool = pool_of(klass)
-            next if pool.nil? || pools.key?(pool) || replica?(pool)
+            next if pool.nil? || replica?(pool)
 
-            pools[pool] = database_name(pool)
+            pools[database_name(pool)] ||= pool
           end
         end
 
@@ -96,35 +116,29 @@ module Woods
           pool.respond_to?(:db_config) && pool.db_config.respond_to?(:replica?) && pool.db_config.replica?
         end
 
-        # Rails 6.1+ names the configuration on the pool; Rails 6.0 names the
-        # connection specification instead.
-        def database_name(pool)
-          return pool.db_config.name.to_s if pool.respond_to?(:db_config)
-
-          pool.respond_to?(:spec) ? pool.spec.name.to_s : nil
+        def legacy_configuration_name(spec)
+          settings = spec.config.transform_keys(&:to_s)
+          match = ActiveRecord::Base.configurations.configs_for(env_name: Rails.env).find do |candidate|
+            candidate.config.transform_keys(&:to_s) == settings
+          end
+          match&.spec_name&.to_s
         rescue StandardError
           nil
         end
 
         def table_names(pool)
           names = pool.with_connection(&:tables)
-          names.map(&:to_s) - INTERNAL_TABLES
+          (names.map(&:to_s) - INTERNAL_TABLES).sort
         rescue StandardError => e
           Rails.logger.warn("[Woods] Could not list tables for a database connection: #{e.message}")
           []
         end
 
-        # @return [Hash{Array(Object, String) => Array<String>}] identity-keyed on the pool
+        # @return [Hash{Array(String, String) => Array<String>}] [database, table] => owner names
         def owners_by_table(classes)
-          claims = classes.each_with_object({}.compare_by_identity) do |klass, by_pool|
-            claim = ownership_claim(klass)
-            next unless claim
-
-            ((by_pool[claim[:pool]] ||= {})[claim[:table]] ||= []) << claim
-          end
-          claims.each_with_object(PoolTableIndex.new) do |(pool, by_table), index|
-            by_table.each { |table, table_claims| index.store(pool, table, ordered_owner_names(table_claims)) }
-          end
+          claims = classes.filter_map { |klass| ownership_claim(klass) }
+          claims.group_by { |claim| [claim[:database], claim[:table]] }
+                .transform_values { |table_claims| ordered_owner_names(table_claims) }
         end
 
         def ownership_claim(klass)
@@ -136,7 +150,7 @@ module Woods
           table = klass.table_name
           return nil if pool.nil? || table.nil?
 
-          { pool: pool, table: table.to_s, name: name, root: klass.base_class.equal?(klass) }
+          { database: database_name(pool), table: table.to_s, name: name, root: klass.base_class.equal?(klass) }
         rescue StandardError
           nil
         end
@@ -145,26 +159,6 @@ module Woods
         def ordered_owner_names(claims)
           roots = claims.select { |claim| claim[:root] }
           (roots.empty? ? claims : roots).map { |claim| claim[:name] }.uniq.sort
-        end
-      end
-
-      # Lookup keyed on pool identity and table name. Pools are compared by
-      # identity because test doubles and real pools alike define no value
-      # equality worth trusting.
-      class PoolTableIndex
-        def initialize
-          @by_pool = {}.compare_by_identity
-        end
-
-        # @return [void]
-        def store(pool, table, value)
-          (@by_pool[pool] ||= {})[table] = value
-        end
-
-        # @return [Object] the stored value, or +default+
-        def fetch(key, default)
-          pool, table = key
-          @by_pool.fetch(pool, {}).fetch(table, default)
         end
       end
 
@@ -192,8 +186,8 @@ module Woods
       def for_model(model)
         return nil if @tables.empty?
 
-        pool = model.connection_pool
-        named(model.table_name).find { |table| table.pool.equal?(pool) }
+        database = self.class.database_name(model.connection_pool)
+        named(model.table_name).find { |table| table.database == database }
       rescue StandardError
         nil
       end
