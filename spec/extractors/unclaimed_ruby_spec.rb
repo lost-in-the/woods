@@ -209,6 +209,19 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     end
   end
 
+  it 'parses through an injected collector so a run can share one parse per file' do
+    require 'woods/source_references/memo_collector'
+    path = load_source('app/lib/sweep_fixture/tracer.rb', "class SweepFixture::Tracer\n  def call = nil\nend\n")
+    inner = Woods::SourceReferences::Collector.new
+    allow(inner).to receive(:call).and_call_original
+    extractor = described_class.new
+    extractor.collector = Woods::SourceReferences::MemoCollector.new(collector: inner)
+
+    extractor.extract_poro_units(path)
+    extractor.extract_poro_units(path)
+    expect(inner).to have_received(:call).once
+  end
+
   it 'reconciles standalone modules across the swept scope' do
     path = load_source('app/helpers/sweep_fixture/link_helper.rb',
                        "module SweepFixture::LinkHelper\n  def link = 1\nend\n")

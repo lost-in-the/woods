@@ -59,6 +59,15 @@ module Woods
         @models_dir = Rails.root.join('app/models')
       end
 
+      # A run can hand in a {SourceReferences::MemoCollector} shared with the
+      # source-reference pass, so each file is parsed once per run.
+      attr_writer :collector
+
+      # @return [#call] the parser for every file this extractor reads
+      def collector
+        @collector ||= SourceReferences::Collector.new
+      end
+
       # Extract all PORO units from app/models/.
       #
       # Filters out ActiveRecord descendants by name so we don't duplicate
@@ -136,7 +145,7 @@ module Woods
       # @return [String] skip reason
       def skip_reason(file_path)
         source = File.read(file_path)
-        analysis = SourceReferences::Collector.new.call(source)
+        analysis = collector.call(source)
         return 'parse_error' if analysis['parse_error']
 
         declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
@@ -164,7 +173,7 @@ module Woods
 
       def extract_units(file_path, ar_names, fallback:)
         source = File.read(file_path)
-        analysis = SourceReferences::Collector.new.call(source)
+        analysis = collector.call(source)
         discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
         proof = fallback || swept_path?(file_path)
         primary = extract_class_unit(file_path, source, ar_names, analysis, proof: proof)
@@ -200,7 +209,7 @@ module Woods
 
       def extract_standalone_module_file(file)
         source = File.read(file)
-        analysis = SourceReferences::Collector.new.call(source)
+        analysis = collector.call(source)
         units = @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
         swept_path?(file) ? mark(units, SWEEP_MARKER) : units
       rescue StandardError => e
@@ -363,7 +372,7 @@ module Woods
       # @param file_path [String] Absolute path to the file
       # @param source [String] Ruby source code
       # @return [String, nil] The inferred class name
-      def infer_class_name(file_path, source, analysis = SourceReferences::Collector.new.call(source))
+      def infer_class_name(file_path, source, analysis = collector.call(source))
         # Explicit class keyword — Zeitwerk-governed naming first (G-1), then
         # enclosing modules joined by position (#174)
         assigned = AssignedValueDiscovery.new.call(file_path, analysis: analysis,
