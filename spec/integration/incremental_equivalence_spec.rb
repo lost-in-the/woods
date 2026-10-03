@@ -2892,6 +2892,227 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # Table units come from the live schema and from which models claim each
+  # table; migrations, views and declared consumers resolve table names through
+  # the same catalog. Every scenario changes the database or a file and holds
+  # the incremental index to a full extraction of the same state.
+  describe 'database tables and external consumers (#669, #681)' do
+    def connection
+      ActiveRecord::Base.connection
+    end
+
+    def unit_json(index_dir, type_dir, identifier)
+      unit_snapshot(index_dir).find do |key, data|
+        key.start_with?("#{type_dir}/") && data['identifier'] == identifier
+      end&.last
+    end
+
+    def edges(unit, via)
+      unit.fetch('dependencies').select { |dep| dep['via'] == via }.map { |dep| dep['target'] }
+    end
+
+    def migration(name, body)
+      "class #{name} < ActiveRecord::Migration[7.0]\n  def change\n    #{body}\n  end\nend\n"
+    end
+
+    after do
+      %i[audit_rows parcel_events].each { |table| connection.drop_table(table, if_exists: true) }
+    end
+
+    it 'publishes one unit per live table, with model ownership and the model edge, in a full extraction' do
+      connection.create_table(:audit_rows) { |t| t.string :note }
+      index = full_extraction
+
+      posts = unit_json(index, 'database_tables', 'table:posts')
+      audit = unit_json(index, 'database_tables', 'table:audit_rows')
+
+      expect(posts['metadata']).to include('model' => 'Post', 'model_less' => false, 'primary_key' => 'id')
+      expect(posts['metadata']['columns'].map { |column| column['name'] }).to include('id', 'title', 'status')
+      expect(posts['dependents']).to include({ 'type' => 'model', 'identifier' => 'Post' })
+      expect(audit['metadata']).to include('model' => nil, 'model_less' => true)
+      expect(edges(unit_json(index, 'models', 'Post'), 'table')).to eq(['table:posts'])
+      expect(unit_snapshot(index).keys.grep(%r{\Adatabase_tables/})).not_to include(a_string_matching(/schema_migr/))
+      expect(read_json(index, 'graph_analysis.json')['unmodelled_tables']).to include('table:audit_rows')
+    end
+
+    it 'publishes byte-identical table units on a repeat full extraction' do
+      connection.create_table(:audit_rows) { |t| t.string :note }
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+
+    it 'follows a table and its migration as they are created, changed and removed' do
+      path = 'db/migrate/20240301000000_create_audit_rows.rb'
+      index = run_sequence(
+        [
+          lambda {
+            connection.create_table(:audit_rows) { |t| t.string :note }
+            write_file(path, migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+          },
+          lambda {
+            connection.add_column(:audit_rows, :post_id, :integer)
+            write_file(path, migration('CreateAuditRows', "create_table(:audit_rows) { |t| t.string :note }\n    " \
+                                                          'add_reference :audit_rows, :post'))
+          }
+        ]
+      )
+
+      unit = unit_json(index, 'migrations', 'CreateAuditRows')
+      expect(edges(unit, 'migrates')).to eq(%w[table:audit_rows table:posts])
+      expect(edges(unit, 'table_name')).to eq([])
+      expect(edges(unit, 'reference')).to eq(['Post'])
+      expect(unit_json(index, 'database_tables', 'table:audit_rows')['metadata']['column_count']).to eq(3)
+
+      connection.drop_table(:audit_rows)
+      write_file(path, migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.text :note }'))
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(differences(index, full_extraction)).to be_empty
+      expect(unit_json(index, 'database_tables', 'table:audit_rows')).to be_nil
+      unit = unit_json(index, 'migrations', 'CreateAuditRows')
+      expect(edges(unit, 'migrates')).to eq([])
+      expect(unit['metadata']['tables_unresolved']).to eq(['audit_rows'])
+
+      delete_file(path)
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    describe 'a model claiming a table that had none' do
+      # `ParcelEvent` stays in ActiveRecord::Base.descendants for the rest of
+      # the process, so its file and its table join the pristine state.
+      after do
+        FileUtils.cp(app_path('app/models/parcel_event.rb'), File.join(@pristine_root, 'app/models/parcel_event.rb'))
+        connection.create_table(:parcel_events, if_not_exists: true) { |t| t.string :kind }
+      end
+
+      it 'flips the table to modelled and gives its unchanged migration a model edge' do
+        connection.create_table(:parcel_events, if_not_exists: true) { |t| t.string :kind }
+        path = 'db/migrate/20240302000000_create_parcel_events.rb'
+        index = run_sequence(
+          [
+            lambda {
+              write_file(path, migration('CreateParcelEvents', 'create_table(:parcel_events) { |t| t.string :kind }'))
+            },
+            lambda {
+              write_file('app/models/parcel_event.rb', "class ParcelEvent < ApplicationRecord\nend\n")
+              load app_path('app/models/parcel_event.rb')
+              'app/models/parcel_event.rb'
+            }
+          ]
+        )
+
+        expect(unit_json(index, 'database_tables', 'table:parcel_events')['metadata'])
+          .to include('model' => 'ParcelEvent', 'model_less' => false)
+        expect(edges(unit_json(index, 'migrations', 'CreateParcelEvents'), 'table_name')).to eq(['ParcelEvent'])
+        expect(edges(unit_json(index, 'models', 'ParcelEvent'), 'table')).to eq(['table:parcel_events'])
+      end
+    end
+
+    it 'gives an unchanged view an edge when its source table appears' do
+      index = run_sequence(
+        [
+          -> { write_file('db/views/audit_summary_v01.sql', 'SELECT p.id FROM posts p JOIN audit_rows a ON true') },
+          lambda {
+            connection.create_table(:audit_rows) { |t| t.string :note }
+            write_file('db/migrate/20240303000000_create_audit_rows.rb',
+                       migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+          }
+        ]
+      )
+
+      view = unit_json(index, 'database_views', 'audit_summary')
+      expect(edges(view, 'view_source')).to eq(%w[table:audit_rows table:posts])
+      expect(edges(view, 'table_name')).to eq(['Post'])
+    end
+
+    it 'brings tables and everything that resolves them back into agreement through refresh' do
+      index = Dir.mktmpdir('woods_refresh_tables')
+      (@scratch_dirs ||= []) << index
+      write_file('db/migrate/20240304000000_create_audit_rows.rb',
+                 migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+      Woods::Extractor.new(output_dir: index).extract_all
+
+      connection.create_table(:audit_rows) { |t| t.string :note }
+      result = Woods::Extractor.new(output_dir: index).refresh(:database_tables)
+
+      expect(result[:types]).to include(:database_tables, :migrations, :database_views, :external_consumers)
+      expect(differences(index, full_extraction)).to be_empty
+      expect(edges(unit_json(index, 'migrations', 'CreateAuditRows'), 'migrates')).to eq(['table:audit_rows'])
+    end
+
+    describe 'declared external consumers' do
+      let(:declared) { 'config/woods/external_consumers.yml' }
+
+      around do |example|
+        Woods.configuration.external_table_consumers_path = declared
+        Woods.configuration.external_table_consumers = { 'reporting' => %w[comments] }
+        example.run
+      ensure
+        Woods.configuration.external_table_consumers_path = nil
+        Woods.configuration.external_table_consumers = {}
+      end
+
+      it 'follows the declared file as it is created, edited and deleted' do
+        index = run_sequence(
+          [
+            -> { write_file(declared, "storefront:\n  - posts\n  - audit_rows\n") },
+            -> { write_file(declared, "storefront:\n  - posts\n  - comments\nreporting:\n  - posts\n") }
+          ]
+        )
+
+        storefront = unit_json(index, 'external_consumers', 'external:storefront')
+        expect(edges(storefront, 'reads_table')).to eq(%w[table:comments table:posts])
+        expect(storefront['metadata']).to include('declared' => true, 'tables_missing' => [])
+        expect(edges(unit_json(index, 'external_consumers', 'external:reporting'), 'reads_table'))
+          .to eq(%w[table:comments table:posts])
+        expect(unit_json(index, 'database_tables', 'table:posts')['dependents'])
+          .to include({ 'type' => 'external_consumer', 'identifier' => 'external:storefront' })
+
+        delete_file(declared)
+        Woods::Extractor.new(output_dir: index).extract_changed([declared])
+
+        expect(differences(index, full_extraction)).to be_empty
+        expect(unit_json(index, 'external_consumers', 'external:storefront')).to be_nil
+        expect(edges(unit_json(index, 'external_consumers', 'external:reporting'), 'reads_table'))
+          .to eq(['table:comments'])
+      end
+
+      it 'links a declared table once it exists, without the declaration changing' do
+        write_file(declared, "storefront:\n  - audit_rows\n")
+        index = run_sequence(
+          [
+            lambda {
+              connection.create_table(:audit_rows) { |t| t.string :note }
+              write_file('db/migrate/20240305000000_create_audit_rows.rb',
+                         migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+            }
+          ]
+        )
+
+        expect(edges(unit_json(index, 'external_consumers', 'external:storefront'), 'reads_table'))
+          .to eq(['table:audit_rows'])
+      end
+
+      it 'keeps the published generation when the declared file is malformed' do
+        write_file(declared, "storefront:\n  - posts\n")
+        index = Dir.mktmpdir('woods_consumers_malformed')
+        (@scratch_dirs ||= []) << index
+        Woods::Extractor.new(output_dir: index).extract_all
+
+        write_file(declared, "storefront: posts\n")
+        begin
+          Woods::Extractor.new(output_dir: index).extract_changed([declared])
+        rescue Woods::ExtractionError
+          nil
+        end
+
+        expect(edges(unit_json(index, 'external_consumers', 'external:storefront'), 'reads_table'))
+          .to eq(['table:posts'])
+      end
+    end
+  end
+
   # ── Randomized differential run ──────────────────────────────────────────
 
   # The gap-specific examples above pin known failures; this is the part that
@@ -3317,7 +3538,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   def migration_source(base, nonce)
     name = camelize(base.sub(/\A\d+_/, ''))
-    "class #{name} < ActiveRecord::Migration[7.0]\n  def change\n    # #{nonce}\n  end\nend\n"
+    "class #{name} < ActiveRecord::Migration[7.0]\n  def change\n    add_index :posts, :title # #{nonce}\n  end\nend\n"
   end
 
   def camelize(base)
