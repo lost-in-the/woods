@@ -28,6 +28,10 @@ module Woods
       # Lifecycle methods that are not user-defined actions
       LIFECYCLE_METHODS = %i[subscribed unsubscribed].freeze
 
+      # The conventional abstract base every application channel inherits from.
+      # It is a unit of its own, like ApplicationController, marked abstract.
+      ABSTRACT_BASE = 'ApplicationCable::Channel'
+
       def initialize
         # No directories to scan — this is runtime introspection
       end
@@ -72,6 +76,7 @@ module Woods
         unit.namespace = extract_namespace(name)
         unit.source_code = source
         unit.metadata = build_metadata(source, own_methods)
+        unit.metadata[:abstract] = true if name == ABSTRACT_BASE
         unit.dependencies = source.empty? ? [] : scan_common_dependencies(source)
 
         unit
@@ -89,7 +94,7 @@ module Woods
         defined?(ActionCable::Channel::Base)
       end
 
-      # Retrieve channel descendants, filtering out abstract bases and anonymous classes.
+      # Retrieve app-defined, named channel descendants, the abstract base included.
       #
       # @return [Array<Class>]
       def channel_descendants
@@ -97,7 +102,7 @@ module Woods
       end
 
       def app_channel?(klass)
-        action_cable_available? && klass.name && klass.name != 'ApplicationCable::Channel' &&
+        action_cable_available? && klass.name &&
           klass < ActionCable::Channel::Base && app_source_file?(source_file_for(klass, klass.name))
       end
 

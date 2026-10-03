@@ -61,6 +61,9 @@ require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
 require_relative 'module_reconciliation'
+require_relative 'poro_reconciliation'
+require_relative 'skipped_files'
+require_relative 'source_references/memo_collector'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -82,6 +85,7 @@ module Woods
     include Extractors::SourceNesting
     include SourceReferences::Extraction
     include ModuleReconciliation
+    include PoroReconciliation
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -437,6 +441,7 @@ module Woods
       # package added between the two runs.
       @package_resolver = nil
       @incremental_extractors = nil
+      @source_collector = nil
       @persisted_index_stats = nil
       @graph_sha = nil
       profile_phase('payload seed') { begin_payload! }
@@ -452,6 +457,9 @@ module Woods
           extract_all_sequential
         end
       end
+
+      # Phase 1.2: Owned files whose owners emitted nothing go to the PORO path.
+      profile_phase('owner fallback') { extract_owner_fallbacks }
 
       # Phase 1.5: Deduplicate results
       Rails.logger.info '[Woods] Deduplicating results...'
@@ -529,6 +537,7 @@ module Woods
         write_dependency_graph
         write_graph_analysis
       end
+      profile_phase('skipped files') { write_skipped_files(@results.values.flatten.map(&:file_path)) }
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
@@ -639,6 +648,10 @@ module Woods
         touched.merge(reconcile_class_based_types(
                         affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
                       ))
+        # Last: ownership is final only after every family reconciled.
+        touched.merge(reconcile_owner_fallbacks(affected_types))
+        touched.merge(prune_family_owned_poros(affected_types))
+        touched.merge(extract_unitless_poro_files(affected_types))
       end
 
       raise_on_handled_extraction_failure!
@@ -847,6 +860,7 @@ module Woods
       @flow_scope = nil
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
+      @source_collector = nil
       @hybrid_discovery_keys = Set.new
       @active_record_names = nil
       @package_resolver = nil
@@ -882,14 +896,21 @@ module Woods
     def finalize_incremental_run(touched, reason: 'incremental')
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
       profile_phase('graph write') { write_dependency_graph }
+      # A skip reason can change while no unit does (a namespace-only file
+      # turns into a parse error), so a changed report alone warrants a publish.
+      # A payload without one predates the report and gains it on its next
+      # publishing run; that absence alone does not publish.
+      skipped, published_skipped = profile_phase('skipped files') { skipped_files_report }
+      skipped_changed = !published_skipped.nil? && skipped != published_skipped
 
-      if touched.empty? && !withdrew_flows
+      if touched.empty? && !withdrew_flows && !skipped_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
         return
       end
 
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
+      SkippedFiles.write(payload_dir, skipped, durable: payload_writes_durable?) unless skipped == published_skipped
       profile_phase('manifest and summary') do
         write_manifest(incremental: true)
         write_structural_summary
@@ -1361,7 +1382,7 @@ module Woods
         Rails.logger.info "[Woods] Extracting #{type}..."
         start_time = Time.current
 
-        extractor = extractor_class.new
+        extractor = share_source_collector(extractor_class.new)
         @extractors[type] = extractor
         units = extractor.extract_all
 
@@ -1403,7 +1424,7 @@ module Woods
           Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
           start_time = Time.current
 
-          extractor = extractor_class.new
+          extractor = share_source_collector(extractor_class.new)
           results_mutex.synchronize { @extractors[type] = extractor }
 
           units = extractor.extract_all
@@ -2501,6 +2522,22 @@ module Woods
       @graph_sha || Digest::SHA256.hexdigest(AtomicFile.read(payload_dir.join('dependency_graph.json')))
     end
 
+    # Swept Ruby files that produced no unit, with reasons. A pure function of
+    # the tree and the unit paths, so both extraction modes write the same bytes.
+    #
+    # @param unit_paths [Enumerable<String, nil>] every unit file_path
+    # @return [void]
+    def write_skipped_files(unit_paths)
+      report = SkippedFiles.new(root: Rails.root).build(unit_paths)
+      SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
+    end
+
+    # @return [Array(Hash, Hash)] the report for the reconciled graph and the
+    #   one this payload holds (nil when the payload predates the report)
+    def skipped_files_report
+      [SkippedFiles.new(root: Rails.root).build(@dependency_graph.registered_paths), SkippedFiles.read(payload_dir)]
+    end
+
     def write_graph_analysis
       return unless @graph_analysis
 
@@ -2914,12 +2951,25 @@ module Woods
       @incremental_extractors ||= {}
       return @incremental_extractors[key] if @incremental_extractors.key?(key)
 
-      @incremental_extractors[key] = EXTRACTORS[key]&.new
+      @incremental_extractors[key] = EXTRACTORS[key]&.new&.then { |extractor| share_source_collector(extractor) }
     rescue StandardError => e
       (@failed_consumers ||= Set.new).add(key)
       @source_inputs&.unverified("extractor:#{key}")
       Rails.logger.warn "[Woods] Could not build #{key} extractor: #{e.message}"
       @incremental_extractors[key] = nil
+    end
+
+    # One parser per run, shared by the PORO extractor and the source-reference
+    # pass, so a file both read is parsed once.
+    #
+    # @return [SourceReferences::MemoCollector]
+    def source_collector
+      @source_collector ||= SourceReferences::MemoCollector.new
+    end
+
+    def share_source_collector(extractor)
+      extractor.collector = source_collector if extractor.respond_to?(:collector=)
+      extractor
     end
 
     # ActiveRecord model names, needed by PoroExtractor to tell a plain class

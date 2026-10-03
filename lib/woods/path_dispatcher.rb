@@ -56,14 +56,20 @@ module Woods
     #   @return [Array<String>, nil] exact relative paths that match
     # @!attribute basenames
     #   @return [Array<String>, nil] file basenames that match anywhere under Rails.root (honors +exclude+)
+    # @!attribute matcher
+    #   @return [Symbol, nil] name of a {PathDispatcher} predicate that replaces
+    #     every other attribute when set. A name, never a Proc: rules are
+    #     serialized into the source-capture fingerprint, which must be equal
+    #     across processes.
     Rule = Struct.new(
       :extractor_key, :method_name, :dirs, :extensions, :exclude,
-      :require_segment, :recursive, :exact_paths, :basenames,
+      :require_segment, :recursive, :exact_paths, :basenames, :matcher,
       keyword_init: true
     ) do
       # @param relative_path [String] Rails.root-relative path
       # @return [Boolean]
       def matches?(relative_path)
+        return PathDispatcher.public_send(matcher, relative_path) if matcher
         return true if exact_paths&.include?(relative_path)
         return basename_match?(relative_path) if basenames
 
@@ -92,7 +98,68 @@ module Woods
       end
     end
 
+    # File rules that scan a path without owning the constants it declares:
+    # the PORO sweep itself, the runtime model-mixin guard (it matches every
+    # app/lib file and claims only live includes), and the cache-usage scan.
+    NON_CLAIMING_RULES = [%i[poros extract_poro_units], %i[concerns extract_model_mixin_file],
+                          %i[caching extract_caching_file]].freeze
+
+    # Never swept, whatever +unclaimed_ruby_paths+ says.
+    UNSWEPT_PREFIXES = %w[app/assets/ app/javascript/].freeze
+
+    # Fixed glob flags: `**/` spans directories, `{a,b}` alternation works.
+    GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
+
     class << self
+      # The extractor whose file rule owns +relative_path+, ignoring scans in
+      # {NON_CLAIMING_RULES}. Static: it never consults extraction output.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Symbol, nil]
+      def claiming_key_for(relative_path)
+        claiming_keys_for(relative_path).first
+      end
+
+      # Every extractor whose file rule owns +relative_path+, in rule order.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Array<Symbol>]
+      def claiming_keys_for(relative_path)
+        file_rules.filter_map do |rule|
+          next if NON_CLAIMING_RULES.include?([rule.extractor_key, rule.method_name])
+
+          rule.extractor_key if rule.matches?(relative_path)
+        end.uniq
+      end
+
+      # Is this a Ruby file the PORO extractor sweeps because nothing owns it?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def unclaimed?(relative_path)
+        sweepable?(relative_path) && claiming_key_for(relative_path).nil?
+      end
+
+      # Is this owned Ruby under the sweep globs? When its owners emit no unit
+      # for it, the PORO extractor takes it (owner fallback).
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def fallback_candidate?(relative_path)
+        sweepable?(relative_path) && !claiming_key_for(relative_path).nil?
+      end
+
+      # The PORO extractor's surface: app/models outside concerns, plus every
+      # unclaimed path.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def poro_path?(relative_path)
+        model_path = relative_path.start_with?('app/models/') && relative_path.end_with?('.rb') &&
+                     !relative_path.include?('/concerns/')
+        model_path || unclaimed?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -121,6 +188,16 @@ module Woods
       end
 
       private
+
+      def sweepable?(relative_path)
+        relative_path.end_with?('.rb') &&
+          UNSWEPT_PREFIXES.none? { |prefix| relative_path.start_with?(prefix) } &&
+          unclaimed_globs.any? { |glob| File.fnmatch?(glob, relative_path, GLOB_FLAGS) }
+      end
+
+      def unclaimed_globs
+        Woods.configuration&.unclaimed_ruby_paths || []
+      end
 
       def build_file_rules
         plain_ruby_rules + specialized_rules + caching_rules
@@ -163,9 +240,10 @@ module Woods
           file_rule(:view_templates, :extract_view_template_file,
                     ex::ViewTemplateExtractor::VIEW_DIRECTORIES, extensions: view_template_extensions),
           file_rule(:migrations, :extract_migration_file, %w[db/migrate], recursive: false),
-          # POROs are app/models classes that are *not* ActiveRecord models;
-          # the extractor makes that call itself given ar_names.
-          file_rule(:poros, :extract_poro_units, %w[app/models], exclude: %w[/concerns/]),
+          # POROs are app/models classes that are *not* ActiveRecord models,
+          # plus Ruby no other rule owns (#672). The matcher reads the
+          # configured globs at call time, so a memoized rule never goes stale.
+          file_rule(:poros, :extract_poro_units, %w[app], matcher: :poro_path?),
           file_rule(:libs, :extract_lib_file, %w[lib], exclude: ex::LibExtractor::EXCLUDED_SEGMENTS),
           file_rule(:test_mappings, :extract_test_file, %w[spec], extensions: %w[_spec.rb]),
           file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb])

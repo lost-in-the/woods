@@ -891,6 +891,51 @@ that does not exist is skipped.
 `EventExtractor` only when an `app/**/*.rb` file changes, so an edit under an
 added root such as `lib/` is not picked up until `woods:extract` runs.
 
+### Unclaimed Ruby paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `unclaimed_ruby_paths` | Array&lt;String&gt; | `["app/**/*.rb"]` | Globs, relative to `Rails.root`, that `PoroExtractor` sweeps for Ruby no file-based extractor owns. |
+
+Without the sweep, a file under `app/` became a unit only when a dedicated
+extractor claimed its directory. Helpers, view models, routing constraints, an
+app-local `app/lib`, and non-component Ruby beside components produced nothing.
+
+A path is swept when all of these hold:
+
+- it matches one of the globs and ends in `.rb`;
+- it is not under `app/assets/` or `app/javascript/`;
+- no file rule in `PathDispatcher` owns it. The PORO scan, the runtime
+  model-mixin guard, and the cache-usage scan do not count as owners.
+
+Directories of class-discovered extractors (controllers, mailers, channels,
+components) have no file rule, so they are swept too. A class whose ancestry
+belongs to one of those extractors (or to a job, serializer, or GraphQL base) is
+never emitted by the sweep, so typed units are not duplicated. Its plain
+neighbours are. Outside `app/models`, a class unit also needs its canonical
+declaration in that file.
+
+An owned path under the globs whose owning extractors emit no unit for it falls
+back to the same PORO path, marked `metadata.discovered_via: "owner_fallback"`.
+
+Swept units are `poro` units with `metadata.discovered_via: "unclaimed_sweep"`.
+`app/models` is always scanned and its units carry no marker.
+
+```ruby
+Woods.configure do |config|
+  config.unclaimed_ruby_paths = %w[app/helpers/**/*.rb app/view_models/**/*.rb]
+end
+```
+
+Use `[]` to keep the PORO extractor on `app/models` only. The setter rejects a
+value that is not an Array and any entry that is not a non-empty, relative glob
+without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
+
+**Changing `unclaimed_ruby_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint. Incremental runs dispatch with the current
+globs, so a file outside the changed set keeps its old classification until
+`woods:extract` runs.
+
 ## Console MCP options
 
 These options configure the Console MCP server (live database queries via

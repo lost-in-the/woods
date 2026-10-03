@@ -94,7 +94,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { [[ "$path" != */concerns/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/models/* ]]; }; }; }; then
+  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

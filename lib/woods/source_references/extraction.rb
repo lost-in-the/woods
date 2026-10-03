@@ -121,7 +121,7 @@ module Woods
       def reference_pass(units, full:)
         Pass.new(root: Rails.root, session: @source_inputs, units: units,
                  extractor_keys: self.class::TYPE_TO_EXTRACTOR_KEY, baseline: @source_reference_baseline,
-                 refreshed: @source_reference_refreshed || [], full: full).call
+                 refreshed: @source_reference_refreshed || [], full: full, collector: source_collector).call
       end
 
       def rewrite_source_reference_edges(record, edges, affected_types)

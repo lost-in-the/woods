@@ -1657,6 +1657,266 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'unclaimed Ruby under app/ (#672, #673)' do
+    after do
+      %i[SweepDateHelper SweepBillingView SweepConstraint SweepSlugifier SweepTailwind SweepNamespace
+         SweepMapper SweepPattern SweepSerializerHelpers SweepFormatter SweepVersionCapabilities
+         SweepFlipService].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    def write_and_load(relative, source)
+      write_file(relative, source)
+      load app_path(relative)
+      relative
+    end
+
+    def sweep_units(index, marker: 'unclaimed_sweep')
+      unit_snapshot(index).values.select { |unit| unit.dig('metadata', 'discovered_via') == marker }
+                          .map { |unit| unit['identifier'] }
+    end
+
+    it 'adds, edits, and prunes swept files equivalently to a full extraction' do
+      run_sequence([
+                     lambda do
+                       write_and_load('app/helpers/sweep_date_helper.rb', <<~RUBY)
+                         module SweepDateHelper
+                           def pretty_date(value) = value.to_s
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/view_models/sweep_billing_view.rb', <<~RUBY)
+                         class SweepBillingView < SimpleDelegator
+                           def total_label = SweepDateHelper.name
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/constraints/sweep_constraint.rb', <<~RUBY)
+                         class SweepConstraint
+                           def self.matches?(_request) = true
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/lib/sweep_slugifier.rb', "class SweepSlugifier\n  def call(t) = t\nend\n")
+                     end,
+                     lambda do
+                       write_and_load('app/views/ui/sweep_tailwind.rb', <<~RUBY)
+                         module SweepTailwind
+                           def tw(*classes) = classes.join(' ')
+                         end
+                       RUBY
+                     end,
+                     -> { write_and_load('app/models/sweep_namespace.rb', "module SweepNamespace\nend\n") },
+                     lambda do
+                       write_and_load('app/models/sweep_namespace.rb', <<~RUBY)
+                         module SweepNamespace
+                           LIMIT = 3
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/view_models/sweep_billing_view.rb', <<~RUBY)
+                         class SweepBillingView < SimpleDelegator
+                           def total_label = SweepSlugifier.new.call('total')
+                         end
+                       RUBY
+                     end,
+                     -> { write_and_load('app/models/sweep_pattern.rb', "SweepPattern = /\A\w+\z/\n") },
+                     lambda do
+                       Object.send(:remove_const, :SweepPattern)
+                       write_and_load('app/models/sweep_pattern.rb', "SweepPattern = %w[a b].freeze\n")
+                     end,
+                     -> { delete_file('app/constraints/sweep_constraint.rb') }
+                   ])
+    end
+
+    it 'falls back to the PORO path where an owning extractor emits nothing, in both modes' do
+      helpers = 'app/serializers/sweep_serializer_helpers.rb'
+      run_sequence([
+                     lambda do
+                       write_and_load(helpers, <<~RUBY)
+                         module SweepSerializerHelpers
+                           def money(value) = value.to_s
+                         end
+                         class SweepFormatter
+                           def call(value) = value
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/graphql/sweep_version_capabilities.rb', <<~RUBY)
+                         module SweepVersionCapabilities
+                           def self.supports?(capability, version) = true
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load(helpers, <<~RUBY)
+                         module SweepSerializerHelpers
+                           def money(value) = value.to_s
+                           def percent(value) = "\#{value}%"
+                         end
+                         class SweepFormatter
+                           def call(value) = value
+                         end
+                       RUBY
+                     end,
+                     -> { delete_file(helpers) }
+                   ])
+      index = full_extraction
+      expect(sweep_units(index, marker: 'owner_fallback')).to eq(['SweepVersionCapabilities'])
+    end
+
+    it 'moves a file between its owner and the fallback as its shape changes' do
+      flip = 'app/services/sweep_flip_service.rb'
+      service = "class SweepFlipService\n  def call = :ok\nend\n"
+      helper = "module SweepFlipService\n  module_function\n  def call = :ok\nend\n"
+      swap = lambda do |source|
+        Object.send(:remove_const, :SweepFlipService) if Object.const_defined?(:SweepFlipService, false)
+        write_and_load(flip, source)
+      end
+      run_sequence([-> { swap.call(service) }, -> { swap.call(helper) }, -> { swap.call(service) },
+                    -> { swap.call(helper) }])
+      expect(sweep_units(full_extraction, marker: 'owner_fallback')).to eq(['SweepFlipService'])
+    end
+
+    describe 'a class whose family changes through another file' do
+      before do
+        stub_const('Sidekiq::Job', Module.new) unless defined?(Sidekiq::Job)
+        write_and_load('app/models/sweep_parent.rb', "class SweepParent\n  def base = 1\nend\n")
+        write_and_load('app/models/sweep_child.rb', "class SweepChild < SweepParent\n  def perform = 1\nend\n")
+      end
+
+      after do
+        %i[SweepChild SweepParent].each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+      end
+
+      it 'drops the stale poro unit when a parent gains a job mixin outside the blast radius' do
+        index = full_extraction
+        expect(unit_snapshot(index).values.map { |unit| unit['identifier'] }).to include('SweepChild')
+
+        hook = write_and_load('app/lib/sweep_parent_job.rb', "SweepParent.include(Sidekiq::Job)\n")
+        Woods::Extractor.new(output_dir: index).extract_changed([hook])
+
+        expect(unit_snapshot(index).values.select do |unit|
+          unit['identifier'] == 'SweepChild' && unit['type'] == 'poro'
+        end)
+          .to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'restores the poro unit after a reload drops the job mixin' do
+        hook = write_and_load('app/lib/sweep_parent_job.rb', "SweepParent.include(Sidekiq::Job)\n")
+        index = full_extraction
+
+        %i[SweepChild SweepParent].each { |name| Object.send(:remove_const, name) }
+        delete_file(hook)
+        load app_path('app/models/sweep_parent.rb')
+        load app_path('app/models/sweep_child.rb')
+        Woods::Extractor.new(output_dir: index).extract_changed([hook])
+
+        expect(differences(index, full_extraction)).to be_empty
+        expect(unit_snapshot(index).values.map { |unit| unit['identifier'] }).to include('SweepChild')
+      end
+    end
+
+    it 'keeps a module nested in a compact-named controller, and the action it prepends' do
+      write_and_load('app/controllers/sweep.rb', "module Sweep\nend\n")
+      write_and_load('app/controllers/sweep/confirmations_controller.rb', <<~RUBY)
+        class Sweep::ConfirmationsController < ApplicationController
+          module Behavior
+            def new = head(:ok)
+          end
+          prepend Behavior
+        end
+      RUBY
+      routes = File.read(app_path('config/routes.rb'))
+      write_file('config/routes.rb',
+                 routes.sub(/^end\s*\z/, "  namespace(:sweep) { resources :confirmations, only: :new }\nend\n"))
+      Rails.application.reload_routes!
+
+      index = full_extraction
+      units = unit_snapshot(index).values
+      behavior = units.find { |unit| unit['identifier'] == 'Sweep::ConfirmationsController::Behavior' }
+      expect(behavior).to include('type' => 'poro')
+      controller = units.find { |unit| unit['identifier'] == 'Sweep::ConfirmationsController' }
+      source = controller.dig('metadata', 'action_sources', 'new')
+      expect(source).to include('owner' => 'Sweep::ConfirmationsController::Behavior')
+      expect(units.map { |unit| unit['identifier'] }).to include(source.fetch('defined_in'))
+    ensure
+      Object.send(:remove_const, :Sweep) if Object.const_defined?(:Sweep, false)
+    end
+
+    it 'publishes skip-reason changes that touch no unit, and only those' do
+      index = full_extraction
+      empty = 'app/models/sweep_empty.rb'
+      skipped = -> { read_json(index, 'skipped_files.json').fetch('files') }
+      quiet_run = -> { Woods::Extractor.new(output_dir: index).extract_changed(['README.md']) }
+
+      write_file(empty, "module SweepEmpty\nend\n")
+      quiet_run.call
+      expect(skipped.call).to include('path' => empty, 'reason' => 'namespace_only')
+      expect(differences(index, full_extraction)).to be_empty
+
+      write_file(empty, "module SweepEmpty\n  def broken(\nend\n")
+      quiet_run.call
+      expect(skipped.call).to include('path' => empty, 'reason' => 'parse_error')
+
+      stamp = read_json(index, 'manifest.json')['extracted_at']
+      sleep 1.1 # the manifest stamp has second resolution
+      quiet_run.call
+      expect(read_json(index, 'manifest.json')['extracted_at']).to eq(stamp)
+
+      delete_file(empty)
+      quiet_run.call
+      expect(skipped.call.map { |entry| entry['path'] }).not_to include(empty)
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'parses each PORO source once per full extraction' do
+      write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
+      parses = Hash.new(0)
+      collector = Woods::SourceReferences::Collector
+      allow_any_instance_of(collector).to receive(:call).and_wrap_original do |original, source|
+        parses[source] += 1
+        original.call(source)
+      end
+      index = full_extraction
+      poro_sources = unit_snapshot(index).values.select { |unit| unit['type'] == 'poro' }
+                                         .map { |unit| File.read(app_path(unit['file_path'])) }.uniq
+      expect(poro_sources).not_to be_empty
+      expect(poro_sources.to_h { |source| [source[0, 40], parses[source]] }.values.uniq).to eq([1])
+    end
+
+    it 'publishes swept units and a nested class from a namespace file in a full extraction' do
+      write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
+      write_and_load('app/lib/sweep_mapper.rb', <<~RUBY)
+        module SweepMapper
+          class Base
+            def initialize(path) = @path = path
+          end
+        end
+      RUBY
+      write_and_load('app/views/ui/sweep_tailwind.rb', "module SweepTailwind\n  def tw = 1\nend\n")
+      write_and_load('app/models/sweep_namespace.rb', "module SweepNamespace\n  LIMIT = 3\nend\n")
+      index = full_extraction
+      expect(sweep_units(index)).to include('SweepDateHelper', 'SweepMapper::Base', 'SweepTailwind')
+      write_file('app/models/sweep_empty.rb', "module SweepEmpty\nend\n")
+      index = full_extraction
+      expect(read_json(index, 'skipped_files.json').fetch('files'))
+        .to include('path' => 'app/models/sweep_empty.rb', 'reason' => 'namespace_only')
+      namespace = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepNamespace' }
+      expect(namespace.fetch('metadata')).to include('ruby_kind' => 'module', 'constants' => ['LIMIT'])
+      expect(sweep_units(index)).not_to include('SweepMapper', 'ApplicationController', 'PostsController')
+    end
+  end
+
   describe 'class-discovered job nested in a model file (N-1)' do
     # spec/dummy/app/models/billing/invoicing/reconciler.rb nests
     # `RefreshJob < ApplicationJob` inside a compact-form PORO. The full path

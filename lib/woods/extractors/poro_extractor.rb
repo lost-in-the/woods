@@ -8,17 +8,23 @@ require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
 require_relative 'assigned_value_discovery'
-require_relative 'job_ancestry'
 require_relative '../source_references/runtime_lookup'
+require_relative 'class_families'
+require_relative 'constant_assignments'
+require_relative '../path_dispatcher'
 
 module Woods
   module Extractors
-    # PoroExtractor handles plain Ruby object extraction from app/models/.
+    # PoroExtractor handles plain Ruby object extraction from app/models/ and
+    # from Ruby no other extractor claims (helpers, view models, constraints,
+    # app-local libraries, non-component Ruby beside components).
     #
     # Scans app/models/ for Ruby files that define classes which are NOT
     # ActiveRecord descendants (those are handled by ModelExtractor). Captures
     # value objects, form objects, CurrentAttributes subclasses, Struct.new
-    # wrappers, and any other non-AR class living alongside AR models.
+    # wrappers, and any other non-AR class living alongside AR models. The
+    # wider sweep follows `Woods.configuration.unclaimed_ruby_paths` and
+    # {PathDispatcher.poro_path?}, so full and incremental runs agree per file.
     #
     # Files under app/models/concerns/ are excluded — those are handled by
     # ConcernExtractor. Callable standalone modules use the existing poro type,
@@ -42,8 +48,40 @@ module Woods
       # Subdirectory to exclude — handled by ConcernExtractor.
       CONCERNS_SEGMENT = '/concerns/'
 
+      # A `def` at the start of a line. `[ \t]*+` never crosses a newline and
+      # never backtracks, so blank-line runs stay linear.
+      OWN_METHOD_DEFINITION = /^[ \t]*+def\s/
+
+      # A `class` or `module` keyword opening a line, capturing the token after
+      # it (`class << self` captures `<<`).
+      DECLARATION_LINE = /^[ \t]*+(?:class|module)\b[ \t]*+(\S*+)/
+
+      # A plain constant path, optionally rooted.
+      CONSTANT_PATH = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
+
+      # Value-class factories AssignedValueDiscovery can promote to a unit.
+      VALUE_CLASS_CONSTRUCTOR = /\b(?:Struct\.new|Data\.define)\b/
+
+      # The `app/<directory>/` prefix of a root-relative path.
+      APP_DIRECTORY_PREFIX = %r{\Aapp/[^/]++/}
+
+      # Marks a unit found outside app/models by the unclaimed-Ruby sweep.
+      SWEEP_MARKER = 'unclaimed_sweep'
+
+      # Marks a unit from a path another extractor owns but emitted nothing for.
+      FALLBACK_MARKER = 'owner_fallback'
+
       def initialize
         @models_dir = Rails.root.join('app/models')
+      end
+
+      # A run can hand in a {SourceReferences::MemoCollector} shared with the
+      # source-reference pass, so each file is parsed once per run.
+      attr_writer :collector
+
+      # @return [#call] the parser for every file this extractor reads
+      def collector
+        @collector ||= SourceReferences::Collector.new
       end
 
       # Extract all PORO units from app/models/.
@@ -53,16 +91,35 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of PORO units
       def extract_all
-        return [] unless @models_dir.directory?
-
         ar_names = ActiveRecord::Base.descendants.filter_map(&:name).to_set
 
         @module_discovery = StandaloneModuleDiscovery.new
-        Dir[Rails.root.join(MODELS_GLOB)].flat_map do |file|
-          next [] if file.include?(CONCERNS_SEGMENT)
+        swept_files.flat_map { |file| extract_poro_units(file, ar_names: ar_names) }
+      end
 
-          extract_poro_units(file, ar_names: ar_names)
-        end
+      # Every file this extractor scans: app/models outside concerns, plus the
+      # configured unclaimed globs minus anything another file rule owns.
+      #
+      # @return [Array<String>] absolute paths, sorted
+      def swept_files
+        root = Rails.root.to_s
+        globs = [MODELS_GLOB, *Woods.configuration&.unclaimed_ruby_paths]
+        globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: root) }
+             .uniq.sort.select { |relative| PathDispatcher.poro_path?(relative) }
+             .map { |relative| File.join(root, relative) }
+      end
+
+      # Owned Ruby under the sweep globs, each with the extractors that own it.
+      # Extractor runs {#extract_fallback_units} on a path when none of its
+      # owners emitted a unit for it.
+      #
+      # @return [Hash{String => Array<Symbol>}] absolute path => owning extractor keys
+      def fallback_files
+        root = Rails.root.to_s
+        Array(Woods.configuration&.unclaimed_ruby_paths)
+          .flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: root) }
+          .uniq.sort.select { |relative| PathDispatcher.fallback_candidate?(relative) }
+          .to_h { |relative| [File.join(root, relative), PathDispatcher.claiming_keys_for(relative)] }
       end
 
       # Preserve the historical single-unit return contract. A class remains
@@ -82,15 +139,18 @@ module Woods
       # @param ar_names [Set<String>] Active Record identities to exclude
       # @return [Array<ExtractedUnit>] legacy class followed by standalone modules
       def extract_poro_units(file_path, ar_names: Set.new)
-        source = File.read(file_path)
-        analysis = SourceReferences::Collector.new.call(source)
-        primary = extract_class_unit(file_path, source, ar_names, analysis)
-        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
-        modules = discovery.call(file_path, analysis: analysis).map { |record| module_unit(file_path, source, record) }
-        [primary, *modules].compact
-      rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
-        []
+        extract_units(file_path, ar_names, fallback: false)
+      end
+
+      # Units for a path another extractor's file rule owns but emitted nothing
+      # for. The same class-family exclusion and canonical-ownership proof as
+      # the sweep apply; units carry {FALLBACK_MARKER}.
+      #
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @return [Array<ExtractedUnit>]
+      def extract_fallback_units(file_path, ar_names: Set.new)
+        extract_units(file_path, ar_names, fallback: true)
       end
 
       # Recompute unclaimed module identities for includer-only reconciliation.
@@ -99,46 +159,137 @@ module Woods
       # @return [Hash<String, Array<ExtractedUnit>>] absolute paths and module units
       def standalone_modules
         @module_discovery = StandaloneModuleDiscovery.new
-        return {} unless @models_dir.directory?
-
-        Dir[Rails.root.join(MODELS_GLOB)].each_with_object({}) do |file, result|
-          next if file.include?(CONCERNS_SEGMENT)
+        swept_files.each_with_object({}) do |file, result|
+          # Without the keyword the file declares no module; skip the parse.
+          next unless File.read(file).match?(/\bmodule\s/)
 
           units = extract_standalone_module_file(file)
           result[file] = units unless units.empty?
         end
       end
 
+      # The skip reason the file decides on its own, before any ownership or
+      # runtime question: `parse_error`, `no_declaration` or `namespace_only`.
+      #
+      # @param file_path [String] absolute path of a file that produced no unit
+      # @return [String, nil] nil when the file declares something of its own
+      def static_skip_reason(file_path)
+        source, analysis, declarations = skip_inputs(file_path)
+        return 'parse_error' if analysis['parse_error']
+        return 'no_declaration' if declarations.empty? && ConstantAssignments.new.call(source).empty?
+
+        'namespace_only' if declarations.any? && namespace_only?(source, declarations)
+      end
+
+      # Why a scanned file yields no unit. See {Woods::SkippedFiles} for the reasons.
+      #
+      # @param file_path [String] absolute path of a file that produced no unit
+      # @return [String] skip reason
+      def skip_reason(file_path)
+        static = static_skip_reason(file_path)
+        return static if static
+
+        _source, _analysis, declarations = skip_inputs(file_path)
+        family = declarations.select { |declaration| declaration['kind'] == 'class' }
+                             .map { |declaration| declaration['owner'] }.uniq
+                             .filter_map { |identifier| runtime_family(identifier) }.first
+        family ? "rejected_by:#{family}" : 'not_owned'
+      end
+
       private
 
-      # A class the job family admits is a job unit, not also a PORO.
-      #
-      # @param class_name [String]
-      # @return [Boolean]
-      def job_owned?(class_name)
-        klass = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
-        JobAncestry.admitted?(klass, app_root: Rails.root.to_s)
+      # A file whose only declarations are a class-family class and its
+      # namespace wrappers cannot yield a PORO unit, and deciding that needs no
+      # parse. Most swept controller, mailer and component files are this shape.
+      def family_owned_file?(file_path, source)
+        return false if source.match?(VALUE_CLASS_CONSTRUCTOR)
+
+        governed = managed_constant_path(file_path.to_s)
+        return false unless governed
+
+        segments = governed.split('::')
+        return false unless declares_only?(source, segments)
+        return false unless runtime_family(governed)
+
+        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        (1...segments.size).none? { |depth| discovery.owns?(segments.first(depth).join('::'), file_path) }
+      end
+
+      # Whether the file's class/module lines, in order, spell exactly the
+      # governed constant: `module A` + `class B` or `class A::B` for `A::B`.
+      # Any other declaration (a nested module, `class << self`) needs a parse.
+      def declares_only?(source, segments)
+        tokens = source.scan(DECLARATION_LINE).flatten
+        tokens.all? { |token| token.match?(CONSTANT_PATH) } &&
+          tokens.flat_map { |token| token.delete_prefix('::').split('::') } == segments
+      end
+
+      def skip_inputs(file_path)
+        source = File.read(file_path)
+        analysis = collector.call(source)
+        declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
+        [source, analysis, declarations]
+      end
+
+      def extract_units(file_path, ar_names, fallback:)
+        source = File.read(file_path)
+        return [] if family_owned_file?(file_path, source)
+
+        analysis = collector.call(source)
+        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        proof = fallback || swept_path?(file_path)
+        primary = extract_class_unit(file_path, source, ar_names, analysis, proof: proof)
+        nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)
+        modules = discovery.call(file_path, analysis: analysis, admit: fallback)
+                           .map { |record| module_unit(file_path, source, record) }
+        units = [primary, *nested, *modules, *constant_units(file_path, source, analysis)].compact
+        return mark(units, FALLBACK_MARKER) if fallback
+
+        swept_path?(file_path) ? mark(units, SWEEP_MARKER) : units
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
+        []
+      end
+
+      # Nodes that give a module body content of its own.
+      CONTENT_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
+                       Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode, Prism::BlockNode].freeze
+      private_constant :CONTENT_NODES
+
+      def namespace_only?(source, declarations)
+        return false unless declarations.all? { |declaration| declaration['kind'] == 'module' }
+
+        pending = [Prism.parse(source).value]
+        until pending.empty?
+          node = pending.pop
+          return false if CONTENT_NODES.any? { |type| node.is_a?(type) }
+
+          pending.concat(node.compact_child_nodes)
+        end
+        true
       end
 
       def extract_standalone_module_file(file)
         source = File.read(file)
-        analysis = SourceReferences::Collector.new.call(source)
-        @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
+        analysis = collector.call(source)
+        units = @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
+        swept_path?(file) ? mark(units, SWEEP_MARKER) : units
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract standalone module #{file}: #{e.message}")
         []
       end
 
-      def extract_class_unit(file_path, source, ar_names, analysis)
+      def extract_class_unit(file_path, source, ar_names, analysis, proof:)
         return nil unless class_source?(source, analysis)
 
         class_name = infer_class_name(file_path, source, analysis)
         return nil unless class_name
         return nil if ar_names.include?(class_name)
-        return nil if job_owned?(class_name)
         return nil if analysis.fetch('declarations').any? do |declaration|
           declaration['owner'] == class_name && declaration['kind'] == 'module'
         end
+        return nil if runtime_family(class_name)
+        return nil if proof && !@module_discovery.owns?(class_name, file_path)
 
         unit = ExtractedUnit.new(type: :poro, identifier: class_name, file_path: file_path)
         parent_class = extract_parent_class(source, class_name)
@@ -146,6 +297,89 @@ module Woods
         unit.source_code = annotate_source(source, class_name, parent_class)
         unit.metadata = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
+        unit
+      end
+
+      # A namespace file's governed constant is a module, so no class is
+      # primary. Classes nested only in modules, with a method of their own
+      # and canonically declared here, are units; bodiless helpers
+      # (`class Error < StandardError; end`) are not.
+      def nested_class_units(file_path, source, ar_names, analysis)
+        declarations = analysis.fetch('declarations')
+        modules = declarations.select { |declaration| declaration['kind'] == 'module' }.to_set { |d| d['owner'] }
+        lines = source.lines
+        candidates = declarations.select do |declaration|
+          declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero? &&
+            !declaration['constructor'] && !modules.include?(declaration['owner']) &&
+            !ar_names.include?(declaration['owner']) &&
+            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) } &&
+            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
+        end
+        @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
+          next if runtime_family(identifier)
+
+          declaration = candidates.find { |candidate| candidate['owner'] == identifier }
+          nested_class_unit(file_path, source, identifier, lines[(declaration['line'] - 1)...declaration['end_line']].join)
+        end
+      end
+
+      # @return [Symbol, nil] the class-discovered extractor owning a loaded class
+      def runtime_family(identifier)
+        @lookup ||= SourceReferences::RuntimeLookup.new
+        value = @lookup.call("::#{identifier}", allow_private: true)[:value]
+        return unless @lookup.class_object?(value)
+
+        ClassFamilies.owner_of(value, @lookup, bases: (@family_bases ||= ClassFamilies.resolve_bases(@lookup)))
+      end
+
+      # Outside app/models, a class unit needs the same canonical-ownership
+      # proof modules get, so two files never mint one identifier.
+      def swept_path?(file_path)
+        !File.expand_path(file_path).start_with?("#{File.expand_path(@models_dir)}/")
+      end
+
+      def mark(units, marker)
+        units.each { |unit| unit.metadata = unit.metadata.merge(discovered_via: marker) }
+      end
+
+      # A file with no class or module body can still own top-level constants
+      # (`Pattern = /.../`). Each owned, non-module assignment is a unit.
+      def constant_units(file_path, source, analysis)
+        return [] if analysis['parse_error'] || analysis.fetch('declarations').any?
+
+        lines = source.lines
+        ConstantAssignments.new.call(source).filter_map do |record|
+          next unless owned_constant?(record[:identifier], file_path)
+
+          constant_unit(file_path, record, lines[(record[:line] - 1)...record[:end_line]].join)
+        end
+      end
+
+      def owned_constant?(identifier, file_path)
+        @lookup ||= SourceReferences::RuntimeLookup.new
+        @lookup.call("::#{identifier}", allow_private: true)[:reason] == 'non_module_constant' &&
+          @module_discovery.owns?(identifier, file_path)
+      end
+
+      def constant_unit(file_path, record, body)
+        identifier = record[:identifier]
+        unit = ExtractedUnit.new(type: :poro, identifier: identifier, file_path: file_path)
+        unit.namespace = extract_namespace(identifier)
+        unit.source_code = annotate_source(body, identifier, nil)
+        unit.metadata = { ruby_kind: 'constant', value_kind: record[:value_kind], parent_class: nil,
+                          public_methods: [], class_methods: [], initialize_params: [], method_count: 0,
+                          loc: count_loc(body) }
+        unit.dependencies = extract_dependencies(body)
+        unit
+      end
+
+      def nested_class_unit(file_path, source, identifier, body)
+        unit = ExtractedUnit.new(type: :poro, identifier: identifier, file_path: file_path)
+        parent_class = extract_parent_class(source, identifier)
+        unit.namespace = extract_namespace(identifier)
+        unit.source_code = annotate_source(body, identifier, parent_class)
+        unit.metadata = extract_metadata(body, parent_class)
+        unit.dependencies = extract_dependencies(body)
         unit
       end
 
@@ -201,7 +435,7 @@ module Woods
       # @param file_path [String] Absolute path to the file
       # @param source [String] Ruby source code
       # @return [String, nil] The inferred class name
-      def infer_class_name(file_path, source, analysis = SourceReferences::Collector.new.call(source))
+      def infer_class_name(file_path, source, analysis = collector.call(source))
         # Explicit class keyword — Zeitwerk-governed naming first (G-1), then
         # enclosing modules joined by position (#174)
         assigned = AssignedValueDiscovery.new.call(file_path, analysis: analysis,
@@ -235,7 +469,7 @@ module Woods
       def path_based_class_name(file_path)
         relative = file_path.sub("#{Rails.root}/", '')
         relative
-          .sub(%r{^app/models/}, '')
+          .sub(APP_DIRECTORY_PREFIX, '')
           .sub('.rb', '')
           .split('/')
           .map(&:camelize)

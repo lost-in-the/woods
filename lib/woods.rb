@@ -151,7 +151,8 @@ module Woods
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
-                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths
+                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
+                :unclaimed_ruby_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -232,6 +233,8 @@ module Woods
       @event_patterns = [].freeze
       # Roots EventExtractor scans, relative to Rails.root. See the setter.
       @event_paths = %w[app].freeze
+      # Globs PoroExtractor sweeps for Ruby no other extractor claims.
+      @unclaimed_ruby_paths = ['app/**/*.rb'].freeze
     end
 
     def embedding_model=(value)
@@ -462,6 +465,26 @@ module Woods
       @event_paths = value.each_with_index.map { |entry, index| validate_event_path!(entry, index) }.freeze
     end
 
+    # Root-relative globs {Woods::Extractors::PoroExtractor} sweeps for Ruby
+    # files that no file-based extractor claims (helpers, view models, routing
+    # constraints, app-local libraries). `app/models` is always scanned.
+    # `app/assets`, `app/javascript` and non-`.rb` matches are never swept.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.unclaimed_ruby_paths = ['app/helpers/**/*.rb', 'app/view_models/**/*.rb']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def unclaimed_ruby_paths=(value)
+      raise ConfigurationError, "unclaimed_ruby_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index) }
+      @unclaimed_ruby_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -530,6 +553,13 @@ module Woods
       end
 
       entry.chomp('/').freeze
+    end
+
+    # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
+    def validate_relative_glob!(glob, index)
+      return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') && !glob.split('/').include?('..')
+
+      raise ConfigurationError, "unclaimed_ruby_paths[#{index}] must be a relative glob, got #{glob.inspect}"
     end
 
     def validate_boolean!(name, value)

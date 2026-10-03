@@ -50,6 +50,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       type_index_differences(incremental_dir, full_dir) +
       graph_differences(incremental_dir, full_dir) +
       manifest_differences(incremental_dir, full_dir) +
+      skipped_files_differences(incremental_dir, full_dir) +
       analysis_differences(incremental_dir, full_dir) +
       flow_differences(incremental_dir, full_dir) +
       summary_differences(incremental_dir) +
@@ -108,6 +109,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return [] if incremental == full
 
     ["manifest: #{brief(hash_delta(incremental, full))}"]
+  end
+
+  # The skipped-files report is a pure function of the tree and the unit
+  # paths, so it must match byte for byte.
+  def skipped_files_differences(incremental_dir, full_dir)
+    incremental = read_json(incremental_dir, 'skipped_files.json')
+    full = read_json(full_dir, 'skipped_files.json')
+    return [] if incremental == full
+
+    ["skipped_files.json: #{brief(hash_delta(incremental, full))}"]
   end
 
   # SUMMARY.md's totals against the manifest of the SAME index (M4).

@@ -1,0 +1,1 @@
+- Index the application channel base (#672). `ApplicationCable::Channel` was excluded by name, and the PORO sweep leaves channel classes to `ActionCableExtractor`, so the file produced no unit. It is now an `action_cable_channel` unit with `metadata.abstract: true`. A base defined outside the application's source is still skipped.

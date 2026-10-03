@@ -48,6 +48,8 @@ namespace :woods do
     end
     puts '=' * 50
     puts "  Total: #{results.values.sum(&:size)} units"
+    skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
+    puts "  #{skipped}" if skipped
     puts
     puts "Output written to: #{output_dir}"
   end
@@ -349,6 +351,9 @@ namespace :woods do
       puts 'WARNINGS:'
       warnings.each { |w| puts "  ⚠ #{w}" }
     end
+
+    skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
+    puts "INFO:\n  #{skipped}" if skipped
 
     if errors.empty? && warnings.empty?
       puts '✓ Index is valid.'

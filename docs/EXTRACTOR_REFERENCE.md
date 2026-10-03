@@ -460,6 +460,32 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns). Woods 2.1 writers also discover callable standalone modules as described below.
 
+It also sweeps Ruby under `app/` that no file-based extractor owns: helpers,
+view models, routing constraints, an app-local `app/lib`, and non-component
+Ruby beside components. The sweep follows `config.unclaimed_ruby_paths`; see
+[Unclaimed Ruby paths](CONFIGURATION_REFERENCE.md#unclaimed-ruby-paths). Swept
+units carry `metadata.discovered_via: "unclaimed_sweep"`. Classes owned by a
+class-discovered extractor (controllers, mailers, channels, components, jobs,
+serializers, GraphQL) are never emitted by the sweep.
+
+A file under the globs that another extractor owns, but for which that
+extractor emits nothing (helpers beside a serializer base, a module in a
+services directory, a batch loader under `app/graphql`), falls back to the same
+PORO path. Those units carry `metadata.discovered_via: "owner_fallback"`. The
+decision is made per file after every typed extractor has run, in full and
+incremental extraction alike. When a class later joins or leaves a
+class-discovered family through another file (a parent gains
+`include Sidekiq::Job`), incremental extraction drops or restores its PORO unit
+to match a full run.
+
+A file with no class or module body can still own top-level constants
+(`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment
+whose runtime `const_source_location` is that file, and whose value is not a
+module, becomes a `poro` unit with `metadata.ruby_kind: "constant"` and
+`metadata.value_kind` read from the syntax: `regexp`, `array`, `hash`, `string`,
+`symbol`, `number`, `range`, `boolean`, `nil`, or `expression`. A trailing
+`.freeze` does not change the kind.
+
 **Key details:**
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
 - Common examples: value objects, form objects placed in `app/models`, domain structs
@@ -501,8 +527,22 @@ loaded module whose canonical declaration and own methods are defined under
 `class << self` methods and plain instance-method mixins. Discovery uses runtime
 ownership and source locations without calling those methods.
 
-Namespace-only wrappers, aliases, unloaded constants, gem-owned modules and
-methods supplied only by another file do not establish standalone ownership.
+Three more module shapes produce a unit:
+
+| Shape | Evidence | Metadata |
+|---|---|---|
+| An `ActiveSupport::Concern` no live model includes | A `ClassMethods` method defined in the file, or an `included` / `prepended` block | `active_support_concern: true`; `ClassMethods` names join `class_methods` |
+| A method wrapped by a helper from another file | A prepended wrapper (a memoizer) is skipped through the super chain; a method redefined in place still counts when this module body declares it with `def` | Same as any module |
+| A constant-only module | Non-module constants declared inside the module body | `constants: [...]` |
+
+When a namespace file's governed constant is a module, classes nested in it are
+units too, if each defines at least one method and is canonically declared in
+that file. A bodiless helper such as `class Error < StandardError; end` stays
+inside its owner's source.
+
+Namespace-only wrappers (no methods, no constants, no hook), aliases, unloaded
+constants, gem-owned modules and methods supplied only by another file do not
+establish standalone ownership.
 An app module included by a live model belongs to `ConcernExtractor`; a library
 module remains owned by `LibExtractor`. Separate callable modules sharing a
 source file retain their own identities. Ordinary class PORO identifiers stay unchanged.
@@ -695,6 +735,7 @@ Every single-file app-owned unit under a package root carries `metadata[:package
 **Key details:**
 - Discovers via `ActionCable::Channel::Base.descendants`. **Included in Woods 2.1:** discovery and direct extraction exclude dependency-owned source files.
 - Records stream names, authentication checks in `subscribed`, and any `broadcast_to` calls
+- The application base `ApplicationCable::Channel` is a channel unit too, with `metadata.abstract: true`, the way `ApplicationController` is a controller unit
 
 ---
 

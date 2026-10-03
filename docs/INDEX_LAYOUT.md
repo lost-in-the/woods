@@ -24,6 +24,7 @@ A typical structural index looks like this; optional entries need not exist:
 │       ├── source_inputs.json          # optional on older indexes
 │       ├── dependency_graph.json
 │       ├── graph_analysis.json
+│       ├── skipped_files.json          # optional on older indexes
 │       ├── SUMMARY.md
 │       ├── models/
 │       │   ├── _index.json
@@ -75,6 +76,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. |
+| `skipped_files.json` | Swept Ruby files that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only` and `not_owned`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
 

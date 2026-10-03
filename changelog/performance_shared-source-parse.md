@@ -1,0 +1,1 @@
+- Parse each Ruby file once per extraction run (#672). The PORO sweep and the source-reference pass both parsed every PORO unit file; they now share one run-scoped `SourceReferences::MemoCollector`, keyed by content digest, in full and incremental runs.

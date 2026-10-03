@@ -178,6 +178,19 @@ module Woods
       Woods::Generation.new(output_dir: output_dir).payload_dir
     end
 
+    # One line naming how many swept Ruby files produced no unit, by reason.
+    #
+    # @param output_dir [Pathname, String] index directory
+    # @return [String, nil] nil when the published generation has no report
+    def woods_skipped_files_summary(output_dir)
+      require 'woods/skipped_files'
+      report = Woods::SkippedFiles.read(woods_payload_dir(output_dir))
+      return unless report
+
+      counts = report.fetch('counts').map { |reason, count| "#{reason}: #{count}" }.join(', ')
+      "Skipped files: #{report.fetch('total')} (#{counts}); see #{Woods::SkippedFiles::FILENAME}"
+    end
+
     # @param output_dir [Pathname, String] index directory
     # @param wait [Numeric, nil] seconds to wait for the lock (default: the
     #   shared writer wait; injectable so a spec need not sit out the window)

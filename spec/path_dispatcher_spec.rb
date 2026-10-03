@@ -170,6 +170,87 @@ RSpec.describe Woods::PathDispatcher do
     end
   end
 
+  describe 'unclaimed Ruby (#672)' do
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'names the extractor whose file rule owns a path' do
+      expect(described_class.claiming_key_for('app/services/checkout.rb')).to eq(:services)
+      expect(described_class.claiming_key_for('app/models/concerns/auditable.rb')).to eq(:concerns)
+    end
+
+    it 'does not count the PORO, runtime-mixin, or caching scans as owning a path' do
+      %w[app/helpers/date_helper.rb app/models/value_object.rb app/controllers/posts_controller.rb].each do |path|
+        expect(described_class.claiming_key_for(path)).to(be_nil, path)
+      end
+    end
+
+    it 'sweeps Ruby under app/ that no file rule owns' do
+      %w[
+        app/helpers/date_helper.rb app/view_models/billing_view.rb app/constraints/non_production_constraint.rb
+        app/lib/slugifier.rb app/views/components/builders/tailwind.rb app/controllers/posts_controller.rb
+      ].each { |path| expect(described_class.unclaimed?(path)).to(be(true), path) }
+    end
+
+    it 'never sweeps owned paths, assets, javascript, or non-Ruby files' do
+      %w[
+        app/services/checkout.rb app/models/concerns/auditable.rb app/assets/config/manifest.rb
+        app/javascript/setup.rb app/helpers/date_helper.js lib/slugifier.rb
+      ].each { |path| expect(described_class.unclaimed?(path)).to(be(false), path) }
+    end
+
+    it 'follows the configured globs' do
+      Woods.configuration.unclaimed_ruby_paths = ['app/helpers/**/*.rb']
+
+      expect(described_class.unclaimed?('app/helpers/date_helper.rb')).to be(true)
+      expect(described_class.unclaimed?('app/view_models/billing_view.rb')).to be(false)
+    end
+
+    it 'serializes rules without process-specific values, so capture fingerprints survive a restart' do
+      require 'woods/source_inputs/scopes'
+      rules = -> { JSON.generate(described_class.file_rules.map(&:to_h)) }
+      fingerprint = -> { Woods::SourceInputs::Scopes.new(extra_roots: []).fingerprint }
+      before_rules = rules.call
+      before_fingerprint = fingerprint.call
+
+      described_class.reset!
+
+      expect(rules.call).to eq(before_rules)
+      expect(fingerprint.call).to eq(before_fingerprint)
+    end
+
+    it 'lists every owning extractor of a path' do
+      expect(described_class.claiming_keys_for('app/policies/post_policy.rb')).to contain_exactly(:policies,
+                                                                                                  :pundit_policies)
+      expect(described_class.claiming_keys_for('app/helpers/date_helper.rb')).to eq([])
+    end
+
+    it 'offers owned Ruby under the globs as a fallback candidate, and nothing else' do
+      expect(described_class.fallback_candidate?('app/serializers/serializer_helpers.rb')).to be(true)
+      expect(described_class.fallback_candidate?('app/graphql/loaders/association_loader.rb')).to be(true)
+      %w[app/helpers/date_helper.rb app/assets/config/x.rb lib/reporting/csv.rb app/views/posts/index.html.erb]
+        .each { |path| expect(described_class.fallback_candidate?(path)).to(be(false), path) }
+    end
+
+    it 'routes swept paths and app/models to the PORO extractor, whatever the globs say' do
+      Woods.configuration.unclaimed_ruby_paths = []
+
+      expect(keys_for('app/models/value_object.rb')).to include(:poros)
+      expect(keys_for('app/helpers/date_helper.rb')).not_to include(:poros)
+
+      Woods.configuration.unclaimed_ruby_paths = ['app/**/*.rb']
+
+      expect(keys_for('app/helpers/date_helper.rb')).to include(:poros)
+      expect(keys_for('app/services/checkout.rb')).not_to include(:poros)
+      expect(keys_for('app/models/concerns/auditable.rb')).not_to include(:poros)
+    end
+  end
+
   describe '#whole_app_keys_for' do
     it 'triggers a routes re-run on config/routes.rb' do
       expect(dispatcher.whole_app_keys_for('config/routes.rb')).to include(:routes)
