@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'behavioral_profile'
+require_relative 'config_source_guard'
 
 module Woods
   module Extractors
@@ -16,6 +17,9 @@ module Woods
     # `db/seeds/`, and the root `Gemfile` and `Rakefile`. Each file becomes one
     # ExtractedUnit with metadata about config type, gem references, and
     # detected settings.
+    #
+    # Published source is passed through {ConfigSourceGuard.redact}, so a
+    # credential-shaped literal is replaced by a marker.
     #
     # `config/routes.rb` belongs to RouteExtractor (a `route_file` unit) and
     # `config/application.rb` is the nominal path of the behavioral profile, so
@@ -131,9 +135,10 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil on failure
       def extract_configuration_file(file_path)
         config_type = detect_config_type(file_path)
-        return nil unless config_type
+        return nil unless config_type && readable?(file_path)
 
-        source = File.read(file_path)
+        # Credential-shaped text never reaches the published source or metadata.
+        source = ConfigSourceGuard.redact(File.read(file_path))
         identifier = build_identifier(file_path)
 
         unit = ExtractedUnit.new(
@@ -154,6 +159,16 @@ module Woods
       end
 
       private
+
+      # Initializers and environments are read as found. Every other file must
+      # resolve under the application root, so a symlink cannot publish a
+      # foreign file as a boot, seed or root unit.
+      def readable?(file_path)
+        relative = file_path.to_s.sub("#{Rails.root}/", '')
+        return true if CONFIG_DIRECTORIES.any? { |dir| relative.start_with?("#{dir}/") }
+
+        ConfigSourceGuard.inside_root?(file_path.to_s, Rails.root.to_s)
+      end
 
       # Files outside {CONFIG_DIRECTORIES}: the exact files, the Ruby directly
       # under `config/`, then the extra directories. Sorted, so repeat runs agree.

@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
 require 'active_support/core_ext/object/blank'
 require 'woods/extractors/configuration_extractor'
 
@@ -330,6 +331,34 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
       expect(unit.namespace).to eq('seeds')
       expect(unit.source_code).to include('Type: seeds', 'WidgetSeedService.call')
       expect(unit.dependencies).to include({ type: :service, target: 'WidgetSeedService', via: :code_reference })
+    end
+
+    it 'redacts credential-shaped text in the published source' do
+      gemfile = create_file('Gemfile', "source 'https://ledger:plaintext-marker@gems.example'\ngem 'rails'\n")
+      initializer = create_file('config/initializers/ledger.rb', "Ledger.api_key = 'sk_live_#{'a1B2' * 8}'\n")
+      extractor = described_class.new
+
+      published = [gemfile, initializer].map { |path| JSON.generate(extractor.extract_configuration_file(path).to_h) }
+
+      expect(published.join).not_to include('plaintext-marker')
+      expect(published.join).not_to include('sk_live_')
+      expect(published.first).to include('gems.example')
+    end
+
+    it 'refuses a boot or root file that resolves outside the application root' do
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'boot.rb'), "PLAINTEXT_MARKER = 1\n")
+      %w[Gemfile config/boot.rb db/seeds/extra.rb].each do |relative|
+        FileUtils.mkdir_p(File.dirname(File.join(tmp_dir, relative)))
+        File.symlink(File.join(outside, 'boot.rb'), File.join(tmp_dir, relative))
+      end
+      extractor = described_class.new
+
+      expect(config_units).to eq([])
+      expect(extractor.extract_configuration_file(File.join(tmp_dir, 'Gemfile'))).to be_nil
+      expect(extractor.extract_configuration_file(File.join(tmp_dir, 'config/../../x/Gemfile'))).to be_nil
+    ensure
+      FileUtils.rm_rf(outside)
     end
 
     it 'answers ownership from the path alone' do

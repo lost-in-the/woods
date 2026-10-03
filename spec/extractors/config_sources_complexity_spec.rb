@@ -8,6 +8,7 @@ require 'woods/extractors/config_file_extractor'
 require 'woods/extractors/config_read_scanner'
 require 'woods/extractors/route_extractor'
 require 'woods/extractors/configuration_extractor'
+require 'woods/extractors/config_source_guard'
 
 # YAML files and the Ruby that reads them are uncontrolled input. Every
 # pattern the config-file extractor and the config-read scanner apply must
@@ -104,6 +105,24 @@ RSpec.describe 'Config source scan complexity' do
   }.each do |label, source|
     it "the Gemfile declaration scan stays within #{budget_seconds}s on #{label}" do
       within_budget(budget_seconds) { source.scan(Woods::Extractors::ConfigurationExtractor::GEM_DECLARATION) }
+    end
+  end
+
+  {
+    'repeated scheme separators' => '://' * 16_000,
+    'a scheme separator then repeated colons' => "://#{'a:' * 25_000}",
+    'a scheme separator, a long user, no password' => "://#{word}@",
+    'repeated userinfo near-matches' => '://a:b ' * 7_000,
+    'repeated private key headers' => "-----BEGIN PRIVATE KEY-----\n" * 5_000,
+    'a private key header then a long body' => "-----BEGIN PRIVATE KEY-----\n#{"#{'a' * 60}\n" * 5_000}",
+    'repeated token prefixes' => 'eyJ' * 16_000,
+    'repeated dotted token near-matches' => 'eyJa.eyJa ' * 5_000,
+    'repeated database URL openers' => 'postgres://a:' * 4_000,
+    'repeated key prefixes' => 'sk_live_' * 6_000,
+    'a long word' => word
+  }.each do |label, source|
+    it "source redaction stays within #{budget_seconds}s on #{label}" do
+      within_budget(budget_seconds) { Woods::Extractors::ConfigSourceGuard.redact(source) }
     end
   end
 

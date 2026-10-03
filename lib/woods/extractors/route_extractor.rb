@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'config_source_guard'
 
 module Woods
   module Extractors
@@ -22,7 +23,9 @@ module Woods
     # +drawn_in+ edge to the file's unit. Each of those files is also a
     # +route_file+ unit holding its source, the DSL calls it declares, the
     # files it draws and the routes located in it, so a draw file is indexed
-    # even when the runtime exposes no locations.
+    # even when the runtime exposes no locations. A route file must resolve
+    # under the application root, and its published source is passed through
+    # {ConfigSourceGuard.redact}.
     #
     # @example
     #   extractor = RouteExtractor.new
@@ -99,7 +102,7 @@ module Woods
 
         named = relative == ROUTES_FILE || (relative.start_with?("#{ROUTES_DIRECTORY}/") && relative.end_with?('.rb'))
         files[relative] = named && !relative.split('/').include?('..') &&
-                          File.file?(File.join(application_root, relative))
+                          ConfigSourceGuard.inside_root?(File.join(application_root, relative), application_root)
       end
 
       # Attach a recorded location to a route unit.
@@ -136,13 +139,14 @@ module Woods
       def route_file_paths
         nested = Dir.glob("#{ROUTES_DIRECTORY}/**/*.rb", base: application_root)
         root_file = File.file?(File.join(application_root, ROUTES_FILE)) ? [ROUTES_FILE] : []
-        (root_file + nested).uniq.sort
+        (root_file + nested).uniq.sort.select { |relative| route_file?(relative) }
       end
 
       def build_route_file(relative, path, routes, source_locations)
         source = File.read(path, encoding: Encoding::UTF_8)
         raise Woods::ExtractionError, 'Source is not valid UTF-8' unless source.valid_encoding?
 
+        source = ConfigSourceGuard.redact(source)
         declarations = route_declarations(source)
         draws = declarations.select { |entry| entry[:method] == 'draw' }.filter_map { |entry| entry[:argument] }.uniq
         unit = ExtractedUnit.new(type: :route_file, identifier: relative, file_path: path)

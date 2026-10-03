@@ -571,6 +571,24 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       )
     end
 
+    it 'redacts credential-shaped text in a route file and refuses one outside the root' do
+      write_routes('config/routes.rb', "mount Ledger::Web => '/ledger', auth: 'https://ledger:plaintext-marker@x.example'\n")
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'admin.rb'), "PLAINTEXT_MARKER = 1\n")
+      FileUtils.mkdir_p(File.join(root, 'config/routes'))
+      File.symlink(File.join(outside, 'admin.rb'), File.join(root, 'config/routes/admin.rb'))
+      stub_rooted_routes([located_route('config/routes/admin.rb:1', verb: 'GET', path: '/widgets',
+                                                                    controller: 'widgets', action: 'index')])
+
+      units = described_class.new.extract_all
+
+      expect(route_files_of(units).map(&:identifier)).to eq(%w[config/routes.rb])
+      expect(route_files_of(units).first.source_code).not_to include('plaintext-marker')
+      expect(routes_of(units).first.file_path).to be_nil
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+
     it 'emits no route_file unit when the application has no route files' do
       stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
 
