@@ -4,6 +4,7 @@ require 'digest'
 require 'json'
 require 'set'
 require_relative 'ast/parser'
+require_relative 'atomic_file'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
 require_relative 'source_line_map'
@@ -460,11 +461,7 @@ module Woods
           path = File.join(@extracted_dir, directory, filename)
           next unless File.file?(path)
 
-          # Force UTF-8: the extractor writes the routes-comment header in
-          # source_code using Unicode box-drawing characters; reading under
-          # the platform default (US-ASCII on some CIs) raises
-          # InvalidByteSequenceError before JSON parsing.
-          return JSON.parse(File.read(path, encoding: 'UTF-8'), symbolize_names: true)
+          return JSON.parse(AtomicFile.read(path), symbolize_names: true)
         rescue JSON::ParserError
           next
         end
