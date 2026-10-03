@@ -567,19 +567,20 @@ module Woods
     # same target twice (say once as `:belongs_to` and once as
     # `:code_reference`) contributes two entries in a full extraction, so
     # reconstructing this list incrementally has to do the same or the two
-    # paths produce different unit JSON. Order is registration order and is
-    # not guaranteed to match a full extraction's; callers comparing the two
-    # should compare as multisets.
+    # paths produce different unit JSON. Entries are sorted by identifier,
+    # then type, the order {ExtractedUnit#to_h} serializes a full
+    # extraction's dependents in, so neither depends on registration order.
     #
     # @param identifier [String] Unit identifier
     # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
     def dependents_detail(identifier)
-      (@reverse[identifier] || []).flat_map do |source|
+      entries = (@reverse[identifier] || []).flat_map do |source|
         sorted_nodes(@nodes[source] || {}).flat_map do |type, node|
           edge_count = Array(@edges[source]&.[](type)).count { |e| e[:target] == identifier }
           Array.new(edge_count) { { type: node[:type], identifier: source } }
         end
       end
+      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s] }
     end
 
     # Get all units of a specific type

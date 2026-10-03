@@ -137,7 +137,9 @@ module Woods
       # Route Mapping
       # ──────────────────────────────────────────────────────────────────────
 
-      # Build a map of controller -> action -> route info from Rails routes
+      # Build a map of controller -> action -> route info from Rails routes.
+      # Actions are key-sorted; each action's routes stay in route-table
+      # order, which is the order Rails matches them in.
       def build_routes_map
         routes = {}
 
@@ -157,7 +159,7 @@ module Woods
           }
         end
 
-        routes
+        routes.transform_values { |actions| actions.sort.to_h }
       end
 
       def extract_verb(route)
@@ -280,8 +282,8 @@ module Woods
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
           result = { kind: callback.kind, filter: callback_filter(callback) }
-          result[:only] = only if only.any?
-          result[:except] = except if except.any?
+          result[:only] = only.sort if only.any?
+          result[:except] = except.sort if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           result
@@ -344,9 +346,9 @@ module Woods
       # the concern's effects (filters) were captured.
       #
       # @param controller [Class] The controller class
-      # @return [Array<Module>] App-defined concern modules
+      # @return [Array<Module>] App-defined concern modules, sorted by name
       def detect_included_concerns(controller)
-        controller.included_modules.select { |mod| app_concern_module?(mod) }
+        controller.included_modules.select { |mod| app_concern_module?(mod) }.sort_by(&:name)
       end
 
       # Whether a module included in a controller is an application-defined
@@ -548,15 +550,14 @@ module Woods
       #
       # @param controller [Class] The controller class
       # @return [Hash{String => Hash}] action name to
-      #   +{ owner:, defined_in:, file:, line: }+. +file+ is relative to
-      #   Rails.root; +defined_in+ is the indexed unit whose source holds the
-      #   method body, or nil when no unit does.
+      #   +{ owner:, defined_in:, file:, line: }+, sorted by action name.
+      #   +file+ is relative to Rails.root; +defined_in+ is the indexed unit
+      #   whose source holds the method body, or nil when no unit does.
       def resolve_action_sources(controller)
         routed = routed_actions(controller)
         own_file = source_file_for(controller)
 
-        controller.action_methods.each_with_object({}) do |name, sources|
-          name = name.to_s
+        action_method_names(controller).each_with_object({}) do |name, sources|
           next if name.end_with?('=')
 
           method = controller.instance_method(name)
@@ -581,12 +582,11 @@ module Woods
       #
       # @param controller [Class] The controller class
       # @return [Hash{String => Hash}] action name to +{ owner: }+, the name
-      #   of the module or class that defines the method
+      #   of the module or class that defines the method, sorted by action
       def resolve_inherited_gem_actions(controller)
         routed = routed_actions(controller)
 
-        controller.action_methods.each_with_object({}) do |name, actions|
-          name = name.to_s
+        action_method_names(controller).each_with_object({}) do |name, actions|
           next if name.end_with?('=') || !routed.include?(name)
 
           method = controller.instance_method(name)
@@ -594,6 +594,16 @@ module Woods
 
           actions[name] = { owner: method.owner.name }
         end
+      end
+
+      # Rails' +action_methods+ is a Set whose order follows method
+      # definition and inclusion order, so it is sorted before anything
+      # derived from it is emitted.
+      #
+      # @param controller [Class]
+      # @return [Array<String>]
+      def action_method_names(controller)
+        controller.action_methods.map(&:to_s).sort
       end
 
       # @param controller [Class]

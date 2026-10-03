@@ -758,11 +758,22 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
 end
 
 RSpec.describe 'Controllers outside ActionController::Base, in a real Rails process', :booted_app do
-  def extract_controllers
+  def controller_lines
     script = File.expand_path('../fixtures/controller_runtime/boot.rb', __dir__)
     output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
     expect(status.success?).to be(true), error
-    output.lines.grep(/\A\{/).to_h { |line| JSON.parse(line).then { |unit| [unit['identifier'], unit] } }
+    output.lines.grep(/\A\{/)
+  end
+
+  def extract_controllers
+    controller_lines.to_h { |line| JSON.parse(line).then { |unit| [unit['identifier'], unit] } }
+  end
+
+  it 'emits byte-identical controller units from two independent boots' do
+    first = controller_lines
+
+    expect(first.size).to eq(3)
+    expect(controller_lines).to eq(first)
   end
 
   it 'indexes ActionController::Metal controllers as metal controller units with their own actions' do

@@ -20,12 +20,11 @@ same manifest counts and `graph_analysis.json` — and, when flow
 precomputation is enabled, the same `flows/flow_index.json`, the same
 flow documents, and the same flow annotations on controller units.
 
-Three differences are tolerated, and nothing else:
+Two differences are tolerated, and nothing else:
 
 | Tolerated | Why |
 |---|---|
 | Wall-clock stamps (`extracted_at`, `generated_at`, and the digest over it) | A unit an incremental run correctly left alone keeps an older stamp. |
-| Ordering inside a unit's `dependents` | Full extraction appends in extractor order, incremental in graph order. Same multiset. |
 | PageRank beyond six decimal places | Iterative floating point accumulated in each run's registration order. Scores are compared as values; only the last bits are forgiven. |
 
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.

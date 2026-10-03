@@ -43,6 +43,15 @@ RSpec.describe Woods::ExtractedUnit do
       unit.dependencies = [{ type: :service, target: 'UserService' }]
     end
 
+    it 'serializes dependents in canonical order, whatever order they were collected in' do
+      unit.dependents = [{ type: :service, identifier: 'Shipment' }, { type: :job, identifier: 'Audit' },
+                         { type: :model, identifier: 'Widget' }, { type: :job, identifier: 'Audit' }]
+
+      expect(unit.to_h[:dependents]).to eq([{ type: :job, identifier: 'Audit' }, { type: :job, identifier: 'Audit' },
+                                            { type: :service, identifier: 'Shipment' },
+                                            { type: :model, identifier: 'Widget' }])
+    end
+
     it 'includes all fields' do
       hash = unit.to_h
 

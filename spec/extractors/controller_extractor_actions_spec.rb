@@ -224,6 +224,29 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end
     RUBY
 
+    load_app('app/controllers/concerns/action_fixtures/throttling.rb', <<~RUBY)
+      module ActionFixtures::Throttling
+        extend ActiveSupport::Concern
+      end
+    RUBY
+
+    load_app('app/controllers/concerns/action_fixtures/auditing.rb', <<~RUBY)
+      module ActionFixtures::Auditing
+        extend ActiveSupport::Concern
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/shipments_controller.rb', <<~RUBY)
+      class ActionFixtures::ShipmentsController < ActionFixtures::BaseController
+        include ActionFixtures::Throttling
+        include ActionFixtures::Auditing
+
+        def update = nil
+        def index = nil
+        def archive = nil
+      end
+    RUBY
+
     load_app('app/controllers/action_fixtures/health_controller.rb', <<~RUBY)
       class ActionFixtures::HealthController < ActionFixtures::FrameworkMetal
         def show
@@ -243,19 +266,26 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     RUBY
   end
 
+  let(:routes) do
+    [
+      route('action_fixtures/sso_google', 'create'),
+      route('action_fixtures/confirmations', 'new'),
+      route('action_fixtures/confirmations', 'create'),
+      route('action_fixtures/modern/confirmations', 'create'),
+      route('action_fixtures/sales_reports', 'show'),
+      route('action_fixtures/ledgers', 'totals'),
+      route('action_fixtures/health', 'show'),
+      route('action_fixtures/members/sessions', 'new'),
+      route('action_fixtures/members/sessions', 'create'),
+      route('action_fixtures/widgets', 'widget'),
+      route('action_fixtures/shipments', 'update'),
+      route('action_fixtures/shipments', 'index'),
+      route('action_fixtures/shipments', 'archive')
+    ]
+  end
+
   let(:extractor) do
-    build_extractor([
-                      route('action_fixtures/sso_google', 'create'),
-                      route('action_fixtures/confirmations', 'new'),
-                      route('action_fixtures/confirmations', 'create'),
-                      route('action_fixtures/modern/confirmations', 'create'),
-                      route('action_fixtures/sales_reports', 'show'),
-                      route('action_fixtures/ledgers', 'totals'),
-                      route('action_fixtures/health', 'show'),
-                      route('action_fixtures/members/sessions', 'new'),
-                      route('action_fixtures/members/sessions', 'create'),
-                      route('action_fixtures/widgets', 'widget')
-                    ], named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
+    build_extractor(routes, named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
   end
 
   def unit_for(name)
@@ -488,6 +518,49 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     it 'leave out unrouted mixin helpers while keeping a routed inherited action' do
       expect(chunk_actions('SsoGoogleController')).to contain_exactly('create')
       expect(chunk_actions('SalesReportsController')).to contain_exactly('show')
+    end
+  end
+
+  describe 'output order' do
+    # A before filter whose only: list is a Set, as ActionFilter holds it.
+    def filter_only(*actions)
+      condition = Object.new.tap { |cond| cond.instance_variable_set(:@actions, actions.to_set) }
+      Object.new.tap do |callback|
+        callback.define_singleton_method(:kind) { :before }
+        callback.define_singleton_method(:filter) { :load_shipment }
+        callback.instance_variable_set(:@if, [condition])
+        callback.instance_variable_set(:@unless, [])
+      end
+    end
+
+    def serialized(unit)
+      JSON.generate(unit.to_h.except(:extracted_at))
+    end
+
+    let(:controller) { ActionFixtures::ShipmentsController }
+
+    it 'sorts actions, action sources, routes, filter action lists and chunks' do
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('update', 'archive')])
+      unit = extractor.extract_controller(controller)
+
+      expect(unit.metadata[:actions]).to eq(%w[archive index update])
+      expect(unit.metadata[:action_sources].keys).to eq(%w[archive index update])
+      expect(unit.metadata[:routes].keys).to eq(%w[archive index update])
+      expect(unit.metadata[:filters].first[:only]).to eq(%w[archive update])
+      expect(unit.chunks.map { |chunk| chunk[:metadata][:action] }).to eq(%w[archive index update])
+      expect(unit.metadata[:included_concerns]).to eq(%w[ActionFixtures::Auditing ActionFixtures::Throttling])
+    end
+
+    it 'is byte-identical when reflection and the route table answer in another order' do
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('update', 'archive')])
+      first = serialized(extractor.extract_controller(controller))
+
+      reordered = build_extractor(routes.reverse)
+      allow(controller).to receive(:_process_action_callbacks).and_return([filter_only('archive', 'update')])
+      allow(controller).to(receive(:action_methods).and_wrap_original { |original| original.call.to_a.reverse.to_set })
+      allow(controller).to(receive(:included_modules).and_wrap_original { |original| original.call.reverse })
+
+      expect(serialized(reordered.extract_controller(controller))).to eq(first)
     end
   end
 end

@@ -102,8 +102,9 @@ embeddings and exports if the identifiers they store changed; restart MCP to loa
 the new gem. A reader upgrade alone cannot add relationships to an older index.
 
 The expanded references remain conservative: component callers and unresolved
-runtime scopes are not exhaustively covered. Full and incremental results can
-still differ in `dependents` presentation order without changing membership.
+runtime scopes are not exhaustively covered. Before 2.2, full and incremental
+results could differ in `dependents` presentation order without changing
+membership; both now serialize `dependents` sorted by identifier, then type.
 Large affected sets may cost as much as a full extraction; choose full extraction
 for those workloads rather than assuming every incremental run is faster.
 
