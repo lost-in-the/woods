@@ -87,13 +87,17 @@ module Woods
       #   ({TemplateRubyFragments}). A compiled template is evaluated in the
       #   component class, so its constants are looked up from that class
       #   alone, not from the modules the class file nests it in.
+      # @param kinds [Array<Symbol>, nil] the {RenderCallScan::Candidate} kinds
+      #   to resolve; nil for all. A caller that is not a component (a
+      #   controller) has no Kits or slots and asks for +:constant+ only.
       # @return [Result]
-      def call(component, source, fragments: [])
+      def call(component, source, fragments: [], kinds: nil)
         run = { component: component, bases: loaded(COMPONENT_BASES), kit: loaded(%w[Phlex::Kit]).first,
                 targets: {}, unresolved: {}, slot_targets: {}, unresolved_slots: {}, yielded: [] }
 
-        (RenderCallScan.call(source) + template_candidates(component, fragments))
-          .each { |candidate| resolve(candidate, run) }
+        candidates = RenderCallScan.call(source) + template_candidates(component, fragments)
+        candidates = candidates.select { |candidate| kinds.include?(candidate.kind) } if kinds
+        candidates.each { |candidate| resolve(candidate, run) }
         run[:yielded].each { |candidate| record(run, candidate.name, yielded_verdict(candidate, run)) }
 
         result(run)

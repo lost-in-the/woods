@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require 'digest'
 require 'prism'
 require_relative 'ast_source_extraction'
+require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
@@ -27,6 +28,7 @@ module Woods
     #
     class ControllerExtractor
       include AstSourceExtraction
+      include ComponentDiscovery
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
@@ -123,9 +125,11 @@ module Woods
         inlined_source, inlined_concerns = build_controller_source_with_concerns(controller, source)
         action_sources = resolve_action_sources(controller)
         unit.source_code = build_composite_source(controller, inlined_source)
+        renders = component_renders(controller, source)
         unit.metadata = extract_metadata(controller, source, inlined_concerns: inlined_concerns,
                                                              action_sources: action_sources)
-        unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources)
+                        .merge(unresolved_renders: renders.unresolved, external_renders: renders.external)
+        unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources, renders: renders)
 
         # Controllers benefit from per-action chunks
         unit.chunks = build_action_chunks(controller, unit)
@@ -954,7 +958,7 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(controller, source = nil, action_sources: nil)
+      def extract_dependencies(controller, source = nil, action_sources: nil, renders: nil)
         # Included concerns add per-request behavior (filters, helpers).
         # Same edge shape as ModelExtractor's concern edges so graph
         # consumers see one format (#175).
@@ -970,10 +974,10 @@ module Woods
         if source
           deps.concat(scan_common_dependencies(source))
 
-          # Phlex component references
-          source.scan(/render\s+(\w+(?:::\w+)*Component)/).flatten.uniq.each do |component|
-            deps << { type: :component, target: component, via: :render }
-          end
+          # Components rendered: `render RowComponent.new` names the unit the
+          # running app reaches, not the name as written.
+          renders ||= component_renders(controller, source)
+          deps.concat(renders.targets.map { |target| { type: :component, target: target, via: :render } })
 
           # Other view renders
           source.scan(%r{render\s+["'](\w+/\w+)["']}).flatten.uniq.each do |template|
@@ -989,6 +993,16 @@ module Woods
         # its parent keeps that edge as well as the inheritance one.
         structural = action_source_dependencies(controller, action_sources || resolve_action_sources(controller))
         (consolidate_dependencies(deps) + structural).uniq { |dep| dep.values_at(:type, :target, :via) }
+      end
+
+      # The components a controller's source renders. A controller has no
+      # Kits and no slots, so only rendered constants are resolved.
+      #
+      # @param controller [Class]
+      # @param source [String]
+      # @return [RenderTargetResolver::Result]
+      def component_renders(controller, source)
+        resolve_render_targets(controller, source, kinds: %i[constant])
       end
 
       # Edges to the units that hold the bodies of actions this controller

@@ -323,6 +323,16 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
     end
   end
 
+  it 'resolves only the requested kinds of call' do
+    stub_const('Billing::V2::ManagePage', Class.new(ApplicationView))
+    source = nested('render TierGrid.new; Sidebar(1); m.Sidebar(2)')
+
+    result = resolver.call(page, source, kinds: %i[constant])
+
+    expect(result.targets).to eq(['Billing::V2::TierGrid'])
+    expect(result.unresolved).to eq([])
+  end
+
   it 'never reports a lowercase helper call' do
     result = resolve('form_with(model: @x) { }; t(".title"); partial("x"); render partial("x")')
 
