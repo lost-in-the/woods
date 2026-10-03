@@ -97,7 +97,8 @@ module Woods
       private
 
       def app_component?(component)
-        @component_base && component.name && component < @component_base && app_source_file?(source_file_for(component))
+        @component_base && component.name && component < @component_base &&
+          current_constant?(component) && app_source_file?(source_file_for(component))
       end
 
       # Find the base component class used in the application.

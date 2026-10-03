@@ -104,7 +104,7 @@ module Woods
 
       def app_component?(component)
         @component_base && component.name && component < @component_base &&
-          !preview_class?(component) && app_source_file?(source_file_for(component))
+          !preview_class?(component) && current_constant?(component) && app_source_file?(source_file_for(component))
       end
 
       # Find the ViewComponent::Base class if the gem is loaded

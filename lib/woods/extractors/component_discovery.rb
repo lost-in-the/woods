@@ -81,6 +81,22 @@ module Woods
         (@render_target_resolver ||= RenderTargetResolver.new).call(component, source)
       end
 
+      # Whether a class still owns its name.
+      #
+      # A Rails reload leaves the previous class object in `descendants` until
+      # it is collected, under the name its replacement now holds, so one
+      # component would be extracted twice and the survivor picked by order.
+      # A name that resolves to nothing loaded is left to the caller's other
+      # checks.
+      #
+      # @param component [Class]
+      # @return [Boolean] false when the name resolves to a different object
+      def current_constant?(component)
+        @constant_lookup ||= SourceReferences::RuntimeLookup.new
+        current = @constant_lookup.call("::#{component.name}", allow_private: true)[:value]
+        current.nil? || current.equal?(component)
+      end
+
       # @return [Array<String>] absolute directories to walk, nested entries
       #   collapsed into their ancestor so no file is handed over twice
       def component_directories

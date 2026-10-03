@@ -539,6 +539,28 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     end
   end
 
+  # ── Reloaded classes ────────────────────────────────────────────────────
+
+  describe 'a class object a reload left behind' do
+    let(:file_system) { { '/rails/app/components/shelf_card.rb' => "class ShelfCard < Phlex::HTML\nend\n" } }
+
+    before do
+      base = Class.new
+      stub_const('Phlex::HTML', base)
+      stale = Class.new(base)
+      stub_const('ShelfCard', stale)
+      current = Class.new(base) { def restocked; end }
+      stub_const('ShelfCard', current)
+      base.define_singleton_method(:descendants) { [stale, current] }
+    end
+
+    it 'extracts only the class its name still resolves to' do
+      units = described_class.new.extract_all
+
+      expect(units.map { |unit| unit.metadata[:public_methods] }).to eq([[:restocked]])
+    end
+  end
+
   # ── Render target resolution ────────────────────────────────────────────
 
   describe 'render target resolution' do
