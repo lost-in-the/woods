@@ -421,7 +421,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | `spec/factories/**`, `test/factories/**` | factories |
 | `db/views/**/*.sql` | database_views |
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`), `app/graphql/**/*.rb` | graphql_operations |
-| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**`, `app/models/**/*.rb` | database_tables, **and** migrations, database_views, external_consumers |
+| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` | database_tables, **and** migrations, database_views, external_consumers |
 | the file named by `external_table_consumers_path` | external_consumers |
 | any `package.yml`, `packwerk.yml` | packages |
 

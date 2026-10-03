@@ -387,7 +387,8 @@ module Woods
       # hook projection, which cannot call it.
       def schema_unit_rules
         [whole_app_rule(:database_tables, %w[db/migrate app/models],
-                        exact_paths: %w[db/schema.rb db/structure.sql], matcher: :database_schema_path?),
+                        extensions: %w[.rb], exact_paths: %w[db/schema.rb db/structure.sql],
+                        matcher: :database_schema_path?),
          whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
       end
 

@@ -175,13 +175,14 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
     it 'fires on schema dumps, migrations and model files' do
       %w[db/schema.rb db/structure.sql db/billing_schema.rb db/billing_structure.sql
          db/migrate/20240101000000_create_widgets.rb db/migrate/archive/20200101000000_create_parts.rb
-         app/models/widget.rb app/models/ledger/entry.rb packs/ledger/app/models/ledger/entry.rb].each do |path|
+         app/models/widget.rb app/models/ledger/entry.rb].each do |path|
         expect(described_class.trigger_path?(path)).to be(true), path
       end
     end
 
     it 'stays quiet for everything else' do
-      %w[db/seeds.rb db/billing_migrate/20240101000000_create_invoices.rb db/views/report_v01.sql app/services/widget_service.rb app/models/widget.yml
+      %w[db/seeds.rb db/migrate/notes.txt packs/ledger/app/models/ledger/entry.rb
+         db/billing_migrate/20240101000000_create_invoices.rb db/views/report_v01.sql app/services/widget_service.rb app/models/widget.yml
          lib/db/schema.rb config/schema.rb].each do |path|
         expect(described_class.trigger_path?(path)).to be(false), path
       end

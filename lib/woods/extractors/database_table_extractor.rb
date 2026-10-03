@@ -24,7 +24,7 @@ module Woods
       # Schema dumps, one per database (`db/schema.rb`, `db/billing_schema.rb`).
       SCHEMA_FILE_GLOBS = %w[db/schema.rb db/structure.sql db/*_schema.rb db/*_structure.sql].freeze
 
-      MIGRATION_GLOBS = %w[db/migrate/**/*].freeze
+      MIGRATION_GLOBS = %w[db/migrate/**/*.rb].freeze
 
       MODEL_DIRECTORY = 'app/models/'
 
@@ -44,7 +44,7 @@ module Woods
       # @param path [String]
       # @return [Boolean]
       def self.model_path?(path)
-        path.end_with?('.rb') && (path.start_with?(MODEL_DIRECTORY) || path.include?("/#{MODEL_DIRECTORY}"))
+        path.end_with?('.rb') && path.start_with?(MODEL_DIRECTORY)
       end
 
       # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
