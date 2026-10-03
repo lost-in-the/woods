@@ -216,15 +216,7 @@ module Woods
     def locate(operations, unit_data)
       map = (unit_data[:metadata] || {})[:source_line_map]
       file = unit_data[:file_path]
-      operations.each { |op| locate_operation(op, map, file) }
-    end
-
-    def locate_operation(operation, map, file)
-      operation[:line] = SourceLineMap.translate(map, operation[:line])
-      operation[:file] = file
-      %i[nested then_ops else_ops].each do |key|
-        operation[key]&.each { |nested| locate_operation(nested, map, file) }
-      end
+      FlowAnalysis::OperationExtractor.relocate(operations) { |line| [SourceLineMap.translate(map, line), file] }
     end
 
     # The unit's whole parsed source, parsed once per assembler instance.

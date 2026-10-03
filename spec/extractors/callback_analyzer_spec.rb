@@ -222,6 +222,19 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(result[:side_effects][:jobs_enqueued]).to eq(['Billing::SyncJob'])
     end
 
+    it 'reports nested operations in the file and line their segment came from' do
+      source = "class User\nend\n\n\n" \
+               "module Stamped\n  def stamp\n    if ready?\n      Clock.tick!\n    end\n  end\nend\n"
+      segments = [{ start: 1, length: 2, file: 'app/models/user.rb' },
+                  { start: 5, length: 7, file: 'app/models/concerns/stamped.rb' }]
+      analyzer = described_class.new(source_code: source, segments: segments)
+
+      ops = analyzer.analyze(make_callback(filter: 'stamp'))[:side_effects][:operations]
+      nested = ops.find { |op| op[:type] == :conditional }[:then_ops].first
+
+      expect(nested).to include(target: 'Clock', line: 4, file: 'app/models/concerns/stamped.rb')
+    end
+
     # The callback body is scanned on its own, but its constants mean what
     # they mean inside the model's class, as the model's enqueue edges do.
     describe 'through the callback method’s class nesting' do

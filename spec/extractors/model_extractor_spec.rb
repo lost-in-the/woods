@@ -37,11 +37,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
   # Stub the extractor to see exactly one included concern with the given
   # name and source code (bypasses concern file discovery).
-  def stub_inlined_concern(name, code)
+  def stub_inlined_concern(name, code, path: nil)
     mod = Module.new
     allow(mod).to receive(:name).and_return(name)
     allow(extractor).to receive(:extract_included_modules).and_return([mod])
-    allow(extractor).to receive(:concern_source).with(mod).and_return([name, code])
+    allow(extractor).to receive(:concern_source).with(mod).and_return([name, code, path])
     mod
   end
 
@@ -702,6 +702,75 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       enriched = unit.metadata[:callbacks].find { |cb| cb[:filter] == 'set_slug' }
       expect(enriched[:side_effects][:columns_written]).to include('slug')
       expect(enriched[:side_effects][:jobs_enqueued]).to include('SlugJob')
+    end
+
+    # The analyzer parses the model file followed by each concern's code, so
+    # a line it counts is a line of that joined text, not of any one file.
+    describe 'callback operation locations' do
+      let(:model_source) do
+        <<~RUBY
+          class AuditLog < ApplicationRecord
+            before_save :stamp
+
+            def stamp
+              Clock.tick!
+            end
+          end
+        RUBY
+      end
+
+      def stub_audit_log_model
+        model = stub_bare_model('AuditLog')
+        column = double('Column', name: 'slug', type: :string, sql_type: 'varchar(255)',
+                                  limit: nil, null: true, default: nil)
+        allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug])
+        allow(model).to receive(:connection).and_return(double('Connection', foreign_keys: []))
+        callbacks = %i[set_slug stamp].map { |filter| double('Callback', filter: filter, kind: :before) }
+        allow(model).to receive(:_save_callbacks).and_return(callbacks)
+        model
+      end
+
+      def stub_model_file
+        allow(File).to receive(:exist?).and_call_original
+        allow(File).to receive(:exist?).with(model_path).and_return(true)
+        allow(File).to receive(:read).and_call_original
+        allow(File).to receive(:read).with(model_path).and_return(model_source)
+      end
+
+      def extract_with_concern(concern_path)
+        model = stub_audit_log_model
+        stub_inlined_concern('Trackable', concern_code, path: concern_path)
+        allow(extractor).to receive(:source_file_for).and_return(model_path)
+        stub_model_file
+
+        extractor.send(:extract_model, model).metadata[:callbacks].to_h do |cb|
+          [cb[:filter], cb[:side_effects][:operations]]
+        end
+      end
+
+      def line_in(source, needle)
+        source.lines.index { |line| line.include?(needle) } + 1
+      end
+
+      it 'reports a concern-defined callback at the concern file and line' do
+        ops = extract_with_concern('/app/app/models/concerns/trackable.rb').fetch('set_slug')
+
+        expect(ops.find { |op| op[:target] == 'SlugJob' })
+          .to include(line: line_in(concern_code, 'SlugJob'), file: 'app/models/concerns/trackable.rb')
+      end
+
+      it 'reports a model-defined callback at the model file and line' do
+        ops = extract_with_concern('/app/app/models/concerns/trackable.rb').fetch('stamp')
+
+        expect(ops).to eq([{ type: :call, target: 'Clock', method: 'tick!', line: line_in(model_source, 'Clock'),
+                             file: 'app/models/audit_log.rb' }])
+      end
+
+      it 'reports no line or file for a body read from outside the application root' do
+        ops = extract_with_concern('/gems/trackable/lib/trackable.rb').fetch('set_slug')
+
+        expect(ops.map { |op| op.values_at(:line, :file) }.uniq).to eq([[nil, nil]])
+      end
     end
   end
 

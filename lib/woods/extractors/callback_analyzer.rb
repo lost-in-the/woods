@@ -60,8 +60,14 @@ module Woods
 
       # @param source_code [String] Composite model source (with inlined concerns)
       # @param column_names [Array<String>] Model's database column names
-      def initialize(source_code:, column_names: [])
+      # @param segments [Array<Hash>, nil] where each part of +source_code+
+      #   came from, as `{ start:, length:, file: }` with 1-based lines and a
+      #   file relative to the application root (nil outside it). With
+      #   segments, operation lines are reported in their own file; without,
+      #   they stay lines of +source_code+.
+      def initialize(source_code:, column_names: [], segments: nil)
         @source_code = source_code
+        @segments = segments
         @column_names = column_names.map(&:to_s)
         @parser = Ast::Parser.new
         @operation_extractor = FlowAnalysis::OperationExtractor.new
@@ -277,9 +283,23 @@ module Woods
       def extract_operations(method_node)
         return [] unless method_node
 
-        @operation_extractor.extract(method_node)
+        operations = @operation_extractor.extract(method_node)
+        return operations unless @segments
+
+        FlowAnalysis::OperationExtractor.relocate(operations) { |line| segment_location(line) }
       rescue StandardError
         []
+      end
+
+      # @param line [Integer, nil] a line of the analysis source
+      # @return [Array(Integer, String)] the line in, and the path of, the
+      #   file that line came from; nils when that file is outside the
+      #   application root or the line belongs to no segment
+      def segment_location(line)
+        segment = line && @segments.find { |part| line >= part[:start] && line < part[:start] + part[:length] }
+        return [nil, nil] unless segment && segment[:file]
+
+        [line - segment[:start] + 1, segment[:file]]
       end
 
       # Return an empty side-effects structure.

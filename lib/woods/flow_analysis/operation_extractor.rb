@@ -26,6 +26,24 @@ module Woods
       RESPONSE_METHODS = %w[redirect_to head respond_with].freeze
       DYNAMIC_DISPATCH_METHODS = %w[send public_send].freeze
 
+      # Keys of an operation that hold the operations nested inside it.
+      NESTED_KEYS = %i[nested then_ops else_ops].freeze
+
+      # Rewrite each operation's +line+ and +file+, nested operations
+      # included, from the line its AST was parsed at.
+      #
+      # @param operations [Array<Hash>]
+      # @yieldparam line [Integer, nil] the line in the parsed text
+      # @yieldreturn [Array(Integer, String)] the line and file to report;
+      #   nil for either when the parsed line has no place in a file
+      # @return [Array<Hash>] +operations+, rewritten in place
+      def self.relocate(operations, &locate)
+        operations.each do |operation|
+          operation[:line], operation[:file] = locate.call(operation[:line])
+          NESTED_KEYS.each { |key| relocate(operation[key], &locate) if operation[key] }
+        end
+      end
+
       # Extract operations from a method definition node in source line order.
       #
       # @param method_node [Ast::Node] A :def or :defs node
