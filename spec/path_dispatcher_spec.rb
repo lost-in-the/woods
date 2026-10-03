@@ -404,4 +404,42 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.file_rules_for('packs/billing/package.yml')).to be_empty
     end
   end
+
+  describe '#whole_app_keys_for GraphQL operation documents' do
+    it 're-runs the operation family for a document under a configured root' do
+      expect(dispatcher.whole_app_keys_for('app/javascript/widgets/widget_list.graphql')).to eq([:graphql_operations])
+      expect(dispatcher.whole_app_keys_for('app/frontend/widgets/create_widget.gql')).to eq([:graphql_operations])
+      expect(dispatcher.relevant?('app/javascript/widgets/widget_list.graphql')).to be(true)
+    end
+
+    it 're-runs the operation family when the server schema changes' do
+      expect(dispatcher.whole_app_keys_for('app/graphql/types/widget_type.rb')).to include(:graphql_operations)
+    end
+
+    it 'ignores other client files, documents outside the roots and installed packages' do
+      %w[app/javascript/widgets/widget_list.ts docs/widget_list.graphql
+         app/javascript/node_modules/pkg/widget_list.graphql app/graphql/schema.graphql].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).not_to include(:graphql_operations), path
+      end
+    end
+
+    it 'follows config.graphql_document_paths' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.graphql_document_paths = ['client/**/*.graphql']
+
+      expect(dispatcher.whole_app_keys_for('client/widgets/widget_list.graphql')).to eq([:graphql_operations])
+      expect(dispatcher.whole_app_keys_for('app/javascript/widgets/widget_list.graphql')).to eq([])
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'serializes its rules without a Proc' do
+      rules = described_class.whole_app_rules.select { |rule| rule.extractor_key == :graphql_operations }
+
+      expect(rules.size).to eq(2)
+      expect(rules.flat_map { |rule| rule.to_h.values }.grep(Proc)).to eq([])
+      expect(JSON.generate(rules.map(&:to_h))).to include('graphql_document_path?')
+    end
+  end
 end

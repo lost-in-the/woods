@@ -92,6 +92,30 @@ RSpec.describe Woods::ReloadPolicy do
       expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:ignore)
     end
 
+    context 'with GraphQL operation documents' do
+      it 're-extracts a document under a configured root' do
+        expect(policy.classify('app/javascript/widgets/widget_list.graphql')).to eq(:reextract)
+        expect(policy.classify('app/frontend/widgets/create_widget.gql')).to eq(:reextract)
+      end
+
+      it 'ignores a document outside the roots and other client files' do
+        expect(policy.classify('docs/widget_list.graphql')).to eq(:ignore)
+        expect(policy.classify('app/javascript/widgets/widget_list.ts')).to eq(:ignore)
+        expect(policy.classify('app/javascript/node_modules/pkg/widget_list.graphql')).to eq(:ignore)
+      end
+
+      it 'follows config.graphql_document_paths' do
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.graphql_document_paths = ['client/**/*.graphql']
+
+        expect(policy.classify('client/widgets/widget_list.graphql')).to eq(:reextract)
+        expect(policy.classify('app/javascript/widgets/widget_list.graphql')).to eq(:ignore)
+      ensure
+        Woods.configuration = original
+      end
+    end
+
     context 'with Packwerk package files (#280)' do
       it 'demands a re-extraction, not a reload or restart' do
         expect(policy.classify('package.yml')).to eq(:reextract)

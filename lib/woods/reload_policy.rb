@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'graphql_document_paths'
+
 module Woods
   # What a resident, booted Woods process must do before a changed path can be
   # re-extracted truthfully.
@@ -206,7 +208,7 @@ module Woods
 
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
-        REEXTRACT_BASENAMES.include?(File.basename(path))
+        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path)
     end
 
     def under?(path, directories)

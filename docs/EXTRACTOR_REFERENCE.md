@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **35 extractor classes** producing **39 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **36 extractor classes** producing **40 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 35 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 36 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 40 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **35 extractor classes** producing **39 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 35 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 36 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -634,6 +634,48 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 
 ---
 
+### GraphQLOperationExtractor
+
+**What it captures:** client-side GraphQL operation documents: the queries, mutations, subscriptions and fragments the application's own clients send. One `graphql_operation` unit per named operation and per fragment.
+
+**Key details:**
+- Scans `.graphql` / `.gql` files matching `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}` and `app/frontend/**/*.{graphql,gql}`; see [GraphQL document paths](CONFIGURATION_REFERENCE.md#graphql-document-paths)). Paths under `node_modules` never match.
+- Parses with graphql-ruby's own parser. The gem is optional: when it is not loaded the family is skipped and one `info` line says so. A document that does not parse, or that holds schema definitions (an SDL dump such as `schema.graphql`), is skipped and logged.
+- Identifier: `gql:<OperationName>`. An anonymous operation is `gql:<document path>`. A later definition of a name another document already uses is `gql:<Name>@<document path>` (documents are read in path order).
+- Selections resolve against the booted schema by reading field metadata only; no field, resolver or `resolve_type` body runs. With several schemas, each definition uses the schema that leaves the fewest selections unresolved (ties go to the first by name), recorded in `metadata.schema`.
+- Edges (`via`):
+  - `root_field`: each top-level field to the unit it resolves through, the resolver or mutation class, else the type that defines the field.
+  - `type_reference`: every object, interface or union type the definition selects on.
+  - `fragment_spread`: the fragment unit a spread names. The fragment in the same document wins; otherwise every fragment of that name is linked.
+- An edge is emitted only when `GraphQLExtractor` publishes a unit for the target. Schema drift is metadata, never a dangling edge: `unknown_fields` (`Type.field`), `unknown_types` (type conditions) and `unknown_fragments` (spreads with no definition).
+- Metadata: `kind` (`query`, `mutation`, `subscription`, `fragment`), `operation_name`, `document_path`, `line`, `variables` (name, type, printed default), `type_condition`, `top_level_fields`, `field_selections`, `fragment_spreads`, `schema`.
+- No single-file extraction method. Incremental extraction re-runs the extractor wholesale on any document change under the configured roots and on any `.rb` change under `app/graphql`. A schema defined outside `app/graphql` needs a full extraction to refresh the documents that select it.
+
+**Example:**
+```json
+{
+  "type": "graphql_operation",
+  "identifier": "gql:WidgetList",
+  "file_path": "app/javascript/widgets/widget_list.graphql",
+  "metadata": {
+    "kind": "query",
+    "operation_name": "WidgetList",
+    "line": 1,
+    "variables": [{ "name": "first", "type": "Int", "default": "10" }],
+    "top_level_fields": ["widgets"],
+    "field_selections": ["Query.widgets", "Widget.id"],
+    "fragment_spreads": ["WidgetFields"],
+    "schema": "LedgerSchema",
+    "unknown_fields": ["Widget.legacyCode"]
+  },
+  "dependencies": [
+    { "type": "graphql_resolver", "target": "Resolvers::WidgetsResolver", "via": "root_field" },
+    { "type": "graphql_type", "target": "Types::WidgetType", "via": "type_reference" },
+    { "type": "graphql_operation", "target": "gql:WidgetFields", "via": "fragment_spread" }
+  ]
+}
+```
+
 ### PunditExtractor
 
 **What it captures:** Pundit policy classes with their action methods (`index?`, `show?`, `create?`, `update?`, `destroy?`, and custom predicates).
@@ -1022,7 +1064,7 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 35 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 36 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -1039,7 +1081,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 39 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package` |
+| `type` | Symbol | Unit category, one of the 40 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
