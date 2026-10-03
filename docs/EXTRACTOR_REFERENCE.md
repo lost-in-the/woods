@@ -845,6 +845,8 @@ namespace.
 **Key details:**
 - Scans `spec/` and `test/` directories
 - Maps each spec file to its subject class by convention (e.g., `spec/models/user_spec.rb` → `User`)
+- The first `describe` or `feature` block names the subject. Only a constant path (`Widget`, `'Ledger::Entry'`) becomes `subject_class` and a `:test_coverage` edge; free text (`'Widget checkout'`) is stored as `metadata[:description]` with no edge
+- `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`type: :system` on the first group decides, else `:unit`
 - Records test count and whether RSpec or Minitest is detected
 - These directories are outside `app/` so no eager loading is needed
 
