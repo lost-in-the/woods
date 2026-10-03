@@ -68,7 +68,7 @@ module Woods
           file_path: file_path
         )
 
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? File.read(file_path, encoding: Encoding::UTF_8) : ''
 
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)

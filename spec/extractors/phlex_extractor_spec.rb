@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'tmpdir'
+require 'fileutils'
 require 'set'
 require 'active_support/core_ext/object/blank'
 require 'woods'
@@ -613,6 +615,38 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
 
   # Host runs showed the same multiset in a different order between runs:
   # `public_instance_methods` and `descendants` carry no ordering guarantee.
+  # Real files: the File stubs above return UTF-8 literals whatever the locale.
+  describe 'source encoding' do
+    let(:rails_root) { Pathname.new(Dir.mktmpdir) }
+    let(:component) { build_component(name: 'WidgetComponent') }
+
+    before do
+      allow(File).to receive(:exist?).and_call_original
+      allow(File).to receive(:file?).and_call_original
+      allow(File).to receive(:read).and_call_original
+      # Discovery's directory walk needs a booted autoloader; descendants are stubbed below.
+      allow_any_instance_of(described_class).to receive(:load_component_files)
+      FileUtils.mkdir_p(rails_root.join('app/components'))
+      File.write(rails_root.join('app/components/widget_component.rb'), <<~RUBY)
+        class WidgetComponent < Phlex::HTML
+          # Ünïcødé ☃
+          renders_one :header
+        end
+      RUBY
+      base = build_phlex_base(descendants: [component])
+      component.define_singleton_method(:superclass) { base }
+      stub_const('Phlex::HTML', base)
+    end
+
+    after { FileUtils.rm_rf(rails_root) }
+
+    it 'reads a multibyte component source the same under a POSIX default external encoding' do
+      unit = with_posix_default_external { described_class.new.extract_all.first }
+
+      expect(unit&.source_code).to include('# Ünïcødé ☃')
+    end
+  end
+
   describe 'deterministic ordering' do
     let(:widget) { build_component(name: 'WidgetComponent', methods: %i[view_template title badge]) }
     let(:alert) { build_component(name: 'AlertComponent') }

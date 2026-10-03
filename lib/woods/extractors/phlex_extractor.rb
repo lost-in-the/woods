@@ -146,7 +146,7 @@ module Woods
       def read_source(file_path)
         return '' unless file_path && File.exist?(file_path)
 
-        File.read(file_path)
+        File.read(file_path, encoding: Encoding::UTF_8)
       end
 
       # ──────────────────────────────────────────────────────────────────────

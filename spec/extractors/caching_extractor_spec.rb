@@ -671,16 +671,8 @@ RSpec.describe Woods::Extractors::CachingExtractor do
           %p= Rails.cache.read("widget/☃")
       HAML
 
-      original_encoding = Encoding.default_external
-      original_verbose = $VERBOSE
-      begin
-        $VERBOSE = nil # Ruby warns when the default external encoding is reassigned.
-        Encoding.default_external = Encoding::US_ASCII
-        calls = described_class.new.extract_caching_file(path)&.metadata&.fetch(:cache_calls)
-      ensure
-        Encoding.default_external = original_encoding
-        $VERBOSE = original_verbose
-      end
+      unit = with_posix_default_external { described_class.new.extract_caching_file(path) }
+      calls = unit&.metadata&.fetch(:cache_calls)
 
       expect(calls&.map { |c| c[:key_pattern] }).to eq(['"widget/☃"', '[@widget, "☃"]'])
     end
