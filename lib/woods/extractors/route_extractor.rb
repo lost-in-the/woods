@@ -16,7 +16,7 @@ module Woods
     # action. A route that reaches no controller action (a mount, a redirect,
     # a Rack endpoint) carries a +kind+ and the endpoint it points at instead.
     #
-    # Where the runtime exposes +route.source_location+ (Rails 8.0+, with
+    # Where the runtime exposes +route.source_location+ (Rails 7.1+, with
     # +ActionDispatch::Routing::Mapper.route_source_locations+ on, the
     # development default), a route drawn in +config/routes.rb+ or under
     # +config/routes/+ carries that file as its +file_path+, its line, and a

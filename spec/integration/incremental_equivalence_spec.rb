@@ -2290,7 +2290,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         end
       end
 
-      # Rails 8.0+ records where a route was drawn; older runtimes expose nothing.
+      # Rails 7.1+ records where a route was drawn; older runtimes expose nothing.
       def runtime_locates_routes?
         ActionDispatch::Journey::Route.method_defined?(:source_location)
       end
