@@ -733,6 +733,8 @@ Leave it at its default. The full list of what always runs:
 | `:events` | EventExtractor | Event publish/subscribe patterns |
 | `:decorators` | DecoratorExtractor | Decorators, presenters, form objects |
 | `:database_views` | DatabaseViewExtractor | SQL views (Scenic) |
+| `:database_tables` | DatabaseTableExtractor | Tables in the live schema, including tables no model owns |
+| `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
@@ -791,6 +793,36 @@ path implies is the one Zeitwerk manages. A directory that is not autoloaded is
 walked and skipped; one `Rails.logger.debug` line per extraction says how many
 files that was, so the misconfiguration is visible instead of looking like an
 app with no components.
+
+### External table consumers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `external_table_consumers` | Hash&lt;String, Array&lt;String&gt;&gt; | `{}` | Other applications that read this database, as consumer name => table names. Each becomes an `external_consumer` unit with `reads_table` edges to the table units. |
+| `external_table_consumers_path` | String, nil | `nil` | A YAML file of the same shape, relative to `Rails.root`, merged with the setting above. |
+
+```ruby
+Woods.configure do |config|
+  config.external_table_consumers = { "storefront" => %w[products orders] }
+  config.external_table_consumers_path = "config/woods/external_consumers.yml"
+end
+```
+
+```yaml
+# config/woods/external_consumers.yml
+storefront:
+  - products
+  - orders
+```
+
+Both settings are validated at assignment and raise
+`Woods::ConfigurationError` on anything but plain data. Procs are refused.
+A consumer named in both places reads the union of its tables.
+
+**Prefer the file when the list changes.** An incremental run re-runs the
+consumers when the declared file changes. A change to
+`external_table_consumers` itself is an initializer change, which needs a
+full extraction.
 
 ### Event patterns
 

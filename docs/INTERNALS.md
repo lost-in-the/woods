@@ -134,7 +134,7 @@ Set `config.concurrent_extraction = true` to run extractors in parallel threads.
 4. Re-extracts each affected unit using the appropriate extractor method
 5. Updates only the affected JSON files and the type-level `_index.json`
 
-**Incremental extraction re-runs wholesale**, rather than skipping, the eleven unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `rails_source` (gated by `include_framework_sources`), `package`, and `graphql_operation`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
+**Incremental extraction re-runs wholesale**, rather than skipping, the thirteen unit types that don't map to individual files: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `database_table`, `external_consumer`, `rails_source` (gated by `include_framework_sources`), `package`, and `graphql_operation`. Each has its own trigger path (e.g. `config/routes.rb` for routes, `Gemfile.lock` for middleware/engines), when it changes, `Extractor::WHOLE_APP_EXTRACTORS` re-runs that extractor in full instead of diffing files. `gem_source` works the same way, also triggered by `Gemfile.lock`.
 
 ---
 
