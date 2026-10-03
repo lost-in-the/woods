@@ -884,8 +884,13 @@ module Woods
       # @return [Array<Hash>] type, model-call and field-resolver edges
       def constant_path_dependencies(source, identifier)
         lookup = SourceReferences::RuntimeLookup.new
+        targets = {}
         ConstantPaths.references(source).filter_map do |reference|
-          target = edge_target(reference, lookup)
+          # A file repeats a handful of paths (`String`, its own base class).
+          nesting = reference.literal ? [] : reference.nesting
+          key = [reference.path, nesting]
+          targets[key] = edge_target(reference.path, nesting, lookup) unless targets.key?(key)
+          target = targets[key]
           next if target.nil? || target == identifier
 
           via = reference_via(reference, target)
@@ -897,12 +902,12 @@ module Woods
       # a value constant, graphql-ruby's own namespace, or a class the
       # application does not own.
       #
-      # @param reference [ConstantPaths::Reference]
+      # @param path [String] the constant path as written
+      # @param nesting [Array<String>] enclosing scope names, innermost first
       # @param lookup [SourceReferences::RuntimeLookup]
       # @return [String, nil]
-      def edge_target(reference, lookup)
-        nesting = reference.literal ? [] : reference.nesting
-        resolution = ConstantPaths.resolve(reference.path, nesting, lookup: lookup)
+      def edge_target(path, nesting, lookup)
+        resolution = ConstantPaths.resolve(path, nesting, lookup: lookup)
         return if resolution.status == :value || resolution.target.start_with?('GraphQL::')
         return if resolution.status == :resolved && !indexable_constant?(resolution)
 
@@ -917,9 +922,18 @@ module Woods
       # @return [Boolean]
       def indexable_constant?(resolution)
         return false if resolution.builtin
-        return true if resolution.source_file.nil? || app_source?(resolution.source_file, Rails.root.to_s)
+        return true if resolution.source_file.nil? || application_file?(resolution.source_file)
 
         defined?(ActiveRecord::Base) && resolution.value.is_a?(Class) && resolution.value < ActiveRecord::Base
+      end
+
+      # Many constants share a defining file, and the answer for a file is fixed.
+      #
+      # @param file [String]
+      # @return [Boolean]
+      def application_file?(file)
+        @application_files ||= {}
+        @application_files.fetch(file) { @application_files[file] = app_source?(file, Rails.root.to_s) }
       end
 
       # @return [Symbol, nil] the edge label, or nil when the reference is not an edge
