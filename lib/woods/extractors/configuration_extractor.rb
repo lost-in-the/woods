@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../git_source_filter'
-
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -138,7 +138,7 @@ module Woods
         return nil if (@git_filter ||= GitSourceFilter.new(root: Rails.root)).skip_reason(file_path)
 
         # Credential-shaped text never reaches the published source or metadata.
-        source = ConfigSourceGuard.redact(File.read(file_path))
+        source = ConfigSourceGuard.redact(SourceFile.read(file_path))
         gems = config_type == 'gemfile' ? GemfileDeclarations.call(source) : []
         identifier = build_identifier(file_path)
 

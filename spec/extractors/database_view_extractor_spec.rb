@@ -10,6 +10,14 @@ require 'woods/extractors/database_view_extractor'
 RSpec.describe Woods::Extractors::DatabaseViewExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'db/views/active_widgets_v01.sql',
+                  source: <<~SOURCE,
+                    -- Widgets — active only
+                    SELECT id FROM widgets WHERE active = true
+                  SOURCE
+                  identifier: 'active_widgets'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

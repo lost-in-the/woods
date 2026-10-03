@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require 'prism'
 
 require_relative '../source_inputs/consumer_errors'
@@ -444,7 +445,7 @@ module Woods
         return cache[path] if cache.key?(path)
 
         cache[path] = begin
-          File.read(path)
+          SourceFile.read(path)
         rescue StandardError
           nil
         end

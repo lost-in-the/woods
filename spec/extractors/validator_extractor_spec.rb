@@ -9,6 +9,18 @@ require 'woods/extractors/validator_extractor'
 RSpec.describe Woods::Extractors::ValidatorExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/validators/ledger_code_validator.rb',
+                  source: <<~SOURCE,
+                    # Ledger code — format check
+                    class LedgerCodeValidator < ActiveModel::EachValidator
+                      def validate_each(record, attribute, value)
+                        record.errors.add(attribute, 'is invalid — try again') if value.nil?
+                      end
+                    end
+                  SOURCE
+                  identifier: 'LedgerCodeValidator'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

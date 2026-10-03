@@ -12,6 +12,19 @@ require 'woods/extractors/rake_task_extractor'
 RSpec.describe Woods::Extractors::RakeTaskExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'lib/tasks/ledger.rake',
+                  source: <<~SOURCE,
+                    # Ledger — maintenance
+                    namespace :ledger do
+                      desc 'Reconcile the ledger — nightly'
+                      task reconcile: :environment do
+                        puts 'done'
+                      end
+                    end
+                  SOURCE
+                  identifier: 'ledger:reconcile'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -70,9 +83,9 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     # and parse counts below fail on the pre-fix shape.
     it 'reads and parses each .rake file once per run' do
       reads = Hash.new(0)
-      allow(File).to receive(:read).and_wrap_original do |method, path|
+      allow(File).to receive(:read).and_wrap_original do |method, path, **options|
         reads[path.to_s] += 1
-        method.call(path)
+        method.call(path, **options)
       end
       parses = 0
       allow_any_instance_of(described_class).to receive(:parse_tasks).and_wrap_original do |method, source|

@@ -11,6 +11,20 @@ require 'woods/extractors/job_extractor'
 RSpec.describe Woods::Extractors::JobExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/jobs/shipment_job.rb',
+                  source: <<~SOURCE,
+                    # Shipment — dispatch
+                    class ShipmentJob < ApplicationJob
+                      queue_as :default
+
+                      def perform(id)
+                        id
+                      end
+                    end
+                  SOURCE
+                  identifier: 'ShipmentJob'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'yaml'
@@ -50,7 +51,7 @@ module Woods
       # @param file_path [String] absolute path to a package.yml
       # @return [ExtractedUnit, nil] nil when the file is not a YAML mapping
       def extract_package_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         data = YAML.safe_load(source, permitted_classes: [Symbol], aliases: true) || {}
         raise ArgumentError, 'package.yml is not a mapping' unless data.is_a?(Hash)
 

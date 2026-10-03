@@ -10,6 +10,15 @@ require 'woods/extractors/i18n_extractor'
 RSpec.describe Woods::Extractors::I18nExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'config/locales/en.yml',
+                  source: <<~SOURCE,
+                    en:
+                      widget:
+                        title: "Widget — catalogue"
+                  SOURCE
+                  identifier: 'en.yml'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'set'
@@ -85,7 +86,7 @@ module Woods
         engine = engine_for(file_path)
         return nil unless engine
 
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         identifier = build_identifier(file_path)
         namespace = extract_view_namespace(file_path)
 

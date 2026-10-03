@@ -14,6 +14,20 @@ require 'woods/extractors/state_machine_extractor'
 RSpec.describe Woods::Extractors::StateMachineExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/models/shipment.rb',
+                  source: <<~SOURCE,
+                    # Shipment — lifecycle
+                    class Shipment < ApplicationRecord
+                      include AASM
+                      aasm do
+                        state :pending, initial: true
+                        state :sent
+                      end
+                    end
+                  SOURCE
+                  identifier: 'Shipment::aasm'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

@@ -10,6 +10,18 @@ require 'woods/extractors/pundit_extractor'
 RSpec.describe Woods::Extractors::PunditExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/policies/widget_policy.rb',
+                  source: <<~SOURCE,
+                    # Widget — access rules
+                    class WidgetPolicy < ApplicationPolicy
+                      def update?
+                        user.present?
+                      end
+                    end
+                  SOURCE
+                  identifier: 'WidgetPolicy'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

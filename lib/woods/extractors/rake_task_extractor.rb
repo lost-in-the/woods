@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'line_neutralizer'
@@ -98,7 +99,7 @@ module Woods
       # @return [Hash{Symbol => String, Array<Hash>}, nil] `{ source:, tasks: }`
       def rake_file_data(file)
         (@rake_file_data ||= {})[file] ||= begin
-          source = File.read(file)
+          source = SourceFile.read(file)
           { source: source, tasks: parse_tasks(source) }
         end
       rescue StandardError => e

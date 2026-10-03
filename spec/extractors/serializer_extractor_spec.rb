@@ -10,6 +10,16 @@ require 'woods/extractors/serializer_extractor'
 RSpec.describe Woods::Extractors::SerializerExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/serializers/widget_serializer.rb',
+                  source: <<~SOURCE,
+                    # Widget — public fields
+                    class WidgetSerializer < ActiveModel::Serializer
+                      attributes :id, :name
+                    end
+                  SOURCE
+                  identifier: 'WidgetSerializer'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
