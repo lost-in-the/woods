@@ -61,6 +61,12 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
     end
   end
 
+  describe '#scan_unresolved_partials' do
+    it 'reports no unresolved partials by default' do
+      expect(engine.scan_unresolved_partials('src')).to eq([])
+    end
+  end
+
   describe '#parse' do
     it 'returns the source unchanged by default (identity hook)' do
       expect(engine.parse('<h1>hello</h1>')).to eq('<h1>hello</h1>')

@@ -48,7 +48,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
   describe '.supported_template_engines' do
     it 'returns the engine names currently wired into the orchestrator' do
-      expect(described_class.supported_template_engines).to eq(%i[erb haml])
+      expect(described_class.supported_template_engines).to eq(%i[erb haml jbuilder])
     end
 
     it 'is aggregated from ENGINES — adding an engine extends the list' do
@@ -375,6 +375,47 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
           { type: :view_template, target: 'shared/_footer.html.haml', via: :render },
           { type: :controller, target: 'WidgetsController', via: :view_render }
         )
+      end
+    end
+
+    context 'with jbuilder templates' do
+      before do
+        create_file('app/views/api/widgets/index.json.jbuilder', <<~RUBY)
+          json.array! @widgets, partial: 'api/widgets/widget', as: :widget
+          json.meta do
+            json.partial! versioned_template_path(:meta), ledger: @ledger
+            json.partial! @order.customer
+          end
+        RUBY
+        create_file('app/views/api/widgets/_widget.json.jbuilder', "json.id widget.id\n")
+        create_file('app/views/api/widgets/_widget.html.erb', '<p><%= widget.name %></p>')
+      end
+
+      let(:units) { described_class.new.extract_all }
+      let(:index_unit) { units.find { |u| u.identifier == 'api/widgets/index.json.jbuilder' } }
+
+      it 'records jbuilder as the template engine' do
+        expect(index_unit.metadata[:template_engine]).to eq('jbuilder')
+      end
+
+      it 'records literal partials and instance variables' do
+        expect(index_unit.metadata).to include(
+          partials_rendered: ['api/widgets/widget'],
+          instance_variables: %w[@ledger @order @widgets]
+        )
+      end
+
+      it 'records runtime-built partial references as metadata, not edges' do
+        expect(index_unit.metadata[:unresolved_partials]).to eq(
+          [{ kind: 'helper', name: 'versioned_template_path' }, { kind: 'object', name: '@order.customer' }]
+        )
+        render_targets = index_unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+        expect(render_targets).to eq(['api/widgets/_widget.json.jbuilder'])
+      end
+
+      it 'leaves unresolved_partials out of metadata when there are none' do
+        erb_partial = units.find { |u| u.identifier == 'api/widgets/_widget.html.erb' }
+        expect(erb_partial.metadata).not_to have_key(:unresolved_partials)
       end
     end
 

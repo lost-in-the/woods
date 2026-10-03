@@ -7,6 +7,7 @@ require_relative 'route_helper_resolver'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
 require_relative 'view_engines/haml'
+require_relative 'view_engines/jbuilder'
 
 module Woods
   module Extractors
@@ -41,7 +42,7 @@ module Woods
       # engine whose {ViewEngines::Base#handles?} returns true for a file
       # wins — place more specific engines before more general ones if
       # overlap is ever introduced.
-      ENGINES = [ViewEngines::Erb, ViewEngines::Haml].freeze
+      ENGINES = [ViewEngines::Erb, ViewEngines::Haml, ViewEngines::Jbuilder].freeze
 
       # Template engine names the extraction pipeline currently
       # understands — aggregated from {ENGINES} so the list stays honest
@@ -131,7 +132,8 @@ module Woods
         dir == '.' ? nil : dir
       end
 
-      # Build metadata hash for the template.
+      # Build metadata hash for the template. `unresolved_partials` is
+      # present only when the engine reports runtime-built partials.
       #
       # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
@@ -139,7 +141,7 @@ module Woods
       # @param partials [Array<String>] Pre-extracted partial names
       # @return [Hash]
       def build_metadata(engine, source, file_path, partials)
-        {
+        metadata = {
           template_engine: engine.name.to_s,
           is_partial: partial?(file_path),
           partials_rendered: partials,
@@ -147,6 +149,9 @@ module Woods
           helpers_called: engine.scan_helpers(source),
           loc: source.lines.count { |l| l.strip.length.positive? }
         }
+        unresolved = engine.scan_unresolved_partials(source)
+        metadata[:unresolved_partials] = unresolved if unresolved.any?
+        metadata
       end
 
       # Check if a template is a partial (filename starts with _).
