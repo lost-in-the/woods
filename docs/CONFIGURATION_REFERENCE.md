@@ -869,7 +869,8 @@ written.
 
 **Changing `event_patterns` needs a full extraction.** The configuration is not
 part of any incremental fingerprint. `woods:incremental` re-runs `EventExtractor`
-only when an `app/**/*.rb` file changes, and then with the new patterns, so
+only when a `.rb` file under an `event_paths` root changes, and then with the
+new patterns, so
 units for files that did not change can stay stale until `woods:extract` runs.
 
 **`event_paths` chooses the scan roots.** The default, `%w[app]`, is the only
@@ -887,9 +888,14 @@ to `Rails.root` without `..` segments, and drops a trailing slash. Anything
 else raises `Woods::ConfigurationError` and keeps the previous value. A root
 that does not exist is skipped.
 
-**Changing `event_paths` needs a full extraction.** Incremental runs re-run
-`EventExtractor` only when an `app/**/*.rb` file changes, so an edit under an
-added root such as `lib/` is not picked up until `woods:extract` runs.
+**Edits under every configured root are incremental.** `woods:incremental`
+re-runs `EventExtractor` wholesale when any `.rb` file under an `event_paths`
+root changes, so with `%w[app lib]` a publisher added to or removed from a
+`lib/` file is picked up without a full extraction.
+
+**Changing the `event_paths` value itself needs one full extraction.** Events
+already indexed were scanned under the old roots and stay as they are until an
+`event_paths` file changes or `woods:extract` runs.
 
 ### Unclaimed Ruby paths
 

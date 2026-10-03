@@ -909,7 +909,7 @@ namespace.
 **Key details:**
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
 - Scans `**/*.rb` under each `config.event_paths` root (default `app`; see [Event patterns](CONFIGURATION_REFERENCE.md#event-patterns))
-- No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere). Changes under other `event_paths` roots need a full extraction
+- No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under an `event_paths` root (a publish or subscribe site can appear anywhere). Changing the `event_paths` value itself needs one full extraction
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
 - Each event depends on the class or module that owns each publisher file (`via: published_by`) and each subscriber file (`via: subscribed_by`), so `dependents` of an emitting class lists its events. The owner is the constant the file's autoload path governs, else its first class, else its primary module; a file declaring neither yields no edge. Edge `type` is the generic `class`: the graph resolves targets by identifier
 - Application event wrappers are added with `config.event_patterns` (see [Event patterns](CONFIGURATION_REFERENCE.md#event-patterns)). Their `system` label is recorded in `metadata.pattern` / `metadata.systems`, never in the identifier

@@ -174,8 +174,15 @@ module Woods
 
       # Rules for extractors that must be re-run wholesale.
       #
+      # Memoized per configured +event_paths+: the events rule's +dirs+ come
+      # from configuration, which can change or be replaced after the first
+      # call. Keying on the value keeps every rule plain serializable data.
+      #
       # @return [Array<Rule>]
       def whole_app_rules
+        roots = event_roots
+        @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
+        @whole_app_rules_event_roots = roots
         @whole_app_rules ||= build_whole_app_rules.freeze
       end
 
@@ -185,9 +192,14 @@ module Woods
       def reset!
         @file_rules = nil
         @whole_app_rules = nil
+        @whole_app_rules_event_roots = nil
       end
 
       private
+
+      def event_roots
+        Woods.configuration&.event_paths || Woods::Extractors::EventExtractor::APP_DIRECTORIES
+      end
 
       def sweepable?(relative_path)
         relative_path.end_with?('.rb') &&
@@ -291,9 +303,10 @@ module Woods
           whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
                          extensions: %w[.rb]),
           whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
-          # EventExtractor is a two-pass scan over all of app/ — any Ruby
-          # change can add or remove a publish/subscribe site.
-          whole_app_rule(:events, Woods::Extractors::EventExtractor::APP_DIRECTORIES, extensions: %w[.rb]),
+          # EventExtractor is a two-pass scan over its configured roots
+          # (`event_paths`, default app/): any Ruby change under one can add
+          # or remove a publish/subscribe site.
+          whole_app_rule(:events, event_roots, extensions: %w[.rb]),
           # Framework/gem sources are a function of the installed dependency
           # set, so the lockfile is their one honest trigger (#169). The
           # `include_framework_sources` gate lives in the extractor

@@ -398,7 +398,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
 | `app/models/**/*.rb` | state_machines |
-| `app/**/*.rb` | events |
+| `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
 | `spec/factories/**`, `test/factories/**` | factories |
 | `db/views/**/*.sql` | database_views |
 | any `package.yml`, `packwerk.yml` | packages |
