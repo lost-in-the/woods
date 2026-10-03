@@ -333,6 +333,33 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
     end
   end
 
+  # ── Class-based discovery source paths ───────────────────────────────
+
+  describe '#source_file_for' do
+    let(:external_serializer_class) do
+      Class.new do
+        def self.name
+          'Gems::ExternalSerializer'
+        end
+      end
+    end
+
+    it 'returns nil when no source resolves and the convention path does not exist' do
+      expect(described_class.new.send(:source_file_for, external_serializer_class)).to be_nil
+    end
+
+    it 'still returns the convention path when the file exists' do
+      path = create_file('app/serializers/shipment_serializer.rb', "class ShipmentSerializer; end\n")
+      serializer_class = Class.new do
+        def self.name
+          'ShipmentSerializer'
+        end
+      end
+
+      expect(described_class.new.send(:source_file_for, serializer_class)).to eq(path)
+    end
+  end
+
   # ── Application-defined bases ────────────────────────────────────────
 
   describe 'application-defined serializer bases' do

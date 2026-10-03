@@ -257,13 +257,18 @@ module Woods
       # Convention path first, then introspection via {#resolve_source_location}
       # which filters out vendor/node_modules paths.
       #
+      # Returns nil rather than a fabricated convention path when nothing
+      # resolves, as {JobExtractor} does: a nonexistent `app/serializers/` path
+      # enters the graph's file_map, and the next incremental run's safety-net
+      # sweep prunes a unit a full extraction still emits.
+      #
       # @param klass [Class]
       # @return [String, nil]
       def source_file_for(klass)
         convention_path = Rails.root.join("app/serializers/#{klass.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # ──────────────────────────────────────────────────────────────────────
