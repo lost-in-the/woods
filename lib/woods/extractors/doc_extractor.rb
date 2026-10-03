@@ -80,6 +80,7 @@ module Woods
         # policy name this class without ever scanning a document.
         require_relative 'doc_redaction'
         @root = Rails.root.to_s
+        @real_root = File.realpath(@root)
         @redaction = DocRedaction.new
       end
 
@@ -100,7 +101,7 @@ module Woods
       #   documentation file, is over {MAX_DOC_BYTES}, or cannot be read
       def extract_doc_file(file_path)
         relative = file_path.to_s.delete_prefix("#{@root}/")
-        return nil unless self.class.doc_path?(relative) && File.file?(file_path)
+        return nil unless self.class.doc_path?(relative) && File.file?(file_path) && documentation_target?(file_path)
         return skip_oversize(relative) if File.size(file_path) > MAX_DOC_BYTES
 
         build_unit(relative, file_path, SourceFile.read(file_path))
@@ -110,6 +111,14 @@ module Woods
       end
 
       private
+
+      # A symlink is read only when the file it reaches is itself documentation:
+      # inside the repository and under the configured roots. Otherwise a
+      # `docs/notes.md` link could publish a credential file.
+      def documentation_target?(file_path)
+        real = File.realpath(file_path)
+        real.start_with?("#{@real_root}/") && self.class.doc_path?(real.delete_prefix("#{@real_root}/"))
+      end
 
       def skip_oversize(relative)
         Rails.logger.warn("[Woods] Skipping documentation #{relative}: larger than #{MAX_DOC_BYTES} bytes")

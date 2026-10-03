@@ -187,6 +187,23 @@ RSpec.describe Woods::Extractors::DocExtractor do
       expect(unit_for('docs/big.md', "# Big\n#{'word ' * 40}")).to be_nil
     end
 
+    it 'refuses a symlink that leaves the repository or lands outside the documentation roots' do
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'leak.md'), '# Leaked')
+      create_file('config/master.key', 'notakey')
+      FileUtils.mkdir_p(File.join(tmp_dir, 'docs'))
+      File.symlink(File.join(outside, 'leak.md'), File.join(tmp_dir, 'docs/outside.md'))
+      File.symlink(File.join(tmp_dir, 'config/master.key'), File.join(tmp_dir, 'docs/key.md'))
+      create_file('docs/real.md', '# Real')
+      File.symlink(File.join(tmp_dir, 'docs/real.md'), File.join(tmp_dir, 'docs/alias.md'))
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[docs/alias.md docs/real.md])
+      expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/outside.md'))).to be_nil
+      expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/key.md'))).to be_nil
+    ensure
+      FileUtils.rm_rf(outside) if outside
+    end
+
     it 'reads invalid UTF-8 without raising' do
       path = create_file('docs/bytes.md', "# Bytes\n")
       File.binwrite(path, "# Bytes \xFF\n\n`Widget`\n")
