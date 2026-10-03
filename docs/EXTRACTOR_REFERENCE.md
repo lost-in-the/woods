@@ -739,7 +739,9 @@ expanded mailer and schedule identities in an existing index.
   class (`metadata[:job_class_inferred]`), as sidekiq-scheduler does.
 - Extracts job class name, cron expression, queue, and any arguments
 - `metadata[:frequency_human_readable]` describes standard cron lines in words (`0 7 * * *` is
-  `daily at 07:00`, `0 8 * * 0` is `weekly on Sunday at 08:00`), including nicknames such as `@daily`,
+  `daily at 07:00`, `0 8 * * 0` is `weekly on Sunday at 08:00`, `*/15 9-17 * * 1-5` is
+  `every 15 minutes from 09:00 to 17:45 on weekdays`, `0 9 * 6 *` is `daily at 09:00 in June`;
+  ranges end at the last firing time), including nicknames such as `@daily`,
   a leading seconds field and a trailing time zone. Shapes it cannot describe exactly keep the raw
   expression; `metadata[:cron_expression]` always holds the cron line as written.
 - Resolves trusted application `recurring.yml` through Rails' configuration loader,

@@ -45,7 +45,11 @@ RSpec.describe Woods::Extractors::CronHumanizer do
       '30 18 * * *' => 'daily at 18:30',
       '0 7,19 * * *' => 'daily at 07:00 and 19:00',
       '0,30 9 * * *' => 'daily at 09:00 and 09:30',
-      '0 9-17 * * *' => 'hourly at :00 from 09:00 to 17:00'
+      '0 9-17 * * *' => 'hourly at :00 from 09:00 to 17:00',
+      '0,30 9-17 * * *' => 'hourly at :00 and :30 from 09:00 to 17:30',
+      '*/15 9-17 * * *' => 'every 15 minutes from 09:00 to 17:45',
+      '*/20 8-18 * * *' => 'every 20 minutes from 08:00 to 18:40',
+      '* 9-17 * * *' => 'every minute from 09:00 to 17:59'
     }.each do |cron, text|
       it "humanizes #{cron.inspect} as #{text.inspect}" do
         expect(humanize(cron)).to eq(text)
@@ -70,7 +74,14 @@ RSpec.describe Woods::Extractors::CronHumanizer do
       '*/10 * * * 1-5' => 'every 10 minutes on weekdays',
       '35 * * * 0' => 'hourly at :35 on Sunday',
       '0 9-17 * * 1-5' => 'hourly at :00 from 09:00 to 17:00 on weekdays',
-      '0 * 1 * *' => 'every hour on day 1 of the month'
+      '0 * 1 * *' => 'every hour on day 1 of the month',
+      '*/15 9-17 * * 1-5' => 'every 15 minutes from 09:00 to 17:45 on weekdays',
+      '0 9 * 6 *' => 'daily at 09:00 in June',
+      '0 9 * 6-8 *' => 'daily at 09:00 in June through August',
+      '0 9 * 1,7 1' => 'weekly on Monday at 09:00 in January and July',
+      '0 9 1 1,7 *' => 'monthly on day 1 at 09:00 in January and July',
+      '0 9 1-7 3 *' => 'monthly on days 1 through 7 at 09:00 in March',
+      '*/10 * * DEC *' => 'every 10 minutes in December'
     }.each do |cron, text|
       it "humanizes #{cron.inspect} as #{text.inspect}" do
         expect(humanize(cron)).to eq(text)
@@ -105,8 +116,10 @@ RSpec.describe Woods::Extractors::CronHumanizer do
     [
       '15 3 */2 * 1-5',     # stepped day of month
       '0 0 1 * 1',          # day of month and day of week both restricted (cron ORs them)
-      '0 0 * 6 *',          # month without a day
-      '*/10 9-17 * * *',    # stepped minutes inside an hour range
+      '0 0 * */3 *',        # stepped months
+      '*/10 9,17 * * *',    # stepped minutes over an hour list
+      '*/10 9-11,14-17 * * *', # stepped minutes over several hour ranges
+      '*/10 */2 * * *',     # stepped minutes over stepped hours
       '0 0 L * *',          # fugit's last-day extension
       '0 0 * * 1#2',        # nth weekday
       '1-5/2 * * * *',      # stepped range

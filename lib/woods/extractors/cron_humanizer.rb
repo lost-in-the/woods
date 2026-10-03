@@ -95,14 +95,20 @@ module Woods
         minute, hour, day, month, weekday = fields.each_with_index.map { |field, index| parse(field, FIELDS[index]) }
         return nil if [minute, hour, day, month, weekday].any?(&:nil?)
 
-        days = day_phrase(day, month, weekday)
+        months = month_phrase(day, month, weekday)
+        return nil if months == :unsupported
+
+        days = day_phrase(day, months ? :any : month, weekday)
         return nil if days == :unsupported
 
         clock = clock_times(minute, hour)
-        return clock_sentence(clock, days) if clock
-
-        recurring = recurring_phrase(minute, hour)
-        recurring && [recurring, recurring_suffix(days)].compact.join(' ')
+        text = if clock
+                 clock_sentence(clock, days)
+               else
+                 recurring = recurring_phrase(minute, hour)
+                 recurring && [recurring, recurring_suffix(days)].compact.join(' ')
+               end
+        text && [text, months].compact.join(' ')
       end
 
       # A field becomes :any, [:step, n], or [:set, [[from, to], ...]]; nil when unsupported.
@@ -160,25 +166,33 @@ module Woods
 
           minutes && "hourly at #{past_the_hour(minutes)}"
         else
-          return nil unless minutes
+          return minutes && stepped_hours(minutes, hour.last) if hour.first == :step
 
-          hourly_window(minutes, hour)
+          hour_range(minute, hour.last)
         end
       end
 
-      def hourly_window(minutes, hour)
-        if hour.first == :step
-          return "hourly at #{past_the_hour(minutes)}" if hour.last == 1
+      def stepped_hours(minutes, step)
+        return "hourly at #{past_the_hour(minutes)}" if step == 1
 
-          return "every #{hour.last} hours at #{past_the_hour(minutes)}"
-        end
+        "every #{step} hours at #{past_the_hour(minutes)}"
+      end
 
-        ranges = hour.last
-        return nil unless minutes.one? && ranges.one? && ranges.first.first < ranges.first.last
+      # One hour range: the window runs from the first to the last firing.
+      def hour_range(minute, ranges)
+        return nil unless ranges.one? && ranges.first.first < ranges.first.last
 
         from, to = ranges.first
-        minute = minutes.first
-        "hourly at #{past_the_hour(minutes)} from #{clock(from, minute)} to #{clock(to, minute)}"
+        minutes, phrase = minutes_within_hour(minute)
+        minutes && "#{phrase} from #{clock(from, minutes.first)} to #{clock(to, minutes.last)}"
+      end
+
+      def minutes_within_hour(minute)
+        return [(0..59).to_a, 'every minute'] if [:any, [:step, 1]].include?(minute)
+        return [(0..59).step(minute.last).to_a, quantity(minute.last, 'minute', every: true)] if minute.first == :step
+
+        minutes = singles(minute)
+        minutes && [minutes, "hourly at #{past_the_hour(minutes)}"]
       end
 
       def past_the_hour(minutes)
@@ -187,6 +201,20 @@ module Woods
 
       def clock(hour, minute)
         format('%<hour>02d:%<minute>02d', hour: hour, minute: minute)
+      end
+
+      # A month restriction the yearly phrase does not absorb becomes a suffix.
+      #
+      # @return [nil, :unsupported, String]
+      def month_phrase(day, month, weekday)
+        return nil if month == :any
+        return nil if weekday == :any && singles(day)&.one? && singles(month)&.one?
+        return :unsupported unless month.first == :set
+
+        names = month.last.map do |from, to|
+          from == to ? MONTHS[from - 1] : "#{MONTHS[from - 1]} through #{MONTHS[to - 1]}"
+        end
+        "in #{sentence(names)}"
       end
 
       # @return [nil, :unsupported, Array] nil when every day matches
@@ -264,7 +292,8 @@ module Woods
       end
 
       private_class_method :describe_with_seconds, :describe, :parse, :parse_item, :value, :singles,
-                           :clock_times, :recurring_phrase, :hourly_window, :past_the_hour, :clock, :day_phrase,
+                           :clock_times, :recurring_phrase, :stepped_hours, :hour_range, :minutes_within_hour,
+                           :past_the_hour, :clock, :month_phrase, :day_phrase,
                            :weekday_phrase, :month_day_phrase, :yearly_phrase, :clock_sentence,
                            :recurring_suffix, :quantity, :sentence
     end
