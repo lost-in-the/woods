@@ -306,6 +306,35 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     end)
   end
 
+  it 'extracts mounts, redirects, and Rack endpoints from a real route table' do
+    stub_const('ApiFallback', Class.new { def call(_env) = [410, {}, []] })
+    routes = ActionDispatch::Routing::RouteSet.new
+    routes.draw do
+      mount ->(_env) { [200, {}, []] } => '/cable'
+      get '/settings', to: redirect('/account/settings')
+      get '/start', to: redirect(path: '/home', status: 302)
+      get '/old', to: redirect { |_params, _request| '/new' }
+      match '/v1/*unmatched_route', to: ApiFallback.new, via: :all
+      constraints(subdomain: 'www') { root to: redirect('https://example.test/') }
+      get '/posts', to: 'posts#index'
+    end
+    allow(Rails.application).to receive(:routes).and_return(routes)
+
+    units = Woods::Extractors::RouteExtractor.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+
+    expect(units.keys).to contain_exactly(
+      'ANY /cable (mount)', 'GET /settings (redirect)', 'GET /start (redirect)', 'GET /old (redirect)',
+      'ANY /v1/*unmatched_route (rack_endpoint)', 'GET / [subdomain=www] (redirect)', 'GET /posts'
+    )
+    expect(units['ANY /cable (mount)'].metadata).to include(kind: 'mount', app: 'Proc')
+    expect(units['GET /settings (redirect)'].metadata).to include(redirect_target: '/account/settings',
+                                                                  redirect_status: 301)
+    expect(units['GET /start (redirect)'].metadata).to include(redirect_target: 'path=/home', redirect_status: 302)
+    expect(units['GET /old (redirect)'].metadata).to include(redirect_target: 'dynamic')
+    expect(units['ANY /v1/*unmatched_route (rack_endpoint)'].metadata).to include(app: 'ApiFallback')
+    expect(units.values.reject { |unit| unit.identifier == 'GET /posts' }.flat_map(&:dependencies)).to be_empty
+  end
+
   it 'reports declared job and service parameters without names from default expressions' do
     job_params = find_unit(:jobs, 'SignatureJob').fetch('metadata').fetch('perform_params')
     service_params = find_unit(:services, 'SignatureService').fetch('metadata').fetch('initialize_params')

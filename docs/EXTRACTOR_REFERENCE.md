@@ -339,7 +339,13 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - A route with request constraints is qualified: `"GET /users [subdomain=api]"`, `"GET /users [format=json]"`, `"GET /users [constraint=proc]"` for a callable. Path-segment requirements (`id: /\d+/`) do not qualify
 - Routes that still share an identifier are numbered in route order (`"GET /users #2"`) so none are dropped
 - Records controller, action, route name, and constraints
-- Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` changes, it isn't skipped, just not diffed per file
+- Routes that dispatch to no controller action also become units. They carry `metadata.kind` and the kind is appended to the identifier, so they never collide with (or renumber) a controller route. Controller routes carry no `kind`
+  - `mount`: a `mount` (unanchored path). `metadata.app` is the mounted class name (`"Ledger::Engine"`) or the class of a mounted instance. An engine mount links `{ type: :engine, target: "<Engine class>", via: :mount }`, the `EngineExtractor` identifier
+  - `redirect`: `to: redirect(...)`. `metadata.redirect_target` is the target path, sorted `key=value` options for an options redirect, or `"dynamic"` for a block. `metadata.redirect_status` holds the status
+  - `rack_endpoint`: any other Rack callable (`to: ApiFallback.new`, a lambda). `metadata.app` is its class name
+- Kinds are read from the live endpoint behind `route.app` (unwrapping `ActionDispatch::Routing::Mapper::Constraints`), never from the routes file. A blank verb (`mount`, `via: :all`) renders as `ANY`: `"ANY /cable (mount)"`, `"GET /settings (redirect)"`, `"GET / [subdomain=www] (redirect)"`
+- These units emit no `route_dispatch` edge. The one route still skipped is a controller route whose action is a dynamic path segment (`get ':action', controller: ...`): it names no single action
+- Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` or a file under `config/routes/` (a `draw` file) changes, it isn't skipped, just not diffed per file
 
 **Example output (abbreviated):**
 

@@ -12,7 +12,8 @@ module Woods
     # Unlike file-based extractors, RouteExtractor reads the live routing
     # table from `Rails.application.routes.routes`. Each route becomes an
     # ExtractedUnit with metadata about HTTP method, path, controller, and
-    # action.
+    # action. A route that reaches no controller action (a mount, a redirect,
+    # a Rack endpoint) carries a +kind+ and the endpoint it points at instead.
     #
     # @example
     #   extractor = RouteExtractor.new
@@ -57,7 +58,7 @@ module Woods
         controller = defaults[:controller]
         action = defaults[:action]
 
-        return nil unless controller && action
+        return extract_endpoint_route(route) unless controller && action
 
         verb = route_verb(route)
         path = route_path(route)
@@ -80,6 +81,155 @@ module Woods
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract route: #{e.message}")
         nil
+      end
+
+      # Extract a route that dispatches to no controller action: a mount, a
+      # `redirect(...)`, or a Rack endpoint object. Classified from the live
+      # endpoint behind +route.app+, never from the routes file.
+      #
+      # A dispatcher endpoint here is a controller route whose action comes
+      # from a path segment (`get ':action', controller: ...`); it names no
+      # single action and stays skipped.
+      #
+      # @param route [ActionDispatch::Journey::Route]
+      # @return [ExtractedUnit, nil]
+      def extract_endpoint_route(route)
+        app = route_endpoint(route)
+        return nil if app.nil? || (app.respond_to?(:dispatcher?) && app.dispatcher?)
+
+        kind = endpoint_kind(route, app)
+        verb = endpoint_verb(route)
+        path = route_path(route)
+
+        unit = ExtractedUnit.new(
+          type: :route,
+          identifier: "#{route_identifier(verb, path, route)} (#{kind})",
+          file_path: nil
+        )
+        unit.metadata = build_endpoint_metadata(kind, verb, path, app, route)
+        unit.source_code = build_endpoint_source(unit.metadata, app)
+        unit.dependencies = build_endpoint_dependencies(kind, app)
+        unit
+      end
+
+      # The endpoint behind a route, unwrapped from the
+      # ActionDispatch::Routing::Mapper::Constraints wrapper Rails puts around
+      # every `to:` callable and mounted app. Only that wrapper is unwrapped:
+      # an engine class also answers +app+ (its own middleware stack).
+      #
+      # @return [Object, nil]
+      def route_endpoint(route)
+        app = route.respond_to?(:app) ? route.app : nil
+        5.times do
+          break unless constraints_wrapper?(app)
+
+          app = app.app
+        end
+        app
+      end
+
+      def constraints_wrapper?(app)
+        defined?(ActionDispatch::Routing::Mapper::Constraints) &&
+          app.is_a?(ActionDispatch::Routing::Mapper::Constraints)
+      end
+
+      # @return [String] "redirect", "mount" (an unanchored path, which is
+      #   what `mount` draws), or "rack_endpoint"
+      def endpoint_kind(route, app)
+        return 'redirect' if defined?(ActionDispatch::Routing::Redirect) && app.is_a?(ActionDispatch::Routing::Redirect)
+
+        path = route.respond_to?(:path) ? route.path : nil
+        path.respond_to?(:anchored) && path.anchored == false ? 'mount' : 'rack_endpoint'
+      end
+
+      # `mount` and `via: :all` leave the verb blank; they answer every verb.
+      def endpoint_verb(route)
+        verb = route.respond_to?(:verb) ? route.verb : nil
+        verb.present? ? route_verb(route) : 'ANY'
+      end
+
+      # @return [String] the class name of the endpoint, or of the mounted
+      #   class itself
+      def endpoint_name(app)
+        name = app.is_a?(Module) ? app.name : app.class.name
+        name || app.class.to_s
+      end
+
+      # Same test EngineExtractor uses to recognise an engine.
+      def engine_endpoint?(app)
+        return true if app.is_a?(Class) && defined?(Rails::Engine) && app < Rails::Engine
+
+        app.is_a?(Class) && app.respond_to?(:engine_name) && app.respond_to?(:routes)
+      end
+
+      # @return [Hash]
+      def build_endpoint_metadata(kind, verb, path, app, route)
+        metadata = {
+          kind: kind,
+          http_method: verb,
+          path: path,
+          app: endpoint_name(app),
+          route_name: route.respond_to?(:name) ? route.name : nil,
+          constraints: route_constraints(route),
+          path_params: path.scan(/:(\w+)/).flatten
+        }
+        return metadata unless kind == 'redirect'
+
+        metadata.merge(redirect_target: redirect_target(app),
+                       redirect_status: app.respond_to?(:status) ? app.status : nil)
+      end
+
+      # A path redirect holds its target string in +block+, an options
+      # redirect its options hash; a block redirect is computed per request.
+      #
+      # @return [String]
+      def redirect_target(app)
+        if defined?(ActionDispatch::Routing::OptionRedirect) && app.is_a?(ActionDispatch::Routing::OptionRedirect)
+          return app.options.sort_by { |key, _| key.to_s }.map { |key, value| "#{key}=#{value}" }.join(', ')
+        end
+
+        block = app.respond_to?(:block) ? app.block : nil
+        block.is_a?(String) ? block : 'dynamic'
+      end
+
+      # @return [String]
+      def build_endpoint_source(metadata, app)
+        lines = ["# Route: #{metadata[:http_method]} #{metadata[:path]}"]
+        lines << "# Name: #{metadata[:route_name]}" if metadata[:route_name]
+        lines << "# Kind: #{metadata[:kind]}"
+        lines << "# App: #{metadata[:app]}"
+        lines << "# Constraints: #{metadata[:constraints].inspect}" if metadata[:constraints].any?
+        lines << '#'
+        lines << "# #{endpoint_declaration(metadata, app)}"
+        lines.join("\n")
+      end
+
+      def endpoint_declaration(metadata, app)
+        verb = metadata[:http_method]
+        path = metadata[:path]
+        case metadata[:kind]
+        when 'mount' then "mount #{metadata[:app]} => '#{path}'"
+        when 'redirect' then "#{verb.downcase} '#{path}', to: #{redirect_declaration(metadata, app)}"
+        else "match '#{path}', to: #{metadata[:app]}, via: :#{verb == 'ANY' ? 'all' : verb.downcase}"
+        end
+      end
+
+      def redirect_declaration(metadata, app)
+        return 'redirect { ... }' if metadata[:redirect_target] == 'dynamic'
+        return "redirect('#{metadata[:redirect_target]}')" unless app.respond_to?(:options)
+
+        "redirect(#{app.options.map { |key, value| "#{key}: '#{value}'" }.join(', ')})"
+      end
+
+      # No route_dispatch edge: nothing here reaches a controller action. A
+      # mounted engine links to the engine unit, whose identifier is the
+      # engine class name.
+      #
+      # @return [Array<Hash>]
+      def build_endpoint_dependencies(kind, app)
+        return [] unless kind == 'mount' && engine_endpoint?(app)
+
+        [{ type: :engine, target: app.name, via: :mount }]
       end
 
       # Identifier for a route: `VERB /path`, qualified by its request
