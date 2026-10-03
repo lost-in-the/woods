@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative 'atomic_file'
+require_relative 'source_file'
 require_relative 'version'
 require_relative 'filename_utils'
 require_relative 'token_utils'
@@ -3340,7 +3341,7 @@ module Woods
         path = path.to_s
         next unless path.end_with?('.rb')
 
-        governed_class_name(path, File.read(path))
+        governed_class_name(path, SourceFile.read(path))
       end.compact.to_set
     end
 

@@ -2748,6 +2748,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(index['services'].map { |e| e['identifier'] }).to include('Tag')
     end
 
+    # The re-add reads the moved file to learn the constant its loader path
+    # names. Under a POSIX locale that read must not fail on a multibyte byte,
+    # or the rescue returns no names and the model stays missing.
+    it 're-adds a moved multibyte model after ONE run under a US-ASCII default external encoding' do
+      write_file('app/models/ledger_tag.rb', <<~RUBY)
+        # Ledger tag — labels entries
+        class LedgerTag < ApplicationRecord
+          self.table_name = "posts"
+        end
+      RUBY
+      load app_path('app/models/ledger_tag.rb')
+
+      index_dir = Dir.mktmpdir('woods_diff_multibyte')
+      (@scratch_dirs ||= []) << index_dir
+      with_posix_default_external do
+        Woods::Extractor.new(output_dir: index_dir).extract_all
+        move_file('app/models/ledger_tag.rb', 'app/services/ledger_tag.rb')
+        Woods::Extractor.new(output_dir: index_dir).extract_changed(%w[app/models/ledger_tag.rb
+                                                                       app/services/ledger_tag.rb])
+      end
+
+      # The comparison helpers read artifacts with the suite locale, so they run outside the block.
+      expect(differences(index_dir, full_extraction)).to be_empty
+
+      index = index_snapshot(index_dir)
+      expect(index['models'].count { |e| e['identifier'] == 'LedgerTag' }).to eq(1)
+      expect(index['services'].map { |e| e['identifier'] }).to include('LedgerTag')
+    end
+
     it 'does not resurrect a deleted namespaced model from another namespace\'s added file' do
       index_dir = Dir.mktmpdir('woods_diff_resurrect')
       (@scratch_dirs ||= []) << index_dir
@@ -2818,7 +2847,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # pristine tree so the runtime and the filesystem keep agreeing in
     # every later example.
     after do
-      %w[app/services/tag.rb app/models/admin/user.rb app/models/public/user.rb
+      %w[app/services/tag.rb app/services/ledger_tag.rb app/models/admin/user.rb app/models/public/user.rb
          app/models/user.rb app/models/notes.rb].each do |relative|
         created = app_path(relative)
         next unless File.exist?(created)
