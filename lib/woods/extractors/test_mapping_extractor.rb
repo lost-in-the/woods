@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'rake_task_extractor'
 require_relative 'test_route_resolver'
 require_relative 'test_support_catalog'
 
@@ -60,7 +61,11 @@ module Woods
       CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
 
       # Rake tasks are identified by name, so a task-shaped string describe in
-      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a unit.
+      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a
+      # unit when a task of that name exists. A describe that names a
+      # NAMESPACE (`describe 'ledger'`) covers every `ledger:*` task instead.
+      # Task names come from the rake files, so a `.rake` change re-runs this
+      # extractor wholesale.
       RAKE_TASK_SPEC_DIR = %r{/spec/(?:lib/)?tasks/|/test/lib/tasks/}
       RAKE_TASK_NAME = /\A[\w-]+(?::[\w-]+)*\z/
 
@@ -104,7 +109,7 @@ module Woods
         unit.metadata = extract_metadata(source, file_path, framework).merge(support_metadata(support))
         unit.metadata[:routes_exercised] = routes_exercised(source, unit.metadata[:test_type])
         unit.dependencies = consolidate_dependencies(
-          extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type]), support.dependencies,
+          coverage_dependencies(unit.metadata, file_path), support.dependencies,
           unit.metadata[:routes_exercised].map { |route| { type: :route, target: route, via: :exercises_route } }
         )
 
@@ -152,6 +157,7 @@ module Woods
           shared_examples: extract_shared_examples_defined(source)
         }
         metadata[:description] = subject if subject && !subject_class
+        metadata[:rake_namespace] = subject if subject && !subject_class && rake_namespace?(subject, file_path)
         metadata
       end
 
@@ -194,7 +200,48 @@ module Woods
         return false if group&.match?(RSPEC_FEATURE_GROUP)
         return true if subject.match?(CONSTANT_PATH)
 
+        rake_subject?(subject, file_path) && rake_task_names.include?(subject)
+      end
+
+      # @return [Boolean] whether a task spec describes this task-shaped string
+      def rake_subject?(subject, file_path)
         file_path.match?(RAKE_TASK_SPEC_DIR) && subject.match?(RAKE_TASK_NAME)
+      end
+
+      # @return [Boolean] whether a task spec describes a namespace that holds tasks
+      def rake_namespace?(subject, file_path)
+        rake_subject?(subject, file_path) && namespace_tasks(subject).any?
+      end
+
+      # @param namespace [String] e.g. "ledger"
+      # @return [Array<String>] sorted names of every task under the namespace
+      def namespace_tasks(namespace)
+        rake_task_names.select { |name| name.start_with?("#{namespace}:") }
+      end
+
+      # Names of the application's rake tasks, as the rake task units carry them.
+      #
+      # @return [Array<String>] sorted task names
+      def rake_task_names
+        @rake_task_names ||= RakeTaskExtractor.new.extract_all.map(&:identifier).sort
+      rescue StandardError
+        @rake_task_names = []
+      end
+
+      # Link the test to what it covers: the tasks of a described rake
+      # namespace, a described rake task, or the subject class.
+      #
+      # @param metadata [Hash] the unit's metadata
+      # @param file_path [String] Absolute path to the test file
+      # @return [Array<Hash>]
+      def coverage_dependencies(metadata, file_path)
+        subject = metadata[:subject_class]
+        tasks = if metadata[:rake_namespace] then namespace_tasks(metadata[:rake_namespace])
+                elsif subject && rake_subject?(subject, file_path) && rake_task_names.include?(subject) then [subject]
+                end
+        return extract_dependencies(subject, metadata[:test_type]) unless tasks
+
+        tasks.map { |task| { type: :rake_task, target: task, via: :test_coverage } }
       end
 
       # Extract the primary subject under test, as written.

@@ -262,6 +262,12 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
       end
 
       it 'keeps a namespaced task-name describe under spec/lib/tasks/ as the subject' do
+        create_file('lib/tasks/ledger.rake', <<~RUBY)
+          namespace :ledger do
+            task rebuild_balances: :environment do
+            end
+          end
+        RUBY
         path = create_file('spec/lib/tasks/ledger/rebuild_balances_spec.rb', <<~RUBY)
           RSpec.describe "ledger:rebuild_balances" do
             it 'rebuilds' do; end
@@ -271,10 +277,55 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         unit = described_class.new.extract_test_file(path)
         expect(unit.metadata[:subject_class]).to eq('ledger:rebuild_balances')
         expect(unit.metadata).not_to have_key(:description)
-        expect(unit.dependencies).to eq([{ type: :model, target: 'ledger:rebuild_balances', via: :test_coverage }])
+        expect(unit.dependencies)
+          .to eq([{ type: :rake_task, target: 'ledger:rebuild_balances', via: :test_coverage }])
+      end
+
+      it 'links a namespace describe to every task in the namespace' do
+        create_file('lib/tasks/ledger.rake', <<~RUBY)
+          namespace :ledger do
+            task rebuild_balances: :environment do
+            end
+
+            namespace :audit do
+              task run: :environment do
+              end
+            end
+          end
+
+          task ledger_export: :environment do
+          end
+        RUBY
+        path = create_file('spec/lib/tasks/ledger_spec.rb', <<~RUBY)
+          RSpec.describe "ledger" do
+            it 'rebuilds' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'ledger', rake_namespace: 'ledger')
+        expect(unit.dependencies).to eq(
+          [{ type: :rake_task, target: 'ledger:audit:run', via: :test_coverage },
+           { type: :rake_task, target: 'ledger:rebuild_balances', via: :test_coverage }]
+        )
+      end
+
+      it 'records a task-shaped describe that names no task or namespace as the description' do
+        create_file('lib/tasks/ledger.rake', "task ledger_export: :environment do\nend\n")
+        path = create_file('spec/lib/tasks/shipments_spec.rb', <<~RUBY)
+          RSpec.describe "shipments" do
+            it 'ships' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'shipments')
+        expect(unit.metadata).not_to have_key(:rake_namespace)
+        expect(unit.dependencies).to eq([])
       end
 
       it 'keeps a task-name describe under spec/tasks/ as the subject' do
+        create_file('lib/tasks/export.rake', "task export_widgets: :environment do\nend\n")
         path = create_file('spec/tasks/export_widgets_spec.rb', <<~RUBY)
           RSpec.describe "export_widgets" do
             it 'exports' do; end
@@ -283,7 +334,7 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
 
         unit = described_class.new.extract_test_file(path)
         expect(unit.metadata[:subject_class]).to eq('export_widgets')
-        expect(unit.dependencies).to eq([{ type: :model, target: 'export_widgets', via: :test_coverage }])
+        expect(unit.dependencies).to eq([{ type: :rake_task, target: 'export_widgets', via: :test_coverage }])
       end
 
       it 'records a task-shaped describe outside a tasks directory as the description' do
