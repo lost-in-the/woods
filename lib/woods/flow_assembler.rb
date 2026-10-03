@@ -305,11 +305,15 @@ module Woods
 
         next if except.is_a?(Array) && method_name && except.map(&:to_s).include?(method_name.to_s)
 
+        # The declaration site the extractor recorded, or nil when it could
+        # not be known; it is a line of the declaring file, not of this
+        # unit's annotated source, so it is not translated.
         operations << {
           type: :call,
           target: nil,
           method: cb_name.to_s,
-          line: nil
+          line: cb[:line],
+          file: cb[:file]
         }
       end
     end

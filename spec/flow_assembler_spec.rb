@@ -374,6 +374,24 @@ RSpec.describe Woods::FlowAssembler do
         expect(methods).to eq(%w[verify_ledger_state! post!])
       end
 
+      it 'reports a filter at the site the extractor recorded for it' do
+        write_receiver('LedgerBehavior')
+        unit = JSON.parse(File.read(Dir[File.join(extracted_dir, 'controllers', '*.json')].first))
+        unit['metadata']['filters'][0].merge!('line' => 12, 'file' => 'app/controllers/concerns/verifying.rb')
+        File.write(Dir[File.join(extracted_dir, 'controllers', '*.json')].first, JSON.generate(unit))
+
+        filter = operations_for('LedgersController#create').first
+
+        expect(filter).to include(method: 'verify_ledger_state!', line: 12,
+                                  file: 'app/controllers/concerns/verifying.rb')
+      end
+
+      it 'reports no site for a filter recorded without one' do
+        write_receiver('LedgerBehavior')
+
+        expect(operations_for('LedgersController#create').first).to include(line: nil, file: nil)
+      end
+
       it 'yields only the filters when no indexed unit holds the body' do
         write_receiver(nil)
 

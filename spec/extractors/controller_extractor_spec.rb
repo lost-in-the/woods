@@ -441,6 +441,107 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
   end
 
+  # ── filter declaration sites ─────────────────────────────────────────
+  #
+  # Rails keeps no source location for a symbol filter, so the declaration
+  # is found in the source of the first app-defined ancestor that declares
+  # it. A proc filter carries its own source location.
+  describe 'filter declaration sites' do
+    let(:root) { Dir.mktmpdir('filter_sites') }
+    let(:concern) { Module.new }
+    let(:controller) { Class.new }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      stub_const('Rails', double('Rails', application: double('Application', routes: routes_double),
+                                          root: Pathname.new(root)))
+      described_class.new
+    end
+
+    after { FileUtils.remove_entry(root) }
+
+    def write(relative, contents)
+      path = File.join(root, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      path
+    end
+
+    def stub_controller(callbacks)
+      chain = [controller, concern, Object]
+      controller.define_singleton_method(:_process_action_callbacks) { callbacks }
+      controller.define_singleton_method(:ancestors) { chain }
+    end
+
+    def chain_for(callbacks)
+      stub_controller(callbacks)
+      allow(extractor).to receive(:source_file_for).with(controller).and_return(@controller_path)
+      allow(extractor).to receive(:module_source_path).and_return(nil)
+      allow(extractor).to receive(:module_source_path).with(concern).and_return(@concern_path)
+      extractor.send(:extract_filter_chain, controller)
+    end
+
+    before do
+      @controller_path = write('app/controllers/ledgers_controller.rb', <<~RUBY)
+        class LedgersController < ApplicationController
+          include Authenticating
+
+          before_action :load_ledger, :load_entries, only: :show
+          around_action :with_audit
+        end
+      RUBY
+      @concern_path = write('app/controllers/concerns/authenticating.rb', <<~RUBY)
+        module Authenticating
+          extend ActiveSupport::Concern
+
+          included do
+            prepend_before_action :authenticate!
+          end
+        end
+      RUBY
+    end
+
+    it 'locates a filter declared in the controller' do
+      chain = chain_for([build_callback(kind: :before, filter: :load_entries)])
+
+      expect(chain.first).to include(line: 4, file: 'app/controllers/ledgers_controller.rb')
+    end
+
+    it 'locates a filter declared in an included concern' do
+      chain = chain_for([build_callback(kind: :before, filter: :authenticate!)])
+
+      expect(chain.first).to include(line: 5, file: 'app/controllers/concerns/authenticating.rb')
+    end
+
+    it 'matches the declaration of the callback kind' do
+      chain = chain_for([build_callback(kind: :around, filter: :with_audit)])
+
+      expect(chain.first).to include(line: 5, file: 'app/controllers/ledgers_controller.rb')
+    end
+
+    it 'locates a proc filter at its own source location' do
+      path = write('app/controllers/concerns/stamping.rb', "STAMP_FILTER = proc { true }\n")
+      load path
+      chain = chain_for([build_callback(kind: :before, filter: STAMP_FILTER)])
+
+      expect(chain.first).to include(line: 1, file: 'app/controllers/concerns/stamping.rb')
+    ensure
+      Object.send(:remove_const, :STAMP_FILTER) if Object.const_defined?(:STAMP_FILTER)
+    end
+
+    it 'records no site for a filter no app source declares' do
+      chain = chain_for([build_callback(kind: :before, filter: :verify_authenticity_token)])
+
+      expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token)
+    end
+
+    it 'records no site for a filter declared under another kind' do
+      chain = chain_for([build_callback(kind: :after, filter: :load_ledger)])
+
+      expect(chain.first).not_to have_key(:line)
+    end
+  end
+
   # ── extract_filter_chain (integration) ───────────────────────────────
 
   describe '#extract_filter_chain' do
