@@ -109,7 +109,36 @@ module Woods
         # The scan names scopes from source text. When one is not a loaded
         # constant there is no lexical scope to search, only the top level.
         result = @runtime.call(name) if result[:reason] == 'unloaded_scope'
-        result
+        result[:reason] == 'constant_alias' ? follow_alias(name, nesting) : result
+      end
+
+      # RuntimeLookup declines a constant whose value is named something else
+      # (`Card = Ui::Card`). For a render that is still the component reached,
+      # so walk the same tables again and answer with the value's own name.
+      def follow_alias(name, nesting)
+        scopes = name.start_with?('::') ? [Object] : lexical_scopes(nesting)
+        value = nil
+        name.delete_prefix('::').split('::').each do |part|
+          owner = scopes.find { |scope| @runtime.reflect(scope, :const_defined?, part, false) }
+          return { status: :missing, reason: 'constant_missing' } unless owner
+          return unknown('autoload_pending') if @runtime.reflect(owner, :autoload?, part, false)
+
+          value = @runtime.reflect(owner, :const_get, part, false)
+          return unknown('non_module_constant') unless @runtime.module_object?(value)
+
+          scopes = [value] + @runtime.reflect(value, :ancestors).take_while { |mod| !IDENTICAL.bind(mod).call(Object) }
+        end
+        canonical = @runtime.reflect(value, :name)
+        canonical ? { status: :resolved, target: canonical, value: value } : unknown('anonymous_constant')
+      rescue NameError
+        unknown('constant_changed')
+      end
+
+      def lexical_scopes(nesting)
+        modules = nesting.filter_map { |scope| @runtime.call("::#{scope}", allow_private: true)[:value] }
+        return [Object] if modules.empty?
+
+        modules + @runtime.reflect(modules.first, :ancestors) + [Object]
       end
 
       def kit_verdict(candidate, run)
@@ -150,7 +179,7 @@ module Woods
           kit_name = @runtime.reflect(ancestor, :name)
           next unless kit_name
 
-          result = @runtime.call("::#{kit_name}::#{name}", allow_private: true)
+          result = lookup("::#{kit_name}::#{name}", [])
           return result unless result[:status] == :missing
         end
         nil
@@ -185,7 +214,11 @@ module Woods
       end
 
       def no_kit
-        { status: :unknown, reason: 'no_kit_constant' }
+        unknown('no_kit_constant')
+      end
+
+      def unknown(reason)
+        { status: :unknown, reason: reason }
       end
     end
   end

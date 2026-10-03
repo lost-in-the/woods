@@ -102,6 +102,28 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
       expect(result.unresolved).to eq([])
     end
 
+    it 'follows an aliased constant to the component it names' do
+      stub_const('Billing::V2::Card', Ui::Header)
+
+      result = resolve('render Card.new')
+
+      expect(result.targets).to eq(['Ui::Header'])
+      expect(result.unresolved).to eq([])
+    end
+
+    it 'follows an aliased namespace inside a constant path' do
+      stub_const('Billing::V2::Parts', Ui)
+
+      expect(resolve('render Parts::NavMenu.new').targets).to eq(['Ui::NavMenu'])
+    end
+
+    it 'records an alias of something that is not a component' do
+      stub_const('Billing::V2::Tally', Class.new)
+      stub_const('Billing::V2::Count', Billing::V2::Tally)
+
+      expect(resolve('render Count.new').unresolved).to eq([{ name: 'Count', reason: 'not_a_component' }])
+    end
+
     it 'counts a ViewComponent as a component class' do
       stub_const('ViewComponent::Base', Class.new)
       stub_const('Billing::V2::SummaryComponent', Class.new(ViewComponent::Base))
@@ -144,6 +166,12 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
       stub_const('Billing::V2::ManagePage', Class.new(ApplicationView) { include Parts })
 
       expect(resolve('Chip("a")').targets).to eq(['Parts::Chip'])
+    end
+
+    it 'follows a Kit constant that aliases a component elsewhere' do
+      stub_const('Ui::Tile', Billing::V2::TierGrid)
+
+      expect(resolve('Tile(1)').targets).to eq(['Billing::V2::TierGrid'])
     end
 
     it 'resolves a call on a named Kit module' do
