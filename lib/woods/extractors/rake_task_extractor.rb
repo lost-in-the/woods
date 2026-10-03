@@ -3,17 +3,27 @@
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
-require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'rake_task_paths'
+require_relative 'rake_source_parser'
+require_relative 'rake_runtime_index'
+require_relative 'rake_task_catalog'
 
 module Woods
   module Extractors
-    # RakeTaskExtractor handles extraction of custom rake tasks from lib/tasks/.
+    # RakeTaskExtractor indexes rake tasks and the Ruby that supports them.
     #
-    # Scans `lib/tasks/**/*.rake` for task definitions and produces one
-    # ExtractedUnit per task. Uses static regex parsing (never evals rake files).
-    # Supports namespaced tasks, nested namespaces, task dependencies, and arguments.
+    # It reads the files named by +config.rake_task_paths+ (by default
+    # `lib/tasks/**/*.rake`, `rake/**/*.rake` and the `Rakefile`) with Prism
+    # and never runs them. One unit per task: a task defined or enhanced in
+    # several files is one unit carrying every site. Ruby files under a
+    # configured directory become `rake_support` units, so a task's calls
+    # into its helpers are edges.
+    #
+    # The loaded Rake application resolves what a file computes (a task name
+    # built in a loop); everything a file states literally comes from the
+    # file. See {RakeTaskCatalog}.
     #
     # @example
     #   extractor = RakeTaskExtractor.new
@@ -25,56 +35,42 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
 
-      RAKE_DIRECTORIES = %w[lib/tasks].freeze
-
       # Namespaces to exclude from extraction (this gem's own tasks)
       EXCLUDED_NAMESPACES = %w[woods].freeze
 
-      # Matches a line-leading `end` that closes a block, whether it stands
-      # alone or is followed by a method chain (`end.freeze`) or a closing
-      # delimiter (`end)`, `end]`, `end,`). An exact `== 'end'` check misses
-      # those, leaving the namespace/task depth counters out of sync with
-      # blocks that never get popped.
-      END_LINE = /\Aend\b/
+      # Definition kinds Rake keeps outside namespaces.
+      UNSCOPED_KINDS = RakeSourceParser::UNSCOPED_KINDS
 
-      # One task-dependency token: a quoted name (`'assets:precompile'`, whose
-      # namespace segments must survive — EXTB-9) or a plain symbol
-      # (`:environment`). The quoted branch comes first so the `:` inside a
-      # quoted name is consumed with it instead of being read as symbol
-      # syntax and truncated to its last segment.
-      DEPENDENCY_TOKEN = /(?:(['"])([\w:]+)\1|:(\w+))/
+      SUPPORT_KIND = 'rake_support'
 
       def initialize
-        @directories = RAKE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
+        @root = Rails.root
+        @paths = RakeTaskPaths.configured
       end
 
-      # Extract all rake tasks from all discovered directories.
+      # Extract every rake task and support file under the configured paths.
       #
-      # @return [Array<ExtractedUnit>] List of rake task units
+      # @return [Array<ExtractedUnit>] task units, then support units
       def extract_all
-        rake_files.flat_map { |file| extract_rake_file(file) }.uniq(&:identifier)
+        tasks = catalog.names.filter_map { |name| build_unit(name) }
+        (tasks + support_paths.filter_map { |relative| build_support_unit(relative) }).uniq(&:identifier)
       end
 
-      # Extract rake tasks from a single .rake file.
+      # Extract the units one file contributes to: every task it defines or
+      # enhances (each built from all of that task's files), or the support
+      # unit of a Ruby file.
       #
-      # Returns an Array because each file may contain multiple task definitions.
-      #
-      # @param file_path [String] Path to the .rake file
+      # @param file_path [String] Path to a rake file or a support file
       # @return [Array<ExtractedUnit>] List of rake task units
       def extract_rake_file(file_path)
-        return [] unless file_path.to_s.end_with?('.rake')
+        file = file_path.to_s
+        relative = relative_path(file)
+        return [build_support_unit(relative)].compact if support_paths.include?(relative)
+        return [] unless task_source?(file, relative) && rake_file_data(file)
 
-        data = rake_file_data(file_path.to_s)
-        return [] unless data
-
-        tasks = data[:tasks]
-        Rails.logger.debug("Woods: no rake tasks parsed from #{file_path}") if tasks.empty?
-
-        tasks.filter_map do |task_data|
-          next if excluded_namespace?(task_data[:full_name])
-
-          build_unit(task_data, file_path, data[:source], sibling_definitions(task_data[:full_name], file_path))
-        end
+        names = catalog.names_in(file)
+        Rails.logger.debug("Woods: no rake tasks parsed from #{file_path}") if names.empty?
+        names.filter_map { |name| build_unit(name) }
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract rake tasks from #{file_path}: #{e.message}")
         []
@@ -82,298 +78,71 @@ module Woods
 
       private
 
+      def task_source?(file, relative)
+        file.end_with?('.rake') || RakeTaskPaths.task_file?(relative, @paths)
+      end
+
       def rake_files
-        find_files_in_directories(@directories, '**/*.rake').map(&:to_s).sort
+        @rake_files ||= RakeTaskPaths.task_files(@root, @paths)
       end
 
-      # One read and one parse per .rake file per extractor instance (audit
-      # P9a). {#extract_rake_file} and {#all_definitions} both need every
-      # file's source and tasks; the sibling index used to re-read and
-      # re-parse all of them on its first access. The bytes cannot change
-      # mid-run, so the first read/parse answers both paths.
+      # Support files no other extractor owns, root-relative and sorted. A
+      # configured directory inside `lib/` holds Ruby the lib extractor
+      # already indexes.
+      def support_paths
+        @support_paths ||= RakeTaskPaths.support_files(@root, @paths)
+                                        .map { |file| relative_path(file) }
+                                        .reject { |relative| claimed_elsewhere?(relative) }
+      end
+
+      def claimed_elsewhere?(relative)
+        return false unless defined?(Woods::Extractor::EXTRACTORS) && defined?(Woods::PathDispatcher)
+
+        !Woods::PathDispatcher.claiming_key_for(relative).nil?
+      end
+
+      # One read and one parse per file per extractor instance. Both
+      # {#extract_rake_file} and the catalog need every file; the bytes cannot
+      # change mid-run, so the first read answers both.
       #
-      # A file that fails to read or parse is memoized as nil: it produced no
-      # definitions and no units before either.
+      # A file that fails to read is memoized as nil and contributes nothing.
       #
-      # @param file [String] Absolute path of the .rake file
-      # @return [Hash{Symbol => String, Array<Hash>}, nil] `{ source:, tasks: }`
+      # @param file [String] Absolute path
+      # @return [Hash{Symbol => Object}, nil] `{ source:, parsed: }`
       def rake_file_data(file)
-        (@rake_file_data ||= {})[file] ||= begin
+        @rake_file_data ||= {}
+        return @rake_file_data[file] if @rake_file_data.key?(file)
+
+        @rake_file_data[file] = begin
           source = SourceFile.read(file)
-          { source: source, tasks: parse_tasks(source) }
-        end
-      rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to scan rake tasks in #{file}: #{e.message}")
-        nil
-      end
-
-      # Every definition of every task across the rake directories, keyed by
-      # full name (B-126). Rake merges a task reopened in two files into one
-      # task, so the index does the same: one unit whose source carries every
-      # definition. Built lazily once per extractor instance, which the
-      # orchestrator rebuilds per run.
-      #
-      # @return [Hash{String => Array<Hash>}] `{ full_name => [{ file:, task:, source: }] }`
-      def all_definitions
-        @all_definitions ||= rake_files.each_with_object(Hash.new { |h, k| h[k] = [] }) do |file, index|
-          data = rake_file_data(file)
-          next unless data
-
-          data[:tasks].each do |task_data|
-            index[task_data[:full_name]] << { file: file, task: task_data, source: data[:source] }
-          end
+          { source: source, parsed: parse_tasks(source) }
+        rescue StandardError, SystemStackError => e
+          # Pathologically nested source overflows the stack inside the walk.
+          SourceInputs::ConsumerErrors.log(self, "Failed to scan rake tasks in #{file}: #{e.message}")
+          nil
         end
       end
 
-      # Definitions of +full_name+ in files other than +file_path+.
-      #
-      # @return [Array<Hash>]
-      def sibling_definitions(full_name, file_path)
-        all_definitions[full_name].reject { |definition| definition[:file] == file_path.to_s }
-      end
-
-      # Parse task definitions from rake source using a line-by-line state machine.
-      #
-      # Tracks namespace nesting, desc buffers, and task blocks.
-      #
-      # Every structural decision (is this a declaration, does this line open
-      # or close a block) is made against the *neutralized* line — comments,
-      # string bodies, and heredoc bodies blanked by {LineNeutralizer} —
-      # while names and descriptions are still read from the raw line, which
-      # is where their string literals live. Scanning raw source let prose
-      # steer the parser: `# do not touch production` inflated depth with no
-      # matching `end`, so later namespaces inherited a stale prefix, and a
-      # heredoc line reading `end of the road` popped a task's own frame and
-      # truncated its body (EXTB-1).
-      #
-      # @param source [String] Rake file source code
-      # @return [Array<Hash>] Parsed task data
+      # @param source [String] Ruby source
+      # @return [RakeSourceParser::Result]
       def parse_tasks(source)
-        tasks = []
-        namespace_stack = []
-        # Track the block depth at which each namespace was opened.
-        # When depth returns to that level, the namespace ends.
-        namespace_depths = []
-        pending_desc = nil
-        depth = 0
-        lines = source.lines
-        scannable = LineNeutralizer.neutralize_lines(source)
+        RakeSourceParser.parse(source)
+      end
 
-        lines.each_with_index do |line, index|
-          stripped = line.strip
-          code = scannable[index].to_s.strip
-          next if code.empty?
+      def catalog
+        @catalog ||= RakeTaskCatalog.new(
+          task_files: parsed_files(rake_files),
+          support_files: parsed_files(support_paths.map { |relative| @root.join(relative).to_s })
+                         .transform_keys { |file| relative_path(file) },
+          runtime: RakeRuntimeIndex.current
+        )
+      end
 
-          # Track namespace blocks
-          if code.match?(/\Anamespace\s+/)
-            name = extract_namespace_name(stripped)
-            if name
-              namespace_stack.push(name)
-              namespace_depths.push(depth)
-              depth += 1
-            elsif code.include?(' do')
-              # Unparseable namespace name (e.g. dynamic/interpolated) — still
-              # count its block so depth stays in sync with the closing `end`.
-              depth += 1
-            end
-            next
-          end
-
-          # Buffer desc for the next task
-          if code.match?(/\Adesc\s+/)
-            pending_desc = extract_desc(stripped)
-            next
-          end
-
-          # Detect task definitions
-          if code.match?(/\Atask\s+/)
-            task_data = parse_task_line(stripped, namespace_stack, pending_desc, index + 1)
-            if task_data
-              task_data[:block_source] = extract_task_block(lines, scannable, index)
-              tasks << task_data
-            end
-            pending_desc = nil
-            depth += 1 if code.include?(' do')
-            next
-          end
-
-          # Track block openers (non-namespace, non-task)
-          depth += 1 if block_opener?(code)
-
-          # Track end keywords
-          next unless code.match?(END_LINE)
-
-          depth -= 1
-          # Pop namespace if we've returned to the depth where it was opened
-          if namespace_depths.any? && depth == namespace_depths.last
-            namespace_stack.pop
-            namespace_depths.pop
-          end
+      def parsed_files(files)
+        files.each_with_object({}) do |file, parsed|
+          data = rake_file_data(file)
+          parsed[file] = data[:parsed] if data
         end
-
-        tasks
-      end
-
-      # Extract the namespace name from a namespace declaration line.
-      #
-      # Handles both the symbol form (`namespace :foo do`) and the string
-      # form (`namespace 'foo' do` / `namespace "foo" do`).
-      #
-      # @param line [String] e.g. "namespace :foo do"
-      # @return [String, nil] The namespace name
-      def extract_namespace_name(line)
-        match = line.match(/\Anamespace\s+:(\w+)/)
-        return match[1] if match
-
-        match = line.match(/\Anamespace\s+(['"])(\w+)\1/)
-        match ? match[2] : nil
-      end
-
-      # Extract the description string from a desc line.
-      #
-      # @param line [String] e.g. "desc 'Remove stale orders'"
-      # @return [String, nil] The description text
-      def extract_desc(line)
-        match = line.match(/\Adesc\s+(['"])(.*?)\1/)
-        match ? match[2] : nil
-      end
-
-      # Parse a task definition line into structured data.
-      #
-      # @param line [String] The task line
-      # @param namespace_stack [Array<String>] Current namespace nesting
-      # @param description [String, nil] Buffered desc
-      # @param line_number [Integer] 1-based line number
-      # @return [Hash, nil] Parsed task data or nil if unparseable
-      def parse_task_line(line, namespace_stack, description, line_number)
-        task_name, deps, args = parse_task_signature(line)
-        return nil unless task_name
-
-        ns = namespace_stack.any? ? namespace_stack.join(':') : nil
-        full_name = ns ? "#{ns}:#{task_name}" : task_name
-
-        {
-          task_name: task_name,
-          full_name: full_name,
-          task_namespace: ns,
-          description: description,
-          task_dependencies: deps,
-          arguments: args,
-          line_number: line_number
-        }
-      end
-
-      # Parse the task name, dependencies, and arguments from a task signature.
-      #
-      # Handles:
-      #   task :name
-      #   task :name => :dep
-      #   task :name => [:dep1, :dep2]
-      #   task :name, [:arg1, :arg2] => :dep
-      #   task name: :dep
-      #   task name: [:dep1, :dep2]
-      #
-      # @param line [String] The task line
-      # @return [Array(String, Array<String>, Array<String>)] [name, deps, args]
-      def parse_task_signature(line)
-        # Task with args: task :name, [:arg1, :arg2]
-        if line.match(/\Atask\s+:(\w+)\s*,\s*\[([^\]]*)\]/)
-          name = ::Regexp.last_match(1)
-          args = ::Regexp.last_match(2).scan(/:(\w+)/).flatten
-
-          # Check for dependencies after args
-          deps = if line.match(/=>\s*(.+?)(?:\s+do|\s*$)/)
-                   parse_dependency_list(::Regexp.last_match(1))
-                 else
-                   []
-                 end
-
-          return [name, deps, args]
-        end
-
-        # Task with hash-rocket deps: task :name => [:dep1, :dep2]
-        if line.match(/\Atask\s+:(\w+)\s*=>\s*(.+?)(?:\s+do|\s*$)/)
-          name = ::Regexp.last_match(1)
-          deps = parse_dependency_list(::Regexp.last_match(2))
-          return [name, deps, []]
-        end
-
-        # Ruby 1.9 label form: task name: :dep / task name: [:dep1, :dep2]
-        # Ordered after the args branch so `task :name, [:args] => :dep`
-        # is never misread (the leading colon keeps it out of this regex).
-        if line.match(/\Atask\s+(\w+):\s*(.+?)(?:\s+do|\s*$)/)
-          name = ::Regexp.last_match(1)
-          deps = parse_dependency_list(::Regexp.last_match(2))
-          return [name, deps, []]
-        end
-
-        # Simple task: task :name
-        return [::Regexp.last_match(1), [], []] if line.match(/\Atask\s+:(\w+)/)
-
-        nil
-      end
-
-      # Parse a dependency list from a hash-rocket right-hand side.
-      #
-      # @param dep_str [String] e.g. ":environment" or "[:dep1, :dep2]"
-      # @return [Array<String>]
-      def parse_dependency_list(dep_str)
-        dep_str.scan(DEPENDENCY_TOKEN).map { |_quote, quoted, symbol| quoted || symbol }
-      end
-
-      # Extract the task block body (lines between task...do and matching end).
-      #
-      # Depth is counted against the neutralized lines so a keyword inside a
-      # comment, string, or heredoc body cannot open or close a block
-      # (EXTB-1); the body itself is collected from the raw lines.
-      #
-      # @param lines [Array<String>] All source lines
-      # @param scannable [Array<String>] Neutralized counterparts of +lines+
-      # @param task_line_index [Integer] 0-based index of the task line
-      # @return [String] The block body source
-      def extract_task_block(lines, scannable, task_line_index)
-        task_line = scannable[task_line_index]
-        # `block_opener?`, not a bare `include?('do')` substring check — a
-        # task named `docs` (`task docs: :environment`) contains the
-        # substring "do" in its own name, which made a blockless task look
-        # like it opened a `do` block and swallowed the following task's
-        # lines as its own body.
-        return '' unless task_line && block_opener?(task_line.strip)
-
-        depth = 1
-        body_lines = []
-
-        ((task_line_index + 1)...lines.size).each do |i|
-          code = scannable[i].to_s.strip
-
-          depth += 1 if block_opener?(code)
-          depth -= 1 if code.match?(END_LINE)
-
-          break if depth.zero?
-
-          body_lines << lines[i]
-        end
-
-        body_lines.join
-      end
-
-      # Check if a line opens a new block (do...end or def...end).
-      #
-      # +if+/+unless+ count as block openers in statement position: leading
-      # the line, or directly after an assignment operator (`value = if x`,
-      # `@memo ||= unless y` — the {Woods::Chunking::SemanticChunker}
-      # precedent). Trailing modifiers (`return if x`, `value = 1 if x`)
-      # must not count, and a line whose opener closes on the same line
-      # (`x = if a then b end`) is self-balancing: its trailing `end` never
-      # matches the line-leading {END_LINE}, so counting it would push a
-      # frame nothing pops — the same `end` guard the keyword branch uses.
-      #
-      # @param stripped [String] Stripped line content
-      # @return [Boolean]
-      def block_opener?(stripped)
-        return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
-
-        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
       end
 
       # Check if a task name falls under an excluded namespace.
@@ -384,88 +153,119 @@ module Woods
         EXCLUDED_NAMESPACES.any? { |ns| full_name.start_with?("#{ns}:") }
       end
 
-      # Build an ExtractedUnit from parsed task data.
+      # Build the unit for one task from every record of it.
       #
-      # @param task_data [Hash] Parsed task data
-      # @param file_path [String] Path to the .rake file
-      # @param file_source [String] Full file source
-      # @return [ExtractedUnit]
-      def build_unit(task_data, file_path, file_source, siblings = [])
-        definitions = ([{ file: file_path.to_s, task: task_data, source: file_source }] + siblings)
-                      .sort_by { |definition| definition[:file] }
-        primary = definitions.first
+      # @param name [String] full task name
+      # @return [ExtractedUnit, nil]
+      def build_unit(name)
+        records = catalog.records_for(name)
+        return nil if records.empty? || excluded_namespace?(name)
 
-        unit = ExtractedUnit.new(
-          type: :rake_task,
-          identifier: task_data[:full_name],
-          file_path: primary[:file]
-        )
-
-        unit.namespace = task_data[:task_namespace]
-        unit.source_code = definitions.map { |d| build_source_annotation(d[:task], d[:source]) }.join("\n\n")
-        unit.metadata = build_metadata(primary[:task])
-        unit.metadata[:defined_in] = definitions.map { |d| relative_path(d[:file]) } if definitions.size > 1
-        unit.dependencies = definitions.flat_map { |d| extract_dependencies(d[:task], d[:source]) }.uniq
-
+        primary = records.find { |record| !record[:enhancement] } || records.first
+        unit = ExtractedUnit.new(type: :rake_task, identifier: name, file_path: primary[:file])
+        unit.namespace = split_name(name, primary).first
+        unit.source_code = records.map { |record| record[:file] }.uniq
+                                  .map { |file| build_source_annotation(name, records, file) }.join("\n\n")
+        unit.metadata = build_metadata(name, primary, records)
+        unit.dependencies = records.flat_map { |record| extract_dependencies(record) }
+                                   .then { |dependencies| consolidate_dependencies(dependencies) }
+                                   .reject { |dependency| dependency[:target] == name }
         unit
       end
 
-      def relative_path(file)
-        file.to_s.sub("#{Rails.root}/", '')
+      # @return [Array(String, String), Array(nil, String)] namespace and short name
+      def split_name(name, primary)
+        return [nil, name] if UNSCOPED_KINDS.include?(primary[:kind])
+
+        namespace, _, short = name.rpartition(':')
+        [namespace.empty? ? nil : namespace, short]
       end
 
-      # Build annotated source code for the unit.
+      def relative_path(file)
+        file.to_s.sub("#{@root}/", '')
+      end
+
+      # Build annotated source code for one file of the unit.
       #
-      # @param task_data [Hash] Parsed task data
-      # @param file_source [String] Full file source
       # @return [String]
-      def build_source_annotation(task_data, file_source)
-        header = "# Rake task: #{task_data[:full_name]}"
-        header += "\n# #{task_data[:description]}" if task_data[:description]
-        "#{header}\n#{file_source}"
+      def build_source_annotation(name, records, file)
+        description = records.select { |record| record[:file] == file }.filter_map { |record| record[:description] }.first
+        header = "# Rake task: #{name}"
+        header += "\n# #{description}" if description
+        "#{header}\n#{rake_file_data(file)[:source]}"
       end
 
       # Build metadata hash for the unit.
       #
-      # @param task_data [Hash] Parsed task data
       # @return [Hash]
-      def build_metadata(task_data)
+      def build_metadata(name, primary, records)
+        namespace, short = split_name(name, primary)
+        prerequisites = records.flat_map { |record| record[:prerequisites] }.uniq
         {
-          task_name: task_data[:task_name],
-          full_name: task_data[:full_name],
-          description: task_data[:description],
-          task_namespace: task_data[:task_namespace],
-          task_dependencies: task_data[:task_dependencies],
-          arguments: task_data[:arguments],
-          has_environment_dependency: task_data[:task_dependencies].include?('environment'),
-          source_lines: (task_data[:block_source] || '').lines.size,
-          line_number: task_data[:line_number]
-        }
+          task_name: short, full_name: name,
+          description: records.filter_map { |record| record[:description] }.first,
+          task_namespace: namespace, task_dependencies: prerequisites,
+          arguments: records.map { |record| record[:arguments] }.find(&:any?) || [],
+          has_environment_dependency: prerequisites.include?('environment'),
+          source_lines: primary[:body].lines.size, line_number: primary[:line],
+          kind: primary[:kind].to_s,
+          shell_commands: records.flat_map { |record| catalog.shell_commands(record[:facts]) }.uniq
+        }.merge(optional_metadata(primary, records))
       end
 
-      # Extract dependencies from task source.
+      # Keys present only when they say something.
+      def optional_metadata(primary, records)
+        definitions, enhancements = records.partition { |record| !record[:enhancement] }
+        defined_in = definitions.map { |record| relative_path(record[:file]) }.uniq
+        {
+          task_class: primary[:task_class],
+          conditions: (primary[:conditions] unless primary[:conditions].empty?),
+          name_source: primary[:name_source],
+          defined_in: (defined_in if defined_in.size > 1),
+          enhanced_in: (enhancements.map { |record| relative_path(record[:file]) }.uniq unless enhancements.empty?)
+        }.compact
+      end
+
+      # Dependencies of one definition or enhancement: what its body
+      # references, the tasks it invokes, its prerequisites, and the support
+      # files it reaches.
       #
-      # Combines common dependency scanning with cross-task invocation detection.
-      #
-      # @param task_data [Hash] Parsed task data
-      # @param file_source [String] Full file source
+      # @param record [Hash] a {RakeTaskCatalog} record
       # @return [Array<Hash>]
-      def extract_dependencies(task_data, file_source)
-        deps = scan_common_dependencies(task_data[:block_source] || file_source)
-
-        # Detect Rake::Task invocations
-        (task_data[:block_source] || '').scan(/Rake::Task\[['"]([^'"]+)['"]\]\.invoke/) do |match|
-          deps << { type: :rake_task, target: match[0], via: :task_invoke }
+      def extract_dependencies(record)
+        deps = scan_common_dependencies(record[:body])
+        record[:facts][:invocations].each do |target|
+          deps << { type: :rake_task, target: target, via: :task_invoke }
         end
-
-        # Add task dependency references
-        task_data[:task_dependencies].each do |dep|
+        record[:prerequisites].each do |dep|
           next if dep == 'environment'
 
-          deps << { type: :rake_task, target: dep, via: :task_dependency }
+          deps << { type: :rake_task, target: catalog.resolve(dep, record[:namespace]), via: :task_dependency }
         end
+        deps + catalog.support_dependencies(record[:facts])
+      end
 
-        consolidate_dependencies(deps)
+      # Build the unit for one support file.
+      #
+      # @param relative [String] root-relative path, which is also the identifier
+      # @return [ExtractedUnit, nil]
+      def build_support_unit(relative)
+        file = @root.join(relative).to_s
+        data = rake_file_data(file)
+        return nil unless data
+
+        facts = data[:parsed].facts
+        unit = ExtractedUnit.new(type: :rake_task, identifier: relative, file_path: file)
+        unit.source_code = data[:source]
+        unit.metadata = {
+          kind: SUPPORT_KIND, constants: data[:parsed].constants.uniq,
+          methods: data[:parsed].method_definitions.map { |definition| definition[:name] }.uniq,
+          shell_commands: catalog.shell_commands(facts), source_lines: data[:source].lines.size
+        }
+        unit.dependencies = consolidate_dependencies(
+          scan_common_dependencies(data[:source]), catalog.support_dependencies(facts, except: relative)
+        )
+        unit
       end
     end
   end

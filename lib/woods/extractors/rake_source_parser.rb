@@ -34,7 +34,9 @@ module Woods
       #   @return [Array<Hash>] +{ name:, line:, facts: }+ per +def+
       # @!attribute constants
       #   @return [Array<String>] modules and classes the file opens
-      Result = Struct.new(:definitions, :enhancements, :method_definitions, :constants, keyword_init: true)
+      # @!attribute facts
+      #   @return [Hash] {RakeBodyFacts.collect} over the whole file
+      Result = Struct.new(:definitions, :enhancements, :method_definitions, :constants, :facts, keyword_init: true)
 
       Context = Struct.new(:namespace, :conditions, :modules)
 
@@ -79,7 +81,9 @@ module Woods
 
       # @return [Result]
       def parse
-        visit(Prism.parse(@source).value, Context.new([], [], []))
+        program = Prism.parse(@source).value
+        visit(program, Context.new([], [], []))
+        @result.facts = RakeBodyFacts.collect(program)
         @result
       end
 
