@@ -740,6 +740,7 @@ Leave it at its default. The full list of what always runs:
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
+| `:config_files` | ConfigFileExtractor | YAML configuration and data files (key structure only) |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
@@ -966,6 +967,40 @@ default roots.
 
 **Changing `graphql_document_paths` needs a full extraction.** The value is not
 part of any incremental fingerprint.
+
+### Configuration files
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `config_file_paths` | Array&lt;String&gt; | `["config/*.yml", "config/**/*.yml", "app/data/**/*.yml"]` | Globs, relative to `Rails.root`, that `ConfigFileExtractor` indexes as `config_file` units. |
+| `config_file_values` | Boolean | `false` | Store leaf values next to key paths. Credential-named keys, credential-shaped values and ERB stay redacted. |
+| `settings_readers` | Array&lt;Hash&gt; | `[]` | Settings constants built from a YAML file. A read through one adds a `reads_config` edge to that file. |
+
+```ruby
+Woods.configure do |config|
+  config.config_file_paths = %w[config/*.yml config/settings/**/*.yml app/data/**/*.yml]
+  config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+end
+```
+
+Only `.yml` and `.yaml` matches are read, and `config/locales` stays with the
+i18n extractor. Secret-bearing files are never opened, whatever the globs say:
+a basename containing `credential`, `secret`, `password`, `passwd`, `token`,
+`private_key`, `api_key`, `apikey` or `keystore`, a `.enc` or `.key` file, and
+anything under `config/credentials/`. See
+[ConfigFileExtractor](EXTRACTOR_REFERENCE.md#configfileextractor) for what a
+unit holds.
+
+A `settings_readers` entry names a `constant` (`"Settings"`,
+`"Billing::Limits"`) and a root-relative `file`. `Settings.payments.api_host`
+and `Settings[:payments]` then link the reading unit to the file. A namespaced
+constant that only ends in the name (`Widget::Settings`) does not match.
+
+Each setter validates its value, raises `Woods::ConfigurationError` on a
+malformed one and keeps the previous value.
+
+**Changing any of the three needs a full extraction.** The values are not part
+of any incremental fingerprint.
 
 ## Console MCP options
 

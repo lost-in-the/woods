@@ -66,7 +66,11 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]]; }; }; }; then
+  if { [[ "$path" == Gemfile ]] || [[ "$path" == Rakefile ]] || [[ "$path" == config/boot.rb ]] || [[ "$path" == config/deploy.rb ]] || [[ "$path" == config/environment.rb ]] || [[ "$path" == config/importmap.rb ]] || [[ "$path" == db/seeds.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]] || [[ "$path" == config/deploy/* ]] || [[ "$path" == db/seeds/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.yml ]] || [[ "$path" == *.yaml ]]; } && { [[ "$path" == config/* ]] || [[ "$path" == app/data/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -98,7 +102,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { [[ "$path" != */tasks/* ]] && [[ "$path" != */generators/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
+  if { { [[ "$path" != */tasks/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -130,7 +134,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { [[ "$path" != */tasks/* ]] && [[ "$path" != */generators/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
+  if { { [[ "$path" != */tasks/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

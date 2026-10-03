@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **36 extractor classes** producing **40 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **37 extractor classes** producing **42 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 36 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 40 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 37 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 42 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -326,12 +326,66 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ### ConfigurationExtractor
 
-**What it captures:** Rails initializers (`config/initializers/**/*.rb`) and environment files (`config/environments/*.rb`). Also extracts a behavioral profile from the resolved `Rails.application.config` values at runtime.
+**What it captures:** Rails initializers (`config/initializers/**/*.rb`), environment files (`config/environments/*.rb`), and the Ruby an application boots, seeds and builds from. Also extracts a behavioral profile from the resolved `Rails.application.config` values at runtime.
 
 **Key details:**
 - `BehavioralProfile` introspects live config using `respond_to?`/`defined?` guards, a missing config section produces `nil`, not an error
 - Captures: asset pipeline config, middleware additions, cache store, logger config, and custom initializer logic
 - One unit per config file, plus one special `:behavioral_profile` unit per environment
+- `metadata.config_type` names the kind of file:
+
+  | File | `config_type` | Identifier |
+  |---|---|---|
+  | `config/initializers/**/*.rb` | `initializer` | `initializers/<name>.rb` |
+  | `config/environments/*.rb`, `config/environment.rb` | `environment` | `environments/<name>.rb`, `environment.rb` |
+  | `config/boot.rb` | `boot` | `boot.rb` |
+  | `config/importmap.rb` | `importmap` | `importmap.rb` |
+  | `config/deploy.rb`, `config/deploy/**/*.rb` | `deploy` | `deploy.rb`, `deploy/<name>.rb` |
+  | `db/seeds.rb`, `db/seeds/**/*.rb` | `seeds` | `db/seeds.rb`, `db/seeds/<name>.rb` |
+  | `Gemfile` | `gemfile` | `Gemfile` |
+  | `Rakefile` | `rakefile` | `Rakefile` |
+
+- A `Gemfile` unit lists each `gem` declaration in `metadata.gem_references` and links it with `{ type: :gem, via: :configuration }`
+- Boot, seed, deploy and root files get the common dependency scan (models, services, jobs, mailers). Initializers and environments keep their service-only scan. Every kind gets [`reads_config` edges](#configfileextractor)
+- `config/routes.rb` belongs to `RouteExtractor` and `config/application.rb` is the nominal path of the behavioral profile. Other Ruby directly under `config/` (`puma.rb`, for example) is not indexed: `ReloadPolicy` leaves it unclassified so the watch daemon can restart for the helpers its process loaded at boot
+- Published source is redacted first: known credential shapes, URL userinfo, private key blocks, and a string literal assigned to a credential-named key on the same line are replaced by `[REDACTED]`. Redaction is best-effort; a credential with no recognizable shape under a name that says nothing is not detected
+- Boot, seed, deploy and root files must resolve under `Rails.root`; a symlink that leaves it is not read
+
+---
+
+### ConfigFileExtractor
+
+**What it captures:** YAML configuration and application data files. Each file under `config.config_file_paths` becomes one `config_file` unit identified by its root-relative path (`"config/settings.yml"`).
+
+**Key details:**
+- Default globs: `config/*.yml`, `config/**/*.yml`, `app/data/**/*.yml`. `config/locales/` stays with `I18nExtractor`. Only `.yml` and `.yaml` files are read
+- **The file's text is never published.** `source_code` is an outline of key paths, so comments and values cannot reach the index
+- `metadata` holds `top_level_keys`, `environments` (top-level keys among `development`, `test`, `staging`, `production`), `environment_keys` (the keys of each environment section, merge keys resolved), `key_paths` (dotted, `[]` for a sequence of mappings), `root_type`, `entry_count`, `erb`, `env_vars` (the names ERB reads from `ENV`), `documents`, `loc`, `values_stored`, `parse_error`, `oversized` and `key_paths_truncated`
+- **Secret-bearing files are never opened**, whatever the globs say: a basename containing `credential`, `secret`, `password`, `passwd`, `token`, `private_key`, `api_key`, `apikey` or `keystore`, a `.enc` or `.key` file, and anything under `config/credentials/`. The check also runs on the path a symlink resolves to, and a file that resolves outside `Rails.root` is refused
+- `config.config_file_values = true` stores leaf values in `source_code` (`payments.api_host = ledger.example`). A value under a credential-named key, a credential-shaped value (the Console scanner patterns, URL userinfo, a long mixed letter-and-digit run) and ERB source are still replaced by a marker
+- A key that is itself shaped like a credential is redacted in either mode
+- ERB is never evaluated: output tags become a placeholder and other tags are dropped before parsing. YAML is read as a syntax tree, so no object is built from file content. Aliases and merge keys are followed under a visit budget and a 2,000-path budget
+- A file that does not parse still yields a unit, with `parse_error: true` and its top-level keys from a line scan. A file over 1 MB yields a unit with `oversized: true` and is not read
+- **`reads_config` edges.** A unit whose source reads a configuration file links to it with `{ type: :config_file, target: "<path>", via: :reads_config }`, so `dependents` on a `config_file` unit lists its readers. Three reads are recognized: `config_for(:name)` (`config/<name>.yml`), `YAML.load_file` / `safe_load_file` / `unsafe_load_file` (also on `Psych`) with a literal path, a `Rails.root.join` of literals, or a literal prefixed by `#{Rails.root}/`, and a read through a constant listed in `config.settings_readers`. The target comes from the reader's own source and configuration: no file is opened, and a path that is not an indexable configuration file yields no edge
+- Per-file in incremental runs. `config/settings*.yml`, `config/database.yml` and the service YAML Rails reads at boot are restart-sensitive, so an incremental run that names one asks for a full extraction in a fresh process
+
+**Example output (abbreviated):**
+
+```json
+{
+  "type": "config_file",
+  "identifier": "config/settings.yml",
+  "source_code": "# Config file: config/settings.yml (key paths only, values omitted)\n# Environments: production\nproduction\nproduction.payments\nproduction.payments.api_host",
+  "metadata": {
+    "top_level_keys": ["default", "production"],
+    "environments": ["production"],
+    "environment_keys": { "production": ["payments"] },
+    "erb": true,
+    "env_vars": ["LEDGER_HOST"],
+    "values_stored": false
+  }
+}
+```
 
 ---
 
@@ -352,6 +406,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Kinds are read from the live endpoint behind `route.app` (unwrapping `ActionDispatch::Routing::Mapper::Constraints`), never from the routes file. A blank verb (`mount`, `via: :all`) renders as `ANY`: `"ANY /cable (mount)"`, `"GET /settings (redirect)"`, `"GET / [subdomain=www] (redirect)"`
 - These units emit no `route_dispatch` edge. The one route still skipped is a controller route whose action is a dynamic path segment (`get ':action', controller: ...`): it names no single action
 - Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` or a file under `config/routes/` (a `draw` file) changes, it isn't skipped, just not diffed per file
+- **Source locations.** Where the runtime exposes `route.source_location` (Rails 8.0+ with `ActionDispatch::Routing::Mapper.route_source_locations` on, the development default), a route drawn in `config/routes.rb` or under `config/routes/` carries that file as its `file_path`, `metadata.line_number`, a `# Source:` line in its source, and a `{ type: :route_file, via: :drawn_in }` edge. A location in a gem, outside the route files, or pointing at a missing file is ignored. Older runtimes, and environments with the flag off, leave `file_path` empty
+- **`route_file` units.** `config/routes.rb` and every Ruby file under `config/routes/` is also a `route_file` unit identified by its path, whether or not locations are available. It holds the file's source (redacted like configuration source), `metadata.declarations` (the routing DSL calls the file makes, as `{ line, method, argument }`), `metadata.draws` with a `{ type: :route_file, via: :draw }` edge per `draw`, `metadata.source_locations`, and `metadata.routes` / `route_count` for the routes located in it. Declarations are a static reading of the file, not the routes the runtime expands them into
 
 **Example output (abbreviated):**
 
@@ -1023,7 +1079,8 @@ namespace.
 **What it captures:** Ruby files from `lib/`, utility modules, standalone libraries, and infrastructure code.
 
 **Key details:**
-- Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
+- Excludes `lib/tasks/` (covered by RakeTaskExtractor) and generator templates (`generators/**/templates/**/*.rb`), which are ERB with a Ruby extension. Templates appear in `skipped_files.json` with the reason `template`
+- A class under `lib/generators/` that inherits from `Rails::Generators::Base` or `Rails::Generators::NamedBase` is a lib unit with `metadata.kind: "generator"`. Other Ruby there is an ordinary lib unit
 - File-based scanning; no assumption about class hierarchy
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
@@ -1093,7 +1150,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 40 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation` |
+| `type` | Symbol | Unit category, one of the 42 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
