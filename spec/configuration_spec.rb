@@ -493,4 +493,59 @@ RSpec.describe Woods::Configuration do
         .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
     end
   end
+
+  describe '#event_patterns' do
+    let(:publisher) { { role: :publisher, pattern: /Ledger\.emit\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger } }
+
+    it 'defaults to an empty list, so only the built-in patterns run' do
+      expect(described_class.new.event_patterns).to eq([])
+    end
+
+    it 'accepts publisher and subscriber entries' do
+      subscriber = { role: :subscriber, pattern: /Ledger\.on\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger }
+      config.event_patterns = [publisher, subscriber]
+
+      expect(config.event_patterns).to eq([publisher, subscriber])
+    end
+
+    it 'rejects a value that is not an Array' do
+      expect { config.event_patterns = publisher }
+        .to raise_error(Woods::ConfigurationError, /event_patterns must be an Array/)
+    end
+
+    it 'rejects an entry that is not a Hash' do
+      expect { config.event_patterns = [/Ledger\.emit\((\w+)/] }
+        .to raise_error(Woods::ConfigurationError, /event_patterns\[0\] must be a Hash/)
+    end
+
+    it 'rejects a role other than publisher or subscriber' do
+      expect { config.event_patterns = [publisher.merge(role: :listener)] }
+        .to raise_error(Woods::ConfigurationError, /role must be :publisher or :subscriber/)
+    end
+
+    it 'rejects a pattern that is not a Regexp' do
+      expect { config.event_patterns = [publisher.merge(pattern: 'Ledger.emit(\\w+)')] }
+        .to raise_error(Woods::ConfigurationError, /pattern must be a Regexp/)
+    end
+
+    it 'rejects a pattern without a capture group for the event name' do
+      expect { config.event_patterns = [publisher.merge(pattern: /Ledger\.emit\s*\(\s*:(?:\w+)/)] }
+        .to raise_error(Woods::ConfigurationError, /pattern must have a capture group/)
+    end
+
+    it 'rejects a system that is not a Symbol' do
+      expect { config.event_patterns = [publisher.merge(system: 'ledger')] }
+        .to raise_error(Woods::ConfigurationError, /system must be a Symbol/)
+      expect { config.event_patterns = [publisher.except(:system)] }
+        .to raise_error(Woods::ConfigurationError, /system must be a Symbol/)
+    end
+
+    it 'keeps the previous value when a later entry is invalid' do
+      config.event_patterns = [publisher]
+
+      expect { config.event_patterns = [publisher, publisher.merge(role: :listener)] }
+        .to raise_error(Woods::ConfigurationError)
+      expect(config.event_patterns).to eq([publisher])
+    end
+  end
 end

@@ -8,6 +8,7 @@ require 'active_support/core_ext/object/blank'
 require 'woods/model_name_cache'
 require 'woods/extractors/shared_utility_methods'
 require 'woods/extractors/shared_dependency_scanner'
+require 'woods'
 require 'woods/extractors/event_extractor'
 
 RSpec.describe Woods::Extractors::EventExtractor do
@@ -524,6 +525,146 @@ RSpec.describe Woods::Extractors::EventExtractor do
 
       expect(counts[@bus_path]).to eq(1)
       expect(counts[@listener_path]).to eq(1)
+    end
+  end
+
+  # ── Configured event_patterns ────────────────────────────────────────
+
+  def extract_sole_unit
+    units = described_class.new.extract_all
+    expect(units.size).to eq(1)
+    units.first
+  end
+
+  describe 'configured event_patterns' do
+    let(:ledger_patterns) do
+      [
+        { role: :publisher, pattern: /Ledger\.emit\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger },
+        { role: :subscriber, pattern: /Ledger\.on\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger }
+      ]
+    end
+
+    before do
+      # A fresh instance: spec_helper restores the previous object afterwards.
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_patterns = ledger_patterns
+    end
+
+    it 'captures a symbol event name from a configured publisher' do
+      create_file('app/services/checkout_service.rb', <<~RUBY)
+        class CheckoutService
+          def call
+            ShipmentService.new.call
+            Ledger.emit(:checkout_completed, widget_id: id)
+          end
+        end
+      RUBY
+
+      unit = extract_sole_unit
+      expect(unit.identifier).to eq('checkout_completed')
+      expect(unit.metadata[:publishers]).to eq(['app/services/checkout_service.rb'])
+      expect(unit.metadata[:pattern]).to eq(:ledger)
+      expect(unit.dependencies.map { |d| d[:target] }).to include('ShipmentService')
+    end
+
+    it 'captures a string event name from a configured publisher' do
+      create_file('app/services/checkout_service.rb', <<~RUBY)
+        Ledger.emit("checkout.completed", widget_id: id)
+      RUBY
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['checkout.completed'])
+    end
+
+    it 'records a configured subscriber against the publisher of the same event' do
+      create_file('app/services/checkout_service.rb', 'Ledger.emit(:checkout_completed)')
+      create_file('app/listeners/receipt_listener.rb', "Ledger.on('checkout_completed') { |payload| }")
+
+      unit = extract_sole_unit
+      expect(unit.metadata[:publishers]).to eq(['app/services/checkout_service.rb'])
+      expect(unit.metadata[:subscribers]).to eq(['app/listeners/receipt_listener.rb'])
+    end
+
+    it 'keeps one unit per name and lists every system that used it' do
+      Woods.configuration.event_patterns = ledger_patterns + [
+        { role: :publisher, pattern: /Tally\.record\(\s*"([^"]+)"/, system: :tally }
+      ]
+      create_file('app/services/checkout_service.rb', 'Ledger.emit("checkout.completed")')
+      create_file('app/services/tally_service.rb', 'Tally.record("checkout.completed")')
+
+      unit = extract_sole_unit
+      expect(unit.identifier).to eq('checkout.completed')
+      expect(unit.metadata[:systems]).to contain_exactly(:ledger, :tally)
+    end
+
+    it 'lists the built-in system when it shares a name with a configured one' do
+      create_file('app/services/checkout_service.rb', <<~RUBY)
+        ActiveSupport::Notifications.instrument("checkout.completed")
+        Ledger.emit("checkout.completed")
+      RUBY
+
+      unit = extract_sole_unit
+      expect(unit.metadata[:pattern]).to eq(:active_support)
+      expect(unit.metadata[:systems]).to eq(%i[active_support ledger])
+    end
+
+    it 'skips a match whose first capture group did not participate' do
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /Ledger\.emit\((?::(\w+)|"([^"]+)")/, system: :ledger }
+      ]
+      create_file('app/services/checkout_service.rb', 'Ledger.emit("checkout.completed")')
+
+      expect(described_class.new.extract_all).to eq([])
+    end
+  end
+
+  describe 'a publisher-only wrapper with multi-line calls' do
+    before do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /(?:::)?AuditLog\.emit\s*\(\s*["']([^"']+)["']/, system: :audit_log }
+      ]
+    end
+
+    it 'captures literal names across lines and skips a call without one' do
+      create_file('app/workers/maintenance_worker.rb', <<~RUBY)
+        class MaintenanceWorker
+          def perform
+            AuditLog.emit(
+              "Remove Stale Widget Images",
+              scope: "maintenance_worker",
+              task: "remove_stale_widget_images"
+            )
+            ::AuditLog.emit(
+              'Carrier Tracking Update',
+              scope: "carrier",
+              event: outcome == :restarted ? "a" : "b"
+            )
+            AuditLog.emit("Inline Title", scope: "x")
+            AuditLog.emit(scope: "dynamic_only")
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_all
+
+      expect(units.map(&:identifier))
+        .to contain_exactly('Remove Stale Widget Images', 'Carrier Tracking Update', 'Inline Title')
+      expect(units.map { |u| u.metadata[:publishers] }).to all(eq(['app/workers/maintenance_worker.rb']))
+      expect(units.map { |u| u.metadata[:systems] }).to all(eq([:audit_log]))
+    end
+  end
+
+  describe 'without configured event_patterns' do
+    it 'emits the same metadata keys as before the option existed' do
+      Woods.configuration = Woods::Configuration.new
+      create_file('app/services/checkout_service.rb', <<~RUBY)
+        ActiveSupport::Notifications.instrument("checkout.completed")
+        Ledger.emit("checkout.completed")
+      RUBY
+
+      unit = extract_sole_unit
+      expect(unit.metadata.keys).to eq(%i[event_name publishers subscribers pattern publisher_count
+                                          subscriber_count])
     end
   end
 end

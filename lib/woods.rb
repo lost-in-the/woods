@@ -151,7 +151,7 @@ module Woods
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
-                :incremental_blast_radius_depth, :durable_payload_writes
+                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -227,6 +227,9 @@ module Woods
       # Directories the component extractors walk before reading `descendants`,
       # relative to Rails.root. See Extractors::ComponentDiscovery.
       @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
+      # Application event wrappers EventExtractor scans for, on top of its
+      # built-in ActiveSupport::Notifications and Wisper patterns.
+      @event_patterns = [].freeze
     end
 
     def embedding_model=(value)
@@ -417,6 +420,26 @@ module Woods
       )
     end
 
+    # Application event APIs {Woods::Extractors::EventExtractor} recognizes
+    # alongside its built-in ActiveSupport::Notifications and Wisper patterns.
+    #
+    # Each entry names a +role+ (+:publisher+ or +:subscriber+), a +pattern+
+    # whose first capture group is the event name, and a +system+ label
+    # recorded in event metadata. The label never enters the unit identifier.
+    #
+    # @example
+    #   config.event_patterns = [
+    #     { role: :publisher, pattern: /Ledger\.emit\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger }
+    #   ]
+    #
+    # @param value [Array<Hash>] entries with +:role+, +:pattern+, +:system+
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def event_patterns=(value)
+      raise ConfigurationError, "event_patterns must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      @event_patterns = value.each_with_index.map { |entry, index| validate_event_pattern!(entry, index) }.freeze
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -437,6 +460,27 @@ module Woods
       return value if value.is_a?(Integer) && value.positive?
 
       raise ConfigurationError, "#{name} must be a positive Integer or nil, got #{value.inspect}"
+    end
+
+    # @return [Hash] a frozen copy of +entry+ holding only +:role+, +:pattern+ and +:system+
+    # @raise [ConfigurationError] if +entry+ is malformed
+    def validate_event_pattern!(entry, index)
+      label = "event_patterns[#{index}]"
+      raise ConfigurationError, "#{label} must be a Hash, got #{entry.inspect}" unless entry.is_a?(Hash)
+
+      role, pattern, system = entry.values_at(:role, :pattern, :system)
+      unless %i[publisher subscriber].include?(role)
+        raise ConfigurationError, "#{label} role must be :publisher or :subscriber, got #{role.inspect}"
+      end
+      raise ConfigurationError, "#{label} pattern must be a Regexp, got #{pattern.inspect}" unless pattern.is_a?(Regexp)
+      # The empty alternative always matches, so `captures` counts the groups.
+      if /#{pattern}|/.match('').captures.empty?
+        raise ConfigurationError,
+              "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
+      end
+      raise ConfigurationError, "#{label} system must be a Symbol, got #{system.inspect}" unless system.is_a?(Symbol)
+
+      { role: role, pattern: pattern, system: system }.freeze
     end
 
     def validate_boolean!(name, value)
