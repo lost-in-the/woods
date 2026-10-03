@@ -782,7 +782,9 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
     expect(units.fetch('HealthController')['metadata']).to include('metal' => true, 'actions' => ['show'],
                                                                    'filters' => [], 'ancestors' => ['HealthController'])
     expect(units.fetch('PingController')['metadata']).to include(
-      'metal' => true, 'actions' => ['index'], 'filters' => [{ 'kind' => 'before', 'filter' => 'stamp' }]
+      'metal' => true, 'actions' => ['index'],
+      'filters' => [{ 'kind' => 'before', 'filter' => 'stamp',
+                      'line' => 6, 'file' => 'app/controllers/ping_controller.rb' }]
     )
   end
 

@@ -5,6 +5,7 @@ require_relative '../ast/parser'
 require_relative '../flow_analysis/operation_extractor'
 require_relative 'line_neutralizer'
 require_relative 'reference_patterns'
+require_relative 'source_nesting'
 
 module Woods
   module Extractors
@@ -59,8 +60,14 @@ module Woods
 
       # @param source_code [String] Composite model source (with inlined concerns)
       # @param column_names [Array<String>] Model's database column names
-      def initialize(source_code:, column_names: [])
+      # @param segments [Array<Hash>, nil] where each part of +source_code+
+      #   came from, as `{ start:, length:, file: }` with 1-based lines and a
+      #   file relative to the application root (nil outside it). With
+      #   segments, operation lines are reported in their own file; without,
+      #   they stay lines of +source_code+.
+      def initialize(source_code:, column_names: [], segments: nil)
         @source_code = source_code
+        @segments = segments
         @column_names = column_names.map(&:to_s)
         @parser = Ast::Parser.new
         @operation_extractor = FlowAnalysis::OperationExtractor.new
@@ -88,7 +95,7 @@ module Woods
         callback_hash.merge(
           side_effects: {
             columns_written: detect_columns_written(method_source),
-            jobs_enqueued: detect_jobs_enqueued(method_source),
+            jobs_enqueued: detect_jobs_enqueued(method_source, nesting_at_line(method_node.line)),
             services_called: detect_services_called(method_source),
             mailers_triggered: detect_mailers_triggered(method_source),
             database_reads: detect_database_reads(method_source),
@@ -202,12 +209,37 @@ module Woods
 
       # Detect jobs enqueued by the callback method.
       #
-      # Matches Job/Worker classes calling async dispatch methods.
+      # Matches Job/Worker classes calling async dispatch methods, named the
+      # way Ruby resolves them inside the class that defines the method, so
+      # an entry agrees with the model's enqueue edge.
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_jobs_enqueued(method_source)
-        ReferencePatterns.job_enqueues(method_source).uniq.sort
+      def detect_jobs_enqueued(method_source, nesting = [])
+        ReferencePatterns.job_enqueues(method_source, enclosing: nesting).uniq.sort
+      end
+
+      # The class and module scopes open at the start of +line+ in the
+      # composite source, innermost first.
+      #
+      # @param line [Integer, nil] 1-based line of a method definition
+      # @return [Array<String>]
+      def nesting_at_line(line)
+        offset = line && line_starts[line - 1]
+        return [] unless offset
+
+        @lexical_scopes ||= SourceNesting.lexical_scopes(@source_code) || []
+        @lexical_scopes.select { |start, finish, _| start <= offset && offset < finish }.reverse.map(&:last)
+      end
+
+      # Byte offset at which each line of the composite source starts.
+      #
+      # @return [Array<Integer>]
+      def line_starts
+        @line_starts ||= @source_code.each_line.with_object([0]) do |text, starts|
+          starts << (starts.last + text.bytesize)
+        end
       end
 
       # Detect service objects called by the callback method.
@@ -251,9 +283,23 @@ module Woods
       def extract_operations(method_node)
         return [] unless method_node
 
-        @operation_extractor.extract(method_node)
+        operations = @operation_extractor.extract(method_node)
+        return operations unless @segments
+
+        FlowAnalysis::OperationExtractor.relocate(operations) { |line| segment_location(line) }
       rescue StandardError
         []
+      end
+
+      # @param line [Integer, nil] a line of the analysis source
+      # @return [Array(Integer, String)] the line in, and the path of, the
+      #   file that line came from; nils when that file is outside the
+      #   application root or the line belongs to no segment
+      def segment_location(line)
+        segment = line && @segments.find { |part| line >= part[:start] && line < part[:start] + part[:length] }
+        return [nil, nil] unless segment && segment[:file]
+
+        [line - segment[:start] + 1, segment[:file]]
       end
 
       # Return an empty side-effects structure.

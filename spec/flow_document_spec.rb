@@ -138,6 +138,19 @@ RSpec.describe Woods::FlowDocument do
       expect(md).to include('PostService.call')
     end
 
+    it 'names the file of an operation read from a file other than its step' do
+      steps[0][:operations] << { type: :call, target: 'Courier', method: 'book!', line: 7,
+                                 file: 'app/controllers/concerns/dispatching.rb' }
+
+      expect(doc.to_markdown).to include('| Courier.book! | app/controllers/concerns/dispatching.rb:7 |')
+    end
+
+    it 'shows the bare line for an operation from the step file' do
+      steps[0][:operations][0][:file] = 'app/controllers/posts_controller.rb'
+
+      expect(doc.to_markdown).to include('| PostService.call | 10 |')
+    end
+
     it 'renders async operations with args' do
       md = doc.to_markdown
       expect(md).to include('async')

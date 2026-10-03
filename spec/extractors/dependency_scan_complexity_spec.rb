@@ -25,7 +25,11 @@ RSpec.describe 'Shared dependency scan complexity' do
     'a chain that breaks before Mailer.' => "#{'A::MailerA' * 5_000} Mailer.",
     'a chain that breaks before Service.' => "#{'A::ServiceA' * 5_000} Service.",
     'a chain that breaks before Job.perform_later' => "#{'A::JobA' * 7_000} Job.perform_later",
-    'repeated enqueues running into the next word' => 'AJob.perform_later' * 3_000
+    'repeated enqueues running into the next word' => 'AJob.perform_later' * 3_000,
+    # Not backtracking: the reference loop used to read character offsets
+    # from MatchData, which counts from the start of the string on every
+    # call, so ordinary text took time quadratic in its size.
+    'fifty thousand lines of ordinary words' => "aa bb cc dd ee ff gg hh\n" * 50_000
   }
 
   let(:scanner) do

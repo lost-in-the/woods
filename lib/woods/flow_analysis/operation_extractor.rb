@@ -26,6 +26,25 @@ module Woods
       RESPONSE_METHODS = %w[redirect_to head respond_with].freeze
       DYNAMIC_DISPATCH_METHODS = %w[send public_send].freeze
 
+      # Keys of an operation that hold the operations nested inside it.
+      NESTED_KEYS = %i[nested then_ops else_ops].freeze
+
+      # Rewrite each operation's +line+, +statement_line+ and +file+, nested
+      # operations included, from the lines its AST was parsed at.
+      #
+      # @param operations [Array<Hash>]
+      # @yieldparam line [Integer, nil] the line in the parsed text
+      # @yieldreturn [Array(Integer, String)] the line and file to report;
+      #   nil for either when the parsed line has no place in a file
+      # @return [Array<Hash>] +operations+, rewritten in place
+      def self.relocate(operations, &locate)
+        operations.each do |operation|
+          operation[:statement_line] = locate.call(operation[:statement_line]).first if operation[:statement_line]
+          operation[:line], operation[:file] = locate.call(operation[:line])
+          NESTED_KEYS.each { |key| relocate(operation[key], &locate) if operation[key] }
+        end
+      end
+
       # Extract operations from a method definition node in source line order.
       #
       # @param method_node [Ast::Node] A :def or :defs node
@@ -76,7 +95,7 @@ module Woods
           operations << {
             type: :transaction,
             receiver: send_child.receiver,
-            line: send_child.line,
+            **call_lines(send_child),
             nested: nested
           }
         else
@@ -89,6 +108,7 @@ module Woods
       # Handle :send nodes - classify into operation types.
       def handle_send(node, operations)
         return unless node.is_a?(Ast::Node) && node.type == :send
+        return walk_negated(node, operations) if negation?(node)
 
         if async_call?(node)
           operations << {
@@ -96,7 +116,7 @@ module Woods
             target: node.receiver,
             method: node.method_name,
             args_hint: node.arguments || [],
-            line: node.line
+            **call_lines(node)
           }
         elsif dynamic_dispatch?(node)
           operations << {
@@ -104,21 +124,21 @@ module Woods
             target: node.receiver,
             method: node.method_name,
             args_hint: node.arguments || [],
-            line: node.line
+            **call_lines(node)
           }
         elsif response_call?(node)
           operations << {
             type: :response,
             status_code: ResponseCodeMapper.resolve_method(node.method_name, arguments: node.arguments || []),
             render_method: node.method_name,
-            line: node.line
+            **call_lines(node)
           }
         elsif significant_call?(node)
           operations << {
             type: :call,
             target: node.receiver,
             method: node.method_name,
-            line: node.line
+            **call_lines(node)
           }
         end
 
@@ -131,6 +151,27 @@ module Woods
         collect_nested_async(node, operations)
       end
 
+      # A call's +line+ is where it names its method, so a call laid out over
+      # several lines points at the call rather than at its receiver. The line
+      # the call starts on follows as +statement_line+ when it differs.
+      #
+      # @param node [Ast::Node] a :send node
+      # @return [Hash]
+      def call_lines(node)
+        line = node.message_line || node.line
+        line == node.line ? { line: line } : { line: line, statement_line: node.line }
+      end
+
+      # `!x` and `not x` are a `!` call on +x+. The negation is noise; the
+      # call it negates is the operation (`return if !buffered_data_present?`).
+      def negation?(node)
+        node.method_name == '!' && node.receiver && node.children&.first.is_a?(Ast::Node)
+      end
+
+      def walk_negated(node, operations)
+        walk(node.children.first, operations)
+      end
+
       # Emit `:async` for enqueue calls nested anywhere inside +node+'s
       # arguments. Only arguments are walked (the receiver chain is not), and
       # only async calls are emitted, so no other nested call is counted.
@@ -140,7 +181,7 @@ module Woods
 
           if async_call?(argument)
             operations << { type: :async, target: argument.receiver, method: argument.method_name,
-                            args_hint: argument.arguments || [], line: argument.line }
+                            args_hint: argument.arguments || [], **call_lines(argument) }
           end
           collect_nested_async(argument, operations)
         end
@@ -160,6 +201,7 @@ module Woods
 
         # children[0] = condition, children[1] = then, children[2] = else
         children = node.children || []
+        walk_predicate(children[0], operations)
         walk(children[1], then_ops) if children[1].is_a?(Ast::Node)
         walk(children[2], else_ops) if children[2].is_a?(Ast::Node)
 
@@ -185,6 +227,7 @@ module Woods
       # being switched on. Mirrors {#handle_conditional}.
       def handle_case(node, operations)
         children = node.children || []
+        walk_predicate(children[0], operations)
         branch_ops = []
         children.drop(1).each { |child| walk(child, branch_ops) if child.is_a?(Ast::Node) }
 
@@ -198,6 +241,16 @@ module Woods
           then_ops: branch_ops,
           else_ops: []
         }
+      end
+
+      # Walk a conditional's predicate into the enclosing operations, ahead
+      # of the conditional itself: it runs before either branch, whichever
+      # is taken (`if @widget.save`, `case Router.pick(request)`).
+      #
+      # @param predicate [Ast::Node, String, nil]
+      # @param operations [Array<Hash>] the conditional's own level
+      def walk_predicate(predicate, operations)
+        walk(predicate, operations) if predicate.is_a?(Ast::Node)
       end
 
       # Source text for a conditional's predicate child, which the parser may

@@ -6,6 +6,7 @@ require 'set'
 require_relative 'ast/parser'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
+require_relative 'source_line_map'
 
 module Woods
   # Orchestrates execution flow tracing from an entry point through the dependency graph.
@@ -31,6 +32,16 @@ module Woods
     # services a large app's flows keep landing on without pinning the whole
     # index in memory.
     MEMO_LIMIT = 1_000
+
+    # A call target that can name a unit: a constant, or a `::`-joined
+    # constant chain. A lowercase receiver is a local, a method, or an ivar;
+    # resolving it by name matched FactoryBot factories (`widget`, `order`),
+    # whose identifiers are the factory names.
+    CONSTANT_RECEIVER = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
+
+    # Unit types that exist only for the test suite. Application code never
+    # calls one, so they are never flow callees.
+    SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
 
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
@@ -166,8 +177,9 @@ module Woods
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
       scope_node = method_name ? method_node(unit_id, source_code, method_name) : parsed_source(unit_id, source_code)
-      scope_node ||= defining_method_node(unit_id, method_name, metadata) if method_name
-      operations.concat(@operation_extractor.extract(scope_node)) if scope_node
+      holder = load_unit(unit_id)
+      scope_node, holder = defining_method_node(unit_id, method_name, metadata) if scope_node.nil? && method_name
+      operations.concat(locate(@operation_extractor.extract(scope_node), holder)) if scope_node
 
       operations
     end
@@ -177,7 +189,7 @@ module Woods
     # @param unit_id [String] the unit that lacks a local definition
     # @param method_name [String]
     # @param metadata [Hash] that unit's metadata
-    # @return [Ast::Node, nil]
+    # @return [Array(Ast::Node, Hash), nil] the node and the unit holding it
     def defining_method_node(unit_id, method_name, metadata)
       sources = metadata[:action_sources]
       return nil unless sources.is_a?(Hash)
@@ -190,7 +202,21 @@ module Woods
       holder_source = holder && holder[:source_code]
       return nil if holder_source.nil? || holder_source.empty?
 
-      method_node(defined_in, holder_source, method_name)
+      node = method_node(defined_in, holder_source, method_name)
+      node && [node, holder]
+    end
+
+    # Report each operation at its line in the file +unit_data+ was read
+    # from, not in the annotated `source_code` the AST was parsed from, and
+    # name that file. Nested operations are relocated with their parents.
+    #
+    # @param operations [Array<Hash>] operations parsed from +unit_data+
+    # @param unit_data [Hash] the unit whose source was parsed
+    # @return [Array<Hash>] +operations+, relocated in place
+    def locate(operations, unit_data)
+      map = (unit_data[:metadata] || {})[:source_line_map]
+      file = unit_data[:file_path]
+      FlowAnalysis::OperationExtractor.relocate(operations) { |line| [SourceLineMap.translate(map, line), file] }
     end
 
     # The unit's whole parsed source, parsed once per assembler instance.
@@ -279,11 +305,15 @@ module Woods
 
         next if except.is_a?(Array) && method_name && except.map(&:to_s).include?(method_name.to_s)
 
+        # The declaration site the extractor recorded, or nil when it could
+        # not be known; it is a line of the declaring file, not of this
+        # unit's annotated source, so it is not translated.
         operations << {
           type: :call,
           target: nil,
           method: cb_name.to_s,
-          line: nil
+          line: cb[:line],
+          file: cb[:file]
         }
       end
     end
@@ -366,18 +396,24 @@ module Woods
     #   `{ ambiguous: true, candidates: }` marker when several namespaces
     #   share +target+'s short name; or nil when nothing resolves
     def compute_resolved_target(target)
+      return nil unless target.match?(CONSTANT_RECEIVER)
+
       # Tier 1: Graph-wide lookup
-      return target if @graph.node_exists?(target)
+      return callee(target) if @graph.node_exists?(target)
 
       suffix_matches = @graph.find_all_by_suffix(target)
-      return suffix_matches.first if suffix_matches.size == 1
+      return callee(suffix_matches.first) if suffix_matches.size == 1
       return { ambiguous: true, candidates: suffix_matches } if suffix_matches.size > 1
 
       # Tier 2: Disk fallback (unit JSON exists but isn't in the graph)
-      unit_data = load_unit(target)
-      return target if unit_data
+      callee(target) if load_unit(target)
+    end
 
-      nil
+    # @param identifier [String] a resolved unit identifier
+    # @return [String, nil] +identifier+, or nil when its unit exists only
+    #   for the test suite
+    def callee(identifier)
+      SPEC_ONLY_TYPES.include?(load_unit(identifier)&.dig(:type).to_s) ? nil : identifier
     end
 
     # Parse an identifier into [unit_id, method_name].

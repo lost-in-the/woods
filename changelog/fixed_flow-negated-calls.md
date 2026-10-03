@@ -1,0 +1,1 @@
+- Request flows and callback operations keep a call negated with `!` or `not`. `return self if new_record? || readonly? || !buffered_data_present?` used to drop `buffered_data_present?`, because the negation is a `!` call whose receiver was never walked.

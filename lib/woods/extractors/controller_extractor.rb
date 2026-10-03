@@ -3,6 +3,7 @@
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
+require 'prism'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -33,6 +34,11 @@ module Woods
       # Matches everything between a `def foo_params` line and its
       # params.require/permit or params.expect call, without crossing into
       # a sibling method's body. Used by {#extract_permitted_params}.
+      # The DSL calls that declare a process-action callback, by callback kind.
+      FILTER_DECLARATIONS = %i[before after around].to_h do |kind|
+        [kind, %W[#{kind}_action prepend_#{kind}_action append_#{kind}_action]]
+      end.freeze
+
       PARAMS_METHOD_BODY = /(?:(?!\bdef\b)[\s\S])*?/
 
       # @return [Array<String>] Warnings collected during extraction
@@ -286,8 +292,91 @@ module Woods
           result[:except] = except.sort if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
-          result
+          site = filter_declaration_site(controller, callback)
+          site ? result.merge(site) : result
         end
+      end
+
+      # Where a filter was declared, when that can be known rather than
+      # guessed: a proc filter's own source location, or the first
+      # `before_action :name` (of the callback's kind) in the source of the
+      # controller's app-defined ancestors, in method resolution order.
+      #
+      # @param controller [Class]
+      # @param callback [ActiveSupport::Callbacks::Callback]
+      # @return [Hash, nil] `{ line:, file: }`, the file relative to the
+      #   application root
+      def filter_declaration_site(controller, callback)
+        filter = callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter
+        return proc_filter_site(filter) if filter.is_a?(Proc)
+        return nil unless filter.is_a?(Symbol) || filter.is_a?(String)
+
+        declaration = [callback.kind.to_sym, filter.to_s]
+        declaring_sources(controller).each do |path|
+          line = filter_declarations(path)[declaration]
+          return { line: line, file: path.delete_prefix("#{Rails.root}/") } if line
+        end
+        nil
+      end
+
+      # @param filter [Proc]
+      # @return [Hash, nil]
+      def proc_filter_site(filter)
+        path, line = filter.source_location
+        return nil unless line && app_source_file?(path)
+
+        { line: line, file: path.delete_prefix("#{Rails.root}/") }
+      end
+
+      # Source files of the controller and its ancestors that the
+      # application defines, in method resolution order, once per controller
+      # for this extractor (the filter chain is read for each callback).
+      #
+      # @param controller [Class]
+      # @return [Array<String>]
+      def declaring_sources(controller)
+        return [] unless controller.respond_to?(:ancestors)
+
+        (@declaring_sources ||= {}.compare_by_identity)[controller] ||= controller.ancestors.filter_map do |mod|
+          path = mod.equal?(controller) ? source_file_for(controller) : module_source_path(mod)
+          path if app_source_file?(path)
+        end.uniq
+      end
+
+      # @param path [String, nil]
+      # @return [Boolean]
+      def app_source_file?(path)
+        path.is_a?(String) && path.start_with?("#{Rails.root}/") && File.file?(path)
+      end
+
+      # Filter declarations in one source file, parsed once per extractor.
+      #
+      # @param path [String]
+      # @return [Hash{Array(Symbol, String) => Integer}] `[kind, name]` to the
+      #   line of its first declaration
+      def filter_declarations(path)
+        (@filter_declarations ||= {})[path] ||= begin
+          parsed = Prism.parse(File.read(path))
+          sites = {}
+          collect_filter_declarations(parsed.value, sites) if parsed.success?
+          sites
+        end
+      end
+
+      # @return [void]
+      def collect_filter_declarations(node, sites)
+        if node.is_a?(Prism::CallNode) && node.receiver.nil? && (kind = filter_declaration_kind(node.name))
+          Array(node.arguments&.arguments).grep(Prism::SymbolNode).each do |symbol|
+            sites[[kind, symbol.unescaped]] ||= node.location.start_line
+          end
+        end
+        node.compact_child_nodes.each { |child| collect_filter_declarations(child, sites) }
+      end
+
+      # @param name [Symbol] a called method's name
+      # @return [Symbol, nil] the callback kind it declares
+      def filter_declaration_kind(name)
+        FILTER_DECLARATIONS.find { |_kind, methods| methods.include?(name.to_s) }&.first
       end
 
       # A Metal controller has no callback chain until it includes a

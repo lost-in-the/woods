@@ -97,7 +97,8 @@ module Woods
         # Enrich callbacks with side-effect analysis. The analyzer parses real
         # Ruby, so it gets the raw analysis composite — the display composite
         # comments concern bodies out, which Prism cannot see.
-        enrich_callbacks_with_side_effects(unit, source, analysis_source: build_analysis_source(model, source))
+        analysis_source, segments = build_analysis_source(model, source, source_path)
+        enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments)
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
         unit.chunks = build_chunks(unit)
@@ -387,7 +388,7 @@ module Woods
         path = concern_path_for(mod)
         return nil unless path && File.exist?(path)
 
-        @concern_cache[mod.name] = [mod.name, File.read(path)]
+        @concern_cache[mod.name] = [mod.name, File.read(path), path]
       end
 
       # Find the file path for a concern
@@ -878,15 +879,33 @@ module Woods
       #
       # @param model [Class] The ActiveRecord model class
       # @param source [String, nil] The raw model source
-      # @return [String, nil] Concatenated raw sources, or +source+ when no
-      #   concern source is resolvable
-      def build_analysis_source(model, source)
-        return source unless source
+      # @param source_path [String, nil] The model's absolute source path
+      # @return [Array(String, Array<Hash>)] the concatenated raw sources and
+      #   the `{ start:, length:, file: }` segment each part occupies, so an
+      #   operation line can be reported in its own file; `[nil, nil]` when
+      #   there is no model source
+      def build_analysis_source(model, source, source_path = nil)
+        return [source, nil] unless source
 
-        concern_codes = resolved_concern_sources(model).map { |_name, code| code }
-        return source if concern_codes.empty?
+        parts = [[source, source_path]] + resolved_concern_sources(model).map { |_name, code, path| [code, path] }
+        start = 1
+        segments = parts.map do |code, path|
+          length = code.count("\n") + (code.end_with?("\n") ? 0 : 1)
+          segment = { start: start, length: length, file: app_relative_path(path) }
+          # The "\n\n" join leaves two blank lines after a part ending in a
+          # newline and one after a part that does not.
+          start += length + (code.end_with?("\n") ? 2 : 1)
+          segment
+        end
+        [parts.map(&:first).join("\n\n"), segments]
+      end
 
-        ([source] + concern_codes).join("\n\n")
+      # @param path [String, nil] an absolute source path
+      # @return [String, nil] +path+ relative to the application root, or nil
+      #   when it is not under the root
+      def app_relative_path(path)
+        root = "#{Rails.root}/"
+        path.is_a?(String) && path.start_with?(root) ? path.delete_prefix(root) : nil
       end
 
       # Enrich callback metadata with side-effect analysis.
@@ -902,12 +921,15 @@ module Woods
       # @param unit [ExtractedUnit] The model unit with metadata[:callbacks] set
       # @param source [String, nil] The model source code
       # @param analysis_source [String, nil] Parse-friendly composite source
-      def enrich_callbacks_with_side_effects(unit, source, analysis_source: nil)
+      # @param segments [Array<Hash>, nil] where each part of
+      #   +analysis_source+ came from (see {#build_analysis_source})
+      def enrich_callbacks_with_side_effects(unit, source, analysis_source: nil, segments: nil)
         return unless source && unit.metadata[:callbacks]&.any?
 
         analyzer = CallbackAnalyzer.new(
           source_code: analysis_source || unit.source_code,
-          column_names: unit.metadata[:column_names] || []
+          column_names: unit.metadata[:column_names] || [],
+          segments: analysis_source ? segments : nil
         )
 
         unit.metadata[:callbacks] = unit.metadata[:callbacks].map do |cb|

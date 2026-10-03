@@ -1,5 +1,9 @@
 # frozen_string_literal: true
 
+require 'strscan'
+require_relative 'source_nesting'
+require_relative 'lexical_constant'
+
 module Woods
   module Extractors
     # Regexes for "this source references that class", shared by every site
@@ -31,6 +35,11 @@ module Woods
       # A chain of `::`-joined word segments, read whole.
       CONSTANT_CHAIN = /\w++(?:::\w++)*+/
 
+      # Every rule's segment ends in a capitalized suffix (Service, Mailer,
+      # Job, Worker), so a chain with no capital letter cannot qualify and is
+      # skipped before it is split. Ordinary text is mostly such chains.
+      CAPITAL = /[A-Z]/
+
       # `FooService.call` / `FooService::new`.
       SERVICE_RULE = { segment: /\A\w+Service\z/, follower: /\G(?:\.|::)/ }.freeze
 
@@ -59,9 +68,12 @@ module Woods
       end
 
       # @param source [String]
+      # @param enclosing [Array<String>] names of the scopes around the whole
+      #   of +source+, innermost first, when it is an excerpt (a method body
+      #   cut out of its class)
       # @return [Array<String>] Enqueued job classes in source order, repeats kept
-      def job_enqueues(source)
-        references(source, **JOB_ENQUEUE_RULE)
+      def job_enqueues(source, enclosing: [])
+        references(source, **JOB_ENQUEUE_RULE, enclosing: enclosing)
       end
 
       # Each constant chain contributes at most one reference: the chain up
@@ -69,35 +81,113 @@ module Woods
       # `follower`. Scanning resumes after the follower, which can end
       # inside the next word (`Job.perform_laterX`), as the regex did.
       #
+      # Positions are byte offsets kept by a StringScanner. A character
+      # offset into a UTF-8 string (`MatchData#begin`, `String#[]`) is
+      # counted from the string's start on every call, which made this loop
+      # quadratic in the size of ordinary text.
+      #
       # @param source [String]
       # @param segment [Regexp] Anchored test for one chain segment
       # @param follower [Regexp] `\G`-anchored test at the segment's end
+      # @param enclosing [Array<String>] scopes around the whole of +source+
       # @return [Array<String>]
-      def references(source, segment:, follower:)
+      def references(source, segment:, follower:, enclosing: [])
         found = []
-        position = 0
-        while (chain = CONSTANT_CHAIN.match(source, position))
-          finish, follower_end = last_qualifying_end(source, chain, segment, follower)
+        scanner = StringScanner.new(source)
+        while scanner.skip_until(CONSTANT_CHAIN)
+          chain = scanner.matched
+          next unless chain.match?(CAPITAL)
+
+          chain_end = scanner.pos
+          start = chain_end - chain.bytesize
+          finish, follower_end = last_qualifying_end(scanner, chain, chain_end, segment, follower)
           if finish
-            found << source[chain.begin(0)...finish]
-            position = follower_end
+            found << [source.byteslice(start, finish - start), start]
+            scanner.pos = follower_end
           else
-            position = chain.end(0)
+            scanner.pos = chain_end
           end
         end
-        found
+        resolve_lexically(source, found, enclosing)
       end
 
-      # @return [Array(Integer, Integer), nil] Source offsets where the
+      # Name each reference the way Ruby's constant lookup at its call site
+      # would: `PingJob` inside `class Shipment` is `Shipment::PingJob` when
+      # that constant exists. A reference stays as written outside any class
+      # or module, after an explicit `::`, or when no candidate is loaded.
+      #
+      # @param source [String]
+      # @param found [Array<Array(String, Integer)>] reference text and the
+      #   byte offset it starts at
+      # @param enclosing [Array<String>] scopes around the whole of +source+,
+      #   outside every scope it declares
+      # @return [Array<String>]
+      def resolve_lexically(source, found, enclosing = [])
+        return [] if found.empty?
+
+        nesting = NestingSweep.new(SourceNesting.lexical_scopes(source) || [])
+        modules = {}
+        resolved = {}
+        found.map do |text, offset|
+          innermost, scopes = nesting.at(offset)
+          scopes += enclosing if enclosing.any?
+          next text if scopes.empty? || (offset >= 2 && source.byteslice(offset - 2, 2) == '::')
+
+          resolved[[text, innermost.object_id]] ||= LexicalConstant.resolve(text, scopes, modules: modules)
+        end
+      end
+
+      # The scopes open at ascending offsets, in one pass over scopes listed
+      # outer-before-inner in source order (the order
+      # {SourceNesting.lexical_scopes} returns).
+      class NestingSweep
+        # @param scopes [Array<Array(Integer, Integer, String)>]
+        def initialize(scopes)
+          @scopes = scopes
+          @next = 0
+          @open = []
+          @names = {}.compare_by_identity
+        end
+
+        # @param offset [Integer] no smaller than the previous call's
+        # @return [Array(Array, Array<String>)] the innermost scope containing
+        #   +offset+ (nil at the top level), and the names of every scope
+        #   containing it, innermost first
+        def at(offset)
+          while @next < @scopes.size && @scopes[@next][0] <= offset
+            enter(@scopes[@next])
+            @next += 1
+          end
+          close_before(offset)
+          innermost = @open.last
+          [innermost, @names[innermost] ||= @open.reverse.map(&:last)]
+        end
+
+        private
+
+        def enter(scope)
+          close_before(scope[0])
+          @open << scope
+        end
+
+        def close_before(offset)
+          @open.pop while @open.any? && @open.last[1] <= offset
+        end
+      end
+      private_constant :NestingSweep
+
+      # @return [Array(Integer, Integer), nil] Byte offsets where the
       #   reference and its follower end
-      def last_qualifying_end(source, chain, segment, follower)
-        finish = chain.end(0)
-        chain[0].split('::').reverse_each do |part|
-          if part.match?(segment) && (follow = follower.match(source, finish))
-            return [finish, follow.end(0)]
+      def last_qualifying_end(scanner, chain, chain_end, segment, follower)
+        finish = chain_end
+        chain.split('::').reverse_each do |part|
+          if part.match?(segment)
+            scanner.pos = finish
+            length = scanner.match?(follower)
+            return [finish, finish + length] if length
           end
 
-          finish -= part.length + 2
+          finish -= part.bytesize + 2
         end
         nil
       end

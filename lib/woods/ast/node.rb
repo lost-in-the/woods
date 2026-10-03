@@ -28,6 +28,7 @@ module Woods
       :end_line,    # Integer | nil: 1-based end line number (when available)
       :start_byte,   # Integer | nil: inclusive byte offset into the parsed source
       :end_byte,     # Integer | nil: exclusive byte offset into the parsed source
+      :message_line, # Integer | nil: line of a call's method name (for :send)
       keyword_init: true
     ) do
       # Find all descendant nodes matching a type.

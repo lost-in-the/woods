@@ -308,6 +308,7 @@ module Woods
             type: :send,
             children: children,
             line: line_for_prism(prism_node),
+            message_line: prism_message_line(prism_node),
             receiver: receiver_text,
             method_name: prism_node.name.to_s,
             arguments: args
@@ -328,10 +329,21 @@ module Woods
           children: children,
           line: line_for_prism(prism_node),
           end_line: end_line_for_prism(prism_node),
+          message_line: prism_message_line(prism_node),
           receiver: receiver_text,
           method_name: prism_node.name.to_s,
           arguments: args
         )
+      end
+
+      # The line a call names its method on: `Homepage\n  .fetch` is a call
+      # on line 2 that starts on line 1. An implicit `.()` call has no method
+      # name, so its dot stands in.
+      #
+      # @param prism_node [Prism::CallNode]
+      # @return [Integer, nil]
+      def prism_message_line(prism_node)
+        (prism_node.message_loc || prism_node.call_operator_loc)&.start_line
       end
 
       # Convert a call's argument nodes into walkable children.
@@ -573,6 +585,7 @@ module Woods
             children: [],
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression&.last_line,
+            message_line: (parser_node.loc.selector || parser_node.loc.dot)&.line,
             receiver: receiver_text,
             method_name: method_name,
             arguments: args

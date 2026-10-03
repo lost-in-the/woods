@@ -126,7 +126,7 @@ module Woods
       if operations.any?
         lines << '| # | Operation | Target | Line |'
         lines << '|---|-----------|--------|------|'
-        format_operations(operations, lines)
+        format_operations(operations, lines, file: file_path)
       else
         lines << '_No significant operations_'
       end
@@ -135,7 +135,7 @@ module Woods
     end
 
     # Format operations into table rows, handling nesting for transactions and conditionals.
-    def format_operations(operations, lines, prefix: '')
+    def format_operations(operations, lines, file:, prefix: '')
       operations.each_with_index do |op, idx|
         num = "#{prefix}#{idx + 1}"
         op_type = op[:type]
@@ -144,49 +144,61 @@ module Woods
         case op_type_str
         when 'transaction'
           receiver = op[:receiver]
-          line = op[:line]
+          line = location(op, file)
           lines << "| #{num} | transaction | #{receiver}.transaction | #{line} |"
           nested = op[:nested] || []
-          format_operations(nested, lines, prefix: "#{num}.")
+          format_operations(nested, lines, file: file, prefix: "#{num}.")
         when 'conditional'
           condition = op[:condition]
           kind = op[:kind] || 'if'
-          line = op[:line]
+          line = location(op, file)
           lines << "| #{num} | #{kind} #{condition} | | #{line} |"
           then_ops = op[:then_ops] || []
           else_ops = op[:else_ops] || []
-          format_operations(then_ops, lines, prefix: "#{num}a.")
-          format_operations(else_ops, lines, prefix: "#{num}b.")
+          format_operations(then_ops, lines, file: file, prefix: "#{num}a.")
+          format_operations(else_ops, lines, file: file, prefix: "#{num}b.")
         when 'response'
           status = op[:status_code]
           method = op[:render_method]
-          line = op[:line]
+          line = location(op, file)
           status_text = status ? status.to_s : '?'
           lines << "| #{num} | response | #{status_text} (via #{method}) | #{line} |"
         when 'async'
           target = op[:target]
           method = op[:method]
           args = op[:args_hint]
-          line = op[:line]
+          line = location(op, file)
           args_text = args&.any? ? "(#{args.join(', ')})" : ''
           lines << "| #{num} | async | #{target}.#{method}#{args_text} | #{line} |"
         when 'cycle'
           target = op[:target]
-          line = op[:line]
+          line = location(op, file)
           lines << "| #{num} | cycle | #{target} (revisit) | #{line} |"
         when 'dynamic_dispatch'
           target = op[:target]
           method = op[:method]
-          line = op[:line]
+          line = location(op, file)
           lines << "| #{num} | dynamic_dispatch | #{target}.#{method} | #{line} |"
         else
           target = op[:target]
           method = op[:method]
-          line = op[:line]
+          line = location(op, file)
           target_text = [target, method].compact.join('.')
           lines << "| #{num} | #{op_type_str} | #{target_text} | #{line} |"
         end
       end
+    end
+
+    # An operation's line, prefixed with its file when it was read from a
+    # file other than the step's (an action defined in a concern).
+    #
+    # @param operation [Hash]
+    # @param file [String, nil] the step's file
+    # @return [String, Integer, nil]
+    def location(operation, file)
+      line = operation[:line]
+      op_file = operation[:file]
+      op_file && op_file != file && line ? "#{op_file}:#{line}" : line
     end
   end
 end

@@ -325,6 +325,169 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       end
     end
 
+    # An operation is reported where its method is named, so a call laid out
+    # over several lines points at the call, not at the receiver it starts on.
+    describe 'multi-line calls' do
+      it 'reports a chained call at the line of its method name' do
+        source = <<~RUBY
+          def show
+            Homepage
+              .fetch_banner(params[:id])
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'show').first)
+          .to include(target: 'Homepage', method: 'fetch_banner', line: 3, statement_line: 2)
+      end
+
+      it 'reports a call after a multi-line receiver at its own line' do
+        source = <<~RUBY
+          def create
+            Handler.build(
+              request,
+              response
+            ).set_cookie(:session)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').map { |o| [o[:method], o[:line]] })
+          .to include(['set_cookie', 5])
+      end
+
+      it 'reports an implicit call at the line of its dot' do
+        source = <<~RUBY
+          def notify
+            Notifier
+              .(event)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'notify').first).to include(method: 'call', line: 3)
+      end
+
+      it 'reports an enqueue at the line of its enqueue method' do
+        source = <<~RUBY
+          def create
+            SyncJob
+              .perform_later(id)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').first).to include(type: :async, line: 3, statement_line: 2)
+      end
+
+      it 'adds no statement line to a call on one line' do
+        ops = extract_method_ops("def x\n  Ledger.post!(entry)\nend\n", 'x')
+
+        expect(ops.first).not_to have_key(:statement_line)
+      end
+    end
+
+    # A predicate runs before either branch, so its calls belong at the
+    # level the conditional sits at, ahead of it. `if @widget.save` is the
+    # side effect of a typical create action; dropping it left only the
+    # conditional and its responses.
+    describe 'conditional predicates' do
+      it 'emits a call in an if predicate ahead of the conditional' do
+        source = <<~RUBY
+          def create
+            if @widget.save
+              redirect_to @widget
+            else
+              render :new
+            end
+          end
+        RUBY
+
+        ops = extract_method_ops(source, 'create')
+
+        expect(ops.map { |o| o[:type] }).to eq(%i[call conditional])
+        expect(ops.first).to include(target: '@widget', method: 'save', line: 2)
+      end
+
+      it 'keeps the predicate call out of the branches' do
+        source = <<~RUBY
+          def create
+            if Ledger.post!(entry)
+              Audit.record(entry)
+            end
+          end
+        RUBY
+
+        cond = extract_method_ops(source, 'create').find { |o| o[:type] == :conditional }
+
+        expect(cond[:then_ops].map { |o| o[:target] }).to eq(['Audit'])
+      end
+
+      it 'emits the predicate call of a conditional whose branches have no operations' do
+        source = <<~RUBY
+          def show
+            return unless Policy.allowed?(user)
+
+            @widget
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'show').map { |o| [o[:target], o[:method]] })
+          .to eq([%w[Policy allowed?]])
+      end
+
+      it 'emits the call a case statement switches on ahead of the conditional' do
+        source = <<~RUBY
+          def route
+            case Classifier.classify(payload)
+            when :urgent then UrgentWorker.perform_async(payload.id)
+            end
+          end
+        RUBY
+
+        ops = extract_method_ops(source, 'route')
+
+        expect(ops.map { |o| [o[:type], o[:target]] }).to eq([[:call, 'Classifier'], [:conditional, nil]])
+      end
+
+      it 'keeps a call negated with ! in a predicate' do
+        source = <<~RUBY
+          def flush
+            return self if new_record? || readonly? || !buffered_data_present?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'flush').map { |o| o[:method] })
+          .to eq(%w[new_record? readonly? buffered_data_present?])
+      end
+
+      it 'keeps a call negated with not' do
+        source = <<~RUBY
+          def settle
+            Ledger.post! unless not Gate.open?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'settle').first).to include(type: :call, target: 'Gate', method: 'open?')
+      end
+
+      it 'keeps a doubly negated call once' do
+        source = <<~RUBY
+          def warm
+            @warm = !!Cache.warm?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'warm').map { |o| [o[:target], o[:method]] }).to eq([%w[Cache warm?]])
+      end
+
+      it 'emits an enqueue in a predicate as an async operation' do
+        source = <<~RUBY
+          def create
+            render :queued if SyncJob.perform_later(widget.id)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').first).to include(type: :async, target: 'SyncJob')
+      end
+    end
+
     it 'skips conditionals with no significant ops' do
       source = <<~RUBY
         def show
