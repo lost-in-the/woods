@@ -3,23 +3,35 @@
 require 'spec_helper'
 require 'prism'
 
-# Host source must be read through Woods::SourceFile. A bare File.read tags it
-# with the process default external encoding, which is US-ASCII under a POSIX
-# locale, and the extractor's per-file rescue then drops the unit silently.
-# Pinning `encoding:` at the call site is not enough either: it leaves invalid
-# UTF-8 unscrubbed, so one file can still raise where every other is scrubbed.
+# Host source goes through Woods::SourceFile and Woods-written artifacts
+# through Woods::AtomicFile. A bare File.read tags bytes with the process
+# default external encoding. A Rails boot sets that from config.encoding
+# (UTF-8 by default), but the stdio and HTTP servers, the watcher before
+# boot, rake tasks without :environment and PublishedIndex readers never
+# boot Rails: under LC_ALL=C they see US-ASCII and raise on the first
+# multibyte byte. Pinning `encoding:` at a call site is not enough for host
+# source either: it leaves invalid UTF-8 unscrubbed. File.binread is
+# locale-independent by design and is not flagged.
 module SourceReadGuard
-  ROOT = File.expand_path('../..', __dir__)
-  SCANNED = ['lib/woods/extractor.rb', 'lib/woods/extractors/**/*.rb'].freeze
+  ROOT = File.expand_path('..', __dir__)
+  SCANNED = %w[
+    lib/woods/extractor.rb lib/woods/extractors/**/*.rb lib/woods/flow_*.rb lib/woods/flow_analysis/**/*.rb
+    lib/woods/source_references/**/*.rb lib/woods/mcp/**/*.rb exe/* lib/woods/published_index.rb
+    lib/woods/published_index/**/*.rb lib/woods/watch/**/*.rb lib/woods/checks/**/*.rb lib/tasks/**/*.rake
+    lib/woods/tasks.rb lib/woods/rake_helpers.rb
+  ].freeze
   RECEIVERS = %w[File IO].freeze
-  READERS = %i[read readlines foreach binread].freeze
+  READERS = %i[read readlines foreach].freeze
 
-  # [relative path, enclosing method] => why the read is not host source
-  # through SourceFile. Every entry must still match a read, so a stale entry
-  # fails too.
+  # [relative path, enclosing method] => why the read stays. Every entry
+  # must still match a read, so a stale entry fails too.
   ALLOWED = {
     ['lib/woods/extractors/lib_extractor.rb', 'build_file'] =>
-      'pins UTF-8 and refuses invalid source outright (its own contract), never scrubs'
+      'pins UTF-8 and refuses invalid source outright (its own contract), never scrubs',
+    ['lib/woods/mcp/tasks/store.rb', 'current_boot_identity'] =>
+      'kernel boot id under /proc: ASCII by definition',
+    ['lib/woods/mcp/tasks/store.rb', 'linux_process_identity'] =>
+      'kernel boot id and process stat under /proc: ASCII by definition'
   }.freeze
 
   # Collects receiver-qualified File/IO reads with their enclosing method.
@@ -77,8 +89,8 @@ module SourceReadGuard
   end
 end
 
-RSpec.describe 'host source reads in the extractors' do
-  it 'go through SourceFile, apart from the allowlisted non-scrubbing reads' do
+RSpec.describe 'host source and index reads outside a Rails boot' do
+  it 'go through SourceFile or AtomicFile, apart from the allowlisted reads' do
     offenses = SourceReadGuard.scanned_reads.reject do |read|
       SourceReadGuard::ALLOWED.key?([read[:path], read[:method]])
     end
@@ -101,6 +113,7 @@ RSpec.describe 'host source reads in the extractors' do
             ::File.readlines(path, encoding: Encoding::UTF_8)
             IO.read(path)
             File.foreach(path) { |line| line }
+            File.binread(path)
           end
         end
       RUBY
