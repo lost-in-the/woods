@@ -6,6 +6,7 @@ require 'json'
 require 'woods/dependency_graph'
 require 'woods/flow_assembler'
 require 'woods/flow_document'
+require 'woods/source_line_map'
 
 RSpec.describe Woods::FlowAssembler do
   let(:graph) { instance_double(Woods::DependencyGraph) }
@@ -846,6 +847,118 @@ RSpec.describe Woods::FlowAssembler do
   # One FlowAssembler serves every controller and action of a precompute run.
   # Without memoization a unit reached from N controllers was globbed off
   # disk, JSON-parsed and AST-parsed N times over.
+  describe 'operation lines' do
+    let(:header) do
+      <<~RUBY
+        # ╔══════════════════════╗
+        # ║ Routes               ║
+        # ╚══════════════════════╝
+        #   POST /shipments → #create
+        #
+
+      RUBY
+    end
+
+    def annotate(original, concern: nil)
+      body = original
+      if concern
+        block = concern.lines.map { |l| "  # #{l.rstrip}" }.join("\n")
+        banner = "\n# ┌── Included from: Concern\n#{block}\n# ── End\n"
+        body = original.sub(/^(class .*\n)/) { "#{Regexp.last_match(1)}#{banner}" }
+      end
+      header + body
+    end
+
+    def write_annotated(identifier, original, type: 'controller', concern: nil, metadata: {})
+      composite = annotate(original, concern: concern)
+      map = Woods::SourceLineMap.build(original, composite)
+      write_unit(identifier, type: type, source_code: composite,
+                             metadata: metadata.merge('source_line_map' => map))
+    end
+
+    def all_ops(ops)
+      ops.flat_map { |op| [op] + all_ops((op[:then_ops] || []) + (op[:else_ops] || []) + (op[:nested] || [])) }
+    end
+
+    def line_in(source, needle)
+      source.lines.index { |l| l.include?(needle) } + 1
+    end
+
+    let(:controller) do
+      <<~RUBY
+        class ShipmentsController < ApplicationController
+          include Trackable
+
+          def create
+            if params[:express]
+              Courier.book!(params)
+            else
+              Ledger.post!(params)
+            end
+            redirect_to shipments_path
+          end
+        end
+      RUBY
+    end
+
+    let(:concern) { "module Trackable\n  def track\n    Tracker.ping\n  end\nend\n" }
+
+    before { stub_graph_defaults }
+
+    it 'reports the original file line of every operation, nested ones included' do
+      write_annotated('ShipmentsController', controller, concern: concern)
+
+      ops = all_ops(described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                   .assemble('ShipmentsController#create').steps[0][:operations])
+
+      expect(ops.to_h { |op| [op[:method] || op[:type], op[:line]] }).to include(
+        conditional: line_in(controller, 'if params'),
+        'book!' => line_in(controller, 'Courier.book!'),
+        'post!' => line_in(controller, 'Ledger.post!'),
+        response: line_in(controller, 'redirect_to')
+      )
+    end
+
+    it 'names the file each operation was read from' do
+      write_annotated('ShipmentsController', controller, concern: concern)
+
+      ops = all_ops(described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                   .assemble('ShipmentsController#create').steps[0][:operations])
+
+      expect(ops.map { |op| op[:file] }.uniq).to eq(['app/controllers/shipmentscontroller.rb'])
+    end
+
+    it 'reads lines and file from the unit that defines an action held elsewhere' do
+      holder = <<~RUBY
+        module Dispatching
+          extend ActiveSupport::Concern
+
+          def create
+            Courier.book!(params)
+          end
+        end
+      RUBY
+      write_annotated('Dispatching', holder, type: 'concern')
+      write_annotated('ShipmentsController', "class ShipmentsController < ApplicationController\nend\n",
+                      metadata: { 'action_sources' => { 'create' => { 'defined_in' => 'Dispatching' } } })
+
+      op = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                          .assemble('ShipmentsController#create').steps[0][:operations].first
+
+      expect(op).to include(method: 'book!', line: line_in(holder, 'Courier.book!'),
+                            file: 'app/concerns/dispatching.rb')
+    end
+
+    it 'keeps the annotated line for a unit indexed without a map' do
+      write_unit('ShipmentsController', source_code: controller)
+
+      op = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                          .assemble('ShipmentsController#create').steps[0][:operations].last
+
+      expect(op[:line]).to eq(line_in(controller, 'redirect_to'))
+    end
+  end
+
   describe 'per-instance memoization' do
     let(:assembler) { described_class.new(graph: graph, extracted_dir: extracted_dir) }
 

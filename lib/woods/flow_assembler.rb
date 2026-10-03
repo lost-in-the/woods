@@ -6,6 +6,7 @@ require 'set'
 require_relative 'ast/parser'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
+require_relative 'source_line_map'
 
 module Woods
   # Orchestrates execution flow tracing from an entry point through the dependency graph.
@@ -176,8 +177,9 @@ module Woods
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
       scope_node = method_name ? method_node(unit_id, source_code, method_name) : parsed_source(unit_id, source_code)
-      scope_node ||= defining_method_node(unit_id, method_name, metadata) if method_name
-      operations.concat(@operation_extractor.extract(scope_node)) if scope_node
+      holder = load_unit(unit_id)
+      scope_node, holder = defining_method_node(unit_id, method_name, metadata) if scope_node.nil? && method_name
+      operations.concat(locate(@operation_extractor.extract(scope_node), holder)) if scope_node
 
       operations
     end
@@ -187,7 +189,7 @@ module Woods
     # @param unit_id [String] the unit that lacks a local definition
     # @param method_name [String]
     # @param metadata [Hash] that unit's metadata
-    # @return [Ast::Node, nil]
+    # @return [Array(Ast::Node, Hash), nil] the node and the unit holding it
     def defining_method_node(unit_id, method_name, metadata)
       sources = metadata[:action_sources]
       return nil unless sources.is_a?(Hash)
@@ -200,7 +202,29 @@ module Woods
       holder_source = holder && holder[:source_code]
       return nil if holder_source.nil? || holder_source.empty?
 
-      method_node(defined_in, holder_source, method_name)
+      node = method_node(defined_in, holder_source, method_name)
+      node && [node, holder]
+    end
+
+    # Report each operation at its line in the file +unit_data+ was read
+    # from, not in the annotated `source_code` the AST was parsed from, and
+    # name that file. Nested operations are relocated with their parents.
+    #
+    # @param operations [Array<Hash>] operations parsed from +unit_data+
+    # @param unit_data [Hash] the unit whose source was parsed
+    # @return [Array<Hash>] +operations+, relocated in place
+    def locate(operations, unit_data)
+      map = (unit_data[:metadata] || {})[:source_line_map]
+      file = unit_data[:file_path]
+      operations.each { |op| locate_operation(op, map, file) }
+    end
+
+    def locate_operation(operation, map, file)
+      operation[:line] = SourceLineMap.translate(map, operation[:line])
+      operation[:file] = file
+      %i[nested then_ops else_ops].each do |key|
+        operation[key]&.each { |nested| locate_operation(nested, map, file) }
+      end
     end
 
     # The unit's whole parsed source, parsed once per assembler instance.
