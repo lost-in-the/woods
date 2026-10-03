@@ -248,10 +248,10 @@ module Woods
     HYBRID_DISCOVERY_EXTRACTORS = %i[jobs serializers].freeze
 
     # Families whose edges are resolved against the loaded constant tables: a
-    # component's render target can move when any Ruby file adds or removes a
-    # constant, with no graph edge to walk. They re-run with the hybrid
-    # families on a Ruby edit; an unchanged unit is not rewritten.
-    RUNTIME_RESOLVED_EXTRACTORS = %i[components view_components].freeze
+    # render target can move when any Ruby file adds or removes a constant,
+    # with no graph edge to walk. They re-run with the hybrid families on a
+    # Ruby edit; an unchanged unit is not rewritten.
+    RUNTIME_RESOLVED_EXTRACTORS = %i[components view_components controllers].freeze
 
     # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
     #

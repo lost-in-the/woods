@@ -277,12 +277,12 @@ step before it.
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 
-   Components and view components re-run with them on a Ruby edit. A `render`
-   edge names the component the running app would reach, resolved against the
-   loaded constant tables (lexical scope, included Phlex Kits, top level), so
-   creating `Billing::V2::TierGrid` retargets an unchanged
-   `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
-   edge leads there. Only units whose output changed are rewritten. The same
+   Components, view components and controllers re-run with them on a Ruby
+   edit. A `render` edge names the component the running app would reach,
+   resolved against the loaded constant tables (lexical scope, included Phlex
+   Kits, top level), so creating `Billing::V2::TierGrid` retargets an
+   unchanged `Billing::V2::ManagePage` that already renders `TierGrid.new`,
+   or an unchanged controller that renders it, and no graph edge leads there. Only units whose output changed are rewritten. The same
    reload requirement applies: a constant the process has not loaded, or has not
    unloaded, resolves as that process sees it. View components also re-run when
    a sidecar template changes (a template with a Ruby file of the same name

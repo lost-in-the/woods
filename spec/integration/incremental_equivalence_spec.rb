@@ -1662,6 +1662,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/rt_parts/chip.rb
         app/components/rt_shelf/page_component.rb
         app/components/rt_shelf/row_component.rb
+        app/components/rt_desk/card_component.rb
+        app/controllers/rt_desk_controller.rb
       ]
     end
 
@@ -1732,6 +1734,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            ])
 
       expect(render_edges(index, 'RtShelf::PageComponent')).to eq([%w[RtParts::Chip RtShelf::RowComponent], []])
+    end
+
+    it 'retargets an unchanged controller when the component it renders is created' do
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_desk_controller.rb', <<~RUBY)
+                                 class RtDeskController < ApplicationController
+                                   def show
+                                     render RtDesk::CardComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/components/rt_desk/card_component.rb', <<~RUBY)
+                                 module RtDesk
+                                   class CardComponent < ApplicationComponent
+                                     def call = "card"
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
     end
   end
 

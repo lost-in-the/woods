@@ -24,7 +24,7 @@ RSpec.describe 'incremental runtime inputs' do
       it "refreshes the hybrid and runtime-resolved families after changing #{path} without recorded dependencies" do
         changes = Woods::ChangeSet.new(paths: [path], root: @root)
         expect(extractor.send(:hybrid_discovery_keys, changes, []))
-          .to eq(Set[:jobs, :serializers, :components, :view_components])
+          .to eq(Set[:jobs, :serializers, :components, :view_components, :controllers])
       end
     end
 
