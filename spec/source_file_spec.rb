@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'pathname'
 require 'woods/source_file'
+require 'woods/source_references/memo_collector'
 
 RSpec.describe Woods::SourceFile do
   around do |example|
@@ -48,6 +49,23 @@ RSpec.describe Woods::SourceFile do
 
     it 'raises when the file is missing, like File.read' do
       expect { described_class.read(File.join(@dir, 'missing.rb')) }.to raise_error(Errno::ENOENT)
+    end
+  end
+
+  # The source-reference pass hands MemoCollector the file's raw bytes; the
+  # PORO sweep hands it a SourceFile read. Both must hit one cache entry.
+  describe 'with the run-scoped source-reference parse cache' do
+    it 'shares one parse between a SourceFile read and the raw bytes of the same file' do
+      path = write_source("# Ledger — book\nclass Ledger\n  ENTRY = Shipment\nend\n")
+      parser = Woods::SourceReferences::Collector.new
+      allow(parser).to receive(:call).and_call_original
+      memo = Woods::SourceReferences::MemoCollector.new(collector: parser)
+
+      from_reader = with_posix_default_external { memo.call(described_class.read(path)) }
+      from_bytes = memo.call(File.binread(path))
+
+      expect(from_bytes).to equal(from_reader)
+      expect(parser).to have_received(:call).once
     end
   end
 
