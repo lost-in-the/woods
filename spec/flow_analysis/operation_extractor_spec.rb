@@ -325,6 +325,64 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       end
     end
 
+    # An operation is reported where its method is named, so a call laid out
+    # over several lines points at the call, not at the receiver it starts on.
+    describe 'multi-line calls' do
+      it 'reports a chained call at the line of its method name' do
+        source = <<~RUBY
+          def show
+            Homepage
+              .fetch_banner(params[:id])
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'show').first)
+          .to include(target: 'Homepage', method: 'fetch_banner', line: 3, statement_line: 2)
+      end
+
+      it 'reports a call after a multi-line receiver at its own line' do
+        source = <<~RUBY
+          def create
+            Handler.build(
+              request,
+              response
+            ).set_cookie(:session)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').map { |o| [o[:method], o[:line]] })
+          .to include(['set_cookie', 5])
+      end
+
+      it 'reports an implicit call at the line of its dot' do
+        source = <<~RUBY
+          def notify
+            Notifier
+              .(event)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'notify').first).to include(method: 'call', line: 3)
+      end
+
+      it 'reports an enqueue at the line of its enqueue method' do
+        source = <<~RUBY
+          def create
+            SyncJob
+              .perform_later(id)
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'create').first).to include(type: :async, line: 3, statement_line: 2)
+      end
+
+      it 'adds no statement line to a call on one line' do
+        ops = extract_method_ops("def x\n  Ledger.post!(entry)\nend\n", 'x')
+
+        expect(ops.first).not_to have_key(:statement_line)
+      end
+    end
+
     # A predicate runs before either branch, so its calls belong at the
     # level the conditional sits at, ahead of it. `if @widget.save` is the
     # side effect of a typical create action; dropping it left only the

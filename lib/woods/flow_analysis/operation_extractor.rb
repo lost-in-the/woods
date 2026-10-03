@@ -29,8 +29,8 @@ module Woods
       # Keys of an operation that hold the operations nested inside it.
       NESTED_KEYS = %i[nested then_ops else_ops].freeze
 
-      # Rewrite each operation's +line+ and +file+, nested operations
-      # included, from the line its AST was parsed at.
+      # Rewrite each operation's +line+, +statement_line+ and +file+, nested
+      # operations included, from the lines its AST was parsed at.
       #
       # @param operations [Array<Hash>]
       # @yieldparam line [Integer, nil] the line in the parsed text
@@ -39,6 +39,7 @@ module Woods
       # @return [Array<Hash>] +operations+, rewritten in place
       def self.relocate(operations, &locate)
         operations.each do |operation|
+          operation[:statement_line] = locate.call(operation[:statement_line]).first if operation[:statement_line]
           operation[:line], operation[:file] = locate.call(operation[:line])
           NESTED_KEYS.each { |key| relocate(operation[key], &locate) if operation[key] }
         end
@@ -94,7 +95,7 @@ module Woods
           operations << {
             type: :transaction,
             receiver: send_child.receiver,
-            line: send_child.line,
+            **call_lines(send_child),
             nested: nested
           }
         else
@@ -115,7 +116,7 @@ module Woods
             target: node.receiver,
             method: node.method_name,
             args_hint: node.arguments || [],
-            line: node.line
+            **call_lines(node)
           }
         elsif dynamic_dispatch?(node)
           operations << {
@@ -123,21 +124,21 @@ module Woods
             target: node.receiver,
             method: node.method_name,
             args_hint: node.arguments || [],
-            line: node.line
+            **call_lines(node)
           }
         elsif response_call?(node)
           operations << {
             type: :response,
             status_code: ResponseCodeMapper.resolve_method(node.method_name, arguments: node.arguments || []),
             render_method: node.method_name,
-            line: node.line
+            **call_lines(node)
           }
         elsif significant_call?(node)
           operations << {
             type: :call,
             target: node.receiver,
             method: node.method_name,
-            line: node.line
+            **call_lines(node)
           }
         end
 
@@ -148,6 +149,17 @@ module Woods
         # argument: `Audit.record(NotifyJob.perform_later(...))` still
         # enqueues the job (F5).
         collect_nested_async(node, operations)
+      end
+
+      # A call's +line+ is where it names its method, so a call laid out over
+      # several lines points at the call rather than at its receiver. The line
+      # the call starts on follows as +statement_line+ when it differs.
+      #
+      # @param node [Ast::Node] a :send node
+      # @return [Hash]
+      def call_lines(node)
+        line = node.message_line || node.line
+        line == node.line ? { line: line } : { line: line, statement_line: node.line }
       end
 
       # `!x` and `not x` are a `!` call on +x+. The negation is noise; the
@@ -169,7 +181,7 @@ module Woods
 
           if async_call?(argument)
             operations << { type: :async, target: argument.receiver, method: argument.method_name,
-                            args_hint: argument.arguments || [], line: argument.line }
+                            args_hint: argument.arguments || [], **call_lines(argument) }
           end
           collect_nested_async(argument, operations)
         end

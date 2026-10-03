@@ -949,6 +949,17 @@ RSpec.describe Woods::FlowAssembler do
                             file: 'app/concerns/dispatching.rb')
     end
 
+    it 'translates the statement line of a call laid out over several lines' do
+      original = "class ShipmentsController < ApplicationController\n  def create\n" \
+                 "    Courier\n      .book!(params)\n  end\nend\n"
+      write_annotated('ShipmentsController', original)
+
+      op = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                          .assemble('ShipmentsController#create').steps[0][:operations].first
+
+      expect(op).to include(method: 'book!', line: 4, statement_line: 3)
+    end
+
     it 'keeps the annotated line for a unit indexed without a map' do
       write_unit('ShipmentsController', source_code: controller)
 
