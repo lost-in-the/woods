@@ -736,6 +736,7 @@ Leave it at its default. The full list of what always runs:
 | `:database_views` | DatabaseViewExtractor | SQL views (Scenic) |
 | `:database_tables` | DatabaseTableExtractor | Tables in the live schema, including tables no model owns |
 | `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
+| `:js_modules` | JsModuleExtractor | JavaScript/TypeScript modules (shallow; Stimulus, Alpine, Stencil names) |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
@@ -1142,6 +1143,37 @@ non-component references each, component callers added 10,799 edges (2,414 to
 recorded in `source_references.json`. Incremental extraction and
 `woods:refresh` stop with a full-extraction diagnostic when the recorded policy
 differs from the configured one, and the previous generation stays active.
+
+### JavaScript paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `javascript_paths` | Array&lt;String&gt; | `["app/javascript/**/*.{js,ts,jsx,tsx,mjs}", "app/assets/javascripts/**/*.js"]` | Globs, relative to `Rails.root`, that `JsModuleExtractor` scans for `js_module` units. |
+
+Each matching `.js`, `.ts`, `.jsx`, `.tsx` or `.mjs` file becomes one unit
+identified by its root-relative path. Whatever a glob reaches, files under a
+`node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/` or
+`coverage/` directory, minified bundles (`*.min.js`) and TypeScript declaration
+files (`*.d.ts`) are never indexed. The literal prefix of each glob (its
+directories before the first wildcard) is also where bare import specifiers
+such as `controllers/clipboard_controller` and `@/shared/format` resolve.
+
+```ruby
+Woods.configure do |config|
+  config.javascript_paths = %w[app/javascript/**/*.{js,ts} frontend/src/**/*.{ts,tsx}]
+end
+```
+
+Use `[]` to disable the unit type. The setter rejects a value that is not an
+Array and any entry that is not a non-empty, relative glob without `..`,
+raising `Woods::ConfigurationError` and keeping the previous value.
+
+The same predicate (`Woods::JavascriptPaths.source?`) decides which changed
+paths re-run the extractor incrementally and which the watch daemon classifies
+as `:reextract`. **Changing `javascript_paths` itself needs a full
+extraction**: the value is not part of any incremental fingerprint, so modules
+under a newly added root are indexed only when one of them changes or
+`woods:extract` runs.
 
 ## Console MCP options
 

@@ -440,10 +440,11 @@ cheap, which is what makes wholesale replacement the right shape.
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`; never a path under `node_modules/`, root-level included), `app/graphql/**/*.rb` | graphql_operations |
 | `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers |
 | the file named by `external_table_consumers_path` | external_consumers |
+| any `config.javascript_paths` module (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}`, `app/assets/javascripts/**/*.js`) | js_modules; **and** components, view components, view templates when the name map moved |
 | any `package.yml`, `packwerk.yml` | packages |
 | `app/helpers/**/*.rb`, the file of any module mixed in with `helper`, and (view-side consumers only) any file in `ApplicationController`'s ancestry | view_templates, components, view_components, controllers, mailers: the `helper_call` / `helper_method` consumers. Decided by `HelperCatalog.consumer_keys_for`, not a dispatcher rule. |
 
-Eight of these deserve a note:
+Nine of these deserve a note:
 
 - **Rake tasks merge definitions across files.** Any changed or deleted `.rake`
   file reruns the task extractor over all task files. Removing the primary
@@ -476,6 +477,16 @@ Eight of these deserve a note:
   still dispatches per file, which is what keeps a watch cycle on one spec
   edit to one unit. The cost is a re-read of every test file when support
   changes; unit files whose bytes do not change are not rewritten.
+- **JavaScript modules cascade conditionally.** A module's `registered_names`
+  come from whichever file registers it, so every module change re-runs
+  `js_modules` wholesale. Components and templates reference modules by name
+  (`x-data`, `data-controller`, custom element tags), and the graph cannot
+  reach them from the module: the edge points the other way. Before any unit
+  is rewritten the run reads the name-to-module map the published `js_module`
+  units carry; after the re-run it compares that map with the fresh one and
+  re-runs `JS_NAME_CONSUMER_EXTRACTORS` only when a name appeared, vanished or
+  moved. A body edit inside a module re-runs no consumer. The oracle holds
+  both branches to full-extraction equivalence.
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
@@ -714,7 +725,7 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, YAML under `config.config_file_paths` that boot does not capture, and JavaScript modules under `config.javascript_paths` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:reextract` (from configuration) | `.rb` files under `config.test_support_paths` outside `spec/` and `test/`, such as `features/support/**` | Test support is read as bytes. The defaults are already under `spec/` and `test/`. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
