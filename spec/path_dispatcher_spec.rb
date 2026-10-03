@@ -429,6 +429,12 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('lib/tasks/ledger.rake')).to include(:rake_tasks, :test_mappings)
     end
 
+    it 'treats a _test.rb fixture under spec/ as test support, since only test/ holds Minitest tests' do
+      expect(dispatcher.whole_app_keys_for('spec/lib/translators/spec_test.rb')).to include(:test_support)
+      expect(dispatcher.file_rules_for('spec/lib/translators/spec_test.rb')).to be_empty
+      expect(dispatcher.whole_app_keys_for('test/lib/ledger_test.rb')).not_to include(:test_support)
+    end
+
     it 'dispatches a changed test file per file, with no wholesale re-run' do
       %w[spec/models/widget_spec.rb spec/support/widget_helper_spec.rb test/models/widget_test.rb].each do |path|
         expect(dispatcher.whole_app_keys_for(path)).to be_empty, path

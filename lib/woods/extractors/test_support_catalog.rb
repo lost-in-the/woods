@@ -27,8 +27,10 @@ module Woods
       DEFAULT_PATHS = %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
                          test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb].freeze
 
-      # Test files belong to {TestMappingExtractor}, whatever a glob matches.
-      TEST_FILE_SUFFIXES = %w[_spec.rb _test.rb].freeze
+      # Test files belong to {TestMappingExtractor}, whatever a glob matches:
+      # `_spec.rb` under spec/, `_test.rb` under test/. A `spec/lib/.../x_test.rb`
+      # is a fixture, not a Minitest test.
+      TEST_FILE_RULES = { 'spec/' => '_spec.rb', 'test/' => '_test.rb' }.freeze
 
       # `**/` spans directories, `{a,b}` alternation works.
       GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
@@ -62,10 +64,18 @@ module Woods
         # @return [Array<String>] every kind this file has, most specific first
         def kinds
           found = { 'shared_examples' => shared_examples, 'shared_context' => shared_contexts,
-                    'matcher' => matchers, 'helper_module' => helper_modules, 'class' => classes }
+                    'matcher' => matchers, 'helper_module' => mixin_modules, 'class' => classes }
                   .reject { |_kind, names| names.empty? }.keys
           found << 'configuration' if configuration
           found.empty? ? ['script'] : found
+        end
+
+        # Modules that are not merely a namespace around the file's classes.
+        # `module Translators; class SpecTest` is a class file.
+        #
+        # @return [Array<String>]
+        def mixin_modules
+          helper_modules.reject { |name| classes.any? { |klass| klass.start_with?("#{name}::") } }
         end
 
         # @return [Array<String>] every name the file defines
@@ -93,9 +103,17 @@ module Woods
         # @param relative_path [String] Rails.root-relative path
         # @return [Boolean]
         def support_path?(relative_path)
-          relative_path.end_with?('.rb') &&
-            TEST_FILE_SUFFIXES.none? { |suffix| relative_path.end_with?(suffix) } &&
+          relative_path.end_with?('.rb') && !test_file?(relative_path) &&
             paths.any? { |glob| File.fnmatch?(glob, relative_path, GLOB_FLAGS) }
+        end
+
+        # Is this a file the test mapping extractor claims?
+        #
+        # @param relative_path [String] Rails.root-relative path
+        # @return [Boolean]
+        def test_file?(relative_path)
+          suffix = TEST_FILE_RULES[relative_path[%r{\A[^/]+/}]]
+          suffix ? relative_path.end_with?(suffix) : relative_path.end_with?('_spec.rb', '_test.rb')
         end
       end
 

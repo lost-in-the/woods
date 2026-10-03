@@ -1157,7 +1157,7 @@ A target carries one edge: when a test refers to one support file several ways, 
 
 **Key details:**
 - One `test_support` unit per file, identified by its root-relative path (`spec/support/analytics_helpers.rb`)
-- Scans `config.test_support_paths`: by default `spec/support/**/*.rb`, `spec/*_helper.rb`, `spec/lib/**/*.rb` and the same three under `test/`. `*_spec.rb` and `*_test.rb` files are never test support
+- Scans `config.test_support_paths`: by default `spec/support/**/*.rb`, `spec/*_helper.rb`, `spec/lib/**/*.rb` and the same three under `test/`. The files `TestMappingExtractor` claims (`spec/**/*_spec.rb`, `test/**/*_test.rb`) are never test support; a `spec/lib/.../x_test.rb` fixture is
 - Also indexes a factory-directory file that declares no factory
 - A symlink that resolves outside the application root is not read
 - Pure source analysis: nothing is loaded or evaluated
@@ -1166,7 +1166,7 @@ A target carries one edge: when a test refers to one support file several ways, 
 
 | Key | Meaning |
 |---|---|
-| `kind` | The most specific of `shared_examples`, `shared_context`, `matcher`, `helper_module`, `class`, `configuration`, `script` (in that order) |
+| `kind` | The most specific of `shared_examples`, `shared_context`, `matcher`, `helper_module`, `class`, `configuration`, `script` (in that order). A module that only namespaces the file's classes does not count as a helper module |
 | `kinds` | Every kind the file has, in the same order |
 | `names` | Every name the file defines |
 | `shared_examples`, `shared_contexts`, `matchers` | Names as declared (`RSpec.shared_examples`, `shared_examples_for`, `RSpec.shared_context`, `RSpec::Matchers.define`, `define_negated_matcher`, `alias_matcher`) |

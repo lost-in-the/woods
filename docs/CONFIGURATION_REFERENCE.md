@@ -1061,8 +1061,8 @@ of any incremental fingerprint.
 |--------|------|---------|-------------|
 | `test_support_paths` | Array&lt;String&gt; | `["spec/support/**/*.rb", "spec/*_helper.rb", "spec/lib/**/*.rb", "test/support/**/*.rb", "test/*_helper.rb", "test/lib/**/*.rb"]` | Globs, relative to `Rails.root`, whose Ruby files `TestSupportExtractor` indexes as `test_support` units. |
 
-Files ending in `_spec.rb` or `_test.rb` are never test support, whatever the
-globs match: they stay test mappings. Glob syntax is the same as
+Files the test mapping extractor claims (`spec/**/*_spec.rb`, `test/**/*_test.rb`)
+are never test support, whatever the globs match. Glob syntax is the same as
 `unclaimed_ruby_paths`.
 
 ```ruby

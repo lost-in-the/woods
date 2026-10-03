@@ -57,6 +57,19 @@ RSpec.describe Woods::Extractors::TestSupportExtractor do
       expect(units).to eq([])
     end
 
+    it 'indexes a fixture class in a spec/lib subdirectory even when its name ends in _test.rb' do
+      create_file('spec/lib/translators/settings_translators/spec_test.rb', <<~RUBY)
+        module SettingsTranslators
+          class SpecTest
+            def translate = nil
+          end
+        end
+      RUBY
+
+      unit = unit_for('spec/lib/translators/settings_translators/spec_test.rb')
+      expect(unit.metadata).to include(kind: 'class', classes: ['SettingsTranslators::SpecTest'])
+    end
+
     it 'ignores Ruby outside the configured globs' do
       create_file('spec/models/widget_spec.rb', "RSpec.describe Widget do\nend\n")
       create_file('spec/fixtures/sample.rb', "module Sample\nend\n")
