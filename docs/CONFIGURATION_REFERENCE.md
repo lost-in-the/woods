@@ -850,9 +850,15 @@ two lists, each in first-seen order without duplicates:
 | `metadata.scopes` | the `(?<scope>...)` capture, and a `scope:` string or symbol literal passed to the matched call |
 | `metadata.sub_events` | an `event:` string or symbol literal passed to the matched call |
 
-Only the matched call's own keyword arguments count, read from its parse
-tree. A `scope:` passed to a nested call, or a computed value such as
-`event: ok ? "a" : "b"`, is not recorded. For example,
+Literals are read from the matched call's parse tree, one level deep:
+
+- its own keyword arguments: `emit(:x, scope: "a")`
+- a hash-literal argument: `emit(:x, { **details, scope: "a" })`
+- the hash arguments of a `merge`, `merge!`, `reverse_merge` or `deep_merge`
+  argument: `emit(:x, details.merge(scope: "a"))`
+
+A `scope:` nested deeper (`merge(meta: { scope: "a" })`), passed to any other
+call, or computed (`event: ok ? "a" : "b"`) is not recorded. For example,
 `Ledger.emit(:checkout_completed, scope: "receipts", event: "receipt_printed")`
 records `scopes: ["receipts"]` and `sub_events: ["receipt_printed"]` on the
 `checkout_completed` unit.

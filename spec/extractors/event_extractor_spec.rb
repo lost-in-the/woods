@@ -771,6 +771,23 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(unit.metadata).to include(scopes: %w[receipts billing], sub_events: ['receipt_printed'])
     end
 
+    it 'records scope: and event: literals one level inside a hash-building argument' do
+      create_file('app/workers/tax_worker.rb', <<~SRC)
+        class TaxWorker
+          def perform
+            Ledger.emit(:checkout_completed, details.merge({ scope: "tax_requests", event: "requested" }))
+            Ledger.emit(:checkout_completed, details.merge(scope: "refunds"))
+            Ledger.emit(:checkout_completed, { **details, scope: "payouts", event: "settled" })
+            Ledger.emit(:checkout_completed, details.merge(meta: { scope: "deeper" }))
+            Ledger.emit(:checkout_completed, build(scope: "not_a_hash", event: "not_a_hash"))
+          end
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(scopes: %w[tax_requests refunds payouts], sub_events: %w[requested settled])
+    end
+
     it 'records keyword literals from subscriber calls too' do
       create_file('app/listeners/receipt_listener.rb', <<~SRC)
         class ReceiptListener

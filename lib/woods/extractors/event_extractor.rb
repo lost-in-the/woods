@@ -48,6 +48,10 @@ module Woods
       # mapped to the metadata list each one feeds.
       IDENTITY_KEYWORDS = { 'scope' => :scopes, 'event' => :sub_events }.freeze
 
+      # Calls whose hash arguments build the payload a configured call
+      # receives (`details.merge(scope: "x")`), read one level deep.
+      HASH_BUILDING_CALLS = %i[merge merge! reverse_merge deep_merge].freeze
+
       # Wall-clock budget for one match of a configured pattern. The patterns
       # are user-supplied, so a catastrophic one must not hang extraction.
       # Ruby 3.2+ enforces it at the engine level (Regexp.new(timeout:)); on
@@ -247,9 +251,10 @@ module Woods
         end
       end
 
-      # String or symbol literals passed as +scope:+ / +event:+ keywords to
-      # the innermost call enclosing the match's name capture. Keywords of a
-      # nested call and non-literal values are ignored.
+      # String or symbol literals passed as +scope:+ / +event:+ keys to the
+      # innermost call enclosing the match's name capture: its keywords, a
+      # hash-literal argument, or the hash arguments of a {HASH_BUILDING_CALLS}
+      # argument. Deeper nesting and non-literal values are ignored.
       #
       # @param tree [Prism::ParseResult] The file's parse result
       # @param match [MatchData] A configured pattern match
@@ -262,16 +267,40 @@ module Woods
         from = source[0, match.begin(name_group)].bytesize
         to = source[0, match.end(0)].bytesize
         call = innermost_call(tree.value, from, to)
-        keywords = call&.arguments&.arguments&.grep(Prism::KeywordHashNode)&.first
-        return [] unless keywords
+        return [] unless call
 
-        keywords.elements.filter_map do |assoc|
+        identity_hashes(call).flat_map(&:elements).filter_map do |assoc|
           next unless assoc.is_a?(Prism::AssocNode) && assoc.key.is_a?(Prism::SymbolNode)
           next unless IDENTITY_KEYWORDS.key?(assoc.key.unescaped)
           next unless assoc.value.is_a?(Prism::StringNode) || assoc.value.is_a?(Prism::SymbolNode)
 
           [assoc.key.unescaped, assoc.value.unescaped]
         end
+      end
+
+      # Hash nodes directly passed to +call+, plus those passed to a
+      # hash-building call that is itself an argument, in source order.
+      #
+      # @param call [Prism::CallNode]
+      # @return [Array<Prism::HashNode, Prism::KeywordHashNode>]
+      def identity_hashes(call)
+        hash_or_call_arguments(call).flat_map do |arg|
+          next [arg] if hash_node?(arg)
+
+          HASH_BUILDING_CALLS.include?(arg.name) ? hash_or_call_arguments(arg).select { |inner| hash_node?(inner) } : []
+        end
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [Array<Prism::Node>] hash and call-node arguments of +call+
+      def hash_or_call_arguments(call)
+        Array(call.arguments&.arguments).select { |arg| hash_node?(arg) || arg.is_a?(Prism::CallNode) }
+      end
+
+      # @param node [Prism::Node]
+      # @return [Boolean]
+      def hash_node?(node)
+        node.is_a?(Prism::KeywordHashNode) || node.is_a?(Prism::HashNode)
       end
 
       # The deepest call node whose source span covers the byte range.
