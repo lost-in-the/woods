@@ -1168,6 +1168,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       document.fetch('dependencies').find { |dep| dep['target'] == 'PublishPostJob' && dep['via'] == 'job_enqueue' }
     end
 
+    def edge_identities(document)
+      document.fetch('dependencies').map { |dep| dep.values_at('type', 'target', 'via') }
+    end
+
     def ledger_service(methods)
       bodies = methods.map { |name, body| "  def #{name}(post)\n    #{body}\n  end\n" }.join("\n")
       "class LedgerService\n#{bodies}end\n"
@@ -1201,13 +1205,19 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       index = run_sequence(
         [
           -> { write_file(service, ledger_service('post_all' => enqueue)) },
-          -> { write_file(service, ledger_service('post_all' => 'retry_all(post)', 'retry_all' => enqueue)) },
+          lambda {
+            write_file(service, ledger_service('post_all' => 'retry_all(post)', 'retry_all' => enqueue,
+                                               'sign' => 'SignatureService.new.call(post)'))
+          },
           -> { write_file('app/models/post.rb', post_model) }
         ]
       )
 
       document = unit_document(index, 'services', 'LedgerService')
-      expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all])
+      expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(edge_identities(document)).to eq(edge_identities(document).uniq)
+      expect(document.fetch('dependencies'))
+        .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')
       expect(document.dig('metadata', 'method_effects', 'post_all', 'via_method'))
         .to eq('retry_all' => { 'jobs_enqueued' => ['PublishPostJob'] })
       expect(enqueue_edge(document)).to include('through' => 'post_all, retry_all')
@@ -1215,6 +1225,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       model = unit_document(index, 'models', 'Post')
       expect(model.dig('metadata', 'method_effects').keys).to eq(%w[normalize_title publish!])
       expect(enqueue_edge(model)).to include('through' => 'publish!')
+      expect(edge_identities(model)).to eq(edge_identities(model).uniq)
     end
 
     it 'drops the map and the edge annotation when the last effect goes' do
