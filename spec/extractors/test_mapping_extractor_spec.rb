@@ -223,6 +223,42 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata).not_to have_key(:description)
       end
 
+      it 'records an RSpec.feature block as the description' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Widget checkout')
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'records a bare feature block as the description' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          feature "Widget checkout" do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:description]).to eq('Widget checkout')
+      end
+
+      it 'keeps the feature block as the subject when an inner describe names a constant' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            describe Widget do
+              scenario 'with a saved card' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Widget checkout')
+      end
+
       it 'counts it blocks as test_count' do
         path = create_file('spec/models/user_spec.rb', <<~RUBY)
           describe User do

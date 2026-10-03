@@ -33,12 +33,14 @@ module Woods
       # Constant-form describe: `describe User do`, `RSpec.describe User, type: :model do`.
       # The constant must start uppercase (quoted strings can't sneak in) and may be
       # followed by whitespace OR a comma — the rspec-rails generator default is
-      # `RSpec.describe User, type: :model do` (B-082 / #194).
-      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+([A-Z][\w:]*)(?=[\s,]|$)/
+      # `RSpec.describe User, type: :model do` (B-082 / #194). Capybara's
+      # `feature` / `RSpec.feature` is an example group in the same position.
+      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+([A-Z][\w:]*)(?=[\s,]|$)/
 
-      # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`.
+      # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`,
+      # `RSpec.feature 'Widget checkout' do`.
       # The closing quote delimits the subject, so nothing is required after it.
-      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+['"]([^'"]+)['"]/
+      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+['"]([^'"]+)['"]/
 
       # A subject names a class only when it is a constant path (`Widget`,
       # `'Ledger::Entry'`). Free text (`'Widget checkout'`) is a description:
@@ -134,15 +136,15 @@ module Woods
         framework == :rspec ? extract_rspec_subject(source) : extract_minitest_subject(source)
       end
 
-      # Extract subject class from the first describe in an RSpec file.
+      # Extract the subject from the first describe or feature in an RSpec file.
       #
       # Scans line by line and takes the file's FIRST describe, whatever its
       # form — constant reference (describe User do, RSpec.describe User,
       # type: :model do) or string (describe 'User' do). An inner
       # `describe 'validations'` nested under a constant-form outer describe
       # must never become the subject: it would mint a phantom graph node and
-      # lose the real coverage edge. Handles both RSpec.describe and bare
-      # describe.
+      # lose the real coverage edge. Handles RSpec.describe, bare describe,
+      # and their feature forms.
       #
       # @param source [String] RSpec file source code
       # @return [String, nil]
