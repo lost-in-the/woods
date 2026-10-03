@@ -2,15 +2,20 @@
 
 require 'set'
 require 'strscan'
+require_relative 'helper_catalog'
+require_relative '../source_file'
 
 module Woods
   module Extractors
-    # Finds calls to application helper methods in Ruby source.
+    # Finds calls to application helper methods in Ruby source and turns
+    # them into dependency edges.
     #
     # Rails mixes every helper module into every view, so a template calls
     # `pretty_date(x)` without naming `DateHelper`. {.method_calls} is the
     # scan half of closing that gap: one token pass over a source against a
-    # Set of catalog names. Each token is read once, and every pattern is
+    # Set of catalog names. {.resolve} is the other half: it asks the
+    # {HelperCatalog} which module or controller each called name belongs to.
+    # {.annotate} does both for a class-based unit. Each token is read once, and every pattern is
     # anchored at the scanner position, so the pass is linear in the source.
     #
     # The pass is lexical, not a parse. It reports a name when it appears as
@@ -54,6 +59,8 @@ module Woods
 
       # The view-context proxy controllers and components call helpers on.
       HELPERS_PROXY = 'helpers'
+      HELPERS_DELEGATION = /\bto:\s*+:helpers\b/
+      SYMBOL_NAME = /:([A-Za-z_]\w*+[?!]?)/
 
       class << self
         # @param code [String] Ruby source (for a template: its Ruby regions)
@@ -63,6 +70,130 @@ module Woods
         #   each sorted: receiverless calls and `helpers.` calls
         def method_calls(code, names, locals: [])
           new(code, names, locals).method_calls
+        end
+
+        # Turn scanned calls into edges and metadata.
+        #
+        # A template (no `includer`) resolves every call through `context`,
+        # its owning controller or mailer. A class resolves `helpers.` calls
+        # the same way, and a receiverless call only when the class includes
+        # the helper module that defines the name.
+        #
+        # @param catalog [HelperCatalog]
+        # @param calls [Hash{Symbol => Array<String>}] {.method_calls} result
+        # @param context [Class, nil] controller or mailer whose helpers apply
+        # @param includer [Class, nil] the class whose source was scanned
+        # @return [Hash] `{ dependencies: Array<Hash>, metadata: Hash }`.
+        #   Metadata keys, each present only when non-empty: `:helper_calls`
+        #   (module => names), `:helper_method_calls` (controller => names),
+        #   `:ambiguous_helper_calls` (name => candidate modules).
+        def resolve(catalog, calls, context: nil, includer: nil)
+          resolved = calls[:explicit].to_h { |name| [name, catalog.resolve(name, context)] }
+          calls[:bare].each do |name|
+            edges = includer ? catalog.resolve_included(name, includer) : catalog.resolve(name, context)
+            resolved[name] = (resolved.fetch(name, []) + edges).uniq
+          end
+          { dependencies: dependencies(resolved), metadata: metadata(resolved) }
+        end
+
+        # Add a {.resolve} result to a unit. A unit with no helper calls is
+        # left untouched, key for key.
+        #
+        # @param unit [ExtractedUnit]
+        # @param resolution [Hash] {.resolve} result
+        # @return [ExtractedUnit]
+        def apply(unit, resolution)
+          unit.dependencies = (unit.dependencies + resolution[:dependencies]).uniq do |dependency|
+            dependency.values_at(:type, :target, :via)
+          end
+          unit.metadata = unit.metadata.merge(resolution[:metadata])
+          unit
+        end
+
+        # Entry point for the class-based extractors (controllers, mailers,
+        # Phlex components, view components): scan the unit's source, and a
+        # view component's sidecar template, then add the helper edges. A
+        # controller or mailer also lists the helper methods it declares.
+        #
+        # @param extractor [Object] the calling extractor; it carries the
+        #   catalog for the run
+        # @param unit [ExtractedUnit]
+        # @param klass [Class] the class the unit describes
+        # @return [ExtractedUnit]
+        def annotate(extractor, unit, klass)
+          catalog = catalog_for(extractor)
+          return unit if catalog.names.empty?
+
+          calls = class_calls(catalog, unit)
+          context = klass.respond_to?(:_helpers) ? klass : nil
+          apply(unit, resolve(catalog, calls, context: context, includer: klass))
+          declared = catalog.declared_helper_methods(klass)
+          unit.metadata = unit.metadata.merge(helper_methods: declared) if declared.any?
+          unit
+        end
+
+        private
+
+        def catalog_for(extractor)
+          extractor.instance_variable_get(:@helper_catalog) ||
+            extractor.instance_variable_set(:@helper_catalog, HelperCatalog.new)
+        end
+
+        def class_calls(catalog, unit)
+          source = unit.source_code.to_s
+          calls = method_calls(source, catalog.names)
+          sidecar = sidecar_calls(catalog, unit.metadata[:sidecar_template])
+          { bare: calls[:bare] | sidecar[:bare],
+            explicit: (calls[:explicit] | sidecar[:explicit] | proxy_declarations(source, catalog.names)).sort }
+        end
+
+        # Names a class routes to the helpers proxy by declaration:
+        # `use_helpers :a, :b` and `delegate :a, to: :helpers`.
+        def proxy_declarations(source, names)
+          source.each_line.flat_map do |line|
+            next [] unless line.include?('use_helpers') ||
+                           (line.include?('delegate') && line.match?(HELPERS_DELEGATION))
+
+            line.scan(SYMBOL_NAME).flatten.select { |name| names.include?(name) }
+          end.uniq
+        end
+
+        def sidecar_calls(catalog, relative_path)
+          path = relative_path && File.join(catalog.root, relative_path)
+          engine = path && sidecar_engines.find { |candidate| candidate.handles?(path) }
+          return { bare: [], explicit: [] } unless engine && File.file?(path)
+
+          engine.scan_method_calls(SourceFile.read(path), catalog.names)
+        end
+
+        def sidecar_engines
+          require_relative 'view_engines/haml'
+          @sidecar_engines ||= [ViewEngines::Erb.new, ViewEngines::Haml.new]
+        end
+
+        def dependencies(resolved)
+          resolved.values.flatten(1).map { |edge| edge.slice(:type, :target, :via) }.uniq
+                  .sort_by { |edge| [edge[:via].to_s, edge[:target]] }
+        end
+
+        def metadata(resolved)
+          { helper_calls: names_by_target(resolved, :helper_call),
+            helper_method_calls: names_by_target(resolved, :helper_method),
+            ambiguous_helper_calls: ambiguous(resolved) }.reject { |_key, value| value.empty? }
+        end
+
+        def names_by_target(resolved, via)
+          pairs = resolved.flat_map do |name, edges|
+            edges.select { |edge| edge[:via] == via }.map { |edge| [edge[:target], name] }
+          end
+          pairs.group_by(&:first).sort.to_h { |target, group| [target, group.map(&:last).sort] }
+        end
+
+        def ambiguous(resolved)
+          resolved.sort.each_with_object({}) do |(name, edges), found|
+            targets = edges.select { |edge| edge[:ambiguous] }.map { |edge| edge[:target] }
+            found[name] = targets.sort if targets.any?
+          end
         end
       end
 

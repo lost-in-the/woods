@@ -76,6 +76,9 @@ module Woods
         end
       end
 
+      # @return [String] absolute application root
+      attr_reader :root
+
       # @param root [Pathname, String] application root
       # @param contexts [Array<Class>, nil] controller and mailer classes;
       #   discovered from the runtime when nil

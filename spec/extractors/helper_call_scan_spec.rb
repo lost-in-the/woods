@@ -2,7 +2,12 @@
 
 require 'spec_helper'
 require 'set'
+require 'tmpdir'
+require 'fileutils'
+require 'woods'
+require 'woods/extracted_unit'
 require 'woods/extractors/helper_call_scan'
+require 'woods/extractors/helper_catalog'
 
 RSpec.describe Woods::Extractors::HelperCallScan do
   describe '.method_calls' do
@@ -116,6 +121,163 @@ RSpec.describe Woods::Extractors::HelperCallScan do
 
     it 'scans source that is not valid UTF-8' do
       expect(calls("pretty_date \xFF title".dup.force_encoding(Encoding::UTF_8))[:bare]).to eq(%w[pretty_date title])
+    end
+  end
+
+  describe 'edges and metadata' do
+    include_context 'extractor setup'
+
+    let(:application_helpers) { Module.new { def current_session = nil } }
+    let(:application) { context_class('ApplicationController', helpers: application_helpers) }
+    let(:widgets_helpers) do
+      inherited = application_helpers
+      Module.new do
+        include inherited
+
+        def current_widget = nil
+      end
+    end
+    let(:widgets) { context_class('WidgetsController', parent: application, helpers: widgets_helpers) }
+    let(:catalog) do
+      Woods::Extractors::HelperCatalog.new(root: rails_root, contexts: [application, widgets],
+                                           default_context: application)
+    end
+
+    def context_class(name, parent: Object, helpers: Module.new)
+      Class.new(parent) do
+        define_singleton_method(:name) { name }
+        define_singleton_method(:_helpers) { helpers }
+      end
+    end
+
+    def unit_for(source, type: :view_template, identifier: 'widgets/show.html.erb')
+      Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: '/x').tap do |unit|
+        unit.source_code = source
+        unit.metadata = { loc: 1 }
+        unit.dependencies = [{ type: :controller, target: 'WidgetsController', via: :view_render }]
+      end
+    end
+
+    before do
+      create_file('app/helpers/date_helper.rb',
+                  "module DateHelper\n  def pretty_date(v) = v\n  def short_date(v) = v\nend\n")
+      create_file('app/helpers/widgets_helper.rb', "module WidgetsHelper\n  def label_for(w) = w\nend\n")
+      create_file('app/helpers/ledgers_helper.rb', "module LedgersHelper\n  def label_for(l) = l\nend\n")
+    end
+
+    after do
+      %i[ScanBadgeHelper].each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) }
+    end
+
+    describe '.resolve' do
+      it 'groups called names under the module that defines them' do
+        calls = { bare: %w[pretty_date short_date], explicit: [] }
+
+        expect(described_class.resolve(catalog, calls, context: widgets)).to eq(
+          dependencies: [{ type: :poro, target: 'DateHelper', via: :helper_call }],
+          metadata: { helper_calls: { 'DateHelper' => %w[pretty_date short_date] } }
+        )
+      end
+
+      it 'links a helper_method name to the controller that declares it' do
+        calls = { bare: %w[current_session current_widget], explicit: [] }
+
+        expect(described_class.resolve(catalog, calls, context: widgets)).to eq(
+          dependencies: [{ type: :controller, target: 'ApplicationController', via: :helper_method },
+                         { type: :controller, target: 'WidgetsController', via: :helper_method }],
+          metadata: { helper_method_calls: { 'ApplicationController' => %w[current_session],
+                                             'WidgetsController' => %w[current_widget] } }
+        )
+      end
+
+      it 'links an ambiguous name to every candidate and records the ambiguity' do
+        result = described_class.resolve(catalog, { bare: %w[label_for], explicit: [] }, context: widgets)
+
+        expect(result[:dependencies]).to eq([{ type: :poro, target: 'LedgersHelper', via: :helper_call },
+                                             { type: :poro, target: 'WidgetsHelper', via: :helper_call }])
+        expect(result[:metadata]).to eq(
+          helper_calls: { 'LedgersHelper' => %w[label_for], 'WidgetsHelper' => %w[label_for] },
+          ambiguous_helper_calls: { 'label_for' => %w[LedgersHelper WidgetsHelper] }
+        )
+      end
+
+      it 'returns nothing to add when no call resolves' do
+        expect(described_class.resolve(catalog, { bare: [], explicit: [] }, context: widgets))
+          .to eq(dependencies: [], metadata: {})
+      end
+
+      it 'resolves only included helper modules for a receiverless call in a class' do
+        load create_file('app/helpers/scan_badge_helper.rb', "module ScanBadgeHelper\n  def badge(w) = w\nend\n")
+        component = Class.new { include ScanBadgeHelper }
+        calls = { bare: %w[badge pretty_date], explicit: %w[short_date] }
+
+        expect(described_class.resolve(catalog, calls, includer: component)).to eq(
+          dependencies: [{ type: :poro, target: 'DateHelper', via: :helper_call },
+                         { type: :poro, target: 'ScanBadgeHelper', via: :helper_call }],
+          metadata: { helper_calls: { 'DateHelper' => %w[short_date], 'ScanBadgeHelper' => %w[badge] } }
+        )
+      end
+    end
+
+    describe '.apply' do
+      it 'appends the edges and merges the metadata into the unit' do
+        unit = unit_for('<%= pretty_date(x) %>')
+        resolution = described_class.resolve(catalog, { bare: %w[pretty_date], explicit: [] }, context: widgets)
+        described_class.apply(unit, resolution)
+
+        expect(unit.dependencies).to eq([{ type: :controller, target: 'WidgetsController', via: :view_render },
+                                         { type: :poro, target: 'DateHelper', via: :helper_call }])
+        expect(unit.metadata).to eq(loc: 1, helper_calls: { 'DateHelper' => %w[pretty_date] })
+      end
+
+      it 'leaves a unit with no helper calls exactly as it was' do
+        unit = unit_for('<p>static</p>')
+        described_class.apply(unit, dependencies: [], metadata: {})
+
+        expect(unit.metadata).to eq(loc: 1)
+        expect(unit.dependencies.size).to eq(1)
+      end
+    end
+
+    describe '.annotate' do
+      let(:extractor) { Object.new.tap { |object| object.instance_variable_set(:@helper_catalog, catalog) } }
+
+      it 'links helpers-proxy calls in a controller and lists the helper methods it declares' do
+        unit = unit_for("class WidgetsController\n  def show = helpers.pretty_date(1)\n  def title = short_date\nend",
+                        type: :controller, identifier: 'WidgetsController')
+        described_class.annotate(extractor, unit, widgets)
+
+        expect(unit.dependencies).to include({ type: :poro, target: 'DateHelper', via: :helper_call })
+        expect(unit.metadata).to eq(loc: 1, helper_calls: { 'DateHelper' => %w[pretty_date] },
+                                    helper_methods: %w[current_widget])
+      end
+
+      it 'reads use_helpers and helpers delegation in a component as proxy calls' do
+        source = "class BadgeComponent\n  use_helpers :pretty_date\n  delegate :short_date, :other, to: :helpers\nend"
+        unit = unit_for(source, type: :view_component, identifier: 'BadgeComponent')
+        described_class.annotate(extractor, unit, Class.new)
+
+        expect(unit.metadata[:helper_calls]).to eq('DateHelper' => %w[pretty_date short_date])
+        expect(unit.metadata).not_to have_key(:helper_methods)
+      end
+
+      it 'reads the sidecar template of a view component' do
+        create_file('app/components/badge_component.html.erb',
+                    '<p><%= helpers.pretty_date(@at) %> pretty short_date</p>')
+        unit = unit_for('class BadgeComponent; end', type: :view_component, identifier: 'BadgeComponent')
+        unit.metadata[:sidecar_template] = 'app/components/badge_component.html.erb'
+        described_class.annotate(extractor, unit, Class.new)
+
+        expect(unit.metadata[:helper_calls]).to eq('DateHelper' => %w[pretty_date])
+      end
+
+      it 'builds one catalog per extractor' do
+        fresh = Object.new
+        allow(Woods::Extractors::HelperCatalog).to receive(:new).and_return(catalog)
+        2.times { described_class.annotate(fresh, unit_for('x', type: :controller), widgets) }
+
+        expect(Woods::Extractors::HelperCatalog).to have_received(:new).once
+      end
     end
   end
 end
