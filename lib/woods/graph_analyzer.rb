@@ -78,7 +78,8 @@ module Woods
     def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO, volatile_limit_per_target: nil,
                    cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH,
                    controller_resolver: nil)
-      @graph = dependency_graph
+      # Documentation units are not structure: see DependencyGraph#structural_graph.
+      @graph = dependency_graph.respond_to?(:structural_graph) ? dependency_graph.structural_graph : dependency_graph
       @controller_resolver = controller_resolver
       @volatile_ratio = volatile_ratio.to_f
       @volatile_limit_per_target = volatile_limit_per_target
