@@ -48,7 +48,7 @@ module Woods
 
       # @return [Result] complete dependency replacements and next cache
       def call
-        raise_rebuild('reference cache is missing') if !@full && !@baseline
+        verify_baseline! unless @full
 
         @inputs = Inputs.new(root: @root, session: @session, collector: @collector)
         @files = @inputs.call(units: @units, baseline: @baseline, fresh: method(:fresh?), extractor_keys: @keys)
@@ -59,6 +59,13 @@ module Woods
       end
 
       private
+
+      # Edges the previous policy added stay in retained units, so a changed
+      # policy cannot be applied to them piecemeal.
+      def verify_baseline!
+        raise_rebuild('reference cache is missing') unless @baseline
+        raise_rebuild('source_reference_callers changed') unless @baseline['callers'] == @policy.to_h
+      end
 
       def build_result
         dependencies = {}
@@ -76,7 +83,7 @@ module Woods
           owner_record(unit, path, additions)
         end
         owners.sort_by! { |owner| [owner['type'], owner['identifier']] }
-        cache = { 'version' => Cache::VERSION, 'files' => @files, 'owners' => owners }
+        cache = { 'version' => Cache::VERSION, 'callers' => @policy.to_h, 'files' => @files, 'owners' => owners }
         Result.new(dependencies: dependencies, cache: cache, paths: @files.keys)
       end
 
@@ -141,8 +148,7 @@ module Woods
         records = @files.dig(path, 'analysis', 'references') || []
         owned = records.select { |reference| reference['owner'] == unit['identifier'] }
         edges = owned.filter_map { |reference| @registry.resolve(reference, file_path: path) }
-        edges.map! { |edge| normalize_edge(edge) }
-        edges.select! { |edge| @policy.permits?(unit['type'], edge['type']) }
+        edges = edges.map { |edge| normalize_edge(edge) }.select { |edge| @policy.permits?(unit['type'], edge['type']) }
         edges.uniq.sort_by { |edge| [edge['type'], edge['target'], edge['via']] }
       end
 

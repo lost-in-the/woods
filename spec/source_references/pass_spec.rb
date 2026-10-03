@@ -65,6 +65,26 @@ RSpec.describe Woods::SourceReferences::Pass do
     end
   end
 
+  it 'records the caller policy in the cache' do
+    expect(run_pass.cache.fetch('callers')).to eq(policy.to_h)
+  end
+
+  it 'requires a rebuild when the caller policy differs from the one that produced the baseline' do
+    initial = run_pass
+    narrowed = Woods::SourceReferences::CallerPolicy.new(poro: %i[lib])
+    expect { run_pass(baseline: initial.cache, full: false, policy: narrowed) }.to raise_error(
+      Woods::SourceReferences::RebuildRequired, /source_reference_callers changed.*woods:extract/m
+    )
+  end
+
+  it 'rebuilds from a full extraction whatever policy the baseline recorded' do
+    initial = run_pass
+    narrowed = Woods::SourceReferences::CallerPolicy.new(poro: %i[lib])
+    result = run_pass(baseline: initial.cache, full: true, policy: narrowed)
+    expect(result.cache.fetch('callers')).to eq(narrowed.to_h)
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+  end
+
   context 'with a caller policy that narrows targets' do
     let(:policy) { Woods::SourceReferences::CallerPolicy.new(poro: %i[lib]) }
 

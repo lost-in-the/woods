@@ -217,7 +217,8 @@ RSpec.describe 'Source-reference extraction integration' do
     extractor.send(:prepare_source_reference_baseline)
     extractor.send(:enrich_source_references_incremental, Set.new)
     cache = Woods::SourceReferences::Cache.read(extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME))
-    expect(cache).to eq('version' => Woods::SourceReferences::Cache::VERSION, 'files' => {}, 'owners' => [])
+    expect(cache).to eq('version' => Woods::SourceReferences::Cache::VERSION,
+                        'callers' => Woods::SourceReferences::CallerPolicy.new.to_h, 'files' => {}, 'owners' => [])
   end
 
   it 'fails a capped final scan even when the listed changed paths are unrelated to references' do

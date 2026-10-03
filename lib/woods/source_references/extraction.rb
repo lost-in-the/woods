@@ -53,7 +53,8 @@ module Woods
                 'Source-reference baseline is missing or incompatible. Run bin/rails woods:extract once for a full ' \
                 'extraction; the previous published generation remains active.'
         end
-        @source_reference_baseline = { 'version' => Cache::VERSION, 'files' => {}, 'owners' => [] }
+        @source_reference_baseline = { 'version' => Cache::VERSION, 'callers' => source_reference_policy.to_h,
+                                       'files' => {}, 'owners' => [] }
       end
 
       def source_reference_node?(type, identifier)
