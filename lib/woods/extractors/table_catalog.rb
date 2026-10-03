@@ -107,7 +107,7 @@ module Woods
         end
 
         def table_names(pool)
-          names = pool.with_connection { |connection| connection.tables }
+          names = pool.with_connection(&:tables)
           names.map(&:to_s) - INTERNAL_TABLES
         rescue StandardError => e
           Rails.logger.warn("[Woods] Could not list tables for a database connection: #{e.message}")
