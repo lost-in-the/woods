@@ -48,7 +48,16 @@ module Woods
       #   `:options` (Hash{Symbol => String}), and `:argument_range`
       #   (Range, nil): the byte range of the call's arguments in `source`
       def read(source, offset)
-        call = parse_call(source, offset)
+        describe(parse_call(source, offset), offset)
+      end
+
+      # The same description for a call node already parsed.
+      #
+      # @param call [Prism::CallNode, nil]
+      # @param offset [Integer] Byte offset of the parsed text in the file
+      #   (0 when the whole file was parsed)
+      # @return [Hash] As {.read}
+      def describe(call, offset = 0)
         return { key_pattern: nil, ttl: nil, options: {}, argument_range: nil } unless call
 
         options = keyword_options(call)

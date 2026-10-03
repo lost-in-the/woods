@@ -644,7 +644,7 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       'chained block' => '<%= Rails.cache.fetch(KEY) { 1 }.to_s %>'
     }.each do |shape, template|
       it "reads the key of a call inside a larger expression: #{shape}" do
-        key = '"widget-token-#{current_owner.id}"'
+        key = "\"widget-token-\#{current_owner.id}\""
         calls = calls_for('app/views/widgets/show.html.erb', "#{template.sub('KEY', key)}\n")
 
         expect(calls.map { |c| c[:key_pattern] }).to eq([key])
@@ -656,6 +656,115 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       calls = calls_for('app/views/widgets/index.html.haml', "- cache #{key} do\n  %p hi\n")
 
       expect(calls.first[:key_pattern]).to eq(key[0, 120])
+    end
+  end
+
+  # ── Custom cache stores ──────────────────────────────────────────────
+
+  # A store a file obtains itself (from `.cache_store`,
+  # `ActiveSupport::Cache.lookup_store`, or `ActiveSupport::Cache::*Store.new`)
+  # is a cache like Rails.cache; its calls carry the receiver as :store.
+  describe 'custom cache stores' do
+    def extract(source)
+      described_class.new.extract_caching_file(create_file('app/models/widget.rb', source))
+    end
+
+    it 'records calls on a local assigned from cache_store' do
+      unit = extract(<<~'RUBY')
+        class Widget
+          def sync
+            store = WidgetConnection.cache_store
+            store.write("widget/#{id}", payload, expires_in: 10.minutes)
+            store.fetch("widget/#{id}")
+          end
+        end
+      RUBY
+
+      key = "\"widget/\#{id}\""
+      write = { type: :write, key_pattern: key, ttl: '10.minutes', options: { expires_in: '10.minutes' },
+                store: 'store' }
+      fetch = { type: :fetch, key_pattern: key, ttl: nil, options: {}, store: 'store' }
+      expect(unit.metadata[:cache_calls]).to eq([write, fetch])
+      expect(unit.metadata[:cache_strategy]).to eq(:low_level)
+    end
+
+    it 'records calls on a constant assigned from lookup_store' do
+      unit = extract(<<~'RUBY')
+        class Ledger
+          LEDGER_CACHE = ActiveSupport::Cache.lookup_store(:memory_store)
+          def balance = LEDGER_CACHE.read("ledger/#{id}")
+          def reset = LEDGER_CACHE.delete("ledger/#{id}")
+          def cached? = LEDGER_CACHE.exist?("ledger/#{id}")
+        end
+      RUBY
+
+      calls = unit.metadata[:cache_calls]
+      expect(calls.map { |c| c[:type] }).to eq(%i[read delete exist])
+      expect(calls.map { |c| c[:store] }.uniq).to eq(['LEDGER_CACHE'])
+    end
+
+    it 'records calls on a memoizing method and its ivar' do
+      unit = extract(<<~'RUBY')
+        class Shipment
+          def label_cache
+            @label_cache ||= ActiveSupport::Cache::MemoryStore.new(size: 1.megabyte)
+          end
+
+          def label = label_cache.fetch("shipment/#{id}/label", expires_in: 1.hour) { render_label }
+          def clear = @label_cache.delete("shipment/#{id}/label")
+        end
+      RUBY
+
+      calls = unit.metadata[:cache_calls]
+      expect(calls.map { |c| [c[:type], c[:store], c[:ttl]] }).to eq([[:fetch, 'label_cache', '1.hour'],
+                                                                      [:delete, '@label_cache', nil]])
+    end
+
+    it 'records a call chained straight onto the store expression' do
+      calls = extract("WidgetConnection.cache_store.write('widget/all', 1)\n").metadata[:cache_calls]
+
+      expect(calls).to eq([{ type: :write, key_pattern: "'widget/all'", ttl: nil, options: {},
+                             store: 'WidgetConnection.cache_store' }])
+    end
+
+    it 'orders store calls after Rails.cache calls and excludes a bare key method argument' do
+      calls = extract(<<~RUBY).metadata[:cache_calls]
+        class Widget
+          def totals = Rails.cache.fetch("totals") { compute }
+          def local = (store = WidgetConnection.cache_store).fetch(cache_key)
+        end
+      RUBY
+
+      expect(calls.map { |c| c[:type] }).to eq(%i[fetch fetch])
+      expect(calls.last[:store]).to eq('(store = WidgetConnection.cache_store)')
+    end
+
+    it 'ignores write-like calls on receivers that are not cache stores' do
+      unit = extract(<<~RUBY)
+        class Widget
+          def store = Store.first
+          def settings = Rails.application.config.cache_store
+          def persist
+            record = Store.find(id)
+            record.write("widget", 1)
+            store.fetch("widget")
+            settings.fetch(0)
+          end
+        end
+      RUBY
+
+      expect(unit).to be_nil
+    end
+
+    it 'ignores commented-out store calls' do
+      unit = extract(<<~RUBY)
+        class Widget
+          CACHE = ActiveSupport::Cache.lookup_store(:memory_store)
+          # CACHE.write("widget", 1)
+        end
+      RUBY
+
+      expect(unit).to be_nil
     end
   end
 
@@ -862,6 +971,22 @@ RSpec.describe Woods::Extractors::CachingExtractor do
 
       unit = within_budget { described_class.new.extract_caching_file(path) }
       expect(unit.metadata[:cache_calls].map { |c| c[:key_pattern] }.uniq).to eq(["[@w, '☃']"])
+    end
+
+    store = "CACHE = ActiveSupport::Cache.lookup_store(:memory_store)\n"
+    {
+      'calls on a custom store' => [store + ("CACHE.write('k', 1)\n" * repeats), repeats],
+      'store bindings' => ["#{Array.new(repeats) { |i| "s#{i} = Widget.cache_store\n" }.join}s1.read(1)\n", 1],
+      'deep nesting near a store' => ["#{store}x = #{'[' * 5_000}#{']' * 5_000}\nCACHE.read(1)\n", 1],
+      'a long call chain off a store' => ["#{store}CACHE#{'.itself' * repeats}.read(1)\nCACHE.read(1)\n", 1],
+      'write calls on other receivers' => ["#{store}#{"record.write(1)\n" * repeats}CACHE.read(1)\n", 1]
+    }.each do |label, (source, count)|
+      it "finds custom store calls in linear time: #{label}" do
+        path = create_file('app/models/widget.rb', source)
+
+        unit = within_budget { described_class.new.extract_caching_file(path) }
+        expect(unit.metadata[:cache_calls].size).to eq(count)
+      end
     end
 
     it 'blanks an unclosed ERB comment tag to the end of the file in linear time' do

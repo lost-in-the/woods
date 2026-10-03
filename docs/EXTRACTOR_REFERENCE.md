@@ -883,6 +883,7 @@ namespace.
 **Key details:**
 - Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`, derived from `ViewTemplateExtractor::ENGINES`, so a newly registered engine is scanned too). Slim views are not scanned.
 - Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
+- Records calls on cache stores a Ruby file obtains itself (`Woods::Extractors::CacheStoreCalls`): a local, instance or class variable, constant, or method assigned from `.cache_store`, `ActiveSupport::Cache.lookup_store`, or `ActiveSupport::Cache::*Store.new`, or one of those expressions chained directly. Their `read`, `write`, `fetch`, `delete`, and `exist?` calls are recorded like `Rails.cache` calls, with a `store` field naming the receiver, and count as low-level caching. Binding is per file and by name.
 - Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependencies are still scanned from the full source, as in every other extractor.
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
 - Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):

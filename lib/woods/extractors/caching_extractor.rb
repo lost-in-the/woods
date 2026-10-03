@@ -9,6 +9,7 @@ require_relative 'shared_dependency_scanner'
 require_relative 'template_extensions'
 require_relative 'cache_call_arguments'
 require_relative 'comment_blanking'
+require_relative 'cache_store_calls'
 
 module Woods
   module Extractors
@@ -109,8 +110,9 @@ module Woods
         source = File.read(file_path)
         # Cache calls are read from the code only: commented-out calls never run.
         code = CommentBlanking.blank(source, file_path)
+        store_calls = File.extname(file_path.to_s) == '.rb' ? CacheStoreCalls.find(code) : []
 
-        return nil unless cache_usage?(code)
+        return nil unless cache_usage?(code) || store_calls.any?
 
         file_type ||= infer_file_type(file_path)
         identifier = relative_path(file_path)
@@ -123,7 +125,7 @@ module Woods
 
         unit.namespace   = nil
         unit.source_code = annotate_source(source, identifier, file_type)
-        unit.metadata    = extract_metadata(source, code, file_type)
+        unit.metadata    = extract_metadata(source, code, file_type, store_calls)
         unit.dependencies = extract_dependencies(source)
 
         unit
@@ -177,9 +179,10 @@ module Woods
       # @param source [String] Source code, for the line count
       # @param code [String] Source with comments blanked, for cache calls
       # @param file_type [Symbol] :controller, :model, or :view
+      # @param store_calls [Array<Hash>] Custom store calls, from {CacheStoreCalls.find}
       # @return [Hash] Caching metadata
-      def extract_metadata(source, code, file_type)
-        cache_calls = extract_cache_calls(code)
+      def extract_metadata(source, code, file_type, store_calls = [])
+        cache_calls = extract_cache_calls(code, store_calls)
         {
           cache_calls: cache_calls,
           cache_strategy: infer_cache_strategy(code, cache_calls),
@@ -204,9 +207,13 @@ module Woods
       # (`Rails.cache.fetch([id, "cache me do"])`), so it is dropped too;
       # fragment is the last call type in {CACHE_PATTERNS}.
       #
+      # Custom store calls follow the pattern calls, in source order, and
+      # their arguments count for the bare key method check.
+      #
       # @param source [String] Source code
+      # @param store_calls [Array<Hash>] Custom store calls, from {CacheStoreCalls.find}
       # @return [Array<Hash>] Cache call descriptors
-      def extract_cache_calls(source)
+      def extract_cache_calls(source, store_calls = [])
         key_patterns, call_patterns = CACHE_PATTERNS.partition { |type, _| KEY_METHOD_TYPES.include?(type) }
         calls = []
         argument_ranges = []
@@ -221,6 +228,13 @@ module Woods
             argument_ranges << range if range
             calls << { type: type }.merge(arguments)
           end
+        end
+
+        store_calls.each do |call|
+          call = call.dup
+          range = call.delete(:argument_range)
+          argument_ranges << range if range
+          calls << call
         end
 
         spans = merge_ranges(argument_ranges)
@@ -307,10 +321,10 @@ module Woods
       # @param source [String] Source code
       # @param cache_calls [Array<Hash>] Extracted cache calls
       # @return [Symbol] :fragment, :action, :low_level, or :mixed
-      def infer_cache_strategy(source, _cache_calls)
+      def infer_cache_strategy(source, cache_calls)
         has_action    = source.match?(CACHE_PATTERNS[:caches_action])
         has_fragment  = source.match?(CACHE_PATTERNS[:fragment])
-        has_low_level = source.match?(/Rails\.cache\.(?:fetch|read|write)/)
+        has_low_level = source.match?(/Rails\.cache\.(?:fetch|read|write)/) || cache_calls.any? { |call| call.key?(:store) }
 
         active_strategies = [has_action, has_fragment, has_low_level].count(true)
 
