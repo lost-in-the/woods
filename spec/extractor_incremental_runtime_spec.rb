@@ -21,9 +21,10 @@ RSpec.describe 'incremental runtime inputs' do
 
   describe 'hybrid runtime refresh selection' do
     %w[app/models/queue_settings.rb lib/runtime_settings.rb].each do |path|
-      it "refreshes both runtime families after changing #{path} without recorded dependencies" do
+      it "refreshes the hybrid and runtime-resolved families after changing #{path} without recorded dependencies" do
         changes = Woods::ChangeSet.new(paths: [path], root: @root)
-        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
+        expect(extractor.send(:hybrid_discovery_keys, changes, []))
+          .to eq(Set[:jobs, :serializers, :components, :view_components])
       end
     end
 
