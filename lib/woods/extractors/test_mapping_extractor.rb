@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'test_route_resolver'
 require_relative 'test_support_catalog'
 
 module Woods
@@ -22,6 +23,10 @@ module Woods
     # resolved through {TestSupportCatalog}, so a unit depends on the support
     # files as well as its own: a support change re-runs this extractor
     # wholesale.
+    #
+    # Feature, system and request tests are also linked to the routes they
+    # navigate (:exercises_route), see {TestRouteResolver}. That makes this
+    # extractor a route consumer: a routes change re-runs it too.
     #
     # @example
     #   extractor = TestMappingExtractor.new
@@ -61,8 +66,11 @@ module Woods
 
       # Outside a typed directory, the first example group's `type:` metadata
       # or a Capybara `feature` block decides the test type.
-      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system)\b/
+      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system|request)\b/
       RSPEC_FEATURE_GROUP = /^\s*(?:RSpec\.)?feature\s/
+
+      # Test types that drive the app through its routes.
+      NAVIGATING_TEST_TYPES = %i[feature system request].freeze
 
       def initialize
         @rails_root = Rails.root
@@ -94,8 +102,10 @@ module Woods
         support = @support_catalog.references(source)
         unit.source_code = source
         unit.metadata = extract_metadata(source, file_path, framework).merge(support_metadata(support))
+        unit.metadata[:routes_exercised] = routes_exercised(source, unit.metadata[:test_type])
         unit.dependencies = consolidate_dependencies(
-          extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type]), support.dependencies
+          extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type]), support.dependencies,
+          unit.metadata[:routes_exercised].map { |route| { type: :route, target: route, via: :exercises_route } }
         )
 
         unit
@@ -143,6 +153,17 @@ module Woods
         }
         metadata[:description] = subject if subject && !subject_class
         metadata
+      end
+
+      # Routes a navigating test exercises; other test types are not scanned.
+      #
+      # @param source [String] File source code
+      # @param test_type [Symbol]
+      # @return [Array<String>] sorted route unit identifiers
+      def routes_exercised(source, test_type)
+        return [] unless NAVIGATING_TEST_TYPES.include?(test_type)
+
+        (@route_resolver ||= TestRouteResolver.new).exercised(source)
       end
 
       # Names of the test support this file refers to, as written. A name is
@@ -275,7 +296,7 @@ module Woods
       # Read the test type the first example group declares.
       #
       # @param source [String] File source code
-      # @return [Symbol] :feature, :system, or :unit when nothing is declared
+      # @return [Symbol] :feature, :system, :request, or :unit when nothing is declared
       def declared_test_type(source)
         group = first_example_group(source)
         return :unit unless group

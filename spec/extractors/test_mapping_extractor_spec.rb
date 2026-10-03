@@ -799,6 +799,95 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
     end
   end
 
+  # ── Routes exercised ────────────────────────────────────────────────
+
+  describe 'routes exercised' do
+    before do
+      stub_route_set(
+        [route_double(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index', name: 'widgets'),
+         route_double(verb: 'POST', path: '/widgets', controller: 'widgets', action: 'create'),
+         route_double(verb: 'GET', path: '/widgets/:id', controller: 'widgets', action: 'show', name: 'widget')],
+        root: rails_root, logger: logger
+      )
+    end
+
+    def route_edges(unit)
+      unit.dependencies.select { |dep| dep[:via] == :exercises_route }
+    end
+
+    it 'links a feature spec to the routes it visits' do
+      path = create_file('spec/features/widgets_spec.rb', <<~RUBY)
+        RSpec.feature 'Widgets' do
+          scenario 'browsing' do
+            visit widgets_path
+            visit "/widgets/\#{widget.id}"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(route_edges(unit)).to eq(
+        [{ type: :route, target: 'GET /widgets', via: :exercises_route },
+         { type: :route, target: 'GET /widgets/:id', via: :exercises_route }]
+      )
+      expect(unit.metadata[:routes_exercised]).to eq(['GET /widgets', 'GET /widgets/:id'])
+    end
+
+    it 'links a request spec by verb' do
+      path = create_file('spec/requests/widgets_spec.rb', <<~RUBY)
+        RSpec.describe 'Widgets API' do
+          it 'creates' do
+            post widgets_path, params: {}
+          end
+        end
+      RUBY
+
+      expect(route_edges(described_class.new.extract_test_file(path)).map { |dep| dep[:target] })
+        .to eq(['POST /widgets'])
+    end
+
+    it 'links system specs and Minitest integration and system tests' do
+      spec = create_file('spec/system/widgets_spec.rb',
+                         "RSpec.describe 'Widgets' do\n  it('x') { visit widgets_path }\nend\n")
+      integration = create_file('test/integration/widgets_test.rb', <<~RUBY)
+        class WidgetsTest < ActionDispatch::IntegrationTest
+          test "index" do
+            get widgets_url
+          end
+        end
+      RUBY
+
+      [spec, integration].each do |file|
+        expect(route_edges(described_class.new.extract_test_file(file)).map { |dep| dep[:target] })
+          .to eq(['GET /widgets'])
+      end
+    end
+
+    it 'honors a request type declared on the first example group' do
+      path = create_file('spec/api/widgets_spec.rb', <<~RUBY)
+        RSpec.describe 'Widgets API', type: :request do
+          it('lists') { get "/widgets" }
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(unit.metadata[:test_type]).to eq(:request)
+      expect(unit.metadata[:routes_exercised]).to eq(['GET /widgets'])
+    end
+
+    it 'does not scan other test types' do
+      path = create_file('spec/controllers/widgets_controller_spec.rb', <<~RUBY)
+        RSpec.describe WidgetsController do
+          it('lists') { get "/widgets" }
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(route_edges(unit)).to eq([])
+      expect(unit.metadata[:routes_exercised]).to eq([])
+    end
+  end
+
   # ── Serialization round-trip ────────────────────────────────────────
 
   describe 'serialization' do
