@@ -48,10 +48,18 @@ module Woods
       # mapped to the metadata list each one feeds.
       IDENTITY_KEYWORDS = { 'scope' => :scopes, 'event' => :sub_events }.freeze
 
+      # Wall-clock budget for one match of a configured pattern. The patterns
+      # are user-supplied, so a catastrophic one must not hang extraction.
+      # Ruby 3.2+ enforces it at the engine level (Regexp.new(timeout:)); on
+      # older Rubies patterns compile without one and this constant is unused.
+      CONFIGURED_PATTERN_TIMEOUT = 1.0
+
       def initialize
         roots = Woods.configuration&.event_paths || APP_DIRECTORIES
         @directories = roots.map { |d| Rails.root.join(d) }.select(&:directory?)
-        @configured_patterns = Woods.configuration&.event_patterns || []
+        @configured_patterns = (Woods.configuration&.event_patterns || []).each_with_index.map do |entry, index|
+          entry.merge(pattern: bounded_pattern(entry[:pattern]), index: index)
+        end
       end
 
       # Extract all event units using a two-pass approach.
@@ -130,7 +138,10 @@ module Woods
           # no subscriber naming the event either, the event unit did not
           # exist at all (EXTB-3). The AS::Notifications and `.on(` scans
           # already accept parens.
-          source.scan(/\b(?:publish|broadcast)\s*\(?\s*:(\w+)/) do |m|
+          # One whitespace run per side of the optional paren: `\s*\(?\s*`
+          # let both runs split the same spaces, quadratic without the
+          # Ruby 3.2+ match cache.
+          source.scan(/\b(?:publish|broadcast)\s*(?:\(\s*)?:(\w+)/) do |m|
             register_publisher(event_map, m[0], file_path, :wisper)
           end
         end
@@ -152,7 +163,9 @@ module Woods
       #
       # The event name is the +(?<name>...)+ capture when the pattern has one,
       # else the first capture group. A match whose name capture did not
-      # participate names no event and is skipped.
+      # participate names no event and is skipped. A pattern that exceeds
+      # {CONFIGURED_PATTERN_TIMEOUT} is logged and contributes nothing for
+      # this file; the other patterns still run.
       #
       # @param source [String] Ruby source code
       # @param file_path [String] File path
@@ -162,8 +175,10 @@ module Woods
         tree = nil
         @configured_patterns.each do |entry|
           named = entry[:pattern].names.include?('name')
-          source.scan(entry[:pattern]) do
-            match = Regexp.last_match
+          matches = configured_matches(entry, source, file_path)
+          next unless matches
+
+          matches.each do |match|
             event_name = named ? match[:name] : match[1]
             next if event_name.nil? || event_name.empty?
 
@@ -176,6 +191,42 @@ module Woods
             record_identity(event_map[event_name], match, tree, source)
           end
         end
+      end
+
+      # Every match of one configured pattern, or nil when it timed out.
+      #
+      # @param entry [Hash] Configured pattern entry
+      # @param source [String] Ruby source code
+      # @param file_path [String] File path
+      # @return [Array<MatchData>, nil]
+      def configured_matches(entry, source, file_path)
+        matches = []
+        source.scan(entry[:pattern]) { matches << Regexp.last_match }
+        matches
+      rescue StandardError => e
+        raise unless regexp_timeout_error?(e)
+
+        SourceInputs::ConsumerErrors.log(
+          self, "event_patterns[#{entry[:index]}] (#{entry[:system]}) timed out on #{file_path}; skipped for this file"
+        )
+        nil
+      end
+
+      # @param pattern [Regexp] A configured pattern
+      # @return [Regexp] The pattern with a per-match time limit where supported
+      def bounded_pattern(pattern)
+        return pattern unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+
+        Regexp.new(pattern, timeout: CONFIGURED_PATTERN_TIMEOUT)
+      end
+
+      # Regexp::TimeoutError does not exist before Ruby 3.2, so it is matched
+      # through a defined? check rather than named in a rescue clause.
+      #
+      # @param error [StandardError]
+      # @return [Boolean]
+      def regexp_timeout_error?(error)
+        defined?(Regexp::TimeoutError) && error.is_a?(Regexp::TimeoutError)
       end
 
       # Record a match's +(?<scope>...)+ capture and the matched call's

@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 require 'active_support/core_ext/object/blank'
 require 'woods/model_name_cache'
 require 'woods/extractors/shared_utility_methods'
@@ -879,6 +880,71 @@ RSpec.describe Woods::Extractors::EventExtractor do
       create_file('app/services/ledger_service.rb', 'ActiveSupport::Notifications.instrument("ledger.settled")')
 
       expect(described_class.new.extract_all.map(&:identifier)).to eq(['ledger.settled'])
+    end
+  end
+
+  # ── Regex complexity ─────────────────────────────────────────────────
+
+  describe 'built-in patterns on adversarial input' do
+    # Ruby 3.2+ memoizes backtracking, so a quadratic shape only shows on the
+    # 3.0/3.1 rows, where the Timeout watchdog trips instead.
+    def within_regexp_budget(&block)
+      return Timeout.timeout(5, &block) unless Regexp.respond_to?(:timeout=)
+
+      previous = Regexp.timeout
+      Regexp.timeout = 1.0
+      begin
+        block.call
+      ensure
+        Regexp.timeout = previous
+      end
+    end
+
+    run = ' ' * 100_000
+    {
+      'an instrument call with no argument list' => "ActiveSupport::Notifications.instrument#{run}x",
+      'an instrument call with an unterminated name' => "ActiveSupport::Notifications.instrument(\"#{'a' * 100_000}",
+      'a subscribe call with no argument list' => "ActiveSupport::Notifications.subscribe#{run}x",
+      'a Wisper publish with no event symbol' => "include Wisper\npublish#{run}x",
+      'a Wisper broadcast with no event symbol' => "include Wisper\nbroadcast(#{run}x",
+      'a Wisper .on with no event symbol' => "Wisper\nwidget.on#{run}x",
+      'an include with no Wisper' => "include#{run}x"
+    }.each do |shape, adversarial|
+      it "scans #{shape} in linear time" do
+        create_file('app/services/widget_service.rb', "ActiveSupport::Notifications.instrument('widget.made')\n#{adversarial}\n")
+        extractor = described_class.new
+
+        units = within_regexp_budget { extractor.extract_all }
+
+        expect(units.map(&:identifier)).to eq(['widget.made'])
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
+      end
+    end
+  end
+
+  describe 'a configured pattern that backtracks catastrophically' do
+    before do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /Ledger\.emit\(((?:a|a)*)\1"/, system: :ledger },
+        { role: :publisher, pattern: /Tally\.record\(\s*"([^"]+)"/, system: :tally }
+      ]
+    end
+
+    it 'is skipped for that file after its time limit, keeping the other patterns' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      create_file('app/services/ledger_service.rb', <<~SRC)
+        Ledger.emit(#{'a' * 40}!
+        Tally.record("checkout.completed")
+      SRC
+
+      units = Timeout.timeout(10) { described_class.new.extract_all }
+
+      expect(units.map(&:identifier)).to eq(['checkout.completed'])
+      expect(logger).to have_received(:error).with(/event_patterns\[0\] \(ledger\) timed out on .*ledger_service\.rb/)
     end
   end
 

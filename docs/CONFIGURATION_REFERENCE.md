@@ -827,6 +827,15 @@ group, a pattern with named groups but no `(?<name>...)`, or a `system` that is
 not a `Symbol` raises `Woods::ConfigurationError`.
 The previous value is kept.
 
+**You own your pattern's complexity.** Woods runs each pattern over every
+scanned file as written. Avoid shapes that backtrack polynomially: an
+unanchored quantified run followed by something that can fail, or adjacent
+quantifiers that match the same characters (`\s*\(?\s*`). On Ruby 3.2+ each
+configured pattern carries a 1-second per-match limit. A pattern that exceeds
+it is logged, contributes nothing for that file, and the other patterns still
+run. Older Rubies have no engine-level limit, so a catastrophic pattern there
+stalls extraction.
+
 **The system label is metadata, not identity.** An event unit's identifier is
 the event name alone, so existing identifiers never change. When patterns are
 configured, every event unit also carries `metadata.systems`: each system that
