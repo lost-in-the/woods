@@ -17,6 +17,8 @@ RSpec.describe 'Application-owned optional extraction', :booted_app do
       'ownership full/incremental equivalence',
       'component and mailer edits full/incremental equivalence',
       'component and mailer refresh equivalence',
+      'a sidecar template edit retargets its component',
+      'sidecar template edit full/incremental equivalence',
       'conflicting schedules retain jobs and qualified identities',
       'schedule collision addition equivalence',
       'schedule refresh equivalence',

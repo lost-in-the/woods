@@ -3010,9 +3010,22 @@ module Woods
         return (HYBRID_DISCOVERY_EXTRACTORS + RUNTIME_RESOLVED_EXTRACTORS).to_set
       end
 
-      affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
-                  .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
-                  .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
+      keys = affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
+                         .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
+                         .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
+      keys.add(:view_components) if change_set.absolute_paths.any? { |path| sidecar_template?(path) }
+      keys
+    end
+
+    # A view component's render edges are read from its sidecar templates too,
+    # and the graph records only the component's Ruby file. A template is a
+    # sidecar when a Ruby file of the same name sits beside it, or names the
+    # directory it is in.
+    def sidecar_template?(path)
+      return false unless Extractors::TemplateExtensions::SCANNED.any? { |extension| path.end_with?(extension) }
+
+      directory = File.dirname(path)
+      File.exist?(File.join(directory, "#{File.basename(path)[/\A[^.]+/]}.rb")) || File.exist?("#{directory}.rb")
     end
 
     # Re-extract every file-based unit defined by the changed paths that still

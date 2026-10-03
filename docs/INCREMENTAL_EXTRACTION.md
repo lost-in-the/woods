@@ -284,7 +284,10 @@ step before it.
    `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
    edge leads there. Only units whose output changed are rewritten. The same
    reload requirement applies: a constant the process has not loaded, or has not
-   unloaded, resolves as that process sees it.
+   unloaded, resolves as that process sees it. View components also re-run when
+   a sidecar template changes (a template with a Ruby file of the same name
+   beside it, or named for the directory it is in), because their render edges
+   are read from those templates and the graph records only the Ruby file.
 
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.

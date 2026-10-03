@@ -28,6 +28,16 @@ RSpec.describe 'incremental runtime inputs' do
       end
     end
 
+    %w[app/components/shelf_component.html.erb app/components/shelf_component/shelf_component.html.haml].each do |path|
+      it "refreshes view components after changing the sidecar template #{path}" do
+        FileUtils.mkdir_p(@root.join('app/components'))
+        File.write(@root.join('app/components/shelf_component.rb'), "class ShelfComponent\nend\n")
+        changes = Woods::ChangeSet.new(paths: [path], root: @root)
+
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:view_components])
+      end
+    end
+
     %w[config/locales/en.yml app/views/posts/index.html.erb config/queue.yml].each do |path|
       it "keeps #{path} scoped to hybrid units already in its blast radius" do
         changes = Woods::ChangeSet.new(paths: [path], root: @root)

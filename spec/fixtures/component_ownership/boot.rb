@@ -191,6 +191,13 @@ Dir.mktmpdir('woods_components') do |root|
     compare.call('component and mailer edits full/incremental equivalence')
     Woods::Extractor.new(output_dir: output).refresh(:components, :view_components, :action_cable_channels, :mailers)
     compare.call('component and mailer refresh equivalence')
+    sidecar = write_source(root, 'app/components/owned_view.html.erb', '<%= render Ui::PanelComponent.new %>')
+    Woods::Extractor.new(output_dir: output).extract_changed([sidecar])
+    assert_fact(checks, 'a sidecar template edit retargets its component') do
+      reader.find_unit('OwnedView', type: 'view_component')['dependencies']
+            .include?('type' => 'component', 'target' => 'Ui::PanelComponent', 'via' => 'render')
+    end
+    compare.call('sidecar template edit full/incremental equivalence')
 
     cron = write_source(root, 'config/sidekiq_cron.yml',
                         "cleanup:\n  class: OtherJob\n  cron: '0 * * * *'\n  queue: alternate\n  args: [7]\n")
