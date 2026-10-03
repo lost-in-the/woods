@@ -66,6 +66,7 @@ ARTIFACT_TEMPLATES = [
   ->(i) { "app/views/gen/erb_#{i}.html.erb" },
   ->(i) { "app/views/gen/hml_#{i}.html.haml" },
   ->(i) { "app/views/gen/jbd_#{i}.json.jbuilder" },
+  ->(i) { "app/helpers/hlp_#{i}_helper.rb" },         # helper catalog: templates call hlp_<i>_label
   ->(i) { "spec/models/spc_#{i}_spec.rb" },
   ->(i) { "spec/features/ftr_#{i}_spec.rb" },         # routes exercised + test support references
   ->(i) { "spec/lib/tasks/rk_#{i}_spec.rb" },         # describes the rk_N rake namespace
@@ -3747,6 +3748,106 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'helper call edges' do
+    let(:helper) { 'app/helpers/hlp_date_helper.rb' }
+    let(:rival) { 'app/helpers/hlp_ledger_helper.rb' }
+    let(:template) { 'app/views/gen/hc_show.html.erb' }
+
+    def helper_source(method_name, module_name: 'HlpDateHelper')
+      "module #{module_name}\n  def #{method_name}(value) = value\nend\n"
+    end
+
+    def rival_source
+      helper_source('fancy_date', module_name: 'HlpLedgerHelper')
+    end
+
+    def helper_edges(index_dir, identifier)
+      unit = unit_snapshot(index_dir).values.find { |data| data['identifier'] == identifier }
+      unit.fetch('dependencies').select { |edge| %w[helper_call helper_method].include?(edge['via']) }
+    end
+
+    it 'follows a helper module through creation, a renamed method, a rival definition and deletion' do
+      index_dir = run_sequence([
+                                 -> { write_file(helper, helper_source('pretty_date')) },
+                                 -> { write_file(template, "<p><%= pretty_date(@post.created_at) %></p>\n") },
+                                 # The template did not change, but what its call means did.
+                                 -> { write_file(helper, helper_source('fancy_date')) },
+                                 -> { write_file(template, "<p><%= fancy_date(@post.created_at) %></p>\n") },
+                                 -> { write_file(rival, rival_source) },
+                                 -> { delete_file(helper) },
+                                 -> { delete_file(rival) }
+                               ])
+
+      expect(helper_edges(index_dir, 'gen/hc_show.html.erb')).to eq([])
+    end
+
+    it 'records the edge, the rename and the ambiguity at each step' do
+      index_dir = run_sequence([-> { write_file(helper, helper_source('pretty_date')) },
+                                -> { write_file(template, "<p><%= pretty_date(@post.created_at) %></p>\n") }])
+      expect(helper_edges(index_dir, 'gen/hc_show.html.erb'))
+        .to eq([{ 'type' => 'poro', 'target' => 'HlpDateHelper', 'via' => 'helper_call' }])
+
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([write_file(helper, helper_source('fancy_date'))])
+      expect(helper_edges(index_dir, 'gen/hc_show.html.erb')).to eq([])
+
+      changed = [write_file(template, "<p><%= fancy_date(1) %></p>\n"), write_file(rival, rival_source)]
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(changed)
+      unit = unit_snapshot(index_dir).values.find { |data| data['identifier'] == 'gen/hc_show.html.erb' }
+      expect(helper_edges(index_dir, 'gen/hc_show.html.erb').map { |edge| edge['target'] })
+        .to eq(%w[HlpDateHelper HlpLedgerHelper])
+      expect(unit.dig('metadata', 'ambiguous_helper_calls')).to eq('fancy_date' => %w[HlpDateHelper HlpLedgerHelper])
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'links a view to the controller that declares the helper_method it calls' do
+      controller = 'app/controllers/hc_widgets_controller.rb'
+      index_dir = run_sequence([
+                                 lambda do
+                                   write_file(controller, <<~RUBY)
+                                     class HcWidgetsController < ApplicationController
+                                       helper_method :current_hc_widget
+
+                                       def show; end
+
+                                       private
+
+                                       def current_hc_widget = nil
+                                     end
+                                   RUBY
+                                   load app_path(controller)
+                                   controller
+                                 end,
+                                 -> { write_file('app/views/hc_widgets/show.html.erb', "<%= current_hc_widget %>\n") },
+                                 # A layout has no owning controller and cannot reach the declaration.
+                                 -> { write_file('app/views/layouts/hc.html.erb', "<%= current_hc_widget %>\n") },
+                                 # The default context's own file re-runs the ownerless consumers.
+                                 lambda do
+                                   write_file('app/controllers/application_controller.rb', <<~RUBY)
+                                     # frozen_string_literal: true
+
+                                     # edited
+                                     class ApplicationController < ActionController::Base
+                                     end
+                                   RUBY
+                                 end
+                               ])
+
+      expect(helper_edges(index_dir, 'hc_widgets/show.html.erb'))
+        .to eq([{ 'type' => 'controller', 'target' => 'HcWidgetsController', 'via' => 'helper_method' }])
+      expect(helper_edges(index_dir, 'layouts/hc.html.erb')).to eq([])
+      controller_unit = unit_snapshot(index_dir).values.find { |data| data['identifier'] == 'HcWidgetsController' }
+      expect(controller_unit.dig('metadata', 'helper_methods')).to eq(%w[current_hc_widget])
+    end
+
+    # `HcWidgetsController` stays in ActionController::Base.descendants for the
+    # rest of the process. Fold its file into the pristine tree so the runtime
+    # and the filesystem keep agreeing in every later example.
+    after do
+      source = app_path('app/controllers/hc_widgets_controller.rb')
+      FileUtils.cp(source, File.join(@pristine_root, 'app/controllers/hc_widgets_controller.rb')) if File.exist?(source)
+    end
+  end
+
   describe 'randomized operation sequences' do
     DIFF_SEEDS.each do |seed|
       it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})" do
@@ -3871,9 +3972,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when /\.rake\z/ then rake_source(base, Array.new(1 + random.rand(3)) { |n| "task#{n}" })
     when /\.yml\z/ then "en:\n  #{base}: value_#{nonce}\n"
     when /\.sql\z/ then "SELECT #{nonce} AS answer;\n"
-    when /\.erb\z/ then "<div><%= Rails.cache.fetch('#{base}_#{nonce}') { 1 } %></div>\n"
-    when /\.haml\z/ then "%div= Rails.cache.fetch('#{base}_#{nonce}') { 1 }\n"
-    when /\.jbuilder\z/ then "json.answer #{nonce}\n"
+    when /\.erb\z/
+      "<div><%= Rails.cache.fetch('#{base}_#{nonce}') { 1 } %> <%= hlp_#{random.rand(6)}_label(1) %></div>\n"
+    when /\.haml\z/ then "%div= Rails.cache.fetch('#{base}_#{nonce}') { 1 }\n%p= hlp_#{random.rand(6)}_label(1)\n"
+    when /\.jbuilder\z/ then "json.answer #{nonce}\njson.label hlp_#{random.rand(6)}_label(1)\n"
+    when %r{\Aapp/helpers/} then helper_module_source(base)
     when %r{\Adb/migrate/} then migration_source(base, nonce)
     when %r{\Aspec/factories/} then factory_source(base, nonce, random)
     when %r{\Aspec/support/} then support_source(base, nonce, random)
@@ -3902,6 +4005,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       "module Types\n  class #{name} < Types::BaseObject\n    field :id, ID, null: false\n    " \
       "field :n#{nonce}, Integer, null: true\n  end\nend\n"
     end
+  end
+
+  # `hlp_3_helper` defines `hlp_3_label`, the name the template artifacts call.
+  def helper_module_source(base)
+    "module #{camelize(base)}\n  def #{base.delete_suffix('_helper')}_label(value) = value\nend\n"
   end
 
   # Three shapes: a plain factory, one inheriting from another file's
