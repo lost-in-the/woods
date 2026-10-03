@@ -133,7 +133,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
       expect(profiled_phases).to eq(
         ['source capture', 'payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
          're-extraction', 'reconciliation', 'source references', 'git enrichment', 'unit finalization', 'type index',
-         'graph write', 'graph analysis', 'flows', 'skipped files', 'manifest and summary',
+         'graph write', 'skipped files', 'graph analysis', 'flows', 'manifest and summary',
          'source verification', 'payload sync', 'publish', 'payload prune']
       )
     end

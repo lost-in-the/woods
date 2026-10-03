@@ -896,15 +896,17 @@ module Woods
     def finalize_incremental_run(touched, reason: 'incremental')
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
       profile_phase('graph write') { write_dependency_graph }
+      # A skip reason can change while no unit does (a namespace-only file
+      # turns into a parse error), so the report alone can warrant a publish.
+      skipped_changed = profile_phase('skipped files') { refresh_skipped_files(@dependency_graph.registered_paths) }
 
-      if touched.empty? && !withdrew_flows
+      if touched.empty? && !withdrew_flows && !skipped_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
         return
       end
 
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
-      profile_phase('skipped files') { write_skipped_files(@dependency_graph.registered_paths) }
       profile_phase('manifest and summary') do
         write_manifest(incremental: true)
         write_structural_summary
@@ -2524,6 +2526,18 @@ module Woods
     def write_skipped_files(unit_paths)
       report = SkippedFiles.new(root: Rails.root).build(unit_paths)
       SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
+    end
+
+    # Rewrite the report only when it differs from the one this payload holds.
+    #
+    # @param unit_paths [Enumerable<String, nil>] every unit file_path
+    # @return [Boolean] whether the report changed
+    def refresh_skipped_files(unit_paths)
+      report = SkippedFiles.new(root: Rails.root).build(unit_paths)
+      return false if report == SkippedFiles.read(payload_dir)
+
+      SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
+      true
     end
 
     def write_graph_analysis

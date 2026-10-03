@@ -1826,6 +1826,32 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    it 'publishes skip-reason changes that touch no unit, and only those' do
+      index = full_extraction
+      empty = 'app/models/sweep_empty.rb'
+      skipped = -> { read_json(index, 'skipped_files.json').fetch('files') }
+      quiet_run = -> { Woods::Extractor.new(output_dir: index).extract_changed(['README.md']) }
+
+      write_file(empty, "module SweepEmpty\nend\n")
+      quiet_run.call
+      expect(skipped.call).to include('path' => empty, 'reason' => 'namespace_only')
+      expect(differences(index, full_extraction)).to be_empty
+
+      write_file(empty, "module SweepEmpty\n  def broken(\nend\n")
+      quiet_run.call
+      expect(skipped.call).to include('path' => empty, 'reason' => 'parse_error')
+
+      stamp = read_json(index, 'manifest.json')['extracted_at']
+      sleep 1.1 # the manifest stamp has second resolution
+      quiet_run.call
+      expect(read_json(index, 'manifest.json')['extracted_at']).to eq(stamp)
+
+      delete_file(empty)
+      quiet_run.call
+      expect(skipped.call.map { |entry| entry['path'] }).not_to include(empty)
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
     it 'parses each PORO source once per full extraction' do
       write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
       parses = Hash.new(0)
