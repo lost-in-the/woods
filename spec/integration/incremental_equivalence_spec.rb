@@ -83,7 +83,10 @@ ARTIFACT_TEMPLATES = [
   # extractor's full pass is deliberately ungated for the same reason.
   ->(i) { "app/graphql/types/gqt_#{i}_type.rb" },
   ->(i) { "app/graphql/mutations/gqm_#{i}.rb" },
-  ->(i) { "app/graphql/resolvers/gqr_#{i}.rb" }
+  ->(i) { "app/graphql/resolvers/gqr_#{i}.rb" },
+  # Documentation: resolved against the whole index after every run, so an
+  # unchanged document gains and loses edges as the artifacts above come and go.
+  ->(i) { "docs/gen/doc_#{i}.md" }
 ].freeze
 
 RSpec.describe 'Incremental extraction equivalence', :booted_app do
@@ -1750,6 +1753,151 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                  }
                                ])
       expect(unresolvable.call(index_dir)).to eq([ghost])
+    end
+  end
+
+  describe 'documentation units' do
+    def doc_unit(dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, 'docs', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == identifier }
+    end
+
+    def edges(dir, identifier)
+      doc_unit(dir, identifier).fetch('dependencies').map { |edge| edge.values_at('type', 'target', 'via') }
+    end
+
+    def guide(*lines)
+      "# Posting guide\n\n#{lines.join("\n")}\n"
+    end
+
+    # The per-example reset globs `*`, which skips dot directories.
+    after { %w[.claude .github].each { |dir| FileUtils.rm_rf(app_path(dir)) } }
+
+    it 'indexes a document created after the baseline, with its edges and reverse edges' do
+      index = run_sequence([
+                             lambda {
+                               write_file('docs/posting.md', guide('`Post` lives in `app/models/post.rb`.',
+                                                                   'Routes: `GET /posts`. Unknown: `Shipment`.',
+                                                                   'See [the readme](../README.md).'))
+                             },
+                             -> { write_file('README.md', "# Dummy\n\nStart with [posting](docs/posting.md).\n") }
+                           ])
+
+      expect(edges(index, 'docs/posting.md')).to include(%w[model Post documents], ['route', 'GET /posts', 'documents'],
+                                                         %w[doc README.md doc_link])
+      expect(edges(index, 'README.md')).to eq([%w[doc docs/posting.md doc_link]])
+      mentions = doc_unit(index, 'docs/posting.md').dig('metadata', 'mentions')
+      expect(mentions.to_h { |mention| mention.values_at('text', 'resolved') })
+        .to include('Post' => true, 'app/models/post.rb' => true, 'GET /posts' => true, 'Shipment' => false)
+
+      graph = JSON.parse(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir,
+                                             'dependency_graph.json')))
+      expect(graph.fetch('reverse').fetch('Post')).to include('docs/posting.md')
+      expect(graph.fetch('pagerank').values_at('docs/posting.md', 'README.md')).to eq([0.0, 0.0])
+    end
+
+    it 'gives an unchanged document its edge when the target appears, and takes it back when it goes' do
+      index = run_sequence([
+                             -> { write_file('docs/late.md', guide('`LateService` and `rake late:run`.')) },
+                             -> { write_file('app/services/late_service.rb', service_source('LateService')) },
+                             -> { write_file('lib/tasks/late.rake', rake_source('late', %w[run])) }
+                           ])
+      expect(edges(index, 'docs/late.md')).to eq([%w[service LateService documents], %w[rake_task late:run documents]])
+
+      delete_file('app/services/late_service.rb')
+      delete_file('lib/tasks/late.rake')
+      Woods::Extractor.new(output_dir: index)
+                      .extract_changed(%w[app/services/late_service.rb lib/tasks/late.rake].map do |path|
+                                         app_path(path)
+                                       end)
+
+      expect(edges(index, 'docs/late.md')).to eq([])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'follows an edit, a rename and a deletion, including the documents that link to the file' do
+      run_sequence([
+                     -> { write_file('docs/a.md', guide('`Post` and [b](b.md).')) },
+                     -> { write_file('docs/b.md', guide('`Comment` and [a](a.md).')) },
+                     -> { write_file('docs/a.md', guide('No mentions now, still [b](b.md).')) },
+                     lambda {
+                       move_file('docs/b.md', 'docs/guides/b.md')
+                       %w[docs/b.md docs/guides/b.md]
+                     },
+                     -> { write_file('docs/a.md', guide('Now [b](guides/b.md).')) },
+                     -> { delete_file('docs/guides/b.md') },
+                     -> { delete_file('docs/a.md') }
+                   ])
+    end
+
+    it 'follows a route a document names when config/routes.rb changes' do
+      index = run_sequence([
+                             -> { write_file('docs/api.md', guide('```', 'GET /comments', '```')) },
+                             lambda {
+                               write_file('config/routes.rb', <<~RUBY)
+                                 Rails.application.routes.draw do
+                                   resources :posts
+                                   resources :comments, only: [:index]
+                                 end
+                               RUBY
+                               Rails.application.reload_routes!
+                               'config/routes.rb'
+                             }
+                           ])
+
+      expect(edges(index, 'docs/api.md')).to eq([['route', 'GET /comments', 'documents']])
+    end
+
+    it 'indexes agent instruction files under dot directories' do
+      index = run_sequence([
+                             -> { write_file('.claude/rules/models.md', guide('`Post` rules.')) },
+                             -> { write_file('.claude/skills/review/SKILL.md', guide('`Comment` review.')) },
+                             -> { write_file('.github/pull_request_template.md', guide('Checklist.')) },
+                             -> { write_file('.claude/rules/models.md', guide('`Comment` rules.')) },
+                             -> { delete_file('.claude/skills/review/SKILL.md') }
+                           ])
+
+      expect(edges(index, '.claude/rules/models.md')).to eq([%w[model Comment documents]])
+      expect(doc_unit(index, '.github/pull_request_template.md')).not_to be_nil
+    end
+
+    it 'publishes redacted source and section chunks identically in both modes' do
+      secret = "AKIA#{'ABCD1234' * 2}"
+      index = run_sequence([
+                             lambda {
+                               write_file('docs/keys.md', "# Keys\n\nNever commit `#{secret}`.\n\n## Rotation\n\n" \
+                                                          "#{'Rotate the ledger key every quarter. ' * 30}\n")
+                             }
+                           ])
+      unit = doc_unit(index, 'docs/keys.md')
+
+      expect(JSON.generate(unit)).not_to include(secret)
+      expect(unit.fetch('source_code')).to include('Never commit `[REDACTED]`.')
+      expect(unit.fetch('chunks').map { |chunk| chunk.dig('metadata', 'heading') }).to eq(%w[Keys Rotation])
+    end
+
+    it 'does not republish when nothing a document names has changed' do
+      write_file('docs/steady.md', guide('`Post` and `Shipment`.'))
+      index = full_extraction
+      manifest = File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json')
+      before = File.read(manifest)
+
+      expect(Woods::Extractor.new(output_dir: index).extract_changed([])).to eq([])
+      expect(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json'))).to eq(before)
+    end
+
+    it 're-resolves documents on a targeted refresh' do
+      write_file('docs/tasks.md', guide('`rake audit:run`'))
+      index = full_extraction
+      write_file('lib/tasks/audit.rake', rake_source('audit', %w[run]))
+
+      Woods::Extractor.new(output_dir: index).refresh(:rake_tasks)
+
+      expect(edges(index, 'docs/tasks.md')).to eq([%w[rake_task audit:run documents]])
+      expect(differences(index, full_extraction)).to be_empty
     end
   end
 
@@ -4658,12 +4806,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     write_file(relative, artifact_source(relative, random.rand(1_000_000), random))
   end
 
-  # rubocop:disable Metrics/CyclomaticComplexity -- a lookup table of file
-  # shape to sample content; one branch per extractor under test.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength -- a lookup table
+  # of file shape to sample content; one branch per extractor under test.
   def artifact_source(relative, nonce, random)
     base = File.basename(relative).sub(/\.\w+(\.\w+)?\z/, '')
 
     case relative
+    when /\.md\z/ then doc_source(base, nonce)
     when /\.rake\z/ then rake_source(base, Array.new(1 + random.rand(3)) { |n| "task#{n}" })
     when /\.yml\z/ then "en:\n  #{base}: value_#{nonce}\n"
     when /\.sql\z/ then "SELECT #{nonce} AS answer;\n"
@@ -4683,7 +4832,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     else "class #{camelize(base)}\n  VERSION = #{nonce}\n  def call\n    Post.count\n  end\nend\n"
     end
   end
-  # rubocop:enable Metrics/CyclomaticComplexity
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
 
   # Written to match `graphql_class?`'s patterns, which are what the extractor
   # actually keys on — a base-class suffix, not the presence of the gem.
@@ -4749,6 +4898,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         end
       end
     RUBY
+  end
+
+  # Mentions artifacts from the other families by constant, path, task and
+  # route, and links a sibling document. Which of them exist changes from one
+  # operation to the next.
+  def doc_source(base, nonce)
+    a, b, c = nonce.digits.first(3).map { |digit| digit % 6 }.then { |digits| digits + ([0] * (3 - digits.size)) }
+    <<~MARKDOWN
+      # #{base} #{nonce}
+
+      `Post` backs `Svc#{a}Service` and `Lb#{b}::VERSION`; see `app/services/svc_#{c}_service.rb`.
+      More in [the next document](doc_#{b}.md) and [the model](../../app/models/post.rb).
+
+      ## Operations
+
+      ```
+      bin/rake rk_#{a}:task0
+      GET /posts
+      Mgr#{c}Manager.new.call
+      ```
+    MARKDOWN
   end
 
   def migration_source(base, nonce)

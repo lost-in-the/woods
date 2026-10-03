@@ -8,6 +8,7 @@ require_relative 'git_source_filter'
 require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/configuration_extractor'
 require_relative 'javascript_paths'
+require_relative 'extractors/doc_extractor'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -253,6 +254,16 @@ module Woods
         JavascriptPaths.source?(relative_path)
       end
 
+      # Documentation is matched by the configured globs at call time. The
+      # rule's own fields stay fixed: they describe the default roots to the
+      # generated hook predicate and keep the rule fingerprint config-free.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def doc_path?(relative_path)
+        Woods::Extractors::DocExtractor.doc_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -376,7 +387,9 @@ module Woods
           file_rule(:poros, :extract_poro_units, %w[app], matcher: :poro_path?),
           file_rule(:libs, :extract_lib_file, %w[lib], exclude: ex::LibExtractor::EXCLUDED_SEGMENTS),
           file_rule(:test_mappings, :extract_test_file, %w[spec], extensions: %w[_spec.rb]),
-          file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb])
+          file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb]),
+          file_rule(:docs, :extract_doc_file, ex::DocExtractor::DEFAULT_ROOT_DIRECTORIES,
+                    exact_paths: ex::DocExtractor::DEFAULT_ROOT_FILES, extensions: %w[.md], matcher: :doc_path?)
         ]
       end
 

@@ -7,7 +7,6 @@ require_relative '../chunking/markdown_section_chunker'
 require_relative '../watch/tree_scan'
 require_relative '../watch/watcher'
 require_relative 'doc_mentions'
-require_relative 'doc_redaction'
 
 module Woods
   module Extractors
@@ -30,6 +29,10 @@ module Woods
     #   unit.metadata[:mentions]      # => [{ kind: "constant", text: "Widget", line: 4, resolved: false }]
     class DocExtractor
       GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
+      # The default roots as plain data: the dispatch rule hands them to the
+      # generated hook predicate, which runs without a configuration.
+      DEFAULT_ROOT_FILES = %w[README.md CLAUDE.md AGENTS.md].freeze
+      DEFAULT_ROOT_DIRECTORIES = %w[docs doc .claude/rules .claude/skills .github].freeze
       # A larger file is generated output, not documentation someone reads.
       MAX_DOC_BYTES = 1_048_576
       # Unique mention candidates kept per document, in order of appearance.
@@ -73,6 +76,9 @@ module Woods
       end
 
       def initialize
+        # Loaded here, not at require time: the dispatch rules and the reload
+        # policy name this class without ever scanning a document.
+        require_relative 'doc_redaction'
         @root = Rails.root.to_s
         @redaction = DocRedaction.new
       end
