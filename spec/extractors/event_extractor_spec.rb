@@ -644,6 +644,16 @@ RSpec.describe Woods::Extractors::EventExtractor do
         .to eq([['OrderBus', :published_by], ['OrderListener', :subscribed_by]])
     end
 
+    it 'names each shared file owner once for the whole run' do
+      extractor = described_class.new
+      allow(extractor).to receive(:governed_class_name).and_call_original
+
+      extractor.extract_all
+
+      expect(extractor).to have_received(:governed_class_name).with(@bus_path, anything).once
+      expect(extractor).to have_received(:governed_class_name).with(@listener_path, anything).once
+    end
+
     it 'reads each shared file once for the whole run' do
       counts = counts_per_path
 

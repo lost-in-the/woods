@@ -404,15 +404,19 @@ module Woods
 
       # The constant a file is named for, as the extractor that owns the file
       # would name it: the Zeitwerk-governed constant first, then the first
-      # class, then the primary module.
+      # class, then the primary module. Memoized per path like {#cached_source}:
+      # a file that publishes many events is parsed once, not once per event.
       #
       # @param path [String] Absolute file path
       # @return [String, nil]
       def owner_name(path)
-        source = cached_source(path)
-        return nil unless source
+        owners = (@owner_names ||= {})
+        return owners[path] if owners.key?(path)
 
-        governed_class_name(path, source) || qualified_first_class_name(source) || qualified_outer_module_name(source)
+        source = cached_source(path)
+        owners[path] = source && (governed_class_name(path, source) ||
+                                  qualified_first_class_name(source) ||
+                                  qualified_outer_module_name(source))
       end
     end
   end
