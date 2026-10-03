@@ -118,13 +118,38 @@ module Woods
     end
 
     # A runtime-discovered owner can report the realpath of a file the glob
-    # named through a symlinked root.
+    # named through a symlink. Only a path that crosses one has two spellings,
+    # and checking directories (memoized) is far cheaper than a realpath per unit.
     def path_spellings(path)
       return [] unless path
 
       expanded = File.expand_path(path.to_s, Rails.root.to_s)
+      return [expanded] unless crosses_symlink?(expanded)
+
       real = File.exist?(expanded) ? File.realpath(expanded) : expanded
       [expanded, real].uniq
+    end
+
+    def crosses_symlink?(expanded)
+      root = File.expand_path(Rails.root.to_s)
+      return true if symlinked_root?(root) || !expanded.start_with?("#{root}/")
+
+      File.symlink?(expanded) || symlinked_dir_below?(File.dirname(expanded), root)
+    end
+
+    def symlinked_root?(root)
+      @symlinked_root = File.realpath(root) != root if @symlinked_root.nil?
+      @symlinked_root
+    end
+
+    def symlinked_dir_below?(dir, root)
+      @symlinked_dirs ||= {}
+      until dir == root
+        return true if @symlinked_dirs.fetch(dir) { @symlinked_dirs[dir] = File.symlink?(dir) }
+
+        dir = File.dirname(dir)
+      end
+      false
     end
 
     def fallback_ar_names
