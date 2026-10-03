@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'woods/extractors/source_nesting'
 require 'fileutils'
 require 'tmpdir'
+require 'timeout'
 
 RSpec.describe Woods::Extractors::SourceNesting do
   # Create a test class that includes the module so we can call its methods.
@@ -962,6 +963,64 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
     it 'does not count a self-balancing assignment-form conditional as an opener' do
       expect(scanner.block_opener?('value = if a then b else c end')).to be false
+    end
+
+    it 'counts a line ending in a word that only ends in end' do
+      expect(scanner.block_opener?('items.each do |item| buffer.append')).to be true
+    end
+
+    it 'does not count a line ending in end after punctuation' do
+      expect(scanner.block_opener?('items.each do |item| item.save; end')).to be false
+    end
+
+    # The patterns this replaced, kept as the oracle for stripped lines.
+    # `.*(?<!\bend)\s*$` backtracked to every earlier keyword when a line
+    # ended in `end`, which was quadratic in the line on Ruby < 3.2.
+    it 'agrees with the backtracking patterns it replaced on stripped lines' do
+      keyword = /\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/
+      conditional = /(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/
+      tokens = %w[do def end if unless = == x append ; | ( ) . é _end endx case class for in].push(' ', '  ')
+      random = Random.new(1234)
+
+      2_000.times do
+        line = Array.new(random.rand(1..9)) { tokens.sample(random: random) }.join.strip
+        next if line.empty?
+
+        expected = line.match?(keyword) || line.match?(conditional)
+        expect(scanner.block_opener?(line)).to eq(expected), line.inspect
+      end
+    end
+
+    describe 'complexity' do
+      budget_seconds = 1.0
+
+      around do |example|
+        if Regexp.respond_to?(:timeout=)
+          previous = Regexp.timeout
+          Regexp.timeout = budget_seconds
+          begin
+            example.run
+          ensure
+            Regexp.timeout = previous
+          end
+        else
+          Timeout.timeout(budget_seconds * 5) { example.run }
+        end
+      end
+
+      {
+        'repeated do keywords ending in end' => "#{'do x ' * 50_000}end",
+        'repeated assignment conditionals ending in end' => "#{'= if x ' * 10_000}end",
+        'a keyword then a long run of spaces' => "do#{' ' * 50_000}end",
+        'many equals signs then spaces' => "#{'=  ' * 50_000}x",
+        'near-miss keywords' => 'dox defx endx ' * 10_000
+      }.each do |label, line|
+        it "classifies #{label} in linear time" do
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          scanner.block_opener?(line)
+          expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < budget_seconds
+        end
+      end
     end
   end
 

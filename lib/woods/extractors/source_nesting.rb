@@ -64,6 +64,15 @@ module Woods
       # popped.
       END_LINE = /\Aend\b/
 
+      # The three tests {#block_opener?} combines. Each is linear: a keyword
+      # from a fixed list, a conditional at the line start or after `=`, and
+      # a whole-word `end` closing the line. The single pattern they replace,
+      # `\b(do|def|…)\b.*(?<!\bend)\s*$`, backtracked to every earlier
+      # keyword when the line ended in `end`.
+      OPENER_KEYWORD = /\b(?:do|def|case|begin|class|module|while|until|for)\b/
+      STATEMENT_CONDITIONAL = /(?:\A|=\s*+)(?:if|unless)\b/
+      TRAILING_END = /\bend\s*+\z/
+
       # Every class and module body in the source, with the byte range it
       # spans, for asking what `Module.nesting` is at a position.
       #
@@ -209,9 +218,9 @@ module Woods
       # @param stripped [String] Stripped line content
       # @return [Boolean]
       def block_opener?(stripped)
-        return true if stripped.match?(/\b(do|def|case|begin|class|module|while|until|for)\b.*(?<!\bend)\s*$/)
+        return false if stripped.match?(TRAILING_END)
 
-        stripped.match?(/(?:\A|=\s*)(?:if|unless)\b.*(?<!\bend)\s*$/)
+        stripped.match?(OPENER_KEYWORD) || stripped.match?(STATEMENT_CONDITIONAL)
       end
 
       private

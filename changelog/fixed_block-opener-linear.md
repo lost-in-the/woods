@@ -1,0 +1,1 @@
+- The tolerant line scanner that names classes in source Prism cannot parse no longer takes quadratic time on a long line ending in `end`. Its block-opener test, `\b(do|def|…)\b.*(?<!\bend)\s*$`, backtracked to every earlier keyword; on Ruby 3.0 a 250 KB line took over two minutes. It is now three linear tests with the same answers.
