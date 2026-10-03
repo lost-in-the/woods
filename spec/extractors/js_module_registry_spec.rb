@@ -239,13 +239,17 @@ RSpec.describe Woods::Extractors::JsModuleRegistry do
       write('index/js_modules/_index.json', JSON.generate([{ 'identifier' => 'ignored' }]))
     end
 
+    def published
+      described_class.published_name_map(File.join(@root, 'index'))
+    end
+
     it 'reports no change when the published units carry the current map' do
       write('app/javascript/controllers/clipboard_controller.js', '')
       publish([{ 'identifier' => 'app/javascript/controllers/clipboard_controller.js',
                  'metadata' => { 'registered_names' => [{ 'kind' => 'stimulus_controller', 'name' => 'clipboard',
                                                           'source' => 'filename' }] } }])
 
-      expect(described_class.names_changed_since?(File.join(@root, 'index'), @root)).to be(false)
+      expect(described_class.names_changed?(published, @root)).to be(false)
     end
 
     it 'reports a change when a name was added, removed or moved' do
@@ -254,19 +258,34 @@ RSpec.describe Woods::Extractors::JsModuleRegistry do
                  'metadata' => { 'registered_names' => [{ 'kind' => 'stimulus_controller', 'name' => 'clipboard',
                                                           'source' => 'registration' }] } }])
 
-      expect(described_class.names_changed_since?(File.join(@root, 'index'), @root)).to be(true)
+      expect(described_class.names_changed?(published, @root)).to be(true)
     end
 
     it 'ignores store names, which no template edge uses' do
       write('app/javascript/stores.js', 'Alpine.store("cart", {})')
 
-      expect(described_class.names_changed_since?(File.join(@root, 'index'), @root)).to be(false)
+      expect(described_class.names_changed?(published, @root)).to be(false)
     end
 
     it 'treats a missing index directory as an empty published map' do
-      expect(described_class.names_changed_since?(File.join(@root, 'index'), @root)).to be(false)
+      expect(described_class.names_changed?(published, @root)).to be(false)
       write('app/javascript/controllers/clipboard_controller.js', '')
-      expect(described_class.names_changed_since?(File.join(@root, 'index'), @root)).to be(true)
+      expect(described_class.names_changed?(published, @root)).to be(true)
+    end
+
+    it 'treats an unknown published map as changed' do
+      expect(described_class.names_changed?(nil, @root)).to be(true)
+    end
+
+    it 'snapshots the published map only for a change set that touches a module' do
+      publish([{ 'identifier' => 'app/javascript/a.js',
+                 'metadata' => { 'registered_names' => [{ 'kind' => 'alpine_data', 'name' => 'a',
+                                                          'source' => 'registration' }] } }])
+      index = File.join(@root, 'index')
+
+      expect(described_class.published_names_for(index, %w[app/models/widget.rb])).to be_nil
+      expect(described_class.published_names_for(index, %w[app/models/widget.rb app/javascript/a.js]))
+        .to eq('alpine_data' => { 'a' => 'app/javascript/a.js' })
     end
   end
 

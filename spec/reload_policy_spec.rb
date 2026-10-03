@@ -174,6 +174,29 @@ RSpec.describe Woods::ReloadPolicy do
       end
     end
 
+    it 'only needs re-extraction for JavaScript modules, which are read as bytes' do
+      expect(policy.classify('app/javascript/controllers/clipboard_controller.js')).to eq(:reextract)
+      expect(policy.classify('app/javascript/widgets/picker.tsx')).to eq(:reextract)
+      expect(policy.classify('app/assets/javascripts/legacy.js')).to eq(:reextract)
+    end
+
+    it 'ignores JavaScript that is not module source' do
+      expect(policy.classify('app/javascript/vendor/chart.js')).to eq(:ignore)
+      expect(policy.classify('app/javascript/site.css')).to eq(:ignore)
+      expect(policy.classify('node_modules/pkg/index.js')).to eq(:ignore)
+    end
+
+    it 'follows configured javascript_paths' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+      expect(policy.classify('frontend/widgets/picker.ts')).to eq(:reextract)
+      expect(policy.classify('app/javascript/entry.js')).to eq(:ignore)
+    ensure
+      Woods.configuration = original
+    end
+
     it 'ignores paths that are not extraction input' do
       expect(policy.classify('README.md')).to eq(:ignore)
       expect(policy.classify('.github/workflows/ci.yml')).to eq(:ignore)

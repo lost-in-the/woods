@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'graphql_document_paths'
+require_relative 'javascript_paths'
 
 require_relative 'extractors/config_file_extractor'
 require_relative 'path_dispatcher'
@@ -254,7 +255,7 @@ module Woods
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
         REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
         ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path) ||
-        Extractors::RakeTaskPaths.covers?(path)
+        Extractors::RakeTaskPaths.covers?(path) || JavascriptPaths.source?(path)
     end
 
     def under?(path, directories)
