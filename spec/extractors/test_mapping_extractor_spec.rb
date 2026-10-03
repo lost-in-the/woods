@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'active_support/core_ext/object/blank'
+require 'active_support/core_ext/string/inflections'
 require 'woods/model_name_cache'
 require 'woods/extractors/test_mapping_extractor'
 
