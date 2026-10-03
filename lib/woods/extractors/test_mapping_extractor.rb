@@ -300,7 +300,9 @@ module Woods
 
       # Count test examples in the file.
       #
-      # For RSpec: counts it/specify/example/scenario blocks.
+      # For RSpec: counts it/specify/example/scenario blocks. The patterns
+      # match indentation with `[ \t]`, never `\s`: `^\s*` also spans
+      # newlines, which makes a run of blank lines quadratic to scan.
       # For Minitest: counts test "..." strings and def test_ methods.
       #
       # @param source [String] File source code
@@ -308,10 +310,10 @@ module Woods
       # @return [Integer]
       def count_tests(source, framework)
         if framework == :rspec
-          source.scan(/^\s*(?:it|specify|example|scenario)\s+['"]/).size
+          source.scan(/^[ \t]*(?:it|specify|example|scenario)[ \t]+['"]/).size
         else
-          source.scan(/^\s*test\s+['"]/).size +
-            source.scan(/^\s*def\s+test_\w/).size
+          source.scan(/^[ \t]*test[ \t]+['"]/).size +
+            source.scan(/^[ \t]*def[ \t]+test_\w/).size
         end
       end
 
@@ -320,7 +322,7 @@ module Woods
       # @param source [String] File source code
       # @return [Array<String>]
       def extract_shared_examples_defined(source)
-        source.scan(/^\s*shared_examples(?:_for)?\s+['"]([^'"]+)['"]/).flatten
+        source.scan(/^[ \t]*shared_examples(?:_for)?[ \t]+['"]([^'"\n]+)['"]/).flatten
       end
 
       # Infer test type from the directory structure of the file path, then

@@ -73,7 +73,7 @@ module Woods
         verb = (verb || receiver_visit) == 'visit' ? 'GET' : verb.upcase
         return helper_route(verb, helper) if helper
 
-        path = normalize(interpolated ? interpolated.gsub(INTERPOLATION, '1') : literal)
+        path = normalize(interpolated || literal, interpolated: !interpolated.nil?)
         path && literal_route(verb, path)
       end
 
@@ -85,10 +85,15 @@ module Woods
         (named.verb == verb ? named : @by_verb_and_path[[verb, named.path]])&.identifier
       end
 
-      # Drop the query string, fragment and trailing slash. A literal still
-      # holding `#{` was cut short by a quote inside its interpolation.
-      def normalize(path)
-        return nil if path.include?('#{') || path.length > MAX_LITERAL_LENGTH
+      # Drop the query string, fragment and trailing slash, with each
+      # interpolation standing for one segment value. A literal still holding
+      # `#{` was cut short by a quote inside its interpolation. The length
+      # bound comes first: it also bounds the interpolation scan.
+      def normalize(path, interpolated:)
+        return nil if path.length > MAX_LITERAL_LENGTH
+
+        path = path.gsub(INTERPOLATION, '1') if interpolated
+        return nil if path.include?('#{')
 
         path = path[/\A[^?#]*/].chomp('/')
         path.empty? ? '/' : path
