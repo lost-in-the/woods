@@ -890,6 +890,171 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
     end
   end
 
+  # ── Sidekiq-Cron Ruby registrations (config/initializers/**/*.rb) ──
+
+  describe 'Sidekiq-Cron Ruby registrations' do
+    before do
+      stub_const('Ledger::PurgeWorker', Class.new)
+      stub_const('Shipment::SweepWorker', Class.new)
+    end
+
+    def cron_ruby_units
+      described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_cron_ruby }
+    end
+
+    def sole_cron_ruby_unit
+      units = cron_ruby_units
+      expect(units.size).to eq(1)
+      units.first
+    end
+
+    it 'reads Sidekiq::Cron::Job.create with keyword options' do
+      path = create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.on(:startup) do
+            Sidekiq::Cron::Job.create(name: 'ledger purge', cron: '0 7 * * *', class: 'Ledger::PurgeWorker',
+                                      queue: 'low', args: [1, { 'full' => true }])
+          end
+        end
+      RUBY
+
+      unit = sole_cron_ruby_unit
+      expect(unit.identifier).to eq('scheduled:ledger purge')
+      expect(unit.file_path).to eq(path)
+      expect(unit.namespace).to eq('Ledger')
+      expect(unit.metadata).to include(
+        task_name: 'ledger purge', job_class: 'Ledger::PurgeWorker', job_class_resolved: true,
+        cron_expression: '0 7 * * *', queue: 'low', args: [1, { 'full' => true }], line: 3,
+        registration: :create, frequency_human_readable: 'daily at 07:00'
+      )
+      expect(unit.dependencies).to eq([{ type: :job, target: 'Ledger::PurgeWorker', via: :scheduled }])
+    end
+
+    it 'reads string-keyed hashes and the klass key' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create('name' => 'sweep', 'cron' => '35 * * * *', 'klass' => Shipment::SweepWorker)
+      RUBY
+
+      expect(cron_ruby_units.map { |u| [u.identifier, u.metadata[:job_class]] })
+        .to eq([['scheduled:sweep', 'Shipment::SweepWorker']])
+    end
+
+    it 'reads Sidekiq::Cron::Job.new(...).save, directly or through a local' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.new(name: 'purge', cron: '0 7 * * *', class: 'Ledger::PurgeWorker').save
+        job = Sidekiq::Cron::Job.new(name: 'sweep', cron: '35 * * * *', class: 'Shipment::SweepWorker')
+        job.save if job.valid?
+        unsaved = Sidekiq::Cron::Job.new(name: 'draft', cron: '0 1 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(cron_ruby_units.map { |u| [u.identifier, u.metadata[:registration]] })
+        .to eq([['scheduled:purge', :new_save], ['scheduled:sweep', :new_save]])
+    end
+
+    it 'reads load_from_hash and load_from_array with literal arguments' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.load_from_hash(
+          'purge' => { 'class' => 'Ledger::PurgeWorker', 'cron' => '0 7 * * *' },
+          'sweep' => { 'class' => 'Shipment::SweepWorker', 'cron' => '*/5 * * * *', 'queue' => 'sweeps' }
+        )
+        Sidekiq::Cron::Job.load_from_array!([
+          { 'name' => 'nightly purge', 'class' => 'Ledger::PurgeWorker', 'cron' => '0 2 * * *' }
+        ])
+        Sidekiq::Cron::Job.load_from_hash!(YAML.load_file('config/other_schedule.yml'))
+      RUBY
+
+      expect(cron_ruby_units.map { |u| [u.identifier, u.metadata[:cron_expression], u.metadata[:registration]] })
+        .to eq([['scheduled:purge', '0 7 * * *', :load_from_hash], ['scheduled:sweep', '*/5 * * * *', :load_from_hash],
+                ['scheduled:nightly purge', '0 2 * * *', :load_from_array]])
+      expect(cron_ruby_units.find { |u| u.identifier == 'scheduled:sweep' }.metadata[:queue]).to eq('sweeps')
+    end
+
+    it 'ignores calls on receivers other than Sidekiq::Cron::Job' do
+      create_file('config/initializers/widgets.rb', <<~RUBY)
+        Widget::Cron::Job.create(name: 'x', cron: '0 7 * * *', class: 'Ledger::PurgeWorker')
+        Job.create(name: 'y', cron: '0 7 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(cron_ruby_units).to eq([])
+    end
+
+    it 'records a computed cron and warns' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: 'purge', cron: Ledger.purge_cron, class: 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(sole_cron_ruby_unit.metadata)
+        .to include(cron_expression: nil, cron_source: 'Ledger.purge_cron', frequency_human_readable: nil)
+      expect(logger).to have_received(:warn).with(/sidekiq_cron\.rb:1.*cron is not a literal/)
+    end
+
+    it 'keeps a literal-named job whose class is computed, without an edge' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: 'purge', cron: '0 7 * * *', class: worker_class)
+      RUBY
+
+      unit = sole_cron_ruby_unit
+      expect(unit.metadata).to include(job_class: nil, job_class_source: 'worker_class')
+      expect(unit.dependencies).to eq([])
+      expect(logger).to have_received(:warn).with(/sidekiq_cron\.rb:1.*job class is not a literal name/)
+    end
+
+    it 'names a job with a computed name after its class and records the name source' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: "purge-\#{Rails.env}", cron: '0 7 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+
+      unit = sole_cron_ruby_unit
+      expect(unit.identifier).to eq('scheduled:ledger/purge_worker')
+      expect(unit.metadata).to include(task_name: 'ledger/purge_worker', name_source: %("purge-\#{Rails.env}"))
+    end
+
+    it 'skips and warns about a registration with neither a literal name nor a literal class' do
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: job_name, cron: '0 7 * * *', class: worker_class)
+      RUBY
+
+      expect(cron_ruby_units).to eq([])
+      expect(logger).to have_received(:warn).with(/sidekiq_cron\.rb:1.*neither a literal name nor a literal class/)
+    end
+
+    it 'numbers repeat registrations of one name by source position' do
+      create_file('config/environments/production.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: 'purge', cron: '0 7 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+      create_file('config/environments/staging.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: 'purge', cron: '0 9 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(cron_ruby_units.to_h { |u| [u.identifier, u.metadata[:cron_expression]] })
+        .to eq('scheduled:purge' => '0 7 * * *', 'scheduled:purge:2' => '0 9 * * *')
+    end
+
+    it 'qualifies a name shared with the Sidekiq-Cron YAML file' do
+      create_file('config/sidekiq_cron.yml', "purge:\n  class: Ledger::PurgeWorker\n  cron: '0 * * * *'\n")
+      create_file('config/initializers/sidekiq_cron.rb', <<~RUBY)
+        Sidekiq::Cron::Job.create(name: 'purge', cron: '0 7 * * *', class: 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(described_class.new.extract_all.map(&:identifier))
+        .to contain_exactly('scheduled:sidekiq_cron:purge', 'scheduled:sidekiq_cron_ruby:purge')
+    end
+
+    it 'reads periodic and Sidekiq-Cron registrations from one file with one parse' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.periodic { |mgr| mgr.register('0 7 * * *', 'Ledger::PurgeWorker') }
+        end
+        Sidekiq::Cron::Job.create(name: 'sweep', cron: '35 * * * *', class: 'Shipment::SweepWorker')
+      RUBY
+      allow(Prism).to receive(:parse).and_call_original
+
+      formats = described_class.new.extract_all.map { |u| u.metadata[:schedule_format] }
+      expect(formats).to contain_exactly(:sidekiq_periodic, :sidekiq_cron_ruby)
+      expect(Prism).to have_received(:parse).once
+    end
+  end
+
   # ── Human-readable frequency ───────────────────────────────────────
 
   describe 'human-readable frequency' do

@@ -1,7 +1,6 @@
 # frozen_string_literal: true
 
-require 'prism'
-require_relative '../source_references/runtime_lookup'
+require_relative 'schedule_literals'
 
 module Woods
   module Extractors
@@ -17,7 +16,7 @@ module Woods
     #   # => [{ cron: '0 * * * *', cron_source: nil, job_class: 'SweepWorker', options: {}, line: 1 }]
     module PeriodicRegistrations
       # Raised when the source does not parse.
-      class ParseError < StandardError; end
+      ParseError = ScheduleLiterals::ParseError
 
       # Receiver names for a block's numbered and `it` parameters.
       IMPLICIT_PARAMETERS = %i[_1 it].freeze
@@ -30,11 +29,14 @@ module Woods
       #   nil with the argument's source in `:cron_source` when the cron is computed
       # @raise [ParseError] when Prism reports a syntax error
       def read(source)
-        result = Prism.parse(source)
-        raise ParseError, result.errors.first.message unless result.success?
+        collect(ScheduleLiterals.parse(source))
+      end
 
+      # @param program [Prism::Node] a parsed source
+      # @return [Array<Hash>] as {.read}
+      def collect(program)
         calls = []
-        collect_periodic_blocks(result.value, calls)
+        collect_periodic_blocks(program, calls)
         calls.map { |call| registration(call) }
       end
 
@@ -93,45 +95,14 @@ module Woods
         {
           cron: literal_cron ? cron.unescaped : nil,
           cron_source: literal_cron ? nil : cron&.slice,
-          job_class: class_name(job_class),
-          options: literal_hash(options),
+          job_class: ScheduleLiterals.class_name(job_class),
+          options: ScheduleLiterals.literal_hash(options),
           line: call.location.start_line
         }
       end
 
-      def class_name(node)
-        name = case node
-               when Prism::StringNode then node.unescaped
-               when Prism::ConstantReadNode, Prism::ConstantPathNode then node.slice
-               end
-        name.delete_prefix('::') if name&.match?(SourceReferences::RuntimeLookup::CONSTANT)
-      end
-
-      def literal_hash(node)
-        return {} unless node.is_a?(Prism::KeywordHashNode) || node.is_a?(Prism::HashNode)
-
-        node.elements.each_with_object({}) do |element, hash|
-          next unless element.is_a?(Prism::AssocNode)
-
-          hash[literal(element.key).to_s] = literal(element.value)
-        end
-      end
-
-      # Literal values become Ruby values; anything computed keeps its source.
-      def literal(node)
-        case node
-        when Prism::StringNode, Prism::SymbolNode then node.unescaped
-        when Prism::IntegerNode, Prism::FloatNode then node.value
-        when Prism::TrueNode then true
-        when Prism::FalseNode then false
-        when Prism::NilNode then nil
-        else node.slice
-        end
-      end
-
       private_class_method :collect_periodic_blocks, :collect_registrations, :periodic_block?,
-                           :rebinds_implicit_parameter?, :block_parameter, :registration_call?, :registration, :class_name,
-                           :literal_hash, :literal
+                           :rebinds_implicit_parameter?, :block_parameter, :registration_call?, :registration
     end
   end
 end

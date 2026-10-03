@@ -712,6 +712,15 @@ expanded mailer and schedule identities in an existing index.
   logged as a warning. A class that is not loaded is logged as a warning and the
   unit is kept with `job_class_resolved: false`. Identifiers are `scheduled:<job_class.underscore>`;
   repeat registrations of one class are numbered `:2`, `:3` by file and line.
+- Reads Sidekiq-Cron jobs registered in Ruby (format `:sidekiq_cron_ruby`) from the same sources:
+  `Sidekiq::Cron::Job.create(...)`, `Sidekiq::Cron::Job.new(...).save` (directly or through a local
+  that is saved), and `load_from_hash(!)` / `load_from_array(!)` with a literal Hash or Array.
+  `metadata[:registration]` names the form. String or symbol keys and `class` or `klass` are
+  accepted. Identifiers are `scheduled:<name>`, or `scheduled:<job_class.underscore>` with
+  `metadata[:name_source]` when the name is computed; a computed class keeps the unit without an
+  edge (`metadata[:job_class_source]`); an entry with neither is skipped with a warning. A computed
+  argument such as `load_from_hash(YAML.load_file(...))` is not read. Repeats of one name are numbered
+  like periodic repeats.
 - Extracts job class name, cron expression, queue, and any arguments
 - `metadata[:frequency_human_readable]` describes standard cron lines in words (`0 7 * * *` is
   `daily at 07:00`, `0 8 * * 0` is `weekly on Sunday at 08:00`), including nicknames such as `@daily`,
