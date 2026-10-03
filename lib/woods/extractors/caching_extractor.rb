@@ -47,11 +47,17 @@ module Woods
         delete: /Rails\.cache\.delete\s*[(\[]/,
         exist: /Rails\.cache\.exist\?\s*[(\[]/,
         caches_action: /\bcaches_action\b/,
-        # Linear by construction: blanks are possessive, and the scan for
-        # `do` stops at the next `cache` token, so each character is scanned
-        # from one `cache` start only. An unbounded `.*?` rescanned the rest
-        # of the line from every `cache` (polynomial without memoization).
-        fragment: /\bcache(?:_if|_unless)?\s++(?:(?!\bcache(?:_if|_unless)?\s)[^\n])*?\bdo\b|\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/,
+        # The scan for `do` reads tokens: a backslash pair, a quoted string,
+        # or one other character, stopping at a `cache` token outside a
+        # string. A string is one token, so `cache [x, "cache me"] do`
+        # matches at the outer call. It stays linear: every token moves each
+        # scan's quote state (outside, in "", in '') by the same one-to-one
+        # map, so scans started at different `cache` tokens never share a
+        # state, and at most three scans cover any character. That is why a
+        # backslash pair is a token outside strings too: an escape honored
+        # only inside a string merges states. An unbounded `.*?` rescanned
+        # the rest of the line from every `cache` (polynomial on Ruby < 3.2).
+        fragment: /\bcache(?:_if|_unless)?\s++(?:\\.|"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'|(?!\bcache(?:_if|_unless)?\s)[^\n"'\\])*?\bdo\b|\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/,
         # A bare key method inside the arguments of a call matched above is
         # skipped (see #extract_cache_calls).
         cache_key: /\bcache_key(?:_with_version)?\b/,
@@ -184,7 +190,10 @@ module Woods
       # A key method named bare inside another cache call's arguments
       # (`json.cache! cache_key do`) is that call's key, usually a local,
       # so it is not counted. A receiver call (`record.cache_key`) there,
-      # or an implicit-self call anywhere else, still counts.
+      # or an implicit-self call anywhere else, still counts. A fragment
+      # match inside an earlier call's arguments is text in that call's key
+      # (`Rails.cache.fetch([id, "cache me do"])`), so it is dropped too;
+      # fragment is the last call type in {CACHE_PATTERNS}.
       #
       # @param source [String] Source code
       # @return [Array<Hash>] Cache call descriptors
@@ -194,7 +203,10 @@ module Woods
         argument_ranges = []
 
         call_patterns.each do |type, pattern|
+          spans = type == :fragment ? merge_ranges(argument_ranges) : []
           each_occurrence(source, pattern) do |offset|
+            next if within_spans?(spans, offset)
+
             arguments = call_arguments(source, offset, type)
             range = arguments.delete(:argument_range)
             argument_ranges << range if range
@@ -240,6 +252,13 @@ module Woods
       def bare_cache_argument?(source, offset, spans)
         return false if offset.positive? && source[offset - 1] == '.'
 
+        within_spans?(spans, offset)
+      end
+
+      # @param spans [Array<Range>] Merged argument ranges, from {#merge_ranges}
+      # @param offset [Integer] Character offset
+      # @return [Boolean]
+      def within_spans?(spans, offset)
         span = spans.bsearch { |range| range.end > offset }
         span ? span.begin <= offset : false
       end

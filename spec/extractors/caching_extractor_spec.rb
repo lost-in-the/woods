@@ -608,6 +608,31 @@ RSpec.describe Woods::Extractors::CachingExtractor do
                              options: { expires_in: '1.hour' } }])
     end
 
+    it 'keeps a key whose string mentions cache as one fragment call' do
+      erb = calls_for('app/views/widgets/show.html.erb', <<~ERB)
+        <% cache [@widget, "cache me now"] do %>
+        <% end %>
+      ERB
+      haml = calls_for('app/views/widgets/show.html.haml', <<~'HAML')
+        - cache [@widget, 'cache it', "say \"cache me\""] do
+          %p hi
+      HAML
+
+      expect(erb).to eq([{ type: :fragment, key_pattern: '[@widget, "cache me now"]', ttl: nil, options: {} }])
+      expect(haml).to eq([{ type: :fragment, key_pattern: %q([@widget, 'cache it', "say \\"cache me\\""]), ttl: nil,
+                            options: {} }])
+    end
+
+    it 'does not read a fragment cache out of another cache call arguments' do
+      calls = calls_for('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def notes = Rails.cache.fetch([id, "cache me do"]) { compute }
+        end
+      RUBY
+
+      expect(calls.map { |c| c[:type] }).to eq([:fetch])
+    end
+
     it 'truncates a long key expression to 120 characters' do
       key = "[#{Array.new(40) { |i| "part_#{i}" }.join(', ')}]"
       calls = calls_for('app/views/widgets/index.html.haml', "- cache #{key} do\n  %p hi\n")
@@ -643,7 +668,14 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       'near-miss do' => 'cache dox ' * repeats,
       'json.cache without a bang' => 'json.cache ' * repeats,
       'Rails.cache.fetch then blanks' => "Rails.cache.fetch#{' ' * repeats}x",
-      'cache_key-prefixed words' => 'cache_keyx ' * repeats
+      'cache_key-prefixed words' => 'cache_keyx ' * repeats,
+      'cache inside an open string' => 'cache "cache ' * repeats,
+      'cache inside closed strings' => 'cache "cache " ' * repeats,
+      'unclosed quotes after cache' => %(cache "x cache 'y ) * repeats,
+      'escaped quotes after cache' => 'cache "\\" cache ' * repeats,
+      'mixed quotes after cache' => %(cache "' cache '" ) * repeats,
+      'backslash quote outside a string' => %(cache \\" cache ) * repeats,
+      'backslash runs around quotes' => %(cache "\\\\" cache \\' cache ) * repeats
     }.each do |label, input|
       it "matches every cache pattern in linear time: #{label}" do
         within_budget do
