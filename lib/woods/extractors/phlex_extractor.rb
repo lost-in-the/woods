@@ -8,6 +8,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
+require_relative 'frontend_references'
 
 module Woods
   module Extractors
@@ -31,6 +32,7 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
+      include FrontendReferences
 
       # Common Phlex base classes to look for
       PHLEX_BASES = %w[
@@ -91,7 +93,7 @@ module Woods
         unit.dependencies = extract_dependencies(unit.source_code, renders)
         HelperCallScan.annotate(self, unit, component)
 
-        unit
+        apply_frontend_references(unit, unit.source_code)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract component #{component.name}: #{e.message}")
         nil
@@ -253,11 +255,6 @@ module Woods
 
         source.scan(/helpers\.(\w+)/).flatten.uniq.each do |method|
           deps << { type: :helper_method, target: method, via: :call }
-        end
-
-        # Stimulus controllers (from data-controller attributes)
-        source.scan(/data[_-]controller[=:]\s*["']([^"']+)["']/).flatten.uniq.each do |controller|
-          deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
         # Navigation edges — resolve _path / _url helpers to real controllers
