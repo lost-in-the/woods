@@ -471,7 +471,7 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 
 **Included in Woods 2.1:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
 
-**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
+**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, frontend module references (see [Frontend references](#frontend-references)), and route helper usage.
 
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
@@ -528,8 +528,9 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 - The `view_render` edge exists only when the controller the directory names is a runtime `ActionController::Base` or `ActionController::API` subclass. Mailer view directories link to their `ActionMailer::Base` subclass with a `:mailer` edge.
 - Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
 - **Helper call edges** (see [Application helper calls](#application-helper-calls)): a template calling `pretty_date(x)` gets a `:helper_call` edge to the helper module that defines `pretty_date`, and a `:helper_method` edge to the controller that declares a name with `helper_method`. `metadata[:helper_calls]` lists the called names per module.
+- Frontend module references (`x-data`, `data-controller`, custom element tags) become `js_module` edges; see [Frontend references](#frontend-references)
 
-**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Frontend module references are read from every parsed engine; see [Frontend references](#frontend-references). The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
 
 #### Application helper calls
 
@@ -591,6 +592,35 @@ Each key is present only when non-empty, so a unit with no helper calls is
 byte-identical to its pre-2.2 form. Incremental maintenance re-runs the five
 consumers wholesale when a helper source changes; see
 [Incremental extraction](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
+
+---
+
+### JsModuleExtractor
+
+**What it captures:** one shallow `js_module` unit per JavaScript or TypeScript file under `config.javascript_paths` (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}` and `app/assets/javascripts/**/*.js`; see [JavaScript paths](CONFIGURATION_REFERENCE.md#javascript-paths)). The identifier is the root-relative path.
+
+**Key details:**
+- Shallow by design. No JavaScript toolchain and no AST: a linear `StringScanner` token pass (`Woods::Extractors::JsTokenizer`) skips comments, strings, template literals and regular-expression literals, and `JsModuleFacts` reads the rest. Dynamic registration (a name built at runtime, a loop over a manifest) is not seen.
+- `metadata.kind` is one of `stimulus_controller`, `alpine_data`, `stencil_component`, `custom_element`, `module`. `language` is `javascript` or `typescript`.
+- `metadata.default_export` (name or `null`), `has_default_export`, `named_exports` (sorted), and `imports`: one entry per specifier with `names`, `kind` (`static`, `dynamic`, `require`, `reexport`) and `resolved`, the module path when the specifier names a local file (relative, `@/` and `~/` aliases, bare paths under a configured root, index files, extension swaps). A package import resolves to `null`.
+- `metadata.registered_names` lists the names other code uses for this module, each `{ kind:, name:, source: }`, with `source` one of `registration`, `filename`, `global`, `stencil`, `define`. `metadata.registers` lists names this file registers for another module. `metadata.stimulus_loaders` records `eagerLoadControllersFrom` / `lazyLoadControllersFrom` calls.
+- **Name resolution** (`Woods::Extractors::JsModuleRegistry`), per run. Stimulus: `application.register("clipboard", ClipboardController)` beats the `controllers/**/*_controller.{js,ts}` filename convention (`controllers/ledgers/line_item_controller.js` registers `ledgers--line-item`; loader directories count as `controllers/` too). Alpine: `Alpine.data("dropdown", ...)` beats `window.dropdown = function`. Custom elements: Stencil `@Component({ tag: "x-card" })` and `customElements.define("x-card", Card)`. `Alpine.store` names are recorded but no template edge targets them. A registration whose value is imported lands on the defining module, following barrel re-exports; an inline value lands on the registering module. Two modules claiming one name at the same precedence resolve to nothing.
+- Edges: `via: :import` to each resolved local import. Package imports produce no edge.
+- **Size cap:** a file over 200 KB (`JsModuleExtractor::MAX_SOURCE_BYTES`) keeps its metadata but stores an empty `source_code`, with `metadata.source_omitted: true`; `source_bytes` is always recorded. A file over 2 MB is listed but not tokenized (`analysis_omitted: true`).
+- Excluded wherever a glob reaches them: `node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/`, `coverage/` directories, `*.min.js`, `*.d.ts`.
+- Incremental re-extraction re-runs `JsModuleExtractor` wholesale on any module change: a module's registered names come from whichever file registers them. When that re-run moves the name-to-module map, the components, view components and view templates are re-run too (`Extractor::JS_NAME_CONSUMER_EXTRACTORS`); a body edit that moves no name re-runs none of them. `woods:refresh[js_modules]` cascades the same way. Changing `javascript_paths` itself needs one full extraction.
+
+### Frontend references
+
+`PhlexExtractor`, `ViewComponentExtractor` and `ViewTemplateExtractor` scan their source for the names server-rendered markup uses to reach JavaScript (`Woods::Extractors::FrontendReferences`):
+
+| Reference | Forms read | Edge |
+|---|---|---|
+| Alpine data | `x-data="dropdown"`, `x-data="picker({ ... })"`, `"x-data": "..."`, `x_data: "..."`, `"x-data" => "..."` | `{ type: :js_module, via: :alpine_data }` |
+| Stimulus controller | `data-controller="a b"` (one edge per name), `data_controller: "..."`, `data: { controller: "..." }` | `{ type: :js_module, via: :stimulus_controller }` |
+| Custom element | `<x-shipment-card>`, HAML `%x-shipment-card`, Phlex `register_element :x_shipment_card` | `{ type: :js_module, via: :custom_element }` |
+
+An inline object (`x-data="{ open: false }"`), a `$store` reference, an interpolated value, and a routing `controller:` option outside a `data:` hash produce nothing. A name no module registers produces no edge and is listed in `metadata[:unresolved_frontend_references]` as `{ kind:, name: }`; `turbo-frame` and other framework elements land there unless the app defines them. The earlier dangling `:stimulus_controller` edges (`via: :html_attribute`) are gone: a Stimulus reference is now either a `js_module` edge or an unresolved entry.
 
 ---
 
@@ -1357,7 +1387,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 45 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support` |
+| `type` | Symbol | Unit category, one of the 45 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support`, `:js_module` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
