@@ -245,4 +245,101 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
       expect(service_deps.first[:target]).to eq('NotificationService')
     end
   end
+
+  # ── Boot, seed and root files ───────────────────────────────────────
+
+  describe 'boot, seed and root files' do
+    def config_units
+      described_class.new.extract_all.reject { |unit| unit.identifier == 'BehavioralProfile' }
+    end
+
+    it 'extracts each file with its kind' do
+      {
+        'config/boot.rb' => "require 'bundler/setup'\n",
+        'config/environment.rb' => "require_relative 'application'\nRails.application.initialize!\n",
+        'config/importmap.rb' => "pin 'application'\n",
+        'config/coverage.rb' => "SimpleCov.configure do\n  add_filter '/spec/'\nend\n",
+        'config/deploy.rb' => "set :application, 'ledger'\n",
+        'config/deploy/production.rb' => "server 'ledger.example'\n",
+        'db/seeds.rb' => "Widget.create!(name: 'seed')\n",
+        'db/seeds/widgets.rb' => "Widget.create!(name: 'nested')\n",
+        'Gemfile' => "source 'https://rubygems.org'\ngem 'rails'\n",
+        'Rakefile' => "require_relative 'config/application'\nRails.application.load_tasks\n"
+      }.each { |relative, source| create_file(relative, source) }
+
+      kinds = config_units.to_h { |unit| [unit.identifier, unit.metadata[:config_type]] }
+
+      expect(kinds).to eq(
+        'boot.rb' => 'boot', 'environment.rb' => 'environment', 'importmap.rb' => 'importmap',
+        'coverage.rb' => 'configuration', 'deploy.rb' => 'deploy', 'deploy/production.rb' => 'deploy',
+        'db/seeds.rb' => 'seeds', 'db/seeds/widgets.rb' => 'seeds', 'Gemfile' => 'gemfile', 'Rakefile' => 'rakefile'
+      )
+    end
+
+    it 'returns units in a stable order with initializers and environments first' do
+      %w[config/initializers/b.rb config/boot.rb Gemfile config/environments/test.rb db/seeds.rb].each do |relative|
+        create_file(relative, "# #{relative}\n")
+      end
+
+      expect(config_units.map(&:identifier)).to eq(
+        %w[initializers/b.rb environments/test.rb Gemfile boot.rb db/seeds.rb]
+      )
+    end
+
+    it 'leaves the route file and the application file to their own units' do
+      create_file('config/routes.rb', "Rails.application.routes.draw {}\n")
+      create_file('config/application.rb', "module Ledger; class Application < Rails::Application; end; end\n")
+      create_file('config/routes/admin.rb', "resources :widgets\n")
+
+      expect(config_units).to eq([])
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'config/routes.rb'))).to be_nil
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'config/application.rb'))).to be_nil
+    end
+
+    it 'ignores nested config directories it does not own, and non-Ruby files' do
+      create_file('config/locales/en.rb', "{ en: {} }\n")
+      create_file('config/settings.yml', "a: 1\n")
+      create_file('lib/widget.rb', "class Widget; end\n")
+
+      expect(config_units).to eq([])
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'lib/widget.rb'))).to be_nil
+    end
+
+    it 'links a Gemfile to the gems it declares' do
+      path = create_file('Gemfile', <<~RUBY)
+        source 'https://rubygems.org'
+        gem 'rails', '~> 8.0'
+        gem "sidekiq"
+        # gem 'commented'
+        group :test do
+          gem('rspec-rails')
+        end
+      RUBY
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.metadata[:gem_references]).to eq(%w[rails sidekiq rspec-rails])
+      expect(unit.dependencies).to include({ type: :gem, target: 'rspec-rails', via: :configuration })
+    end
+
+    it 'scans a seed file for the usual dependencies' do
+      path = create_file('db/seeds.rb', "WidgetSeedService.call\n")
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.namespace).to eq('seeds')
+      expect(unit.source_code).to include('Type: seeds', 'WidgetSeedService.call')
+      expect(unit.dependencies).to include({ type: :service, target: 'WidgetSeedService', via: :code_reference })
+    end
+
+    it 'answers ownership from the path alone' do
+      owned = %w[config/initializers/a.rb config/environments/test.rb config/boot.rb config/deploy/x.rb
+                 db/seeds/a/b.rb Gemfile Rakefile config/puma.rb]
+      unowned = %w[config/routes.rb config/application.rb config/routes/admin.rb config/settings.yml
+                   config/locales/en.rb lib/tasks/a.rb Gemfile.lock db/schema.rb app/models/widget.rb]
+
+      expect(owned.select { |path| described_class.configuration_path?(path) }).to eq(owned)
+      expect(unowned.select { |path| described_class.configuration_path?(path) }).to eq([])
+    end
+  end
 end

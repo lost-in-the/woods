@@ -7,6 +7,7 @@ require 'woods'
 require 'woods/extractors/config_file_extractor'
 require 'woods/extractors/config_read_scanner'
 require 'woods/extractors/route_extractor'
+require 'woods/extractors/configuration_extractor'
 
 # YAML files and the Ruby that reads them are uncontrolled input. Every
 # pattern the config-file extractor and the config-read scanner apply must
@@ -90,6 +91,19 @@ RSpec.describe 'Config source scan complexity' do
       extractor = Woods::Extractors::RouteExtractor.new
 
       within_budget(budget_seconds) { extractor.send(:route_declarations, source) }
+    end
+  end
+
+  {
+    'gem then spaces' => "gem#{spaces}",
+    'gem, spaces, a paren, spaces' => "gem#{spaces}(#{spaces}",
+    'many blank lines' => "\n" * 50_000,
+    'many indented near-miss lines' => "   gemx\n" * 10_000,
+    'repeated gem openers on one line' => 'gem(' * 10_000,
+    'a gem with a long unterminated name' => "gem '#{word}"
+  }.each do |label, source|
+    it "the Gemfile declaration scan stays within #{budget_seconds}s on #{label}" do
+      within_budget(budget_seconds) { source.scan(Woods::Extractors::ConfigurationExtractor::GEM_DECLARATION) }
     end
   end
 

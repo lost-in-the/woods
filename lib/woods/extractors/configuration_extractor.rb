@@ -11,8 +11,15 @@ module Woods
     # ConfigurationExtractor handles Rails configuration file extraction.
     #
     # Scans `config/initializers/` and `config/environments/` for Ruby
-    # configuration files. Each file becomes one ExtractedUnit with metadata
-    # about config type, gem references, and detected settings.
+    # configuration files, plus the Ruby an application boots, seeds and builds
+    # from: the files directly under `config/`, `config/deploy/`, `db/seeds.rb`,
+    # `db/seeds/`, and the root `Gemfile` and `Rakefile`. Each file becomes one
+    # ExtractedUnit with metadata about config type, gem references, and
+    # detected settings.
+    #
+    # `config/routes.rb` belongs to RouteExtractor (a `route_file` unit) and
+    # `config/application.rb` is the nominal path of the behavioral profile, so
+    # neither is extracted here.
     #
     # @example
     #   extractor = ConfigurationExtractor.new
@@ -29,6 +36,63 @@ module Woods
         config/environments
       ].freeze
 
+      # Config type of each directory scanned recursively.
+      DIRECTORY_TYPES = {
+        'config/initializers' => 'initializer',
+        'config/environments' => 'environment',
+        'config/deploy' => 'deploy',
+        'db/seeds' => 'seeds'
+      }.freeze
+
+      # Directories scanned in addition to {CONFIG_DIRECTORIES}.
+      SOURCE_DIRECTORIES = (DIRECTORY_TYPES.keys - CONFIG_DIRECTORIES).freeze
+
+      # Config type of each file named exactly. Any other Ruby file directly
+      # under `config/` is a plain `configuration`.
+      FILE_TYPES = {
+        'Gemfile' => 'gemfile',
+        'Rakefile' => 'rakefile',
+        'config/boot.rb' => 'boot',
+        'config/deploy.rb' => 'deploy',
+        'config/environment.rb' => 'environment',
+        'config/importmap.rb' => 'importmap',
+        'db/seeds.rb' => 'seeds'
+      }.freeze
+
+      # Root-relative files named exactly, including the two with no extension.
+      SOURCE_FILES = FILE_TYPES.keys.freeze
+
+      # The directory whose direct Ruby children are configuration.
+      TOP_LEVEL_DIRECTORY = 'config'
+
+      # Files directly under `config/` that other units own.
+      TOP_LEVEL_EXCLUDED = %w[config/routes.rb config/application.rb].freeze
+
+      GEM_DECLARATION = /^[ \t]*+gem[ \t]*+\(?+[ \t]*+["']([\w.-]++)["']/
+
+      class << self
+        # Whether this extractor owns a path. A pure function of the path.
+        #
+        # @param relative_path [String] Rails.root-relative path
+        # @return [Boolean]
+        def configuration_path?(relative_path)
+          !config_type_for(relative_path.to_s).nil?
+        end
+
+        # @param relative_path [String] Rails.root-relative path
+        # @return [String, nil] the config type, or nil for a path this extractor does not own
+        def config_type_for(relative_path)
+          return FILE_TYPES[relative_path] if FILE_TYPES.key?(relative_path)
+          return nil unless relative_path.end_with?('.rb')
+
+          directory = DIRECTORY_TYPES.keys.find { |dir| relative_path.start_with?("#{dir}/") }
+          return DIRECTORY_TYPES[directory] if directory
+
+          top_level = File.dirname(relative_path) == TOP_LEVEL_DIRECTORY
+          'configuration' if top_level && !TOP_LEVEL_EXCLUDED.include?(relative_path)
+        end
+      end
+
       def initialize
         @directories = CONFIG_DIRECTORIES.map { |d| Rails.root.join(d) }
                                          .select(&:directory?)
@@ -38,7 +102,7 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of configuration units
       def extract_all
-        units = find_files_in_directories(@directories).filter_map do |file|
+        units = (find_files_in_directories(@directories) + boot_and_root_files).filter_map do |file|
           extract_configuration_file(file)
         end
 
@@ -66,9 +130,11 @@ module Woods
       # @param file_path [String] Path to the configuration file
       # @return [ExtractedUnit, nil] The extracted unit or nil on failure
       def extract_configuration_file(file_path)
+        config_type = detect_config_type(file_path)
+        return nil unless config_type
+
         source = File.read(file_path)
         identifier = build_identifier(file_path)
-        config_type = detect_config_type(file_path)
 
         unit = ExtractedUnit.new(
           type: :configuration,
@@ -79,7 +145,7 @@ module Woods
         unit.namespace = config_type
         unit.source_code = annotate_source(source, identifier, config_type)
         unit.metadata = extract_metadata(source, config_type)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, config_type)
 
         unit
       rescue StandardError => e
@@ -88,6 +154,18 @@ module Woods
       end
 
       private
+
+      # Files outside {CONFIG_DIRECTORIES}: the exact files, the Ruby directly
+      # under `config/`, then the extra directories. Sorted, so repeat runs agree.
+      #
+      # @return [Array<String>] absolute paths
+      def boot_and_root_files
+        root = Rails.root.to_s
+        relative = SOURCE_FILES.select { |path| File.file?(File.join(root, path)) }
+        relative += Dir.glob("#{TOP_LEVEL_DIRECTORY}/*.rb", base: root)
+        relative += SOURCE_DIRECTORIES.flat_map { |dir| Dir.glob("#{dir}/**/*.rb", base: root) }
+        relative.uniq.sort.select { |path| self.class.configuration_path?(path) }.map { |path| File.join(root, path) }
+      end
 
       # ──────────────────────────────────────────────────────────────────────
       # Identification
@@ -102,18 +180,12 @@ module Woods
         relative.sub(%r{^config/}, '')
       end
 
-      # Detect whether this is an initializer or environment config.
+      # The kind of configuration a file holds, decided by its path.
       #
       # @param file_path [String]
-      # @return [String]
+      # @return [String, nil] nil for a path this extractor does not own
       def detect_config_type(file_path)
-        if file_path.include?('config/initializers')
-          'initializer'
-        elsif file_path.include?('config/environments')
-          'environment'
-        else
-          'configuration'
-        end
+        self.class.config_type_for(file_path.to_s.sub("#{Rails.root}/", ''))
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -125,7 +197,7 @@ module Woods
       # @param config_type [String]
       # @return [String]
       def annotate_source(source, identifier, config_type)
-        gem_refs = detect_gem_references(source)
+        gem_refs = detect_gem_references(source, config_type)
 
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -148,7 +220,7 @@ module Woods
       def extract_metadata(source, config_type)
         {
           config_type: config_type,
-          gem_references: detect_gem_references(source),
+          gem_references: detect_gem_references(source, config_type),
           config_settings: detect_config_settings(source),
           rails_config_blocks: detect_rails_config_blocks(source),
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') },
@@ -159,9 +231,10 @@ module Woods
       # Detect gem/library references in configuration.
       #
       # @param source [String]
+      # @param config_type [String, nil] a Gemfile also counts its `gem` declarations
       # @return [Array<String>]
-      def detect_gem_references(source)
-        refs = []
+      def detect_gem_references(source, config_type = nil)
+        refs = config_type == 'gemfile' ? source.scan(GEM_DECLARATION).flatten : []
 
         # Gem.configure style: Devise.setup, Sidekiq.configure_server
         source.scan(/(\w+)\.(setup|configure\w*|config)\b/).each do |match|
@@ -214,9 +287,10 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       # @param source [String]
+      # @param config_type [String, nil]
       # @return [Array<Hash>]
-      def extract_dependencies(source)
-        deps = detect_gem_references(source).map do |gem_ref|
+      def extract_dependencies(source, config_type = nil)
+        deps = detect_gem_references(source, config_type).map do |gem_ref|
           { type: :gem, target: gem_ref, via: :configuration }
         end
 
