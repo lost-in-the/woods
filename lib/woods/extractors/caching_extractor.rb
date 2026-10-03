@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'strscan'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -68,6 +70,9 @@ module Woods
       # Call types whose first argument (after the condition, for
       # `cache_if`) is a cache key.
       KEYED_TYPES = %i[fetch read write delete exist fragment].freeze
+
+      # Byte value of `.`, the receiver separator before a key method.
+      DOT = '.'.ord
 
       # Cache key methods: no arguments read, and counted unless they are a
       # bare identifier passed to another cache call.
@@ -233,7 +238,7 @@ module Woods
       # Sorted, disjoint union of exclusive ranges, so membership is one
       # binary search instead of a scan over every cache call.
       #
-      # @param ranges [Array<Range>] Exclusive character ranges
+      # @param ranges [Array<Range>] Exclusive byte ranges
       # @return [Array<Range>]
       def merge_ranges(ranges)
         ranges.sort_by(&:begin).each_with_object([]) do |range, merged|
@@ -250,17 +255,17 @@ module Woods
       # inside the arguments of a cache call.
       #
       # @param source [String] Source code
-      # @param offset [Integer] Character offset of the key method name
+      # @param offset [Integer] Byte offset of the key method name
       # @param spans [Array<Range>] Merged argument ranges, from {#merge_ranges}
       # @return [Boolean]
       def bare_cache_argument?(source, offset, spans)
-        return false if offset.positive? && source[offset - 1] == '.'
+        return false if offset.positive? && source.getbyte(offset - 1) == DOT
 
         within_spans?(spans, offset)
       end
 
       # @param spans [Array<Range>] Merged argument ranges, from {#merge_ranges}
-      # @param offset [Integer] Character offset
+      # @param offset [Integer] Byte offset
       # @return [Boolean]
       def within_spans?(spans, offset)
         span = spans.bsearch { |range| range.end > offset }
@@ -269,22 +274,27 @@ module Woods
 
       # Yield the start offset of every non-overlapping occurrence of a pattern.
       #
+      # Offsets are bytes: MatchData character offsets on a UTF-8 string are
+      # counted from its start, which made a loop over many matches
+      # quadratic. `fixed_anchor` lets `\b` see the text before the scan
+      # position.
+      #
       # @param source [String] Source code
       # @param pattern [Regexp] Pattern to scan for
-      # @yieldparam offset [Integer] Character offset where the occurrence begins
+      # @yieldparam offset [Integer] Byte offset where the occurrence begins
       # @return [void]
       def each_occurrence(source, pattern)
-        offset = 0
-        while (match = source.match(pattern, offset))
-          yield match.begin(0)
-          offset = [match.end(0), match.begin(0) + 1].max
+        scanner = StringScanner.new(source, fixed_anchor: true)
+        while scanner.skip_until(pattern)
+          yield scanner.pos - scanner.matched_size
+          scanner.getch if scanner.matched_size.zero?
         end
       end
 
       # Key, ttl, and literal options for one cache call occurrence.
       #
       # @param source [String] Source code
-      # @param offset [Integer] Character offset where the occurrence begins
+      # @param offset [Integer] Byte offset where the occurrence begins
       # @param type [Symbol] The cache call type
       # @return [Hash] :key_pattern, :ttl, :options, and :argument_range
       def call_arguments(source, offset, type)

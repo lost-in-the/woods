@@ -481,11 +481,12 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       expect(types).to eq(%i[fetch read])
     end
 
-    # A byte-measured argument range runs past a multibyte key and would
-    # swallow the implicit-self call in the block body.
-    it 'ends the argument range by character, not byte, after a multibyte key' do
+    # An argument range in different units from the match offsets ends short
+    # of (or runs past) a multibyte key's arguments, miscounting the bare key
+    # inside them or the implicit-self call in the block.
+    it 'measures argument ranges in the units of the match offsets, after a multibyte key' do
       path = create_file('app/views/widgets/show.html.erb',
-                         "<% cache ['☃☃☃☃☃☃', @widget] do %><%= cache_key %>\n<% end %>\n")
+                         "<% cache ['☃☃☃☃☃☃', cache_key] do %><%= cache_key %>\n<% end %>\n")
 
       calls = described_class.new.extract_caching_file(path, :view).metadata[:cache_calls]
       expect(calls.map { |c| c[:type] }).to eq(%i[fragment cache_key])
@@ -828,6 +829,22 @@ RSpec.describe Woods::Extractors::CachingExtractor do
         unit = within_budget { described_class.new.extract_caching_file(path) }
         expect(unit.metadata[:cache_calls].size).to eq(1)
       end
+    end
+
+    # MatchData offsets on a UTF-8 string are counted from its start, so a
+    # match loop has to work in bytes to stay linear.
+    it 'finds 50k key method calls in a multibyte file in linear time' do
+      path = create_file('app/models/ledger.rb', "☃ ledger.cache_key\n" * repeats)
+
+      unit = within_budget { described_class.new.extract_caching_file(path) }
+      expect(unit.metadata[:cache_calls].size).to eq(repeats)
+    end
+
+    it 'reads 10k fragment calls in a multibyte file in linear time' do
+      path = create_file('app/views/w/g.html.erb', "<% cache [@w, '☃'] do %><% end %>\n" * 10_000)
+
+      unit = within_budget { described_class.new.extract_caching_file(path) }
+      expect(unit.metadata[:cache_calls].map { |c| c[:key_pattern] }.uniq).to eq(["[@w, '☃']"])
     end
 
     it 'blanks an unclosed ERB comment tag to the end of the file in linear time' do

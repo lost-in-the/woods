@@ -34,13 +34,13 @@ module Woods
 
       KEY_LIMIT = 120
       MAX_LINES = 8
-      MAX_CHARS = 2_000
+      MAX_BYTES = 2_000
 
       # @param source [String] File source
-      # @param offset [Integer] Character offset where the cache call begins
+      # @param offset [Integer] Byte offset where the cache call begins
       # @return [Hash] `:key_pattern` (String, nil), `:ttl` (String, nil),
       #   `:options` (Hash{Symbol => String}), and `:argument_range`
-      #   (Range, nil): the character range of the call's arguments in `source`
+      #   (Range, nil): the byte range of the call's arguments in `source`
       def read(source, offset)
         call = parse_call(source, offset)
         return { key_pattern: nil, ttl: nil, options: {}, argument_range: nil } unless call
@@ -76,8 +76,10 @@ module Woods
       end
 
       # Candidate call texts, shortest first, cut at the end of an ERB tag.
+      # The window is taken in bytes so `offset` maps straight onto Prism's
+      # byte locations; `scrub` repairs a character cut at the window end.
       def snippets(source, offset)
-        text = source[offset, MAX_CHARS]
+        text = source.byteslice(offset, MAX_BYTES).scrub
         tag_end = text.index(/-?%>/)
         text = text[0...tag_end] if tag_end
         lines = text.lines
@@ -86,7 +88,7 @@ module Woods
 
       def argument_range(call, offset)
         location = call.arguments&.location
-        location && ((offset + location.start_character_offset)...(offset + location.end_character_offset))
+        location && ((offset + location.start_offset)...(offset + location.end_offset))
       end
 
       def positional_arguments(call)
