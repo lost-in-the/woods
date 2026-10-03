@@ -8,6 +8,7 @@ require_relative 'route_helper_resolver'
 require_relative 'helper_catalog'
 require_relative 'helper_call_scan'
 require_relative 'comment_blanking'
+require_relative 'caller_prefix_partials'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
 require_relative 'view_engines/haml'
@@ -75,18 +76,30 @@ module Woods
       # @return [Array<ExtractedUnit>] List of view template units
       def extract_all
         extensions = @engines.flat_map(&:extensions).uniq
-        @directories.flat_map do |dir|
+        pending = {}
+        units = @directories.flat_map do |dir|
           files = extensions.flat_map { |ext| Dir[dir.join("**/*#{ext}")] }
-          files.uniq.filter_map { |file| extract_view_template_file(file) }
+          files.uniq.filter_map { |file| extract_view_template_file(file, pending: pending) }
         end
+        resolve_caller_partials(units, pending)
+        units
       end
 
       # Extract a single view template file.
       #
+      # A relative partial no file was found for depends on which pages
+      # render this template ({CallerPrefixPartials}). Without +pending+ the
+      # unit is returned as {#extract_all} would produce it, which reads
+      # every template when this one holds such a partial.
+      #
       # @param file_path [String] Path to the template file
+      # @param pending [Hash, nil] When given, caller-dependent partials are
+      #   collected into it under the unit's identifier and left unresolved
       # @return [ExtractedUnit, nil] The extracted unit, or nil if no
       #   registered engine handles the file
-      def extract_view_template_file(file_path)
+      def extract_view_template_file(file_path, pending: nil)
+        return extract_resolved_template(file_path) unless pending
+
         engine = engine_for(file_path)
         return nil unless engine
 
@@ -105,7 +118,7 @@ module Woods
         code = CommentBlanking.blank(source, file_path)
         interpolated, partials = engine.scan_partials(code).partition { |name| name.include?(INTERPOLATION_MARKER) }
         unit.metadata = build_metadata(engine, source, code, file_path, partials, interpolated)
-        unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials)
+        unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials, pending)
         apply_helper_calls(unit, engine, source, namespace)
 
         unit
@@ -115,6 +128,57 @@ module Woods
       end
 
       private
+
+      # @param file_path [String]
+      # @return [ExtractedUnit, nil] The unit with its caller-dependent partials resolved
+      def extract_resolved_template(file_path)
+        pending = {}
+        unit = extract_view_template_file(file_path, pending: pending)
+        return unit if unit.nil? || pending.empty?
+
+        resolved = extract_all.find { |candidate| candidate.identifier == unit.identifier }
+        return resolved if resolved
+
+        resolve_caller_partials([unit], pending)
+        unit
+      end
+
+      # @param units [Array<ExtractedUnit>] Every view template unit
+      # @param pending [Hash{String => Array<Hash>}] See {CallerPrefixPartials#apply}
+      # @return [void]
+      def resolve_caller_partials(units, pending)
+        return if pending.empty?
+
+        owners = units.filter_map(&:namespace).uniq.sort.each_with_object({}) do |directory, known|
+          prefixes = owner_prefixes(directory)
+          known[directory] = { prefixes: prefixes, layout: owner_layout(directory, prefixes) } if prefixes
+        end
+        resolver = lambda do |identifier, prefixes, name|
+          found = partial_under_prefixes(engine_for(identifier), name, identifier, prefixes)
+          preferred_partial(engine_for(identifier), identifier, found) if found.any?
+        end
+        CallerPrefixPartials.new(owners: owners, resolver: resolver).apply(units, pending)
+      end
+
+      # The layout an owner renders its pages in: the one it names, or the
+      # first `layouts/<prefix>` template that exists along its prefixes. A
+      # layout chosen at request time (a Symbol or Proc) is unknown.
+      #
+      # @param directory [String] View directory with an owner
+      # @param prefixes [Array<String>] The owner's view prefixes
+      # @return [String, nil] Extension-less identifier, e.g. "layouts/application"
+      def owner_layout(directory, prefixes)
+        klass = view_owner(directory)[:klass]
+        layout = klass.respond_to?(:_layout) ? klass._layout : nil
+        case layout
+        when String then layout.match?(/\blayouts/) ? layout : "layouts/#{layout}"
+        when nil
+          prefixes.map { |prefix| "layouts/#{prefix}" }
+                  .find { |candidate| existing_partial_identifiers("#{candidate}.html").any? }
+        end
+      rescue StandardError
+        nil
+      end
 
       # Find the registered engine that handles the given file, if any.
       #
@@ -184,12 +248,19 @@ module Woods
       # @param file_path [String] Path to the template
       # @param identifier [String] Template identifier
       # @param partials [Array<String>] Pre-extracted partial names
+      # @param pending [Hash] Collects each relative partial no file was found for
       # @return [Array<Hash>]
-      def build_dependencies(engine, code, file_path, identifier, partials)
+      def build_dependencies(engine, code, file_path, identifier, partials, pending)
         deps = []
 
         partials.each do |partial_name|
           partial_identifier = resolve_partial(engine, partial_name, identifier)
+          unless partial_identifier
+            partial_identifier = engine.resolve_partial_identifier(partial_name, identifier)
+            unless partial_name.include?('/')
+              (pending[identifier] ||= []) << { name: partial_name, target: partial_identifier }
+            end
+          end
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
 
@@ -229,24 +300,34 @@ module Woods
       # Resolve a rendered partial to the template file that exists on disk
       # under any registered engine, so a partial rendered across engines
       # points at a real unit. A relative name missing from the template's
-      # own directory is looked up through the controller's view prefixes.
-      # Among several matches the renderer's format wins, then a
-      # format-less partial, then the renderer's own engine, then {ENGINES}
-      # order. With no match the engine's own identifier is kept as the
-      # edge target.
+      # own directory is looked up through the view prefixes of the class
+      # that owns that directory. A template in a directory nothing owns
+      # (a layout, a shared partial) is rendered through its callers'
+      # prefixes instead, which {CallerPrefixPartials} resolves.
       #
       # @param engine [ViewEngines::Base] Engine of the rendering template
       # @param partial_name [String] Partial name from the render call
       # @param identifier [String] Identifier of the rendering template
-      # @return [String] Partial template identifier
+      # @return [String, nil] Partial template identifier, nil when no file exists
       def resolve_partial(engine, partial_name, identifier)
-        fallback = engine.resolve_partial_identifier(partial_name, identifier)
-        candidates = existing_partial_identifiers(fallback)
+        candidates = existing_partial_identifiers(engine.resolve_partial_identifier(partial_name, identifier))
         if candidates.empty? && !partial_name.include?('/')
-          candidates = inherited_partial_identifiers(engine, partial_name, identifier)
+          own_dir = File.dirname(identifier)
+          prefixes = owner_prefixes(own_dir)
+          candidates = partial_under_prefixes(engine, partial_name, identifier, prefixes - [own_dir]) if prefixes
         end
-        return fallback if candidates.empty?
+        preferred_partial(engine, identifier, candidates) if candidates.any?
+      end
 
+      # Among several files for one partial the renderer's format wins, then
+      # a format-less partial, then the renderer's own engine, then
+      # {ENGINES} order.
+      #
+      # @param engine [ViewEngines::Base] Engine of the rendering template
+      # @param identifier [String] Identifier of the rendering template
+      # @param candidates [Array<String>] Existing partial identifiers
+      # @return [String]
+      def preferred_partial(engine, identifier, candidates)
         renderer_format = template_format(identifier)
         candidates.min_by do |candidate|
           [format_rank(template_format(candidate), renderer_format),
@@ -258,23 +339,31 @@ module Woods
 
       # Rails resolves a relative partial through the rendering
       # controller's `_prefixes`: its own path, each parent controller's,
-      # then "application". A template with no controller (a layout, a
-      # shared partial) still reaches "application". The first prefix
-      # holding the partial wins.
+      # then "application". The first prefix holding the partial wins.
       #
       # @param engine [ViewEngines::Base]
       # @param partial_name [String] Relative partial name, e.g. "show"
       # @param identifier [String] Identifier of the rendering template
+      # @param prefixes [Array<String>] View prefixes, in lookup order
       # @return [Array<String>]
-      def inherited_partial_identifiers(engine, partial_name, identifier)
-        own_dir = File.dirname(identifier)
-        (controller_prefixes(own_dir) + ['application']).uniq.each do |prefix|
-          next if prefix == own_dir
-
+      def partial_under_prefixes(engine, partial_name, identifier, prefixes)
+        prefixes.each do |prefix|
           found = existing_partial_identifiers(engine.resolve_partial_identifier("#{prefix}/#{partial_name}", identifier))
           return found if found.any?
         end
         []
+      end
+
+      # Lookup prefixes of the class that owns a view directory, ending in
+      # "application".
+      #
+      # @param dir [String] View directory, "." for the views root
+      # @return [Array<String>, nil] nil when no runtime class owns the directory
+      def owner_prefixes(dir)
+        return nil unless view_owner(dir == '.' ? nil : dir)
+
+        prefixes = controller_prefixes(dir)
+        ((prefixes.empty? ? [dir] : prefixes) + ['application']).uniq
       end
 
       # View prefixes of the runtime class that owns a view directory.

@@ -552,8 +552,11 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(render_targets('profile/password/show.html.haml')).to eq(['cards/_show.html.haml'])
     end
 
-    it "keeps the engine's own identifier when no prefix holds the partial" do
-      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    it 'records no edge, and the name as unresolved, when no prefix holds the partial' do
+      unit = described_class.new.extract_all.find { |u| u.identifier == 'profile/password/edit.html.haml' }
+
+      expect(unit.dependencies.select { |d| d[:via] == :render }).to eq([])
+      expect(unit.metadata[:unresolved_partials]).to eq([{ kind: 'caller_prefix', name: 'show', candidates: [] }])
     end
   end
 
