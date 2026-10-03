@@ -229,7 +229,26 @@ module Woods
       end
 
       def build_file_rules
-        plain_ruby_rules + specialized_rules + caching_rules
+        plain_ruby_rules + configuration_rules + specialized_rules + caching_rules
+      end
+
+      # Ruby and YAML configuration sources.
+      def configuration_rules
+        ex = Woods::Extractors
+
+        [
+          # Initializers and environments, plus the boot, seed, deploy and root
+          # files ConfigurationExtractor names exactly.
+          file_rule(:configurations, :extract_configuration_file,
+                    ex::ConfigurationExtractor::DIRECTORY_TYPES.keys,
+                    exact_paths: ex::ConfigurationExtractor::SOURCE_FILES),
+          # YAML under the configured globs. The matcher reads them at call
+          # time; the static attributes describe the defaults, for projections
+          # that cannot call it.
+          file_rule(:config_files, :extract_config_file, ex::ConfigFileExtractor::DEFAULT_ROOTS,
+                    extensions: ex::ConfigFileExtractor::DEFAULT_EXTENSIONS,
+                    exclude: ex::ConfigFileExtractor::PROJECTED_EXCLUSIONS, matcher: :config_file_path?)
+        ]
       end
 
       # Extractors that glob `**/*.rb` under directories they own.
@@ -253,17 +272,6 @@ module Woods
         ex = Woods::Extractors
 
         [
-          # Initializers and environments, plus the boot, seed, deploy and root
-          # files ConfigurationExtractor names exactly.
-          file_rule(:configurations, :extract_configuration_file,
-                    ex::ConfigurationExtractor::DIRECTORY_TYPES.keys,
-                    exact_paths: ex::ConfigurationExtractor::SOURCE_FILES),
-          # YAML under the configured globs. The matcher reads them at call
-          # time; the static attributes describe the defaults, for projections
-          # that cannot call it.
-          file_rule(:config_files, :extract_config_file, ex::ConfigFileExtractor::DEFAULT_ROOTS,
-                    extensions: ex::ConfigFileExtractor::DEFAULT_EXTENSIONS,
-                    exclude: ex::ConfigFileExtractor::PROJECTED_EXCLUSIONS, matcher: :config_file_path?),
           # ConcernExtractor globs app/**/concerns, not just the two canonical
           # directories — match any .rb under app/ inside a concerns/ segment.
           file_rule(:concerns, :extract_concern_file, %w[app], require_segment: '/concerns/'),
