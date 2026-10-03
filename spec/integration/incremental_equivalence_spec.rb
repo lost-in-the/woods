@@ -1660,7 +1660,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   describe 'unclaimed Ruby under app/ (#672, #673)' do
     after do
       %i[SweepDateHelper SweepBillingView SweepConstraint SweepSlugifier SweepTailwind SweepNamespace
-         SweepMapper].each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) }
+         SweepMapper SweepPattern].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
     end
 
     def write_and_load(relative, source)
@@ -1721,6 +1723,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            def total_label = SweepSlugifier.new.call('total')
                          end
                        RUBY
+                     end,
+                     -> { write_and_load('app/models/sweep_pattern.rb', "SweepPattern = /\A\w+\z/\n") },
+                     lambda do
+                       Object.send(:remove_const, :SweepPattern)
+                       write_and_load('app/models/sweep_pattern.rb', "SweepPattern = %w[a b].freeze\n")
                      end,
                      -> { delete_file('app/constraints/sweep_constraint.rb') }
                    ])

@@ -46,6 +46,11 @@ RSpec.describe Woods::SkippedFiles do
     expect(reason_for('app/lib/boot_hook.rb')).to eq('no_declaration')
   end
 
+  it 'reports an unloaded constant assignment file as not_owned' do
+    create_file('app/models/skip_fixture/patterns.rb', "SkipFixture::Unloaded = /x/\n")
+    expect(reason_for('app/models/skip_fixture/patterns.rb')).to eq('not_owned')
+  end
+
   it 'reports a parse error' do
     create_file('app/lib/broken.rb', "class SkipFixture::Broken\n  def call(\nend\n")
     expect(reason_for('app/lib/broken.rb')).to eq('parse_error')

@@ -142,6 +142,38 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     expect(identifiers).to contain_exactly('SweepFixture::DateHelper', 'SweepFixture::Value')
   end
 
+  describe 'top-level constant assignment files' do
+    it 'emits one constant unit per owned assignment with its value kind' do
+      stub_const('SweepFixture::Billing', Module.new)
+      load_source('app/models/sweep_fixture/patterns.rb', <<~'RUBY')
+        SweepFixture::EmailPattern = /\A[^@\s]+@[^@\s]+\z/
+        SweepFixture::ReservedNames = %w[admin root].freeze
+        SweepFixture::Billing::Countries = { 'CA' => 'Canada' }.freeze
+      RUBY
+      units = described_class.new.extract_all
+      expect(units.to_h { |unit| [unit.identifier, unit.metadata.values_at(:ruby_kind, :value_kind)] }).to eq(
+        'SweepFixture::EmailPattern' => %w[constant regexp],
+        'SweepFixture::ReservedNames' => %w[constant array],
+        'SweepFixture::Billing::Countries' => %w[constant hash]
+      )
+      countries = units.find { |unit| unit.identifier == 'SweepFixture::Billing::Countries' }
+      expect(countries.namespace).to eq('SweepFixture::Billing')
+      expect(countries.source_code).to include("{ 'CA' => 'Canada' }")
+      expect(countries.source_code).not_to include('EmailPattern')
+    end
+
+    it 'skips aliases of modules and constants owned by another file' do
+      load_source('app/lib/sweep_fixture/limits.rb', "SweepFixture::Limit = 3\n")
+      load_source('app/lib/sweep_fixture/aliases.rb', "SweepFixture::Alias = SweepFixture\nSweepFixture::Limit = 4\n")
+      expect(identifiers).to eq(['SweepFixture::Limit'])
+    end
+
+    it 'leaves constants inside a class or module body to their owner' do
+      load_source('app/models/sweep_fixture/settings.rb', "module SweepFixture::Settings\n  LIMIT = 3\nend\n")
+      expect(identifiers).to eq(['SweepFixture::Settings'])
+    end
+  end
+
   describe '#extract_fallback_units for a claimed path whose owner emitted nothing' do
     it 'extracts helper classes and mixins beside a serializer base' do
       path = load_source('app/serializers/sweep_fixture/serializer_helpers.rb', <<~RUBY)

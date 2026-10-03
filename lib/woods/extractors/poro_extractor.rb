@@ -11,6 +11,7 @@ require_relative 'assigned_value_discovery'
 require_relative 'job_ancestry'
 require_relative '../source_references/runtime_lookup'
 require_relative 'class_families'
+require_relative 'constant_assignments'
 require_relative '../path_dispatcher'
 
 module Woods
@@ -139,7 +140,9 @@ module Woods
         return 'parse_error' if analysis['parse_error']
 
         declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
-        return 'no_declaration' if declarations.empty?
+        if declarations.empty?
+          return ConstantAssignments.new.call(source).empty? ? 'no_declaration' : 'not_owned'
+        end
         return 'namespace_only' if namespace_only?(source, declarations)
 
         family = declarations.select { |declaration| declaration['kind'] == 'class' }
@@ -168,7 +171,7 @@ module Woods
         nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)
         modules = discovery.call(file_path, analysis: analysis, admit: fallback)
                            .map { |record| module_unit(file_path, source, record) }
-        units = [primary, *nested, *modules].compact
+        units = [primary, *nested, *modules, *constant_units(file_path, source, analysis)].compact
         return mark(units, FALLBACK_MARKER) if fallback
 
         swept_path?(file_path) ? mark(units, SWEEP_MARKER) : units
@@ -265,6 +268,37 @@ module Woods
 
       def mark(units, marker)
         units.each { |unit| unit.metadata = unit.metadata.merge(discovered_via: marker) }
+      end
+
+      # A file with no class or module body can still own top-level constants
+      # (`Pattern = /.../`). Each owned, non-module assignment is a unit.
+      def constant_units(file_path, source, analysis)
+        return [] if analysis['parse_error'] || analysis.fetch('declarations').any?
+
+        lines = source.lines
+        ConstantAssignments.new.call(source).filter_map do |record|
+          next unless owned_constant?(record[:identifier], file_path)
+
+          constant_unit(file_path, record, lines[(record[:line] - 1)...record[:end_line]].join)
+        end
+      end
+
+      def owned_constant?(identifier, file_path)
+        @lookup ||= SourceReferences::RuntimeLookup.new
+        @lookup.call("::#{identifier}", allow_private: true)[:reason] == 'non_module_constant' &&
+          @module_discovery.owns?(identifier, file_path)
+      end
+
+      def constant_unit(file_path, record, body)
+        identifier = record[:identifier]
+        unit = ExtractedUnit.new(type: :poro, identifier: identifier, file_path: file_path)
+        unit.namespace = extract_namespace(identifier)
+        unit.source_code = annotate_source(body, identifier, nil)
+        unit.metadata = { ruby_kind: 'constant', value_kind: record[:value_kind], parent_class: nil,
+                          public_methods: [], class_methods: [], initialize_params: [], method_count: 0,
+                          loc: count_loc(body) }
+        unit.dependencies = extract_dependencies(body)
+        unit
       end
 
       def nested_class_unit(file_path, source, identifier, body)

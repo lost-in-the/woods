@@ -466,6 +466,14 @@ units carry `metadata.discovered_via: "unclaimed_sweep"`. Classes owned by a
 class-discovered extractor (controllers, mailers, channels, components, jobs,
 serializers, GraphQL) are never emitted by the sweep.
 
+A file with no class or module body can still own top-level constants
+(`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment
+whose runtime `const_source_location` is that file, and whose value is not a
+module, becomes a `poro` unit with `metadata.ruby_kind: "constant"` and
+`metadata.value_kind` read from the syntax: `regexp`, `array`, `hash`, `string`,
+`symbol`, `number`, `range`, `boolean`, `nil`, or `expression`. A trailing
+`.freeze` does not change the kind.
+
 **Key details:**
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
 - Common examples: value objects, form objects placed in `app/models`, domain structs
