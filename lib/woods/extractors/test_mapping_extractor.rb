@@ -119,7 +119,8 @@ module Woods
       # @return [Hash]
       def extract_metadata(source, file_path, framework)
         subject = extract_subject(source, framework)
-        subject_class = subject if subject && names_unit?(subject, file_path)
+        group = first_example_group(source) if framework == :rspec
+        subject_class = subject if subject && names_unit?(subject, group, file_path)
         test_type = infer_test_type(file_path, source)
 
         metadata = {
@@ -136,10 +137,16 @@ module Woods
 
       # Decide whether a subject names a unit rather than describing behavior.
       #
+      # A quoted feature title is always prose, even when it looks like a
+      # constant (`feature "Changelog"`); an unquoted constant still names a unit.
+      #
       # @param subject [String] Subject as written
+      # @param group [String, nil] Line opening the first RSpec example group
       # @param file_path [String] Absolute path to the test file
       # @return [Boolean]
-      def names_unit?(subject, file_path)
+      def names_unit?(subject, group, file_path)
+        return true if group&.match?(RSPEC_CONSTANT_DESCRIBE)
+        return false if group&.match?(RSPEC_FEATURE_GROUP)
         return true if subject.match?(CONSTANT_PATH)
 
         file_path.match?(RAKE_TASK_SPEC_DIR) && subject.match?(RAKE_TASK_NAME)

@@ -296,6 +296,30 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.dependencies).to eq([])
       end
 
+      it 'records a constant-shaped feature title as the description' do
+        path = create_file('spec/features/changelog_spec.rb', <<~RUBY)
+          RSpec.feature "Changelog", type: :feature do
+            scenario 'lists entries' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Changelog')
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'links an unquoted constant feature argument like a constant describe' do
+        path = create_file('spec/features/widget_spec.rb', <<~RUBY)
+          RSpec.feature Widget do
+            scenario 'lists widgets' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Widget')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Widget', via: :test_coverage }])
+      end
+
       it 'counts it blocks as test_count' do
         path = create_file('spec/models/user_spec.rb', <<~RUBY)
           describe User do
