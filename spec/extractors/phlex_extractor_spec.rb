@@ -630,6 +630,23 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
     end
 
+    it 'emits a slot edge to the qualified unit and records a slot that names no component' do
+      file_system['/rails/app/components/billing/v2/manage_page.rb'] = <<~RUBY
+        module Billing
+          module V2
+            class ManagePage < Phlex::HTML
+              renders_one :grid, TierGrid
+              renders_one :phantom, Phantom
+            end
+          end
+        end
+      RUBY
+
+      expect(unit.dependencies.select { |d| d[:via] == :slot })
+        .to eq([{ type: :component, target: 'Billing::V2::TierGrid', via: :slot }])
+      expect(unit.metadata[:unresolved_slots]).to eq([{ name: 'Phantom', reason: 'constant_missing' }])
+    end
+
     it 'records a component no application file defines as external, with its gem, and emits no edge' do
       stub_const('ShelfUi::Button', Class.new(Phlex::HTML))
       file_system['/rails/app/components/billing/v2/manage_page.rb'] = <<~RUBY

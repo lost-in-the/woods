@@ -19,6 +19,13 @@ module Woods
     # * +:kit_path+: `Ui::Header(title: "x")`, the same call on a named module
     # * +:yielded+: `menu.NavItem("a")`, the same call on a block argument
     #
+    # Slot declarations (`renders_one`, `renders_many`) are reported too:
+    #
+    # * +:slot+: a constant (`renders_one :header, HeaderComponent`), the
+    #   component a lambda slot builds, or an entry of a `types:` hash
+    # * +:slot_string+: a class name given as a string, which the framework
+    #   resolves from the component class, so only that scope is carried
+    #
     # A lowercase call (`form_with`, `t`, `partial`) is never a candidate.
     #
     # @example
@@ -29,7 +36,8 @@ module Woods
       # One call that may render a component.
       #
       # @!attribute kind
-      #   @return [Symbol] +:constant+, +:kit+, +:kit_path+ or +:yielded+
+      #   @return [Symbol] +:constant+, +:kit+, +:kit_path+, +:yielded+,
+      #     +:slot+ or +:slot_string+
       # @!attribute name
       #   @return [String] the constant path or method name as written
       # @!attribute nesting
@@ -38,6 +46,11 @@ module Woods
 
       # Class methods that build what `render` receives.
       FACTORIES = %i[new with_collection].freeze
+
+      SLOT_DECLARATIONS = %i[renders_one renders_many].freeze
+
+      # Calls whose block is a lambda body.
+      LAMBDA_CALLS = %i[lambda proc].freeze
 
       CAPITALIZED = /\A[[:upper:]]/
 
@@ -79,6 +92,8 @@ module Woods
       def visit_call_node(node)
         if node.name == :render
           record_render(node)
+        elsif SLOT_DECLARATIONS.include?(node.name) && node.receiver.nil?
+          slot_arguments(node).each { |argument| record_slot(argument) }
         elsif CAPITALIZED.match?(node.name.to_s)
           record_capitalized_call(node)
         end
@@ -129,8 +144,47 @@ module Woods
         end
       end
 
-      def add(kind, name)
-        @candidates << Candidate.new(kind: kind, name: name, nesting: @nesting.dup)
+      # Everything after the slot's name.
+      def slot_arguments(node)
+        Array(node.arguments&.arguments).drop(1)
+      end
+
+      def record_slot(node)
+        case node
+        when Prism::StringNode then add(:slot_string, node.unescaped, @nesting.first(1))
+        when Prism::LambdaNode then record_slot(last_statement(node.body))
+        when Prism::HashNode, Prism::KeywordHashNode then record_slot_options(node)
+        when Prism::CallNode then record_slot_call(node)
+        else
+          name = constant_name(node)
+          add(:slot, name) if name
+        end
+      end
+
+      # `types: { chip: ChipComponent, link: { renders: LinkComponent, as: :link } }`:
+      # every value that names a component is one, however deep.
+      def record_slot_options(node)
+        node.elements.each { |element| record_slot(element.value) if element.is_a?(Prism::AssocNode) }
+      end
+
+      def record_slot_call(node)
+        return record_slot(last_statement(node.block.body)) if lambda_call?(node)
+
+        name = factory_receiver(node)
+        add(:slot, name) if name
+      end
+
+      def lambda_call?(node)
+        LAMBDA_CALLS.include?(node.name) && node.receiver.nil? && node.block.is_a?(Prism::BlockNode)
+      end
+
+      # What a lambda slot returns: the component it builds, when it builds one.
+      def last_statement(body)
+        body.is_a?(Prism::StatementsNode) ? body.body.last : body
+      end
+
+      def add(kind, name, nesting = @nesting.dup)
+        @candidates << Candidate.new(kind: kind, name: name, nesting: nesting)
       end
 
       # @return [String, nil] nil for anything but a literal constant path

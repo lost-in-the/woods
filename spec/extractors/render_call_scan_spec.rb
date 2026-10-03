@@ -66,6 +66,38 @@ RSpec.describe Woods::Extractors::RenderCallScan do
     )
   end
 
+  it 'reports the component each slot declaration names, in every form' do
+    source = <<~RUBY
+      module Ledger
+        class PageComponent < ViewComponent::Base
+          renders_one :title
+          renders_one :header, HeaderComponent
+          renders_many :rows, "RowComponent"
+          renders_one :footer, ->(**args) { FooterComponent.new(**args) }
+          renders_one :aside, lambda { |label| Ui::Aside.new(label) }
+          renders_one :body, ->(text) { text.upcase }
+          renders_many :items, types: {
+            chip: ChipComponent,
+            tag: "TagComponent",
+            link: { renders: LinkComponent, as: :link },
+            note: ->(text) { NoteComponent.new(text) }
+          }
+        end
+      end
+    RUBY
+
+    expect(scan(source)).to eq(
+      [[:slot, 'HeaderComponent', %w[Ledger::PageComponent Ledger]],
+       [:slot_string, 'RowComponent', %w[Ledger::PageComponent]],
+       [:slot, 'FooterComponent', %w[Ledger::PageComponent Ledger]],
+       [:slot, 'Ui::Aside', %w[Ledger::PageComponent Ledger]],
+       [:slot, 'ChipComponent', %w[Ledger::PageComponent Ledger]],
+       [:slot_string, 'TagComponent', %w[Ledger::PageComponent]],
+       [:slot, 'LinkComponent', %w[Ledger::PageComponent Ledger]],
+       [:slot, 'NoteComponent', %w[Ledger::PageComponent Ledger]]]
+    )
+  end
+
   it 'never reports a lowercase call, a helper argument, or a non-constant render' do
     source = <<~RUBY
       class Page

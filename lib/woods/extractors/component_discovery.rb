@@ -82,6 +82,20 @@ module Woods
         @render_target_resolver.call(component, source)
       end
 
+      # @param result [RenderTargetResolver::Result]
+      # @return [Array<Hash>] `:render` edges, then `:slot` edges
+      def component_dependencies(result)
+        result.targets.map { |target| { type: :component, target: target, via: :render } } +
+          result.slot_targets.map { |target| { type: :component, target: target, via: :slot } }
+      end
+
+      # @param result [RenderTargetResolver::Result]
+      # @return [Hash] the renders and slots that produced no edge, and why
+      def component_resolution_metadata(result)
+        { unresolved_renders: result.unresolved, unresolved_slots: result.unresolved_slots,
+          external_renders: result.external }
+      end
+
       # Who defines a rendered component class.
       #
       # The test is the one both component families apply to their own units:

@@ -85,10 +85,8 @@ module Woods
         unit.namespace = extract_namespace(component)
         unit.source_code = read_source(unit.file_path)
         renders = resolve_render_targets(component, unit.source_code)
-        unit.metadata = extract_metadata(component, unit.source_code).merge(
-          unresolved_renders: renders.unresolved, external_renders: renders.external
-        )
-        unit.dependencies = extract_dependencies(unit.source_code, renders.targets)
+        unit.metadata = extract_metadata(component, unit.source_code).merge(component_resolution_metadata(renders))
+        unit.dependencies = extract_dependencies(unit.source_code, renders)
 
         unit
       rescue StandardError => e
@@ -237,9 +235,9 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       # @param source [String]
-      # @param render_targets [Array<String>] identifiers from {#resolve_render_targets}
-      def extract_dependencies(source, render_targets)
-        deps = render_targets.map { |target| { type: :component, target: target, via: :render } }
+      # @param renders [RenderTargetResolver::Result] from {#resolve_render_targets}
+      def extract_dependencies(source, renders)
+        deps = component_dependencies(renders)
 
         # Model references (often passed as props)
         deps.concat(scan_model_dependencies(source, via: :data_dependency))

@@ -385,7 +385,9 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
             end
           end
         RUBY
-        '/rails/app/components/footer_component.rb' => ''
+        '/rails/app/components/footer_component.rb' => '',
+        '/rails/app/components/header_component.rb' => '',
+        '/rails/app/components/card_component.rb' => ''
       }
     end
 
@@ -394,8 +396,9 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       component_class.define_singleton_method(:superclass) { base }
       stub_const('ViewComponent::Base', base)
       # The base double fakes `name`, and its subclasses inherit the fake.
-      footer = Class.new(ViewComponent::Base) { define_singleton_method(:name) { 'FooterComponent' } }
-      stub_const('FooterComponent', footer)
+      %w[FooterComponent HeaderComponent CardComponent].each do |name|
+        stub_const(name, Class.new(ViewComponent::Base) { define_singleton_method(:name) { name } })
+      end
     end
 
     it 'detects rendered sub-components' do
@@ -470,6 +473,10 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
         '/rails/app/components/ledger/page_component.rb' => <<~RUBY,
           module Ledger
             class PageComponent < ViewComponent::Base
+              renders_one :title, TitleComponent
+              renders_many :cells, "Ledger::CellComponent"
+              renders_one :phantom, Phantom
+
               def call
                 render SummaryComponent.new(rows)
                 render(RowComponent.with_collection(rows))
@@ -480,7 +487,9 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
           end
         RUBY
         '/rails/app/components/ledger/summary_component.rb' => '',
-        '/rails/app/components/ledger/row_component.rb' => ''
+        '/rails/app/components/ledger/row_component.rb' => '',
+        '/rails/app/components/ledger/title_component.rb' => '',
+        '/rails/app/components/ledger/cell_component.rb' => ''
       }
     end
 
@@ -490,7 +499,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       # Real classes, not the name-faking doubles above: resolution reads the
       # constant tables, so the components have to be constants.
       stub_const('ViewComponent::Base', Class.new)
-      %w[Page Summary Row].each do |name|
+      %w[Page Summary Row Title Cell].each do |name|
         stub_const("Ledger::#{name}Component", Class.new(ViewComponent::Base))
       end
     end
@@ -506,6 +515,17 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
     it 'records a capitalized render that names no component instead of emitting an edge' do
       expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+    end
+
+    it 'targets the qualified unit for constant and string slot classes' do
+      expect(unit.dependencies.select { |d| d[:via] == :slot }).to eq(
+        [{ type: :component, target: 'Ledger::CellComponent', via: :slot },
+         { type: :component, target: 'Ledger::TitleComponent', via: :slot }]
+      )
+    end
+
+    it 'records a slot class that names no component instead of emitting an edge' do
+      expect(unit.metadata[:unresolved_slots]).to eq([{ name: 'Phantom', reason: 'constant_missing' }])
     end
 
     it 'records a component no application file defines as external and emits no edge' do

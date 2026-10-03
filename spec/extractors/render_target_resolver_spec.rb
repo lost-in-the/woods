@@ -239,6 +239,62 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
     end
   end
 
+  describe 'slot declarations' do
+    def declare(body)
+      resolver.call(page, <<~RUBY)
+        module Billing
+          module V2
+            class ManagePage < ApplicationView
+              #{body}
+            end
+          end
+        end
+      RUBY
+    end
+
+    it 'resolves a slot constant like a rendered constant, apart from the render targets' do
+      result = declare('renders_one :grid, TierGrid')
+
+      expect(result.slot_targets).to eq(['Billing::V2::TierGrid'])
+      expect(result.targets).to eq([])
+    end
+
+    it 'resolves a string class name from the component class, not its lexical scope' do
+      stub_const('Footer', Class.new(ApplicationView))
+
+      result = declare('renders_many :rows, "TierGrid"; renders_one :footer, "Footer"; renders_one :head, "Header"')
+
+      expect(result.slot_targets).to eq(%w[Footer Ui::Header])
+      expect(result.unresolved_slots).to eq([{ name: 'TierGrid', reason: 'constant_missing' }])
+    end
+
+    it 'resolves the component a lambda slot builds' do
+      expect(declare('renders_one :grid, ->(**args) { TierGrid.new(**args) }').slot_targets)
+        .to eq(['Billing::V2::TierGrid'])
+    end
+
+    it 'records a slot that names no component and emits no target' do
+      stub_const('Billing::V2::Ledger', Class.new)
+
+      result = declare('renders_one :a, Ghost; renders_one :b, Ledger')
+
+      expect(result.slot_targets).to eq([])
+      expect(result.unresolved_slots).to eq(
+        [{ name: 'Ghost', reason: 'constant_missing' }, { name: 'Ledger', reason: 'not_a_component' }]
+      )
+      expect(result.unresolved).to eq([])
+    end
+
+    it 'reports a slot component the application does not own as external' do
+      resolver = described_class.new(ownership: ->(klass) { klass == Ui::Header ? 'shelf_ui' : :app })
+
+      result = resolver.call(page, "class Billing::V2::ManagePage\n  renders_one :head, Ui::Header\nend\n")
+
+      expect(result.slot_targets).to eq([])
+      expect(result.external).to eq([{ name: 'Ui::Header', gem: 'shelf_ui' }])
+    end
+  end
+
   it 'never reports a lowercase helper call' do
     result = resolve('form_with(model: @x) { }; t(".title"); partial("x"); render partial("x")')
 

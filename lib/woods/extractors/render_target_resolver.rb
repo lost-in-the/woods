@@ -39,6 +39,11 @@ module Woods
     #   result.unresolved # => [{ name: "Ghost", reason: "constant_missing" }]
     #   result.external   # => [{ name: "ShelfUi::Button", gem: "shelf_ui" }]
     #
+    # Slot declarations (`renders_one :header, HeaderComponent`) resolve the
+    # same way into +slot_targets+ and +unresolved_slots+. A class name given
+    # as a string is looked up from the component class alone, as the
+    # framework does.
+    #
     class RenderTargetResolver
       # @!attribute targets
       #   @return [Array<String>] sorted identifiers of the components rendered
@@ -46,7 +51,11 @@ module Woods
       #   @return [Array<Hash>] sorted `{ name:, reason: }` for calls that name no component
       # @!attribute external
       #   @return [Array<Hash>] sorted `{ name:, gem: }` for component classes no unit represents
-      Result = Struct.new(:targets, :unresolved, :external, keyword_init: true)
+      # @!attribute slot_targets
+      #   @return [Array<String>] sorted identifiers of the components slots are declared with
+      # @!attribute unresolved_slots
+      #   @return [Array<Hash>] sorted `{ name:, reason: }` for slots that name no component
+      Result = Struct.new(:targets, :unresolved, :external, :slot_targets, :unresolved_slots, keyword_init: true)
 
       # Classes whose descendants are components. Those not loaded are skipped.
       COMPONENT_BASES = %w[
@@ -74,7 +83,7 @@ module Woods
       # @return [Result]
       def call(component, source)
         run = { component: component, bases: loaded(COMPONENT_BASES), kit: loaded(%w[Phlex::Kit]).first,
-                targets: {}, unresolved: {}, yielded: [] }
+                targets: {}, unresolved: {}, slot_targets: {}, unresolved_slots: {}, yielded: [] }
 
         RenderCallScan.call(source).each { |candidate| resolve(candidate, run) }
         run[:yielded].each { |candidate| record(run, candidate.name, yielded_verdict(candidate, run)) }
@@ -87,15 +96,27 @@ module Woods
       # A component class the application does not define has no unit, so an
       # edge to it would point at nothing. It is reported instead.
       def result(run)
-        own_name = run[:component].name
-        owners = run[:targets].sort.reject { |name, _klass| name == own_name }
-                              .map { |name, klass| [name, @ownership.call(klass)] }
-        owned, external = owners.partition { |_name, owner| owner == :app }
+        renders, external_renders = owned(run[:targets], run)
+        slots, external_slots = owned(run[:slot_targets], run)
         Result.new(
-          targets: owned.map(&:first),
-          unresolved: run[:unresolved].sort.map { |name, reason| { name: name, reason: reason } },
-          external: external.map { |name, gem| { name: name, gem: gem } }
+          targets: renders, unresolved: reasons(run[:unresolved]),
+          slot_targets: slots, unresolved_slots: reasons(run[:unresolved_slots]),
+          external: (external_renders + external_slots).uniq.sort_by { |entry| entry[:name] }
         )
+      end
+
+      # @return [Array(Array<String>, Array<Hash>)] application-owned
+      #   identifiers, then `{ name:, gem: }` for the rest
+      def owned(resolved, run)
+        own_name = run[:component].name
+        owners = resolved.sort.reject { |name, _klass| name == own_name }
+                         .map { |name, klass| [name, @ownership.call(klass)] }
+        app, external = owners.partition { |_name, owner| owner == :app }
+        [app.map(&:first), external.map { |name, gem| { name: name, gem: gem } }]
+      end
+
+      def reasons(unresolved)
+        unresolved.sort.map { |name, reason| { name: name, reason: reason } }
       end
 
       def resolve(candidate, run)
@@ -104,20 +125,22 @@ module Woods
         when :kit then record(run, candidate.name, kit_verdict(candidate, run))
         when :kit_path then record(run, candidate.name, kit_path_verdict(candidate))
         when :yielded then resolve_yielded(candidate, run)
+        when :slot, :slot_string
+          record(run, candidate.name, lookup(candidate.name, candidate.nesting), :slot_targets, :unresolved_slots)
         end
       end
 
       # A verdict is a RuntimeLookup result, or nil for a call that is not a
       # render at all.
-      def record(run, name, verdict)
+      def record(run, name, verdict, resolved = :targets, unresolved = :unresolved)
         return unless verdict
 
         if verdict[:status] != :resolved
-          run[:unresolved][name] ||= verdict[:reason]
+          run[unresolved][name] ||= verdict[:reason]
         elsif component_class?(verdict[:value], run)
-          run[:targets][verdict[:target]] = verdict[:value]
+          run[resolved][verdict[:target]] = verdict[:value]
         else
-          run[:unresolved][name] ||= 'not_a_component'
+          run[unresolved][name] ||= 'not_a_component'
         end
       end
 
