@@ -386,6 +386,56 @@ RSpec.describe Woods::PathDispatcher do
       end
     end
 
+    context 'with rake task paths' do
+      before { Woods.configuration = Woods::Configuration.new }
+
+      def rake_rules
+        described_class.whole_app_rules.select { |rule| rule.extractor_key == :rake_tasks }
+      end
+
+      it 'triggers a rake_tasks re-run for every default root and its support Ruby' do
+        %w[lib/tasks/export.rake lib/tasks/support/format.rb rake/deploy.rake rake/lib/container.rb
+           Rakefile].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).to include(:rake_tasks), path
+        end
+      end
+
+      it 'leaves other paths alone' do
+        %w[lib/export.rake rake/notes.md engines/billing/Rakefile app/models/widget.rb].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).not_to include(:rake_tasks), path
+        end
+      end
+
+      it 're-runs test_mappings on a root rake file, whose task names task specs resolve against' do
+        expect(dispatcher.whole_app_keys_for('rake/deploy.rake')).to include(:rake_tasks, :test_mappings)
+        expect(dispatcher.whole_app_keys_for('Rakefile')).to include(:rake_tasks, :test_mappings)
+      end
+
+      it 'makes the new roots relevant to an incremental run' do
+        expect(dispatcher).to be_relevant('rake/deploy.rake')
+        expect(dispatcher).to be_relevant('rake/lib/container.rb')
+      end
+
+      it 'follows configured rake_task_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.rake_task_paths = ['ops/*.rake']
+
+        expect(dispatcher.whole_app_keys_for('ops/deploy.rake')).to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('ops/nested/deploy.rake')).not_to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('ops/nested/helper.rb')).to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('lib/tasks/export.rake')).not_to include(:rake_tasks)
+      end
+
+      it 'serializes as plain data naming the configured roots' do
+        serialized = JSON.parse(JSON.generate(rake_rules.map(&:to_h)))
+
+        expect(serialized.map { |rule| rule.values_at('dirs', 'extensions', 'exact_paths') }).to eq(
+          [[['lib/tasks'], %w[.rake .rb], nil], [['rake'], %w[.rake .rb], nil], [[], nil, ['Rakefile']]]
+        )
+        expect(rake_rules.map(&:matcher)).to all(be_nil)
+      end
+    end
+
     it 'triggers a factory re-run on a factory file' do
       expect(dispatcher.whole_app_keys_for('spec/factories/posts.rb')).to include(:factories)
     end

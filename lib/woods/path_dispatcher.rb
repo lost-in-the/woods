@@ -257,13 +257,14 @@ module Woods
 
       # Rules for extractors that must be re-run wholesale.
       #
-      # Memoized per configured +event_paths+: the events rule's +dirs+ come
-      # from configuration, which can change or be replaced after the first
-      # call. Keying on the value keeps every rule plain serializable data.
+      # Memoized per configured +event_paths+ and +rake_task_paths+: those
+      # rules' +dirs+ come from configuration, which can change or be replaced
+      # after the first call. Keying on the value keeps every rule plain
+      # serializable data.
       #
       # @return [Array<Rule>]
       def whole_app_rules
-        roots = event_roots
+        roots = [event_roots, Woods::Extractors::RakeTaskPaths.configured]
         @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
         @whole_app_rules_event_roots = roots
         require_rule_extractors
@@ -383,7 +384,7 @@ module Woods
 
       def aggregate_source_rules
         [whole_app_rule(:libs, %w[lib], extensions: %w[.rb], exclude: Woods::Extractors::LibExtractor::EXCLUDED_SEGMENTS),
-         whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
+         *Woods::Extractors::RakeTaskPaths.rule_attributes.map { |rule| whole_app_rule(:rake_tasks, **rule) }]
       end
 
       # Schedule files by name, any Ruby config source that can register
@@ -442,7 +443,7 @@ module Woods
                                                          matcher: :test_support_source?),
          whole_app_rule(:test_mappings, dirs, extensions: %w[.rb], exact_paths: helpers,
                                               matcher: :test_support_definitions?),
-         whole_app_rule(:test_mappings, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
+         *Woods::Extractors::RakeTaskPaths.rule_attributes.map { |rule| whole_app_rule(:test_mappings, **rule) }]
       end
 
       def build_whole_app_rules
@@ -488,8 +489,8 @@ module Woods
         Rule.new(extractor_key: key, method_name: method_name, dirs: Array(dirs), **opts)
       end
 
-      def whole_app_rule(key, dirs, **opts)
-        Rule.new(extractor_key: key, method_name: nil, dirs: Array(dirs), **opts)
+      def whole_app_rule(key, dirs = [], **opts)
+        Rule.new(extractor_key: key, method_name: nil, dirs: Array(opts.delete(:dirs) || dirs), **opts)
       end
     end
 

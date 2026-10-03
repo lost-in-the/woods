@@ -78,6 +78,22 @@ RSpec.describe Woods::ReloadPolicy do
         expect(policy.classify('lib/tasks/export.rb')).to eq(:reextract)
       end
 
+      it 'only needs re-extraction for a root rake directory and its support Ruby' do
+        expect(policy.classify('rake/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('rake/lib/container.rb')).to eq(:reextract)
+        expect(policy.classify('rake/notes.md')).to eq(:ignore)
+      end
+
+      it 'follows configured rake_task_paths' do
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.rake_task_paths = ['ops/*.rake', 'lib/ops/**/*.rake']
+
+        expect(policy.classify('ops/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('lib/ops/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('lib/ops/helper.rb')).to eq(:reload)
+        expect(policy.classify('rake/deploy.rake')).to eq(:ignore)
+      end
+
       it 'only needs re-extraction for locales, migrations, views and tests' do
         expect(policy.classify('config/locales/en.yml')).to eq(:reextract)
         expect(policy.classify('db/migrate/20240101000000_create_posts.rb')).to eq(:reextract)

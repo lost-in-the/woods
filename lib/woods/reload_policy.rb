@@ -5,6 +5,8 @@ require_relative 'graphql_document_paths'
 require_relative 'extractors/config_file_extractor'
 require_relative 'path_dispatcher'
 
+require_relative 'extractors/rake_task_paths'
+
 module Woods
   # What a resident, booted Woods process must do before a changed path can be
   # re-extracted truthfully.
@@ -251,7 +253,8 @@ module Woods
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
         REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
-        ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path)
+        ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path) ||
+        Extractors::RakeTaskPaths.covers?(path)
     end
 
     def under?(path, directories)

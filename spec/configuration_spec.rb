@@ -907,12 +907,11 @@ RSpec.describe Woods::Configuration do
     end
 
     it 'feeds the rake path predicates' do
+      Woods.configuration = described_class.new
       Woods.configuration.rake_task_paths = ['ops/*.rake']
 
       expect(Woods::Extractors::RakeTaskPaths.task_file?('ops/deploy.rake')).to be(true)
       expect(Woods::Extractors::RakeTaskPaths.task_file?('lib/tasks/export.rake')).to be(false)
-    ensure
-      Woods.configuration.rake_task_paths = Woods::Extractors::RakeTaskPaths::DEFAULT_PATHS
     end
   end
 end
