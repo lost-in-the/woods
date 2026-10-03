@@ -130,7 +130,7 @@ module Woods
         return nil if job_class.name.nil?
 
         file_path = source_file_for(job_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit = ExtractedUnit.new(
           type: :job,

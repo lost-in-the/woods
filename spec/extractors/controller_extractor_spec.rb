@@ -1022,6 +1022,20 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
 
     describe '#build_controller_source_with_concerns' do
+      it 'inlines a multibyte concern file under a US-ASCII default external encoding' do
+        path = write_concern_file('RequiresAuthor', "# Author — gate\n#{concern_code}")
+        mod = concern_module('RequiresAuthor', path)
+        controller = controller_double('PostsController', mod)
+        source = "class PostsController < ApplicationController\nend\n"
+
+        inlined, names = with_us_ascii_default_external do
+          extractor.send(:build_controller_source_with_concerns, controller, source)
+        end
+
+        expect(names).to eq(['RequiresAuthor'])
+        expect(inlined).to include('# Author — gate')
+      end
+
       it 'inlines the concern body as a commented display block after the class declaration' do
         path = write_concern_file('RequiresAuthor', concern_code)
         mod = concern_module('RequiresAuthor', path)

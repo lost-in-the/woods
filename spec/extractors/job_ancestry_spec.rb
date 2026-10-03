@@ -66,6 +66,17 @@ RSpec.describe Woods::Extractors::JobAncestry do
       expect(described_class.admitted?(AncestryJobs::ImportManager, app_root: app_root)).to be(true)
     end
 
+    it 'admits a job class from a multibyte definition file under a US-ASCII default external encoding' do
+      declare('app/models/ancestry_jobs/import_manager.rb',
+              "# Import — nightly\nclass ImportManager\n  include Sidekiq::Worker\nend")
+
+      admitted = with_us_ascii_default_external do
+        described_class.admitted?(AncestryJobs::ImportManager, app_root: app_root)
+      end
+
+      expect(admitted).to be(true)
+    end
+
     it 'refuses a job class defined outside the application root' do
       expect(described_class.admitted?(AncestryJobs::GemWorker, app_root: app_root)).to be(false)
     end

@@ -864,6 +864,21 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(described_class.new.send(:source_file_for, job_class)).to eq(path)
     end
 
+    it 'reads a multibyte job file under a US-ASCII default external encoding' do
+      create_file('app/jobs/shipment_job.rb',
+                  "# Shipment — dispatch\nclass ShipmentJob < ApplicationJob\n  def perform(id); end\nend\n")
+      job_class = Class.new do
+        def self.name
+          'ShipmentJob'
+        end
+      end
+
+      unit = with_us_ascii_default_external { described_class.new.send(:extract_job_class, job_class) }
+
+      expect(unit.source_code).to be_valid_encoding
+      expect(unit.source_code).to include('Shipment — dispatch')
+    end
+
     it 'builds a unit with a nil file_path for an unresolvable job class' do
       unit = described_class.new.send(:extract_job_class, external_job_class)
 

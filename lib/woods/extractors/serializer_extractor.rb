@@ -134,7 +134,7 @@ module Woods
         return nil unless base_class_name
 
         file_path = source_file_for(klass)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit = ExtractedUnit.new(
           type: :serializer,
@@ -192,7 +192,7 @@ module Woods
             end
           else
             find_files_in_directories(directories).filter_map do |file|
-              admitted_class_name(file, File.read(file))
+              admitted_class_name(file, SourceFile.read(file))
             rescue StandardError
               nil
             end
