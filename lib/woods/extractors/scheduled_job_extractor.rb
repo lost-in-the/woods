@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require_relative '../source_inputs/consumer_errors'
+require_relative '../source_references/runtime_lookup'
+require_relative 'periodic_registrations'
 
 require 'yaml'
 require 'set'
@@ -20,6 +22,10 @@ module Woods
     # - `config/sidekiq_cron.yml` — Sidekiq-Cron scheduled jobs
     # - `config/schedule.rb` — Whenever DSL
     #
+    # It also reads Sidekiq Enterprise `periodic` registrations from Ruby config
+    # sources (`config/initializers/**/*.rb`, `config/environments/*.rb`,
+    # `config/application.rb`); see {PeriodicRegistrations}.
+    #
     # Each scheduled entry becomes its own ExtractedUnit with type `:scheduled_job`.
     # Identifiers are prefixed with "scheduled:" to avoid collision with JobExtractor units.
     #
@@ -35,6 +41,12 @@ module Woods
         'config/sidekiq_cron.yml' => :sidekiq_cron,
         'config/schedule.rb' => :whenever
       }.freeze
+
+      # Directories whose Ruby files may register Sidekiq periodic jobs
+      PERIODIC_SOURCE_DIRECTORIES = %w[config/initializers config/environments].freeze
+
+      # Single files that may register Sidekiq periodic jobs
+      PERIODIC_SOURCE_FILES = %w[config/application.rb].freeze
 
       # Common cron patterns mapped to human-readable descriptions
       CRON_HUMANIZE = {
@@ -57,6 +69,7 @@ module Woods
           full_path = Rails.root.join(relative_path)
           hash[full_path.to_s] = format if File.exist?(full_path)
         end
+        periodic_source_paths.each { |path| @schedule_files[path] = :sidekiq_periodic }
       end
 
       # Extract all scheduled job entries from all discovered schedule files.
@@ -72,7 +85,7 @@ module Woods
       # this returns an Array because each schedule file contains multiple entries.
       #
       # @param file_path [String] Path to the schedule file
-      # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever
+      # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever, :sidekiq_periodic
       # @return [Array<ExtractedUnit>] List of scheduled job units
       def extract_scheduled_job_file(file_path, format)
         path = File.expand_path(file_path.to_s)
@@ -83,7 +96,13 @@ module Woods
       private
 
       def schedule_units(files)
-        files.flat_map { |path, format| extract_schedule_file(path, format) }
+        number_periodic_repeats(files.flat_map { |path, format| extract_schedule_file(path, format) })
+      end
+
+      def periodic_source_paths
+        globbed = PERIODIC_SOURCE_DIRECTORIES.flat_map { |dir| Dir.glob(Rails.root.join(dir, '**', '*.rb').to_s) }
+        files = PERIODIC_SOURCE_FILES.map { |file| Rails.root.join(file).to_s }.select { |path| File.file?(path) }
+        (globbed + files).sort
       end
 
       def extract_schedule_file(file_path, format)
@@ -92,6 +111,8 @@ module Woods
           extract_yaml_schedule(file_path, format)
         when :whenever
           extract_whenever_schedule(file_path)
+        when :sidekiq_periodic
+          extract_periodic_schedule(file_path)
         else
           []
         end
@@ -373,6 +394,75 @@ module Woods
         unit.dependencies = build_dependencies(block[:job_class])
 
         unit
+      end
+
+      # ──────────────────────────────────────────────────────────────────────
+      # Sidekiq Enterprise periodic registrations (Ruby config sources)
+      # ──────────────────────────────────────────────────────────────────────
+
+      # @param file_path [String] Path to a Ruby config source
+      # @return [Array<ExtractedUnit>]
+      def extract_periodic_schedule(file_path)
+        source = File.read(file_path)
+        # Most initializers never mention periodic; skip the parse for them.
+        return [] unless source.include?('periodic')
+
+        PeriodicRegistrations.read(source).filter_map do |registration|
+          build_periodic_unit(registration, file_path, source)
+        end
+      end
+
+      # @param registration [Hash] one entry from {PeriodicRegistrations.read}
+      # @param file_path [String] Path to the Ruby config source
+      # @param source [String] Raw file content
+      # @return [ExtractedUnit, nil] nil when the job class is not a literal name
+      def build_periodic_unit(registration, file_path, source)
+        job_class = registration[:job_class]
+        location = "#{file_path}:#{registration[:line]}"
+        unless job_class
+          Rails.logger.warn("[Woods] Skipping periodic registration at #{location}: job class is not a literal name")
+          return nil
+        end
+
+        resolved = job_class_loaded?(job_class)
+        unless resolved
+          Rails.logger.warn("[Woods] Periodic registration at #{location} names #{job_class}, which is not a loaded class")
+        end
+
+        unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{job_class.underscore}",
+                                 file_path: file_path)
+        unit.namespace = job_class.split('::')[0..-2].join('::') if job_class.include?('::')
+        unit.source_code = source
+        unit.metadata = {
+          schedule_format: :sidekiq_periodic,
+          task_name: job_class.underscore,
+          job_class: job_class,
+          job_class_resolved: resolved,
+          cron_expression: registration[:cron],
+          queue: registration[:options]['queue'],
+          options: registration[:options],
+          line: registration[:line],
+          frequency_human_readable: humanize_frequency(registration[:cron], :sidekiq_periodic)
+        }
+        unit.dependencies = build_dependencies(job_class)
+        unit
+      end
+
+      def job_class_loaded?(job_class)
+        @runtime_lookup ||= SourceReferences::RuntimeLookup.new
+        @runtime_lookup.call(job_class)[:status] == :resolved
+      end
+
+      # Sidekiq accepts one job class under several crons. Number the repeats
+      # by source position so the names hold whatever order files arrive in.
+      def number_periodic_repeats(units)
+        periodic = units.select { |unit| unit.metadata[:schedule_format] == :sidekiq_periodic }
+        periodic.group_by(&:identifier).each_value do |entries|
+          entries.sort_by { |unit| [unit.file_path, unit.metadata[:line]] }.drop(1).each.with_index(2) do |unit, n|
+            unit.identifier = "#{unit.identifier}:#{n}"
+          end
+        end
+        units
       end
 
       # ──────────────────────────────────────────────────────────────────────

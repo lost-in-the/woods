@@ -189,6 +189,15 @@ module Woods
          whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
       end
 
+      # Schedule files by name, plus any Ruby config source that can register
+      # Sidekiq periodic jobs.
+      def scheduled_job_rule
+        schedules = Woods::Extractors::ScheduledJobExtractor
+        exact_paths = schedules::SCHEDULE_FILES.keys + schedules::PERIODIC_SOURCE_FILES
+        whole_app_rule(:scheduled_jobs, schedules::PERIODIC_SOURCE_DIRECTORIES,
+                       extensions: %w[.rb], exact_paths: exact_paths)
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -198,8 +207,7 @@ module Woods
           whole_app_rule(:engines, %w[config/routes], exact_paths: %w[config/routes.rb Gemfile.lock]),
           whole_app_rule(:middleware, %w[config/initializers config/environments],
                          exact_paths: %w[config/application.rb Gemfile.lock]),
-          whole_app_rule(:scheduled_jobs, [],
-                         exact_paths: Woods::Extractors::ScheduledJobExtractor::SCHEDULE_FILES.keys),
+          scheduled_job_rule,
           whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
                          extensions: %w[.rb]),
           whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,

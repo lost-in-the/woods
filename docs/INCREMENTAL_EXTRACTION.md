@@ -395,7 +395,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task) |
 | `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
-| `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware |
+| `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb` | scheduled_jobs |
 | `app/models/**/*.rb` | state_machines |
 | `app/**/*.rb` | events |

@@ -654,6 +654,186 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
     end
   end
 
+  # ── Sidekiq periodic (config/initializers/**/*.rb) ─────────────────
+
+  describe 'Sidekiq periodic registrations' do
+    before do
+      stub_const('Ledger::PurgeWorker', Class.new)
+      stub_const('Ledger::RefreshRatesWorker', Class.new)
+      stub_const('Shipment::SweepWorker', Class.new)
+      stub_const('Ledger::ApplyHolds', Class.new)
+    end
+
+    def periodic_initializer(body, path: 'config/initializers/sidekiq.rb')
+      create_file(path, <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.periodic do |mgr|
+        #{body.gsub(/^/, '    ')}
+          end
+        end
+      RUBY
+    end
+
+    def periodic_units
+      described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_periodic }
+    end
+
+    it 'emits one unit per registration with its cron and job class' do
+      periodic_initializer(<<~RUBY)
+        mgr.register('0 7 * * *', 'Ledger::PurgeWorker')
+        mgr.register("*/10 * * * *", "Ledger::RefreshRatesWorker")
+        mgr.register('35 * * * *', 'Shipment::SweepWorker') # trailing comment
+        mgr.register('0 3 * * *', 'Ledger::ApplyHolds')
+      RUBY
+
+      units = periodic_units
+      expect(units.map(&:type)).to all(eq(:scheduled_job))
+      expect(units.map { |u| [u.metadata[:cron_expression], u.metadata[:job_class]] }).to eq(
+        [['0 7 * * *', 'Ledger::PurgeWorker'], ['*/10 * * * *', 'Ledger::RefreshRatesWorker'],
+         ['35 * * * *', 'Shipment::SweepWorker'], ['0 3 * * *', 'Ledger::ApplyHolds']]
+      )
+      expect(units.map(&:identifier)).to eq(%w[scheduled:ledger/purge_worker scheduled:ledger/refresh_rates_worker
+                                               scheduled:shipment/sweep_worker scheduled:ledger/apply_holds])
+      expect(units.map(&:file_path)).to all(eq(File.join(tmp_dir, 'config/initializers/sidekiq.rb')))
+      expect(units.map { |u| u.metadata[:line] }).to eq([3, 4, 5, 6])
+      expect(units.first.namespace).to eq('Ledger')
+      expect(units.map { |u| u.metadata[:job_class_resolved] }).to all(be(true))
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it 'links each registration to its job unit with the scheduled edge' do
+      periodic_initializer("mgr.register('0 7 * * *', 'Ledger::PurgeWorker')\n")
+
+      expect(periodic_units.first.dependencies).to eq([{ type: :job, target: 'Ledger::PurgeWorker', via: :scheduled }])
+    end
+
+    it 'accepts the job class as a constant' do
+      periodic_initializer("mgr.register('* * * * *', ::Ledger::PurgeWorker)\n")
+
+      unit = periodic_units.first
+      expect(unit.metadata[:job_class]).to eq('Ledger::PurgeWorker')
+      expect(unit.dependencies.first[:target]).to eq('Ledger::PurgeWorker')
+    end
+
+    it 'records registration options in metadata' do
+      periodic_initializer(<<~RUBY)
+        mgr.register('15 */4 * * *', 'Ledger::PurgeWorker', retry: 1, queue: 'low', tz: 'America/Chicago')
+      RUBY
+
+      metadata = periodic_units.first.metadata
+      expect(metadata[:options]).to eq('retry' => 1, 'queue' => 'low', 'tz' => 'America/Chicago')
+      expect(metadata[:queue]).to eq('low')
+    end
+
+    it 'humanizes common cron patterns' do
+      periodic_initializer(<<~RUBY)
+        mgr.register('0 * * * *', 'Ledger::PurgeWorker')
+        mgr.register('*/10 * * * *', 'Ledger::RefreshRatesWorker')
+      RUBY
+
+      expect(periodic_units.map { |u| u.metadata[:frequency_human_readable] })
+        .to eq(['every hour', 'every 10 minutes'])
+    end
+
+    it 'finds registrations nested inside conditionals in the periodic block' do
+      periodic_initializer(<<~RUBY)
+        if ENV['SCHEDULE_SWEEPS']
+          mgr.register('35 * * * *', 'Shipment::SweepWorker')
+        end
+      RUBY
+
+      expect(periodic_units.map { |u| u.metadata[:job_class] }).to eq(['Shipment::SweepWorker'])
+    end
+
+    it 'ignores register calls whose receiver is not the periodic block parameter' do
+      create_file('config/initializers/registry.rb', <<~RUBY)
+        Widget.registry.register('0 7 * * *', 'Ledger::PurgeWorker')
+        Sidekiq.configure_server do |config|
+          config.periodic do |mgr|
+            other.register('0 7 * * *', 'Ledger::RefreshRatesWorker')
+          end
+        end
+      RUBY
+
+      expect(periodic_units).to eq([])
+    end
+
+    it 'scans nested initializer directories, environments, and application.rb' do
+      periodic_initializer("mgr.register('0 7 * * *', 'Ledger::PurgeWorker')\n",
+                           path: 'config/initializers/jobs/sidekiq.rb')
+      periodic_initializer("mgr.register('0 8 * * *', 'Ledger::RefreshRatesWorker')\n",
+                           path: 'config/environments/production.rb')
+      periodic_initializer("mgr.register('0 9 * * *', 'Shipment::SweepWorker')\n",
+                           path: 'config/application.rb')
+
+      expect(periodic_units.map { |u| u.metadata[:job_class] })
+        .to contain_exactly('Ledger::PurgeWorker', 'Ledger::RefreshRatesWorker', 'Shipment::SweepWorker')
+    end
+
+    it 'skips parsing an initializer that never mentions periodic' do
+      create_file('config/initializers/widgets.rb', "Widget.configure { |c| c.size = 3 }\n")
+      expect(Prism).not_to receive(:parse)
+
+      expect(described_class.new.extract_all).to eq([])
+    end
+
+    it 'warns about an unresolvable job class and still emits the registration' do
+      periodic_initializer("mgr.register('0 7 * * *', 'Ledger::MissingWorker')\n")
+
+      units = periodic_units
+      expect(logger).to have_received(:warn).with(/Ledger::MissingWorker/)
+      expect(units.map { |u| u.metadata[:job_class] }).to eq(['Ledger::MissingWorker'])
+      expect(units.first.metadata[:job_class_resolved]).to be(false)
+    end
+
+    it 'warns about and skips a registration whose job class is not a literal name' do
+      periodic_initializer("mgr.register('0 7 * * *', worker_name)\n")
+
+      expect(periodic_units).to eq([])
+      expect(logger).to have_received(:warn).with(/sidekiq\.rb:3.*not a literal name/)
+    end
+
+    it 'numbers repeat registrations of one job class by source position' do
+      periodic_initializer(<<~RUBY)
+        mgr.register('0 7 * * *', 'Ledger::PurgeWorker')
+        mgr.register('0 19 * * *', 'Ledger::PurgeWorker')
+      RUBY
+
+      expect(periodic_units.map { |u| [u.identifier, u.metadata[:cron_expression]] }).to eq(
+        [['scheduled:ledger/purge_worker', '0 7 * * *'], ['scheduled:ledger/purge_worker:2', '0 19 * * *']]
+      )
+    end
+
+    it 'numbers repeats the same way when file enumeration order changes' do
+      periodic_initializer("mgr.register('0 7 * * *', 'Ledger::PurgeWorker')\n", path: 'config/initializers/a.rb')
+      periodic_initializer("mgr.register('0 9 * * *', 'Ledger::PurgeWorker')\n", path: 'config/initializers/b.rb')
+      extractor = described_class.new
+      expected = extractor.extract_all.to_h { |u| [u.identifier, u.metadata[:cron_expression]] }
+      files = extractor.instance_variable_get(:@schedule_files)
+      extractor.instance_variable_set(:@schedule_files, files.to_a.reverse.to_h)
+
+      expect(extractor.extract_all.to_h { |u| [u.identifier, u.metadata[:cron_expression]] }).to eq(expected)
+      expect(expected).to eq('scheduled:ledger/purge_worker' => '0 7 * * *',
+                             'scheduled:ledger/purge_worker:2' => '0 9 * * *')
+    end
+
+    it 'qualifies a name shared with another format like any cross-format collision' do
+      periodic_initializer("mgr.register('0 7 * * *', 'Ledger::PurgeWorker')\n")
+      create_file('config/sidekiq_cron.yml', "ledger/purge_worker:\n  class: OtherJob\n  cron: '0 * * * *'\n")
+
+      expect(described_class.new.extract_all.map(&:identifier))
+        .to contain_exactly('scheduled:sidekiq_periodic:ledger/purge_worker',
+                            'scheduled:sidekiq_cron:ledger/purge_worker')
+    end
+
+    it 'logs and skips an initializer that does not parse' do
+      create_file('config/initializers/broken.rb', "config.periodic do |mgr|\n  mgr.register('0 7 * * *',\n")
+
+      expect(described_class.new.extract_all).to eq([])
+      expect(logger).to have_received(:error).with(/broken\.rb/)
+    end
+  end
+
   # ── Human-readable frequency ───────────────────────────────────────
 
   describe 'human-readable frequency' do

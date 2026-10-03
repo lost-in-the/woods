@@ -1157,6 +1157,22 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    it 'publishes periodic registrations on a full run and leaves initializer edits to one' do
+      periodic = lambda do |*crons|
+        lines = crons.map { |cron| "    mgr.register('#{cron}', 'PublishPostJob')\n" }.join
+        "Sidekiq.configure_server do |config|\n  config.periodic do |mgr|\n#{lines}  end\nend\n"
+      end
+      path = write_file('config/initializers/periodic.rb', periodic.call('0 7 * * *', '0 19 * * *'))
+
+      index = full_extraction
+      expect(read_json(index, 'dependency_graph.json').fetch('reverse').fetch('PublishPostJob'))
+        .to include('scheduled:publish_post_job', 'scheduled:publish_post_job:2')
+
+      write_file(path, periodic.call('0 7 * * *'))
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([path]) }
+        .to raise_error(Woods::ExtractionError, /fresh Rails process/)
+    end
+
     it 'leaves the manifest timestamp alone when a run changes nothing' do
       index_dir = Dir.mktmpdir('woods_diff_noop')
       (@scratch_dirs ||= []) << index_dir

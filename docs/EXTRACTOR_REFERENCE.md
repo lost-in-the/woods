@@ -702,6 +702,13 @@ expanded mailer and schedule identities in an existing index.
 
 **Key details:**
 - Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
+- Reads Sidekiq Enterprise periodic registrations (`mgr.register(cron, job_class, options)` inside a
+  `periodic` block, format `:sidekiq_periodic`) from `config/initializers/**/*.rb`,
+  `config/environments/*.rb` and `config/application.rb` with a static Prism scan; the code is never run.
+  Files that never mention `periodic` are not parsed. The job class may be a string or a constant;
+  options are kept in `metadata[:options]`. A class that is not loaded is logged as a warning and the
+  unit is kept with `job_class_resolved: false`. Identifiers are `scheduled:<job_class.underscore>`;
+  repeat registrations of one class are numbered `:2`, `:3` by file and line.
 - Extracts job class name, cron expression, queue, and any arguments
 - Resolves trusted application `recurring.yml` through Rails' configuration loader,
   including ERB, filename-relative `require_relative`, and YAML aliases. On Rails
@@ -714,7 +721,9 @@ expanded mailer and schedule identities in an existing index.
 - Sidekiq-Cron remains safe-loaded YAML; Whenever remains a static DSL scan.
   Invalid YAML/ERB, missing required files and runtime configuration errors are
   logged and omit that schedule file. Source remains the original file text.
-- No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes
+- No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes.
+  The Ruby config sources are restart-sensitive: incremental extraction refuses them and a full
+  `woods:extract` picks up changed periodic registrations.
 
 ---
 
