@@ -6,6 +6,7 @@ require_relative 'line_neutralizer'
 require_relative 'reference_patterns'
 require_relative 'form_action_scan'
 require_relative 'route_helper_resolver'
+require_relative 'config_read_scanner'
 
 module Woods
   module Extractors
@@ -31,6 +32,8 @@ module Woods
     #   end
     #
     module SharedDependencyScanner
+      include ConfigReadScanner
+
       # Scan for ActiveRecord model references using the precomputed regex.
       #
       # Three passes:
@@ -176,9 +179,9 @@ module Woods
 
       # Scan for all common dependency types and return a deduplicated array.
       #
-      # Combines model, service, job, and mailer scans. Use this when an
-      # extractor needs all four standard dependency types with the default
-      # +:code_reference+ via label.
+      # Combines model, service, job, and mailer scans, plus configuration file
+      # reads ({ConfigReadScanner}). Use this when an extractor needs the
+      # standard dependency types with their default via labels.
       #
       # @param source [String] Ruby source code to scan
       # @return [Array<Hash>] Deduplicated dependency hashes
@@ -187,7 +190,8 @@ module Woods
           scan_model_dependencies(source),
           scan_service_dependencies(source),
           scan_job_dependencies(source),
-          scan_mailer_dependencies(source)
+          scan_mailer_dependencies(source),
+          scan_config_dependencies(source)
         )
       end
 

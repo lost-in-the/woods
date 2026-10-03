@@ -900,6 +900,7 @@ module Woods
         deps.concat(scan_service_dependencies(source))
         deps.concat(scan_job_dependencies(source))
         deps.concat(scan_mailer_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
 
         # Resolver dependencies (standalone resolver classes referenced in fields)
         source.scan(/resolver:\s*([\w:]+)/).flatten.uniq.each do |resolver|

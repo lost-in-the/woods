@@ -169,6 +169,14 @@ module Woods
         GraphQLDocumentPaths.match?(relative_path)
       end
 
+      # Is this a YAML file ConfigFileExtractor indexes, under the configured globs?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def config_file_path?(relative_path)
+        Woods::Extractors::ConfigFileExtractor.config_file_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -236,8 +244,7 @@ module Woods
           [:policies, :extract_policy_file, ex::PolicyExtractor::POLICY_DIRECTORIES],
           [:validators, :extract_validator_file, ex::ValidatorExtractor::VALIDATOR_DIRECTORIES],
           [:pundit_policies, :extract_pundit_file, ex::PunditExtractor::PUNDIT_DIRECTORIES],
-          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES],
-          [:configurations, :extract_configuration_file, ex::ConfigurationExtractor::CONFIG_DIRECTORIES]
+          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES]
         ].map { |key, method_name, dirs| file_rule(key, method_name, dirs) }
       end
 
@@ -246,6 +253,15 @@ module Woods
         ex = Woods::Extractors
 
         [
+          # Initializers and environments, plus the boot, seed, deploy and root
+          # files ConfigurationExtractor names exactly.
+          file_rule(:configurations, :extract_configuration_file,
+                    ex::ConfigurationExtractor::DIRECTORY_TYPES.keys,
+                    exact_paths: ex::ConfigurationExtractor::SOURCE_FILES),
+          # YAML under the configured globs. The matcher reads them at call
+          # time; the static attributes are the defaults, for projections.
+          file_rule(:config_files, :extract_config_file, ex::ConfigFileExtractor::DEFAULT_ROOTS,
+                    extensions: ex::ConfigFileExtractor::EXTENSIONS, matcher: :config_file_path?),
           # ConcernExtractor globs app/**/concerns, not just the two canonical
           # directories — match any .rb under app/ inside a concerns/ segment.
           file_rule(:concerns, :extract_concern_file, %w[app], require_segment: '/concerns/'),

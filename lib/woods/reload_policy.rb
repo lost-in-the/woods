@@ -2,6 +2,8 @@
 
 require_relative 'graphql_document_paths'
 
+require_relative 'extractors/config_file_extractor'
+
 module Woods
   # What a resident, booted Woods process must do before a changed path can be
   # re-extracted truthfully.
@@ -139,17 +141,25 @@ module Woods
       config/locales
       db/migrate
       db/views
+      db/seeds
+      config/deploy
       lib/tasks
+      lib/generators
       spec
       test
     ].freeze
 
-    # Schedule files, which are data rather than code.
+    # Schedule files, which are data rather than code, and the seed, deploy
+    # and importmap files ConfigurationExtractor reads as bytes. None of them
+    # sets a value the extraction captures at boot.
     REEXTRACT_PATHS = %w[
       config/recurring.yml
       config/sidekiq_cron.yml
       config/schedule.rb
       config/schedule.yml
+      config/deploy.rb
+      config/importmap.rb
+      db/seeds.rb
     ].freeze
 
     # Packwerk boundary files, read as bytes by PackageExtractor (#280).
@@ -200,7 +210,8 @@ module Woods
 
     def reload?(path)
       return true if ROUTE_PATHS.include?(path) || under?(path, ROUTE_DIRECTORIES)
-      # lib/tasks and lib/generators are read as files, never autoloaded.
+      # lib/tasks and lib/generators are read as files, never autoloaded; both
+      # are re-extracted instead.
       return false if under?(path, %w[lib/tasks lib/generators])
 
       path.end_with?('.rb') && under?(path, RELOAD_DIRECTORIES)
@@ -208,7 +219,13 @@ module Woods
 
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
-        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path)
+        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) || config_file?(path)
+    end
+
+    # YAML under the configured `config_file_paths` that boot does not
+    # capture: ConfigFileExtractor reads its key structure as bytes.
+    def config_file?(path)
+      Extractors::ConfigFileExtractor.config_file_path?(path)
     end
 
     def under?(path, directories)

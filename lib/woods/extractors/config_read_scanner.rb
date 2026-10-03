@@ -31,79 +31,90 @@ module Woods
       SEPARATOR = /\s*+,\s*+/
       ROOT_INTERPOLATION = '#{Rails.root}/' # rubocop:disable Lint/InterpolationCheck
 
+      # Mixed into extractors through {SharedDependencyScanner}. The scan
+      # itself lives on the module, so no helper name leaks into an extractor.
+      #
       # @param source [String] Ruby source code
       # @return [Array<Hash>] `{ type: :config_file, target:, via: :reads_config }`, sorted by target
       def scan_config_dependencies(source)
-        scannable = LineNeutralizer.strip_comments(source)
-        paths = config_for_paths(scannable) + load_file_paths(scannable) + settings_reader_paths(scannable)
-        paths.uniq.sort.filter_map do |path|
-          next unless ConfigFileExtractor.config_file_path?(path)
+        ConfigReadScanner.call(source)
+      end
 
-          { type: :config_file, target: path, via: :reads_config }
+      class << self
+        # @param source [String] Ruby source code
+        # @return [Array<Hash>] `{ type: :config_file, target:, via: :reads_config }`, sorted by target
+        def call(source)
+          scannable = LineNeutralizer.strip_comments(source)
+          paths = config_for_paths(scannable) + load_file_paths(scannable) + settings_reader_paths(scannable)
+          paths.uniq.sort.filter_map do |path|
+            next unless ConfigFileExtractor.config_file_path?(path)
+
+            { type: :config_file, target: path, via: :reads_config }
+          end
         end
-      end
 
-      private
+        private
 
-      def config_for_paths(source)
-        return [] unless source.include?('config_for')
+        def config_for_paths(source)
+          return [] unless source.include?('config_for')
 
-        source.scan(CONFIG_FOR).map { |captures| "config/#{captures.compact.first}.yml" }
-      end
-
-      def load_file_paths(source)
-        return [] unless source.include?('load_file')
-
-        paths = []
-        scanner = StringScanner.new(source)
-        while scanner.scan_until(LOAD_FILE)
-          path = scanner.scan(ROOT_JOIN) ? joined_literals(scanner) : single_literal(scanner)
-          path = normalize_path(path)
-          paths << path if path
+          source.scan(CONFIG_FOR).map { |captures| "config/#{captures.compact.first}.yml" }
         end
-        paths
-      end
 
-      def single_literal(scanner)
-        scanner.scan(STRING_LITERAL) && (scanner[1] || scanner[2])
-      end
+        def load_file_paths(source)
+          return [] unless source.include?('load_file')
 
-      # @return [String, nil] the joined segments, or nil when any argument is not a literal
-      def joined_literals(scanner)
-        segments = []
-        loop do
-          segment = single_literal(scanner)
-          return nil unless segment
-
-          segments << segment
-          break unless scanner.scan(SEPARATOR)
+          paths = []
+          scanner = StringScanner.new(source)
+          while scanner.scan_until(LOAD_FILE)
+            path = scanner.scan(ROOT_JOIN) ? joined_literals(scanner) : single_literal(scanner)
+            path = normalize_path(path)
+            paths << path if path
+          end
+          paths
         end
-        scanner.scan(/\s*+\)/) ? segments.join('/') : nil
-      end
 
-      def normalize_path(path)
-        return nil if path.nil? || path.empty?
-
-        path = path.delete_prefix(ROOT_INTERPOLATION)
-        return nil if path.include?('#{') || path.start_with?('/') || path.split('/').include?('..')
-
-        path
-      end
-
-      def settings_reader_paths(source)
-        Array(Woods.configuration&.settings_readers).filter_map do |reader|
-          constant = reader[:constant].to_s
-          next if constant.empty? || !source.include?(constant)
-
-          reader[:file].to_s if source.match?(settings_pattern(constant))
+        def single_literal(scanner)
+          scanner.scan(STRING_LITERAL) && (scanner[1] || scanner[2])
         end
-      end
 
-      # A read is the constant followed by a method call or an index, at the
-      # top of a constant path: `Settings.x`, `::Settings[:x]`, never `Other::Settings.x`.
-      def settings_pattern(constant)
-        name = Regexp.escape(constant.delete_prefix('::'))
-        /(?<![\w:])(?:::)?+#{name}\s*+[.\[]/
+        # @return [String, nil] the joined segments, or nil when any argument is not a literal
+        def joined_literals(scanner)
+          segments = []
+          loop do
+            segment = single_literal(scanner)
+            return nil unless segment
+
+            segments << segment
+            break unless scanner.scan(SEPARATOR)
+          end
+          scanner.scan(/\s*+\)/) ? segments.join('/') : nil
+        end
+
+        def normalize_path(path)
+          return nil if path.nil? || path.empty?
+
+          path = path.delete_prefix(ROOT_INTERPOLATION)
+          return nil if path.include?('#{') || path.start_with?('/') || path.split('/').include?('..')
+
+          path
+        end
+
+        def settings_reader_paths(source)
+          Array(Woods.configuration&.settings_readers).filter_map do |reader|
+            constant = reader[:constant].to_s
+            next if constant.empty? || !source.include?(constant)
+
+            reader[:file].to_s if source.match?(settings_pattern(constant))
+          end
+        end
+
+        # A read is the constant followed by a method call or an index, at the
+        # top of a constant path: `Settings.x`, `::Settings[:x]`, never `Other::Settings.x`.
+        def settings_pattern(constant)
+          name = Regexp.escape(constant.delete_prefix('::'))
+          /(?<![\w:])(?:::)?+#{name}\s*+[.\[]/
+        end
       end
     end
   end

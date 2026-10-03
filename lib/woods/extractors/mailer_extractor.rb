@@ -241,6 +241,7 @@ module Woods
         deps = []
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
         # Navigation edges — resolve `_path`/`_url` helpers to real
         # controllers via RouteHelperResolver (wired through the include +
         # build_route_helper_map call in #initialize). This adds resolved

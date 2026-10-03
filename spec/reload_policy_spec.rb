@@ -70,6 +70,44 @@ RSpec.describe Woods::ReloadPolicy do
         expect(policy.classify('test/models/post_test.rb')).to eq(:reextract)
       end
 
+      it 'only needs re-extraction for generators, which LibExtractor reads as files' do
+        expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:reextract)
+        expect(policy.classify('lib/generators/thing/templates/thing.rb')).to eq(:reextract)
+      end
+
+      it 'only needs re-extraction for seed, deploy and importmap files' do
+        %w[db/seeds.rb db/seeds/widgets.rb config/deploy.rb config/deploy/production.rb
+           config/importmap.rb].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'only needs re-extraction for YAML config files boot does not capture' do
+        %w[config/namespaces.yml config/blocked_words.yml config/settings/extra/rates.yml
+           app/data/surveys/nps.yml].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'still demands a restart for boot-captured YAML and never reads a secret file as bytes' do
+        %w[config/settings.yml config/settings/production.yml config/cable.yml config/storage.yml
+           config/database.yml config/credentials.yml.enc].each do |path|
+          expect(policy.classify(path)).to eq(:restart), path
+        end
+        expect(policy.classify('config/secrets.yml')).to eq(:ignore)
+      end
+
+      it 'follows config.config_file_paths' do
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.config_file_paths = ['data/**/*.yaml']
+
+        expect(policy.classify('data/ledgers/rates.yaml')).to eq(:reextract)
+        expect(policy.classify('config/namespaces.yml')).to eq(:ignore)
+      ensure
+        Woods.configuration = original
+      end
+
       it 'only needs re-extraction for templates, which are not constants' do
         expect(policy.classify('app/views/posts/index.html.erb')).to eq(:reextract)
       end
@@ -88,8 +126,8 @@ RSpec.describe Woods::ReloadPolicy do
       expect(policy.classify('.github/workflows/ci.yml')).to eq(:ignore)
       expect(policy.classify('app/assets/stylesheets/application.css')).to eq(:ignore)
       expect(policy.classify('public/favicon.ico')).to eq(:ignore)
-      # LibExtractor skips generators, so nothing downstream reads them.
-      expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:ignore)
+      expect(policy.classify('config/puma.rb')).to eq(:ignore)
+      expect(policy.classify('deploy/chart/values.yml')).to eq(:ignore)
     end
 
     context 'with GraphQL operation documents' do

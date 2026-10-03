@@ -203,6 +203,7 @@ module Woods
         deps = []
         deps.concat(scan_model_dependencies(source, via: :validation))
         deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
 
         # Other validators referenced, with their full constant path
         source.scan(/((?:[A-Z]\w*::)*\w+Validator)(?:\.|::new)/).flatten.uniq.each do |validator|

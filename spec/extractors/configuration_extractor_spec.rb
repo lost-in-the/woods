@@ -324,13 +324,25 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
     end
 
     it 'scans a seed file for the usual dependencies' do
-      path = create_file('db/seeds.rb', "WidgetSeedService.call\n")
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/\bWidget\b/)
+      path = create_file('db/seeds.rb', "WidgetSeedService.call\nWidget.create!(name: 'seed')\nSeedJob.perform_later\n")
 
       unit = described_class.new.extract_configuration_file(path)
 
       expect(unit.namespace).to eq('seeds')
       expect(unit.source_code).to include('Type: seeds', 'WidgetSeedService.call')
-      expect(unit.dependencies).to include({ type: :service, target: 'WidgetSeedService', via: :code_reference })
+      expect(unit.dependencies).to include({ type: :service, target: 'WidgetSeedService', via: :code_reference },
+                                           { type: :model, target: 'Widget', via: :code_reference },
+                                           { type: :job, target: 'SeedJob', via: :code_reference })
+    end
+
+    it 'keeps the service-only scan for initializers' do
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/\bWidget\b/)
+      path = create_file('config/initializers/widgets.rb', "Widget.preload\nWidgetService.call\n")
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.dependencies.map { |edge| edge[:type] }).to eq([:service])
     end
 
     it 'redacts credential-shaped text in the published source' do

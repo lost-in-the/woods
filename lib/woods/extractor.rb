@@ -47,6 +47,7 @@ require_relative 'extractors/event_extractor'
 require_relative 'extractors/decorator_extractor'
 require_relative 'extractors/database_view_extractor'
 require_relative 'extractors/graphql_operation_extractor'
+require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -150,7 +151,8 @@ module Woods
       poros: Extractors::PoroExtractor,
       libs: Extractors::LibExtractor,
       packages: Extractors::PackageExtractor,
-      graphql_operations: Extractors::GraphQLOperationExtractor
+      graphql_operations: Extractors::GraphQLOperationExtractor,
+      config_files: Extractors::ConfigFileExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -204,7 +206,10 @@ module Woods
       poro: :poros,
       lib: :libs,
       package: :packages,
-      graphql_operation: :graphql_operations
+      graphql_operation: :graphql_operations,
+      config_file: :config_files,
+      # RouteExtractor emits a route_file unit per draw file beside its routes.
+      route_file: :routes
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -230,7 +235,8 @@ module Woods
       caching: :extract_caching_file,
       test_mapping: :extract_test_file,
       poro: :extract_poro_units,
-      lib: :extract_lib_file
+      lib: :extract_lib_file,
+      config_file: :extract_config_file
     }.freeze
 
     # GraphQL types all use the same extractor method.

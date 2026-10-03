@@ -52,6 +52,9 @@ module Woods
         'db/seeds' => 'seeds'
       }.freeze
 
+      # Config types of {CONFIG_DIRECTORIES}, and of a call that names no type.
+      CONFIG_TYPES_BY_DIRECTORY = [nil, 'initializer', 'environment'].freeze
+
       # Directories scanned in addition to {CONFIG_DIRECTORIES}.
       SOURCE_DIRECTORIES = (DIRECTORY_TYPES.keys - CONFIG_DIRECTORIES).freeze
 
@@ -302,7 +305,14 @@ module Woods
           { type: :gem, target: gem_ref, via: :configuration }
         end
 
-        deps.concat(scan_service_dependencies(source))
+        # Initializers and environments keep their service-only scan. Boot,
+        # seed, deploy and root files reference models, jobs and mailers too.
+        if CONFIG_TYPES_BY_DIRECTORY.include?(config_type)
+          deps.concat(scan_service_dependencies(source))
+          deps.concat(scan_config_dependencies(source))
+        else
+          deps.concat(scan_common_dependencies(source))
+        end
 
         consolidate_dependencies(deps)
       end

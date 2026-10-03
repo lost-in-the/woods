@@ -59,6 +59,45 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('lib/generators/thing/thing_generator.rb')).to include(:libs)
     end
 
+    it 'routes boot, seed, deploy and root files to the configuration extractor' do
+      %w[config/initializers/redis.rb config/environments/test.rb config/boot.rb config/environment.rb
+         config/importmap.rb config/deploy.rb config/deploy/production.rb db/seeds.rb db/seeds/widgets.rb
+         Gemfile Rakefile].each do |path|
+        expect(keys_for(path)).to include(:configurations), path
+      end
+      %w[config/routes.rb config/application.rb config/puma.rb config/routes/admin.rb Gemfile.lock
+         db/schema.rb].each do |path|
+        expect(keys_for(path)).not_to include(:configurations), path
+      end
+    end
+
+    it 'routes configured YAML to the config file extractor, and never a secret or locale file' do
+      %w[config/settings.yml config/settings/production.yml config/sidekiq.yml
+         app/data/surveys/nps.yml].each do |path|
+        expect(keys_for(path)).to include(:config_files), path
+      end
+      %w[config/locales/en.yml config/secrets.yml config/credentials/production.yml config/master.key
+         .github/workflows/ci.yml spec/fixtures/widgets.yml config/settings.rb].each do |path|
+        expect(keys_for(path)).not_to include(:config_files), path
+      end
+    end
+
+    it 'follows config.config_file_paths at call time' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.config_file_paths = ['data/**/*.yaml']
+
+      expect(keys_for('data/ledgers/rates.yaml')).to include(:config_files)
+      expect(keys_for('config/settings.yml')).not_to include(:config_files)
+    ensure
+      Woods.configuration = original
+    end
+
+    it 're-runs routes wholesale for a draw file, which carries its route_file unit' do
+      expect(dispatcher.whole_app_keys_for('config/routes/admin.rb')).to include(:routes)
+      expect(Woods::Extractor::EXTRACTOR_KEY_TO_TYPES.fetch(:routes)).to eq(%i[route route_file])
+    end
+
     it 'matches migrations only at the top level of db/migrate' do
       expect(keys_for('db/migrate/20240101000000_create_posts.rb')).to eq([:migrations])
       expect(keys_for('db/migrate/archive/20200101000000_old.rb')).to be_empty

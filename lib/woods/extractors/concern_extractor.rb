@@ -354,6 +354,7 @@ module Woods
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
         deps.concat(scan_job_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
 
         consolidate_dependencies(deps)
       end

@@ -36,7 +36,7 @@ module Woods
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
         database_views caching factories test_mappings rails_source
-        poros libs packages graphql_operations ruby_classes ruby_modules ruby_methods ruby_files
+        poros libs packages graphql_operations config_files ruby_classes ruby_modules ruby_methods ruby_files
       ].freeze
 
       # Singular type name for each directory (used in search filtering).
@@ -46,11 +46,12 @@ module Woods
       TYPE_TO_DIR = DIR_TO_TYPE.invert.freeze
 
       # Most output directories contain one unit type. RailsSourceExtractor
-      # emits gem_source units in rails_source/, while GraphQL publishes four
-      # subtypes in graphql/. Search accepts directory-family aliases and
+      # emits gem_source units in rails_source/, RouteExtractor emits route_file
+      # units in routes/, while GraphQL publishes four subtypes in graphql/. Search accepts directory-family aliases and
       # concrete types, and returns each unit's actual public type.
       UNIT_TYPES_BY_DIR = DIR_TO_TYPE.transform_values { |type| [type].freeze }
                                      .merge('rails_source' => %w[rails_source gem_source].freeze,
+                                            'routes' => %w[route route_file].freeze,
                                             'graphql' => %w[graphql_type graphql_mutation graphql_resolver graphql_query].freeze)
                                      .freeze
       UNIT_TYPE_TO_DIR = UNIT_TYPES_BY_DIR.each_with_object({}) do |(directory, types), result|

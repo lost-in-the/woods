@@ -3,6 +3,7 @@
 require 'psych'
 require 'set'
 require 'strscan'
+require 'woods'
 
 require_relative '../source_inputs/consumer_errors'
 require_relative '../console/credential_scanner'
@@ -37,6 +38,9 @@ module Woods
     class ConfigFileExtractor
       # Root-relative globs scanned when `config_file_paths` is not set.
       DEFAULT_PATHS = %w[config/*.yml config/**/*.yml app/data/**/*.yml].freeze
+
+      # Directories the default globs live under.
+      DEFAULT_ROOTS = %w[config app/data].freeze
 
       # Locale files belong to I18nExtractor.
       EXCLUDED_PREFIXES = %w[config/locales/].freeze
