@@ -426,6 +426,8 @@ module Woods
     # Each entry names a +role+ (+:publisher+ or +:subscriber+), a +pattern+
     # whose first capture group is the event name, and a +system+ label
     # recorded in event metadata. The label never enters the unit identifier.
+    # A pattern with named groups names the event with +(?<name>...)+ and may
+    # add +(?<scope>...)+, recorded in +metadata.scopes+.
     #
     # @example
     #   config.event_patterns = [
@@ -473,14 +475,27 @@ module Woods
         raise ConfigurationError, "#{label} role must be :publisher or :subscriber, got #{role.inspect}"
       end
       raise ConfigurationError, "#{label} pattern must be a Regexp, got #{pattern.inspect}" unless pattern.is_a?(Regexp)
-      # The empty alternative always matches, so `captures` counts the groups.
-      if /#{pattern}|/.match('').captures.empty?
-        raise ConfigurationError,
-              "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
-      end
+
+      validate_event_name_capture!(label, pattern)
       raise ConfigurationError, "#{label} system must be a Symbol, got #{system.inspect}" unless system.is_a?(Symbol)
 
       { role: role, pattern: pattern, system: system }.freeze
+    end
+
+    # @raise [ConfigurationError] unless +pattern+ captures an event name
+    def validate_event_name_capture!(label, pattern)
+      # Named groups make every unnamed group non-capturing, so group 1 would
+      # be whichever named group comes first.
+      if pattern.names.any? && !pattern.names.include?('name')
+        raise ConfigurationError,
+              "#{label} pattern has named capture groups but no (?<name>...) group for the event name, " \
+              "got #{pattern.inspect}"
+      end
+      # The empty alternative always matches, so `captures` counts the groups.
+      return unless /#{pattern}|/.match('').captures.empty?
+
+      raise ConfigurationError,
+            "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
     end
 
     def validate_boolean!(name, value)

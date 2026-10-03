@@ -812,14 +812,17 @@ end
 - **`pattern`**: a `Regexp`. Its first capture group is the event name. The
   example accepts both `Ledger.emit(:checkout_completed)` and
   `Ledger.emit("checkout.completed")`. A match whose first group did not
-  participate is skipped.
+  participate is skipped. A pattern with named groups must name the event
+  with `(?<name>...)`: Ruby makes unnamed groups non-capturing once any group
+  is named. It may also capture `(?<scope>...)`.
 - **`system`**: a `Symbol` label for the event system.
 
 Configured patterns scan every `app/**/*.rb` file after the built-in ones.
 
 The setter validates each entry when it is assigned. A role outside
 `:publisher`/`:subscriber`, a pattern that is not a `Regexp` or has no capture
-group, or a `system` that is not a `Symbol` raises `Woods::ConfigurationError`.
+group, a pattern with named groups but no `(?<name>...)`, or a `system` that is
+not a `Symbol` raises `Woods::ConfigurationError`.
 The previous value is kept.
 
 **The system label is metadata, not identity.** An event unit's identifier is
@@ -828,8 +831,24 @@ configured, every event unit also carries `metadata.systems`: each system that
 used the name, in the order first seen. `metadata.pattern` stays the first of
 them. Two systems emitting the same name produce one unit listing both.
 
+**Scope and sub-event detail is metadata too.** Configured matches also fill
+two lists, each in first-seen order without duplicates:
+
+| Key | Filled from |
+|-----|-------------|
+| `metadata.scopes` | the `(?<scope>...)` capture, and a `scope:` string or symbol literal passed to the matched call |
+| `metadata.sub_events` | an `event:` string or symbol literal passed to the matched call |
+
+Only the matched call's own keyword arguments count, read from its parse
+tree. A `scope:` passed to a nested call, or a computed value such as
+`event: ok ? "a" : "b"`, is not recorded. For example,
+`Ledger.emit(:checkout_completed, scope: "receipts", event: "receipt_printed")`
+records `scopes: ["receipts"]` and `sub_events: ["receipt_printed"]` on the
+`checkout_completed` unit.
+
 With `event_patterns` unset or empty, event units are byte-identical to an
-extraction without the option. No `systems` key is written.
+extraction without the option. No `systems`, `scopes` or `sub_events` key is
+written.
 
 **Changing `event_patterns` needs a full extraction.** The configuration is not
 part of any incremental fingerprint. `woods:incremental` re-runs `EventExtractor`

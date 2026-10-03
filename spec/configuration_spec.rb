@@ -533,6 +533,19 @@ RSpec.describe Woods::Configuration do
         .to raise_error(Woods::ConfigurationError, /pattern must have a capture group/)
     end
 
+    it 'accepts a pattern that names the event with a (?<name>) capture' do
+      named = publisher.merge(pattern: /Bus\.emit\(\s*:(?<scope>\w+),\s*:(?<name>\w+)/)
+      config.event_patterns = [named]
+
+      expect(config.event_patterns).to eq([named])
+    end
+
+    it 'rejects a pattern with named captures but no (?<name>) capture' do
+      # Named groups turn every unnamed group non-capturing, so group 1 would be the scope.
+      expect { config.event_patterns = [publisher.merge(pattern: Regexp.new('(?<scope>\w+)\.emit\(:(\w+)'))] }
+        .to raise_error(Woods::ConfigurationError, /named capture groups but no \(\?<name>/)
+    end
+
     it 'rejects a system that is not a Symbol' do
       expect { config.event_patterns = [publisher.merge(system: 'ledger')] }
         .to raise_error(Woods::ConfigurationError, /system must be a Symbol/)

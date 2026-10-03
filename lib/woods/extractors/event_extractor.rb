@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'prism'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -15,6 +17,9 @@ module Woods
     # Applications with their own event wrapper add patterns through
     # +Woods.configuration.event_patterns+; see {Woods::Configuration#event_patterns=}.
     # Their +system+ label is recorded in metadata and never changes the identifier.
+    # A configured match also records event identity detail: a +(?<scope>...)+
+    # capture and the matched call's +scope:+ literal land in +metadata[:scopes]+,
+    # its +event:+ literal in +metadata[:sub_events]+.
     #
     # Uses a two-pass approach:
     # 1. Scan all files, collecting publishers and subscribers per event name
@@ -36,6 +41,10 @@ module Woods
       include SharedUtilityMethods
 
       APP_DIRECTORIES = %w[app].freeze
+
+      # Keyword arguments of a configured call recorded as event identity,
+      # mapped to the metadata list each one feeds.
+      IDENTITY_KEYWORDS = { 'scope' => :scopes, 'event' => :sub_events }.freeze
 
       def initialize
         @directories = APP_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
@@ -138,17 +147,21 @@ module Woods
 
       # Scan for the application's own event APIs from +event_patterns+.
       #
-      # A match whose first capture group did not participate names no event
-      # and is skipped.
+      # The event name is the +(?<name>...)+ capture when the pattern has one,
+      # else the first capture group. A match whose name capture did not
+      # participate names no event and is skipped.
       #
       # @param source [String] Ruby source code
       # @param file_path [String] File path
       # @param event_map [Hash] Mutable event map
       # @return [void]
       def scan_configured_patterns(source, file_path, event_map)
+        tree = nil
         @configured_patterns.each do |entry|
+          named = entry[:pattern].names.include?('name')
           source.scan(entry[:pattern]) do
-            event_name = Regexp.last_match(1)
+            match = Regexp.last_match
+            event_name = named ? match[:name] : match[1]
             next if event_name.nil? || event_name.empty?
 
             if entry[:role] == :publisher
@@ -156,8 +169,74 @@ module Woods
             else
               register_subscriber(event_map, event_name, file_path, entry[:system])
             end
+            tree ||= Prism.parse(source)
+            record_identity(event_map[event_name], match, tree, source)
           end
         end
+      end
+
+      # Record a match's +(?<scope>...)+ capture and the matched call's
+      # +scope:+ / +event:+ literals on the event entry, first seen first.
+      #
+      # @param entry [Hash] The event map entry
+      # @param match [MatchData] A configured pattern match
+      # @param tree [Prism::ParseResult] The file's parse result
+      # @param source [String] Ruby source code
+      # @return [void]
+      def record_identity(entry, match, tree, source)
+        values = Hash.new { |hash, key| hash[key] = [] }
+        values[:scopes] << match[:scope] if match.names.include?('scope')
+        call_keyword_literals(tree, match, source).each { |key, value| values[IDENTITY_KEYWORDS[key]] << value }
+
+        values.each do |list, found|
+          found.each { |value| entry[list] << value unless value.nil? || value.empty? || entry[list].include?(value) }
+        end
+      end
+
+      # String or symbol literals passed as +scope:+ / +event:+ keywords to
+      # the innermost call enclosing the match's name capture. Keywords of a
+      # nested call and non-literal values are ignored.
+      #
+      # @param tree [Prism::ParseResult] The file's parse result
+      # @param match [MatchData] A configured pattern match
+      # @param source [String] Ruby source code
+      # @return [Array<Array(String, String)>] keyword name and literal value pairs
+      def call_keyword_literals(tree, match, source)
+        return [] unless tree.success?
+
+        name_group = match.names.include?('name') ? :name : 1
+        from = source[0, match.begin(name_group)].bytesize
+        to = source[0, match.end(0)].bytesize
+        call = innermost_call(tree.value, from, to)
+        keywords = call&.arguments&.arguments&.grep(Prism::KeywordHashNode)&.first
+        return [] unless keywords
+
+        keywords.elements.filter_map do |assoc|
+          next unless assoc.is_a?(Prism::AssocNode) && assoc.key.is_a?(Prism::SymbolNode)
+          next unless IDENTITY_KEYWORDS.key?(assoc.key.unescaped)
+          next unless assoc.value.is_a?(Prism::StringNode) || assoc.value.is_a?(Prism::SymbolNode)
+
+          [assoc.key.unescaped, assoc.value.unescaped]
+        end
+      end
+
+      # The deepest call node whose source span covers the byte range.
+      #
+      # @param root [Prism::Node] Program node
+      # @param from [Integer] Start byte offset
+      # @param to [Integer] End byte offset
+      # @return [Prism::CallNode, nil]
+      def innermost_call(root, from, to)
+        found = nil
+        stack = [root]
+        while (node = stack.pop)
+          location = node.location
+          next unless location.start_offset <= from && to <= location.end_offset
+
+          found = node if node.is_a?(Prism::CallNode)
+          stack.concat(node.compact_child_nodes)
+        end
+        found
       end
 
       # Does this file give any indication it is using Wisper?
@@ -209,7 +288,8 @@ module Woods
       # @param pattern [Symbol] System that matched
       # @return [Hash] The entry
       def event_entry(event_map, event_name, pattern)
-        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern, systems: [] }
+        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern, systems: [],
+                                            scopes: [], sub_events: [] }
         entry[:systems] << pattern unless entry[:systems].include?(pattern)
         entry
       end
@@ -255,7 +335,11 @@ module Woods
           subscriber_count: data[:subscribers].size
         }
         # Only when configured, so an app that sets nothing keeps byte-identical units.
-        unit.metadata[:systems] = data[:systems] if @configured_patterns.any?
+        if @configured_patterns.any?
+          unit.metadata[:systems] = data[:systems]
+          unit.metadata[:scopes] = data[:scopes]
+          unit.metadata[:sub_events] = data[:sub_events]
+        end
         unit.dependencies = dependencies
         unit
       end

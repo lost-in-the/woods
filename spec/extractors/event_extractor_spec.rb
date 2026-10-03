@@ -733,6 +733,43 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(unit.metadata[:systems]).to eq(%i[active_support ledger])
     end
 
+    it 'takes the event name from a (?<name>) capture and records a (?<scope>) capture' do
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /Bus\.emit\(\s*:(?<scope>\w+),\s*:(?<name>\w+)/, system: :bus }
+      ]
+      create_file('app/services/checkout_service.rb', 'Bus.emit(:billing, :checkout_completed)')
+
+      unit = extract_sole_unit
+      expect(unit.identifier).to eq('checkout_completed')
+      expect(unit.metadata).to include(scopes: ['billing'], sub_events: [])
+    end
+
+    it 'records scope: and event: keyword literals passed to the matched call only' do
+      create_file('app/workers/receipt_worker.rb', <<~SRC)
+        class ReceiptWorker
+          def perform
+            Ledger.emit(:checkout_completed, scope: "receipts", event: "receipt_printed")
+            Ledger.emit(:checkout_completed, scope: :billing, event: outcome ? "a" : "b")
+            Ledger.emit(:checkout_completed, payload: wrap(scope: "nested", event: "inner"))
+            Ledger.emit(:checkout_completed, scope: "receipts")
+          end
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(scopes: %w[receipts billing], sub_events: ['receipt_printed'])
+    end
+
+    it 'records keyword literals from subscriber calls too' do
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          Ledger.on(:checkout_completed, scope: "receipts") { |payload| }
+        end
+      SRC
+
+      expect(extract_sole_unit.metadata).to include(scopes: ['receipts'], sub_events: [])
+    end
+
     it 'skips a match whose first capture group did not participate' do
       Woods.configuration.event_patterns = [
         { role: :publisher, pattern: /Ledger\.emit\((?::(\w+)|"([^"]+)")/, system: :ledger }
@@ -777,6 +814,11 @@ RSpec.describe Woods::Extractors::EventExtractor do
         .to contain_exactly('Remove Stale Widget Images', 'Carrier Tracking Update', 'Inline Title')
       expect(units.map { |u| u.metadata[:publishers] }).to all(eq(['app/workers/maintenance_worker.rb']))
       expect(units.map { |u| u.metadata[:systems] }).to all(eq([:audit_log]))
+      expect(units.to_h { |u| [u.identifier, u.metadata.values_at(:scopes, :sub_events)] }).to eq(
+        'Remove Stale Widget Images' => [['maintenance_worker'], []],
+        'Carrier Tracking Update' => [['carrier'], []],
+        'Inline Title' => [['x'], []]
+      )
     end
   end
 
