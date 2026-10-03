@@ -298,6 +298,81 @@ RSpec.describe Woods::GraphAnalyzer do
     end
   end
 
+  describe '#unresolvable_routes' do
+    def route(identifier, controller_class, action, controller: 'unused')
+      make_unit(type: :route, identifier: identifier, file_path: nil,
+                dependencies: [{ type: :controller, target: controller_class, via: :route_dispatch }],
+                metadata: { controller: controller, action: action })
+    end
+
+    def controller(identifier, actions)
+      make_unit(type: :controller, identifier: identifier, metadata: { actions: actions })
+    end
+
+    before do
+      graph.register(controller('LedgersController', %w[index create]))
+      graph.register(route('GET /ledgers', 'LedgersController', 'index'))
+    end
+
+    it 'reports nothing for a route whose controller defines the action' do
+      expect(analyzer.unresolvable_routes).to eq([])
+    end
+
+    it 'reports a route whose action the controller does not have' do
+      graph.register(route('DELETE /ledgers/:id', 'LedgersController', 'destroy'))
+
+      expect(analyzer.unresolvable_routes).to eq([
+                                                   { route: 'DELETE /ledgers/:id', controller: 'LedgersController',
+                                                     action: 'destroy', reason: 'missing_action' }
+                                                 ])
+    end
+
+    it 'reports a route whose controller has no unit' do
+      graph.register(route('GET /shipments', 'ShipmentsController', 'index'))
+
+      expect(analyzer.unresolvable_routes).to eq([
+                                                   { route: 'GET /shipments', controller: 'ShipmentsController',
+                                                     action: 'index', reason: 'missing_controller' }
+                                                 ])
+    end
+
+    it 'skips a missing controller the resolver recognizes as defined outside the index' do
+      graph.register(route('GET /widgets/blobs/:id', 'Widgets::BlobsController', 'show'))
+      resolving = described_class.new(graph, controller_resolver: ->(name) { name == 'Widgets::BlobsController' })
+
+      expect(resolving.unresolvable_routes).to eq([])
+    end
+
+    it 'skips routes that carry no controller or action' do
+      graph.register(make_unit(type: :route, identifier: 'MOUNT /widgets', file_path: nil, metadata: {}))
+
+      expect(analyzer.unresolvable_routes).to eq([])
+    end
+
+    it 'skips a controller whose actions were never recorded' do
+      graph.register(make_unit(type: :controller, identifier: 'LegacyController'))
+      graph.register(route('GET /legacy', 'LegacyController', 'index'))
+
+      expect(analyzer.unresolvable_routes).to eq([])
+    end
+
+    it 'reaches the same verdicts from a graph reloaded from JSON' do
+      graph.register(route('DELETE /ledgers/:id', 'LedgersController', 'destroy'))
+      restored = Woods::DependencyGraph.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(described_class.new(restored).unresolvable_routes.map { |entry| entry[:reason] }).to eq(['missing_action'])
+    end
+
+    it 'is part of the full report, with a count' do
+      graph.register(route('GET /shipments', 'ShipmentsController', 'index'))
+
+      report = analyzer.analyze
+
+      expect(report[:unresolvable_routes].map { |entry| entry[:route] }).to eq(['GET /shipments'])
+      expect(report[:stats][:unresolvable_route_count]).to eq(1)
+    end
+  end
+
   describe '#analyze' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))

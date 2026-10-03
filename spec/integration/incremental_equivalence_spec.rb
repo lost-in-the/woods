@@ -1141,6 +1141,51 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'unresolvable routes in graph_analysis.json' do
+    after do
+      created = app_path('app/controllers/lanterns_controller.rb')
+      FileUtils.cp(created, File.join(@pristine_root, 'app/controllers/lanterns_controller.rb')) if File.exist?(created)
+    end
+
+    def lanterns_source(*actions)
+      "class LanternsController < ApplicationController\n" \
+        "#{actions.map { |action| "  def #{action}\n    @lanterns = Post.recent\n  end\n" }.join}end\n"
+    end
+
+    it 'reports missing controllers and actions, and follows a controller edit that supplies the action' do
+      write_file('app/controllers/lanterns_controller.rb', lanterns_source('index'))
+      load app_path('app/controllers/lanterns_controller.rb')
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts, only: %i[index show create]
+          resources :lanterns, only: %i[index]
+          get 'lanterns/archive', to: 'lanterns#archive'
+          get 'ghosts', to: 'ghosts#index'
+          get 'welcome', to: 'rails/welcome#index'
+        end
+      RUBY
+      Rails.application.reload_routes!
+
+      ghost = { 'route' => 'GET /ghosts', 'controller' => 'GhostsController',
+                'action' => 'index', 'reason' => 'missing_controller' }
+      archive = { 'route' => 'GET /lanterns/archive', 'controller' => 'LanternsController',
+                  'action' => 'archive', 'reason' => 'missing_action' }
+      unresolvable = ->(dir) { read_json(dir, 'graph_analysis.json')['unresolvable_routes'] }
+
+      expect(unresolvable.call(run_sequence([]))).to eq([ghost, archive])
+
+      index_dir = run_sequence([
+                                 lambda {
+                                   write_file('app/controllers/lanterns_controller.rb',
+                                              lanterns_source('index', 'archive'))
+                                   load app_path('app/controllers/lanterns_controller.rb')
+                                   'app/controllers/lanterns_controller.rb'
+                                 }
+                               ])
+      expect(unresolvable.call(index_dir)).to eq([ghost])
+    end
+  end
+
   describe 'gap 4 — whole-app unit types' do
     it 'refreshes routes when config/routes.rb changes' do
       run_sequence([

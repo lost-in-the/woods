@@ -74,9 +74,12 @@ module Woods
     # @param volatile_limit_per_target [Integer, nil] maximum edges per typed dependency, before the global limit
     # @param cycle_limit [Integer, nil] see {DEFAULT_CYCLE_LIMIT}
     # @param cycle_max_length [Integer, nil] see {DEFAULT_CYCLE_MAX_LENGTH}
+    # @param controller_resolver [#call, nil] see {#unresolvable_routes}
     def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO, volatile_limit_per_target: nil,
-                   cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH)
+                   cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH,
+                   controller_resolver: nil)
       @graph = dependency_graph
+      @controller_resolver = controller_resolver
       @volatile_ratio = volatile_ratio.to_f
       @volatile_limit_per_target = volatile_limit_per_target
       @cycle_limit = cycle_limit
@@ -370,6 +373,31 @@ module Woods
               .sort_by { |c| [-c[:member_count], c[:name].to_s] }
     end
 
+    # Routes that dispatch to a controller or action the index does not have.
+    #
+    # Read from the graph, never from route metadata: route units are not
+    # re-extracted when a controller changes, while controller nodes are, so
+    # a verdict stored on the route would go stale. Each route node carrying
+    # a `route_action` is checked against its `:route_dispatch` target:
+    #
+    # - `missing_controller`: no controller node exists for the target. A
+    #   `controller_resolver` that answers true for the name (a controller
+    #   defined by a gem or engine, which the index does not extract) skips
+    #   the route instead.
+    # - `missing_action`: the controller node's `actions` lack the action.
+    #   A controller node with no recorded `actions` is not judged.
+    #
+    # Routes with no controller or action (mounts, redirects, Rack
+    # endpoints) carry no `route_action` and are never reported.
+    #
+    # @return [Array<Hash>] `{ route:, controller:, action:, reason: }`,
+    #   sorted by route identifier
+    def unresolvable_routes
+      @unresolvable_routes ||= @graph.units_of_type(:route).sort.filter_map do |identifier|
+        unresolvable_route(identifier)
+      end
+    end
+
     # Full analysis report combining all structural metrics.
     #
     # @return [Hash] Complete analysis with :orphans, :dead_ends, :hubs,
@@ -383,6 +411,7 @@ module Woods
       computed_cross_database = cross_database_edges
       computed_volatile = volatile_dependencies
       computed_undeclared = undeclared_package_edges
+      computed_unresolvable = unresolvable_routes
 
       {
         orphans: computed_orphans,
@@ -393,6 +422,7 @@ module Woods
         cross_database_edges: computed_cross_database,
         volatile_dependencies: computed_volatile,
         undeclared_package_edges: computed_undeclared,
+        unresolvable_routes: computed_unresolvable,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
@@ -401,12 +431,40 @@ module Woods
           cycle_limit_reached: cycle_limit_reached?,
           cross_database_edge_count: computed_cross_database.size,
           **volatile_dependency_stats(computed_volatile),
-          undeclared_package_edge_count: computed_undeclared.size
+          undeclared_package_edge_count: computed_undeclared.size,
+          unresolvable_route_count: computed_unresolvable.size
         }
       }
     end
 
     private
+
+    # @param identifier [String] a route node
+    # @return [Hash, nil] the report entry, or nil when the route resolves
+    def unresolvable_route(identifier)
+      action = @graph.node(identifier, type: :route)&.dig(:route_action)
+      return nil unless action
+
+      dispatch = @graph.edge_records(identifier, type: :route).find { |edge| edge[:via] == :route_dispatch }
+      controller = dispatch&.dig(:target)
+      return nil unless controller
+
+      reason = unresolvable_reason(controller, action)
+      reason && { route: identifier, controller: controller, action: action, reason: reason }
+    end
+
+    # @return [String, nil]
+    def unresolvable_reason(controller, action)
+      node = @graph.node(controller, type: :controller)
+      if node.nil?
+        return nil if @controller_resolver&.call(controller)
+
+        return 'missing_controller'
+      end
+
+      actions = node[:actions]
+      actions.is_a?(Array) && !actions.include?(action) ? 'missing_action' : nil
+    end
 
     # ──────────────────────────────────────────────────────────────────────
     # Domain Cluster Helpers
