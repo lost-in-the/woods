@@ -22,7 +22,8 @@ module Woods
       Reference = Struct.new(:path, :nesting, :call, :keyword, :literal, keyword_init: true)
 
       # +status+ is +:resolved+ for a loaded class or module, +:value+ for any
-      # other constant, +:unresolved+ when nothing loaded answers to the path.
+      # other constant, +:pending+ for a registered autoload nothing has
+      # loaded yet, +:unresolved+ when nothing loaded answers to the path.
       # +source_file+ is the Ruby file defining a resolved constant, nil when
       # Ruby reports none; +builtin+ marks one the interpreter itself defines.
       # +value+ is the resolved class or module itself.
@@ -85,8 +86,17 @@ module Woods
         case result[:status] == :resolved ? :resolved : result[:reason]
         when :resolved then resolved(result)
         when 'non_module_constant' then Resolution.new(target: normalize(path), status: :value, builtin: false)
+        when 'autoload_pending' then pending(path, result)
         else Resolution.new(target: normalize(path), status: :unresolved, builtin: false)
         end
+      end
+
+      # The registration names the constant; loading it is not ours to do.
+      #
+      # @return [Resolution]
+      def pending(path, result)
+        target = result[:pending_target]
+        Resolution.new(target: target || normalize(path), status: target ? :pending : :unresolved, builtin: false)
       end
 
       # @return [Resolution]
@@ -209,7 +219,7 @@ module Woods
         found
       end
 
-      private_class_method :resolved, :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
+      private_class_method :pending, :resolved, :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
                            :constant_node?, :constant?, :token_references
     end
   end
