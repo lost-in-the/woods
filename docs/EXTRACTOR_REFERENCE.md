@@ -391,6 +391,13 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
 - Slots and sub-component composition are extracted from the `view_template` method
+- A `render` edge targets the component unit the running app reaches, not the name as written. The source is parsed, and each call is resolved against the loaded constant tables without autoloading:
+  - `render TierGrid.new` inside `Billing::V2::ManagePage` follows Ruby constant lookup: the lexical scope of the call site, the ancestors of the class (an included Phlex Kit supplies its components this way), then the top level. `render TierGrid` and `render TierGrid.with_collection(rows)` resolve the same way
+  - `Header(title: "x")` is a method call, so the lexical scope does not apply. It resolves through the Kits among the class's ancestors: modules that `extend Phlex::Kit`, or that define a method of that name. `Ui::Header(...)` resolves the named module
+  - `menu.NavItem("a")` on a block argument resolves through the class's Kits, then through the Kits of the components the same file renders, when those agree on one answer
+  - a lowercase call (`form_with`, `t`, `render partial("x")`) is never a render target, and a capitalized call the runtime shows to be an ordinary method (`Integer("3")`) is ignored
+- `metadata.unresolved_renders` lists each capitalized render that names no component class, sorted, as `{ name:, reason: }`. No edge is emitted for it. Reasons: `constant_missing`, `not_a_component`, `no_kit_constant`, `autoload_pending`, `constant_alias`, `non_module_constant`, `private_constant`
+- `via: :slot` edges (`renders_one :header, HeaderComponent`) keep the name as written
 - `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 
 ---
@@ -404,6 +411,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`), next to the component or inside its sidecar directory (`button_component/button_component.html.haml`), for every engine in `Woods::Extractors::TemplateExtensions::DETECTED`
 - `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
+- `render` edges and `metadata.unresolved_renders` follow the same rules as [PhlexExtractor](#phlexextractor): `render SummaryComponent.new` inside `Ledger::PageComponent` targets `Ledger::SummaryComponent`. Only the component's Ruby file is read; a `render` in a sidecar template produces no edge
 - **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
