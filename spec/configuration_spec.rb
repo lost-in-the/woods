@@ -533,6 +533,19 @@ RSpec.describe Woods::Configuration do
         .to raise_error(Woods::ConfigurationError, /pattern must have a capture group/)
     end
 
+    it 'accepts a pattern that names the event with a (?<name>) capture' do
+      named = publisher.merge(pattern: /Bus\.emit\(\s*:(?<scope>\w+),\s*:(?<name>\w+)/)
+      config.event_patterns = [named]
+
+      expect(config.event_patterns).to eq([named])
+    end
+
+    it 'rejects a pattern with named captures but no (?<name>) capture' do
+      # Named groups turn every unnamed group non-capturing, so group 1 would be the scope.
+      expect { config.event_patterns = [publisher.merge(pattern: Regexp.new('(?<scope>\w+)\.emit\(:(\w+)'))] }
+        .to raise_error(Woods::ConfigurationError, /named capture groups but no \(\?<name>/)
+    end
+
     it 'rejects a system that is not a Symbol' do
       expect { config.event_patterns = [publisher.merge(system: 'ledger')] }
         .to raise_error(Woods::ConfigurationError, /system must be a Symbol/)
@@ -546,6 +559,53 @@ RSpec.describe Woods::Configuration do
       expect { config.event_patterns = [publisher, publisher.merge(role: :listener)] }
         .to raise_error(Woods::ConfigurationError)
       expect(config.event_patterns).to eq([publisher])
+    end
+  end
+
+  describe '#event_paths' do
+    it 'defaults to app, the only root EventExtractor scanned before the option' do
+      expect(described_class.new.event_paths).to eq(%w[app])
+    end
+
+    it 'accepts additional relative roots' do
+      config.event_paths = %w[app lib]
+
+      expect(config.event_paths).to eq(%w[app lib])
+      expect(config.event_paths).to be_frozen
+    end
+
+    it 'drops a trailing slash so app/ and app name one root' do
+      config.event_paths = %w[app/ lib/events/]
+
+      expect(config.event_paths).to eq(%w[app lib/events])
+    end
+
+    it 'rejects a value that is not a non-empty Array' do
+      expect { config.event_paths = 'lib' }
+        .to raise_error(Woods::ConfigurationError, /event_paths must be a non-empty Array/)
+      expect { config.event_paths = [] }
+        .to raise_error(Woods::ConfigurationError, /event_paths must be a non-empty Array/)
+    end
+
+    it 'rejects an entry that is not a non-empty String' do
+      expect { config.event_paths = ['app', :lib] }
+        .to raise_error(Woods::ConfigurationError, /event_paths\[1\] must be a non-empty String/)
+      expect { config.event_paths = [''] }
+        .to raise_error(Woods::ConfigurationError, /event_paths\[0\] must be a non-empty String/)
+    end
+
+    it 'rejects an absolute path or one that leaves Rails.root' do
+      expect { config.event_paths = ['/srv/lib'] }
+        .to raise_error(Woods::ConfigurationError, /event_paths\[0\] must be relative to Rails.root/)
+      expect { config.event_paths = ['lib/../../shared'] }
+        .to raise_error(Woods::ConfigurationError, /event_paths\[0\] must be relative to Rails.root/)
+    end
+
+    it 'keeps the previous value when a later entry is invalid' do
+      config.event_paths = %w[app lib]
+
+      expect { config.event_paths = ['app', '/srv'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.event_paths).to eq(%w[app lib])
     end
   end
 end

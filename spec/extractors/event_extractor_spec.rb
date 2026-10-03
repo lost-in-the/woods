@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 require 'active_support/core_ext/object/blank'
 require 'woods/model_name_cache'
 require 'woods/extractors/shared_utility_methods'
@@ -418,21 +419,145 @@ RSpec.describe Woods::Extractors::EventExtractor do
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependencies' do
-    it 'includes :via key on all dependencies' do
-      create_file('app/services/order_service.rb', <<~RUBY)
-        class OrderService
+    def edges_of(unit)
+      unit.dependencies
+    end
+
+    it 'points an event at the class that publishes it, not at constants that class mentions' do
+      create_file('app/services/checkout_service.rb', <<~SRC)
+        class CheckoutService
           def call
-            ActiveSupport::Notifications.instrument("order.completed")
-            NotifyService.call
-            CleanupJob.perform_later
+            ActiveSupport::Notifications.instrument("checkout.completed")
+            ShipmentService.call
+            ReceiptJob.perform_later
           end
         end
-      RUBY
+      SRC
 
-      units = described_class.new.extract_all
-      units.first.dependencies.each do |dep|
-        expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
-      end
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'CheckoutService', via: :published_by }])
+    end
+
+    it 'points an event at the class that subscribes to it' do
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          ActiveSupport::Notifications.subscribe("checkout.completed") { |*args| LedgerEntry.create! }
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'ReceiptListener', via: :subscribed_by }])
+    end
+
+    it 'lists publisher edges before subscriber edges, one per file' do
+      create_file('app/services/checkout_service.rb', <<~SRC)
+        class CheckoutService
+          ActiveSupport::Notifications.instrument("checkout.completed")
+        end
+      SRC
+      create_file('app/services/refund_service.rb', <<~SRC)
+        class RefundService
+          ActiveSupport::Notifications.instrument("checkout.completed")
+        end
+      SRC
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          ActiveSupport::Notifications.subscribe("checkout.completed") {}
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'CheckoutService', via: :published_by },
+          { type: :class, target: 'RefundService', via: :published_by },
+          { type: :class, target: 'ReceiptListener', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'keeps both edges when one class publishes and subscribes to the same event' do
+      create_file('app/services/widget_relay.rb', <<~SRC)
+        class WidgetRelay
+          ActiveSupport::Notifications.instrument("widget.moved")
+          ActiveSupport::Notifications.subscribe("widget.moved") {}
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'WidgetRelay', via: :published_by },
+          { type: :class, target: 'WidgetRelay', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'names the publisher by the constant its path governs, not the first class it declares' do
+      create_file('app/services/billing/container/parser.rb', <<~SRC)
+        module Billing
+          class Container
+            class Parser
+              def call
+                ActiveSupport::Notifications.instrument("billing.parsed")
+              end
+            end
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit).map { |d| d[:target] }).to eq(['Billing::Container::Parser'])
+    end
+
+    it 'names a module publisher by its module name' do
+      create_file('app/lib/ledger.rb', <<~SRC)
+        module Ledger
+          class Error < StandardError; end
+
+          def self.close
+            ActiveSupport::Notifications.instrument("ledger.closed")
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'Ledger', via: :published_by }])
+    end
+
+    it 'emits no edge for a file that declares no class or module' do
+      create_file('app/services/order_service.rb', <<~SRC)
+        ActiveSupport::Notifications.instrument("order.created", order: order)
+        OrderMailer.deliver_later
+      SRC
+
+      expect(edges_of(described_class.new.extract_all.first)).to eq([])
+    end
+
+    it 'gives Wisper publishers and subscribers the same edges' do
+      create_file('app/services/shipment_service.rb', <<~SRC)
+        class ShipmentService
+          include Wisper::Publisher
+          def call
+            broadcast(:shipment_sent, self)
+          end
+        end
+      SRC
+      create_file('app/listeners/shipment_listener.rb', <<~SRC)
+        class ShipmentListener
+          def self.wire(service)
+            service.on(:shipment_sent) { Wisper.clear }
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'ShipmentService', via: :published_by },
+          { type: :class, target: 'ShipmentListener', via: :subscribed_by }
+        ]
+      )
     end
   end
 
@@ -506,7 +631,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
       counts
     end
 
-    it 'builds both shared-file events with dependencies from the combined source' do
+    it 'builds both shared-file events with an edge to each owning class' do
       units = described_class.new.extract_all
       by_name = units.to_h { |unit| [unit.identifier, unit] }
 
@@ -514,8 +639,20 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(by_name['order.shipped'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
       expect(by_name['order.shipped'].metadata[:subscribers]).to eq(['app/listeners/order_listener.rb'])
       expect(by_name['order.paid'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
-      expect(by_name['order.shipped'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
-      expect(by_name['order.paid'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
+      expect(by_name['order.shipped'].dependencies.map { |d| [d[:target], d[:via]] })
+        .to eq([['OrderBus', :published_by], ['OrderListener', :subscribed_by]])
+      expect(by_name['order.paid'].dependencies.map { |d| [d[:target], d[:via]] })
+        .to eq([['OrderBus', :published_by], ['OrderListener', :subscribed_by]])
+    end
+
+    it 'names each shared file owner once for the whole run' do
+      extractor = described_class.new
+      allow(extractor).to receive(:governed_class_name).and_call_original
+
+      extractor.extract_all
+
+      expect(extractor).to have_received(:governed_class_name).with(@bus_path, anything).once
+      expect(extractor).to have_received(:governed_class_name).with(@listener_path, anything).once
     end
 
     it 'reads each shared file once for the whole run' do
@@ -564,7 +701,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(unit.identifier).to eq('checkout_completed')
       expect(unit.metadata[:publishers]).to eq(['app/services/checkout_service.rb'])
       expect(unit.metadata[:pattern]).to eq(:ledger)
-      expect(unit.dependencies.map { |d| d[:target] }).to include('ShipmentService')
+      expect(unit.dependencies).to eq([{ type: :class, target: 'CheckoutService', via: :published_by }])
     end
 
     it 'captures a string event name from a configured publisher' do
@@ -605,6 +742,60 @@ RSpec.describe Woods::Extractors::EventExtractor do
       unit = extract_sole_unit
       expect(unit.metadata[:pattern]).to eq(:active_support)
       expect(unit.metadata[:systems]).to eq(%i[active_support ledger])
+    end
+
+    it 'takes the event name from a (?<name>) capture and records a (?<scope>) capture' do
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /Bus\.emit\(\s*:(?<scope>\w+),\s*:(?<name>\w+)/, system: :bus }
+      ]
+      create_file('app/services/checkout_service.rb', 'Bus.emit(:billing, :checkout_completed)')
+
+      unit = extract_sole_unit
+      expect(unit.identifier).to eq('checkout_completed')
+      expect(unit.metadata).to include(scopes: ['billing'], sub_events: [])
+    end
+
+    it 'records scope: and event: keyword literals passed to the matched call only' do
+      create_file('app/workers/receipt_worker.rb', <<~SRC)
+        class ReceiptWorker
+          def perform
+            Ledger.emit(:checkout_completed, scope: "receipts", event: "receipt_printed")
+            Ledger.emit(:checkout_completed, scope: :billing, event: outcome ? "a" : "b")
+            Ledger.emit(:checkout_completed, payload: wrap(scope: "nested", event: "inner"))
+            Ledger.emit(:checkout_completed, scope: "receipts")
+          end
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(scopes: %w[receipts billing], sub_events: ['receipt_printed'])
+    end
+
+    it 'records scope: and event: literals one level inside a hash-building argument' do
+      create_file('app/workers/tax_worker.rb', <<~SRC)
+        class TaxWorker
+          def perform
+            Ledger.emit(:checkout_completed, details.merge({ scope: "tax_requests", event: "requested" }))
+            Ledger.emit(:checkout_completed, details.merge(scope: "refunds"))
+            Ledger.emit(:checkout_completed, { **details, scope: "payouts", event: "settled" })
+            Ledger.emit(:checkout_completed, details.merge(meta: { scope: "deeper" }))
+            Ledger.emit(:checkout_completed, build(scope: "not_a_hash", event: "not_a_hash"))
+          end
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(scopes: %w[tax_requests refunds payouts], sub_events: %w[requested settled])
+    end
+
+    it 'records keyword literals from subscriber calls too' do
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          Ledger.on(:checkout_completed, scope: "receipts") { |payload| }
+        end
+      SRC
+
+      expect(extract_sole_unit.metadata).to include(scopes: ['receipts'], sub_events: [])
     end
 
     it 'skips a match whose first capture group did not participate' do
@@ -651,6 +842,126 @@ RSpec.describe Woods::Extractors::EventExtractor do
         .to contain_exactly('Remove Stale Widget Images', 'Carrier Tracking Update', 'Inline Title')
       expect(units.map { |u| u.metadata[:publishers] }).to all(eq(['app/workers/maintenance_worker.rb']))
       expect(units.map { |u| u.metadata[:systems] }).to all(eq([:audit_log]))
+      expect(units.to_h { |u| [u.identifier, u.metadata.values_at(:scopes, :sub_events)] }).to eq(
+        'Remove Stale Widget Images' => [['maintenance_worker'], []],
+        'Carrier Tracking Update' => [['carrier'], []],
+        'Inline Title' => [['x'], []]
+      )
+    end
+  end
+
+  describe 'event_paths' do
+    let(:bus_source) do
+      <<~SRC
+        module Ledger
+          class Bus
+            def settle
+              ActiveSupport::Notifications.instrument("ledger.settled")
+            end
+          end
+        end
+      SRC
+    end
+
+    it 'scans only app/ by default' do
+      Woods.configuration = Woods::Configuration.new
+      create_file('lib/ledger/bus.rb', bus_source)
+
+      expect(described_class.new.extract_all).to eq([])
+    end
+
+    it 'scans every configured root, recording paths relative to Rails.root' do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_paths = %w[app lib]
+      create_file('lib/ledger/bus.rb', bus_source)
+      create_file('app/listeners/settlement_listener.rb', <<~SRC)
+        class SettlementListener
+          ActiveSupport::Notifications.subscribe("ledger.settled") {}
+        end
+      SRC
+
+      unit = extract_sole_unit
+      expect(unit.metadata).to include(publishers: ['lib/ledger/bus.rb'],
+                                       subscribers: ['app/listeners/settlement_listener.rb'])
+      expect(unit.dependencies).to eq(
+        [
+          { type: :class, target: 'Ledger::Bus', via: :published_by },
+          { type: :class, target: 'SettlementListener', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'skips a configured root that does not exist' do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_paths = %w[app engines/billing]
+      create_file('app/services/ledger_service.rb', 'ActiveSupport::Notifications.instrument("ledger.settled")')
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['ledger.settled'])
+    end
+  end
+
+  # ── Regex complexity ─────────────────────────────────────────────────
+
+  describe 'built-in patterns on adversarial input' do
+    # Ruby 3.2+ memoizes backtracking, so a quadratic shape only shows on the
+    # 3.0/3.1 rows, where the Timeout watchdog trips instead.
+    def within_regexp_budget(&block)
+      return Timeout.timeout(5, &block) unless Regexp.respond_to?(:timeout=)
+
+      previous = Regexp.timeout
+      Regexp.timeout = 1.0
+      begin
+        block.call
+      ensure
+        Regexp.timeout = previous
+      end
+    end
+
+    run = ' ' * 100_000
+    {
+      'an instrument call with no argument list' => "ActiveSupport::Notifications.instrument#{run}x",
+      'an instrument call with an unterminated name' => "ActiveSupport::Notifications.instrument(\"#{'a' * 100_000}",
+      'a subscribe call with no argument list' => "ActiveSupport::Notifications.subscribe#{run}x",
+      'a Wisper publish with no event symbol' => "include Wisper\npublish#{run}x",
+      'a Wisper broadcast with no event symbol' => "include Wisper\nbroadcast(#{run}x",
+      'a Wisper .on with no event symbol' => "Wisper\nwidget.on#{run}x",
+      'an include with no Wisper' => "include#{run}x"
+    }.each do |shape, adversarial|
+      it "scans #{shape} in linear time" do
+        create_file('app/services/widget_service.rb', "ActiveSupport::Notifications.instrument('widget.made')\n#{adversarial}\n")
+        extractor = described_class.new
+
+        units = within_regexp_budget { extractor.extract_all }
+
+        expect(units.map(&:identifier)).to eq(['widget.made'])
+        expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
+      end
+    end
+  end
+
+  describe 'a configured pattern that backtracks catastrophically' do
+    before do
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.event_patterns = [
+        { role: :publisher, pattern: /Ledger\.emit\(((?:a|a)*)\1"/, system: :ledger },
+        { role: :publisher, pattern: /Tally\.record\(\s*"([^"]+)"/, system: :tally }
+      ]
+    end
+
+    it 'is skipped for that file after its time limit, keeping the other patterns' do
+      unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+        skip('per-pattern Regexp timeouts need Ruby 3.2+')
+      end
+
+      create_file('app/services/ledger_service.rb', <<~SRC)
+        Ledger.emit(#{'a' * 40}!
+        Tally.record("checkout.completed")
+      SRC
+
+      units = Timeout.timeout(10) { described_class.new.extract_all }
+
+      expect(units.map(&:identifier)).to eq(['checkout.completed'])
+      expect(logger).to have_received(:error).with(/event_patterns\[0\] \(ledger\) timed out on .*ledger_service\.rb/)
     end
   end
 

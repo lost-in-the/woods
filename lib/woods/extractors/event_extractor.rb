@@ -1,25 +1,34 @@
 # frozen_string_literal: true
 
+require 'prism'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
-require_relative 'shared_dependency_scanner'
 
 module Woods
   module Extractors
     # EventExtractor discovers event publishing and subscribing patterns across the app.
     #
-    # Scans +app/**/*.rb+ for two event system conventions:
+    # Scans +**/*.rb+ under each +Woods.configuration.event_paths+ root
+    # (default +app+) for two event system conventions:
     # - ActiveSupport::Notifications: +instrument+ (publish) and +subscribe+ (consume)
     # - Wisper: +publish+/+broadcast+ (publish) and +on(:event_name)+ (subscribe)
     #
     # Applications with their own event wrapper add patterns through
     # +Woods.configuration.event_patterns+; see {Woods::Configuration#event_patterns=}.
     # Their +system+ label is recorded in metadata and never changes the identifier.
+    # A configured match also records event identity detail: a +(?<scope>...)+
+    # capture and the matched call's +scope:+ literal land in +metadata[:scopes]+,
+    # its +event:+ literal in +metadata[:sub_events]+.
     #
     # Uses a two-pass approach:
     # 1. Scan all files, collecting publishers and subscribers per event name
     # 2. Merge by event name → one ExtractedUnit per unique event
+    #
+    # An event depends on the class or module that owns each publisher file
+    # (+via: :published_by+) and each subscriber file (+via: :subscribed_by+),
+    # so +dependents+ of an emitting class reaches its events.
     #
     # @example
     #   extractor = EventExtractor.new
@@ -31,13 +40,30 @@ module Woods
     #
     class EventExtractor
       include SharedUtilityMethods
-      include SharedDependencyScanner
 
+      # Default scan roots; +Woods.configuration.event_paths+ replaces them.
       APP_DIRECTORIES = %w[app].freeze
 
+      # Keyword arguments of a configured call recorded as event identity,
+      # mapped to the metadata list each one feeds.
+      IDENTITY_KEYWORDS = { 'scope' => :scopes, 'event' => :sub_events }.freeze
+
+      # Calls whose hash arguments build the payload a configured call
+      # receives (`details.merge(scope: "x")`), read one level deep.
+      HASH_BUILDING_CALLS = %i[merge merge! reverse_merge deep_merge].freeze
+
+      # Wall-clock budget for one match of a configured pattern. The patterns
+      # are user-supplied, so a catastrophic one must not hang extraction.
+      # Ruby 3.2+ enforces it at the engine level (Regexp.new(timeout:)); on
+      # older Rubies patterns compile without one and this constant is unused.
+      CONFIGURED_PATTERN_TIMEOUT = 1.0
+
       def initialize
-        @directories = APP_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
-        @configured_patterns = Woods.configuration&.event_patterns || []
+        roots = Woods.configuration&.event_paths || APP_DIRECTORIES
+        @directories = roots.map { |d| Rails.root.join(d) }.select(&:directory?)
+        @configured_patterns = (Woods.configuration&.event_patterns || []).each_with_index.map do |entry, index|
+          entry.merge(pattern: bounded_pattern(entry[:pattern]), index: index)
+        end
       end
 
       # Extract all event units using a two-pass approach.
@@ -116,7 +142,10 @@ module Woods
           # no subscriber naming the event either, the event unit did not
           # exist at all (EXTB-3). The AS::Notifications and `.on(` scans
           # already accept parens.
-          source.scan(/\b(?:publish|broadcast)\s*\(?\s*:(\w+)/) do |m|
+          # One whitespace run per side of the optional paren: `\s*\(?\s*`
+          # let both runs split the same spaces, quadratic without the
+          # Ruby 3.2+ match cache.
+          source.scan(/\b(?:publish|broadcast)\s*(?:\(\s*)?:(\w+)/) do |m|
             register_publisher(event_map, m[0], file_path, :wisper)
           end
         end
@@ -136,17 +165,25 @@ module Woods
 
       # Scan for the application's own event APIs from +event_patterns+.
       #
-      # A match whose first capture group did not participate names no event
-      # and is skipped.
+      # The event name is the +(?<name>...)+ capture when the pattern has one,
+      # else the first capture group. A match whose name capture did not
+      # participate names no event and is skipped. A pattern that exceeds
+      # {CONFIGURED_PATTERN_TIMEOUT} is logged and contributes nothing for
+      # this file; the other patterns still run.
       #
       # @param source [String] Ruby source code
       # @param file_path [String] File path
       # @param event_map [Hash] Mutable event map
       # @return [void]
       def scan_configured_patterns(source, file_path, event_map)
+        tree = nil
         @configured_patterns.each do |entry|
-          source.scan(entry[:pattern]) do
-            event_name = Regexp.last_match(1)
+          named = entry[:pattern].names.include?('name')
+          matches = configured_matches(entry, source, file_path)
+          next unless matches
+
+          matches.each do |match|
+            event_name = named ? match[:name] : match[1]
             next if event_name.nil? || event_name.empty?
 
             if entry[:role] == :publisher
@@ -154,8 +191,135 @@ module Woods
             else
               register_subscriber(event_map, event_name, file_path, entry[:system])
             end
+            tree ||= Prism.parse(source)
+            record_identity(event_map[event_name], match, tree, source)
           end
         end
+      end
+
+      # Every match of one configured pattern, or nil when it timed out.
+      #
+      # @param entry [Hash] Configured pattern entry
+      # @param source [String] Ruby source code
+      # @param file_path [String] File path
+      # @return [Array<MatchData>, nil]
+      def configured_matches(entry, source, file_path)
+        matches = []
+        source.scan(entry[:pattern]) { matches << Regexp.last_match }
+        matches
+      rescue StandardError => e
+        raise unless regexp_timeout_error?(e)
+
+        SourceInputs::ConsumerErrors.log(
+          self, "event_patterns[#{entry[:index]}] (#{entry[:system]}) timed out on #{file_path}; skipped for this file"
+        )
+        nil
+      end
+
+      # @param pattern [Regexp] A configured pattern
+      # @return [Regexp] The pattern with a per-match time limit where supported
+      def bounded_pattern(pattern)
+        return pattern unless Gem::Version.new(RUBY_VERSION) >= Gem::Version.new('3.2')
+
+        Regexp.new(pattern, timeout: CONFIGURED_PATTERN_TIMEOUT)
+      end
+
+      # Regexp::TimeoutError does not exist before Ruby 3.2, so it is matched
+      # through a defined? check rather than named in a rescue clause.
+      #
+      # @param error [StandardError]
+      # @return [Boolean]
+      def regexp_timeout_error?(error)
+        defined?(Regexp::TimeoutError) && error.is_a?(Regexp::TimeoutError)
+      end
+
+      # Record a match's +(?<scope>...)+ capture and the matched call's
+      # +scope:+ / +event:+ literals on the event entry, first seen first.
+      #
+      # @param entry [Hash] The event map entry
+      # @param match [MatchData] A configured pattern match
+      # @param tree [Prism::ParseResult] The file's parse result
+      # @param source [String] Ruby source code
+      # @return [void]
+      def record_identity(entry, match, tree, source)
+        values = Hash.new { |hash, key| hash[key] = [] }
+        values[:scopes] << match[:scope] if match.names.include?('scope')
+        call_keyword_literals(tree, match, source).each { |key, value| values[IDENTITY_KEYWORDS[key]] << value }
+
+        values.each do |list, found|
+          found.each { |value| entry[list] << value unless value.nil? || value.empty? || entry[list].include?(value) }
+        end
+      end
+
+      # String or symbol literals passed as +scope:+ / +event:+ keys to the
+      # innermost call enclosing the match's name capture: its keywords, a
+      # hash-literal argument, or the hash arguments of a {HASH_BUILDING_CALLS}
+      # argument. Deeper nesting and non-literal values are ignored.
+      #
+      # @param tree [Prism::ParseResult] The file's parse result
+      # @param match [MatchData] A configured pattern match
+      # @param source [String] Ruby source code
+      # @return [Array<Array(String, String)>] keyword name and literal value pairs
+      def call_keyword_literals(tree, match, source)
+        return [] unless tree.success?
+
+        name_group = match.names.include?('name') ? :name : 1
+        from = source[0, match.begin(name_group)].bytesize
+        to = source[0, match.end(0)].bytesize
+        call = innermost_call(tree.value, from, to)
+        return [] unless call
+
+        identity_hashes(call).flat_map(&:elements).filter_map do |assoc|
+          next unless assoc.is_a?(Prism::AssocNode) && assoc.key.is_a?(Prism::SymbolNode)
+          next unless IDENTITY_KEYWORDS.key?(assoc.key.unescaped)
+          next unless assoc.value.is_a?(Prism::StringNode) || assoc.value.is_a?(Prism::SymbolNode)
+
+          [assoc.key.unescaped, assoc.value.unescaped]
+        end
+      end
+
+      # Hash nodes directly passed to +call+, plus those passed to a
+      # hash-building call that is itself an argument, in source order.
+      #
+      # @param call [Prism::CallNode]
+      # @return [Array<Prism::HashNode, Prism::KeywordHashNode>]
+      def identity_hashes(call)
+        hash_or_call_arguments(call).flat_map do |arg|
+          next [arg] if hash_node?(arg)
+
+          HASH_BUILDING_CALLS.include?(arg.name) ? hash_or_call_arguments(arg).select { |inner| hash_node?(inner) } : []
+        end
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [Array<Prism::Node>] hash and call-node arguments of +call+
+      def hash_or_call_arguments(call)
+        Array(call.arguments&.arguments).select { |arg| hash_node?(arg) || arg.is_a?(Prism::CallNode) }
+      end
+
+      # @param node [Prism::Node]
+      # @return [Boolean]
+      def hash_node?(node)
+        node.is_a?(Prism::KeywordHashNode) || node.is_a?(Prism::HashNode)
+      end
+
+      # The deepest call node whose source span covers the byte range.
+      #
+      # @param root [Prism::Node] Program node
+      # @param from [Integer] Start byte offset
+      # @param to [Integer] End byte offset
+      # @return [Prism::CallNode, nil]
+      def innermost_call(root, from, to)
+        found = nil
+        stack = [root]
+        while (node = stack.pop)
+          location = node.location
+          next unless location.start_offset <= from && to <= location.end_offset
+
+          found = node if node.is_a?(Prism::CallNode)
+          stack.concat(node.compact_child_nodes)
+        end
+        found
       end
 
       # Does this file give any indication it is using Wisper?
@@ -207,7 +371,8 @@ module Woods
       # @param pattern [Symbol] System that matched
       # @return [Hash] The entry
       def event_entry(event_map, event_name, pattern)
-        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern, systems: [] }
+        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern, systems: [],
+                                            scopes: [], sub_events: [] }
         entry[:systems] << pattern unless entry[:systems].include?(pattern)
         entry
       end
@@ -227,8 +392,7 @@ module Woods
         return nil if data[:publishers].empty? && data[:subscribers].empty?
 
         file_path = data[:publishers].first || data[:subscribers].first
-        all_paths = (data[:publishers] + data[:subscribers]).uniq
-        combined_source = load_source_files(all_paths)
+        dependencies = build_dependencies(data)
 
         # Keep absolute paths for source reads; emitted paths must not make
         # metadata or annotation hashes depend on the checkout directory.
@@ -254,26 +418,20 @@ module Woods
           subscriber_count: data[:subscribers].size
         }
         # Only when configured, so an app that sets nothing keeps byte-identical units.
-        unit.metadata[:systems] = data[:systems] if @configured_patterns.any?
-        unit.dependencies = build_dependencies(combined_source)
+        if @configured_patterns.any?
+          unit.metadata[:systems] = data[:systems]
+          unit.metadata[:scopes] = data[:scopes]
+          unit.metadata[:sub_events] = data[:sub_events]
+        end
+        unit.dependencies = dependencies
         unit
-      end
-
-      # Load source from multiple files for dependency scanning.
-      #
-      # Silently skips files that cannot be read.
-      #
-      # @param file_paths [Array<String>] File paths to read
-      # @return [String] Combined source
-      def load_source_files(file_paths)
-        file_paths.filter_map { |path| cached_source(path) }.join("\n")
       end
 
       # One read per distinct path per extractor instance (audit P2).
       #
-      # Pass 2 ({#build_unit}) recombines the same publisher/subscriber files
-      # for every event that references them, so a widely-shared file was
-      # re-read once per event on top of the pass-1 {#scan_file} read. The
+      # Pass 2 ({#build_unit}) names the owner of the same publisher/subscriber
+      # files for every event that references them, so a widely-shared file
+      # was re-read once per event on top of the pass-1 {#scan_file} read. The
       # bytes cannot change mid-run, so the first read answers the rest.
       #
       # A failed read is memoized as nil, matching the per-event skip it
@@ -304,13 +462,41 @@ module Woods
         lines.join("\n")
       end
 
-      # Build dependencies by scanning combined source of publisher/subscriber files.
+      # One edge per publisher file, then one per subscriber file, to the
+      # class or module that file is named for. A file that declares neither
+      # yields no edge.
       #
-      # @param combined_source [String] Combined source from all related files
+      # @param data [Hash] Accumulated publishers/subscribers (absolute paths)
       # @return [Array<Hash>]
-      def build_dependencies(combined_source)
-        deps = scan_common_dependencies(combined_source)
-        consolidate_dependencies(deps)
+      def build_dependencies(data)
+        edges = data[:publishers].filter_map { |path| owner_edge(path, :published_by) } +
+                data[:subscribers].filter_map { |path| owner_edge(path, :subscribed_by) }
+        edges.uniq { |edge| [edge[:target], edge[:via]] }
+      end
+
+      # @param path [String] Absolute publisher or subscriber path
+      # @param via [Symbol] :published_by or :subscribed_by
+      # @return [Hash, nil]
+      def owner_edge(path, via)
+        owner = owner_name(path)
+        owner && { type: :class, target: owner, via: via }
+      end
+
+      # The constant a file is named for, as the extractor that owns the file
+      # would name it: the Zeitwerk-governed constant first, then the first
+      # class, then the primary module. Memoized per path like {#cached_source}:
+      # a file that publishes many events is parsed once, not once per event.
+      #
+      # @param path [String] Absolute file path
+      # @return [String, nil]
+      def owner_name(path)
+        owners = (@owner_names ||= {})
+        return owners[path] if owners.key?(path)
+
+        source = cached_source(path)
+        owners[path] = source && (governed_class_name(path, source) ||
+                                  qualified_first_class_name(source) ||
+                                  qualified_outer_module_name(source))
       end
     end
   end

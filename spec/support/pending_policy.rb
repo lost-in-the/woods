@@ -23,6 +23,10 @@ module PendingPolicy
       ['spec/mcp/index_reader_spec.rb', "Woods::MCP::IndexReader bounded user search regex #{description}",
        'per-pattern Regexp timeouts need Ruby 3.2+', -> { Gem::Version.new(RUBY_VERSION) < Gem::Version.new('3.2') }]
     end,
+    ['spec/extractors/event_extractor_spec.rb',
+     'Woods::Extractors::EventExtractor a configured pattern that backtracks catastrophically ' \
+     'is skipped for that file after its time limit, keeping the other patterns',
+     'per-pattern Regexp timeouts need Ruby 3.2+', -> { Gem::Version.new(RUBY_VERSION) < Gem::Version.new('3.2') }],
     ['spec/mcp/tasks/store_spec.rb',
      'Woods::MCP::Tasks::Store producer identity reads the actual current Linux process identity ' \
      'when procfs is available',

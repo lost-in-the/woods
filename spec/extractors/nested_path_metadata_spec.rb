@@ -46,9 +46,9 @@ RSpec.describe 'App-owned nested extractor paths' do
                      'Wisper.subscribe(listener); publisher.on(:order_created) {}'
                    end
       records = in_each_root do |root|
-        write_source(root, 'app/services/a_order.rb', "#{publisher}\n#{publisher}\nOrderService.call\n")
-        write_source(root, 'app/services/z_order.rb', publisher)
-        write_source(root, 'app/listeners/order_listener.rb', "#{subscriber}\nShippingJob.perform_later\n")
+        write_source(root, 'app/services/a_order.rb', "class AOrder\n#{publisher}\n#{publisher}\nend\n")
+        write_source(root, 'app/services/z_order.rb', "class ZOrder\n#{publisher}\nend\n")
+        write_source(root, 'app/listeners/order_listener.rb', "class OrderListener\n#{subscriber}\nend\n")
         unit = Woods::Extractors::EventExtractor.new.extract_all.fetch(0)
 
         expect(unit.file_path).to eq(File.join(root, 'app/services/a_order.rb'))
@@ -58,7 +58,8 @@ RSpec.describe 'App-owned nested extractor paths' do
         )
         expect(unit.source_code).to include('# Publishers: app/services/a_order.rb, app/services/z_order.rb',
                                             '# Subscribers: app/listeners/order_listener.rb')
-        expect(unit.dependencies.map { |dependency| dependency[:target] }).to include('OrderService', 'ShippingJob')
+        expect(unit.dependencies.map { |dependency| [dependency[:target], dependency[:via]] })
+          .to eq([['AOrder', :published_by], ['ZOrder', :published_by], ['OrderListener', :subscribed_by]])
         serialized_unit(unit)
       end
 
@@ -107,9 +108,10 @@ RSpec.describe 'App-owned nested extractor paths' do
     FileUtils.mkdir_p(app)
     allow(Rails).to receive(:root).and_return(Pathname.new(app))
     path = write_source("#{app}-external", 'events.rb', <<~RUBY)
-      ActiveSupport::Notifications.instrument('external.event')
-      ActiveSupport::Notifications.subscribe('external.event') {}
-      ExternalService.call
+      class ExternalRelay
+        ActiveSupport::Notifications.instrument('external.event')
+        ActiveSupport::Notifications.subscribe('external.event') {}
+      end
     RUBY
     extractor = Woods::Extractors::EventExtractor.new
     events = {}
@@ -119,7 +121,8 @@ RSpec.describe 'App-owned nested extractor paths' do
     expect(events.fetch('external.event')).to include(publishers: [path], subscribers: [path])
     expect(unit.metadata).to include(publishers: [path], subscribers: [path])
     expect(unit.source_code).to include("# Publishers: #{path}", "# Subscribers: #{path}")
-    expect(unit.dependencies.map { |dependency| dependency[:target] }).to include('ExternalService')
+    expect(unit.dependencies.map { |dependency| [dependency[:target], dependency[:via]] })
+      .to eq([['ExternalRelay', :published_by], ['ExternalRelay', :subscribed_by]])
     expect(serialized_unit(unit).fetch('file_path')).to eq(path)
   end
 

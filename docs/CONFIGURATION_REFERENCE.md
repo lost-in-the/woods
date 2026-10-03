@@ -795,6 +795,7 @@ app with no components.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `event_patterns` | Array&lt;Hash&gt; | `[]` | Extra publish/subscribe call shapes `EventExtractor` recognizes, on top of its built-in `ActiveSupport::Notifications` and Wisper patterns. |
+| `event_paths` | Array&lt;String&gt; | `%w[app]` | Directories, relative to `Rails.root`, whose `**/*.rb` files `EventExtractor` scans for built-in and configured patterns. |
 
 `EventExtractor` knows two event systems out of the box. An application that
 wraps its events in its own class needs to describe that wrapper:
@@ -812,15 +813,28 @@ end
 - **`pattern`**: a `Regexp`. Its first capture group is the event name. The
   example accepts both `Ledger.emit(:checkout_completed)` and
   `Ledger.emit("checkout.completed")`. A match whose first group did not
-  participate is skipped.
+  participate is skipped. A pattern with named groups must name the event
+  with `(?<name>...)`: Ruby makes unnamed groups non-capturing once any group
+  is named. It may also capture `(?<scope>...)`.
 - **`system`**: a `Symbol` label for the event system.
 
-Configured patterns scan every `app/**/*.rb` file after the built-in ones.
+Configured patterns scan every `.rb` file under the `event_paths` roots after
+the built-in ones.
 
 The setter validates each entry when it is assigned. A role outside
 `:publisher`/`:subscriber`, a pattern that is not a `Regexp` or has no capture
-group, or a `system` that is not a `Symbol` raises `Woods::ConfigurationError`.
+group, a pattern with named groups but no `(?<name>...)`, or a `system` that is
+not a `Symbol` raises `Woods::ConfigurationError`.
 The previous value is kept.
+
+**You own your pattern's complexity.** Woods runs each pattern over every
+scanned file as written. Avoid shapes that backtrack polynomially: an
+unanchored quantified run followed by something that can fail, or adjacent
+quantifiers that match the same characters (`\s*\(?\s*`). On Ruby 3.2+ each
+configured pattern carries a 1-second per-match limit. A pattern that exceeds
+it is logged, contributes nothing for that file, and the other patterns still
+run. Older Rubies have no engine-level limit, so a catastrophic pattern there
+stalls extraction.
 
 **The system label is metadata, not identity.** An event unit's identifier is
 the event name alone, so existing identifiers never change. When patterns are
@@ -828,13 +842,54 @@ configured, every event unit also carries `metadata.systems`: each system that
 used the name, in the order first seen. `metadata.pattern` stays the first of
 them. Two systems emitting the same name produce one unit listing both.
 
+**Scope and sub-event detail is metadata too.** Configured matches also fill
+two lists, each in first-seen order without duplicates:
+
+| Key | Filled from |
+|-----|-------------|
+| `metadata.scopes` | the `(?<scope>...)` capture, and a `scope:` string or symbol literal passed to the matched call |
+| `metadata.sub_events` | an `event:` string or symbol literal passed to the matched call |
+
+Literals are read from the matched call's parse tree, one level deep:
+
+- its own keyword arguments: `emit(:x, scope: "a")`
+- a hash-literal argument: `emit(:x, { **details, scope: "a" })`
+- the hash arguments of a `merge`, `merge!`, `reverse_merge` or `deep_merge`
+  argument: `emit(:x, details.merge(scope: "a"))`
+
+A `scope:` nested deeper (`merge(meta: { scope: "a" })`), passed to any other
+call, or computed (`event: ok ? "a" : "b"`) is not recorded. For example,
+`Ledger.emit(:checkout_completed, scope: "receipts", event: "receipt_printed")`
+records `scopes: ["receipts"]` and `sub_events: ["receipt_printed"]` on the
+`checkout_completed` unit.
+
 With `event_patterns` unset or empty, event units are byte-identical to an
-extraction without the option. No `systems` key is written.
+extraction without the option. No `systems`, `scopes` or `sub_events` key is
+written.
 
 **Changing `event_patterns` needs a full extraction.** The configuration is not
 part of any incremental fingerprint. `woods:incremental` re-runs `EventExtractor`
 only when an `app/**/*.rb` file changes, and then with the new patterns, so
 units for files that did not change can stay stale until `woods:extract` runs.
+
+**`event_paths` chooses the scan roots.** The default, `%w[app]`, is the only
+root scanned before the option existed. An application whose event wrapper or
+listeners live in `lib/` adds it:
+
+```ruby
+Woods.configure do |config|
+  config.event_paths = %w[app lib]
+end
+```
+
+The setter requires a non-empty `Array` of non-empty `String`s, each relative
+to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+else raises `Woods::ConfigurationError` and keeps the previous value. A root
+that does not exist is skipped.
+
+**Changing `event_paths` needs a full extraction.** Incremental runs re-run
+`EventExtractor` only when an `app/**/*.rb` file changes, so an edit under an
+added root such as `lib/` is not picked up until `woods:extract` runs.
 
 ## Console MCP options
 

@@ -666,7 +666,8 @@ module Woods
                                "(e.g. 'code_reference') or an array " \
                                "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
                                'Known values: link_to, redirect_to, form_action, render, code_reference, ' \
-                               'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface.'
+                               'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface, ' \
+                               'published_by, subscribed_by.'
                 },
                 limit: { type: 'integer',
                          description: "Maximum nodes to return (default: #{DEFAULT_TRAVERSAL_LIMIT})" },
