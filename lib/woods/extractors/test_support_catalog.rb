@@ -137,6 +137,18 @@ module Woods
         )
       end
 
+      # Is this a regular file whose real path stays inside the application?
+      # A symlink that leaves the root would publish source the application
+      # does not own.
+      #
+      # @param file_path [String] absolute path
+      # @return [Boolean]
+      def contained?(file_path)
+        File.file?(file_path) && File.realpath(file_path).start_with?("#{real_root}/")
+      rescue SystemCallError
+        false
+      end
+
       # Test types the given modules are mixed into by any support file.
       #
       # @param module_names [Array<String>] qualified module names
@@ -175,8 +187,12 @@ module Woods
 
       def support_files
         self.class.paths.flat_map { |glob| Dir.glob(File.join(@root, glob), GLOB_FLAGS) }
-            .select { |path| File.file?(path) && self.class.support_path?(path.delete_prefix("#{@root}/")) }
+            .select { |path| self.class.support_path?(path.delete_prefix("#{@root}/")) && contained?(path) }
             .uniq.sort
+      end
+
+      def real_root
+        @real_root ||= File.realpath(@root)
       end
 
       # @return [Hash{String => Array<String>}] 'module' / 'class' => qualified names

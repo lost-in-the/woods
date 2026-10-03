@@ -59,7 +59,8 @@ module Woods
       end
 
       def factory_files
-        FactoryExtractor::FACTORY_DIRECTORIES.flat_map { |dir| Dir[@rails_root.join(dir, '**', '*.rb').to_s] }.sort
+        FactoryExtractor::FACTORY_DIRECTORIES.flat_map { |dir| Dir[@rails_root.join(dir, '**', '*.rb').to_s] }
+                                             .select { |path| @catalog.contained?(path) }.sort
       end
 
       def log_failure(path, message)

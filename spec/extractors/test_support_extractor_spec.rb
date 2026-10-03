@@ -72,6 +72,22 @@ RSpec.describe Woods::Extractors::TestSupportExtractor do
       expect(units.map(&:identifier)).to eq(['features/support/env.rb'])
     end
 
+    it 'never reads a symlink that resolves outside the application root' do
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'secrets.rb'), "module OutsideSecrets\nend\n")
+      FileUtils.mkdir_p(File.join(tmp_dir, 'spec/support'))
+      FileUtils.mkdir_p(File.join(tmp_dir, 'spec/factories'))
+      File.symlink(File.join(outside, 'secrets.rb'), File.join(tmp_dir, 'spec/support/linked.rb'))
+      File.symlink(File.join(outside, 'secrets.rb'), File.join(tmp_dir, 'spec/factories/linked.rb'))
+      File.symlink(outside, File.join(tmp_dir, 'spec/support/linked_dir'))
+      create_file('spec/support/real.rb', "module Real\nend\n")
+      File.symlink(File.join(tmp_dir, 'spec/support/real.rb'), File.join(tmp_dir, 'spec/support/alias.rb'))
+
+      expect(units.map(&:identifier)).to eq(%w[spec/support/alias.rb spec/support/real.rb])
+    ensure
+      FileUtils.rm_rf(outside) if outside
+    end
+
     it 'sets the file path and the whole file as source' do
       path = create_file('spec/support/analytics_helpers.rb', "module AnalyticsHelpers\nend\n")
 
