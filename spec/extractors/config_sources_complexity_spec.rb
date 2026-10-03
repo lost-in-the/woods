@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'woods'
 require 'woods/extractors/config_file_extractor'
 require 'woods/extractors/config_read_scanner'
+require 'woods/extractors/route_extractor'
 
 # YAML files and the Ruby that reads them are uncontrolled input. Every
 # pattern the config-file extractor and the config-read scanner apply must
@@ -56,7 +57,11 @@ RSpec.describe 'Config source scan complexity' do
     'repeated ENV.fetch near-matches' => "a: <%= #{'ENV.fetch("' * 10_000} %>\n",
     'a long key with no colon' => "#{word}\n",
     'a long key on an unparsable document' => "#{word}: [\n",
-    'many unparsable key lines' => "#{"k.-k: [\n" * 10_000}",
+    'many unparsable key lines' => "k.-k: [\n" * 10_000,
+    'a value of repeated URL userinfo near-matches' => "a: \"x://#{'a:' * 2_000}\"\n",
+    'a value of repeated scheme separators' => "a: \"#{'://' * 1_300}\"\n",
+    'a long opaque value' => "a: #{'a1' * 2_000}\n",
+    'a value of short opaque runs' => "a: \"#{'a1b2c3d4e5f6g7h8i9 ' * 200}\"\n",
     'a long whitespace value' => "a: \"#{spaces}\"\n",
     'deeply nested flow sequences' => "a: #{'[' * 5_000}#{']' * 5_000}\n",
     'deeply nested mappings' => "#{(0...2_000).map { |n| "#{' ' * n}k:\n" }.join}#{' ' * 2_000}v: 1\n",
@@ -68,6 +73,36 @@ RSpec.describe 'Config source scan complexity' do
       extractor = Woods::Extractors::ConfigFileExtractor.new
 
       within_budget(budget_seconds) { expect(extractor.extract_config_file(path)).not_to be_nil }
+    end
+  end
+
+  {
+    'a routing call then spaces' => "get#{spaces}",
+    'a routing call, spaces, a paren, spaces' => "get#{spaces}(#{spaces}",
+    'repeated routing calls on one line' => 'get ' * 10_000,
+    'a routing call with a long unterminated string' => "get \"#{word}",
+    'a routing call with a long symbol then a near-miss' => "resources :#{word}!",
+    'leading spaces then no call' => "#{spaces}x",
+    'many declaration lines' => "resources :widgets\n" * 10_000,
+    'a long alternation near-miss' => "#{'resource' * 6_000}\n"
+  }.each do |label, source|
+    it "the route declaration scan stays within #{budget_seconds}s on #{label}" do
+      extractor = Woods::Extractors::RouteExtractor.new
+
+      within_budget(budget_seconds) { extractor.send(:route_declarations, source) }
+    end
+  end
+
+  {
+    'a location of repeated colons' => ':' * 50_000,
+    'a location with a long digit run' => "config/routes.rb:#{'1' * 50_000}",
+    'a location with a long digit run then a letter' => "config/routes.rb:#{'1' * 50_000}x"
+  }.each do |label, location|
+    it "the route location parse stays within #{budget_seconds}s on #{label}" do
+      extractor = Woods::Extractors::RouteExtractor.new
+      route = double('Route', source_location: location)
+
+      within_budget(budget_seconds) { extractor.send(:route_location, route) }
     end
   end
 
