@@ -18,7 +18,7 @@ module Woods
     # Runtime lookup is repeated every run: source text alone cannot fingerprint
     # changed ancestors, aliases or lexical shadows in a reloaded application.
     class Pass
-      CALLER_TYPES = %w[model controller service poro lib concern].freeze
+      CALLER_TYPES = %w[model controller service poro lib concern job].freeze
       Result = Struct.new(:dependencies, :cache, :paths, keyword_init: true)
 
       # @param root [String, Pathname] application root

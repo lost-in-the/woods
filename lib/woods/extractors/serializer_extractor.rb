@@ -19,6 +19,9 @@ module Woods
     # - ActiveModel::Serializer (AMS)
     # - Blueprinter::Base
     # - Draper::Decorator
+    # - Application-defined bases: every runtime descendant of a class this
+    #   extractor admits from `app/serializers` or `app/blueprinters`
+    # - Standalone classes under `app/serializers` named `*Serializer`
     #
     # @example
     #   extractor = SerializerExtractor.new
@@ -43,6 +46,13 @@ module Woods
         'Draper::Decorator' => :draper
       }.freeze
 
+      # Directories whose admitted classes act as application serializer
+      # bases. `app/decorators` is excluded: DecoratorExtractor owns it.
+      APPLICATION_BASE_DIRECTORIES = %w[
+        app/serializers
+        app/blueprinters
+      ].freeze
+
       def initialize
         @directories = SERIALIZER_DIRECTORIES.map { |d| Rails.root.join(d) }
                                              .select(&:directory?)
@@ -60,12 +70,13 @@ module Woods
           units << unit if unit
         end
 
-        # Class-based discovery for loaded gems
+        # Class-based discovery for loaded gems and application bases
+        bases = application_bases(units)
         seen = units.to_set(&:identifier)
-        discoverable_classes.each do |klass|
+        discoverable_classes(bases).each do |klass|
           next if seen.include?(klass.name)
 
-          unit = extract_serializer_class(klass)
+          unit = extract_serializer_class(klass, bases)
           units << unit if unit
         end
 
@@ -78,10 +89,8 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit, or nil if not a serializer
       def extract_serializer_file(file_path)
         source = File.read(file_path)
-        class_name = extract_class_name(file_path, source)
-
+        class_name = admitted_class_name(file_path, source)
         return nil unless class_name
-        return nil unless serializer_file?(source)
 
         unit = ExtractedUnit.new(
           type: :serializer,
@@ -100,21 +109,26 @@ module Woods
         nil
       end
 
-      # Current, named descendants of the supported runtime serializer bases.
-      # Stale class objects retained after Rails reload do not own their name.
+      # Current, named descendants of the supported runtime serializer bases
+      # and of the application bases. Stale class objects retained after
+      # Rails reload do not own their name.
+      #
+      # @param bases [Array<Class>] application bases; scanned when omitted
       # @return [Array<Class>]
-      def discoverable_classes
-        BASE_CLASSES.keys.filter_map(&:safe_constantize).flat_map(&:descendants).uniq.select do |klass|
-          runtime_base_for(klass)
+      def discoverable_classes(bases = application_bases)
+        roots = BASE_CLASSES.keys.filter_map(&:safe_constantize) + bases
+        roots.flat_map(&:descendants).uniq.select do |klass|
+          runtime_base_for(klass, bases)
         end
       end
 
       # Extract a serializer from its class (runtime introspection)
       #
       # @param klass [Class] The serializer class
+      # @param bases [Array<Class>, nil] application bases; scanned when needed
       # @return [ExtractedUnit, nil] The extracted unit
-      def extract_serializer_class(klass)
-        base_class_name = runtime_base_for(klass)
+      def extract_serializer_class(klass, bases = nil)
+        base_class_name = runtime_base_for(klass, bases)
         return nil unless base_class_name
 
         file_path = source_file_for(klass)
@@ -141,16 +155,50 @@ module Woods
 
       # The live constant and a supported ancestor jointly establish ownership.
       # @param klass [Class]
+      # @param bases [Array<Class>, nil] application bases; scanned when needed
       # @return [String, nil] supported base name for a current serializer class
-      def runtime_base_for(klass)
-        return nil unless klass.is_a?(Class) && klass.name
+      def runtime_base_for(klass, bases = nil)
+        return nil unless live_class?(klass)
 
-        lookup = SourceReferences::RuntimeLookup.new
-        return nil unless lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
-
-        BASE_CLASSES.keys.find do |name|
+        framework = BASE_CLASSES.keys.find do |name|
           base = name.safe_constantize
           base && klass < base
+        end
+        framework || (bases || application_bases).find { |base| klass < base }&.name
+      end
+
+      # @param klass [Object]
+      # @return [Boolean] whether klass is a named class that still owns its name
+      def live_class?(klass)
+        return false unless klass.is_a?(Class) && klass.name
+
+        SourceReferences::RuntimeLookup.new.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
+      end
+
+      # Live classes this extractor admits from {APPLICATION_BASE_DIRECTORIES}.
+      # Their runtime descendants are serializers whatever their source says.
+      #
+      # @param units [Array<ExtractedUnit>, nil] file units already extracted;
+      #   the directories are scanned when omitted
+      # @return [Array<Class>]
+      def application_bases(units = nil)
+        directories = APPLICATION_BASE_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
+        identifiers =
+          if units
+            units.filter_map do |unit|
+              unit.identifier if directories.any? { |dir| unit.file_path.to_s.start_with?("#{dir}/") }
+            end
+          else
+            find_files_in_directories(directories).filter_map do |file|
+              admitted_class_name(file, File.read(file))
+            rescue StandardError
+              nil
+            end
+          end
+
+        identifiers.uniq.filter_map do |identifier|
+          klass = SourceReferences::RuntimeLookup.new.call("::#{identifier}", allow_private: true)[:value]
+          klass if live_class?(klass)
         end
       end
 
@@ -166,6 +214,28 @@ module Woods
           .sub(%r{^app/(serializers|blueprinters|decorators)/}, '')
           .sub('.rb', '')
           .camelize
+      end
+
+      # The file's identity when this extractor admits it, else nil.
+      #
+      # @param file_path [String]
+      # @param source [String]
+      # @return [String, nil]
+      def admitted_class_name(file_path, source)
+        class_name = extract_class_name(file_path, source)
+        return nil unless class_name
+        return class_name if serializer_file?(source) || standalone_serializer?(file_path, source, class_name)
+
+        nil
+      end
+
+      # A class under `app/serializers` whose own name ends in `Serializer`.
+      # Helper classes nested beside the base (`ApplicationSerializer::KeyParser`)
+      # do not qualify.
+      def standalone_serializer?(file_path, source, class_name)
+        file_path.to_s.start_with?("#{Rails.root.join('app/serializers')}/") &&
+          class_name.split('::').last.end_with?('Serializer') &&
+          declares_class?(source, class_name)
       end
 
       def serializer_file?(source)
@@ -187,13 +257,18 @@ module Woods
       # Convention path first, then introspection via {#resolve_source_location}
       # which filters out vendor/node_modules paths.
       #
+      # Returns nil rather than a fabricated convention path when nothing
+      # resolves, as {JobExtractor} does: a nonexistent `app/serializers/` path
+      # enters the graph's file_map, and the next incremental run's safety-net
+      # sweep prunes a unit a full extraction still emits.
+      #
       # @param klass [Class]
       # @return [String, nil]
       def source_file_for(klass)
         convention_path = Rails.root.join("app/serializers/#{klass.name.underscore}.rb").to_s
         return convention_path if File.exist?(convention_path)
 
-        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: convention_path)
+        resolve_source_location(klass, app_root: Rails.root.to_s, fallback: nil)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -248,6 +323,7 @@ module Woods
       def extract_metadata_from_source(source, class_name)
         {
           serializer_type: detect_serializer_type(source),
+          parent_class: extract_parent_class(source, class_name),
           wrapped_model: detect_wrapped_model(source, class_name),
           attributes: extract_attributes(source),
           associations: extract_associations(source),

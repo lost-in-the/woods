@@ -1742,6 +1742,100 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Object.send(:remove_const, :NewHybridHost) if Object.const_defined?(:NewHybridHost, false)
   end
 
+  it 'discovers a new markerless descendant of an application serializer base' do
+    base = write_file('app/serializers/ledger_base_serializer.rb', <<~RUBY)
+      class LedgerBaseSerializer
+        def as_json(*) = { processor: processor }
+      end
+    RUBY
+    load app_path(base)
+    index = full_extraction
+    view = write_file('app/serializers/ledger_cash_view.rb', <<~RUBY)
+      class LedgerCashView < LedgerBaseSerializer
+        def processor = 'cash'
+      end
+    RUBY
+    load app_path(view)
+
+    touched = Woods::Extractor.new(output_dir: index).extract_changed([view])
+
+    expect(touched).to include('LedgerCashView')
+    expect(differences(index, full_extraction)).to be_empty
+  ensure
+    %i[LedgerCashView LedgerBaseSerializer].each do |name|
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+    end
+  end
+
+  describe 'markerless job leaves admitted by runtime ancestry' do
+    after do
+      %i[LedgerCashJob LedgerBaseJob LedgerIconWorker LedgerProbeWorker LedgerImportManager LedgerRate
+         Sidekiq].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    def add_leaf_incrementally(base_path, base_source, leaf_path, leaf_source)
+      load app_path(write_file(base_path, base_source))
+      index = full_extraction
+      load app_path(write_file(leaf_path, leaf_source))
+      [index, Woods::Extractor.new(output_dir: index).extract_changed([leaf_path])]
+    end
+
+    it 'discovers a new leaf of an application ActiveJob base' do
+      index, touched = add_leaf_incrementally(
+        'app/jobs/ledger_base_job.rb', "class LedgerBaseJob < ActiveJob::Base\n  def perform(id) = id\nend\n",
+        'app/jobs/ledger_cash_job.rb', "class LedgerCashJob < LedgerBaseJob\n  def self.ledger = :cash\nend\n"
+      )
+
+      expect(touched).to include('LedgerCashJob')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    def load_sidekiq_stand_in
+      Dir.mktmpdir('sidekiq-stand-in') do |gem_root|
+        stand_in = File.join(gem_root, 'sidekiq.rb')
+        File.write(stand_in, "module Sidekiq\n  module Job; end\n  Worker = Job\nend\n")
+        load stand_in
+      end
+    end
+
+    it 'makes a worker that is the primary class of an app/models file one job unit with its references' do
+      load_sidekiq_stand_in
+      load app_path(write_file('app/models/ledger_rate.rb', "class LedgerRate\n  def self.for(*) = nil\nend\n"))
+      index = full_extraction
+      path = write_file('app/models/ledger_import_manager.rb', <<~RUBY)
+        class LedgerImportManager
+          include Sidekiq::Worker
+          def perform(id) = LedgerRate.for(Post.find(id), SignatureService)
+        end
+      RUBY
+      load app_path(path)
+
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+      expect(graph.node_types('LedgerImportManager')).to eq([:job])
+      expect(graph.dependencies_of('LedgerImportManager', type: :job))
+        .to include('LedgerRate', 'Post', 'SignatureService')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'discovers a new leaf of a Sidekiq worker' do
+      load_sidekiq_stand_in
+      index, touched = add_leaf_incrementally(
+        'app/workers/ledger_probe_worker.rb',
+        "class LedgerProbeWorker\n  include Sidekiq::Worker\n  def perform(id) = id\nend\n",
+        'app/workers/ledger_icon_worker.rb',
+        "class LedgerIconWorker < LedgerProbeWorker\n  def self.icon = :ledger\nend\n"
+      )
+
+      expect(touched).to include('LedgerIconWorker')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   describe 'nested hybrid ownership moves out of a surviving model file' do
     [false, true].each do |new_first|
       it "moves a nested job in either changed-path order, new first=#{new_first}" do

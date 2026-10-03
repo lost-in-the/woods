@@ -11,7 +11,12 @@ module Woods
     #
     # Custom validators encapsulate reusable validation logic that applies
     # across multiple models. They inherit from `ActiveModel::Validator`
-    # or `ActiveModel::EachValidator` and live in `app/validators/`.
+    # or `ActiveModel::EachValidator`, or are plain objects with their own
+    # `validate`/`valid?` API, and live in `app/validators/`.
+    #
+    # Every class a file under `app/validators/` is named for becomes a unit;
+    # the API style only sets `metadata[:validator_type]` (`:plain` when no
+    # ActiveModel shape is recognized).
     #
     # We extract:
     # - Validator name and namespace
@@ -57,7 +62,7 @@ module Woods
         class_name = extract_class_name(file_path, source, 'validators')
 
         return nil unless class_name
-        return nil unless validator_file?(source)
+        return nil unless validator_file?(source) || declares_class?(source, class_name)
 
         unit = ExtractedUnit.new(
           type: :validator,
@@ -134,7 +139,7 @@ module Woods
         return :each_validator if source.match?(/def\s+validate_each\b/)
         return :validator if source.match?(/def\s+validate\(/)
 
-        :unknown
+        :plain
       end
 
       def extract_validated_attributes(source)
@@ -199,8 +204,8 @@ module Woods
         deps.concat(scan_model_dependencies(source, via: :validation))
         deps.concat(scan_service_dependencies(source))
 
-        # Other validators referenced
-        source.scan(/(\w+Validator)(?:\.|::new)/).flatten.uniq.each do |validator|
+        # Other validators referenced, with their full constant path
+        source.scan(/((?:[A-Z]\w*::)*\w+Validator)(?:\.|::new)/).flatten.uniq.each do |validator|
           deps << { type: :validator, target: validator, via: :code_reference }
         end
 

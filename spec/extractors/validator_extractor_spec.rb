@@ -143,6 +143,77 @@ RSpec.describe Woods::Extractors::ValidatorExtractor do
       expect(unit.metadata[:validator_type]).to eq(:each_validator)
     end
 
+    it 'admits a plain validator object with an arg-less validate and delegated errors' do
+      path = create_file('app/validators/widget_in_stock_validator.rb', <<~RUBY)
+        class WidgetInStockValidator
+          def initialize(widget) = self.widget = widget
+
+          def validate
+            return unless widget.active?
+
+            errors.add(:status, :needs_stock)
+          end
+
+          def valid?
+            widget.valid?
+            validate
+            widget.errors.none?
+          end
+
+          private
+
+          def errors = widget.errors
+          attr_accessor :widget
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+
+      expect(unit).to have_attributes(type: :validator, identifier: 'WidgetInStockValidator', file_path: path)
+      expect(unit.metadata[:validator_type]).to eq(:plain)
+      expect(unit.metadata[:validated_attributes]).to eq(['status'])
+      expect(unit.source_code).to include('Type: plain')
+    end
+
+    it 'admits a markerless class under app/validators as a plain validator' do
+      path = create_file('app/validators/shipment_rules.rb', <<~RUBY)
+        class ShipmentRules
+          def self.format(data)
+            data.to_json
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+      expect(unit.identifier).to eq('ShipmentRules')
+      expect(unit.metadata[:validator_type]).to eq(:plain)
+    end
+
+    it 'keeps marker-admitted validator units identical to their pre-plain shape' do
+      path = create_file('app/validators/ledger_total_validator.rb', <<~RUBY)
+        class LedgerTotalValidator < ActiveModel::EachValidator
+          def validate_each(record, attribute, value)
+            record.errors.add(attribute, :mismatch) unless value == record.expected_total
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+      expect(unit.metadata).to eq(
+        validator_type: :each_validator,
+        validated_attributes: ['attribute'],
+        validation_rules: ['value == record.expected_total'],
+        error_messages: [':mismatch'],
+        public_methods: ['validate_each'],
+        class_methods: [],
+        options_used: [],
+        inferred_models: ['LedgerTotal'],
+        custom_errors: [],
+        loc: 5,
+        method_count: 1
+      )
+    end
+
     it 'annotates source with header' do
       path = create_file('app/validators/email_format_validator.rb', <<~RUBY)
         class EmailFormatValidator < ActiveModel::EachValidator
@@ -157,9 +228,9 @@ RSpec.describe Woods::Extractors::ValidatorExtractor do
       expect(unit.source_code).to include('Type: each_validator')
     end
 
-    it 'returns nil for non-validator files' do
-      path = create_file('app/validators/utility.rb', <<~RUBY)
-        class Utility
+    it 'returns nil for a module-only file' do
+      path = create_file('app/validators/widget_rules.rb', <<~RUBY)
+        module WidgetRules
           def self.format(data)
             data.to_json
           end
@@ -261,6 +332,24 @@ RSpec.describe Woods::Extractors::ValidatorExtractor do
       unit = described_class.new.extract_validator_file(path)
       validator_deps = unit.dependencies.select { |d| d[:type] == :validator }
       expect(validator_deps.first[:target]).to eq('EmailFormatValidator')
+    end
+
+    it 'keeps the namespace of a referenced validator' do
+      path = create_file('app/validators/cart_validator.rb', <<~RUBY)
+        class CartValidator
+          def validate
+            Cart::ShippableValidator.new(cart).validate
+            ::Ledger::Rules::TotalValidator::new(cart).validate
+            LineQuantityValidator.new(cart).validate
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+      targets = unit.dependencies.select { |d| d[:type] == :validator }.map { |d| d[:target] }
+      expect(targets).to contain_exactly(
+        'Cart::ShippableValidator', 'Ledger::Rules::TotalValidator', 'LineQuantityValidator'
+      )
     end
   end
 end

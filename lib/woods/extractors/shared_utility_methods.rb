@@ -150,6 +150,19 @@ module Woods
         DeclaredParent.call(source, class_name)
       end
 
+      # Whether the source declares the selected identity as a class.
+      #
+      # @param source [String] Ruby source code
+      # @param class_name [String] Already selected extraction identity
+      # @return [Boolean] false for a module, or for an identity no declaration spells
+      def declares_class?(source, class_name)
+        each_declaration(source) do |kind, _name, qualified|
+          return true if kind == 'class' && qualified == class_name
+        end
+
+        false
+      end
+
       # Count non-blank, non-comment lines of code.
       #
       # @param source [String] Ruby source code

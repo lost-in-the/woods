@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'active_support/core_ext/class/subclasses'
 require 'woods/extractors/serializer_extractor'
 
 RSpec.describe Woods::Extractors::SerializerExtractor do
@@ -329,6 +330,164 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
 
       unit = described_class.new.extract_serializer_file(path)
       expect(unit.metadata[:wrapped_model]).to eq('Product')
+    end
+  end
+
+  # ── Class-based discovery source paths ───────────────────────────────
+
+  describe '#source_file_for' do
+    let(:external_serializer_class) do
+      Class.new do
+        def self.name
+          'Gems::ExternalSerializer'
+        end
+      end
+    end
+
+    it 'returns nil when no source resolves and the convention path does not exist' do
+      expect(described_class.new.send(:source_file_for, external_serializer_class)).to be_nil
+    end
+
+    it 'still returns the convention path when the file exists' do
+      path = create_file('app/serializers/shipment_serializer.rb', "class ShipmentSerializer; end\n")
+      serializer_class = Class.new do
+        def self.name
+          'ShipmentSerializer'
+        end
+      end
+
+      expect(described_class.new.send(:source_file_for, serializer_class)).to eq(path)
+    end
+  end
+
+  # ── Application-defined bases ────────────────────────────────────────
+
+  describe 'application-defined serializer bases' do
+    before { stub_const('LedgerFixture', Module.new) }
+
+    def declare(relative, body)
+      path = create_file("app/serializers/ledger_fixture/#{relative}", "module LedgerFixture\n#{body}\nend\n")
+      load path
+      path
+    end
+
+    def declare_base_chain
+      declare('application_serializer.rb', <<~RUBY)
+        class ApplicationSerializer
+          def self.attributes(*names) = (@attributes = names)
+          def self.has_one(name, **) = name
+          def self.type(name) = name
+          def as_json(*) = {}
+        end
+      RUBY
+      declare('base_charge_serializer.rb', <<~RUBY)
+        class BaseChargeSerializer < ApplicationSerializer
+          type "ledger/charges"
+          attributes :amount, :label
+          protected def processor = "base"
+        end
+      RUBY
+      declare('base_thumb_serializer.rb', <<~RUBY)
+        class BaseThumbSerializer < ApplicationSerializer
+          attributes :url
+        end
+      RUBY
+    end
+
+    def units_by_id
+      described_class.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+    end
+
+    it 'indexes method-only and DSL-only subclasses with the whole parent chain' do
+      declare_base_chain
+      declare('cash_charge_serializer.rb', <<~RUBY)
+        class CashChargeSerializer < BaseChargeSerializer
+          protected
+
+          def processor = "cash"
+        end
+      RUBY
+      declare('tile_thumb_serializer.rb', <<~RUBY)
+        class TileThumbSerializer < BaseThumbSerializer
+          type :tile_thumbs
+        end
+      RUBY
+
+      units = units_by_id
+
+      expect(units.fetch('LedgerFixture::CashChargeSerializer').metadata[:parent_class])
+        .to eq('BaseChargeSerializer')
+      expect(units.fetch('LedgerFixture::TileThumbSerializer').metadata[:parent_class])
+        .to eq('BaseThumbSerializer')
+      expect(units.fetch('LedgerFixture::BaseChargeSerializer').metadata[:parent_class])
+        .to eq('ApplicationSerializer')
+      expect(units.fetch('LedgerFixture::ApplicationSerializer').metadata[:parent_class]).to be_nil
+    end
+
+    it 'discovers a markerless descendant of an application base at runtime' do
+      declare_base_chain
+      path = declare('card_charge_view.rb', <<~RUBY)
+        class CardChargeView < BaseChargeSerializer
+          protected
+
+          def processor = "card"
+        end
+      RUBY
+
+      extractor = described_class.new
+      expect(extractor.extract_serializer_file(path)).to be_nil
+      expect(extractor.discoverable_classes).to include(LedgerFixture::CardChargeView)
+
+      unit = units_by_id.fetch('LedgerFixture::CardChargeView')
+      expect(unit).to have_attributes(type: :serializer, file_path: path)
+      expect(unit.metadata[:parent_class]).to eq('BaseChargeSerializer')
+    end
+
+    it 'admits a standalone serializer class with no superclass' do
+      path = declare('problem_serializer.rb', <<~RUBY)
+        class ProblemSerializer
+          def initialize(code, title, detail, options = {}) = nil
+          def as_json(*) = {}
+        end
+      RUBY
+
+      unit = described_class.new.extract_serializer_file(path)
+      expect(unit).to have_attributes(identifier: 'LedgerFixture::ProblemSerializer', type: :serializer)
+    end
+
+    it 'keeps helper classes nested under the application base out' do
+      declare_base_chain
+      declare('application_serializer/association.rb', <<~RUBY)
+        class ApplicationSerializer
+          class Association
+            def initialize(name) = nil
+          end
+        end
+      RUBY
+      declare('application_serializer/key_parser.rb', <<~RUBY)
+        class ApplicationSerializer
+          class KeyParser
+            def to_h = {}
+          end
+        end
+      RUBY
+
+      expect(units_by_id.keys).to contain_exactly(
+        'LedgerFixture::ApplicationSerializer',
+        'LedgerFixture::BaseChargeSerializer',
+        'LedgerFixture::BaseThumbSerializer'
+      )
+    end
+
+    it 'takes no application bases from app/decorators' do
+      {
+        'application_decorator' => "class ApplicationDecorator\n  def self.attributes(*) = nil\n  attributes :id\nend",
+        'charge_decorator' => "class ChargeDecorator < ApplicationDecorator\n  def label = 'charge'\nend"
+      }.each do |name, body|
+        load create_file("app/decorators/ledger_fixture/#{name}.rb", "module LedgerFixture\n#{body}\nend\n")
+      end
+
+      expect(described_class.new.discoverable_classes).not_to include(LedgerFixture::ChargeDecorator)
     end
   end
 end
