@@ -6,14 +6,17 @@ require_relative 'atomic_file'
 require_relative 'path_dispatcher'
 require_relative 'extractors/poro_extractor'
 require_relative 'extractors/graphql_operation_extractor'
+require_relative 'extractors/lib_extractor'
 require_relative 'graphql_document_paths'
 
 module Woods
   # Ruby files under the configured sweep roots, and GraphQL operation
   # documents under the configured document roots, that produced no unit,
-  # each with the reason it was skipped.
+  # each with the reason it was skipped. Generator templates under `lib/` are
+  # listed too: they carry a Ruby extension and are never extracted.
   #
   # Reasons for Ruby files:
+  # * +template+ — a generator template, ERB that is not parseable Ruby
   # * +rejected_by:<key>+ — a file rule owns the path, or a class-discovered
   #   extractor owns the class, and that extractor emitted nothing for it
   # * +parse_error+ — Prism could not parse the file
@@ -72,7 +75,8 @@ module Woods
     end
 
     def ruby_candidates
-      globs = [Extractors::PoroExtractor::MODELS_GLOB, *Woods.configuration&.unclaimed_ruby_paths]
+      globs = [Extractors::PoroExtractor::MODELS_GLOB, *Woods.configuration&.unclaimed_ruby_paths,
+               Extractors::LibExtractor::TEMPLATE_GLOB]
       globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }.uniq.select do |relative|
         relative.end_with?('.rb') && PathDispatcher::UNSWEPT_PREFIXES.none? { |prefix| relative.start_with?(prefix) } &&
           File.file?(File.join(@root, relative))
@@ -82,6 +86,8 @@ module Woods
     # The file's own shape decides first, so `module Admin; end` under an
     # owned directory reads namespace_only, not rejected_by its owner.
     def reason_for(relative)
+      return 'template' if Extractors::LibExtractor.generator_template?(relative)
+
       path = File.join(@root, relative)
       return Extractors::GraphQLOperationExtractor.document_skip_reason(path) if GraphQLDocumentPaths.match?(relative)
 

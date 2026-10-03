@@ -127,18 +127,55 @@ RSpec.describe Woods::Extractors::LibExtractor do
       expect(identifiers).not_to include('ExportTask')
     end
 
-    it 'skips files in lib/generators/' do
-      create_file('lib/generators/install_generator.rb', <<~RUBY)
-        class InstallGenerator < Rails::Generators::Base
-          def generate; end
+    it 'extracts a Rails generator as a lib unit of kind generator' do
+      create_file('lib/generators/widget/widget_generator.rb', <<~RUBY)
+        class WidgetGenerator < Rails::Generators::NamedBase
+          def create_widget; end
         end
       RUBY
+      create_file('lib/generators/ledger/install_generator.rb', <<~RUBY)
+        module Ledger
+          class InstallGenerator < ::Rails::Generators::Base
+            def copy_initializer; end
+          end
+        end
+      RUBY
+      create_file('lib/generators/ledger/naming.rb', "module Ledger\n  module Naming\n    def label; end\n  end\nend\n")
       create_file('lib/utilities.rb', 'class Utilities; end')
 
-      units = described_class.new.extract_all
-      identifiers = units.map(&:identifier)
-      expect(identifiers).to include('Utilities')
-      expect(identifiers).not_to include('InstallGenerator')
+      units = described_class.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+
+      expect(units.keys).to contain_exactly('WidgetGenerator', 'Ledger::InstallGenerator', 'Ledger::Naming',
+                                            'Utilities')
+      expect(units['WidgetGenerator'].type).to eq(:lib)
+      expect(units['WidgetGenerator'].metadata).to include(kind: 'generator',
+                                                           parent_class: 'Rails::Generators::NamedBase')
+      expect(units['Ledger::InstallGenerator'].metadata[:kind]).to eq('generator')
+      expect(units['Ledger::Naming'].metadata).not_to have_key(:kind)
+      expect(units['Utilities'].metadata).not_to have_key(:kind)
+    end
+
+    it 'skips generator templates, which are ERB with a Ruby extension' do
+      create_file('lib/generators/widget/widget_generator.rb',
+                  "class WidgetGenerator < Rails::Generators::NamedBase; end\n")
+      template = create_file('lib/generators/widget/templates/widget.rb',
+                             "class <%= class_name %> < ApplicationRecord\nend\n")
+      create_file('lib/generators/widget/templates/nested/policy.rb', "class <%= class_name %>Policy; end\n")
+      create_file('lib/reports/templates/summary.rb', 'class Reports::Templates::Summary; end')
+
+      extractor = described_class.new
+
+      expect(extractor.extract_all.map(&:identifier)).to contain_exactly('WidgetGenerator',
+                                                                         'Reports::Templates::Summary')
+      expect(extractor.extract_lib_file(template)).to be_nil
+    end
+
+    it 'recognizes a generator template from the path alone' do
+      expect(described_class.generator_template?('lib/generators/widget/templates/widget.rb')).to be(true)
+      expect(described_class.generator_template?('lib/ledger/generators/install/templates/a/b.rb')).to be(true)
+      expect(described_class.generator_template?('lib/generators/widget/widget_generator.rb')).to be(false)
+      expect(described_class.generator_template?('lib/reports/templates/summary.rb')).to be(false)
+      expect(described_class.generator_template?('lib/templates/generators/summary.rb')).to be(false)
     end
 
     it 'handles a completely empty lib directory' do

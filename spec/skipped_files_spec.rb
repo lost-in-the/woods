@@ -51,6 +51,18 @@ RSpec.describe Woods::SkippedFiles do
     expect(reason_for('app/models/skip_fixture/patterns.rb')).to eq('not_owned')
   end
 
+  it 'reports a generator template as a template, whatever it parses as' do
+    create_file('lib/generators/widget/templates/widget.rb', "class <%= class_name %> < ApplicationRecord\nend\n")
+    create_file('lib/generators/widget/templates/plain.rb', "class Plain; end\n")
+    create_file('lib/generators/widget/widget_generator.rb', "class WidgetGenerator; end\n")
+    create_file('lib/reports/templates/summary.rb', "class Summary; end\n")
+
+    expect(report.fetch('files').map { |entry| entry['path'] }).to eq(
+      %w[lib/generators/widget/templates/plain.rb lib/generators/widget/templates/widget.rb]
+    )
+    expect(report.fetch('counts')).to eq('template' => 2)
+  end
+
   it 'reports a parse error' do
     create_file('app/lib/broken.rb', "class SkipFixture::Broken\n  def call(\nend\n")
     expect(reason_for('app/lib/broken.rb')).to eq('parse_error')

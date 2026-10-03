@@ -52,10 +52,11 @@ RSpec.describe Woods::PathDispatcher do
       expect(keys_for('lib/tasks/export.rb')).not_to include(:rake_tasks)
     end
 
-    it 'excludes lib/tasks and lib/generators from the lib extractor' do
+    it 'excludes lib/tasks from the lib extractor and routes generators to it' do
       expect(keys_for('lib/reporting/csv.rb')).to include(:libs)
       expect(keys_for('lib/tasks/export.rb')).not_to include(:libs)
-      expect(keys_for('lib/generators/thing/thing_generator.rb')).not_to include(:libs)
+      expect(keys_for('lib/generators/thing/thing_generator.rb')).to include(:libs)
+      expect(dispatcher.whole_app_keys_for('lib/generators/thing/thing_generator.rb')).to include(:libs)
     end
 
     it 'matches migrations only at the top level of db/migrate' do
