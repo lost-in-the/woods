@@ -57,7 +57,10 @@ module Woods
     # @!attribute basenames
     #   @return [Array<String>, nil] file basenames that match anywhere under Rails.root (honors +exclude+)
     # @!attribute matcher
-    #   @return [#call, nil] predicate that replaces every other attribute when set
+    #   @return [Symbol, nil] name of a {PathDispatcher} predicate that replaces
+    #     every other attribute when set. A name, never a Proc: rules are
+    #     serialized into the source-capture fingerprint, which must be equal
+    #     across processes.
     Rule = Struct.new(
       :extractor_key, :method_name, :dirs, :extensions, :exclude,
       :require_segment, :recursive, :exact_paths, :basenames, :matcher,
@@ -66,7 +69,7 @@ module Woods
       # @param relative_path [String] Rails.root-relative path
       # @return [Boolean]
       def matches?(relative_path)
-        return matcher.call(relative_path) if matcher
+        return PathDispatcher.public_send(matcher, relative_path) if matcher
         return true if exact_paths&.include?(relative_path)
         return basename_match?(relative_path) if basenames
 
@@ -240,7 +243,7 @@ module Woods
           # POROs are app/models classes that are *not* ActiveRecord models,
           # plus Ruby no other rule owns (#672). The matcher reads the
           # configured globs at call time, so a memoized rule never goes stale.
-          file_rule(:poros, :extract_poro_units, %w[app], matcher: ->(path) { poro_path?(path) }),
+          file_rule(:poros, :extract_poro_units, %w[app], matcher: :poro_path?),
           file_rule(:libs, :extract_lib_file, %w[lib], exclude: ex::LibExtractor::EXCLUDED_SEGMENTS),
           file_rule(:test_mappings, :extract_test_file, %w[spec], extensions: %w[_spec.rb]),
           file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb])

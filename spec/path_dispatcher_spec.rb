@@ -211,6 +211,19 @@ RSpec.describe Woods::PathDispatcher do
       expect(described_class.unclaimed?('app/view_models/billing_view.rb')).to be(false)
     end
 
+    it 'serializes rules without process-specific values, so capture fingerprints survive a restart' do
+      require 'woods/source_inputs/scopes'
+      rules = -> { JSON.generate(described_class.file_rules.map(&:to_h)) }
+      fingerprint = -> { Woods::SourceInputs::Scopes.new(extra_roots: []).fingerprint }
+      before_rules = rules.call
+      before_fingerprint = fingerprint.call
+
+      described_class.reset!
+
+      expect(rules.call).to eq(before_rules)
+      expect(fingerprint.call).to eq(before_fingerprint)
+    end
+
     it 'lists every owning extractor of a path' do
       expect(described_class.claiming_keys_for('app/policies/post_policy.rb')).to contain_exactly(:policies,
                                                                                                   :pundit_policies)
