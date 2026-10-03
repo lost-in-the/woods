@@ -204,6 +204,26 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end
     RUBY
 
+    # A gem controller in the style of an authentication engine's
+    # sessions controller, and an app controller that inherits from it.
+    load write(gem_root, 'app/controllers/action_fixtures/vault/sessions_controller.rb', <<~RUBY)
+      module ActionFixtures::Vault; end
+
+      class ActionFixtures::Vault::SessionsController < ActionFixtures::FrameworkBase
+        def new = nil
+        def create = nil
+        def destroy = nil
+      end
+    RUBY
+
+    load_app('app/controllers/action_fixtures/members/sessions_controller.rb', <<~RUBY)
+      module ActionFixtures::Members; end
+
+      class ActionFixtures::Members::SessionsController < ActionFixtures::Vault::SessionsController
+        def new = super
+      end
+    RUBY
+
     load_app('app/controllers/action_fixtures/health_controller.rb', <<~RUBY)
       class ActionFixtures::HealthController < ActionFixtures::FrameworkMetal
         def show
@@ -231,7 +251,10 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
                       route('action_fixtures/modern/confirmations', 'create'),
                       route('action_fixtures/sales_reports', 'show'),
                       route('action_fixtures/ledgers', 'totals'),
-                      route('action_fixtures/health', 'show')
+                      route('action_fixtures/health', 'show'),
+                      route('action_fixtures/members/sessions', 'new'),
+                      route('action_fixtures/members/sessions', 'create'),
+                      route('action_fixtures/widgets', 'widget')
                     ], named_routes: { base_reports: route('action_fixtures/base_reports', 'show') })
   end
 
@@ -394,6 +417,58 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       end)
 
       expect(Woods::GraphAnalyzer.new(graph).unresolvable_routes).to eq([])
+    end
+  end
+
+  describe 'routed actions whose body is gem code' do
+    subject(:unit) { unit_for('Members::SessionsController') }
+
+    def route_unit(identifier, controller, action)
+      Woods::ExtractedUnit.new(type: :route, identifier: identifier, file_path: nil).tap do |route|
+        route.metadata = { controller: controller.underscore.delete_suffix('_controller'), action: action }
+        route.dependencies = [{ type: :controller, target: controller, via: :route_dispatch }]
+      end
+    end
+
+    def graph_with(*units)
+      Woods::DependencyGraph.new.tap { |graph| units.each { |unit| graph.register(unit) } }
+    end
+
+    it 'are not admitted as actions, while the controller’s own override is' do
+      expect(unit.metadata[:actions]).to eq(['new'])
+    end
+
+    it 'are recorded with their gem owner, leaving unrouted gem actions out' do
+      expect(unit.metadata[:inherited_gem_actions]).to eq(
+        'create' => { owner: 'ActionFixtures::Vault::SessionsController' }
+      )
+    end
+
+    it 'add no edge into the gem class' do
+      expect(unit.dependencies.map { |dep| dep[:target] }).not_to include('ActionFixtures::Vault::SessionsController')
+    end
+
+    it 'include a routed reader a gem DSL defines on the controller itself' do
+      expect(unit_for('WidgetsController').metadata[:inherited_gem_actions]).to eq(
+        'widget' => { owner: 'ActionFixtures::WidgetsController' }
+      )
+    end
+
+    it 'record an empty set on a controller with none' do
+      expect(unit_for('LedgersController').metadata[:inherited_gem_actions]).to eq({})
+    end
+
+    it 'keep a route to them out of the unresolvable-route report' do
+      controller = 'ActionFixtures::Members::SessionsController'
+      graph = graph_with(unit, route_unit('POST /members/sessions', controller, 'create'),
+                         route_unit('DELETE /members/sessions', controller, 'reset'))
+      restored = Woods::DependencyGraph.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      [graph, restored].each do |candidate|
+        expect(Woods::GraphAnalyzer.new(candidate).unresolvable_routes)
+          .to eq([{ route: 'DELETE /members/sessions', controller: controller, action: 'reset',
+                    reason: 'missing_action' }])
+      end
     end
   end
 end

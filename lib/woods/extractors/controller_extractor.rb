@@ -552,7 +552,7 @@ module Woods
       #   Rails.root; +defined_in+ is the indexed unit whose source holds the
       #   method body, or nil when no unit does.
       def resolve_action_sources(controller)
-        routed = (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
+        routed = routed_actions(controller)
         own_file = source_file_for(controller)
 
         controller.action_methods.each_with_object({}) do |name, sources|
@@ -571,6 +571,35 @@ module Woods
             line: line
           }
         end
+      end
+
+      # Routed actions Rails can dispatch whose body is gem code: inherited
+      # from a gem superclass, mixed in from a gem module, or defined onto the
+      # class by a gem DSL. They are not admitted as actions (the index holds
+      # no unit for the body, so there is nothing to chunk or trace), but a
+      # route to one resolves at runtime and must not read as a dead route.
+      #
+      # @param controller [Class] The controller class
+      # @return [Hash{String => Hash}] action name to +{ owner: }+, the name
+      #   of the module or class that defines the method
+      def resolve_inherited_gem_actions(controller)
+        routed = routed_actions(controller)
+
+        controller.action_methods.each_with_object({}) do |name, actions|
+          name = name.to_s
+          next if name.end_with?('=') || !routed.include?(name)
+
+          method = controller.instance_method(name)
+          next if app_action_source?(method.source_location&.first)
+
+          actions[name] = { owner: method.owner.name }
+        end
+      end
+
+      # @param controller [Class]
+      # @return [Set<String>] actions a route dispatches to on this controller
+      def routed_actions(controller)
+        (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
       end
 
       # Whether a method body lives in application source: under Rails.root,
@@ -672,6 +701,7 @@ module Woods
           # Actions and routes
           actions: actions,
           action_sources: action_sources,
+          inherited_gem_actions: resolve_inherited_gem_actions(controller),
           routes: @routes_map[controller.name] || {},
 
           # Filter chain

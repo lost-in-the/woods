@@ -774,6 +774,13 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
       'metal' => true, 'actions' => ['index'], 'filters' => [{ 'kind' => 'before', 'filter' => 'stamp' }]
     )
   end
+
+  it 'records a routed action inherited from a gem controller without admitting its body' do
+    metadata = extract_controllers.fetch('GreetingsController')['metadata']
+
+    expect(metadata).to include('actions' => [],
+                                'inherited_gem_actions' => { 'index' => { 'owner' => 'Rails::WelcomeController' } })
+  end
 end
 
 RSpec.describe 'Pgvector generator dimension boundaries', :booted_app do
