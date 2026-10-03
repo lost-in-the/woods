@@ -497,6 +497,57 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'relative partials through controller view prefixes' do
+    before do
+      stub_const('ActionController::Base', Class.new)
+      stub_const('ProfileController', Class.new(ActionController::Base))
+      stub_const('Profile::PasswordController', Class.new(ProfileController) do
+        def self._prefixes
+          %w[profile/password profile application]
+        end
+      end)
+      create_file('app/views/profile/password/edit.html.haml', "= render 'show'\n")
+    end
+
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it "finds the partial under a parent controller's prefix" do
+      create_file('app/views/profile/_show.html.haml', '%p show')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/_show.html.haml'])
+    end
+
+    it 'prefers the earlier prefix when several prefixes hold the partial' do
+      create_file('app/views/profile/_show.html.haml', '%p show')
+      create_file('app/views/application/_show.html.haml', '%p app')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/_show.html.haml'])
+    end
+
+    it "keeps the template's own directory first" do
+      create_file('app/views/profile/password/_show.html.haml', '%p own')
+      create_file('app/views/profile/_show.html.haml', '%p parent')
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    end
+
+    it 'falls back to application/ for a template with no controller' do
+      create_file('app/views/layouts/application.html.haml', "= render 'flash_messages'\n= yield\n")
+      create_file('app/views/application/_flash_messages.html.haml', '%div flash')
+      expect(render_targets('layouts/application.html.haml')).to eq(['application/_flash_messages.html.haml'])
+    end
+
+    it 'does not walk prefixes for a partial name that has a directory' do
+      create_file('app/views/profile/password/show.html.haml', "= render 'cards/show'\n")
+      create_file('app/views/application/_show.html.haml', '%p app')
+      expect(render_targets('profile/password/show.html.haml')).to eq(['cards/_show.html.haml'])
+    end
+
+    it "keeps the engine's own identifier when no prefix holds the partial" do
+      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    end
+  end
+
   describe 'view_render edges' do
     before { stub_const('ActionController::Base', Class.new) }
 
