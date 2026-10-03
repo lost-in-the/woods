@@ -227,12 +227,12 @@ module Woods
         @lexical_scopes.select { |start, finish, _| start <= offset && offset < finish }.reverse.map(&:last)
       end
 
-      # Character offset at which each line of the composite source starts.
+      # Byte offset at which each line of the composite source starts.
       #
       # @return [Array<Integer>]
       def line_starts
         @line_starts ||= @source_code.each_line.with_object([0]) do |text, starts|
-          starts << (starts.last + text.length)
+          starts << (starts.last + text.bytesize)
         end
       end
 

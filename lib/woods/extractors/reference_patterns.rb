@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'strscan'
 require_relative 'source_nesting'
 require_relative 'lexical_constant'
 
@@ -75,6 +76,11 @@ module Woods
       # `follower`. Scanning resumes after the follower, which can end
       # inside the next word (`Job.perform_laterX`), as the regex did.
       #
+      # Positions are byte offsets kept by a StringScanner. A character
+      # offset into a UTF-8 string (`MatchData#begin`, `String#[]`) is
+      # counted from the string's start on every call, which made this loop
+      # quadratic in the size of ordinary text.
+      #
       # @param source [String]
       # @param segment [Regexp] Anchored test for one chain segment
       # @param follower [Regexp] `\G`-anchored test at the segment's end
@@ -82,14 +88,17 @@ module Woods
       # @return [Array<String>]
       def references(source, segment:, follower:, enclosing: [])
         found = []
-        position = 0
-        while (chain = CONSTANT_CHAIN.match(source, position))
-          finish, follower_end = last_qualifying_end(source, chain, segment, follower)
+        scanner = StringScanner.new(source)
+        while scanner.skip_until(CONSTANT_CHAIN)
+          chain = scanner.matched
+          chain_end = scanner.pos
+          start = chain_end - chain.bytesize
+          finish, follower_end = last_qualifying_end(scanner, chain, chain_end, segment, follower)
           if finish
-            found << [source[chain.begin(0)...finish], chain.begin(0)]
-            position = follower_end
+            found << [source.byteslice(start, finish - start), start]
+            scanner.pos = follower_end
           else
-            position = chain.end(0)
+            scanner.pos = chain_end
           end
         end
         resolve_lexically(source, found, enclosing)
@@ -102,7 +111,7 @@ module Woods
       #
       # @param source [String]
       # @param found [Array<Array(String, Integer)>] reference text and the
-      #   character offset it starts at
+      #   byte offset it starts at
       # @param enclosing [Array<String>] scopes around the whole of +source+,
       #   outside every scope it declares
       # @return [Array<String>]
@@ -115,7 +124,7 @@ module Woods
         found.map do |text, offset|
           innermost, scopes = nesting.at(offset)
           scopes += enclosing if enclosing.any?
-          next text if scopes.empty? || (offset >= 2 && source[offset - 2, 2] == '::')
+          next text if scopes.empty? || (offset >= 2 && source.byteslice(offset - 2, 2) == '::')
 
           resolved[[text, innermost.object_id]] ||= LexicalConstant.resolve(text, scopes, modules: modules)
         end
@@ -160,16 +169,18 @@ module Woods
       end
       private_constant :NestingSweep
 
-      # @return [Array(Integer, Integer), nil] Source offsets where the
+      # @return [Array(Integer, Integer), nil] Byte offsets where the
       #   reference and its follower end
-      def last_qualifying_end(source, chain, segment, follower)
-        finish = chain.end(0)
-        chain[0].split('::').reverse_each do |part|
-          if part.match?(segment) && (follow = follower.match(source, finish))
-            return [finish, follow.end(0)]
+      def last_qualifying_end(scanner, chain, chain_end, segment, follower)
+        finish = chain_end
+        chain.split('::').reverse_each do |part|
+          if part.match?(segment)
+            scanner.pos = finish
+            length = scanner.match?(follower)
+            return [finish, finish + length] if length
           end
 
-          finish -= part.length + 2
+          finish -= part.bytesize + 2
         end
         nil
       end

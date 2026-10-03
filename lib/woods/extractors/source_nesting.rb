@@ -64,8 +64,8 @@ module Woods
       # popped.
       END_LINE = /\Aend\b/
 
-      # Every class and module body in the source, with the character range
-      # it spans, for asking what `Module.nesting` is at a position.
+      # Every class and module body in the source, with the byte range it
+      # spans, for asking what `Module.nesting` is at a position.
       #
       # A scope's name is its declaration joined onto the enclosing scopes'
       # names, as written: `class Fleet::Shipment` inside `module Ops` is
@@ -73,7 +73,7 @@ module Woods
       #
       # @param source [String] Ruby source code
       # @return [Array<Array(Integer, Integer, String)>, nil] start and end
-      #   character offsets and qualified name, outer scopes before the ones
+      #   byte offsets and qualified name, outer scopes before the ones
       #   they enclose; nil when the source does not parse
       def self.lexical_scopes(source)
         parsed = Prism.parse(source)
@@ -93,7 +93,7 @@ module Woods
           return unless declaration
 
           nesting = [*namespace, declaration[2]]
-          scopes << [node.location.start_character_offset, node.location.end_character_offset, nesting.join('::')]
+          scopes << [node.location.start_offset, node.location.end_offset, nesting.join('::')]
           collect_scopes(node.body, nesting, scopes)
         else
           node.compact_child_nodes.each { |child| collect_scopes(child, namespace, scopes) }
