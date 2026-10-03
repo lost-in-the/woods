@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'timeout'
+require 'woods/extractors/view_engines/erb'
 require 'woods/extractors/view_engines/haml'
 require 'woods/extractors/view_engines/jbuilder'
 
@@ -27,10 +28,17 @@ RSpec.describe 'View engine scan complexity' do
     'repeated render calls' => '= render ' * 10_000,
     'form_with then spaces' => "= form_with#{spaces}",
     'repeated form_with calls' => '= form_with ' * 10_000,
-    'filter interpolation then spaces' => ":javascript\n  \#{#{spaces}"
+    'filter interpolation then spaces' => ":javascript\n  \#{#{spaces}",
+    'ERB form_with then spaces' => "<%= form_with#{spaces}",
+    'ERB form_with then a long word' => "<%= form_with #{'a' * 50_000}",
+    'ERB form_with then underscored words' => "<%= form_with #{'a_' * 25_000}",
+    'ERB repeated form_with calls' => '<%= form_with ' * 10_000,
+    'ERB render then spaces' => "<%= render#{spaces}",
+    'ERB repeated render calls' => '<%= render ' * 10_000
   }
 
-  engines = [Woods::Extractors::ViewEngines::Haml.new, Woods::Extractors::ViewEngines::Jbuilder.new]
+  engines = [Woods::Extractors::ViewEngines::Erb.new, Woods::Extractors::ViewEngines::Haml.new,
+             Woods::Extractors::ViewEngines::Jbuilder.new]
   scans = %i[scan_partials scan_unresolved_partials scan_helpers scan_navigation_candidates]
 
   around do |example|

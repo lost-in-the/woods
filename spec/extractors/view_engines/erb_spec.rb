@@ -172,5 +172,46 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
     it 'returns an empty array for source with no route helpers' do
       expect(engine.scan_navigation_candidates('<h1>static</h1>')).to eq([])
     end
+
+    describe 'form_action candidates' do
+      def form_helpers(source)
+        engine.scan_navigation_candidates(source).select { |c| c[:via] == :form_action }.map { |c| c[:helper] }
+      end
+
+      it 'takes the first route helper after the form call, across lines' do
+        source = "<%= form_with model: @widget,\n  url: widget_path(@widget), data: { back: widgets_path } do |f| %>"
+        expect(form_helpers(source)).to eq(['widget_path'])
+      end
+
+      it 'stops at the closing % of the ERB tag' do
+        expect(form_helpers('<%= form_for @widget do |f| %><%= link_to "x", widgets_path %>')).to eq([])
+      end
+
+      it 'takes the last _path/_url suffix inside one word' do
+        expect(form_helpers('<%= form_with url: ledger_path_url %>')).to eq(['ledger_path_url'])
+      end
+
+      it 'matches a suffix followed by more word characters' do
+        expect(form_helpers('<%= form_with url: shipments_paths %>')).to eq(['shipments_path'])
+      end
+
+      it 'needs a word character before the suffix' do
+        expect(form_helpers('<%= form_with url: _path, x: a_url %>')).to eq(['a_url'])
+      end
+
+      it 'matches a form call embedded in a longer word' do
+        expect(form_helpers('<%= my_form_with url: widgets_path %>')).to eq(['widgets_path'])
+      end
+
+      it 'tries the next form call when one finds no helper before a %' do
+        source = '<%= form_with model: @w %><%= form_with url: ledgers_path %>'
+        expect(form_helpers(source)).to eq(['ledgers_path'])
+      end
+
+      it 'resumes after a matched helper, so one helper serves one form call' do
+        source = '<%= form_with url: a_path, form_for b_path, c_path %>'
+        expect(form_helpers(source)).to eq(%w[a_path b_path])
+      end
+    end
   end
 end
