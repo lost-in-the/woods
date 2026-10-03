@@ -169,7 +169,7 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:subject_class]).to eq('Admin::UserPolicy')
       end
 
-      it 'captures the string subject from a string-only describe file' do
+      it 'records a free-text string describe as the description, not the subject class' do
         path = create_file('spec/tasks/cleanup_spec.rb', <<~RUBY)
           RSpec.describe 'rake tasks' do
             it 'runs cleanup' do; end
@@ -177,7 +177,18 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         RUBY
 
         unit = described_class.new.extract_test_file(path)
-        expect(unit.metadata[:subject_class]).to eq('rake tasks')
+        expect(unit.metadata).to include(subject_class: nil, description: 'rake tasks')
+      end
+
+      it 'emits no coverage edge for a free-text string describe' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe 'Widget checkout', type: :feature do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.dependencies).to eq([])
       end
 
       it 'uses the first describe of a request spec even with type metadata after the string' do
@@ -190,7 +201,123 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         RUBY
 
         unit = described_class.new.extract_test_file(path)
-        expect(unit.metadata[:subject_class]).to eq('GET /users')
+        expect(unit.metadata).to include(subject_class: nil, description: 'GET /users')
+      end
+
+      it 'links a namespaced constant-path string describe like a constant describe' do
+        path = create_file('spec/models/ledger/entry_spec.rb', <<~RUBY)
+          RSpec.describe 'Ledger::Entry' do
+            it 'balances' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Ledger::Entry')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Ledger::Entry', via: :test_coverage }])
+      end
+
+      it 'adds no description key for a constant describe' do
+        path = create_file('spec/models/widget_spec.rb', 'RSpec.describe Widget, type: :model do; end')
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).not_to have_key(:description)
+      end
+
+      it 'records an RSpec.feature block as the description' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Widget checkout')
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'records a bare feature block as the description' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          feature "Widget checkout" do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:description]).to eq('Widget checkout')
+      end
+
+      it 'keeps the feature block as the subject when an inner describe names a constant' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            describe Widget do
+              scenario 'with a saved card' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Widget checkout')
+      end
+
+      it 'keeps a namespaced task-name describe under spec/lib/tasks/ as the subject' do
+        path = create_file('spec/lib/tasks/ledger/rebuild_balances_spec.rb', <<~RUBY)
+          RSpec.describe "ledger:rebuild_balances" do
+            it 'rebuilds' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('ledger:rebuild_balances')
+        expect(unit.metadata).not_to have_key(:description)
+        expect(unit.dependencies).to eq([{ type: :model, target: 'ledger:rebuild_balances', via: :test_coverage }])
+      end
+
+      it 'keeps a task-name describe under spec/tasks/ as the subject' do
+        path = create_file('spec/tasks/export_widgets_spec.rb', <<~RUBY)
+          RSpec.describe "export_widgets" do
+            it 'exports' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('export_widgets')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'export_widgets', via: :test_coverage }])
+      end
+
+      it 'records a task-shaped describe outside a tasks directory as the description' do
+        path = create_file('spec/lib/widget_exporter_spec.rb', <<~RUBY)
+          RSpec.describe "export_widgets" do
+            it 'exports' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'export_widgets')
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'records a constant-shaped feature title as the description' do
+        path = create_file('spec/features/changelog_spec.rb', <<~RUBY)
+          RSpec.feature "Changelog", type: :feature do
+            scenario 'lists entries' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'Changelog')
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'links an unquoted constant feature argument like a constant describe' do
+        path = create_file('spec/features/widget_spec.rb', <<~RUBY)
+          RSpec.feature Widget do
+            scenario 'lists widgets' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Widget')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Widget', via: :test_coverage }])
       end
 
       it 'counts it blocks as test_count' do
@@ -240,6 +367,70 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
 
         unit = described_class.new.extract_test_file(path)
         expect(unit.metadata[:test_type]).to eq(:system)
+      end
+
+      it 'infers :feature test_type from spec/features/ path' do
+        path = create_file('spec/features/widget_checkout_spec.rb', 'describe "Widget checkout" do; end')
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'infers :feature test_type from type: :feature metadata outside spec/features/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe 'Widget checkout', type: :feature do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'infers :system test_type from type: :system metadata outside spec/system/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe "Widget checkout", type: :system do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:system)
+      end
+
+      it 'infers :feature test_type from a feature block outside spec/features/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'keeps the directory test_type when the describe declares a different type' do
+        path = create_file('spec/requests/widgets_spec.rb', <<~RUBY)
+          RSpec.describe 'Widgets', type: :feature do
+            it 'lists widgets' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:request)
+      end
+
+      it 'reads type metadata from the first example group only' do
+        path = create_file('spec/lib/widget_formatter_spec.rb', <<~RUBY)
+          RSpec.describe WidgetFormatter do
+            describe 'rendering', type: :system do
+              it 'formats' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:unit)
       end
 
       it 'defaults to :unit test_type for unrecognized paths' do

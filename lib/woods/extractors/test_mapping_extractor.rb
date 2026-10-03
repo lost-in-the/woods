@@ -33,12 +33,29 @@ module Woods
       # Constant-form describe: `describe User do`, `RSpec.describe User, type: :model do`.
       # The constant must start uppercase (quoted strings can't sneak in) and may be
       # followed by whitespace OR a comma — the rspec-rails generator default is
-      # `RSpec.describe User, type: :model do` (B-082 / #194).
-      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+([A-Z][\w:]*)(?=[\s,]|$)/
+      # `RSpec.describe User, type: :model do` (B-082 / #194). Capybara's
+      # `feature` / `RSpec.feature` is an example group in the same position.
+      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+([A-Z][\w:]*)(?=[\s,]|$)/
 
-      # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`.
+      # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`,
+      # `RSpec.feature 'Widget checkout' do`.
       # The closing quote delimits the subject, so nothing is required after it.
-      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+['"]([^'"]+)['"]/
+      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+['"]([^'"]+)['"]/
+
+      # A subject names a class only when it is a constant path (`Widget`,
+      # `'Ledger::Entry'`). Free text (`'Widget checkout'`) is a description:
+      # it names no unit, so it must never become a :test_coverage target.
+      CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
+
+      # Rake tasks are identified by name, so a task-shaped string describe in
+      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a unit.
+      RAKE_TASK_SPEC_DIR = %r{/spec/(?:lib/)?tasks/|/test/lib/tasks/}
+      RAKE_TASK_NAME = /\A[\w-]+(?::[\w-]+)*\z/
+
+      # Outside a typed directory, the first example group's `type:` metadata
+      # or a Capybara `feature` block decides the test type.
+      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system)\b/
+      RSPEC_FEATURE_GROUP = /^\s*(?:RSpec\.)?feature\s/
 
       def initialize
         @rails_root = Rails.root
@@ -101,10 +118,12 @@ module Woods
       # @param framework [Symbol] :rspec or :minitest
       # @return [Hash]
       def extract_metadata(source, file_path, framework)
-        subject_class = extract_subject_class(source, framework)
-        test_type = infer_test_type(file_path)
+        subject = extract_subject(source, framework)
+        group = first_example_group(source) if framework == :rspec
+        subject_class = subject if subject && names_unit?(subject, group, file_path)
+        test_type = infer_test_type(file_path, source)
 
-        {
+        metadata = {
           subject_class: subject_class,
           test_count: count_tests(source, framework),
           test_type: test_type,
@@ -112,42 +131,66 @@ module Woods
           shared_examples: extract_shared_examples_defined(source),
           shared_examples_used: extract_shared_examples_used(source)
         }
+        metadata[:description] = subject if subject && !subject_class
+        metadata
       end
 
-      # Extract the primary subject class under test.
+      # Decide whether a subject names a unit rather than describing behavior.
+      #
+      # A quoted feature title is always prose, even when it looks like a
+      # constant (`feature "Changelog"`); an unquoted constant still names a unit.
+      #
+      # @param subject [String] Subject as written
+      # @param group [String, nil] Line opening the first RSpec example group
+      # @param file_path [String] Absolute path to the test file
+      # @return [Boolean]
+      def names_unit?(subject, group, file_path)
+        return true if group&.match?(RSPEC_CONSTANT_DESCRIBE)
+        return false if group&.match?(RSPEC_FEATURE_GROUP)
+        return true if subject.match?(CONSTANT_PATH)
+
+        file_path.match?(RAKE_TASK_SPEC_DIR) && subject.match?(RAKE_TASK_NAME)
+      end
+
+      # Extract the primary subject under test, as written.
       #
       # For RSpec: reads the top-level describe/RSpec.describe argument.
       # For Minitest: reads the class name and strips the "Test" suffix.
       #
       # @param source [String] File source code
       # @param framework [Symbol] :rspec or :minitest
-      # @return [String, nil] Class name or nil if not detected
-      def extract_subject_class(source, framework)
+      # @return [String, nil] Constant path or free-text description, nil if not detected
+      def extract_subject(source, framework)
         framework == :rspec ? extract_rspec_subject(source) : extract_minitest_subject(source)
       end
 
-      # Extract subject class from the first describe in an RSpec file.
+      # Extract the subject from the first describe or feature in an RSpec file.
       #
       # Scans line by line and takes the file's FIRST describe, whatever its
       # form — constant reference (describe User do, RSpec.describe User,
       # type: :model do) or string (describe 'User' do). An inner
       # `describe 'validations'` nested under a constant-form outer describe
       # must never become the subject: it would mint a phantom graph node and
-      # lose the real coverage edge. Handles both RSpec.describe and bare
-      # describe.
+      # lose the real coverage edge. Handles RSpec.describe, bare describe,
+      # and their feature forms.
       #
       # @param source [String] RSpec file source code
       # @return [String, nil]
       def extract_rspec_subject(source)
-        source.each_line do |line|
-          constant = line.match(RSPEC_CONSTANT_DESCRIBE)
-          return constant[1] if constant
+        group = first_example_group(source)
+        return nil unless group
 
-          string = line.match(RSPEC_STRING_DESCRIBE)
-          return string[1] if string
+        (group.match(RSPEC_CONSTANT_DESCRIBE) || group.match(RSPEC_STRING_DESCRIBE))[1]
+      end
+
+      # Find the line that opens the file's first describe or feature block.
+      #
+      # @param source [String] RSpec file source code
+      # @return [String, nil]
+      def first_example_group(source)
+        source.each_line.find do |line|
+          line.match?(RSPEC_CONSTANT_DESCRIBE) || line.match?(RSPEC_STRING_DESCRIBE)
         end
-
-        nil
       end
 
       # Extract subject class from Minitest test class name.
@@ -196,18 +239,33 @@ module Woods
         source.scan(/^\s*(?:include_examples|it_behaves_like)\s+['"]([^'"]+)['"]/).flatten
       end
 
-      # Infer test type from the directory structure of the file path.
+      # Infer test type from the directory structure of the file path, then
+      # from the first example group for files outside a typed directory.
       #
       # @param file_path [String] Absolute path to the test file
-      # @return [Symbol] One of :model, :controller, :request, :system, :unit
-      def infer_test_type(file_path)
+      # @param source [String] File source code
+      # @return [Symbol] One of :model, :controller, :request, :system, :feature, :unit
+      def infer_test_type(file_path, source)
         case file_path
         when %r{/spec/models/}, %r{/test/models/} then :model
         when %r{/spec/controllers/}, %r{/test/controllers/} then :controller
         when %r{/spec/requests/}, %r{/test/integration/} then :request
         when %r{/spec/system/}, %r{/test/system/} then :system
-        else :unit
+        when %r{/spec/features/} then :feature
+        else declared_test_type(source)
         end
+      end
+
+      # Read the test type the first example group declares.
+      #
+      # @param source [String] File source code
+      # @return [Symbol] :feature, :system, or :unit when nothing is declared
+      def declared_test_type(source)
+        group = first_example_group(source)
+        return :unit unless group
+        return :feature if group.match?(RSPEC_FEATURE_GROUP)
+
+        group[RSPEC_DECLARED_TYPE, 1]&.to_sym || :unit
       end
 
       # Extract dependencies by linking the test file to the unit under test.
