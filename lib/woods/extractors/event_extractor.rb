@@ -13,6 +13,10 @@ module Woods
     # - ActiveSupport::Notifications: +instrument+ (publish) and +subscribe+ (consume)
     # - Wisper: +publish+/+broadcast+ (publish) and +on(:event_name)+ (subscribe)
     #
+    # Applications with their own event wrapper add patterns through
+    # +Woods.configuration.event_patterns+; see {Woods::Configuration#event_patterns=}.
+    # Their +system+ label is recorded in metadata and never changes the identifier.
+    #
     # Uses a two-pass approach:
     # 1. Scan all files, collecting publishers and subscribers per event name
     # 2. Merge by event name → one ExtractedUnit per unique event
@@ -33,6 +37,7 @@ module Woods
 
       def initialize
         @directories = APP_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
+        @configured_patterns = Woods.configuration&.event_patterns || []
       end
 
       # Extract all event units using a two-pass approach.
@@ -67,6 +72,7 @@ module Woods
 
         scan_active_support_notifications(source, file_path, event_map)
         scan_wisper_patterns(source, file_path, event_map)
+        scan_configured_patterns(source, file_path, event_map)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to scan #{file_path} for events: #{e.message}")
       end
@@ -128,6 +134,30 @@ module Woods
         end
       end
 
+      # Scan for the application's own event APIs from +event_patterns+.
+      #
+      # A match whose first capture group did not participate names no event
+      # and is skipped.
+      #
+      # @param source [String] Ruby source code
+      # @param file_path [String] File path
+      # @param event_map [Hash] Mutable event map
+      # @return [void]
+      def scan_configured_patterns(source, file_path, event_map)
+        @configured_patterns.each do |entry|
+          source.scan(entry[:pattern]) do
+            event_name = Regexp.last_match(1)
+            next if event_name.nil? || event_name.empty?
+
+            if entry[:role] == :publisher
+              register_publisher(event_map, event_name, file_path, entry[:system])
+            else
+              register_subscriber(event_map, event_name, file_path, entry[:system])
+            end
+          end
+        end
+      end
+
       # Does this file give any indication it is using Wisper?
       #
       # Deliberately broader than the publisher gate's `include Wisper` —
@@ -150,10 +180,10 @@ module Woods
       # @param event_map [Hash] Mutable event map
       # @param event_name [String] Event name
       # @param file_path [String] Publisher file path
-      # @param pattern [Symbol] :active_support or :wisper
+      # @param pattern [Symbol] :active_support, :wisper, or a configured system label
       # @return [void]
       def register_publisher(event_map, event_name, file_path, pattern)
-        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern }
+        entry = event_entry(event_map, event_name, pattern)
         entry[:publishers] << file_path unless entry[:publishers].include?(file_path)
       end
 
@@ -162,11 +192,24 @@ module Woods
       # @param event_map [Hash] Mutable event map
       # @param event_name [String] Event name
       # @param file_path [String] Subscriber file path
-      # @param pattern [Symbol] :active_support or :wisper
+      # @param pattern [Symbol] :active_support, :wisper, or a configured system label
       # @return [void]
       def register_subscriber(event_map, event_name, file_path, pattern)
-        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern }
+        entry = event_entry(event_map, event_name, pattern)
         entry[:subscribers] << file_path unless entry[:subscribers].include?(file_path)
+      end
+
+      # Find or create the map entry for an event, recording +pattern+ among
+      # the systems that used the name. The first system seen stays +:pattern+.
+      #
+      # @param event_map [Hash] Mutable event map
+      # @param event_name [String] Event name
+      # @param pattern [Symbol] System that matched
+      # @return [Hash] The entry
+      def event_entry(event_map, event_name, pattern)
+        entry = event_map[event_name] ||= { publishers: [], subscribers: [], pattern: pattern, systems: [] }
+        entry[:systems] << pattern unless entry[:systems].include?(pattern)
+        entry
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -210,6 +253,8 @@ module Woods
           publisher_count: data[:publishers].size,
           subscriber_count: data[:subscribers].size
         }
+        # Only when configured, so an app that sets nothing keeps byte-identical units.
+        unit.metadata[:systems] = data[:systems] if @configured_patterns.any?
         unit.dependencies = build_dependencies(combined_source)
         unit
       end
