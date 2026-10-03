@@ -35,6 +35,18 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'regex complexity' do
     end
   end
 
+  it 'counts declaration lines and finds value-class factories in linear time' do
+    lines = described_class::DECLARATION_LINE
+    factories = described_class::VALUE_CLASS_CONSTRUCTOR
+    within_budget do
+      expect("#{" \t" * 50_000}classy".scan(lines)).to eq([])
+      expect(("  clas\n" * 10_000).scan(lines)).to eq([])
+      expect(("  module X\n" * 10_000).scan(lines).size).to eq(10_000)
+      expect(factories.match?('Struct.ne' * 50_000)).to be(false)
+      expect(factories.match?("#{'Data.' * 50_000}define")).to be(true)
+    end
+  end
+
   it 'strips the app directory prefix in linear time' do
     pattern = described_class::APP_DIRECTORY_PREFIX
     within_budget do

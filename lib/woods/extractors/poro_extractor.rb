@@ -52,6 +52,12 @@ module Woods
       # never backtracks, so blank-line runs stay linear.
       OWN_METHOD_DEFINITION = /^[ \t]*+def\s/
 
+      # A `class` or `module` keyword opening a line (`class << self` included).
+      DECLARATION_LINE = /^[ \t]*+(?:class|module)\b/
+
+      # Value-class factories AssignedValueDiscovery can promote to a unit.
+      VALUE_CLASS_CONSTRUCTOR = /\b(?:Struct\.new|Data\.define)\b/
+
       # The `app/<directory>/` prefix of a root-relative path.
       APP_DIRECTORY_PREFIX = %r{\Aapp/[^/]++/}
 
@@ -188,6 +194,23 @@ module Woods
 
       private
 
+      # A file whose only declarations are a class-family class and its
+      # namespace wrappers cannot yield a PORO unit, and deciding that needs no
+      # parse. Most swept controller, mailer and component files are this shape.
+      def family_owned_file?(file_path, source)
+        return false if source.match?(VALUE_CLASS_CONSTRUCTOR)
+
+        governed = managed_constant_path(file_path.to_s)
+        return false unless governed
+
+        segments = governed.split('::')
+        return false if source.scan(DECLARATION_LINE).size > segments.size
+        return false unless runtime_family(governed)
+
+        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        (1...segments.size).none? { |depth| discovery.owns?(segments.first(depth).join('::'), file_path) }
+      end
+
       def skip_inputs(file_path)
         source = File.read(file_path)
         analysis = collector.call(source)
@@ -197,6 +220,8 @@ module Woods
 
       def extract_units(file_path, ar_names, fallback:)
         source = File.read(file_path)
+        return [] if family_owned_file?(file_path, source)
+
         analysis = collector.call(source)
         discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
         proof = fallback || swept_path?(file_path)

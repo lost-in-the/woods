@@ -118,6 +118,67 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     expect(identifiers).to contain_exactly('SweepFixture::ParamsCleaner', 'SweepFixture::Tailwind')
   end
 
+  describe 'skipping family-owned files without parsing' do
+    before { stub_const('ActionController::Base', Class.new) }
+
+    def parses_for(relative, source)
+      path = load_source(relative, source)
+      extractor = described_class.new
+      parsed = []
+      collector = Woods::SourceReferences::Collector.new
+      allow(collector).to receive(:call).and_wrap_original do |original, text|
+        parsed << text
+        original.call(text)
+      end
+      extractor.collector = collector
+      [extractor.extract_poro_units(path).map(&:identifier), parsed.size]
+    end
+
+    it 'does not parse a file holding only a family-owned class in its namespace' do
+      expect(parses_for('app/controllers/sweep_fixture/posts_controller.rb', <<~RUBY)).to eq([[], 0])
+        module SweepFixture
+          class PostsController < ActionController::Base
+            def index = nil
+          end
+        end
+      RUBY
+    end
+
+    it 'still parses when the file declares anything beyond that class' do
+      units, parses = parses_for('app/controllers/sweep_fixture/orders_controller.rb', <<~RUBY)
+        module SweepFixture
+          class OrdersController < ActionController::Base
+            module Filters
+              def self.apply(scope) = scope
+            end
+          end
+        end
+      RUBY
+      expect([units, parses]).to eq([['SweepFixture::OrdersController::Filters'], 1])
+    end
+
+    it 'still parses when the file is where a wrapper namespace is declared' do
+      units, parses = parses_for('app/controllers/sweep_fixture/billing/invoices_controller.rb', <<~RUBY)
+        module SweepFixture::Billing
+          LIMIT = 3
+          class InvoicesController < ActionController::Base
+            def index = nil
+          end
+        end
+      RUBY
+      expect([units, parses]).to eq([['SweepFixture::Billing'], 1])
+    end
+
+    it 'still parses when the file defines a value class' do
+      _units, parses = parses_for('app/controllers/sweep_fixture/carts_controller.rb', <<~RUBY)
+        class SweepFixture::CartsController < ActionController::Base
+          Line = Struct.new(:sku)
+        end
+      RUBY
+      expect(parses).to eq(1)
+    end
+  end
+
   it 'leaves an ActionController::Metal subclass to the controller family' do
     stub_const('ActionController::Metal', Class.new)
     load_source('app/controllers/sweep_fixture/health_controller.rb', <<~RUBY)
