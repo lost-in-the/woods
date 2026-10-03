@@ -1724,7 +1724,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   describe 'markerless job leaves admitted by runtime ancestry' do
     after do
-      %i[LedgerCashJob LedgerBaseJob LedgerIconWorker LedgerProbeWorker Sidekiq].each do |name|
+      %i[LedgerCashJob LedgerBaseJob LedgerIconWorker LedgerProbeWorker LedgerImportManager Sidekiq].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
       end
     end
@@ -1746,12 +1746,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index, full_extraction)).to be_empty
     end
 
-    it 'discovers a new leaf of a Sidekiq worker' do
+    def load_sidekiq_stand_in
       Dir.mktmpdir('sidekiq-stand-in') do |gem_root|
         stand_in = File.join(gem_root, 'sidekiq.rb')
         File.write(stand_in, "module Sidekiq\n  module Job; end\n  Worker = Job\nend\n")
         load stand_in
       end
+    end
+
+    it 'leaves a worker that is the primary class of an app/models file to the poro family' do
+      load_sidekiq_stand_in
+      index = full_extraction
+      path = write_file('app/models/ledger_import_manager.rb',
+                        "class LedgerImportManager\n  include Sidekiq::Worker\n  def perform(id) = id\nend\n")
+      load app_path(path)
+
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+      expect(graph.node_types('LedgerImportManager')).to eq([:poro])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'discovers a new leaf of a Sidekiq worker' do
+      load_sidekiq_stand_in
       index, touched = add_leaf_incrementally(
         'app/workers/ledger_probe_worker.rb',
         "class LedgerProbeWorker\n  include Sidekiq::Worker\n  def perform(id) = id\nend\n",

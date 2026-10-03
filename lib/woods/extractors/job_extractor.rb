@@ -202,12 +202,25 @@ module Woods
       # @return [Array<Class>]
       def application_defined(classes)
         app_root = Rails.root.to_s
-        classes.select do |klass|
-          name = klass.name
-          name && app_source?(Object.const_source_location(name)&.first, app_root)
-        rescue NameError
-          false
-        end
+        classes.select { |klass| ancestry_admissible?(klass, app_root) }
+      end
+
+      # Outside the job directories a file's primary constant belongs to the
+      # family that scans that file (poro, service, lib), so ancestry admits
+      # only classes nested inside it. Decided from the definition file alone.
+      #
+      # @param klass [Class]
+      # @param app_root [String]
+      # @return [Boolean]
+      def ancestry_admissible?(klass, app_root)
+        name = klass.name
+        path = name && Object.const_source_location(name)&.first
+        return false unless app_source?(path, app_root)
+        return true if @directories.any? { |dir| path.start_with?("#{dir}/") }
+
+        extract_class_name(path, File.read(path)) != name
+      rescue NameError, SystemCallError
+        false
       end
 
       # Runtime ancestry, for a class whose source carries no job marker.

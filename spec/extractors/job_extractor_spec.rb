@@ -965,6 +965,52 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(identifiers.tally.values).to all(eq(1))
     end
 
+    context 'with a job class defined in a file another family owns' do
+      before do
+        require 'woods/extractors/poro_extractor'
+        stub_const('ActiveRecord::Base', double('ActiveRecord::Base', descendants: []))
+        stub_const('ActiveJob::Base', Class.new)
+      end
+
+      def units_across_families
+        described_class.new.extract_all + Woods::Extractors::PoroExtractor.new.extract_all
+      end
+
+      it 'leaves a worker that is the primary class of an app/models file to the poro family' do
+        declare('app/models/job_fixture/import_manager.rb', <<~RUBY)
+          class ImportManager
+            include Sidekiq::Worker
+            def perform(id) = id
+          end
+        RUBY
+
+        owners = units_across_families.select { |unit| unit.identifier == 'JobFixture::ImportManager' }
+        expect(owners.map(&:type)).to eq([:poro])
+      end
+
+      it 'leaves an ActiveJob base that is the primary class of an app/models file to the poro family' do
+        declare('app/models/job_fixture/application_job.rb', 'class ApplicationJob < ActiveJob::Base; end')
+
+        owners = units_across_families.select { |unit| unit.identifier == 'JobFixture::ApplicationJob' }
+        expect(owners.map(&:type)).to eq([:poro])
+      end
+
+      it 'still admits a job nested inside an app/models class' do
+        path = declare('app/models/job_fixture/session.rb', <<~RUBY)
+          class Session
+            class PingJob
+              include Sidekiq::Job
+              def perform = nil
+            end
+          end
+        RUBY
+
+        units = units_across_families
+        expect(units.select { |unit| unit.identifier == 'JobFixture::Session::PingJob' }.map(&:type)).to eq([:job])
+        expect(units.find { |unit| unit.identifier == 'JobFixture::Session::PingJob' }.file_path).to eq(path)
+      end
+    end
+
     it 'gives an enqueue call site a job_enqueue edge that the leaf unit answers' do
       declare_probe_workers
       declare('app/jobs/job_fixture/tile_refresh_job.rb', <<~RUBY)
