@@ -44,6 +44,10 @@ module Woods
       # overlap is ever introduced.
       ENGINES = [ViewEngines::Erb, ViewEngines::Haml, ViewEngines::Jbuilder].freeze
 
+      # Marks a partial name built by Ruby string interpolation, whose real
+      # path is only known at runtime.
+      INTERPOLATION_MARKER = '#{'
+
       # Template engine names the extraction pipeline currently
       # understands — aggregated from {ENGINES} so the list stays honest
       # as engines are added or removed. Surfaced through the MCP
@@ -93,8 +97,8 @@ module Woods
 
         unit.namespace = namespace
         unit.source_code = source
-        partials = engine.scan_partials(source)
-        unit.metadata = build_metadata(engine, source, file_path, partials)
+        interpolated, partials = engine.scan_partials(source).partition { |name| name.include?(INTERPOLATION_MARKER) }
+        unit.metadata = build_metadata(engine, source, file_path, partials, interpolated)
         unit.dependencies = build_dependencies(engine, source, file_path, identifier, partials)
 
         unit
@@ -133,14 +137,16 @@ module Woods
       end
 
       # Build metadata hash for the template. `unresolved_partials` is
-      # present only when the engine reports runtime-built partials.
+      # present only when a partial name is interpolated or the engine
+      # reports runtime-built partials.
       #
       # @param engine [ViewEngines::Base] Engine that matched this file
       # @param source [String] Template source code
       # @param file_path [String] Path to the template
-      # @param partials [Array<String>] Pre-extracted partial names
+      # @param partials [Array<String>] Literal partial names
+      # @param interpolated [Array<String>] Partial names built by interpolation
       # @return [Hash]
-      def build_metadata(engine, source, file_path, partials)
+      def build_metadata(engine, source, file_path, partials, interpolated)
         metadata = {
           template_engine: engine.name.to_s,
           is_partial: partial?(file_path),
@@ -149,7 +155,8 @@ module Woods
           helpers_called: engine.scan_helpers(source),
           loc: source.lines.count { |l| l.strip.length.positive? }
         }
-        unresolved = engine.scan_unresolved_partials(source)
+        unresolved = interpolated.map { |name| { kind: 'interpolation', name: name } } +
+                     engine.scan_unresolved_partials(source)
         metadata[:unresolved_partials] = unresolved if unresolved.any?
         metadata
       end
