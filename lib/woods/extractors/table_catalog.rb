@@ -190,6 +190,8 @@ module Woods
       # @param model [Class] an Active Record class
       # @return [Table, nil] nil when the name is not a live table (a view, or no table yet)
       def for_model(model)
+        return nil if @tables.empty?
+
         pool = model.connection_pool
         named(model.table_name).find { |table| table.pool.equal?(pool) }
       rescue StandardError

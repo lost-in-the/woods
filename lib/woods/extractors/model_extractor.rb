@@ -8,6 +8,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
 require_relative 'constant_paths'
+require_relative 'table_catalog'
 
 module Woods
   module Extractors
@@ -48,9 +49,11 @@ module Woods
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
-      def initialize
+      # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
+      def initialize(table_catalog: nil)
         @concern_cache = {}
         @warnings = []
+        @table_catalog = table_catalog
       end
 
       # Extract all ActiveRecord models in the application
@@ -764,6 +767,10 @@ module Woods
           @warnings << "[#{model.name}] Skipping broken association dep #{assoc.name}: #{e.message}"
           nil
         end
+
+        # The table unit this model reads, when the live schema has it.
+        table = (@table_catalog ||= TableCatalog.from_runtime).for_model(model)
+        deps << { type: :database_table, target: table.identifier, via: :table } if table
 
         # Included concerns add instance-level behavior
         extract_included_modules(model).each do |mod|
