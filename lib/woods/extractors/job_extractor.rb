@@ -205,9 +205,12 @@ module Woods
         classes.select { |klass| ancestry_admissible?(klass, app_root) }
       end
 
-      # Outside the job directories a file's primary constant belongs to the
-      # family that scans that file (poro, service, lib), so ancestry admits
-      # only classes nested inside it. Decided from the definition file alone.
+      # The definition file must declare the class: a class built with
+      # `Class.new` and `const_set` reports the generator's call site, whose
+      # source is not the job's. Outside the job directories a file's primary
+      # constant belongs to the family that scans that file (poro, service,
+      # lib), so ancestry admits only classes nested inside it. Decided from
+      # the definition file alone.
       #
       # @param klass [Class]
       # @param app_root [String]
@@ -216,9 +219,15 @@ module Woods
         name = klass.name
         path = name && Object.const_source_location(name)&.first
         return false unless app_source?(path, app_root)
+
+        source = File.read(path)
+        unless declares_class?(source, name)
+          Rails.logger.debug "[Woods] Skipping job #{name}: #{path} does not declare it (generated class)"
+          return false
+        end
         return true if @directories.any? { |dir| path.start_with?("#{dir}/") }
 
-        extract_class_name(path, File.read(path)) != name
+        extract_class_name(path, source) != name
       rescue NameError, SystemCallError
         false
       end

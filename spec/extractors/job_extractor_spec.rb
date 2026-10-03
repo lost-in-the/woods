@@ -1011,6 +1011,27 @@ RSpec.describe Woods::Extractors::JobExtractor do
       end
     end
 
+    it 'skips a generated worker whose definition site does not declare it' do
+      declare('lib/job_fixture/async_dispatch.rb', <<~RUBY)
+        module AsyncDispatch
+          def async_method(name)
+            const_set("\#{name.to_s.capitalize}Worker", Class.new { include Sidekiq::Worker })
+          end
+        end
+      RUBY
+      declare('app/models/job_fixture/widget.rb', <<~RUBY)
+        class Widget
+          extend AsyncDispatch
+          async_method :restock
+        end
+      RUBY
+      allow(logger).to receive(:debug)
+
+      expect(described_class.new.discoverable_classes).not_to include(JobFixture::Widget::RestockWorker)
+      expect(units_by_id).not_to have_key('JobFixture::Widget::RestockWorker')
+      expect(logger).to have_received(:debug).with(/JobFixture::Widget::RestockWorker/).at_least(:once)
+    end
+
     it 'gives an enqueue call site a job_enqueue edge that the leaf unit answers' do
       declare_probe_workers
       declare('app/jobs/job_fixture/tile_refresh_job.rb', <<~RUBY)
