@@ -965,7 +965,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(identifiers.tally.values).to all(eq(1))
     end
 
-    context 'with a job class defined in a file another family owns' do
+    context 'with a job class defined in an app/models file' do
       before do
         require 'woods/extractors/poro_extractor'
         stub_const('ActiveRecord::Base', double('ActiveRecord::Base', descendants: []))
@@ -976,7 +976,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
         described_class.new.extract_all + Woods::Extractors::PoroExtractor.new.extract_all
       end
 
-      it 'leaves a worker that is the primary class of an app/models file to the poro family' do
+      it 'makes a worker that is the primary class of an app/models file a job, not a poro' do
         declare('app/models/job_fixture/import_manager.rb', <<~RUBY)
           class ImportManager
             include Sidekiq::Worker
@@ -985,14 +985,14 @@ RSpec.describe Woods::Extractors::JobExtractor do
         RUBY
 
         owners = units_across_families.select { |unit| unit.identifier == 'JobFixture::ImportManager' }
-        expect(owners.map(&:type)).to eq([:poro])
+        expect(owners.map(&:type)).to eq([:job])
       end
 
-      it 'leaves an ActiveJob base that is the primary class of an app/models file to the poro family' do
+      it 'makes an ActiveJob base that is the primary class of an app/models file a job, not a poro' do
         declare('app/models/job_fixture/application_job.rb', 'class ApplicationJob < ActiveJob::Base; end')
 
         owners = units_across_families.select { |unit| unit.identifier == 'JobFixture::ApplicationJob' }
-        expect(owners.map(&:type)).to eq([:poro])
+        expect(owners.map(&:type)).to eq([:job])
       end
 
       it 'still admits a job nested inside an app/models class' do

@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'reference_patterns'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'job_ancestry'
 require_relative '../source_references/runtime_lookup'
 
 module Woods
@@ -37,10 +38,6 @@ module Woods
         app/workers
         app/sidekiq
       ].freeze
-
-      # Sidekiq's job modules, counted only when Sidekiq is loaded.
-      # `Worker` aliases `Job` on current Sidekiq.
-      SIDEKIQ_JOB_MODULES = %w[Sidekiq::Job Sidekiq::Worker].freeze
 
       def initialize
         @directories = JOB_DIRECTORIES.map { |d| Rails.root.join(d) }
@@ -77,9 +74,9 @@ module Woods
       # Job classes the runtime vouches for beyond the job-directory scan:
       # every named ApplicationJob descendant, plus every class defined in
       # the application whose ancestry includes ActiveJob::Base or a Sidekiq
-      # job module. A job nested inside a class that lives elsewhere (a model
-      # file), or a leaf that inherits everything from a parent job, is
-      # reachable only this way.
+      # job module ({JobAncestry.admitted?}). A job defined in a model file,
+      # or a leaf that inherits everything from a parent job, is reachable
+      # only this way.
       #
       # Shared with the incremental path, which re-extracts a job by class
       # when re-deriving it from its file names a different constant — the
@@ -89,7 +86,9 @@ module Woods
       def discoverable_classes
         lookup = SourceReferences::RuntimeLookup.new
         application_jobs = defined?(ApplicationJob) ? ApplicationJob.descendants : []
-        (application_jobs + application_defined(ancestry_jobs)).uniq.select do |klass|
+        app_root = Rails.root.to_s
+        ancestry_jobs = JobAncestry.candidates.select { |klass| JobAncestry.admitted?(klass, app_root: app_root) }
+        (application_jobs + ancestry_jobs).uniq.select do |klass|
           klass.name && lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
         end
       end
@@ -174,70 +173,12 @@ module Woods
           source.match?(/def perform/)
       end
 
-      # Classes whose ancestry makes them jobs, wherever they are defined.
-      # A module has no descendants list, hence the ObjectSpace walk; the
-      # unbound `include?` ignores classes that redefine it as a class method.
-      #
-      # @return [Array<Class>]
-      def ancestry_jobs
-        jobs = defined?(ActiveJob::Base) ? ActiveJob::Base.descendants : []
-        modules = sidekiq_job_modules
-        return jobs if modules.empty?
-
-        includes = Module.instance_method(:include?)
-        jobs + ObjectSpace.each_object(Class).select do |klass|
-          modules.any? { |mod| includes.bind_call(klass, mod) }
-        end
-      end
-
-      # @return [Array<Module>] the loaded Sidekiq job modules
-      def sidekiq_job_modules
-        SIDEKIQ_JOB_MODULES.filter_map { |name| Object.const_get(name) if Object.const_defined?(name) }.uniq
-      end
-
-      # Framework, gem, and engine jobs stay out: only a class whose
-      # definition site is application source qualifies through ancestry.
-      #
-      # @param classes [Array<Class>]
-      # @return [Array<Class>]
-      def application_defined(classes)
-        app_root = Rails.root.to_s
-        classes.select { |klass| ancestry_admissible?(klass, app_root) }
-      end
-
-      # The definition file must declare the class: a class built with
-      # `Class.new` and `const_set` reports the generator's call site, whose
-      # source is not the job's. Outside the job directories a file's primary
-      # constant belongs to the family that scans that file (poro, service,
-      # lib), so ancestry admits only classes nested inside it. Decided from
-      # the definition file alone.
-      #
-      # @param klass [Class]
-      # @param app_root [String]
-      # @return [Boolean]
-      def ancestry_admissible?(klass, app_root)
-        name = klass.name
-        path = name && Object.const_source_location(name)&.first
-        return false unless app_source?(path, app_root)
-
-        source = File.read(path)
-        unless declares_class?(source, name)
-          Rails.logger.debug "[Woods] Skipping job #{name}: #{path} does not declare it (generated class)"
-          return false
-        end
-        return true if @directories.any? { |dir| path.start_with?("#{dir}/") }
-
-        extract_class_name(path, source) != name
-      rescue NameError, SystemCallError
-        false
-      end
-
       # Runtime ancestry, for a class whose source carries no job marker.
       #
       # @param job_class [Class]
       # @return [Symbol, nil]
       def runtime_job_type(job_class)
-        return :sidekiq if sidekiq_job_modules.any? { |mod| job_class.include?(mod) }
+        return :sidekiq if JobAncestry.sidekiq_modules.any? { |mod| job_class.include?(mod) }
 
         :active_job if defined?(ActiveJob::Base) && job_class < ActiveJob::Base
       end

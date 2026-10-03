@@ -1724,7 +1724,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   describe 'markerless job leaves admitted by runtime ancestry' do
     after do
-      %i[LedgerCashJob LedgerBaseJob LedgerIconWorker LedgerProbeWorker LedgerImportManager Sidekiq].each do |name|
+      %i[LedgerCashJob LedgerBaseJob LedgerIconWorker LedgerProbeWorker LedgerImportManager LedgerRate
+         Sidekiq].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
       end
     end
@@ -1754,18 +1755,25 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'leaves a worker that is the primary class of an app/models file to the poro family' do
+    it 'makes a worker that is the primary class of an app/models file one job unit with its references' do
       load_sidekiq_stand_in
+      load app_path(write_file('app/models/ledger_rate.rb', "class LedgerRate\n  def self.for(*) = nil\nend\n"))
       index = full_extraction
-      path = write_file('app/models/ledger_import_manager.rb',
-                        "class LedgerImportManager\n  include Sidekiq::Worker\n  def perform(id) = id\nend\n")
+      path = write_file('app/models/ledger_import_manager.rb', <<~RUBY)
+        class LedgerImportManager
+          include Sidekiq::Worker
+          def perform(id) = LedgerRate.for(Post.find(id), SignatureService)
+        end
+      RUBY
       load app_path(path)
 
       Woods::Extractor.new(output_dir: index).extract_changed([path])
 
       payload = Woods::Generation.new(output_dir: index).payload_dir
       graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
-      expect(graph.node_types('LedgerImportManager')).to eq([:poro])
+      expect(graph.node_types('LedgerImportManager')).to eq([:job])
+      expect(graph.dependencies_of('LedgerImportManager', type: :job))
+        .to include('LedgerRate', 'Post', 'SignatureService')
       expect(differences(index, full_extraction)).to be_empty
     end
 

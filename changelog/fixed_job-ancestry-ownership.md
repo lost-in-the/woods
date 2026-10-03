@@ -1,6 +1,7 @@
-- Runtime job discovery no longer claims a class that is the primary
-  constant of a file outside the job directories (for example a Sidekiq
-  worker or an `ApplicationJob` base defined as the main class of an
-  `app/models` file). Those stay `poro` units, as before, instead of
-  collapsing to a duplicate `job` node and losing their source references.
-  Jobs nested inside such classes are still admitted.
+- A class with job ancestry (`ActiveJob::Base`, `Sidekiq::Job`, or
+  `Sidekiq::Worker`) defined in an application file is exactly one unit, a
+  `job`, even when it is the primary class of an `app/models` file.
+  PoroExtractor defers to the shared `Woods::Extractors::JobAncestry`
+  predicate instead of emitting a duplicate `poro` unit, and the job unit
+  keeps its job metadata, `job_enqueue` edges, and resolved source
+  references.
