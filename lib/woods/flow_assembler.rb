@@ -153,6 +153,12 @@ module Woods
     # the whole unit, which reported every other method's operations as the
     # called method's; a flow that says nothing is honest, one that lists
     # unrelated side effects is not (F5).
+    #
+    # The exception is a method the unit records in
+    # `metadata[:action_sources]` as defined in another indexed unit (a
+    # controller action from a concern, a prepended module, or a base
+    # controller): its body is read from that unit's source, while the
+    # before filters still come from this unit.
     def extract_operations(unit_id, source_code, method_name, metadata, unit_type)
       operations = []
 
@@ -160,9 +166,31 @@ module Woods
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
       scope_node = method_name ? method_node(unit_id, source_code, method_name) : parsed_source(unit_id, source_code)
+      scope_node ||= defining_method_node(unit_id, method_name, metadata) if method_name
       operations.concat(@operation_extractor.extract(scope_node)) if scope_node
 
       operations
+    end
+
+    # The `def` node for +method_name+ in the unit its action source names.
+    #
+    # @param unit_id [String] the unit that lacks a local definition
+    # @param method_name [String]
+    # @param metadata [Hash] that unit's metadata
+    # @return [Ast::Node, nil]
+    def defining_method_node(unit_id, method_name, metadata)
+      sources = metadata[:action_sources]
+      return nil unless sources.is_a?(Hash)
+
+      source = sources[method_name.to_sym] || sources[method_name.to_s]
+      defined_in = source.is_a?(Hash) ? source[:defined_in] || source['defined_in'] : nil
+      return nil if defined_in.nil? || defined_in == unit_id
+
+      holder = load_unit(defined_in)
+      holder_source = holder && holder[:source_code]
+      return nil if holder_source.nil? || holder_source.empty?
+
+      method_node(defined_in, holder_source, method_name)
     end
 
     # The unit's whole parsed source, parsed once per assembler instance.

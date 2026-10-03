@@ -1141,6 +1141,51 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'unresolvable routes in graph_analysis.json' do
+    after do
+      created = app_path('app/controllers/lanterns_controller.rb')
+      FileUtils.cp(created, File.join(@pristine_root, 'app/controllers/lanterns_controller.rb')) if File.exist?(created)
+    end
+
+    def lanterns_source(*actions)
+      "class LanternsController < ApplicationController\n" \
+        "#{actions.map { |action| "  def #{action}\n    @lanterns = Post.recent\n  end\n" }.join}end\n"
+    end
+
+    it 'reports missing controllers and actions, and follows a controller edit that supplies the action' do
+      write_file('app/controllers/lanterns_controller.rb', lanterns_source('index'))
+      load app_path('app/controllers/lanterns_controller.rb')
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts, only: %i[index show create]
+          resources :lanterns, only: %i[index]
+          get 'lanterns/archive', to: 'lanterns#archive'
+          get 'ghosts', to: 'ghosts#index'
+          get 'welcome', to: 'rails/welcome#index'
+        end
+      RUBY
+      Rails.application.reload_routes!
+
+      ghost = { 'route' => 'GET /ghosts', 'controller' => 'GhostsController',
+                'action' => 'index', 'reason' => 'missing_controller' }
+      archive = { 'route' => 'GET /lanterns/archive', 'controller' => 'LanternsController',
+                  'action' => 'archive', 'reason' => 'missing_action' }
+      unresolvable = ->(dir) { read_json(dir, 'graph_analysis.json')['unresolvable_routes'] }
+
+      expect(unresolvable.call(run_sequence([]))).to eq([ghost, archive])
+
+      index_dir = run_sequence([
+                                 lambda {
+                                   write_file('app/controllers/lanterns_controller.rb',
+                                              lanterns_source('index', 'archive'))
+                                   load app_path('app/controllers/lanterns_controller.rb')
+                                   'app/controllers/lanterns_controller.rb'
+                                 }
+                               ])
+      expect(unresolvable.call(index_dir)).to eq([ghost])
+    end
+  end
+
   describe 'gap 4 — whole-app unit types' do
     it 'refreshes routes when config/routes.rb changes' do
       run_sequence([
@@ -1887,13 +1932,47 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    it 'stays equivalent as inherited actions change through the base controller and routes' do
+      base = 'app/controllers/base_gauges_controller.rb'
+      base_source = lambda do |body|
+        "class BaseGaugesController < ApplicationController\n  def show\n    #{body}\n  end\n\n  " \
+          "def export\n    @gauges = Post.all\n  end\nend\n"
+      end
+      routes = lambda do |*lines|
+        write_file('config/routes.rb', <<~RUBY)
+          Rails.application.routes.draw do
+            resources :posts
+            #{lines.join("\n  ")}
+          end
+        RUBY
+        Rails.application.reload_routes!
+        'config/routes.rb'
+      end
+      write_file(base, base_source.call('@gauge = Post.recent'))
+      load app_path(base)
+      write_file('app/controllers/gauges_controller.rb', "class GaugesController < BaseGaugesController\nend\n")
+      load app_path('app/controllers/gauges_controller.rb')
+      routes.call('resources :gauges, only: %i[show]')
+
+      run_sequence([
+                     lambda {
+                       write_file(base, base_source.call('@gauge = Post.archived'))
+                       load app_path(base)
+                       base
+                     },
+                     -> { routes.call('resources :gauges, only: %i[show]', "get 'gauges/export', to: 'gauges#export'") }
+                   ])
+    end
+
     # ThingsController stays in the controller descendants for the rest of
     # the process and resolves to this file. Fold it into the pristine tree
     # so the runtime and the filesystem keep agreeing in every later
-    # example.
+    # example. The gauges controllers leak the same way.
     after do
-      created = app_path('app/controllers/things_controller.rb')
-      FileUtils.cp(created, File.join(@pristine_root, 'app/controllers/things_controller.rb')) if File.exist?(created)
+      %w[things_controller base_gauges_controller gauges_controller].each do |name|
+        created = app_path("app/controllers/#{name}.rb")
+        FileUtils.cp(created, File.join(@pristine_root, "app/controllers/#{name}.rb")) if File.exist?(created)
+      end
     end
   end
 

@@ -113,9 +113,11 @@ module Woods
 
         unit.namespace = extract_namespace(controller)
         inlined_source, inlined_concerns = build_controller_source_with_concerns(controller, source)
+        action_sources = resolve_action_sources(controller)
         unit.source_code = build_composite_source(controller, inlined_source)
-        unit.metadata = extract_metadata(controller, source, inlined_concerns: inlined_concerns)
-        unit.dependencies = extract_dependencies(controller, source)
+        unit.metadata = extract_metadata(controller, source, inlined_concerns: inlined_concerns,
+                                                             action_sources: action_sources)
+        unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources)
 
         # Controllers benefit from per-action chunks
         unit.chunks = build_action_chunks(controller, unit)
@@ -492,6 +494,124 @@ module Woods
       end
 
       # ──────────────────────────────────────────────────────────────────────
+      # Action Selection
+      # ──────────────────────────────────────────────────────────────────────
+
+      # The controller's actions, each with where its method is defined.
+      #
+      # Starts from Rails' own +action_methods+ and admits a method only when
+      # its body is application source: methods a gem DSL defines on the
+      # class (+define_method+ from a gem file) and setters are not actions.
+      # A method the class owns and defines in its own file is admitted
+      # whether or not a route reaches it. Every other method (from an
+      # included or prepended module, from the superclass chain, or defined
+      # onto the class from another file) is admitted only when routed to
+      # this controller: Rails counts the public helpers of every mixin and
+      # base controller as actions, but they are not endpoints.
+      #
+      # @param controller [Class] The controller class
+      # @return [Hash{String => Hash}] action name to
+      #   +{ owner:, defined_in:, file:, line: }+. +file+ is relative to
+      #   Rails.root; +defined_in+ is the indexed unit whose source holds the
+      #   method body, or nil when no unit does.
+      def resolve_action_sources(controller)
+        routed = (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
+        own_file = source_file_for(controller)
+
+        controller.action_methods.each_with_object({}) do |name, sources|
+          name = name.to_s
+          next if name.end_with?('=')
+
+          method = controller.instance_method(name)
+          file, line = method.source_location
+          next unless app_action_source?(file)
+          next unless routed.include?(name) || (method.owner == controller && same_file?(file, own_file))
+
+          sources[name] = {
+            owner: method.owner.name,
+            defined_in: defining_unit(method.owner, file),
+            file: relative_to_root(file),
+            line: line
+          }
+        end
+      end
+
+      # Whether a method body lives in application source: under Rails.root,
+      # outside vendor/ and node_modules/, and outside any installed gem path
+      # (a bundle installed inside the app root).
+      #
+      # @param file [String, nil] Method source file
+      # @return [Boolean]
+      def app_action_source?(file)
+        return false unless app_source?(file, Rails.root.to_s)
+
+        absolute = File.expand_path(file)
+        gem_install_paths.none? { |dir| absolute.start_with?(dir) }
+      end
+
+      # @return [Array<String>] Installed gem directories, separator-terminated
+      def gem_install_paths
+        @gem_install_paths ||= begin
+          dirs = Gem.path.dup
+          dirs << Bundler.bundle_path.to_s if defined?(Bundler) && Bundler.respond_to?(:bundle_path)
+          dirs.map { |dir| File.expand_path(dir).delete_suffix(File::SEPARATOR) + File::SEPARATOR }.uniq
+        rescue StandardError
+          []
+        end
+      end
+
+      # The indexed unit whose source holds a method owned by +owner+.
+      #
+      # Walks the owner's namespace from the innermost name outward and takes
+      # the first constant that is extracted as a unit from the method's own
+      # file: an app controller class, or a module in a concerns directory. A
+      # module nested inside a controller resolves to that controller.
+      #
+      # @param owner [Module] The method's owner
+      # @param file [String] The method's source file
+      # @return [String, nil]
+      def defining_unit(owner, file)
+        return nil unless owner.name
+
+        parts = owner.name.split('::')
+        parts.size.downto(1) do |count|
+          name = parts.first(count).join('::')
+          return name if unit_holding?(constant_named(name), file)
+        end
+        nil
+      end
+
+      # @param candidate [Module, nil]
+      # @param file [String]
+      # @return [Boolean]
+      def unit_holding?(candidate, file)
+        case candidate
+        when Class
+          app_defined_controller?(candidate) && same_file?(source_file_for(candidate), file)
+        when Module
+          same_file?(module_source_path(candidate), file) && concerns_directory_path?(File.expand_path(file))
+        else
+          false
+        end
+      end
+
+      # @param name [String]
+      # @return [Module, nil]
+      def constant_named(name)
+        Object.const_get(name)
+      rescue NameError
+        nil
+      end
+
+      def same_file?(left, right)
+        left && right && File.expand_path(left) == File.expand_path(right)
+      end
+
+      def relative_to_root(file)
+        File.expand_path(file).delete_prefix("#{File.expand_path(Rails.root.to_s)}#{File::SEPARATOR}")
+      end
+
+      # ──────────────────────────────────────────────────────────────────────
       # Metadata Extraction
       # ──────────────────────────────────────────────────────────────────────
 
@@ -504,14 +624,17 @@ module Woods
       #   {#build_controller_source_with_concerns}). When nil, derived by
       #   running the same inlining — the metadata must never claim a
       #   concern the composite source does not carry.
+      # @param action_sources [Hash{String => Hash}, nil] From
+      #   {#resolve_action_sources}; computed when nil
       # @return [Hash]
-      def extract_metadata(controller, source = nil, inlined_concerns: nil)
-        own_methods = controller.instance_methods(false).to_set(&:to_s)
-        actions = controller.action_methods.select { |m| own_methods.include?(m) }.to_a
+      def extract_metadata(controller, source = nil, inlined_concerns: nil, action_sources: nil)
+        action_sources ||= resolve_action_sources(controller)
+        actions = action_sources.keys
 
         {
           # Actions and routes
           actions: actions,
+          action_sources: action_sources,
           routes: @routes_map[controller.name] || {},
 
           # Filter chain
@@ -659,7 +782,7 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(controller, source = nil)
+      def extract_dependencies(controller, source = nil, action_sources: nil)
         # Included concerns add per-request behavior (filters, helpers).
         # Same edge shape as ModelExtractor's concern edges so graph
         # consumers see one format (#175).
@@ -689,7 +812,41 @@ module Woods
           deps.concat(scan_navigation_dependencies(source, via_type: :redirect_to))
         end
 
-        consolidate_dependencies(deps)
+        # consolidate_dependencies keeps one edge per (type, target), so the
+        # structural edges join afterwards: a controller that redirects to
+        # its parent keeps that edge as well as the inheritance one.
+        structural = action_source_dependencies(controller, action_sources || resolve_action_sources(controller))
+        (consolidate_dependencies(deps) + structural).uniq { |dep| dep.values_at(:type, :target, :via) }
+      end
+
+      # Edges to the units that hold the bodies of actions this controller
+      # does not define itself. Editing that unit's file changes the action,
+      # so the edge puts this controller in the blast radius and flow scope.
+      #
+      # @param controller [Class]
+      # @param action_sources [Hash{String => Hash}]
+      # @return [Array<Hash>]
+      def action_source_dependencies(controller, action_sources)
+        holders = action_sources.values.filter_map { |source| source[:defined_in] }.uniq - [controller.name]
+        deps = holders.map do |holder|
+          type = constant_named(holder).is_a?(Class) ? :controller : :concern
+          { type: type, target: holder, via: :action_source }
+        end
+        deps << superclass_dependency(controller)
+        deps.compact
+      end
+
+      # An edge to an app-defined parent controller. A method the parent
+      # gains can become a routed action of this controller, so editing the
+      # parent must re-extract it even before any action comes from there.
+      #
+      # @param controller [Class]
+      # @return [Hash, nil]
+      def superclass_dependency(controller)
+        parent = controller.superclass
+        return nil unless parent.is_a?(Class) && app_defined_controller?(parent)
+
+        { type: :controller, target: parent.name, via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────

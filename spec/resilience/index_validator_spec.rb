@@ -39,6 +39,39 @@ RSpec.describe Woods::Resilience::IndexValidator do
       expect(errors).to include('Invalid source_inputs.json provenance artifact')
     end
 
+    context 'with unresolvable routes in graph_analysis.json' do
+      before do
+        write_json('manifest.json', { 'counts' => {} })
+        write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })
+      end
+
+      it 'warns once per route with its reason, and stays valid' do
+        write_json('graph_analysis.json', { 'unresolvable_routes' => [
+                     { 'route' => 'GET /shipments', 'controller' => 'ShipmentsController', 'action' => 'index',
+                       'reason' => 'missing_controller' },
+                     { 'route' => 'DELETE /ledgers/:id', 'controller' => 'LedgersController', 'action' => 'destroy',
+                       'reason' => 'missing_action' }
+                   ] })
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report).to be_valid
+        expect(report.warnings).to eq([
+                                        'Unresolvable route GET /shipments: controller ShipmentsController ' \
+                                        'is not indexed (missing_controller)',
+                                        'Unresolvable route DELETE /ledgers/:id: LedgersController has no ' \
+                                        'action destroy (missing_action)'
+                                      ])
+      end
+
+      it 'adds no warning when the analysis lists none or is absent' do
+        expect(described_class.new(index_dir: tmp_dir).validate.warnings).to be_empty
+
+        write_json('graph_analysis.json', { 'unresolvable_routes' => [] })
+        expect(described_class.new(index_dir: tmp_dir).validate.warnings).to be_empty
+      end
+    end
+
     context 'with manifest writer-version provenance (#323)' do
       before do
         write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })

@@ -133,6 +133,35 @@ module Woods
         warn_unresolvable_paths(warnings, unresolvable)
         validate_dependency_graph(payload, errors)
         validate_source_inputs(payload, errors, warnings)
+        warn_unresolvable_routes(payload, warnings)
+      end
+
+      # Routes whose controller or action does not resolve, as the graph
+      # analysis recorded them. Advisory: a dead route does not make the
+      # index invalid.
+      #
+      # @param payload [String]
+      # @param warnings [Array<String>]
+      def warn_unresolvable_routes(payload, warnings)
+        path = File.join(payload, 'graph_analysis.json')
+        return unless File.exist?(path)
+
+        Array(JSON.parse(Woods::AtomicFile.read(path))['unresolvable_routes']).each do |entry|
+          next unless entry.is_a?(Hash)
+
+          warnings << unresolvable_route_warning(entry)
+        end
+      rescue JSON::ParserError
+        warnings << 'graph_analysis.json: invalid JSON; unresolvable routes not checked'
+      end
+
+      def unresolvable_route_warning(entry)
+        detail = if entry['reason'] == 'missing_controller'
+                   "controller #{entry['controller']} is not indexed"
+                 else
+                   "#{entry['controller']} has no action #{entry['action']}"
+                 end
+        "Unresolvable route #{entry['route']}: #{detail} (#{entry['reason']})"
       end
 
       # Optional for old generations; malformed new provenance is an artifact

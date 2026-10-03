@@ -1961,8 +1961,21 @@ module Woods
         volatile_ratio: ratio,
         volatile_limit_per_target: config&.volatile_dependency_limit_per_target,
         cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
-        cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+        cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH,
+        controller_resolver: method(:defined_controller?)
       )
+    end
+
+    # Whether a route's controller constant names a class in the running
+    # app. The unresolvable-route report uses this to leave out controllers
+    # a gem or engine defines, which the index does not extract.
+    #
+    # @param name [String] controller class name
+    # @return [Boolean]
+    def defined_controller?(name)
+      name.safe_constantize.is_a?(Class)
+    rescue StandardError, ScriptError
+      false
     end
 
     # ──────────────────────────────────────────────────────────────────────

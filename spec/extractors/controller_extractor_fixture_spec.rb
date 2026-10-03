@@ -39,8 +39,16 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
     klass.define_singleton_method(:included_modules) { [] }
     klass.define_singleton_method(:descendants) { [] }
 
-    # Define action methods so instance_method(:action_name) works
-    actions.each { |a| klass.define_method(a.to_sym) { nil } }
+    # Define action methods so instance_method(:action_name) works. An
+    # action counts only when its body is app source, so each one reports
+    # the fixture file under the app root as its location.
+    actions.each do |a|
+      if source_file
+        klass.class_eval("def #{a}; end", source_file, 1) # rubocop:disable Style/EvalWithLocation
+      else
+        klass.define_method(a.to_sym) { nil }
+      end
+    end
     stub_instance_methods(klass, actions, source_file)
 
     klass

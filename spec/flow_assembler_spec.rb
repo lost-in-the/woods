@@ -311,6 +311,75 @@ RSpec.describe Woods::FlowAssembler do
       expect(after_ops).to be_empty
     end
 
+    describe 'an action defined outside the controller' do
+      def write_receiver(defined_in)
+        source = <<~RUBY
+          class LedgersController < ApplicationController
+            include LedgerBehavior
+
+            private
+
+            def audit
+              AuditLog.write!
+            end
+          end
+        RUBY
+        write_unit('LedgersController', source_code: source, metadata: {
+                     'actions' => ['create'],
+                     'action_sources' => { 'create' => { 'owner' => 'LedgerBehavior', 'defined_in' => defined_in } },
+                     'filters' => [
+                       { 'kind' => 'before', 'filter' => 'verify_ledger_state!' },
+                       { 'kind' => 'before', 'filter' => 'load_entry', 'only' => %w[show] }
+                     ]
+                   })
+      end
+
+      before do
+        source = <<~RUBY
+          module LedgerBehavior
+            extend ActiveSupport::Concern
+
+            def create
+              Ledger.post!(params)
+            end
+
+            def reverse
+              Ledger.reverse!(params)
+            end
+          end
+        RUBY
+        concern_filters = [{ 'kind' => 'before', 'filter' => 'concern_only_filter' }]
+        write_unit('LedgerBehavior', type: 'concern', source_code: source, metadata: { 'filters' => concern_filters })
+        stub_graph_defaults
+      end
+
+      def operations_for(entry_point)
+        described_class.new(graph: graph, extracted_dir: extracted_dir).assemble(entry_point).steps[0][:operations]
+      end
+
+      it 'takes the body from the unit that defines it' do
+        write_receiver('LedgerBehavior')
+
+        targets = operations_for('LedgersController#create').filter_map { |op| op[:target] }
+
+        expect(targets).to eq(['Ledger'])
+      end
+
+      it 'applies the entry controller’s own before filters first' do
+        write_receiver('LedgerBehavior')
+
+        methods = operations_for('LedgersController#create').map { |op| op[:method] }
+
+        expect(methods).to eq(%w[verify_ledger_state! post!])
+      end
+
+      it 'yields only the filters when no indexed unit holds the body' do
+        write_receiver(nil)
+
+        expect(operations_for('LedgersController#create').map { |op| op[:method] }).to eq(['verify_ledger_state!'])
+      end
+    end
+
     it 'extracts route information from metadata' do
       write_unit('PostsController',
                  type: 'controller',

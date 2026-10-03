@@ -407,6 +407,202 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     end
   end
 
+  # ── Actions defined outside the controller (#666) ────────────────────────
+  #
+  # A routed action whose body lives in a concern, a module prepended from
+  # another controller's file, or a base controller. Editing the file that
+  # holds the body must reassemble the receiving controller's flow.
+
+  def write_routes(*lines)
+    write_file('config/routes.rb', <<~RUBY)
+      Rails.application.routes.draw do
+        resources :posts, only: %i[index show create]
+      #{lines.map { |line| "  #{line}" }.join("\n")}
+      end
+    RUBY
+    Rails.application.reload_routes!
+  end
+
+  def load_app_file(relative, contents)
+    write_file(relative, contents)
+    load app_path(relative)
+  end
+
+  def flow_methods(index_dir, file)
+    flow_doc(index_dir, file)['steps'].first['operations'].map { |op| op['method'] }
+  end
+
+  def expect_flows_match_full(index_dir)
+    full_dir = extract_all_to_tmp
+    incremental = flow_inventory(index_dir).transform_values { |body| body.except('generated_at') }
+    full = flow_inventory(full_dir).transform_values { |body| body.except('generated_at') }
+
+    expect(incremental).to eq(full)
+  end
+
+  def concern_source(body)
+    <<~RUBY
+      module LedgerEntryBehavior
+        extend ActiveSupport::Concern
+
+        included do
+          before_action :check_ledger_state!
+        end
+
+        def create
+          #{body}
+        end
+
+        private
+
+        def check_ledger_state!; end
+      end
+    RUBY
+  end
+
+  def holder_source(body)
+    <<~RUBY
+      class ModernReceiptsController < ApplicationController
+        module Behavior
+          def create
+            #{body}
+          end
+        end
+        prepend Behavior
+      end
+    RUBY
+  end
+
+  def base_source(show_body)
+    <<~RUBY
+      class BaseTalliesController < ApplicationController
+        def show
+          #{show_body}
+        end
+
+        def export
+          @tallies = Post.all
+        end
+      end
+    RUBY
+  end
+
+  it 'reassembles the flow of an action from an included concern when the concern changes' do
+    concern = 'app/controllers/concerns/ledger_entry_behavior.rb'
+    load_app_file(concern, concern_source('@entry = Post.recent'))
+    load_app_file('app/controllers/ledger_entries_controller.rb', <<~RUBY)
+      class LedgerEntriesController < ApplicationController
+        include LedgerEntryBehavior
+      end
+    RUBY
+    write_routes('resources :ledger_entries, only: %i[create]')
+    index_dir = extract_all_to_tmp
+    expect(flow_methods(index_dir, 'LedgerEntriesController_create.json')).to eq(%w[check_ledger_state! recent])
+
+    # A second `included` block raises on reload; a code reloader would
+    # have dropped the module first.
+    LedgerEntryBehavior.remove_instance_variable(:@_included_block)
+    load_app_file(concern, concern_source('@entry = Post.archived'))
+    Woods::Extractor.new(output_dir: index_dir).extract_changed([concern])
+
+    expect(flow_methods(index_dir, 'LedgerEntriesController_create.json')).to eq(%w[check_ledger_state! archived])
+    expect_flows_match_full(index_dir)
+
+    fold_into_pristine(concern)
+    fold_into_pristine('app/controllers/ledger_entries_controller.rb')
+  end
+
+  it 'reassembles the flow of an action prepended from another controller when that file changes' do
+    holder = 'app/controllers/modern_receipts_controller.rb'
+    load_app_file(holder, holder_source('@receipt = Post.recent'))
+    load_app_file('app/controllers/receipts_controller.rb', <<~RUBY)
+      class ReceiptsController < ApplicationController
+        prepend ModernReceiptsController::Behavior
+      end
+    RUBY
+    write_routes('resources :receipts, only: %i[create]', 'resources :modern_receipts, only: %i[create]')
+    index_dir = extract_all_to_tmp
+    expect(flow_methods(index_dir, 'ReceiptsController_create.json')).to eq(['recent'])
+
+    load_app_file(holder, holder_source('@receipt = Post.archived'))
+    Woods::Extractor.new(output_dir: index_dir).extract_changed([holder])
+
+    expect(flow_methods(index_dir, 'ReceiptsController_create.json')).to eq(['archived'])
+    expect(flow_methods(index_dir, 'ModernReceiptsController_create.json')).to eq(['archived'])
+    expect_flows_match_full(index_dir)
+
+    fold_into_pristine(holder)
+    fold_into_pristine('app/controllers/receipts_controller.rb')
+  end
+
+  it 'reassembles the flow of a routed inherited action when the base controller changes' do
+    base = 'app/controllers/base_tallies_controller.rb'
+    load_app_file(base, base_source('@tally = Post.recent'))
+    load_app_file('app/controllers/tallies_controller.rb', <<~RUBY)
+      class TalliesController < BaseTalliesController
+      end
+    RUBY
+    write_routes('resources :tallies, only: %i[show]')
+    index_dir = extract_all_to_tmp
+    expect(controller_json(index_dir, 'TalliesController')['metadata']['actions']).to eq(['show'])
+    expect(flow_methods(index_dir, 'TalliesController_show.json')).to eq(['recent'])
+
+    load_app_file(base, base_source('@tally = Post.archived'))
+    Woods::Extractor.new(output_dir: index_dir).extract_changed([base])
+
+    expect(flow_methods(index_dir, 'TalliesController_show.json')).to eq(['archived'])
+    expect_flows_match_full(index_dir)
+
+    fold_into_pristine(base)
+    fold_into_pristine('app/controllers/tallies_controller.rb')
+  end
+
+  it 'admits a routed action the base controller gains later' do
+    base = 'app/controllers/base_meters_controller.rb'
+    load_app_file(base, "class BaseMetersController < ApplicationController\nend\n")
+    load_app_file('app/controllers/meters_controller.rb', "class MetersController < BaseMetersController\nend\n")
+    write_routes('resources :meters, only: %i[show]')
+    index_dir = extract_all_to_tmp
+    expect(controller_json(index_dir, 'MetersController')['metadata']['actions']).to eq([])
+
+    load_app_file(base, <<~RUBY)
+      class BaseMetersController < ApplicationController
+        def show
+          @meter = Post.recent
+        end
+      end
+    RUBY
+    # Rails memoizes action_methods per class and clears only the class that
+    # gained the method; a reload would have built a fresh subclass.
+    MetersController.clear_action_methods!
+    Woods::Extractor.new(output_dir: index_dir).extract_changed([base])
+
+    expect(controller_json(index_dir, 'MetersController')['metadata']['actions']).to eq(['show'])
+    expect(flow_methods(index_dir, 'MetersController_show.json')).to eq(['recent'])
+    expect_flows_match_full(index_dir)
+
+    fold_into_pristine(base)
+    fold_into_pristine('app/controllers/meters_controller.rb')
+  end
+
+  it 'admits an inherited action once a routes edit reaches it' do
+    load_app_file('app/controllers/base_tallies_controller.rb', base_source('@tally = Post.recent'))
+    load_app_file('app/controllers/tallies_controller.rb', "class TalliesController < BaseTalliesController\nend\n")
+    write_routes('resources :tallies, only: %i[show]')
+    index_dir = extract_all_to_tmp
+    expect(flow_index(index_dir)).not_to have_key('TalliesController#export')
+
+    write_routes('resources :tallies, only: %i[show]', "get 'tallies/export', to: 'tallies#export'")
+    Woods::Extractor.new(output_dir: index_dir).extract_changed(['config/routes.rb'])
+
+    expect(controller_json(index_dir, 'TalliesController')['metadata']['actions']).to contain_exactly('show', 'export')
+    expect(flow_methods(index_dir, 'TalliesController_export.json')).to eq(['all'])
+    expect_flows_match_full(index_dir)
+
+    fold_into_pristine('app/controllers/base_tallies_controller.rb')
+    fold_into_pristine('app/controllers/tallies_controller.rb')
+  end
+
   # ── Fail-closed publication ─────────────────────────────────────────────
   #
   # A failure anywhere in the incremental flow refresh must abort

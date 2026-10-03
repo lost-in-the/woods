@@ -441,44 +441,6 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
   end
 
-  # ── extract_metadata — own actions only ──────────────────────────────
-
-  describe '#extract_metadata (own actions)' do
-    it 'only includes actions defined on the controller itself, not inherited ones' do
-      child_own_methods = %i[create update]
-      child_action_methods = Set.new(%w[create update inherited_action])
-
-      child_controller = double('ChildController')
-      allow(child_controller).to receive(:name).and_return('ChildController')
-      allow(child_controller).to receive(:instance_methods).with(false).and_return(child_own_methods)
-      allow(child_controller).to receive(:action_methods).and_return(child_action_methods)
-      allow(child_controller).to receive(:_process_action_callbacks).and_return([])
-      allow(child_controller).to receive(:ancestors).and_return([])
-      allow(child_controller).to receive(:included_modules).and_return([])
-
-      # Pass source explicitly so extract_metadata does not call source_file_for
-      metadata = extractor.send(:extract_metadata, child_controller, '')
-
-      expect(metadata[:actions]).to match_array(%w[create update])
-      expect(metadata[:actions]).not_to include('inherited_action')
-    end
-
-    it 'returns empty actions when the controller defines no own methods' do
-      controller = double('Controller')
-      allow(controller).to receive(:name).and_return('BaseController')
-      allow(controller).to receive(:instance_methods).with(false).and_return([])
-      allow(controller).to receive(:action_methods).and_return(Set.new(%w[index show]))
-      allow(controller).to receive(:_process_action_callbacks).and_return([])
-      allow(controller).to receive(:ancestors).and_return([])
-      allow(controller).to receive(:included_modules).and_return([])
-
-      # Pass source explicitly so extract_metadata does not call source_file_for
-      metadata = extractor.send(:extract_metadata, controller, '')
-
-      expect(metadata[:actions]).to be_empty
-    end
-  end
-
   # ── extract_filter_chain (integration) ───────────────────────────────
 
   describe '#extract_filter_chain' do
@@ -788,7 +750,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     end
 
     def controller_double(name, *modules)
-      controller = double('Controller', name: name)
+      controller = double('Controller', name: name, superclass: Object)
       allow(controller).to receive(:included_modules).and_return(modules)
       controller
     end
@@ -853,7 +815,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         controller = controller_double('PostsController', mod)
         source = "class PostsController < ApplicationController\nend\n"
 
-        deps = extractor.send(:extract_dependencies, controller, source)
+        deps = extractor.send(:extract_dependencies, controller, source, action_sources: {})
 
         expect(deps).to include(type: :concern, target: 'RequiresAuthor', via: :include)
       end
@@ -863,7 +825,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         mod = concern_module('ActionController::MimeResponds', gem_path)
         controller = controller_double('BareController', mod)
 
-        deps = extractor.send(:extract_dependencies, controller, "class BareController\nend\n")
+        deps = extractor.send(:extract_dependencies, controller, "class BareController\nend\n", action_sources: {})
 
         expect(deps.select { |d| d[:type] == :concern }).to be_empty
       end
@@ -945,7 +907,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         controller = metadata_controller('PostsController', [mod])
         source = "class PostsController < ApplicationController\nend\n"
 
-        metadata = extractor.send(:extract_metadata, controller, source)
+        metadata = extractor.send(:extract_metadata, controller, source, action_sources: {})
 
         expect(metadata[:included_concerns]).to eq(['RequiresAuthor'])
         expect(metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
@@ -956,7 +918,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         controller = metadata_controller('PostsController', [mod])
         source = "class PostsController\nend\n"
 
-        metadata = extractor.send(:extract_metadata, controller, source)
+        metadata = extractor.send(:extract_metadata, controller, source, action_sources: {})
 
         expect(metadata[:included_concerns]).to eq(['DynamicallyDefined'])
         expect(metadata[:inlined_concerns]).to eq([])
