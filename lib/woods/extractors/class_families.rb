@@ -18,7 +18,7 @@ module Woods
       # Extractor key => base constant names, checked in order.
       BASES = {
         models: %w[ActiveRecord::Base],
-        controllers: %w[ActionController::Base ActionController::API],
+        controllers: %w[ActionController::Base ActionController::API ActionController::Metal],
         mailers: %w[ActionMailer::Base],
         action_cable_channels: %w[ActionCable::Channel::Base],
         view_components: %w[ViewComponent::Base ViewComponent::Preview],

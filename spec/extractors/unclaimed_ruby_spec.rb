@@ -118,6 +118,16 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     expect(identifiers).to contain_exactly('SweepFixture::ParamsCleaner', 'SweepFixture::Tailwind')
   end
 
+  it 'leaves an ActionController::Metal subclass to the controller family' do
+    stub_const('ActionController::Metal', Class.new)
+    load_source('app/controllers/sweep_fixture/health_controller.rb', <<~RUBY)
+      class SweepFixture::HealthController < ActionController::Metal
+        def show = nil
+      end
+    RUBY
+    expect(identifiers).to eq([])
+  end
+
   it 'does not emit a class whose canonical declaration lives in another swept file' do
     load_source('app/lib/sweep_fixture/ledger.rb', "class SweepFixture::Ledger\n  def call = nil\nend\n")
     load_source('app/lib/sweep_fixture/ledger_extension.rb', "class SweepFixture::Ledger\n  def extra = nil\nend\n")
