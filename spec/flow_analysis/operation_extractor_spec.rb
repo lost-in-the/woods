@@ -388,6 +388,37 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
         expect(ops.map { |o| [o[:type], o[:target]] }).to eq([[:call, 'Classifier'], [:conditional, nil]])
       end
 
+      it 'keeps a call negated with ! in a predicate' do
+        source = <<~RUBY
+          def flush
+            return self if new_record? || readonly? || !buffered_data_present?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'flush').map { |o| o[:method] })
+          .to eq(%w[new_record? readonly? buffered_data_present?])
+      end
+
+      it 'keeps a call negated with not' do
+        source = <<~RUBY
+          def settle
+            Ledger.post! unless not Gate.open?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'settle').first).to include(type: :call, target: 'Gate', method: 'open?')
+      end
+
+      it 'keeps a doubly negated call once' do
+        source = <<~RUBY
+          def warm
+            @warm = !!Cache.warm?
+          end
+        RUBY
+
+        expect(extract_method_ops(source, 'warm').map { |o| [o[:target], o[:method]] }).to eq([%w[Cache warm?]])
+      end
+
       it 'emits an enqueue in a predicate as an async operation' do
         source = <<~RUBY
           def create

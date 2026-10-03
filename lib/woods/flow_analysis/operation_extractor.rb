@@ -89,6 +89,7 @@ module Woods
       # Handle :send nodes - classify into operation types.
       def handle_send(node, operations)
         return unless node.is_a?(Ast::Node) && node.type == :send
+        return walk_negated(node, operations) if negation?(node)
 
         if async_call?(node)
           operations << {
@@ -129,6 +130,16 @@ module Woods
         # argument: `Audit.record(NotifyJob.perform_later(...))` still
         # enqueues the job (F5).
         collect_nested_async(node, operations)
+      end
+
+      # `!x` and `not x` are a `!` call on +x+. The negation is noise; the
+      # call it negates is the operation (`return if !buffered_data_present?`).
+      def negation?(node)
+        node.method_name == '!' && node.receiver && node.children&.first.is_a?(Ast::Node)
+      end
+
+      def walk_negated(node, operations)
+        walk(node.children.first, operations)
       end
 
       # Emit `:async` for enqueue calls nested anywhere inside +node+'s
