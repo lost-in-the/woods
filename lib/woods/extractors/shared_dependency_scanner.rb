@@ -222,6 +222,14 @@ module Woods
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
+      # {ROUTE_HELPER_PATTERN}, except a keyword label (`base_url: host`):
+      # a label names an argument, not a helper. `posts_path::X` is no label.
+      ROUTE_HELPER_CALL = /\b(\w+)_(path|url)\b(?!:(?!:))/
+
+      # A method the source defines under a helper-shaped name
+      # (`def tracking_url`). Its calls are calls to that method.
+      ROUTE_HELPER_SHAPED_DEF = /\bdef[ \t]++(?:self\.)?(\w+_(?:path|url))\b/
+
       # Where a form_with/form_for call's arguments end: the first `do`, `%>`,
       # or `end`, so an unrelated _path/_url helper after the form is not
       # taken as its action. A `%` alone cannot bound plain-Ruby sources
@@ -241,10 +249,10 @@ module Woods
       def scan_navigation_dependencies(source, via_type: :link_to)
         return [] unless Woods.configuration&.extract_navigation_edges
 
-        seen_helpers = Set.new
+        seen_helpers = source.scan(ROUTE_HELPER_SHAPED_DEF).flatten.to_set
         seen_targets = Set.new
         deps = []
-        source.scan(ROUTE_HELPER_PATTERN).each do |route_name, suffix|
+        source.scan(ROUTE_HELPER_CALL).each do |route_name, suffix|
           helper = "#{route_name}_#{suffix}"
           next if seen_helpers.include?(helper)
 

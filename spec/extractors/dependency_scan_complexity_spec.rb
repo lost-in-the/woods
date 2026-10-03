@@ -29,7 +29,14 @@ RSpec.describe 'Shared dependency scan complexity' do
     # Not backtracking: the reference loop used to read character offsets
     # from MatchData, which counts from the start of the string on every
     # call, so ordinary text took time quadratic in its size.
-    'fifty thousand lines of ordinary words' => "aa bb cc dd ee ff gg hh\n" * 50_000
+    'fifty thousand lines of ordinary words' => "aa bb cc dd ee ff gg hh\n" * 50_000,
+    'a long underscored word with no helper suffix' => 'a_' * 25_000,
+    'a long word of helper suffixes' => 'a_url_' * 8_000,
+    'repeated helper-shaped keyword labels' => 'a_url: ' * 10_000,
+    'repeated helpers before a scope operator' => 'a_path::B ' * 10_000,
+    'def then spaces' => "def#{spaces}",
+    'def then a long underscored word' => "def #{'a_' * 25_000}",
+    'repeated defs of near-helper names' => 'def a_urls; ' * 10_000
   }
 
   let(:scanner) do
@@ -63,8 +70,9 @@ RSpec.describe 'Shared dependency scan complexity' do
   end
 
   adversarial_sources.each do |label, source|
-    it "service, job, mailer, and form scans stay within #{budget_seconds}s on #{label}" do
+    it "service, job, mailer, form, and navigation scans stay within #{budget_seconds}s on #{label}" do
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      scanner.scan_navigation_dependencies(source)
       scanner.scan_service_dependencies(source)
       scanner.scan_job_dependencies(source)
       scanner.scan_mailer_dependencies(source)

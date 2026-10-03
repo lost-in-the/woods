@@ -463,26 +463,86 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(service_deps.map { |d| d[:target] }).to include('PricingService')
     end
 
-    it 'detects URL helper route dependencies' do
-      source = <<~RUBY
-        class UserMailer < ApplicationMailer
-          def welcome_email
-            @url = confirmation_url(token: 'abc')
-            @profile = edit_user_path(@user)
-            mail(to: 'user@example.com')
+    describe 'route helpers' do
+      let(:route_map) do
+        {
+          'billing' => { controller: 'BillingController', action: 'show', path: '/billing', verb: 'GET' },
+          'base' => { controller: 'BaseController', action: 'show', path: '/base', verb: 'GET' },
+          'generate_utm' => { controller: 'UtmController', action: 'create', path: '/utm', verb: 'POST' }
+        }
+      end
+
+      def route_dependencies(source)
+        mailer = build_mailer(name: 'LedgerMailer', actions: %w[statement])
+        create_file('app/mailers/ledger_mailer.rb', source)
+        extractor = described_class.new
+        extractor.instance_variable_set(:@route_helper_map, route_map)
+
+        extractor.extract_mailer(mailer).dependencies.reject { |dep| %i[model service].include?(dep[:type]) }
+      end
+
+      before do
+        Woods.configure unless Woods.configuration
+        allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+      end
+
+      it 'targets the controller a live named route dispatches to' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @url = billing_url(token: 'abc')
+              mail(to: 'reader@example.com')
+            end
           end
-        end
-      RUBY
+        RUBY
 
-      mailer = build_mailer(name: 'UserMailer', actions: %w[welcome_email])
-      create_file('app/mailers/user_mailer.rb', source)
+        expect(deps).to eq([{ type: :controller, target: 'BillingController', via: :link_to }])
+      end
 
-      unit = described_class.new.extract_mailer(mailer)
+      it 'records no edge for a helper name with no live route' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @url = confirmation_url(token: 'abc')
+              mail(to: 'reader@example.com')
+            end
+          end
+        RUBY
 
-      route_deps = unit.dependencies.select { |d| d[:type] == :route }
-      targets = route_deps.map { |d| d[:target] }
-      expect(targets).to include('confirmation')
-      expect(targets).to include('edit_user')
+        expect(deps).to be_empty
+      end
+
+      it 'does not read a keyword argument ending in _url as a route helper' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @link = Shortener.new(base_url: params[:host], asset_path: 'x').call
+              mail(to: 'reader@example.com')
+            end
+          end
+        RUBY
+
+        expect(deps).to be_empty
+      end
+
+      it 'does not read a method the mailer defines as a route helper' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @link = generate_utm_url('statement')
+              mail(to: 'reader@example.com')
+            end
+
+            private
+
+            def generate_utm_url(campaign)
+              "https://example.com/?utm_campaign=\#{campaign}"
+            end
+          end
+        RUBY
+
+        expect(deps).to be_empty
+      end
     end
   end
 

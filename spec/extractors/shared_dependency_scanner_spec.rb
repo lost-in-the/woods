@@ -447,6 +447,29 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result).to include(a_hash_including(target: 'PostsController', via: :link_to))
     end
 
+    it 'ignores a keyword label that ends in _path or _url' do
+      result = nav_scanner.scan_navigation_dependencies('build(posts_url: host, users_path: root)')
+      expect(result).to be_empty
+    end
+
+    it 'keeps a helper compared with a scope-resolved constant' do
+      result = nav_scanner.scan_navigation_dependencies('posts_path::SEGMENT')
+      expect(result).to include(a_hash_including(target: 'PostsController'))
+    end
+
+    it 'ignores a method the source defines, at its definition and its calls' do
+      source = <<~RUBY
+        def posts_url(extra)
+          "\#{extra}"
+        end
+
+        def self.users_path = '/'
+
+        mail(body: posts_url('x') + users_path)
+      RUBY
+      expect(nav_scanner.scan_navigation_dependencies(source)).to be_empty
+    end
+
     it 'finds _url route helpers' do
       source = 'redirect_to posts_url'
       result = nav_scanner.scan_navigation_dependencies(source)
