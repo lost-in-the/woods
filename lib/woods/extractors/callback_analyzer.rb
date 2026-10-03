@@ -42,17 +42,24 @@ module Woods
       # SecureRandom.uuid` in a before_create is arguably the most common
       # callback body in Rails and reported no write at all (EXTA-6). The
       # lookahead rejects `==` (comparison) and `=~` (regex match), the
-      # latter having been read as a write.
-      SELF_ASSIGNMENT_PATTERN = %r{self\.(\w+)\s*(?:\|\||&&|[+\-*/])?=(?!=|~)}
+      # latter having been read as a write. The word and the space after it
+      # are possessive: neither can end anywhere but where it does.
+      SELF_ASSIGNMENT_PATTERN = %r{self\.(\w++)\s*+(?:\|\||&&|[+\-*/])?=(?!=|~)}
 
-      # Pre-compiled regex patterns (avoid dynamic regex construction in hot loops)
+      # Pre-compiled regex patterns (avoid dynamic regex construction in hot
+      # loops). One whitespace run per side of the optional paren:
+      # `\s*\(?\s*` let both runs split the same spaces, quadratic without
+      # the Ruby 3.2+ match cache.
       SINGLE_COLUMN_WRITER_PATTERNS = SINGLE_COLUMN_WRITERS.to_h do |w|
-        [w, /\b#{Regexp.escape(w)}\s*\(?\s*[:'"](\w+)/]
+        [w, /\b#{Regexp.escape(w)}\s*+(?:\(\s*+)?[:'"](\w+)/]
       end.freeze
 
       MULTI_COLUMN_WRITER_PATTERNS = MULTI_COLUMN_WRITERS.to_h do |w|
-        [w, /\b#{Regexp.escape(w)}\s*\(([^)]+)\)/m]
+        [w, /\b#{Regexp.escape(w)}\s*+\(([^)]++)\)/m]
       end.freeze
+
+      # A `name:` key inside a multi-column writer's argument list.
+      KEYWORD_PATTERN = /\b(\w++)\s*+:(?!:)/
 
       DB_READ_PATTERNS = DB_READ_METHODS.to_h do |m|
         [m, /\.#{Regexp.escape(m)}\b/]
@@ -136,12 +143,14 @@ module Woods
 
       private
 
-      # Parse source code safely, returning nil on failure.
+      # Parse source code safely, returning nil on failure. Source nested
+      # deeper than the stack can follow (a constant path thousands of
+      # segments long) counts as a failure, not a crash.
       #
       # @return [Ast::Node, nil]
       def safe_parse
         @parser.parse(@source_code)
-      rescue StandardError
+      rescue StandardError, SystemStackError
         nil
       end
 
@@ -226,15 +235,28 @@ module Woods
         end
 
         # Pattern: update_columns(col: ...) / assign_attributes(col: ...)
+        closable = closable_source(method_source)
         MULTI_COLUMN_WRITER_PATTERNS.each_value do |pattern|
-          method_source.scan(pattern).each do |match|
-            match[0].scan(/\b(\w+)\s*:(?!:)/).flatten.each do |col|
+          closable.scan(pattern).each do |match|
+            match[0].scan(KEYWORD_PATTERN).flatten.each do |col|
               columns << col if @column_names.include?(col)
             end
           end
         end
 
         columns.to_a.sort
+      end
+
+      # The source up to its last closing paren. An argument list can only
+      # close there or earlier, and past it every unclosed `update_columns(`
+      # would be read to the end of the method before failing: quadratic in
+      # a body that repeats one.
+      #
+      # @param method_source [String]
+      # @return [String]
+      def closable_source(method_source)
+        last = method_source.rindex(')')
+        last ? method_source[0..last] : ''
       end
 
       # Detect jobs enqueued by the callback method.

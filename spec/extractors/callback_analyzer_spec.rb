@@ -562,6 +562,34 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
     end
   end
 
+  describe 'column writers written with spacing or left unclosed' do
+    def columns_written(body)
+      source = "class User\n  def touch_up\n#{body}\n  end\nend\n"
+      build_analyzer(source).analyze(make_callback(filter: 'touch_up'))[:side_effects][:columns_written]
+    end
+
+    it 'reads a single-column writer with or without parentheses and spaces' do
+      expect(columns_written('    update_column :status, 1')).to eq(['status'])
+      expect(columns_written('    update_column( :status, 1)')).to eq(['status'])
+      expect(columns_written('    write_attribute  :name, value')).to eq(['name'])
+    end
+
+    it 'reads a closed multi-column writer and ignores the text after the last closing paren' do
+      body = "    update_columns(status: 1, name: 'x')\n    words = %w[assign_attributes( role: ]\n"
+
+      expect(columns_written(body)).to eq(%w[name status])
+    end
+
+    it 'reads a multi-column writer whose arguments span lines' do
+      expect(columns_written("    update_columns(\n      status: 1,\n      role: 2\n    )")).to eq(%w[role status])
+    end
+
+    it 'reads compound self assignments and rejects comparisons' do
+      expect(columns_written("    self.status ||= 1\n    self.name += 'x'\n    self.role == 2\n    self.email =~ /x/"))
+        .to eq(%w[name status])
+    end
+  end
+
   # ── Per-node analysis ──────────────────────────────────────────
 
   describe '#method_effects' do
