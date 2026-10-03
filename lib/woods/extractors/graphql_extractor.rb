@@ -909,13 +909,15 @@ module Woods
         resolution.target
       end
 
-      # Application source, or an ActiveRecord model a gem ships (an engine
-      # model is extracted even though no application file defines it).
+      # Application source, a constant Ruby cannot place, or an ActiveRecord
+      # model a gem ships (an engine model is extracted even though no
+      # application file defines it).
       #
       # @param resolution [ConstantPaths::Resolution]
       # @return [Boolean]
       def indexable_constant?(resolution)
-        return true if app_source?(resolution.source_file, Rails.root.to_s)
+        return false if resolution.builtin
+        return true if resolution.source_file.nil? || app_source?(resolution.source_file, Rails.root.to_s)
 
         defined?(ActiveRecord::Base) && resolution.value.is_a?(Class) && resolution.value < ActiveRecord::Base
       end

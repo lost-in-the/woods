@@ -23,9 +23,10 @@ module Woods
 
       # +status+ is +:resolved+ for a loaded class or module, +:value+ for any
       # other constant, +:unresolved+ when nothing loaded answers to the path.
-      # +source_file+ is nil for a constant no Ruby file defines.
+      # +source_file+ is the Ruby file defining a resolved constant, nil when
+      # Ruby reports none; +builtin+ marks one the interpreter itself defines.
       # +value+ is the resolved class or module itself.
-      Resolution = Struct.new(:target, :status, :source_file, :value, keyword_init: true)
+      Resolution = Struct.new(:target, :status, :source_file, :builtin, :value, keyword_init: true)
 
       # The mixin module ActiveSupport::Concern extends onto an including class.
       CLASS_METHODS_SUFFIX = '::ClassMethods'
@@ -82,11 +83,18 @@ module Woods
         result = aliased(path, nesting, lookup) || result if result[:reason] == 'constant_alias'
 
         case result[:status] == :resolved ? :resolved : result[:reason]
-        when :resolved then Resolution.new(target: result[:target], status: :resolved, value: result[:value],
-                                           source_file: source_file(result[:target]))
-        when 'non_module_constant' then Resolution.new(target: normalize(path), status: :value)
-        else Resolution.new(target: normalize(path), status: :unresolved)
+        when :resolved then resolved(result)
+        when 'non_module_constant' then Resolution.new(target: normalize(path), status: :value, builtin: false)
+        else Resolution.new(target: normalize(path), status: :unresolved, builtin: false)
         end
+      end
+
+      # @return [Resolution]
+      def resolved(result)
+        location = source_location(result[:target])
+        file = location&.first
+        Resolution.new(target: result[:target], status: :resolved, value: result[:value],
+                       source_file: (file if file.is_a?(String)), builtin: location == [])
       end
 
       # A scope that is not loaded declares no constants to find.
@@ -108,10 +116,12 @@ module Woods
         lookup.call("::#{canonical}", allow_private: true) if canonical
       end
 
-      # @return [String, nil] the Ruby file defining +target+
-      def source_file(target)
-        file = CONST_SOURCE_LOCATION.bind(Object).call(target)&.first
-        file if file.is_a?(String)
+      # An empty location is a constant the interpreter defines. Ruby 3.1 can
+      # also answer `[false, 0]` for a constant it cannot place.
+      #
+      # @return [Array, nil] where +target+ is defined, as Ruby reports it
+      def source_location(target)
+        CONST_SOURCE_LOCATION.bind(Object).call(target)
       rescue NameError
         nil
       end
@@ -199,7 +209,7 @@ module Woods
         found
       end
 
-      private_class_method :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
+      private_class_method :resolved, :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
                            :constant_node?, :constant?, :token_references
     end
   end

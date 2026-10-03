@@ -187,5 +187,11 @@ RSpec.describe Woods::Extractors::ConstantPaths do
         .to end_with('lib/woods/extractors/constant_paths.rb')
       expect(described_class.resolve('String', []).source_file).to be_nil
     end
+
+    it 'marks a constant the interpreter defines, and only that, as builtin' do
+      expect(described_class.resolve('String', []).builtin).to be(true)
+      expect(described_class.resolve('Woods::Extractors::ConstantPaths', []).builtin).to be(false)
+      expect(described_class.resolve('Missing::Ledger', []).builtin).to be(false)
+    end
   end
 end

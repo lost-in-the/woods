@@ -993,6 +993,24 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
           )
         end
 
+        it 'keeps an edge to a loaded constant whose definition site is unknown' do
+          allow(Woods::Extractors::ConstantPaths).to receive(:source_location).and_call_original
+          allow(Woods::Extractors::ConstantPaths).to receive(:source_location)
+            .with('R2Types::Types::CrateType').and_return([false, 0])
+
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  field :crate, CrateType, null: true
+                end
+              end
+            end
+          RUBY
+
+          expect(deps.map { |dep| dep[:target] }).to eq(%w[R2Types::Types::BaseType R2Types::Types::CrateType])
+        end
+
         it 'emits no edge for a value constant or an alias of a constant outside the application' do
           deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
             module R2Types
