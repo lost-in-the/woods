@@ -27,7 +27,7 @@ RSpec.describe Woods::InputRules do
        config/routes.rb db/views/posts_v01.sql].each do |path|
       expect(rules.action(path)).to eq(:incremental), path
     end
-    %w[README.md docs/guide.md tmp/output.json spec/README.md vendor/package.yml].each do |path|
+    %w[NOTES.md notes/guide.md tmp/output.json spec/README.md vendor/package.yml].each do |path|
       expect(rules.action(path)).to eq(:ignore), path
     end
   end

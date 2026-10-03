@@ -52,6 +52,7 @@ require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/database_table_extractor'
 require_relative 'extractors/external_consumer_extractor'
+require_relative 'extractors/doc_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -72,6 +73,7 @@ require_relative 'module_reconciliation'
 require_relative 'poro_reconciliation'
 require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
+require_relative 'doc_references'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -92,6 +94,7 @@ module Woods
     include FilenameUtils
     include Extractors::SourceNesting
     include SourceReferences::Extraction
+    include DocReferences::Extraction
     include ModuleReconciliation
     include PoroReconciliation
 
@@ -160,7 +163,8 @@ module Woods
       libs: Extractors::LibExtractor,
       packages: Extractors::PackageExtractor,
       graphql_operations: Extractors::GraphQLOperationExtractor,
-      config_files: Extractors::ConfigFileExtractor
+      config_files: Extractors::ConfigFileExtractor,
+      docs: Extractors::DocExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -220,7 +224,8 @@ module Woods
       graphql_operation: :graphql_operations,
       config_file: :config_files,
       # RouteExtractor emits a route_file unit per draw file beside its routes.
-      route_file: :routes
+      route_file: :routes,
+      doc: :docs
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -247,7 +252,8 @@ module Woods
       test_mapping: :extract_test_file,
       poro: :extract_poro_units,
       lib: :extract_lib_file,
-      config_file: :extract_config_file
+      config_file: :extract_config_file,
+      doc: :extract_doc_file
     }.freeze
 
     # GraphQL types all use the same extractor method.
@@ -521,6 +527,7 @@ module Woods
       # registration copies metadata[:package] onto the node (#280).
       profile_phase('package annotation') { annotate_packages }
       profile_phase('source references') { enrich_source_references_full }
+      profile_phase('doc references') { enrich_doc_references_full }
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
@@ -709,6 +716,7 @@ module Woods
 
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
+      touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
       touched.merge(finalize_incremental_unit_json(affected_types).to_a)
 
       # Regenerate type indexes for affected types
@@ -776,6 +784,7 @@ module Woods
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
+      touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
       touched.merge(finalize_incremental_unit_json(affected_types).to_a)
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")

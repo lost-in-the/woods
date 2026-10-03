@@ -139,7 +139,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'returns nothing for a path no extractor claims' do
-      expect(keys_for('README.md')).to be_empty
+      expect(keys_for('NOTES.md')).to be_empty
       expect(keys_for('config/routes.rb')).to be_empty
     end
 
@@ -550,7 +550,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'rejects paths no extractor cares about' do
-      expect(dispatcher).not_to be_relevant('README.md')
+      expect(dispatcher).not_to be_relevant('NOTES.md')
       expect(dispatcher).not_to be_relevant('app/assets/stylesheets/application.css')
       expect(dispatcher).not_to be_relevant('.github/workflows/ci.yml')
     end
