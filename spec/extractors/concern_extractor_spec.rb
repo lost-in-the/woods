@@ -621,6 +621,26 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(extend_dep[:type]).to eq(:concern)
     end
 
+    it 'strips a leading :: from included and extended modules' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          extend ::ActiveSupport::Concern
+          include ::Depot::Weighable
+          extend ::Depot::Countable
+
+          def stack; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :extend }]
+      )
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable])
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable

@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -284,6 +285,7 @@ module Woods
       # @return [Array<String>] Module names
       def detect_included_modules(source)
         source.scan(/(?:include|extend)\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -295,6 +297,7 @@ module Woods
       # @return [Array<String>] Included module names
       def detect_includes(source)
         source.scan(/\binclude\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -306,6 +309,7 @@ module Woods
       # @return [Array<String>] Extended module names
       def detect_extends(source)
         source.scan(/\bextend\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 

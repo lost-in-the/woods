@@ -7,6 +7,7 @@ require_relative '../ast/parser'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -587,7 +588,7 @@ module Woods
           {
             name: assoc.name,
             type: assoc.macro, # :belongs_to, :has_many, :has_one, :has_and_belongs_to_many
-            target: assoc.class_name,
+            target: ConstantPaths.normalize(assoc.class_name),
             options: extract_association_options(assoc),
             through: assoc.options[:through],
             through_db: through_association_database(assoc),
@@ -746,7 +747,7 @@ module Woods
         # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
           via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
-          dep = { type: :model, target: assoc.class_name, via: via }
+          dep = { type: :model, target: ConstantPaths.normalize(assoc.class_name), via: via }
           if assoc.options[:through]
             dep[:through] = assoc.options[:through].to_s
             through_db = through_association_database(assoc)

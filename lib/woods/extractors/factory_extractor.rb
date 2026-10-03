@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'line_neutralizer'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -191,7 +192,7 @@ module Woods
         options = {}
 
         if (class_match = line.match(/\bclass:\s*['"]?([\w:]+)['"]?/))
-          options[:class_name] = class_match[1]
+          options[:class_name] = ConstantPaths.normalize(class_match[1])
         end
 
         if (parent_match = line.match(/\bparent:\s*:(\w+)/))

@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative '../source_references/runtime_lookup'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -414,7 +415,7 @@ module Woods
 
         # Other serializers referenced (e.g., `serializer: CommentSerializer`)
         source.scan(/(?:serializer|blueprint):\s*([\w:]+)/).flatten.uniq.each do |serializer|
-          deps << { type: :serializer, target: serializer, via: :serialization }
+          deps << { type: :serializer, target: ConstantPaths.normalize(serializer), via: :serialization }
         end
 
         deps.concat(scan_service_dependencies(source))

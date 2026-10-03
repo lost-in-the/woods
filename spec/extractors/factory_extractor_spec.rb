@@ -123,6 +123,23 @@ RSpec.describe Woods::Extractors::FactoryExtractor do
       expect(units.first.metadata[:model_class]).to eq('Admin::User')
     end
 
+    it 'strips a leading :: from the class option' do
+      path = create_file('spec/factories/crates.rb', <<~RUBY)
+        factory :crate, class: '::Depot::Crate' do
+        end
+        factory :pallet, class: ::Depot::Pallet do
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+
+      expect(units.map { |unit| unit.metadata[:model_class] }).to eq(%w[Depot::Crate Depot::Pallet])
+      expect(units.flat_map(&:dependencies)).to include(
+        { type: :model, target: 'Depot::Crate', via: :factory_for },
+        { type: :model, target: 'Depot::Pallet', via: :factory_for }
+      )
+    end
+
     it 'captures traits' do
       path = create_file('spec/factories/users.rb', <<~RUBY)
         factory :user do

@@ -113,6 +113,7 @@ module Woods
       # Extract string-literal arguments passed to `.constantize` or
       # `const_get(...)`. Matches both `"Library::Book".constantize`
       # and `Object.const_get("Library::Book")` / `const_get("...")`.
+      # A leading `::` names the same constant and is not part of the target.
       # Only returns names actually present in {ModelNameCache.model_names}
       # so non-model uses (e.g. `"String".constantize` in infra code) do
       # not produce ghost edges.
@@ -126,10 +127,10 @@ module Woods
         return [] if known.empty?
 
         targets = []
-        source.scan(/(["'])([A-Z][\w:]*)\1\s*\.\s*constantize\b/) do |_quote, name|
+        source.scan(/(["'])(?:::)?([A-Z][\w:]*+)\1\s*\.\s*constantize\b/) do |_quote, name|
           targets << name if known.include?(name)
         end
-        source.scan(/const_get\s*\(\s*(["'])([A-Z][\w:]*)\1/) do |_quote, name|
+        source.scan(/const_get\s*\(\s*(["'])(?:::)?([A-Z][\w:]*+)\1/) do |_quote, name|
           targets << name if known.include?(name)
         end
         targets

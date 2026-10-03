@@ -1258,6 +1258,15 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(deps.map { |d| d[:via] }).not_to include(:polymorphic_interface)
     end
 
+    it 'strips a leading :: from an association edge target' do
+      rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
+                                         class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(rooted), nil)
+
+      expect(deps).to eq([{ type: :model, target: 'Depot::CrateVersion', via: :has_many }])
+    end
+
     it 'distinguishes polymorphic and normal associations on the same model' do
       poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
                                           class_name: 'Commentable', polymorphic?: true, options: {})
@@ -1516,6 +1525,15 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(associations[0]).to include(name: :account, from_db: 'billing', to_db: 'primary', disable_joins: false)
       expect(associations[1]).to include(name: :plans, from_db: 'billing', to_db: 'primary', disable_joins: true)
       expect(associations[1][:options]).to include(through: :account, disable_joins: true)
+    end
+
+    it 'strips a leading :: from an association class_name' do
+      model = stub_bare_model('Invoice')
+      allow(model).to receive(:reflect_on_all_associations).and_return(
+        [reflection(name: :versions, macro: :has_many, class_name: '::Depot::CrateVersion')]
+      )
+
+      expect(extractor.send(:extract_associations, model).first[:target]).to eq('Depot::CrateVersion')
     end
 
     it 'leaves to_db nil for a polymorphic association' do

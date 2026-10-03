@@ -240,6 +240,18 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
       expect(serializer_deps).to all(include(via: :serialization))
     end
 
+    it 'strips a leading :: from a referenced serializer' do
+      path = create_file('app/serializers/crate_serializer.rb', <<~RUBY)
+        class CrateSerializer < ActiveModel::Serializer
+          has_many :labels, serializer: ::Depot::LabelSerializer
+        end
+      RUBY
+
+      unit = described_class.new.extract_serializer_file(path)
+
+      expect(unit.dependencies).to include({ type: :serializer, target: 'Depot::LabelSerializer', via: :serialization })
+    end
+
     it 'detects service dependencies' do
       path = create_file('app/serializers/order_serializer.rb', <<~RUBY)
         class OrderSerializer < ActiveModel::Serializer
