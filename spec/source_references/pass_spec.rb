@@ -160,6 +160,39 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect { run_pass }.to raise_error(Woods::ExtractionError, /parse/)
   end
 
+  context 'with a job unit as the caller' do
+    let(:sources) do
+      {
+        'app/models/import_manager.rb' => <<~RUBY,
+          class ImportManager
+            def perform(id) = LedgerRate.for(ShipmentPlanner.new(id), WidgetCatalog)
+          end
+        RUBY
+        'app/models/ledger_rate.rb' => 'class LedgerRate; end',
+        'app/services/shipment_planner.rb' => 'class ShipmentPlanner; end',
+        'lib/widget_catalog.rb' => 'class WidgetCatalog; end'
+      }
+    end
+    let(:units) do
+      [unit('ImportManager', 'app/models/import_manager.rb', 'job'),
+       unit('LedgerRate', 'app/models/ledger_rate.rb', 'poro'),
+       unit('ShipmentPlanner', 'app/services/shipment_planner.rb', 'service'),
+       unit('WidgetCatalog', 'lib/widget_catalog.rb', 'lib')]
+    end
+
+    before do
+      %w[ImportManager LedgerRate ShipmentPlanner WidgetCatalog].each { |name| stub_const(name, Class.new) }
+    end
+
+    it 'adds resolved edges to the job unit like any other caller' do
+      expect(run_pass.dependencies.fetch(%w[job ImportManager])).to contain_exactly(
+        { 'type' => 'lib', 'target' => 'WidgetCatalog', 'via' => 'code_reference' },
+        { 'type' => 'poro', 'target' => 'LedgerRate', 'via' => 'code_reference' },
+        { 'type' => 'service', 'target' => 'ShipmentPlanner', 'via' => 'code_reference' }
+      )
+    end
+  end
+
   context 'with plain validator objects as targets' do
     let(:sources) do
       {
