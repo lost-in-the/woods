@@ -342,6 +342,19 @@ step before it.
    when its target becomes indexed. Parsing is reused only when the captured
    source identity still matches.
 
+9. **Reconcile documentation references.** Every published `doc` unit's
+   mentions and links are resolved again against the complete typed unit
+   registry, the same resolver a full extraction uses. A document whose edges
+   or `resolved` flags changed is rewritten and its targets' reverse
+   relationships refreshed; one that did not is left untouched, so a run that
+   changes nothing a document names publishes nothing. Like step 8, the
+   rewrite is not an extraction and keeps the unit's timestamp and Git facts.
+   See [DocExtractor](EXTRACTOR_REFERENCE.md#docextractor).
+
+Documentation units are outside the blast radius: a code change never
+re-extracts the documents that mention it, because a document's own content
+does not depend on that code. Step 9 is what keeps their edges current.
+
 Git enrichment uses the same eligibility checks in full and incremental runs:
 existing app-owned files under `Rails.root`, excluding `vendor/`, `node_modules/`,
 and framework/gem source units. Each typed unit resolves its own file history,
@@ -412,6 +425,7 @@ automatically.
 | `db/migrate/*.rb` (top level only) | migrations |
 | `lib/**/*.rb` (outside `tasks/` and generator templates) | libs |
 | `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings (that file's unit; see the wholesale triggers below) |
+| `config.documentation_paths` (default `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md`) | docs |
 
 A path can match several rules, `app/policies` is claimed by both
 `PolicyExtractor` and `PunditExtractor`, `app/decorators` by both the
@@ -714,13 +728,18 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, every `config.rake_task_paths` file and the Ruby under its directories (`rake/**` by default), `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, every `config.rake_task_paths` file and the Ruby under its directories (`rake/**` by default), `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture, and Markdown under `config.documentation_paths` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:reextract` (from configuration) | `.rb` files under `config.test_support_paths` outside `spec/` and `test/`, such as `features/support/**` | Test support is read as bytes. The defaults are already under `spec/` and `test/`. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:restart` (daemon, from its own boot) | Ruby under `config/` the watch daemon's process loaded at boot | Only the booted process knows which helpers it required; the classifier ignores generic `config/*.rb` so a fresh-process hook does not restart over files nothing loads (F3). |
 | `:ignore` | everything else | Not extraction input. |
+
+Documentation Markdown is the one class whose paths are configurable. A process
+that has loaded the extractors (the watch daemon, the rake tasks) classifies it
+from `config.documentation_paths`; a process that has not classifies the
+default roots.
 
 The watch daemon applies two escalations on top of this table: a `:reload`
 path becomes `:restart` when the app cannot reload (`config.enable_reloading =

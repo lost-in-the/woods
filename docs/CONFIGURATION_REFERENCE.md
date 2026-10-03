@@ -745,6 +745,7 @@ Leave it at its default. The full list of what always runs:
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
 | `:config_files` | ConfigFileExtractor | YAML configuration and data files (key structure only) |
+| `:docs` | DocExtractor | Markdown documentation (`documentation_paths`) |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
@@ -1176,6 +1177,43 @@ dispatch with the current entries, and tasks indexed under the old ones stay
 until a rake file changes or `woods:extract` runs. The plugin's shell predicate
 is generated from the defaults; a custom directory is still picked up by
 `woods:incremental` and the watch daemon.
+
+### Documentation paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `documentation_paths` | Array&lt;String&gt; | `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md` | Globs, relative to `Rails.root`, that `DocExtractor` indexes as `doc` units. |
+| `documentation_exclude` | Array&lt;String&gt; | `**/CHANGELOG*.md`, `**/node_modules/**/*`, `**/vendor/**/*`, `doc/api/**/*`, `docs/api/**/*` | Globs removed from `documentation_paths`. |
+| `retrieve_documentation` | Boolean | `true` | Whether retrieval returns `doc` units when the caller gives no `types:` filter. |
+
+```ruby
+Woods.configure do |config|
+  config.documentation_paths += ['handbook/**/*.md']
+  config.documentation_exclude += ['docs/archive/**/*']
+  config.retrieve_documentation = false
+end
+```
+
+Use `documentation_paths = []` to index no documentation. Both setters reject a
+value that is not an Array and any entry that is not a non-empty, relative glob
+without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
+
+Hidden directories are not read, with three exceptions: `.claude/rules`,
+`.claude/skills` and `.github`. Source capture and the watch daemon walk those
+three and no other dot directory, so `documentation_paths` refuses a glob under
+any other one. Directories the watcher ignores (`node_modules`, `tmp`, `log`,
+`coverage`, `vendor/bundle`) are never indexed either.
+
+With `retrieve_documentation = false`, `doc` units are excluded from retrieval
+by default, like `test_mapping` units, and a caller reaches them with
+`types: ["doc"]`. An MCP server started without the host initializer takes the
+same switch from `WOODS_RETRIEVE_DOCUMENTATION=0`, which wins over the
+configuration value.
+
+**Changing `documentation_paths` or `documentation_exclude` needs a full
+extraction.** Neither is part of any incremental fingerprint. The plugin's
+change hook and a process that has not loaded Woods' extractors recognize the
+default roots only; the watch daemon and the rake tasks use the configured ones.
 
 ## Console MCP options
 
