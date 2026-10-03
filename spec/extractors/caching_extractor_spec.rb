@@ -641,12 +641,122 @@ RSpec.describe Woods::Extractors::CachingExtractor do
     end
   end
 
+  # ── Comments ─────────────────────────────────────────────────────────
+
+  # Commented-out code never runs, so a cache call inside a comment is not a
+  # cache call. Each engine's comment forms are blanked before scanning.
+  describe 'commented-out cache calls' do
+    def extract(relative, source)
+      described_class.new.extract_caching_file(create_file(relative, source))
+    end
+
+    def types(relative, source)
+      extract(relative, source).metadata[:cache_calls].map { |c| c[:type] }
+    end
+
+    it 'ignores ERB comment tags, including multi-line ones' do
+      unit = extract('app/views/widgets/index.html.erb', <<~ERB)
+        <%# cache @widgets do %>
+        <%#
+          cache [@widget, 'v1'] do
+        %>
+        <p>no cache</p>
+      ERB
+
+      expect(unit).to be_nil
+    end
+
+    it 'ignores Ruby comments inside ERB code tags' do
+      expect(extract('app/views/widgets/index.html.erb', "<% # cache @widgets do %>\n")).to be_nil
+    end
+
+    it 'keeps a real ERB call next to a commented one' do
+      expect(types('app/views/widgets/index.html.erb', <<~ERB)).to eq([:fragment])
+        <%# cache @old do %>
+        <% cache [@widget, 'v1'] do %>
+        <% end %>
+      ERB
+    end
+
+    it 'ignores a HAML silent comment and its indented block' do
+      expect(types('app/views/widgets/index.html.haml', <<~HAML)).to eq([:fragment])
+        -# cache @old do
+        -#
+          - cache @older do
+            = render @older
+
+          - cache @oldest do
+        - cache [@widget, 'v1'] do
+          = render @widget
+        - # cache @ruby_comment do
+      HAML
+    end
+
+    it 'ignores Ruby line comments and =begin blocks in a model' do
+      unit = extract('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          # Rails.cache.fetch("ledger/old") { compute }
+          # "\#{cache_key}/archived"
+        =begin
+          Rails.cache.write("ledger/older", 1)
+          caches_action :show
+        =end
+          def total = compute
+        end
+      RUBY
+
+      expect(unit).to be_nil
+    end
+
+    it 'keeps a real Ruby call before a trailing comment' do
+      expect(types('app/models/ledger.rb', <<~RUBY)).to eq([:fetch])
+        class Ledger
+          def total = Rails.cache.fetch("ledger/total") { compute } # Rails.cache.read("ledger/x")
+        end
+      RUBY
+    end
+
+    it 'ignores commented jbuilder cache blocks' do
+      expect(types('app/views/widgets/show.json.jbuilder', <<~JBUILDER)).to eq([:fragment])
+        # json.cache! ['old', widget] do
+        json.cache! ['v2', widget] do
+          json.id widget.id
+        end
+      JBUILDER
+    end
+
+    it 'leaves a commented caches_action out of the strategy' do
+      unit = extract('app/controllers/widgets_controller.rb', <<~RUBY)
+        class WidgetsController
+          # caches_action :index
+          def index = Rails.cache.fetch("widgets") { load }
+        end
+      RUBY
+
+      expect(unit.metadata[:cache_strategy]).to eq(:low_level)
+    end
+
+    it 'reads the right key after a multibyte comment' do
+      calls = extract('app/views/widgets/show.html.haml', <<~HAML).metadata[:cache_calls]
+        -# Ünïcødé ☃ cache @old do
+        - cache [@widget, "☃"] do
+          %p hi
+      HAML
+
+      expect(calls).to eq([{ type: :fragment, key_pattern: '[@widget, "☃"]', ttl: nil, options: {} }])
+    end
+  end
+
   # ── Adversarial input complexity ─────────────────────────────────────
 
   # Every scan must stay linear. Ruby 3.2+ fails a slow match through
   # Regexp.timeout; older Rubies (no regex memoization, the real exposure)
   # rely on the wall-clock budget.
   describe 'adversarial input complexity' do
+    # Only this extractor's own scans are timed here. The shared dependency
+    # scan has its own budget in dependency_scan_complexity_spec.rb.
+    before { allow_any_instance_of(described_class).to receive(:extract_dependencies).and_return([]) }
+
     def within_budget(&block)
       return Timeout.timeout(5, &block) unless Regexp.respond_to?(:timeout=)
 
@@ -697,6 +807,33 @@ RSpec.describe Woods::Extractors::CachingExtractor do
 
       unit = within_budget { described_class.new.extract_caching_file(path, :view) }
       expect(unit.metadata[:cache_calls].map { |c| c[:type] }.uniq).to eq([:fragment])
+    end
+
+    erb_call = "\n<% cache @w do %>"
+    haml_call = "- cache @w do\n"
+    {
+      'ERB comment tags' => ['app/views/w/a.html.erb', '<%# cache @w do %>' * repeats, erb_call],
+      'ERB tags opening on blanks' => ['app/views/w/b.html.erb', "<% #{' ' * repeats}x %>" * 3, erb_call],
+      'ERB tag openers' => ['app/views/w/c.html.erb', '<% ' * repeats, "%>#{erb_call}"],
+      'HAML silent comment blocks' => ['app/views/w/d.html.haml', "-# c\n  - cache @w do\n" * 10_000, haml_call],
+      'HAML deep indentation' => ['app/views/w/e.html.haml', "-#\n#{' ' * repeats}- cache @w do\n", haml_call],
+      'Ruby comment lines' => ['app/models/w.rb', "# Rails.cache.fetch('k') { 1 }\n" * repeats,
+                               "Rails.cache.fetch('k') { 1 }\n"],
+      '=begin blocks' => ['app/models/x.rb', "=begin\nRails.cache.read('k')\n=end\n" * 10_000,
+                          "Rails.cache.read('k')\n"]
+    }.each do |label, (relative, noise, call)|
+      it "blanks comments in linear time: #{label}" do
+        path = create_file(relative, noise + call)
+
+        unit = within_budget { described_class.new.extract_caching_file(path) }
+        expect(unit.metadata[:cache_calls].size).to eq(1)
+      end
+    end
+
+    it 'blanks an unclosed ERB comment tag to the end of the file in linear time' do
+      path = create_file('app/views/w/f.html.erb', "#{'<%# ' * repeats}\n<% cache @w do %>")
+
+      expect(within_budget { described_class.new.extract_caching_file(path) }).to be_nil
     end
 
     it 'finds the end of an ERB tag in linear time' do

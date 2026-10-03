@@ -6,6 +6,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'template_extensions'
 require_relative 'cache_call_arguments'
+require_relative 'comment_blanking'
 
 module Woods
   module Extractors
@@ -101,8 +102,10 @@ module Woods
       # @return [ExtractedUnit, nil] The unit or nil if no cache usage
       def extract_caching_file(file_path, file_type = nil)
         source = File.read(file_path)
+        # Cache calls are read from the code only: commented-out calls never run.
+        code = CommentBlanking.blank(source, file_path)
 
-        return nil unless cache_usage?(source)
+        return nil unless cache_usage?(code)
 
         file_type ||= infer_file_type(file_path)
         identifier = relative_path(file_path)
@@ -115,7 +118,7 @@ module Woods
 
         unit.namespace   = nil
         unit.source_code = annotate_source(source, identifier, file_type)
-        unit.metadata    = extract_metadata(source, file_type)
+        unit.metadata    = extract_metadata(source, code, file_type)
         unit.dependencies = extract_dependencies(source)
 
         unit
@@ -166,14 +169,15 @@ module Woods
 
       # Build the metadata hash for a caching unit.
       #
-      # @param source [String] Source code
+      # @param source [String] Source code, for the line count
+      # @param code [String] Source with comments blanked, for cache calls
       # @param file_type [Symbol] :controller, :model, or :view
       # @return [Hash] Caching metadata
-      def extract_metadata(source, file_type)
-        cache_calls = extract_cache_calls(source)
+      def extract_metadata(source, code, file_type)
+        cache_calls = extract_cache_calls(code)
         {
           cache_calls: cache_calls,
-          cache_strategy: infer_cache_strategy(source, cache_calls),
+          cache_strategy: infer_cache_strategy(code, cache_calls),
           file_type: file_type,
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
         }

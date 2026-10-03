@@ -883,6 +883,7 @@ namespace.
 **Key details:**
 - Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`, derived from `ViewTemplateExtractor::ENGINES`, so a newly registered engine is scanned too). Slim views are not scanned.
 - Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
+- Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependencies are still scanned from the full source, as in every other extractor.
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
 - Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
   - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
