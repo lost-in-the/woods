@@ -665,6 +665,140 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
     end
   end
 
+  # ── Test support references ─────────────────────────────────────────
+
+  describe 'test support references' do
+    before do
+      create_file('spec/support/shared/pages.rb', <<~RUBY)
+        RSpec.shared_examples "an accessible page" do |exclusions: []|
+        end
+        RSpec.shared_examples 'a paginated list' do
+        end
+      RUBY
+      create_file('spec/support/billing_stubs.rb', "RSpec.shared_context 'with billing stubs' do\nend\n")
+      create_file('spec/support/matchers/combobox.rb', "RSpec::Matchers.define :have_combobox do |label|\nend\n")
+      create_file('spec/support/analytics_helpers.rb',
+                  "module AnalyticsHelpers\n  def expect_tracked(name) = true\nend\n")
+    end
+
+    def support_edges(unit)
+      unit.dependencies.select { |dep| dep[:type] == :test_support }
+    end
+
+    it 'links every shared example form to the file that defines the examples' do
+      path = create_file('spec/features/widgets_spec.rb', <<~RUBY)
+        RSpec.feature 'Widgets' do
+          it_behaves_like "an accessible page"
+          include_examples 'a paginated list'
+          it_should_behave_like 'an accessible page', exclusions: [:contrast]
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(support_edges(unit)).to eq(
+        [{ type: :test_support, target: 'spec/support/shared/pages.rb', via: :behaves_like }]
+      )
+      expect(unit.metadata[:shared_examples_used]).to eq(['an accessible page', 'a paginated list'])
+    end
+
+    it 'links include_context to the shared context file' do
+      path = create_file('spec/requests/invoices_spec.rb', <<~RUBY)
+        RSpec.describe 'Invoices', type: :request do
+          include_context 'with billing stubs'
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(support_edges(unit)).to eq(
+        [{ type: :test_support, target: 'spec/support/billing_stubs.rb', via: :includes_context }]
+      )
+      expect(unit.metadata[:shared_contexts_used]).to eq(['with billing stubs'])
+    end
+
+    it 'links a custom matcher call to the matcher file' do
+      path = create_file('spec/features/plans_spec.rb', <<~RUBY)
+        RSpec.feature 'Plans' do
+          scenario 'choosing a plan' do
+            expect(page).to have_combobox('Plan')
+            expect(page).not_to have_combobox_placeholder
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(support_edges(unit)).to eq(
+        [{ type: :test_support, target: 'spec/support/matchers/combobox.rb', via: :uses_matcher }]
+      )
+      expect(unit.metadata[:matchers_used]).to eq(['have_combobox'])
+    end
+
+    it 'does not read a longer method name as a matcher call' do
+      path = create_file('spec/features/plans_spec.rb', <<~RUBY)
+        RSpec.feature 'Plans' do
+          scenario('x') { expect(page).to have_combobox_placeholder; page.have_combobox }
+        end
+      RUBY
+
+      expect(support_edges(described_class.new.extract_test_file(path))).to eq([])
+    end
+
+    it 'links an included helper module to its file' do
+      path = create_file('spec/services/tracker_spec.rb', <<~RUBY)
+        RSpec.describe Tracker do
+          include AnalyticsHelpers
+          include ActiveSupport::Testing::TimeHelpers
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(unit.dependencies).to eq(
+        [{ type: :model, target: 'Tracker', via: :test_coverage },
+         { type: :test_support, target: 'spec/support/analytics_helpers.rb', via: :includes_helper }]
+      )
+      expect(unit.metadata[:helpers_included]).to eq(%w[AnalyticsHelpers ActiveSupport::Testing::TimeHelpers])
+    end
+
+    it 'emits no edge for a name no support file defines' do
+      path = create_file('spec/models/widget_spec.rb', <<~RUBY)
+        RSpec.describe Widget do
+          it_behaves_like 'a ghost'
+          include_context 'nowhere'
+        end
+      RUBY
+
+      unit = described_class.new.extract_test_file(path)
+      expect(support_edges(unit)).to eq([])
+      expect(unit.metadata).to include(shared_examples_used: ['a ghost'], shared_contexts_used: ['nowhere'])
+    end
+
+    it 'orders edges the same way whatever order the references appear in' do
+      body = ["  include AnalyticsHelpers\n", "  include_context 'with billing stubs'\n",
+              "  it_behaves_like 'an accessible page'\n", "  it { is_expected.to have_combobox('x') }\n"]
+      edges = [body, body.reverse].map do |lines|
+        path = create_file('spec/features/order_spec.rb', "RSpec.feature 'Order' do\n#{lines.join}end\n")
+        support_edges(described_class.new.extract_test_file(path))
+      end
+
+      expect(edges.first).to eq(edges.last)
+      expect(edges.first.map { |dep| dep[:via] })
+        .to eq(%i[behaves_like includes_context includes_helper uses_matcher])
+    end
+  end
+
+  describe 'test_count' do
+    it 'counts Capybara scenarios' do
+      path = create_file('spec/features/widgets_spec.rb', <<~RUBY)
+        RSpec.feature 'Widgets' do
+          scenario 'listing' do; end
+          scenario "creating" do; end
+          it 'renders' do; end
+        end
+      RUBY
+
+      expect(described_class.new.extract_test_file(path).metadata[:test_count]).to eq(3)
+    end
+  end
+
   # ── Serialization round-trip ────────────────────────────────────────
 
   describe 'serialization' do

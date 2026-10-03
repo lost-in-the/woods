@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'test_support_catalog'
 
 module Woods
   module Extractors
@@ -14,7 +15,13 @@ module Woods
     # test count, shared example usage, and test framework type.
     #
     # Units are linked to the code under test via :test_coverage dependencies,
-    # inferred from the subject class name and file directory structure.
+    # inferred from the subject class name and file directory structure, and
+    # to the test support files they draw on: shared examples
+    # (:behaves_like), shared contexts (:includes_context), helper modules
+    # (:includes_helper) and custom matchers (:uses_matcher). Those names are
+    # resolved through {TestSupportCatalog}, so a unit depends on the support
+    # files as well as its own: a support change re-runs this extractor
+    # wholesale.
     #
     # @example
     #   extractor = TestMappingExtractor.new
@@ -59,6 +66,7 @@ module Woods
 
       def initialize
         @rails_root = Rails.root
+        @support_catalog = TestSupportCatalog.new
       end
 
       # Extract all test mapping units from spec/ and test/ directories.
@@ -83,9 +91,12 @@ module Woods
           file_path: file_path
         )
 
+        support = @support_catalog.references(source)
         unit.source_code = source
-        unit.metadata = extract_metadata(source, file_path, framework)
-        unit.dependencies = extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type])
+        unit.metadata = extract_metadata(source, file_path, framework).merge(support_metadata(support))
+        unit.dependencies = consolidate_dependencies(
+          extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type]), support.dependencies
+        )
 
         unit
       rescue StandardError => e
@@ -128,11 +139,24 @@ module Woods
           test_count: count_tests(source, framework),
           test_type: test_type,
           test_framework: framework,
-          shared_examples: extract_shared_examples_defined(source),
-          shared_examples_used: extract_shared_examples_used(source)
+          shared_examples: extract_shared_examples_defined(source)
         }
         metadata[:description] = subject if subject && !subject_class
         metadata
+      end
+
+      # Names of the test support this file refers to, as written. A name is
+      # listed whether or not a support file defines it.
+      #
+      # @param support [TestSupportCatalog::Usage]
+      # @return [Hash]
+      def support_metadata(support)
+        {
+          shared_examples_used: support.shared_examples,
+          shared_contexts_used: support.shared_contexts,
+          helpers_included: support.helper_modules,
+          matchers_used: support.matchers
+        }
       end
 
       # Decide whether a subject names a unit rather than describing behavior.
@@ -208,7 +232,7 @@ module Woods
 
       # Count test examples in the file.
       #
-      # For RSpec: counts it/specify/example blocks.
+      # For RSpec: counts it/specify/example/scenario blocks.
       # For Minitest: counts test "..." strings and def test_ methods.
       #
       # @param source [String] File source code
@@ -216,7 +240,7 @@ module Woods
       # @return [Integer]
       def count_tests(source, framework)
         if framework == :rspec
-          source.scan(/^\s*(?:it|specify|example)\s+['"]/).size
+          source.scan(/^\s*(?:it|specify|example|scenario)\s+['"]/).size
         else
           source.scan(/^\s*test\s+['"]/).size +
             source.scan(/^\s*def\s+test_\w/).size
@@ -229,14 +253,6 @@ module Woods
       # @return [Array<String>]
       def extract_shared_examples_defined(source)
         source.scan(/^\s*shared_examples(?:_for)?\s+['"]([^'"]+)['"]/).flatten
-      end
-
-      # Extract names of shared examples used (included) in the file.
-      #
-      # @param source [String] File source code
-      # @return [Array<String>]
-      def extract_shared_examples_used(source)
-        source.scan(/^\s*(?:include_examples|it_behaves_like)\s+['"]([^'"]+)['"]/).flatten
       end
 
       # Infer test type from the directory structure of the file path, then
