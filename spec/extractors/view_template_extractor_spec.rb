@@ -419,6 +419,49 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       end
     end
 
+    context 'with interpolated partial names' do
+      before do
+        create_file('app/views/api/receipts/show.json.jbuilder', <<~'RUBY')
+          json.partial! "api/receipts/_#{@order.kind}", order: @order
+          json.partial! 'api/receipts/total', order: @order
+        RUBY
+        create_file('app/views/ledgers/show.html.erb', <<~'ERB')
+          <%= render "ledgers/#{@ledger.kind}_row" %>
+        ERB
+        create_file('app/views/widgets/show.html.haml', <<~'HAML')
+          = render partial: "widgets/#{@widget.style}"
+        HAML
+      end
+
+      let(:units) { described_class.new.extract_all }
+
+      def unit_for(identifier)
+        units.find { |u| u.identifier == identifier }
+      end
+
+      def render_targets(unit)
+        unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+      end
+
+      it 'records an interpolated jbuilder partial as unresolved and creates no edge for it' do
+        unit = unit_for('api/receipts/show.json.jbuilder')
+        expect(unit.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "api/receipts/_\#{@order.kind}" }])
+        expect(unit.metadata[:partials_rendered]).to eq(['api/receipts/total'])
+        expect(render_targets(unit)).to eq(['api/receipts/_total.json.jbuilder'])
+      end
+
+      it 'records interpolated ERB and HAML partials as unresolved and creates no edge for them' do
+        erb = unit_for('ledgers/show.html.erb')
+        haml = unit_for('widgets/show.html.haml')
+        expect(erb.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "ledgers/\#{@ledger.kind}_row" }])
+        expect(haml.metadata[:unresolved_partials])
+          .to eq([{ kind: 'interpolation', name: "widgets/\#{@widget.style}" }])
+        expect(render_targets(erb) + render_targets(haml)).to be_empty
+      end
+    end
+
     context 'with a partial rendered across engines' do
       before do
         create_file('app/views/layouts/application.html.erb', "<%= render 'shared/banner' %>\n<%= yield %>")
