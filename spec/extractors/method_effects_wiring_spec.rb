@@ -5,7 +5,6 @@ require 'set'
 require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
-require 'woods'
 require 'woods/extractors/service_extractor'
 require 'woods/extractors/job_extractor'
 require 'woods/extractors/manager_extractor'
@@ -13,6 +12,9 @@ require 'woods/extractors/poro_extractor'
 
 # Each file-based extractor hands its unit to MethodEffects after the
 # dependencies are known, so the method map and the edge annotation agree.
+#
+# Deliberately loads the extractors alone, as their own specs do: Woods's
+# entry point (and so Woods.configuration) is absent here.
 RSpec.describe Woods::Extractors::MethodEffects, 'extractor wiring' do
   include_context 'extractor setup'
 

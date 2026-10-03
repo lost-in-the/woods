@@ -83,9 +83,10 @@ module Woods
         unit
       end
 
-      # @return [Integer, nil] the configured cap, or 50 before Woods is configured
+      # @return [Integer, nil] the configured cap, or 50 before Woods is
+      #   configured (or when only this file is loaded)
       def self.default_limit
-        configuration = Woods.configuration
+        configuration = Woods.respond_to?(:configuration) ? Woods.configuration : nil
         configuration ? configuration.method_effects_limit : DEFAULT_LIMIT
       end
 
