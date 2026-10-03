@@ -141,6 +141,15 @@ RSpec.describe Woods::SourceLineMap do
       expect(unit.metadata).not_to have_key(:source_line_map)
     end
 
+    it 'reads a relative file path against the given root' do
+      unit.file_path = 'ledgers_controller.rb'
+      unit.source_code = composite
+
+      described_class.record(unit, root: dir)
+
+      expect(unit.metadata[:source_line_map]).to eq(described_class.build(original, composite))
+    end
+
     it 'stores nothing for a unit with no file' do
       unit.file_path = nil
       unit.source_code = composite

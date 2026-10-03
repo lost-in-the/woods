@@ -49,11 +49,15 @@ module Woods
 
     # Store the map for +unit+ in its metadata, or remove a stale one.
     #
-    # @param unit [Woods::ExtractedUnit] a unit whose `file_path` is still the
-    #   absolute path its source was read from
+    # @param unit [Woods::ExtractedUnit] a unit whose source was read from
+    #   `file_path`
+    # @param root [String, nil] the directory a relative `file_path` is
+    #   relative to
     # @return [void]
-    def record(unit)
-      map = build(read(unit.file_path), unit.source_code)
+    def record(unit, root: nil)
+      path = unit.file_path
+      path = File.expand_path(path, root) if root && path.is_a?(String)
+      map = build(read(path), unit.source_code)
       if map
         unit.metadata[:source_line_map] = map
       else

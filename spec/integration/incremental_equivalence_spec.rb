@@ -904,6 +904,41 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     @scratch_dirs = []
   end
 
+  # Annotated source_code shifts lines away from the file; the map back to the
+  # file is recorded while the absolute path is still readable, on the full
+  # path's normalization phase and on each incremental write.
+  describe 'source line maps' do
+    def line_map(dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, 'services', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == identifier }
+        &.dig('metadata', 'source_line_map')
+    end
+
+    it 'records the same map for an annotated unit through full and incremental runs' do
+      require 'woods/source_line_map'
+      path = write_file('app/services/line_map_service.rb', service_source('LineMapService'))
+      index = full_extraction
+      expect(line_map(index, 'LineMapService')).not_to be_nil
+
+      edited = "# frozen_string_literal: true\n\n#{service_source('LineMapService', dependency: 'Post')}"
+      write_file(path, edited)
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+      oracle = full_extraction
+
+      maintained = line_map(index, 'LineMapService')
+      expect(maintained).to eq(line_map(oracle, 'LineMapService'))
+      source = Dir[File.join(Woods::Generation.new(output_dir: index).payload_dir, 'services', '*.json')]
+               .map { |file| JSON.parse(File.read(file, encoding: 'UTF-8')) }
+               .find { |unit| unit.is_a?(Hash) && unit['identifier'] == 'LineMapService' }.fetch('source_code')
+      def_line = source.lines.index { |line| line.include?('def call') } + 1
+      expect(Woods::SourceLineMap.translate(maintained, def_line)).to eq(4)
+      expect(differences(index, oracle)).to be_empty
+    end
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)
