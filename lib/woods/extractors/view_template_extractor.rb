@@ -185,8 +185,8 @@ module Woods
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
 
-        controller = infer_controller(file_path)
-        deps << { type: :controller, target: controller, via: :view_render } if controller
+        owner = view_owner(extract_view_namespace(file_path))
+        deps << { type: owner[:type], target: owner[:name], via: :view_render } if owner
 
         deps.concat(resolve_navigation_candidates(engine, source))
 
@@ -278,18 +278,71 @@ module Woods
         end
       end
 
-      # Infer the controller class from the template's directory path.
+      # The class that renders templates from a view directory: the
+      # controller the directory names, or the mailer for a mailer view
+      # directory. Only a class that exists at runtime counts, so a
+      # directory such as `shared/` or `layouts/` has no owner.
       #
-      # @param file_path [String] Path to the template
-      # @return [String, nil] Controller class name
-      def infer_controller(file_path)
-        namespace = extract_view_namespace(file_path)
-        return nil unless namespace
-        return nil if namespace == 'layouts'
+      # @param namespace [String, nil] View directory, e.g. "admin/users"
+      # @return [Hash, nil] `{ type: :controller | :mailer, name:, klass: }`
+      def view_owner(namespace)
+        return nil if namespace.nil? || namespace == 'layouts'
 
-        parts = namespace.split('/')
-        controller_name = parts.map { |p| p.split('_').map(&:capitalize).join }.join('::')
-        "#{controller_name}Controller"
+        @view_owners ||= {}
+        return @view_owners[namespace] if @view_owners.key?(namespace)
+
+        @view_owners[namespace] = find_view_owner(camelize_path(namespace))
+      end
+
+      # @param base_name [String] e.g. "Admin::Users"
+      # @return [Hash, nil]
+      def find_view_owner(base_name)
+        controller = runtime_constant("#{base_name}Controller")
+        if subclass_of_any?(controller, %w[ActionController::Base ActionController::API])
+          return { type: :controller, name: "#{base_name}Controller", klass: controller }
+        end
+
+        mailer = runtime_constant(base_name)
+        { type: :mailer, name: base_name, klass: mailer } if subclass_of_any?(mailer, %w[ActionMailer::Base])
+      end
+
+      # @param klass [Object, nil]
+      # @param base_names [Array<String>]
+      # @return [Boolean]
+      def subclass_of_any?(klass, base_names)
+        return false unless klass.is_a?(Class)
+
+        base_names.any? do |base_name|
+          base = runtime_constant(base_name)
+          base.is_a?(Class) && klass < base
+        end
+      end
+
+      # Look a constant up one segment at a time without inheritance, so a
+      # missing `Shared::SvgController` never resolves to a top-level
+      # `SvgController`.
+      #
+      # @param name [String]
+      # @return [Object, nil]
+      def runtime_constant(name)
+        name.split('::').reduce(Object) do |scope, part|
+          return nil unless scope.is_a?(Module) && scope.const_defined?(part, false)
+
+          scope.const_get(part, false)
+        end
+      rescue StandardError
+        nil
+      end
+
+      # "admin/user_accounts" -> "Admin::UserAccounts", honoring host
+      # inflections when ActiveSupport is loaded.
+      #
+      # @param path [String]
+      # @return [String]
+      def camelize_path(path)
+        return path.camelize if path.respond_to?(:camelize)
+
+        path.split('/').map { |p| p.split('_').map(&:capitalize).join }.join('::')
       end
     end
   end
