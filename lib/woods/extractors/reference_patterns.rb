@@ -35,6 +35,11 @@ module Woods
       # A chain of `::`-joined word segments, read whole.
       CONSTANT_CHAIN = /\w++(?:::\w++)*+/
 
+      # Every rule's segment ends in a capitalized suffix (Service, Mailer,
+      # Job, Worker), so a chain with no capital letter cannot qualify and is
+      # skipped before it is split. Ordinary text is mostly such chains.
+      CAPITAL = /[A-Z]/
+
       # `FooService.call` / `FooService::new`.
       SERVICE_RULE = { segment: /\A\w+Service\z/, follower: /\G(?:\.|::)/ }.freeze
 
@@ -91,6 +96,8 @@ module Woods
         scanner = StringScanner.new(source)
         while scanner.skip_until(CONSTANT_CHAIN)
           chain = scanner.matched
+          next unless chain.match?(CAPITAL)
+
           chain_end = scanner.pos
           start = chain_end - chain.bytesize
           finish, follower_end = last_qualifying_end(scanner, chain, chain_end, segment, follower)
