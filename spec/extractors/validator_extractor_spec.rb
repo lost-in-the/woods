@@ -333,5 +333,23 @@ RSpec.describe Woods::Extractors::ValidatorExtractor do
       validator_deps = unit.dependencies.select { |d| d[:type] == :validator }
       expect(validator_deps.first[:target]).to eq('EmailFormatValidator')
     end
+
+    it 'keeps the namespace of a referenced validator' do
+      path = create_file('app/validators/cart_validator.rb', <<~RUBY)
+        class CartValidator
+          def validate
+            Cart::ShippableValidator.new(cart).validate
+            ::Ledger::Rules::TotalValidator::new(cart).validate
+            LineQuantityValidator.new(cart).validate
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_validator_file(path)
+      targets = unit.dependencies.select { |d| d[:type] == :validator }.map { |d| d[:target] }
+      expect(targets).to contain_exactly(
+        'Cart::ShippableValidator', 'Ledger::Rules::TotalValidator', 'LineQuantityValidator'
+      )
+    end
   end
 end
