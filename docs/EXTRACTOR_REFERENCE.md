@@ -391,6 +391,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
 - Slots and sub-component composition are extracted from the `view_template` method
+- `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 
 ---
 
@@ -402,6 +403,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`), next to the component or inside its sidecar directory (`button_component/button_component.html.haml`), for every engine in `Woods::Extractors::TemplateExtensions::DETECTED`
+- `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 - **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 

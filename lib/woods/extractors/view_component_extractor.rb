@@ -68,7 +68,7 @@ module Woods
         # "addition", extract it, get nil, and dirty the dependents pass for
         # nothing. Anonymous classes go too: `extract_component` rejects a nil
         # name for the same reason.
-        @component_base.descendants.select { |component| app_component?(component) }
+        @component_base.descendants.select { |component| app_component?(component) }.sort_by(&:name)
       end
 
       # Extract a single ViewComponent component
@@ -158,7 +158,7 @@ module Woods
         {
           slots: extract_slots(source),
           initialize_params: extract_initialize_params(component),
-          public_methods: component.public_instance_methods(false),
+          public_methods: component.public_instance_methods(false).sort,
           parent_component: component.superclass.name,
           sidecar_template: detect_sidecar_template(component),
           preview_class: detect_preview_class(component),

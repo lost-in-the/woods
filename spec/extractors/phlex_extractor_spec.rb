@@ -610,4 +610,29 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       expect(described_class.new.discoverable_classes).to eq([component])
     end
   end
+
+  # Host runs showed the same multiset in a different order between runs:
+  # `public_instance_methods` and `descendants` carry no ordering guarantee.
+  describe 'deterministic ordering' do
+    let(:widget) { build_component(name: 'WidgetComponent', methods: %i[view_template title badge]) }
+    let(:alert) { build_component(name: 'AlertComponent') }
+
+    before do
+      file_system['/rails/app/components/widget_component.rb'] = 'class WidgetComponent; end'
+      file_system['/rails/app/components/alert_component.rb'] = 'class AlertComponent; end'
+      base = build_phlex_base(descendants: [widget, alert])
+      [widget, alert].each { |klass| klass.define_singleton_method(:superclass) { base } }
+      stub_const('Phlex::HTML', base)
+    end
+
+    it 'sorts public_methods' do
+      unit = described_class.new.extract_all.find { |u| u.identifier == 'WidgetComponent' }
+
+      expect(unit.metadata[:public_methods]).to eq(%i[badge title view_template])
+    end
+
+    it 'emits components in name order' do
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[AlertComponent WidgetComponent])
+    end
+  end
 end

@@ -66,7 +66,7 @@ module Woods
         return [] unless @component_base
 
         load_component_files
-        @component_base.descendants.select { |component| app_component?(component) }
+        @component_base.descendants.select { |component| app_component?(component) }.sort_by(&:name)
       end
 
       # Extract a single component
@@ -160,7 +160,7 @@ module Woods
           initialize_params: extract_initialize_params(component),
 
           # Public interface
-          public_methods: component.public_instance_methods(false),
+          public_methods: component.public_instance_methods(false).sort,
 
           # Hierarchy
           parent_component: component.superclass.name,
