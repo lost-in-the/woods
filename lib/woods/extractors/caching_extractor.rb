@@ -47,8 +47,10 @@ module Woods
         exist: /Rails\.cache\.exist\?\s*[(\[]/,
         caches_action: /\bcaches_action\b/,
         fragment: /\bcache\s+.*?\bdo\b|\bcache\s+do\b|\bcache\s*\(|\bjson\.cache(?:_if)?!/,
-        cache_key: /\bcache_key\b/,
-        cache_version: /\bcache_version\b/
+        # Key methods count only as a receiver call or a definition. A bare
+        # identifier is usually a local passed as a key (`cache cache_key do`).
+        cache_key: /\.cache_key(?:_with_version)?\b|\bdef\s+(?:self\.)?cache_key(?:_with_version)?\b/,
+        cache_version: /\.cache_version\b|\bdef\s+(?:self\.)?cache_version\b/
       }.freeze
 
       # Patterns for extracting TTL values

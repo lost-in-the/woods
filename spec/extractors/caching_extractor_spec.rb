@@ -429,6 +429,31 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       cache_key_call = unit.metadata[:cache_calls].find { |c| c[:type] == :cache_key }
       expect(cache_key_call).not_to be_nil
     end
+
+    it 'counts cache_key and cache_key_with_version called on a receiver' do
+      path = create_file('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def digest_key = "\#{owner.cache_key}/\#{entries.cache_key_with_version}"
+          def stamp = account&.cache_version
+        end
+      RUBY
+
+      types = described_class.new.extract_caching_file(path, :model).metadata[:cache_calls].map { |c| c[:type] }
+      expect(types).to eq(%i[cache_key cache_key cache_version])
+    end
+
+    {
+      'jbuilder' => ['app/views/widgets/show.json.jbuilder', "json.cache! cache_key do\n  json.id 1\nend\n"],
+      'erb' => ['app/views/widgets/show.html.erb', "<% cache cache_key do %>\n  <p>hi</p>\n<% end %>\n"],
+      'haml' => ['app/views/widgets/show.html.haml', "- cache cache_version do\n  %p hi\n"]
+    }.each do |engine, (relative, source)|
+      it "does not count a bare cache_key/cache_version argument in a #{engine} view as a call" do
+        path = create_file(relative, source)
+
+        calls = described_class.new.extract_caching_file(path, :view).metadata[:cache_calls]
+        expect(calls.map { |c| c[:type] }).to eq([:fragment])
+      end
+    end
   end
 
   # ── Serialization round-trip ─────────────────────────────────────────
