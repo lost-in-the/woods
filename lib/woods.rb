@@ -156,7 +156,8 @@ module Woods
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
-                :settings_readers, :external_table_consumers, :external_table_consumers_path
+                :settings_readers, :external_table_consumers, :external_table_consumers_path,
+                :test_support_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -249,6 +250,9 @@ module Woods
       # Other applications that read this database's tables. See the setters.
       @external_table_consumers = {}.freeze
       @external_table_consumers_path = nil
+      # Globs TestSupportExtractor indexes as test_support units.
+      @test_support_paths = %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
+                               test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb].freeze
     end
 
     def embedding_model=(value)
@@ -602,6 +606,26 @@ module Woods
     def external_table_consumers_path=(value)
       @external_table_consumers_path =
         Extractors::ExternalConsumerDeclarations.normalize_path!(value, label: 'external_table_consumers_path')
+    end
+
+    # Globs, relative to Rails.root, whose Ruby files become `test_support`
+    # units: helper modules, shared examples and contexts, custom matchers,
+    # and suite configuration. `*_spec.rb` and `*_test.rb` files are never
+    # test support, whatever the globs match.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.test_support_paths += ['features/support/**/*.rb']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def test_support_paths=(value)
+      raise ConfigurationError, "test_support_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index, 'test_support_paths') }
+      @test_support_paths = value.map { |glob| glob.dup.freeze }.freeze
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

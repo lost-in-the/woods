@@ -720,6 +720,50 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#test_support_paths' do
+    it 'defaults to the conventional RSpec and Minitest support locations' do
+      expect(described_class.new.test_support_paths).to eq(
+        %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
+           test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb]
+      )
+    end
+
+    it 'accepts and freezes a list of relative globs' do
+      config = described_class.new
+      config.test_support_paths = ['spec/support/**/*.rb', 'features/support/**/*.rb']
+
+      expect(config.test_support_paths).to eq(['spec/support/**/*.rb', 'features/support/**/*.rb'])
+      expect(config.test_support_paths).to be_frozen
+    end
+
+    it 'accepts an empty list, which indexes no test support files' do
+      config = described_class.new
+      config.test_support_paths = []
+
+      expect(config.test_support_paths).to eq([])
+    end
+
+    it 'rejects a non-array' do
+      expect { described_class.new.test_support_paths = 'spec/support/**/*.rb' }
+        .to raise_error(Woods::ConfigurationError, /test_support_paths must be an Array/)
+    end
+
+    ['/abs/**/*.rb', '../outside/*.rb', 'spec/../../x.rb', '', nil, :sym].each do |glob|
+      it "rejects #{glob.inspect}" do
+        expect { described_class.new.test_support_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /test_support_paths\[0\] must be a relative glob/)
+      end
+    end
+
+    it 'keeps the previous value when validation fails' do
+      config = described_class.new
+      config.test_support_paths = ['spec/support/**/*.rb']
+
+      expect { config.test_support_paths = ['spec/lib/**/*.rb', '/abs.rb'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.test_support_paths).to eq(['spec/support/**/*.rb'])
+    end
+  end
+
   describe '#unclaimed_ruby_paths' do
     it 'defaults to every Ruby file under app/' do
       expect(described_class.new.unclaimed_ruby_paths).to eq(['app/**/*.rb'])
