@@ -723,6 +723,7 @@ Every single-file app-owned unit under a package root carries `metadata[:package
 **Key details:**
 - Discovers via `ActionCable::Channel::Base.descendants`. **Included in Woods 2.1:** discovery and direct extraction exclude dependency-owned source files.
 - Records stream names, authentication checks in `subscribed`, and any `broadcast_to` calls
+- The application base `ApplicationCable::Channel` is a channel unit too, with `metadata.abstract: true`, the way `ApplicationController` is a controller unit
 
 ---
 

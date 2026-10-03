@@ -373,7 +373,7 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
       end
     end
 
-    context 'ApplicationCable::Channel filtering' do
+    context 'the ApplicationCable::Channel base' do
       before do
         base = stub_action_cable_base
         app_channel = build_mock_channel(
@@ -391,9 +391,11 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
         allow(base).to receive(:descendants).and_return([app_channel, real_channel])
       end
 
-      it 'filters out ApplicationCable::Channel' do
-        units = extractor.extract_all
-        expect(units.map(&:identifier)).to eq(['ChatChannel'])
+      it 'emits the abstract base as a channel unit marked abstract' do
+        units = extractor.extract_all.to_h { |unit| [unit.identifier, unit] }
+        expect(units.keys).to contain_exactly('ChatChannel', 'ApplicationCable::Channel')
+        expect(units.fetch('ApplicationCable::Channel').metadata).to include(abstract: true, actions: [])
+        expect(units.fetch('ChatChannel').metadata).not_to have_key(:abstract)
       end
     end
 
@@ -595,7 +597,10 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
   end
 
   def stub_channel_file_reading(source_location, source)
-    allow(File).to receive(:exist?).and_call_original
+    # The newest matching stub wins, so a second generic stub would shadow the
+    # path-specific stubs of every channel built before it.
+    allow(File).to receive(:exist?).and_call_original unless @file_reads_stubbed
+    @file_reads_stubbed = true
     return unless source_location
 
     allow(File).to receive(:exist?).with(source_location).and_return(true)
@@ -603,9 +608,11 @@ RSpec.describe Woods::Extractors::ActionCableExtractor do
     allow(File).to receive(:read).with(source_location).and_return(source)
   end
 
+  # A base channel with no application source file, so the extractor skips it
+  # as it skips any channel defined outside the app.
   def stub_application_cable_channel(base, channels)
-    app_channel = double('ApplicationCable::Channel')
-    allow(app_channel).to receive(:name).and_return('ApplicationCable::Channel')
+    app_channel = build_mock_channel('ApplicationCable::Channel', source: '', public_methods: [],
+                                                                  source_location: nil)
     all_descendants = channels + [app_channel]
     allow(base).to receive(:descendants).and_return(all_descendants)
   end
