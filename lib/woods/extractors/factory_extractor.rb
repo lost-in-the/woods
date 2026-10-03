@@ -19,6 +19,10 @@ module Woods
     # sequences, callbacks, parent inheritance, transient attributes, and
     # nested factory definitions (each becomes its own unit).
     #
+    # A factory without an explicit `class:` models its parent's class: the
+    # `parent:` factory, or the factory whose block encloses it. {#extract_all}
+    # follows parents across files; {#extract_factory_file} sees one file.
+    #
     # @example
     #   extractor = FactoryExtractor.new
     #   units = extractor.extract_all
@@ -39,7 +43,9 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of factory units
       def extract_all
-        find_files_in_directories(@directories).flat_map { |file| extract_factory_file(file) }
+        parsed = find_files_in_directories(@directories).filter_map { |file| parse_file(file) }
+        resolve_model_classes(parsed.flat_map { |entry| entry[:factories] })
+        parsed.flat_map { |entry| build_units(entry) }
       end
 
       # Extract factory definitions from a single factory file.
@@ -49,18 +55,69 @@ module Woods
       # @param file_path [String] Path to the factory file
       # @return [Array<ExtractedUnit>] List of factory units
       def extract_factory_file(file_path)
-        return [] unless file_path.to_s.end_with?('.rb')
+        entry = parse_file(file_path)
+        return [] unless entry
 
-        source = File.read(file_path)
-        factories = parse_factories(source)
-
-        factories.map { |factory_data| build_unit(factory_data, file_path, source) }
-      rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract factories from #{file_path}: #{e.message}")
-        []
+        resolve_model_classes(entry[:factories])
+        build_units(entry)
       end
 
       private
+
+      # Read and parse one factory file.
+      #
+      # @param file_path [String] Path to the factory file
+      # @return [Hash, nil] `{ file_path:, source:, factories: }`, nil for a
+      #   non-Ruby or unreadable file
+      def parse_file(file_path)
+        return nil unless file_path.to_s.end_with?('.rb')
+
+        source = File.read(file_path)
+        { file_path: file_path, source: source, factories: parse_factories(source) }
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract factories from #{file_path}: #{e.message}")
+        nil
+      end
+
+      # @param entry [Hash] a {#parse_file} result with resolved classes
+      # @return [Array<ExtractedUnit>]
+      def build_units(entry)
+        entry[:factories].map { |factory_data| build_unit(factory_data, entry[:file_path], entry[:source]) }
+      end
+
+      # Fill in `:class_name` on every factory that did not declare one.
+      #
+      # The first definition of a name wins, in the order given, so a
+      # duplicated name resolves the same way on every run.
+      #
+      # @param factories [Array<Hash>] parsed factory data, mutated in place
+      # @return [void]
+      def resolve_model_classes(factories)
+        by_name = factories.each_with_object({}) do |factory, names|
+          [factory[:name], *factory[:aliases]].each { |name| names[name] ||= factory }
+        end
+        factories.each { |factory| factory[:class_name] = inherited_class(factory, by_name) }
+      end
+
+      # Walk the parent chain to the nearest explicit class. An unknown parent
+      # or a cycle ends the walk, and the factory's own name is classified.
+      #
+      # @param factory [Hash]
+      # @param by_name [Hash{String => Hash}]
+      # @return [String]
+      def inherited_class(factory, by_name)
+        seen = {}.compare_by_identity
+        current = factory
+        while current && !seen[current]
+          return current[:explicit_class] if current[:explicit_class]
+
+          seen[current] = true
+          return classify(current[:name]) unless current[:parent_factory]
+
+          current = by_name[current[:parent_factory]]
+        end
+        classify(factory[:name])
+      end
 
       # Parse factory definitions from source using a line-by-line state machine.
       #
@@ -97,6 +154,7 @@ module Woods
           # those silently, which is the very shape the parent-inheritance
           # parsing below exists to support.
           if (factory_data = match_factory(stripped, depth, index + 1))
+            factory_data[:parent_factory] ||= factory_stack.last&.fetch(:name)
             if opens_block?(code)
               factory_stack.push(factory_data)
               depth += 1
@@ -174,6 +232,9 @@ module Woods
       #   factory :name, class: 'ClassName' do
       #   factory :name, parent: :other do
       #   factory :name, parent: :other        # blockless
+      #   factory :name, aliases: [:other_name]
+      #
+      # The modeled class is resolved afterwards, see {#resolve_model_classes}.
       #
       # Whether the line opens a block is the caller's concern — see
       # {#parse_factories}.
@@ -201,7 +262,8 @@ module Woods
 
         {
           name: name,
-          class_name: options[:class_name] || classify(name),
+          explicit_class: options[:class_name],
+          aliases: line[/\baliases:\s*\[([^\]\n]*)\]/, 1].to_s.scan(/:(\w+)/).flatten,
           parent_factory: options[:parent],
           open_depth: depth,
           line_number: line_number,

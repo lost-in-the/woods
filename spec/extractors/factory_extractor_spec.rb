@@ -484,6 +484,122 @@ RSpec.describe Woods::Extractors::FactoryExtractor do
     end
   end
 
+  # ── Modeled class resolution ─────────────────────────────────────────
+
+  describe 'modeled class resolution' do
+    def model_classes(units)
+      units.to_h { |unit| [unit.identifier, unit.metadata[:model_class]] }
+    end
+
+    it 'inherits the class of a parent: factory instead of classifying the name' do
+      path = create_file('spec/factories/widgets.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :widget do
+          end
+
+          factory :widget_plus, parent: :widget do
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+      expect(model_classes(units)).to eq('widget' => 'Widget', 'widget_plus' => 'Widget')
+      plus = units.find { |unit| unit.identifier == 'widget_plus' }
+      expect(plus.dependencies).to include({ type: :model, target: 'Widget', via: :factory_for })
+    end
+
+    it 'inherits an explicit class through a chain of parents' do
+      path = create_file('spec/factories/entries.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :entry, class: "Ledger::Entry" do
+          end
+          factory :credit, parent: :entry
+          factory :refund, parent: :credit
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+      expect(model_classes(units)).to eq('entry' => 'Ledger::Entry', 'credit' => 'Ledger::Entry',
+                                         'refund' => 'Ledger::Entry')
+    end
+
+    it 'gives a nested factory its enclosing factory as parent and class' do
+      path = create_file('spec/factories/shipments.rb', <<~RUBY)
+        FactoryBot.define do
+          factory :shipment do
+            factory :express_shipment do
+              factory :overnight_shipment do
+              end
+            end
+          end
+        end
+      RUBY
+
+      units = described_class.new.extract_factory_file(path)
+      expect(model_classes(units)).to eq('shipment' => 'Shipment', 'express_shipment' => 'Shipment',
+                                         'overnight_shipment' => 'Shipment')
+      overnight = units.find { |unit| unit.identifier == 'overnight_shipment' }
+      expect(overnight.metadata[:parent_factory]).to eq('express_shipment')
+      expect(overnight.dependencies).to include({ type: :factory, target: 'express_shipment', via: :factory_parent })
+    end
+
+    it 'keeps an explicit class on a child over the inherited one' do
+      path = create_file('spec/factories/widgets.rb', <<~RUBY)
+        factory :widget do
+          factory :gadget, class: Gadget do
+          end
+        end
+      RUBY
+
+      expect(model_classes(described_class.new.extract_factory_file(path))).to include('gadget' => 'Gadget')
+    end
+
+    it 'strips a leading :: from an explicit class' do
+      path = create_file('spec/factories/entries.rb', <<~RUBY)
+        factory :entry, class: "::Ledger::Entry" do
+        end
+        factory :invoice, class: ::Ledger::Invoice do
+        end
+      RUBY
+
+      expect(model_classes(described_class.new.extract_factory_file(path)))
+        .to eq('entry' => 'Ledger::Entry', 'invoice' => 'Ledger::Invoice')
+    end
+
+    it 'resolves a parent declared by alias' do
+      path = create_file('spec/factories/widgets.rb', <<~RUBY)
+        factory :widget, aliases: [:gizmo, :doohickey] do
+        end
+        factory :small_gizmo, parent: :doohickey
+      RUBY
+
+      expect(model_classes(described_class.new.extract_factory_file(path))).to include('small_gizmo' => 'Widget')
+    end
+
+    it 'resolves a parent defined in another file during extract_all' do
+      create_file('spec/factories/a_children.rb', "factory :widget_plus, parent: :widget\n")
+      create_file('spec/factories/widgets.rb', "factory :widget, class: 'Catalog::Widget' do\nend\n")
+
+      expect(model_classes(described_class.new.extract_all))
+        .to eq('widget' => 'Catalog::Widget', 'widget_plus' => 'Catalog::Widget')
+    end
+
+    it 'classifies the name when the parent is defined nowhere' do
+      path = create_file('spec/factories/widgets.rb', "factory :widget_plus, parent: :missing\n")
+
+      expect(model_classes(described_class.new.extract_factory_file(path))).to eq('widget_plus' => 'WidgetPlus')
+    end
+
+    it 'terminates on a parent cycle' do
+      path = create_file('spec/factories/widgets.rb', <<~RUBY)
+        factory :alpha, parent: :beta
+        factory :beta, parent: :alpha
+      RUBY
+
+      expect(model_classes(described_class.new.extract_factory_file(path))).to eq('alpha' => 'Alpha', 'beta' => 'Beta')
+    end
+  end
+
   # ── Metadata ─────────────────────────────────────────────────────────
 
   describe 'metadata' do
