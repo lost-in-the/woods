@@ -65,7 +65,7 @@ RSpec.describe Woods::Extractors::ValidatorExtractor, 'fixture specs' do
   # ── Edge: Validator with No validate Method ───────────────────────────
 
   describe 'file with no validate method' do
-    it 'returns nil for a class without validator indicators' do
+    it 'admits a class without validator indicators as a plain validator' do
       path = create_file('app/validators/not_a_validator.rb', <<~RUBY)
         class NotAValidator
           def check(value)
@@ -75,7 +75,7 @@ RSpec.describe Woods::Extractors::ValidatorExtractor, 'fixture specs' do
       RUBY
 
       unit = described_class.new.extract_validator_file(path)
-      expect(unit).to be_nil
+      expect(unit.metadata[:validator_type]).to eq(:plain)
     end
   end
 

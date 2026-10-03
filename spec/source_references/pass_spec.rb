@@ -160,6 +160,43 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect { run_pass }.to raise_error(Woods::ExtractionError, /parse/)
   end
 
+  context 'with plain validator objects as targets' do
+    let(:sources) do
+      {
+        'app/models/widget.rb' => <<~RUBY,
+          class Widget
+            validate -> { WidgetInStockValidator.new(self).validate }, if: :active?
+            validate -> { BatchValidator.new(line_items, validate_with: LineQuantityValidator).validate }
+          end
+        RUBY
+        'app/validators/widget_in_stock_validator.rb' => 'class WidgetInStockValidator; end',
+        'app/validators/batch_validator.rb' => 'class BatchValidator; end',
+        'app/validators/line_quantity_validator.rb' => 'class LineQuantityValidator; end'
+      }
+    end
+    let(:units) do
+      [unit('Widget', 'app/models/widget.rb', 'model'),
+       unit('WidgetInStockValidator', 'app/validators/widget_in_stock_validator.rb', 'validator'),
+       unit('BatchValidator', 'app/validators/batch_validator.rb', 'validator'),
+       unit('LineQuantityValidator', 'app/validators/line_quantity_validator.rb', 'validator')]
+    end
+
+    before do
+      %w[Widget WidgetInStockValidator BatchValidator LineQuantityValidator].each do |c|
+        stub_const(c, Class.new)
+      end
+    end
+
+    it 'links a model to the validator it constructs and the validator class it passes as an option' do
+      edges = run_pass.dependencies.fetch(%w[model Widget])
+      expect(edges).to contain_exactly(
+        *%w[BatchValidator LineQuantityValidator WidgetInStockValidator].map do |target|
+          { 'type' => 'validator', 'target' => target, 'via' => 'code_reference' }
+        end
+      )
+    end
+  end
+
   it 'reports a captured-source read failure with the path and retry guidance' do
     error = Woods::SourceInputs::StableReader::Error.new('source_snapshot_mismatch')
     allow(session).to receive(:read_source).with('app/models/ref_caller.rb').and_raise(error)

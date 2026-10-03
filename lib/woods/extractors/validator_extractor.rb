@@ -11,7 +11,12 @@ module Woods
     #
     # Custom validators encapsulate reusable validation logic that applies
     # across multiple models. They inherit from `ActiveModel::Validator`
-    # or `ActiveModel::EachValidator` and live in `app/validators/`.
+    # or `ActiveModel::EachValidator`, or are plain objects with their own
+    # `validate`/`valid?` API, and live in `app/validators/`.
+    #
+    # Every class a file under `app/validators/` is named for becomes a unit;
+    # the API style only sets `metadata[:validator_type]` (`:plain` when no
+    # ActiveModel shape is recognized).
     #
     # We extract:
     # - Validator name and namespace
@@ -57,7 +62,7 @@ module Woods
         class_name = extract_class_name(file_path, source, 'validators')
 
         return nil unless class_name
-        return nil unless validator_file?(source)
+        return nil unless validator_file?(source) || declares_class?(source, class_name)
 
         unit = ExtractedUnit.new(
           type: :validator,
@@ -87,6 +92,17 @@ module Woods
           source.match?(/< ActiveModel::EachValidator/) ||
           source.match?(/def\s+validate_each\b/) ||
           source.match?(/def\s+validate\(/)
+      end
+
+      # @param source [String] Ruby source code
+      # @param class_name [String] the file's selected identity
+      # @return [Boolean] whether that identity is a class declaration, not a module
+      def declares_class?(source, class_name)
+        each_declaration(source) do |kind, _name, qualified|
+          return true if kind == 'class' && qualified == class_name
+        end
+
+        false
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -134,7 +150,7 @@ module Woods
         return :each_validator if source.match?(/def\s+validate_each\b/)
         return :validator if source.match?(/def\s+validate\(/)
 
-        :unknown
+        :plain
       end
 
       def extract_validated_attributes(source)
