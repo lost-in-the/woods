@@ -49,6 +49,13 @@ module Woods
       # Subdirectory to exclude — handled by ConcernExtractor.
       CONCERNS_SEGMENT = '/concerns/'
 
+      # A `def` at the start of a line. `[ \t]*+` never crosses a newline and
+      # never backtracks, so blank-line runs stay linear.
+      OWN_METHOD_DEFINITION = /^[ \t]*+def\s/
+
+      # The `app/<directory>/` prefix of a root-relative path.
+      APP_DIRECTORY_PREFIX = %r{\Aapp/[^/]++/}
+
       # Marks a unit found outside app/models by the unclaimed-Ruby sweep.
       SWEEP_MARKER = 'unclaimed_sweep'
 
@@ -265,7 +272,7 @@ module Woods
             !declaration['constructor'] && !modules.include?(declaration['owner']) &&
             !ar_names.include?(declaration['owner']) &&
             declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) } &&
-            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(/^\s*def\s/)
+            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
         end
         @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
           next if runtime_family(identifier)
@@ -419,7 +426,7 @@ module Woods
       def path_based_class_name(file_path)
         relative = file_path.sub("#{Rails.root}/", '')
         relative
-          .sub(%r{^app/[^/]+/}, '')
+          .sub(APP_DIRECTORY_PREFIX, '')
           .sub('.rb', '')
           .split('/')
           .map(&:camelize)

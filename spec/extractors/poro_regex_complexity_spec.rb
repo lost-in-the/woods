@@ -1,0 +1,42 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'timeout'
+require 'woods/extractors/poro_extractor'
+
+# Ruby 3.2+ memoizes backtracking, which hides polynomial patterns; the
+# timeout still catches them, and Ruby < 3.2 runs under a wall-clock budget.
+RSpec.describe Woods::Extractors::PoroExtractor, 'regex complexity' do
+  def within_budget(&block)
+    if Regexp.respond_to?(:timeout=)
+      previous = Regexp.timeout
+      Regexp.timeout = 1.0
+      begin
+        block.call
+      ensure
+        Regexp.timeout = previous
+      end
+    else
+      Timeout.timeout(5, &block)
+    end
+  end
+
+  it 'finds an own method definition in linear time over blank lines and near misses' do
+    pattern = described_class::OWN_METHOD_DEFINITION
+    within_budget do
+      expect(pattern.match?("\n" * 50_000)).to be(false)
+      expect(pattern.match?(" \t\n" * 50_000)).to be(false)
+      expect(pattern.match?("  de\n" * 10_000)).to be(false)
+      expect(pattern.match?("#{"\n" * 50_000}  def call")).to be(true)
+    end
+  end
+
+  it 'strips the app directory prefix in linear time' do
+    pattern = described_class::APP_DIRECTORY_PREFIX
+    within_budget do
+      expect(pattern.match?("app/#{'x' * 50_000}")).to be(false)
+      expect(pattern.match?("app/#{'x' * 10}/\n" * 10_000)).to be(true)
+      expect(pattern.match?("lib\napp/#{'x' * 10}/")).to be(false)
+    end
+  end
+end
