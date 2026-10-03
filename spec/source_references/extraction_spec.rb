@@ -210,6 +210,18 @@ RSpec.describe 'Source-reference extraction integration' do
     expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired, /full extraction/)
   end
 
+  it 'applies the configured caller policy and records it in the cache' do
+    original = Woods.configuration
+    Woods.configuration = Woods::Configuration.new
+    Woods.configuration.source_reference_callers = { poro: false }
+    extractor = full
+    cache = Woods::SourceReferences::Cache.read(extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME))
+    expect(cache.fetch('callers')).not_to have_key('poro')
+    expect(cache.fetch('owners')).to all(include('added' => []))
+  ensure
+    Woods.configuration = original
+  end
+
   it 'allows empty indexes to initialize a reference cache' do
     extractor = Woods::Extractor.new(output_dir: @output)
     extractor.send(:begin_source_inputs, 'incremental')

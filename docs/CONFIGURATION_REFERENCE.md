@@ -37,6 +37,7 @@ end
 - [Extractors](#extractors)
   - [Component directories](#component-directories)
   - [Event patterns](#event-patterns)
+  - [Source-reference callers](#source-reference-callers)
 - [Console MCP options](#console-mcp-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
@@ -1090,6 +1091,57 @@ end
 
 Each entry must be a method name; anything else raises
 `Woods::ConfigurationError` and keeps the previous value.
+
+### Source-reference callers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `source_reference_callers` | Hash | every constant-owned type, see below | Which unit types publish verified `code_reference` edges from the [constant-reference pass](EXTRACTOR_REFERENCE.md#constant-source-references), and which target types each may reference. |
+
+The Hash names only the caller types to change. Every other type keeps its
+default. A value is one of:
+
+- `:all`: the caller may reference every constant-owned unit type.
+- an Array of target types: the caller may reference only those.
+- `false` (or `[]`): the type is not a caller. Its references are still parsed
+  and cached, and it stays a valid target.
+
+Defaults:
+
+| Caller types | Target types |
+|--------------|--------------|
+| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
+| `component`, `view_component` | all except `component` and `view_component` |
+| `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query` | all except the four GraphQL types |
+
+Components and GraphQL units skip their own family because `render`, `slot`,
+`type_reference` and `field_resolver` edges already state those relationships.
+A design-system component rendered from most views would otherwise add one
+duplicate edge per view.
+
+```ruby
+Woods.configure do |config|
+  config.source_reference_callers = {
+    component: %i[model service poro job mailer], # narrow component callers
+    serializer: false,                             # serializers publish no reference edges
+    graphql_type: :all                             # include GraphQL-to-GraphQL references
+  }
+end
+```
+
+The policy filters edges that were already verified against the loaded
+application. It cannot add an unverified edge. The setter raises
+`Woods::ConfigurationError` for an unknown type and keeps the previous value.
+
+**Edge growth.** Each caller type adds one edge per distinct verified target it
+names. On the test application scaled to 1,200 components with 9
+non-component references each, component callers added 10,799 edges (2,414 to
+13,213 in total). Larger dependency sets can widen the incremental blast radius.
+
+**Changing `source_reference_callers` needs a full extraction.** The policy is
+recorded in `source_references.json`. Incremental extraction and
+`woods:refresh` stop with a full-extraction diagnostic when the recorded policy
+differs from the configured one, and the previous generation stays active.
 
 ## Console MCP options
 

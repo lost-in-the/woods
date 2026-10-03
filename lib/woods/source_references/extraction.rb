@@ -128,7 +128,7 @@ module Woods
       end
 
       def source_reference_policy
-        CallerPolicy.new
+        CallerPolicy.new(Woods.configuration.source_reference_callers)
       end
 
       def rewrite_source_reference_edges(record, edges, affected_types)
