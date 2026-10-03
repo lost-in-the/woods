@@ -61,6 +61,7 @@ require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
 require_relative 'module_reconciliation'
+require_relative 'skipped_files'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -529,6 +530,7 @@ module Woods
         write_dependency_graph
         write_graph_analysis
       end
+      profile_phase('skipped files') { write_skipped_files(@results.values.flatten.map(&:file_path)) }
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
@@ -890,6 +892,7 @@ module Woods
 
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
+      profile_phase('skipped files') { write_skipped_files(@dependency_graph.registered_paths) }
       profile_phase('manifest and summary') do
         write_manifest(incremental: true)
         write_structural_summary
@@ -2499,6 +2502,16 @@ module Woods
     # @return [String] hex SHA256 of dependency_graph.json
     def graph_sha
       @graph_sha || Digest::SHA256.hexdigest(AtomicFile.read(payload_dir.join('dependency_graph.json')))
+    end
+
+    # Swept Ruby files that produced no unit, with reasons. A pure function of
+    # the tree and the unit paths, so both extraction modes write the same bytes.
+    #
+    # @param unit_paths [Enumerable<String, nil>] every unit file_path
+    # @return [void]
+    def write_skipped_files(unit_paths)
+      report = SkippedFiles.new(root: Rails.root).build(unit_paths)
+      SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
     end
 
     def write_graph_analysis

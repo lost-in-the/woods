@@ -1746,6 +1746,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_and_load('app/models/sweep_namespace.rb', "module SweepNamespace\n  LIMIT = 3\nend\n")
       index = full_extraction
       expect(sweep_units(index)).to include('SweepDateHelper', 'SweepMapper::Base', 'SweepTailwind')
+      write_file('app/models/sweep_empty.rb', "module SweepEmpty\nend\n")
+      index = full_extraction
+      expect(read_json(index, 'skipped_files.json').fetch('files'))
+        .to include('path' => 'app/models/sweep_empty.rb', 'reason' => 'namespace_only')
       namespace = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepNamespace' }
       expect(namespace.fetch('metadata')).to include('ruby_kind' => 'module', 'constants' => ['LIMIT'])
       expect(sweep_units(index)).not_to include('SweepMapper', 'ApplicationController', 'PostsController')
