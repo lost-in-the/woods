@@ -349,8 +349,8 @@ RSpec.describe Woods::Extractors::CachingExtractor do
 
       expect(fetch_calls.size).to eq(2)
       expect(fetch_calls).to contain_exactly(
-        { type: :fetch, key_pattern: '"report/hourly"', ttl: '1.hour' },
-        { type: :fetch, key_pattern: '"report/daily"', ttl: '12.hours' }
+        { type: :fetch, key_pattern: '"report/hourly"', ttl: '1.hour', options: { expires_in: '1.hour' } },
+        { type: :fetch, key_pattern: '"report/daily"', ttl: '12.hours', options: { expires_in: '12.hours' } }
       )
     end
 
@@ -453,6 +453,119 @@ RSpec.describe Woods::Extractors::CachingExtractor do
         calls = described_class.new.extract_caching_file(path, :view).metadata[:cache_calls]
         expect(calls.map { |c| c[:type] }).to eq([:fragment])
       end
+    end
+  end
+
+  # ── Cache call arguments ─────────────────────────────────────────────
+
+  # key_pattern is the call's own key expression (source text); options holds
+  # the literal-valued cache options. ttl keeps any expires_in expression.
+  describe 'cache call arguments' do
+    def calls_for(relative, source)
+      described_class.new.extract_caching_file(create_file(relative, source)).metadata[:cache_calls]
+    end
+
+    it 'captures the key of a haml fragment cache' do
+      calls = calls_for('app/views/shipments/show.html.haml', <<~HAML)
+        - cache [shipment.label_images_cache_key, "images"] do
+          = render shipment.labels
+      HAML
+
+      expect(calls).to eq([{ type: :fragment, key_pattern: '[shipment.label_images_cache_key, "images"]',
+                             ttl: nil, options: {} }])
+    end
+
+    it 'captures the key and literal options of a jbuilder cache! block' do
+      calls = calls_for('app/views/widgets/show.json.jbuilder', <<~JBUILDER)
+        json.cache! [widget, 'v2'], expires_in: 1.hour do
+          json.id widget.id
+        end
+      JBUILDER
+
+      expect(calls).to eq([{ type: :fragment, key_pattern: "[widget, 'v2']", ttl: '1.hour',
+                             options: { expires_in: '1.hour' } }])
+    end
+
+    it 'captures the key and literal options of an erb fragment cache' do
+      calls = calls_for('app/views/widgets/index.html.erb', <<~ERB)
+        <% cache [@widgets, 'v3'], expires_in: 10.minutes, race_condition_ttl: 30.seconds, if: :fresh? do -%>
+          <%= render @widgets %>
+        <% end %>
+      ERB
+
+      expect(calls).to eq([{ type: :fragment, key_pattern: "[@widgets, 'v3']", ttl: '10.minutes',
+                             options: { expires_in: '10.minutes', race_condition_ttl: '30.seconds', if: ':fresh?' } }])
+    end
+
+    it 'keeps a computed expires_in as ttl but leaves non-literal options out' do
+      calls = calls_for('app/views/widgets/show.html.erb', <<~ERB)
+        <% cache @widget, expires_in: ttl_for(@widget), unless: current_user.admin? do %>
+          <p>hi</p>
+        <% end %>
+      ERB
+
+      expect(calls).to eq([{ type: :fragment, key_pattern: '@widget', ttl: 'ttl_for(@widget)', options: {} }])
+    end
+
+    it 'takes the key after the condition for conditional fragment caches' do
+      erb = calls_for('app/views/widgets/index.html.erb', "<% cache_if feature_on?, [@widget] do %>\n<% end %>\n")
+      jbuilder = calls_for('app/views/widgets/show.json.jbuilder', <<~JBUILDER)
+        json.cache_if! admin?, [widget, 'admin'], expires_in: 5.minutes do
+          json.id widget.id
+        end
+      JBUILDER
+
+      expect(erb).to eq([{ type: :fragment, key_pattern: '[@widget]', ttl: nil, options: {} }])
+      expect(jbuilder).to eq([{ type: :fragment, key_pattern: "[widget, 'admin']", ttl: '5.minutes',
+                                options: { expires_in: '5.minutes' } }])
+    end
+
+    it 'keeps interpolation and brackets inside a Rails.cache key whole' do
+      calls = calls_for('app/models/ledger.rb', <<~'RUBY')
+        class Ledger
+          def balance
+            Rails.cache.fetch("ledger/#{params[:id]}/balance", expires_in: 5.minutes) { compute }
+          end
+        end
+      RUBY
+
+      expect(calls).to eq([{ type: :fetch, key_pattern: "\"ledger/\#{params[:id]}/balance\"", ttl: '5.minutes',
+                             options: { expires_in: '5.minutes' } }])
+    end
+
+    it 'reads arguments that span several lines' do
+      calls = calls_for('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def totals
+            Rails.cache.fetch(
+              ["ledger", id, "totals"],
+              expires_in: 1.day,
+              race_condition_ttl: 10
+            ) { compute }
+          end
+        end
+      RUBY
+
+      expect(calls).to eq([{ type: :fetch, key_pattern: '["ledger", id, "totals"]', ttl: '1.day',
+                             options: { expires_in: '1.day', race_condition_ttl: '10' } }])
+    end
+
+    it 'reads a call that shares its line with the rest of a one-line method' do
+      calls = calls_for('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def balance; Rails.cache.fetch("ledger/balance", expires_in: 1.hour) { compute }; end
+        end
+      RUBY
+
+      expect(calls).to eq([{ type: :fetch, key_pattern: '"ledger/balance"', ttl: '1.hour',
+                             options: { expires_in: '1.hour' } }])
+    end
+
+    it 'truncates a long key expression to 120 characters' do
+      key = "[#{Array.new(40) { |i| "part_#{i}" }.join(', ')}]"
+      calls = calls_for('app/views/widgets/index.html.haml', "- cache #{key} do\n  %p hi\n")
+
+      expect(calls.first[:key_pattern]).to eq(key[0, 120])
     end
   end
 

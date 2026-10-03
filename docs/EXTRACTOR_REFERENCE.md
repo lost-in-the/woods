@@ -882,8 +882,13 @@ namespace.
 
 **Key details:**
 - Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`). Slim views are not scanned.
-- Recognizes jbuilder `json.cache!` and `json.cache_if!` blocks as fragment caching
+- Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
+- Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
+  - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
+  - `ttl`: the `expires_in:` expression, literal or not.
+  - `options`: `expires_in`, `race_condition_ttl`, `if`, and `unless`, only where the value is a literal (number, string, symbol, boolean, `nil`, or a `1.hour`-style duration).
+- `cache_key`, `cache_key_with_version`, and `cache_version` count only when called on a receiver or defined, never as a bare identifier
 - The `file_type` parameter on `extract_caching_file` defaults to `nil` (auto-detected from path)
 
 ---

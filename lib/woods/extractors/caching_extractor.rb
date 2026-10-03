@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'template_extensions'
+require_relative 'cache_call_arguments'
 
 module Woods
   module Extractors
@@ -46,18 +47,20 @@ module Woods
         delete: /Rails\.cache\.delete\s*[(\[]/,
         exist: /Rails\.cache\.exist\?\s*[(\[]/,
         caches_action: /\bcaches_action\b/,
-        fragment: /\bcache\s+.*?\bdo\b|\bcache\s+do\b|\bcache\s*\(|\bjson\.cache(?:_if)?!/,
+        fragment: /\bcache(?:_if|_unless)?\s+.*?\bdo\b|\bcache(?:_if|_unless)?\s*\(|\bjson\.cache(?:_if)?!/,
         # Key methods count only as a receiver call or a definition. A bare
         # identifier is usually a local passed as a key (`cache cache_key do`).
         cache_key: /\.cache_key(?:_with_version)?\b|\bdef\s+(?:self\.)?cache_key(?:_with_version)?\b/,
         cache_version: /\.cache_version\b|\bdef\s+(?:self\.)?cache_version\b/
       }.freeze
 
-      # Patterns for extracting TTL values
-      TTL_PATTERN = /expires_in:\s*([^,\n)]+)/
+      # Call types whose first argument (after the condition, for
+      # `cache_if`) is a cache key.
+      KEYED_TYPES = %i[fetch read write delete exist fragment].freeze
 
-      # Key-pattern regex (first argument to Rails.cache.*)
-      KEY_PATTERN = /Rails\.cache\.(?:fetch|read|write|delete|exist\?)\s*[(\[]?\s*([^,\n)\]]+)/
+      # Call types whose arguments are read at all. `cache_key` and
+      # `cache_version` are key methods, not calls that take cache options.
+      ARGUMENT_TYPES = (KEYED_TYPES + %i[caches_action]).freeze
 
       def initialize
         @rails_root = Rails.root
@@ -168,12 +171,11 @@ module Woods
 
       # Extract individual cache call entries from source.
       #
-      # Each entry has :type, :key_pattern, and :ttl, parsed from that
-      # occurrence's own argument text (the remainder of its line) — not
-      # from the whole file. Matching against the whole source gave every
-      # entry the first call's key and the first `expires_in:` in the file
-      # (#201); a call without its own `expires_in:` gets a nil ttl rather
-      # than inheriting a neighbor's.
+      # Each entry has :type, :key_pattern, :ttl, and :options, read from
+      # that occurrence's own arguments by {CacheCallArguments} — never from
+      # the whole file, so a call without its own `expires_in:` gets a nil
+      # ttl rather than a neighbor's. :key_pattern is the key expression's
+      # source text; :options holds the literal-valued cache options.
       #
       # @param source [String] Source code
       # @return [Array<Hash>] Cache call descriptors
@@ -182,12 +184,7 @@ module Woods
 
         CACHE_PATTERNS.each do |type, pattern|
           each_occurrence(source, pattern) do |offset|
-            call_text = call_argument_text(source, offset)
-            calls << {
-              type: type,
-              key_pattern: extract_key_pattern(call_text, type),
-              ttl: extract_ttl(call_text)
-            }
+            calls << { type: type }.merge(call_arguments(source, offset, type))
           end
         end
 
@@ -208,39 +205,17 @@ module Woods
         end
       end
 
-      # The argument text belonging to one cache call occurrence: the
-      # remainder of the line the call starts on. Bounding the slice to the
-      # line keeps key/TTL parsing from reading a neighboring call's options.
+      # Key, ttl, and literal options for one cache call occurrence.
       #
       # @param source [String] Source code
       # @param offset [Integer] Character offset where the occurrence begins
-      # @return [String] The call's own argument text
-      def call_argument_text(source, offset)
-        line_end = source.index("\n", offset) || source.length
-        source[offset...line_end]
-      end
-
-      # Extract the key pattern for a Rails.cache call.
-      #
-      # Returns a simplified string representation of the first argument.
-      #
-      # @param call_text [String] The call's own argument text
       # @param type [Symbol] The cache call type
-      # @return [String, nil] The key pattern or nil
-      def extract_key_pattern(call_text, type)
-        return nil unless %i[fetch read write delete exist].include?(type)
+      # @return [Hash] :key_pattern, :ttl, and :options
+      def call_arguments(source, offset, type)
+        return { key_pattern: nil, ttl: nil, options: {} } unless ARGUMENT_TYPES.include?(type)
 
-        match = call_text.match(KEY_PATTERN)
-        match ? match[1].strip[0, 60] : nil
-      end
-
-      # Extract TTL value from the call's own expires_in option.
-      #
-      # @param call_text [String] The call's own argument text
-      # @return [String, nil] The TTL expression or nil
-      def extract_ttl(call_text)
-        match = call_text.match(TTL_PATTERN)
-        match ? match[1].strip : nil
+        arguments = CacheCallArguments.read(source, offset)
+        KEYED_TYPES.include?(type) ? arguments : arguments.merge(key_pattern: nil)
       end
 
       # Infer the caching strategy from the call types present.
