@@ -36,6 +36,7 @@ end
 - [Gem indexing](#gem-indexing)
 - [Extractors](#extractors)
   - [Component directories](#component-directories)
+  - [Event patterns](#event-patterns)
 - [Console MCP options](#console-mcp-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
@@ -788,6 +789,52 @@ path implies is the one Zeitwerk manages. A directory that is not autoloaded is
 walked and skipped; one `Rails.logger.debug` line per extraction says how many
 files that was, so the misconfiguration is visible instead of looking like an
 app with no components.
+
+### Event patterns
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `event_patterns` | Array&lt;Hash&gt; | `[]` | Extra publish/subscribe call shapes `EventExtractor` recognizes, on top of its built-in `ActiveSupport::Notifications` and Wisper patterns. |
+
+`EventExtractor` knows two event systems out of the box. An application that
+wraps its events in its own class needs to describe that wrapper:
+
+```ruby
+Woods.configure do |config|
+  config.event_patterns = [
+    { role: :publisher,  pattern: /Ledger\.emit\s*\(\s*:?["']?([\w.:-]+)/, system: :ledger },
+    { role: :subscriber, pattern: /Ledger\.on\s*\(\s*:?["']?([\w.:-]+)/,   system: :ledger }
+  ]
+end
+```
+
+- **`role`**: `:publisher` or `:subscriber`.
+- **`pattern`**: a `Regexp`. Its first capture group is the event name. The
+  example accepts both `Ledger.emit(:checkout_completed)` and
+  `Ledger.emit("checkout.completed")`. A match whose first group did not
+  participate is skipped.
+- **`system`**: a `Symbol` label for the event system.
+
+Configured patterns scan every `app/**/*.rb` file after the built-in ones.
+
+The setter validates each entry when it is assigned. A role outside
+`:publisher`/`:subscriber`, a pattern that is not a `Regexp` or has no capture
+group, or a `system` that is not a `Symbol` raises `Woods::ConfigurationError`.
+The previous value is kept.
+
+**The system label is metadata, not identity.** An event unit's identifier is
+the event name alone, so existing identifiers never change. When patterns are
+configured, every event unit also carries `metadata.systems`: each system that
+used the name, in the order first seen. `metadata.pattern` stays the first of
+them. Two systems emitting the same name produce one unit listing both.
+
+With `event_patterns` unset or empty, event units are byte-identical to an
+extraction without the option. No `systems` key is written.
+
+**Changing `event_patterns` needs a full extraction.** The configuration is not
+part of any incremental fingerprint. `woods:incremental` re-runs `EventExtractor`
+only when an `app/**/*.rb` file changes, and then with the new patterns, so
+units for files that did not change can stay stale until `woods:extract` runs.
 
 ## Console MCP options
 
