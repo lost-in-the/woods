@@ -589,7 +589,7 @@ module Woods
           {
             name: assoc.name,
             type: assoc.macro, # :belongs_to, :has_many, :has_one, :has_and_belongs_to_many
-            target: ConstantPaths.normalize(assoc.class_name),
+            target: association_target(model, assoc),
             options: extract_association_options(assoc),
             through: assoc.options[:through],
             through_db: through_association_database(assoc),
@@ -749,7 +749,7 @@ module Woods
         # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
           polymorphic = polymorphic_reflection?(assoc)
-          target = ConstantPaths.normalize(assoc.class_name)
+          target = association_target(model, assoc)
           next if polymorphic && ConstantPaths.resolve("::#{target}").status != :resolved
 
           dep = { type: :model, target: target, via: polymorphic ? :polymorphic_interface : assoc.macro }
@@ -798,6 +798,40 @@ module Woods
         end
 
         consolidate_dependencies(deps)
+      end
+
+      # The class an association points at, as a unit identifier.
+      #
+      # +class_name+ is the written string: Rails resolves `"PlanLink"` on
+      # `Pricing::Model` to +Pricing::PlanLink+, and only the resolved name is
+      # a unit. The reflection's own class is the runtime truth; a lexical
+      # lookup from the owner's namespace stands in when it cannot be
+      # computed, and the written name when nothing resolves. A polymorphic
+      # name is an interface and stays as written.
+      #
+      # @param model [Class]
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [String]
+      def association_target(model, assoc)
+        written = assoc.class_name
+        return ConstantPaths.normalize(written) if polymorphic_reflection?(assoc)
+
+        reflected_class_name(assoc) || ConstantPaths.resolve(written, owner_nesting(model)).target
+      end
+
+      # @return [String, nil] the name of the class the reflection computes
+      def reflected_class_name(assoc)
+        klass = assoc.klass if assoc.respond_to?(:klass)
+        name = klass.name if klass.respond_to?(:name)
+        name unless name.to_s.empty?
+      rescue StandardError, LoadError
+        nil
+      end
+
+      # @return [Array<String>] the model and its namespaces, innermost first
+      def owner_nesting(model)
+        parts = model.name.to_s.split('::')
+        parts.size.downto(1).map { |length| parts.first(length).join('::') }
       end
 
       # Interface names the model takes part in: each polymorphic

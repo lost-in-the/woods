@@ -1277,6 +1277,57 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(deps.map { |d| d[:via] }).not_to include(:polymorphic_interface)
     end
 
+    context 'with a class_name written relative to the owner' do
+      def namespaced_model(assoc)
+        model = model_with_associations(assoc)
+        allow(model).to receive(:name).and_return('Pricing::Model')
+        model
+      end
+
+      it 'targets the class the reflection resolves to, not the written name' do
+        klass = double('Klass', name: 'Pricing::PlanLink')
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {}, klass: klass)
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'Pricing::PlanLink', via: :has_many }])
+      end
+
+      it 'resolves the written name from the owner namespace when the reflection cannot compute its class' do
+        stub_const('Pricing::Model', Class.new)
+        stub_const('Pricing::PlanLink', Class.new)
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {})
+        allow(assoc).to receive(:klass).and_raise(NameError, 'uninitialized constant PlanLink')
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'Pricing::PlanLink', via: :has_many }])
+      end
+
+      it 'keeps the written name when nothing resolves' do
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {})
+        allow(assoc).to receive(:klass).and_raise(NameError, 'uninitialized constant PlanLink')
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'PlanLink', via: :has_many }])
+      end
+
+      it 'records the same target in association metadata' do
+        klass = double('Klass', name: 'Pricing::PlanLink')
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {}, klass: klass,
+                                       foreign_key: 'model_id', inverse_of: nil)
+        model = namespaced_model(assoc)
+        allow(model).to receive(:connection_db_config).and_return(double('DbConfig', name: 'primary'))
+
+        expect(extractor.send(:extract_associations, model).first[:target]).to eq('Pricing::PlanLink')
+      end
+    end
+
     it 'strips a leading :: from an association edge target' do
       rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
                                          class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})
@@ -1548,7 +1599,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     it 'strips a leading :: from an association class_name' do
       model = stub_bare_model('Invoice')
       allow(model).to receive(:reflect_on_all_associations).and_return(
-        [reflection(name: :versions, macro: :has_many, class_name: '::Depot::CrateVersion')]
+        [reflection(name: :versions, macro: :has_many, class_name: '::Depot::CrateVersion', klass: double('Klass'))]
       )
 
       expect(extractor.send(:extract_associations, model).first[:target]).to eq('Depot::CrateVersion')
