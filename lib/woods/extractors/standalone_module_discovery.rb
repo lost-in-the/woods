@@ -164,7 +164,8 @@ module Woods
         return unless @lookup.module_object?(scope)
 
         location = CORE_SOURCE.bind(scope).call(name, false)
-        File.realpath(location.first) if location && File.file?(location.first)
+        file = location_file(location)
+        File.realpath(file) if file
       end
 
       def own_methods(value, path, declarations)
@@ -208,10 +209,18 @@ module Woods
         @def_sites[[path, lines]].include?(name.to_s)
       end
 
+      # Ruby 3.1 can report a constant location as [false, 0]; only a String
+      # naming an existing file is a location.
+      #
+      # @return [String, nil]
+      def location_file(location)
+        file = location.is_a?(Array) ? location.first : nil
+        file if file.is_a?(String) && File.file?(file)
+      end
+
       def local_method?(location, path, declarations)
-        unless location && File.file?(location.first) && File.realpath(location.first) == File.realpath(path)
-          return false
-        end
+        file = location_file(location)
+        return false unless file && File.realpath(file) == File.realpath(path)
 
         declarations.any? { |declaration| (declaration['line']..declaration['end_line']).cover?(location.last) }
       end

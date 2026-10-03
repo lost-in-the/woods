@@ -233,6 +233,27 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
     expect(units).to eq([])
   end
 
+  # Ruby 3.1 can report a constant's location as [false, 0].
+  it 'treats a source location without a file name as unowned instead of failing' do
+    path = load_source('located', <<~RUBY)
+      module StandaloneFixture::Located
+        LIMIT = 3
+        def self.call = nil
+      end
+    RUBY
+    real = Woods::Extractors::StandaloneModuleDiscovery::CORE_SOURCE
+    no_file = Object.new
+    no_file.define_singleton_method(:bind) do |scope|
+      bound = real.bind(scope)
+      Object.new.tap { |call| call.define_singleton_method(:call) { |*args| bound.call(*args) && [false, 0] } }
+    end
+    stub_const('Woods::Extractors::StandaloneModuleDiscovery::CORE_SOURCE', no_file)
+
+    extractor = described_class.new
+    expect(extractor.extract_poro_units(path)).to eq([])
+    expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
+  end
+
   describe 'module shapes without plain own methods (#673)' do
     before { require 'active_support/concern' }
 
