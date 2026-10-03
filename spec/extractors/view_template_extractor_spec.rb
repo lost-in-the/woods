@@ -252,6 +252,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
     context 'with controller inference' do
       before do
+        stub_const('ActionController::Base', Class.new)
+        stub_const('Admin::UsersController', Class.new(ActionController::Base))
         create_file('app/views/admin/users/index.html.erb', '<h1>Admin Users</h1>')
       end
 
@@ -340,6 +342,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
 
     context 'with HAML templates' do
       before do
+        stub_const('ActionController::Base', Class.new)
+        stub_const('WidgetsController', Class.new(ActionController::Base))
         create_file('app/views/widgets/index.html.haml', <<~HAML)
           %h1 Widgets
           - @widgets.each do |widget|
@@ -490,6 +494,56 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
         controller_dep = deps.find { |d| d[:via] == :view_render }
         expect(controller_dep).to be_nil
       end
+    end
+  end
+
+  describe 'view_render edges' do
+    before { stub_const('ActionController::Base', Class.new) }
+
+    def view_render_deps(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :view_render }
+    end
+
+    it 'links a template to the controller its directory names when that controller exists' do
+      stub_const('Ledgers::EntriesController', Class.new(ActionController::Base))
+      create_file('app/views/ledgers/entries/index.html.erb', '<h1>Entries</h1>')
+      expect(view_render_deps('ledgers/entries/index.html.erb'))
+        .to eq([{ type: :controller, target: 'Ledgers::EntriesController', via: :view_render }])
+    end
+
+    it 'links an ActionController::API controller' do
+      stub_const('ActionController::API', Class.new)
+      stub_const('Api::WidgetsController', Class.new(ActionController::API))
+      create_file('app/views/api/widgets/show.json.jbuilder', 'json.id 1')
+      expect(view_render_deps('api/widgets/show.json.jbuilder'))
+        .to eq([{ type: :controller, target: 'Api::WidgetsController', via: :view_render }])
+    end
+
+    it 'emits no edge when no controller constant exists for the directory' do
+      create_file('app/views/shared/svg/_icon.html.haml', '%svg')
+      expect(view_render_deps('shared/svg/_icon.html.haml')).to be_empty
+    end
+
+    it 'does not fall back to a top-level controller sharing the last name segment' do
+      stub_const('Shared', Module.new)
+      stub_const('SvgController', Class.new(ActionController::Base))
+      create_file('app/views/shared/svg/_icon.html.haml', '%svg')
+      expect(view_render_deps('shared/svg/_icon.html.haml')).to be_empty
+    end
+
+    it 'emits no edge when the constant is not a controller' do
+      stub_const('ShipmentsController', Class.new)
+      create_file('app/views/shipments/index.html.erb', '<h1>Shipments</h1>')
+      expect(view_render_deps('shipments/index.html.erb')).to be_empty
+    end
+
+    it 'links a mailer view to its mailer class' do
+      stub_const('ActionMailer::Base', Class.new)
+      stub_const('ReceiptMailer', Class.new(ActionMailer::Base))
+      create_file('app/views/receipt_mailer/sent.html.erb', '<p>Sent</p>')
+      expect(view_render_deps('receipt_mailer/sent.html.erb'))
+        .to eq([{ type: :mailer, target: 'ReceiptMailer', via: :view_render }])
     end
   end
 
