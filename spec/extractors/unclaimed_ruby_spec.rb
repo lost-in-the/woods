@@ -132,6 +132,41 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     expect(identifiers).to contain_exactly('SweepFixture::DateHelper', 'SweepFixture::Value')
   end
 
+  describe '#extract_fallback_units for a claimed path whose owner emitted nothing' do
+    it 'extracts helper classes and mixins beside a serializer base' do
+      path = load_source('app/serializers/sweep_fixture/serializer_helpers.rb', <<~RUBY)
+        module SweepFixture::SerializerHelpers
+          def money(value) = value.to_s
+        end
+        class SweepFixture::Formatter
+          def call(value) = value
+        end
+      RUBY
+      units = described_class.new.extract_fallback_units(path)
+      expect(units.map(&:identifier)).to contain_exactly('SweepFixture::Formatter', 'SweepFixture::SerializerHelpers')
+      expect(units.map { |unit| unit.metadata[:discovered_via] }.uniq).to eq(['owner_fallback'])
+    end
+
+    it 'applies the class-family exclusion and canonical ownership like the sweep' do
+      stub_const('ActionController::Base', Class.new)
+      path = load_source('app/services/sweep_fixture/base_controller.rb', <<~RUBY)
+        class SweepFixture::BaseController < ActionController::Base
+          def index = nil
+        end
+      RUBY
+      load_source('app/services/sweep_fixture/owned.rb', "class SweepFixture::Owned\n  def a = 1\nend\n")
+      reopen = load_source('app/services/sweep_fixture/reopen.rb', "class SweepFixture::Owned\n  def b = 2\nend\n")
+      extractor = described_class.new
+      expect(extractor.extract_fallback_units(path)).to eq([])
+      expect(extractor.extract_fallback_units(reopen)).to eq([])
+    end
+
+    it 'leaves the sweep and app/models scans unchanged' do
+      load_source('app/services/sweep_fixture/checkout.rb', "class SweepFixture::Checkout\n  def call = nil\nend\n")
+      expect(identifiers).to eq([])
+    end
+  end
+
   it 'reconciles standalone modules across the swept scope' do
     path = load_source('app/helpers/sweep_fixture/link_helper.rb',
                        "module SweepFixture::LinkHelper\n  def link = 1\nend\n")

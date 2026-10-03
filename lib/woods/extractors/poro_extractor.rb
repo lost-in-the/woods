@@ -51,6 +51,9 @@ module Woods
       # Marks a unit found outside app/models by the unclaimed-Ruby sweep.
       SWEEP_MARKER = 'unclaimed_sweep'
 
+      # Marks a unit from a path another extractor owns but emitted nothing for.
+      FALLBACK_MARKER = 'owner_fallback'
+
       def initialize
         @models_dir = Rails.root.join('app/models')
       end
@@ -97,16 +100,18 @@ module Woods
       # @param ar_names [Set<String>] Active Record identities to exclude
       # @return [Array<ExtractedUnit>] legacy class followed by standalone modules
       def extract_poro_units(file_path, ar_names: Set.new)
-        source = File.read(file_path)
-        analysis = SourceReferences::Collector.new.call(source)
-        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
-        primary = extract_class_unit(file_path, source, ar_names, analysis)
-        nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)
-        modules = discovery.call(file_path, analysis: analysis).map { |record| module_unit(file_path, source, record) }
-        mark_swept([primary, *nested, *modules].compact, file_path)
-      rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
-        []
+        extract_units(file_path, ar_names, fallback: false)
+      end
+
+      # Units for a path another extractor's file rule owns but emitted nothing
+      # for. The same class-family exclusion and canonical-ownership proof as
+      # the sweep apply; units carry {FALLBACK_MARKER}.
+      #
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @return [Array<ExtractedUnit>]
+      def extract_fallback_units(file_path, ar_names: Set.new)
+        extract_units(file_path, ar_names, fallback: true)
       end
 
       # Recompute unclaimed module identities for includer-only reconciliation.
@@ -154,6 +159,24 @@ module Woods
         JobAncestry.admitted?(klass, app_root: Rails.root.to_s)
       end
 
+      def extract_units(file_path, ar_names, fallback:)
+        source = File.read(file_path)
+        analysis = SourceReferences::Collector.new.call(source)
+        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        proof = fallback || swept_path?(file_path)
+        primary = extract_class_unit(file_path, source, ar_names, analysis, proof: proof)
+        nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)
+        modules = discovery.call(file_path, analysis: analysis, admit: fallback)
+                           .map { |record| module_unit(file_path, source, record) }
+        units = [primary, *nested, *modules].compact
+        return mark(units, FALLBACK_MARKER) if fallback
+
+        swept_path?(file_path) ? mark(units, SWEEP_MARKER) : units
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract PORO #{file_path}: #{e.message}")
+        []
+      end
+
       # Nodes that give a module body content of its own.
       CONTENT_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
                        Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode, Prism::BlockNode].freeze
@@ -176,13 +199,13 @@ module Woods
         source = File.read(file)
         analysis = SourceReferences::Collector.new.call(source)
         units = @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
-        mark_swept(units, file)
+        swept_path?(file) ? mark(units, SWEEP_MARKER) : units
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract standalone module #{file}: #{e.message}")
         []
       end
 
-      def extract_class_unit(file_path, source, ar_names, analysis)
+      def extract_class_unit(file_path, source, ar_names, analysis, proof:)
         return nil unless class_source?(source, analysis)
 
         class_name = infer_class_name(file_path, source, analysis)
@@ -193,7 +216,7 @@ module Woods
           declaration['owner'] == class_name && declaration['kind'] == 'module'
         end
         return nil if runtime_family(class_name)
-        return nil if swept_path?(file_path) && !@module_discovery.owns?(class_name, file_path)
+        return nil if proof && !@module_discovery.owns?(class_name, file_path)
 
         unit = ExtractedUnit.new(type: :poro, identifier: class_name, file_path: file_path)
         parent_class = extract_parent_class(source, class_name)
@@ -240,10 +263,8 @@ module Woods
         !File.expand_path(file_path).start_with?("#{File.expand_path(@models_dir)}/")
       end
 
-      def mark_swept(units, file_path)
-        return units unless swept_path?(file_path)
-
-        units.each { |unit| unit.metadata = unit.metadata.merge(discovered_via: SWEEP_MARKER) }
+      def mark(units, marker)
+        units.each { |unit| unit.metadata = unit.metadata.merge(discovered_via: marker) }
       end
 
       def nested_class_unit(file_path, source, identifier, body)

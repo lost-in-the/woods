@@ -39,9 +39,10 @@ module Woods
 
       # @param path [String] original application source path
       # @param analysis [Hash] SourceReferences::Collector result for this file
+      # @param admit [Boolean] accept a path another extractor owns (owner fallback)
       # @return [Array<Hash>] canonical identifiers and source-verified method metadata
-      def call(path, analysis:)
-        return [] unless eligible_path?(path)
+      def call(path, analysis:, admit: false)
+        return [] unless admit ? under_root?(path) : eligible_path?(path)
 
         declarations = analysis.fetch('declarations').select do |declaration|
           declaration['kind'] == 'module' && declaration.fetch('singleton_depth', 0).zero?
@@ -128,6 +129,11 @@ module Woods
         real_root = File.realpath(@root)
         real = File.realpath(absolute)
         real.start_with?("#{real_root}/") && PathDispatcher.poro_path?(real.delete_prefix("#{real_root}/"))
+      end
+
+      def under_root?(path)
+        real = File.realpath(File.expand_path(path, @root))
+        real.end_with?('.rb') && real.start_with?("#{File.realpath(@root)}/")
       end
 
       def claimed_identity?(identifier)
