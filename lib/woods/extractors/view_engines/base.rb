@@ -82,6 +82,18 @@ module Woods
           raise NotImplementedError, "#{self.class.name} must implement #scan_partials"
         end
 
+        # Partial references whose path is only known at runtime, such as a
+        # host helper that builds the path or an object whose partial path
+        # Rails derives. Each entry is shaped `{ kind: 'helper' | 'object',
+        # name: String }`. These are metadata only: the orchestrator never
+        # turns them into dependency edges. Optional; the default finds none.
+        #
+        # @param source [String] Template source code
+        # @return [Array<Hash>]
+        def scan_unresolved_partials(_source)
+          []
+        end
+
         # Instance-variable names referenced in the template source,
         # returned sorted and deduplicated (including the leading `@`).
         #
