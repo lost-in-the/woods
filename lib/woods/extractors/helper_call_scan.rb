@@ -16,7 +16,7 @@ module Woods
     # The pass is lexical, not a parse. It reports a name when it appears as
     # a receiverless call, or as a call on the `helpers` proxy. It skips a
     # name used as a symbol, a hash label, a method called on another
-    # receiver, a method definition, string text, a comment, or a local
+    # receiver, a method definition, string or heredoc text, a comment, or a local
     # (an assignment target, a block parameter, a `local_assigns` or
     # `defined?` probe, or a local the caller names).
     class HelperCallScan
@@ -41,6 +41,11 @@ module Woods
       BLOCK_PARAMETERS = /\|([^|\n]*+)\|/
       LOCAL_ASSIGNS_KEY = /(?:\[|\.(?:fetch|key\?|dig)\(?)\s*+:([A-Za-z_]\w*+)/
       DEFINED_OPERAND = /\s*+\(?\s*+([a-z_]\w*+)/
+      # `<<~NAME`, `<<-NAME`, or `<<NAME` with an all-caps name (so `a <<b`
+      # stays a shift), optionally quoted. Captures 2 or 4 hold the name.
+      HEREDOC = /<<[~-](["'`]?)([A-Za-z_]\w*+)\1|<<(["'`]?)([A-Z][A-Z0-9_]*+)\3/
+      # The end of a line of code, with any trailing comment.
+      LINE_END = /[ \t]*+(?:#[^\n]*+)?\n/
       INTERPOLATION = /#\{/
       ESCAPE = /\\./m
       # Text of an interpolating literal up to the next character that can
@@ -75,6 +80,8 @@ module Woods
         # the code inside one of its interpolations (or of the source itself).
         @frames = [0]
         @previous = nil
+        # Terminators of heredocs opened on the current line, in order.
+        @heredocs = []
       end
 
       # @return [Hash{Symbol => Array<String>}]
@@ -86,6 +93,7 @@ module Woods
       private
 
       def scan_code
+        return heredoc_bodies if @heredocs.any? && @scanner.skip(LINE_END)
         return if @scanner.skip(SPACE) || @scanner.skip(COMMENT)
 
         previous = @previous
@@ -122,6 +130,7 @@ module Woods
         when "'" then quoted(SINGLE_QUOTED)
         when '%' then @scanner.match?(WORD_ARRAY_OPEN) ? quoted(WORD_ARRAY) : @scanner.getch
         when '"', '`' then @frames << @scanner.getch
+        when '<' then @scanner.skip(HEREDOC) ? @heredocs << (@scanner[2] || @scanner[4]) : @scanner.getch
         when '{' then open_brace
         when '}' then close_brace
         when '|' then block_parameters(previous)
@@ -134,6 +143,14 @@ module Woods
       # search from every later quote.
       def quoted(pattern)
         @scanner.skip(pattern) || @scanner.terminate
+      end
+
+      # Skip the bodies of the heredocs the finished line opened. A body
+      # with no terminator line runs to the end of the source.
+      def heredoc_bodies
+        @heredocs.shift(@heredocs.size).each do |terminator|
+          @scanner.skip_until(/^[ \t]*+#{Regexp.escape(terminator)}[ \t]*+$/) || @scanner.terminate
+        end
       end
 
       def open_brace

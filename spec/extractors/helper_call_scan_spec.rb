@@ -96,6 +96,24 @@ RSpec.describe Woods::Extractors::HelperCallScan do
       expect(calls("x = 'open\npretty_date")[:bare]).to eq([])
     end
 
+    it 'skips a heredoc body, apostrophes and all' do
+      code = "sql = <<~SQL\n  select title from widgets where it's pretty_date\nSQL\nwidget_badge(w)"
+      expect(calls(code)[:bare]).to eq(%w[widget_badge])
+    end
+
+    it 'reads the rest of the line that opens a heredoc' do
+      expect(calls("tag(<<~TEXT, pretty_date) # note\n  title\nTEXT\n")[:bare]).to eq(%w[pretty_date])
+    end
+
+    it 'skips each body when one line opens two heredocs' do
+      expect(calls("pair(<<-A, <<-'B')\n  title\n  A\n  pretty_date\n  B\nwidget_badge")[:bare])
+        .to eq(%w[widget_badge])
+    end
+
+    it 'does not read a shift operator as a heredoc' do
+      expect(calls("list << title\nwidget_badge")[:bare]).to eq(%w[title widget_badge])
+    end
+
     it 'scans source that is not valid UTF-8' do
       expect(calls("pretty_date \xFF title".dup.force_encoding(Encoding::UTF_8))[:bare]).to eq(%w[pretty_date title])
     end
