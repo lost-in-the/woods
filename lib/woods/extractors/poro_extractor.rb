@@ -124,6 +124,25 @@ module Woods
         end
       end
 
+      # Why a scanned file yields no unit. See {Woods::SkippedFiles} for the reasons.
+      #
+      # @param file_path [String] absolute path of a file that produced no unit
+      # @return [String] skip reason
+      def skip_reason(file_path)
+        source = File.read(file_path)
+        analysis = SourceReferences::Collector.new.call(source)
+        return 'parse_error' if analysis['parse_error']
+
+        declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
+        return 'no_declaration' if declarations.empty?
+        return 'namespace_only' if namespace_only?(source, declarations)
+
+        family = declarations.select { |declaration| declaration['kind'] == 'class' }
+                             .map { |declaration| declaration['owner'] }.uniq
+                             .filter_map { |identifier| runtime_family(identifier) }.first
+        family ? "rejected_by:#{family}" : 'not_owned'
+      end
+
       private
 
       # A class the job family admits is a job unit, not also a PORO.
@@ -133,6 +152,24 @@ module Woods
       def job_owned?(class_name)
         klass = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
         JobAncestry.admitted?(klass, app_root: Rails.root.to_s)
+      end
+
+      # Nodes that give a module body content of its own.
+      CONTENT_NODES = [Prism::DefNode, Prism::ClassNode, Prism::ConstantWriteNode, Prism::ConstantPathWriteNode,
+                       Prism::ConstantOrWriteNode, Prism::ConstantPathOrWriteNode, Prism::BlockNode].freeze
+      private_constant :CONTENT_NODES
+
+      def namespace_only?(source, declarations)
+        return false unless declarations.all? { |declaration| declaration['kind'] == 'module' }
+
+        pending = [Prism.parse(source).value]
+        until pending.empty?
+          node = pending.pop
+          return false if CONTENT_NODES.any? { |type| node.is_a?(type) }
+
+          pending.concat(node.compact_child_nodes)
+        end
+        true
       end
 
       def extract_standalone_module_file(file)
