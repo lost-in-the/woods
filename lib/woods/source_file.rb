@@ -1,14 +1,14 @@
 # frozen_string_literal: true
 
 module Woods
-  # Reads host-application source as UTF-8, whatever the process locale.
+  # Reads host-application source as UTF-8, whatever the process encoding.
   #
-  # A bare `File.read` tags its result with the process default external
-  # encoding. Under a POSIX locale (`LANG=C`, the default in a plain container
-  # image) that is US-ASCII, so a multibyte byte anywhere in a source file,
-  # an em dash in a comment, makes the first regex or Prism call raise
-  # "invalid byte sequence in US-ASCII". Extractors rescue per file, so the
-  # unit was dropped without a trace.
+  # A bare `File.read` tags its result with `Encoding.default_external`. A
+  # Rails boot sets that from `config.encoding` (UTF-8 by default), but code
+  # that reads without the boot sees the locale's encoding instead: US-ASCII
+  # under `LC_ALL=C`. So does a host whose `config.encoding` is not UTF-8.
+  # A multibyte byte, an em dash in a comment, then makes the first regex or
+  # Prism call raise, and the extractor's per-file rescue drops the unit.
   #
   # Ruby source is UTF-8 unless declared otherwise, so the read is pinned to
   # UTF-8. Bytes that are still not valid UTF-8 (a stray Latin-1 byte, almost

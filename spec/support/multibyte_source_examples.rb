@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 # A real source file with a multibyte character, extracted under a US-ASCII
-# default external encoding, must still yield its unit. Needs the
+# default external encoding, must still yield its unit. That is the encoding
+# a process sees under LC_ALL=C when no Rails boot has set it from
+# config.encoding, so the reader cannot rely on the boot. Needs the
 # 'extractor setup' context (create_file) and an extractor whose
 # `described_class.new.extract_all` discovers +path+.
 #
