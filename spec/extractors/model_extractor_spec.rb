@@ -736,7 +736,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         allow(File).to receive(:exist?).and_call_original
         allow(File).to receive(:exist?).with(model_path).and_return(true)
         allow(File).to receive(:read).and_call_original
-        allow(File).to receive(:read).with(model_path).and_return(model_source)
+        allow(File).to receive(:read).with(model_path, encoding: Encoding::UTF_8).and_return(model_source)
       end
 
       def extract_with_concern(concern_path)
