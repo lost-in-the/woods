@@ -32,8 +32,9 @@ RSpec.describe 'test support and test mapping regex complexity' do
 
   it 'scans support definitions in linear time over blank lines and near misses' do
     within_budget do
-      [catalog::SHARED_EXAMPLES, catalog::SHARED_CONTEXT, catalog::MATCHER, catalog::CONFIGURE, catalog::METHOD,
-       catalog::CONFIG_INCLUDE, catalog::BEHAVES_LIKE, catalog::INCLUDE_CONTEXT, catalog::INCLUDE_MODULE].each do |pattern|
+      patterns = %i[SHARED_EXAMPLES SHARED_CONTEXT MATCHER CONFIGURE METHOD CONFIG_INCLUDE BEHAVES_LIKE
+                    INCLUDE_CONTEXT INCLUDE_MODULE].map { |name| catalog.const_get(name) }
+      patterns.each do |pattern|
         expect("\n" * 50_000).not_to match(pattern)
         expect(" \t\n" * 50_000).not_to match(pattern)
         expect("#{" \t" * 50_000}x").not_to match(pattern)
@@ -103,7 +104,7 @@ RSpec.describe 'test support and test mapping regex complexity' do
       expect(exercised.call("visit widget_pat\nget widget_ur\n" * 10_000)).to eq([])
       expect(exercised.call("get#{'(' * 50_000}")).to eq([])
       expect(exercised.call("visit \"/#{'#{' * 25_000}\"")).to eq([])
-      expect(exercised.call("visit \"/#{'#{x}' * 12_000}\"")).to eq([])
+      expect(exercised.call("visit \"/#{"\#{x}" * 12_000}\"")).to eq([])
       expect(exercised.call("visit \"/files/x/#{'a-' * 200}b\"\n" * 2_000)).to eq(['GET /files/*path/:a-:b'])
       expect(exercised.call("visit \"/#{'a' * 50_000}")).to eq([])
       expect(exercised.call("visit widget_path(w)\n" * 10_000)).to eq(['GET /widgets/:id'])
