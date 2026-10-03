@@ -458,6 +458,14 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **What it captures:** Plain Ruby objects in `app/models` that are not ActiveRecord (non-AR classes, excluding concerns). Woods 2.1 writers also discover callable standalone modules as described below.
 
+It also sweeps Ruby under `app/` that no file-based extractor owns: helpers,
+view models, routing constraints, an app-local `app/lib`, and non-component
+Ruby beside components. The sweep follows `config.unclaimed_ruby_paths`; see
+[Unclaimed Ruby paths](CONFIGURATION_REFERENCE.md#unclaimed-ruby-paths). Swept
+units carry `metadata.discovered_via: "unclaimed_sweep"`. Classes owned by a
+class-discovered extractor (controllers, mailers, channels, components, jobs,
+serializers, GraphQL) are never emitted by the sweep.
+
 **Key details:**
 - Scans `app/models` for files that don't define an `ActiveRecord::Base` descendant
 - Common examples: value objects, form objects placed in `app/models`, domain structs

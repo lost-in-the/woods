@@ -1657,6 +1657,94 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'unclaimed Ruby under app/ (#672, #673)' do
+    after do
+      %i[SweepDateHelper SweepBillingView SweepConstraint SweepSlugifier SweepTailwind SweepNamespace
+         SweepMapper].each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) }
+    end
+
+    def write_and_load(relative, source)
+      write_file(relative, source)
+      load app_path(relative)
+      relative
+    end
+
+    def sweep_units(index)
+      unit_snapshot(index).values.select { |unit| unit.dig('metadata', 'discovered_via') == 'unclaimed_sweep' }
+                          .map { |unit| unit['identifier'] }
+    end
+
+    it 'adds, edits, and prunes swept files equivalently to a full extraction' do
+      run_sequence([
+                     lambda do
+                       write_and_load('app/helpers/sweep_date_helper.rb', <<~RUBY)
+                         module SweepDateHelper
+                           def pretty_date(value) = value.to_s
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/view_models/sweep_billing_view.rb', <<~RUBY)
+                         class SweepBillingView < SimpleDelegator
+                           def total_label = SweepDateHelper.name
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/constraints/sweep_constraint.rb', <<~RUBY)
+                         class SweepConstraint
+                           def self.matches?(_request) = true
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/lib/sweep_slugifier.rb', "class SweepSlugifier\n  def call(t) = t\nend\n")
+                     end,
+                     lambda do
+                       write_and_load('app/views/ui/sweep_tailwind.rb', <<~RUBY)
+                         module SweepTailwind
+                           def tw(*classes) = classes.join(' ')
+                         end
+                       RUBY
+                     end,
+                     -> { write_and_load('app/models/sweep_namespace.rb', "module SweepNamespace\nend\n") },
+                     lambda do
+                       write_and_load('app/models/sweep_namespace.rb', <<~RUBY)
+                         module SweepNamespace
+                           LIMIT = 3
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/view_models/sweep_billing_view.rb', <<~RUBY)
+                         class SweepBillingView < SimpleDelegator
+                           def total_label = SweepSlugifier.new.call('total')
+                         end
+                       RUBY
+                     end,
+                     -> { delete_file('app/constraints/sweep_constraint.rb') }
+                   ])
+    end
+
+    it 'publishes swept units and a nested class from a namespace file in a full extraction' do
+      write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
+      write_and_load('app/lib/sweep_mapper.rb', <<~RUBY)
+        module SweepMapper
+          class Base
+            def initialize(path) = @path = path
+          end
+        end
+      RUBY
+      write_and_load('app/views/ui/sweep_tailwind.rb', "module SweepTailwind\n  def tw = 1\nend\n")
+      write_and_load('app/models/sweep_namespace.rb', "module SweepNamespace\n  LIMIT = 3\nend\n")
+      index = full_extraction
+      expect(sweep_units(index)).to include('SweepDateHelper', 'SweepMapper::Base', 'SweepTailwind')
+      namespace = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepNamespace' }
+      expect(namespace.fetch('metadata')).to include('ruby_kind' => 'module', 'constants' => ['LIMIT'])
+      expect(sweep_units(index)).not_to include('SweepMapper', 'ApplicationController', 'PostsController')
+    end
+  end
+
   describe 'class-discovered job nested in a model file (N-1)' do
     # spec/dummy/app/models/billing/invoicing/reconciler.rb nests
     # `RefreshJob < ApplicationJob` inside a compact-form PORO. The full path

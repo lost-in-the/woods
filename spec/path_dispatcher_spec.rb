@@ -170,6 +170,61 @@ RSpec.describe Woods::PathDispatcher do
     end
   end
 
+  describe 'unclaimed Ruby (#672)' do
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'names the extractor whose file rule owns a path' do
+      expect(described_class.claiming_key_for('app/services/checkout.rb')).to eq(:services)
+      expect(described_class.claiming_key_for('app/models/concerns/auditable.rb')).to eq(:concerns)
+    end
+
+    it 'does not count the PORO, runtime-mixin, or caching scans as owning a path' do
+      %w[app/helpers/date_helper.rb app/models/value_object.rb app/controllers/posts_controller.rb].each do |path|
+        expect(described_class.claiming_key_for(path)).to(be_nil, path)
+      end
+    end
+
+    it 'sweeps Ruby under app/ that no file rule owns' do
+      %w[
+        app/helpers/date_helper.rb app/view_models/billing_view.rb app/constraints/non_production_constraint.rb
+        app/lib/slugifier.rb app/views/components/builders/tailwind.rb app/controllers/posts_controller.rb
+      ].each { |path| expect(described_class.unclaimed?(path)).to(be(true), path) }
+    end
+
+    it 'never sweeps owned paths, assets, javascript, or non-Ruby files' do
+      %w[
+        app/services/checkout.rb app/models/concerns/auditable.rb app/assets/config/manifest.rb
+        app/javascript/setup.rb app/helpers/date_helper.js lib/slugifier.rb
+      ].each { |path| expect(described_class.unclaimed?(path)).to(be(false), path) }
+    end
+
+    it 'follows the configured globs' do
+      Woods.configuration.unclaimed_ruby_paths = ['app/helpers/**/*.rb']
+
+      expect(described_class.unclaimed?('app/helpers/date_helper.rb')).to be(true)
+      expect(described_class.unclaimed?('app/view_models/billing_view.rb')).to be(false)
+    end
+
+    it 'routes swept paths and app/models to the PORO extractor, whatever the globs say' do
+      Woods.configuration.unclaimed_ruby_paths = []
+
+      expect(keys_for('app/models/value_object.rb')).to include(:poros)
+      expect(keys_for('app/helpers/date_helper.rb')).not_to include(:poros)
+
+      Woods.configuration.unclaimed_ruby_paths = ['app/**/*.rb']
+
+      expect(keys_for('app/helpers/date_helper.rb')).to include(:poros)
+      expect(keys_for('app/services/checkout.rb')).not_to include(:poros)
+      expect(keys_for('app/models/concerns/auditable.rb')).not_to include(:poros)
+    end
+  end
+
   describe '#whole_app_keys_for' do
     it 'triggers a routes re-run on config/routes.rb' do
       expect(dispatcher.whole_app_keys_for('config/routes.rb')).to include(:routes)

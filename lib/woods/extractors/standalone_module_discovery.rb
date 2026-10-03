@@ -4,11 +4,12 @@ require 'set'
 require_relative '../source_references/runtime_lookup'
 require_relative 'concern_extractor'
 require_relative 'module_def_sites'
+require_relative '../path_dispatcher'
 
 module Woods
   module Extractors
     # Discovers modules whose canonical declaration and own behavior or data
-    # live in app/models. It does not autoload constants or invoke application
+    # live in a file the PORO extractor scans ({PathDispatcher.poro_path?}). It does not autoload constants or invoke application
     # methods. Cross-file reopenings deliberately do not become additional
     # source owners.
     class StandaloneModuleDiscovery
@@ -53,6 +54,13 @@ module Woods
 
           module_record(identifier, value, path, candidates)
         end
+      end
+
+      # @param identifier [String] constant path
+      # @param path [String] application source path
+      # @return [Boolean] whether +path+ is the constant's canonical declaration
+      def owns?(identifier, path)
+        canonical_path(identifier) == File.realpath(path)
       end
 
       # Classes this file declares and canonically owns.
@@ -115,10 +123,11 @@ module Woods
 
       def eligible_path?(path)
         absolute = File.expand_path(path, @root)
-        return false unless absolute.start_with?("#{@root}/app/models/") && absolute.end_with?('.rb')
-        return false if absolute.include?('/concerns/')
+        return false unless absolute.start_with?("#{@root}/")
 
-        File.realpath(absolute).start_with?("#{File.realpath(@root)}/app/models/")
+        real_root = File.realpath(@root)
+        real = File.realpath(absolute)
+        real.start_with?("#{real_root}/") && PathDispatcher.poro_path?(real.delete_prefix("#{real_root}/"))
       end
 
       def claimed_identity?(identifier)

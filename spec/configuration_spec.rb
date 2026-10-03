@@ -608,4 +608,42 @@ RSpec.describe Woods::Configuration do
       expect(config.event_paths).to eq(%w[app lib])
     end
   end
+
+  describe '#unclaimed_ruby_paths' do
+    it 'defaults to every Ruby file under app/' do
+      expect(described_class.new.unclaimed_ruby_paths).to eq(['app/**/*.rb'])
+    end
+
+    it 'accepts a list of root-relative globs and freezes it' do
+      config.unclaimed_ruby_paths = ['app/helpers/**/*.rb', 'app/view_models/**/*.rb']
+
+      expect(config.unclaimed_ruby_paths).to eq(['app/helpers/**/*.rb', 'app/view_models/**/*.rb'])
+      expect(config.unclaimed_ruby_paths).to be_frozen
+    end
+
+    it 'accepts an empty list, which leaves only the app/models scan' do
+      config.unclaimed_ruby_paths = []
+
+      expect(config.unclaimed_ruby_paths).to eq([])
+    end
+
+    it 'rejects a value that is not an Array' do
+      expect { config.unclaimed_ruby_paths = 'app/**/*.rb' }
+        .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths must be an Array/)
+    end
+
+    it 'rejects an empty, absolute, or parent-relative glob' do
+      ['', '/srv/app/**/*.rb', 'app/../lib/**/*.rb', :app].each do |glob|
+        expect { config.unclaimed_ruby_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/)
+      end
+    end
+
+    it 'keeps the previous value when an entry is invalid' do
+      config.unclaimed_ruby_paths = ['app/helpers/**/*.rb']
+
+      expect { config.unclaimed_ruby_paths = ['app/lib/**/*.rb', '/abs.rb'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.unclaimed_ruby_paths).to eq(['app/helpers/**/*.rb'])
+    end
+  end
 end
