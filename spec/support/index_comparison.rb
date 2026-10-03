@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'woods/atomic_file'
 require 'woods/generation'
 
 # Compares two Woods index directories and reports every way they differ.
@@ -145,7 +146,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     path = File.join(payload_dir(dir), 'SUMMARY.md')
     return ['SUMMARY.md is missing but manifest.json is present'] unless File.exist?(path)
 
-    match = File.read(path).match(/^Units: (\d+) \| Chunks: (\d+) \| Categories: \d+$/)
+    match = Woods::AtomicFile.read(path).match(/^Units: (\d+) \| Chunks: (\d+) \| Categories: \d+$/)
     return ['SUMMARY.md has no totals line'] unless match
 
     units, chunks = match.captures.map(&:to_i)
@@ -183,7 +184,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return {} unless Dir.exist?(flows_dir)
 
     Dir[File.join(flows_dir, '*.json')].to_h do |path|
-      [File.basename(path), JSON.parse(File.read(path)).except(*VOLATILE_FLOW_KEYS)]
+      [File.basename(path), JSON.parse(Woods::AtomicFile.read(path)).except(*VOLATILE_FLOW_KEYS)]
     end
   end
 
@@ -209,14 +210,14 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       # flows/ holds flow documents, not units — {flow_snapshot} owns them.
       next if File.basename(File.dirname(path)) == 'flows'
 
-      data = JSON.parse(File.read(path)).except(*VOLATILE_UNIT_KEYS)
+      data = JSON.parse(Woods::AtomicFile.read(path)).except(*VOLATILE_UNIT_KEYS)
       snapshot["#{File.basename(File.dirname(path))}/#{File.basename(path)}"] = data
     end
   end
 
   def index_snapshot(dir)
     Dir[File.join(payload_dir(dir), '*', '_index.json')].each_with_object({}) do |path, snapshot|
-      entries = JSON.parse(File.read(path)).sort_by { |entry| entry['identifier'].to_s }
+      entries = JSON.parse(Woods::AtomicFile.read(path)).sort_by { |entry| entry['identifier'].to_s }
       snapshot[File.basename(File.dirname(path))] = entries
     end
   end
@@ -283,7 +284,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   def read_json(dir, relative)
     path = File.join(payload_dir(dir), relative)
-    File.exist?(path) ? JSON.parse(File.read(path)) : nil
+    File.exist?(path) ? JSON.parse(Woods::AtomicFile.read(path)) : nil
   end
 
   def deep_sort(value)

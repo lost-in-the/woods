@@ -73,7 +73,8 @@ Dir.mktmpdir('woods_autoload_library') do |root|
     reader.find_unit('LibraryCaller').fetch('dependencies').include?(edge) &&
       Object.autoload?(:DormantLibrary, false) == library
   end
-  graph = JSON.parse(File.read(Woods::Generation.new(output_dir: output).payload_dir.join('dependency_graph.json')))
+  graph_path = Woods::Generation.new(output_dir: output).payload_dir.join('dependency_graph.json')
+  graph = JSON.parse(Woods::AtomicFile.read(graph_path))
   assert_fact(report, 'reverse reference agrees with typed forward edge') do
     graph.fetch('reverse').fetch('DormantLibrary').include?('LibraryCaller') &&
       graph.fetch('reverse_via').fetch('DormantLibrary').any? do |entry|
