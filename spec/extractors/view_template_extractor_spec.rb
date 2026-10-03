@@ -97,6 +97,38 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'partial resolution across engines' do
+    before do
+      stub_const(
+        "#{described_class}::ENGINES",
+        [Woods::Extractors::ViewEngines::Erb, fake_engine_class].freeze
+      )
+    end
+
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it 'resolves to the partial file that exists under another engine' do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'ledgers/summary' %>")
+      create_file('app/views/ledgers/_summary.fake', 'fake source')
+      expect(render_targets('widgets/show.html.erb')).to eq(['ledgers/_summary.fake'])
+    end
+
+    it "prefers the renderer's own format when partials exist under several engines" do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'summary' %>")
+      create_file('app/views/widgets/_summary.fake', 'fake source')
+      create_file('app/views/widgets/_summary.html.erb', '<p>summary</p>')
+      expect(render_targets('widgets/show.html.erb')).to eq(['widgets/_summary.html.erb'])
+    end
+
+    it "falls back to the engine's own identifier when no partial file exists" do
+      create_file('app/views/widgets/show.html.erb', "<%= render 'shipments/missing' %>")
+      expect(render_targets('widgets/show.html.erb')).to eq(['shipments/_missing.html.erb'])
+    end
+  end
+
   describe '#extract_all' do
     context 'when app/views/ does not exist' do
       it 'returns an empty array' do

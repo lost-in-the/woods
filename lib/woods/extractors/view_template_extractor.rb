@@ -168,7 +168,7 @@ module Woods
         deps = []
 
         partials.each do |partial_name|
-          partial_identifier = engine.resolve_partial_identifier(partial_name, identifier)
+          partial_identifier = resolve_partial(engine, partial_name, identifier)
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
 
@@ -178,6 +178,67 @@ module Woods
         deps.concat(resolve_navigation_candidates(engine, source))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
+      end
+
+      # Resolve a rendered partial to the template file that exists on disk
+      # under any registered engine, so a partial rendered across engines
+      # points at a real unit. Among several matches the renderer's format
+      # wins, then a format-less partial, then the renderer's own engine,
+      # then {ENGINES} order. With no match the engine's own identifier is
+      # kept as the edge target.
+      #
+      # @param engine [ViewEngines::Base] Engine of the rendering template
+      # @param partial_name [String] Partial name from the render call
+      # @param identifier [String] Identifier of the rendering template
+      # @return [String] Partial template identifier
+      def resolve_partial(engine, partial_name, identifier)
+        fallback = engine.resolve_partial_identifier(partial_name, identifier)
+        candidates = existing_partial_identifiers(fallback)
+        return fallback if candidates.empty?
+
+        renderer_format = template_format(identifier)
+        candidates.min_by do |candidate|
+          [format_rank(template_format(candidate), renderer_format),
+           engine.handles?(candidate) ? 0 : 1,
+           @engines.index(engine_for(candidate)),
+           candidate]
+        end
+      end
+
+      # Identifiers of existing files that share the partial's directory
+      # and name stem and that some registered engine handles.
+      #
+      # @param partial_identifier [String] e.g. "ledgers/_summary.html.erb"
+      # @return [Array<String>]
+      def existing_partial_identifiers(partial_identifier)
+        dir = File.dirname(partial_identifier)
+        prefix = "#{File.basename(partial_identifier).split('.', 2).first}."
+        @directories.flat_map do |root|
+          path = dir == '.' ? root : root.join(dir)
+          next [] unless path.directory?
+
+          Dir.children(path).select { |name| name.start_with?(prefix) && engine_for(name) }
+             .map { |name| dir == '.' ? name : "#{dir}/#{name}" }
+        end.uniq
+      end
+
+      # Format segment of a template identifier ("html" for
+      # "show.html+phone.erb"), or nil when the name carries none.
+      #
+      # @param identifier [String]
+      # @return [String, nil]
+      def template_format(identifier)
+        parts = File.basename(identifier).split('.')
+        parts.size >= 3 ? parts[-2].split('+').first : nil
+      end
+
+      # @param candidate_format [String, nil]
+      # @param renderer_format [String, nil]
+      # @return [Integer] 0 same format, 1 format-less, 2 other format
+      def format_rank(candidate_format, renderer_format)
+        return 0 if candidate_format == renderer_format
+
+        candidate_format.nil? ? 1 : 2
       end
 
       # Ask the engine for route-helper candidates and resolve each to a
