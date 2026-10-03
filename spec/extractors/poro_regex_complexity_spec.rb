@@ -27,6 +27,10 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'regex complexity' do
       expect(pattern.match?("\n" * 50_000)).to be(false)
       expect(pattern.match?(" \t\n" * 50_000)).to be(false)
       expect(pattern.match?("  de\n" * 10_000)).to be(false)
+      # A literal `def` defeats the engine's substring prefilter; on Ruby 3.0 the
+      # old /^\s*def\s/ spent 11.9s on the first input and 3.7s on the second.
+      expect(pattern.match?("#{"\n" * 50_000}x def ")).to be(false)
+      expect(pattern.match?("#{" \n" * 20_000}defx")).to be(false)
       expect(pattern.match?("#{"\n" * 50_000}  def call")).to be(true)
     end
   end
