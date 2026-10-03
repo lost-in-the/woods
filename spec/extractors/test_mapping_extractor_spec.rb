@@ -259,6 +259,43 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata).to include(subject_class: nil, description: 'Widget checkout')
       end
 
+      it 'keeps a namespaced task-name describe under spec/lib/tasks/ as the subject' do
+        path = create_file('spec/lib/tasks/ledger/rebuild_balances_spec.rb', <<~RUBY)
+          RSpec.describe "ledger:rebuild_balances" do
+            it 'rebuilds' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('ledger:rebuild_balances')
+        expect(unit.metadata).not_to have_key(:description)
+        expect(unit.dependencies).to eq([{ type: :model, target: 'ledger:rebuild_balances', via: :test_coverage }])
+      end
+
+      it 'keeps a task-name describe under spec/tasks/ as the subject' do
+        path = create_file('spec/tasks/export_widgets_spec.rb', <<~RUBY)
+          RSpec.describe "export_widgets" do
+            it 'exports' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('export_widgets')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'export_widgets', via: :test_coverage }])
+      end
+
+      it 'records a task-shaped describe outside a tasks directory as the description' do
+        path = create_file('spec/lib/widget_exporter_spec.rb', <<~RUBY)
+          RSpec.describe "export_widgets" do
+            it 'exports' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).to include(subject_class: nil, description: 'export_widgets')
+        expect(unit.dependencies).to eq([])
+      end
+
       it 'counts it blocks as test_count' do
         path = create_file('spec/models/user_spec.rb', <<~RUBY)
           describe User do

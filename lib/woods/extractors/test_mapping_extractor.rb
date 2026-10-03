@@ -47,6 +47,11 @@ module Woods
       # it names no unit, so it must never become a :test_coverage target.
       CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
 
+      # Rake tasks are identified by name, so a task-shaped string describe in
+      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a unit.
+      RAKE_TASK_SPEC_DIR = %r{/spec/(?:lib/)?tasks/|/test/lib/tasks/}
+      RAKE_TASK_NAME = /\A[\w-]+(?::[\w-]+)*\z/
+
       # Outside a typed directory, the first example group's `type:` metadata
       # or a Capybara `feature` block decides the test type.
       RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system)\b/
@@ -114,7 +119,7 @@ module Woods
       # @return [Hash]
       def extract_metadata(source, file_path, framework)
         subject = extract_subject(source, framework)
-        subject_class = subject if subject&.match?(CONSTANT_PATH)
+        subject_class = subject if subject && names_unit?(subject, file_path)
         test_type = infer_test_type(file_path, source)
 
         metadata = {
@@ -127,6 +132,17 @@ module Woods
         }
         metadata[:description] = subject if subject && !subject_class
         metadata
+      end
+
+      # Decide whether a subject names a unit rather than describing behavior.
+      #
+      # @param subject [String] Subject as written
+      # @param file_path [String] Absolute path to the test file
+      # @return [Boolean]
+      def names_unit?(subject, file_path)
+        return true if subject.match?(CONSTANT_PATH)
+
+        file_path.match?(RAKE_TASK_SPEC_DIR) && subject.match?(RAKE_TASK_NAME)
       end
 
       # Extract the primary subject under test, as written.
