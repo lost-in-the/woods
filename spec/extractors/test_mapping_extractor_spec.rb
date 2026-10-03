@@ -169,7 +169,7 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:subject_class]).to eq('Admin::UserPolicy')
       end
 
-      it 'captures the string subject from a string-only describe file' do
+      it 'records a free-text string describe as the description, not the subject class' do
         path = create_file('spec/tasks/cleanup_spec.rb', <<~RUBY)
           RSpec.describe 'rake tasks' do
             it 'runs cleanup' do; end
@@ -177,7 +177,18 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         RUBY
 
         unit = described_class.new.extract_test_file(path)
-        expect(unit.metadata[:subject_class]).to eq('rake tasks')
+        expect(unit.metadata).to include(subject_class: nil, description: 'rake tasks')
+      end
+
+      it 'emits no coverage edge for a free-text string describe' do
+        path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe 'Widget checkout', type: :feature do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.dependencies).to eq([])
       end
 
       it 'uses the first describe of a request spec even with type metadata after the string' do
@@ -190,7 +201,26 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         RUBY
 
         unit = described_class.new.extract_test_file(path)
-        expect(unit.metadata[:subject_class]).to eq('GET /users')
+        expect(unit.metadata).to include(subject_class: nil, description: 'GET /users')
+      end
+
+      it 'links a namespaced constant-path string describe like a constant describe' do
+        path = create_file('spec/models/ledger/entry_spec.rb', <<~RUBY)
+          RSpec.describe 'Ledger::Entry' do
+            it 'balances' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Ledger::Entry')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Ledger::Entry', via: :test_coverage }])
+      end
+
+      it 'adds no description key for a constant describe' do
+        path = create_file('spec/models/widget_spec.rb', 'RSpec.describe Widget, type: :model do; end')
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata).not_to have_key(:description)
       end
 
       it 'counts it blocks as test_count' do

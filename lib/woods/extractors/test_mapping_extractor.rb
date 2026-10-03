@@ -40,6 +40,11 @@ module Woods
       # The closing quote delimits the subject, so nothing is required after it.
       RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?describe\s+['"]([^'"]+)['"]/
 
+      # A subject names a class only when it is a constant path (`Widget`,
+      # `'Ledger::Entry'`). Free text (`'Widget checkout'`) is a description:
+      # it names no unit, so it must never become a :test_coverage target.
+      CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
+
       def initialize
         @rails_root = Rails.root
       end
@@ -101,10 +106,11 @@ module Woods
       # @param framework [Symbol] :rspec or :minitest
       # @return [Hash]
       def extract_metadata(source, file_path, framework)
-        subject_class = extract_subject_class(source, framework)
+        subject = extract_subject(source, framework)
+        subject_class = subject if subject&.match?(CONSTANT_PATH)
         test_type = infer_test_type(file_path)
 
-        {
+        metadata = {
           subject_class: subject_class,
           test_count: count_tests(source, framework),
           test_type: test_type,
@@ -112,17 +118,19 @@ module Woods
           shared_examples: extract_shared_examples_defined(source),
           shared_examples_used: extract_shared_examples_used(source)
         }
+        metadata[:description] = subject if subject && !subject_class
+        metadata
       end
 
-      # Extract the primary subject class under test.
+      # Extract the primary subject under test, as written.
       #
       # For RSpec: reads the top-level describe/RSpec.describe argument.
       # For Minitest: reads the class name and strips the "Test" suffix.
       #
       # @param source [String] File source code
       # @param framework [Symbol] :rspec or :minitest
-      # @return [String, nil] Class name or nil if not detected
-      def extract_subject_class(source, framework)
+      # @return [String, nil] Constant path or free-text description, nil if not detected
+      def extract_subject(source, framework)
         framework == :rspec ? extract_rspec_subject(source) : extract_minitest_subject(source)
       end
 
