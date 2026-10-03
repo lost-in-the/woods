@@ -3,6 +3,7 @@
 require_relative '../source_inputs/consumer_errors'
 require_relative '../source_references/runtime_lookup'
 require_relative 'periodic_registrations'
+require_relative 'cron_humanizer'
 
 require 'yaml'
 require 'set'
@@ -49,15 +50,7 @@ module Woods
       PERIODIC_SOURCE_FILES = %w[config/application.rb].freeze
 
       # Common cron patterns mapped to human-readable descriptions
-      CRON_HUMANIZE = {
-        '* * * * *' => 'every minute',
-        '0 * * * *' => 'every hour',
-        '0 0 * * *' => 'daily at midnight',
-        '0 0 * * 0' => 'weekly on Sunday',
-        '0 0 * * 1' => 'weekly on Monday',
-        '0 0 1 * *' => 'monthly on the 1st',
-        '0 0 1 1 *' => 'yearly on January 1st'
-      }.freeze
+      CRON_HUMANIZE = CronHumanizer::NAMED
 
       # A quoted Whenever command argument in either style. The body runs to
       # the *matching* delimiter, so the inner quotes of `command "echo 'hi'"`
@@ -389,7 +382,7 @@ module Woods
           job_class: block[:job_class],
           cron_expression: block[:frequency],
           command_type: block[:command_type],
-          frequency_human_readable: block[:frequency]
+          frequency_human_readable: humanize_whenever_frequency(block[:frequency])
         }
         unit.dependencies = build_dependencies(block[:job_class])
 
@@ -490,14 +483,17 @@ module Woods
         # Solid Queue schedules are already human-readable
         return expression if format == :solid_queue
 
-        # Check exact matches
-        return CRON_HUMANIZE[expression] if CRON_HUMANIZE.key?(expression)
+        CronHumanizer.humanize(expression) || expression
+      end
 
-        # Check */N minute pattern
-        return "every #{::Regexp.last_match(1)} minutes" if expression =~ %r{\A\*/(\d+) \* \* \* \*\z}
-
-        # Fallback: return raw expression
-        expression
+      # Whenever frequencies are Ruby (`1.day`, `:hour`); only a quoted cron
+      # line is described, the rest stay as written.
+      #
+      # @param frequency [String] the `every` argument as written
+      # @return [String]
+      def humanize_whenever_frequency(frequency)
+        cron = frequency[/\A#{QUOTED_ARGUMENT}\z/o, 2]
+        (cron && CronHumanizer.humanize(cron)) || frequency
       end
     end
   end

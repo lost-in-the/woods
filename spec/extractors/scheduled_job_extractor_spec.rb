@@ -735,6 +735,17 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
         .to eq(['every hour', 'every 10 minutes'])
     end
 
+    it 'describes daily, hourly, and weekly registrations' do
+      periodic_initializer(<<~RUBY)
+        mgr.register('0 7 * * *', 'Ledger::PurgeWorker')
+        mgr.register('35 * * * *', 'Shipment::SweepWorker')
+        mgr.register('0 8 * * 0', 'Ledger::ApplyHolds')
+      RUBY
+
+      expect(periodic_units.map { |u| u.metadata[:frequency_human_readable] })
+        .to eq(['daily at 07:00', 'hourly at :35', 'weekly on Sunday at 08:00'])
+    end
+
     it 'finds registrations nested inside conditionals in the periodic block' do
       periodic_initializer(<<~RUBY)
         if ENV['SCHEDULE_SWEEPS']
@@ -912,6 +923,40 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
 
       units = described_class.new.extract_scheduled_job_file(path, :sidekiq_cron)
       expect(units.first.metadata[:frequency_human_readable]).to eq('every 5 minutes')
+    end
+
+    it 'describes daily, hourly, and weekly crons in Sidekiq-Cron YAML' do
+      path = create_file('config/sidekiq_cron.yml', <<~YAML)
+        morning_ledger:
+          cron: "0 7 * * *"
+          class: LedgerJob
+        sweep:
+          cron: "35 * * * *"
+          class: SweepJob
+        digest:
+          cron: "0 8 * * 0 America/Chicago"
+          class: DigestJob
+      YAML
+
+      units = described_class.new.extract_scheduled_job_file(path, :sidekiq_cron)
+      expect(units.map { |u| u.metadata[:frequency_human_readable] })
+        .to eq(['daily at 07:00', 'hourly at :35', 'weekly on Sunday at 08:00 (America/Chicago)'])
+      expect(units.first.metadata[:cron_expression]).to eq('0 7 * * *')
+    end
+
+    it 'describes a quoted cron line in a Whenever every block' do
+      path = create_file('config/schedule.rb', <<~RUBY)
+        every '0 9 * * 1-5' do
+          runner "LedgerJob.perform_later"
+        end
+
+        every 1.day, at: '4:30 am' do
+          runner "ReportJob.perform_later"
+        end
+      RUBY
+
+      units = described_class.new.extract_scheduled_job_file(path, :whenever)
+      expect(units.map { |u| u.metadata[:frequency_human_readable] }).to eq(['weekdays at 09:00', '1.day'])
     end
   end
 
