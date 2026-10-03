@@ -278,6 +278,21 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
       expect(unit.metadata[:sidecar_template]).to eq('app/components/button_component.html.erb')
     end
+
+    context 'with a haml sidecar in the component directory' do
+      let(:file_system) do
+        {
+          '/rails/app/components/button_component.rb' => "class ButtonComponent < ViewComponent::Base\nend\n",
+          '/rails/app/components/button_component/button_component.html.haml' => '%button= content'
+        }
+      end
+
+      it 'detects the directory-form haml sidecar' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.metadata[:sidecar_template]).to eq('app/components/button_component/button_component.html.haml')
+      end
+    end
   end
 
   # ── Preview class detection ───────────────────────────────────────────

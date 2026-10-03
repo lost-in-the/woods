@@ -341,6 +341,21 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(templates['welcome_email']).to include('app/views/user_mailer/welcome_email.html.slim')
     end
 
+    it 'discovers haml templates' do
+      mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
+
+      create_file('app/mailers/shipment_mailer.rb', "class ShipmentMailer < ApplicationMailer\nend\n")
+      create_file('app/views/shipment_mailer/dispatched.html.haml', '%h1 Dispatched')
+      create_file('app/views/shipment_mailer/dispatched.text.haml', 'Dispatched')
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:templates]['dispatched']).to contain_exactly(
+        'app/views/shipment_mailer/dispatched.html.haml',
+        'app/views/shipment_mailer/dispatched.text.haml'
+      )
+    end
+
     it 'returns empty hash when no templates found' do
       mailer = build_mailer(name: 'UserMailer', actions: %w[welcome_email])
       create_file('app/mailers/user_mailer.rb', "class UserMailer < ApplicationMailer\nend\n")

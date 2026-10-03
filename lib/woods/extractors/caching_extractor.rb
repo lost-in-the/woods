@@ -4,15 +4,17 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'template_extensions'
 
 module Woods
   module Extractors
     # CachingExtractor detects caching usage across controllers, models, and views.
     #
-    # Scans `app/controllers/**/*.rb`, `app/models/**/*.rb`, and
-    # `app/views/**/*.erb` for cache-related patterns: Rails.cache.*,
-    # caches_action, fragment cache blocks, cache_key, cache_version,
-    # and expires_in. Produces one unit per file that contains any
+    # Scans `app/controllers/**/*.rb`, `app/models/**/*.rb`, and every
+    # {TemplateExtensions::SCANNED} view template (`app/views/**/*.erb`,
+    # `*.haml`, `*.jbuilder`) for cache-related patterns: Rails.cache.*,
+    # caches_action, fragment cache blocks (including jbuilder `cache!`),
+    # cache_key, cache_version, and expires_in. Produces one unit per file that contains any
     # cache calls, identifying the strategy and TTL patterns.
     #
     # @example
@@ -26,12 +28,15 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
 
-      # File glob patterns to scan
-      SCAN_PATTERNS = {
-        controller: 'app/controllers/**/*.rb',
-        model: 'app/models/**/*.rb',
-        view: 'app/views/**/*.erb'
-      }.freeze
+      # `[file_type, glob]` pairs to scan, one plain glob per view engine.
+      # PathDispatcher derives its caching file rules from these, reading
+      # each glob's suffix as a file extension, so a brace glob would break
+      # incremental dispatch.
+      SCAN_PATTERNS = [
+        [:controller, 'app/controllers/**/*.rb'],
+        [:model, 'app/models/**/*.rb'],
+        *TemplateExtensions::SCANNED.map { |ext| [:view, "app/views/**/*#{ext}"] }
+      ].freeze
 
       # Patterns that indicate cache usage, grouped by type
       CACHE_PATTERNS = {
@@ -41,7 +46,7 @@ module Woods
         delete: /Rails\.cache\.delete\s*[(\[]/,
         exist: /Rails\.cache\.exist\?\s*[(\[]/,
         caches_action: /\bcaches_action\b/,
-        fragment: /\bcache\s+.*?\bdo\b|\bcache\s+do\b|\bcache\s*\(/,
+        fragment: /\bcache\s+.*?\bdo\b|\bcache\s+do\b|\bcache\s*\(|\bjson\.cache(?:_if)?!/,
         cache_key: /\bcache_key\b/,
         cache_version: /\bcache_version\b/
       }.freeze

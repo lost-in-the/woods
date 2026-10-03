@@ -314,7 +314,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - **Included in Woods 2.1:** discovers all app-owned `ActionMailer::Base.descendants`, including parallel abstract bases and direct subclasses even when `ApplicationMailer` exists. An app without ActionMailer contributes no mailer units.
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
-- Each mailer action corresponds to an email template, template paths are recorded in metadata
+- Each mailer action corresponds to an email template, template paths are recorded in metadata. Discovery checks `<action>.html` and `<action>.text` in every engine of `Woods::Extractors::TemplateExtensions::DETECTED` (`.erb`, `.haml`, `.jbuilder`, `.slim`).
 - Extracts `default from:`, `layout`, and per-action subject patterns
 - Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
 - Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
@@ -401,7 +401,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **What it captures:** ViewComponent classes from `app/components`. Extracts slots, template paths, preview class references, and collection rendering support.
 
 **Key details:**
-- Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`)
+- Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`), next to the component or inside its sidecar directory (`button_component/button_component.html.haml`), for every engine in `Woods::Extractors::TemplateExtensions::DETECTED`
 - **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
 
@@ -876,10 +876,11 @@ namespace.
 
 ### CachingExtractor
 
-**What it captures:** Cache usage patterns across controllers, models, and ERB view templates.
+**What it captures:** Cache usage patterns across controllers, models, and view templates.
 
 **Key details:**
-- Scans controllers, models, and `.erb` view files
+- Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`). Slim views are not scanned.
+- Recognizes jbuilder `json.cache!` and `json.cache_if!` blocks as fragment caching
 - Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
 - The `file_type` parameter on `extract_caching_file` defaults to `nil` (auto-detected from path)
 

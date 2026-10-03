@@ -6,6 +6,7 @@ require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'woods/model_name_cache'
 require 'woods/extractors/caching_extractor'
+require 'woods/extractor'
 
 RSpec.describe Woods::Extractors::CachingExtractor do
   include_context 'extractor setup'
@@ -62,6 +63,36 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       units = described_class.new.extract_all
       expect(units.size).to eq(1)
       expect(units.first.metadata[:file_type]).to eq(:view)
+    end
+
+    it 'discovers fragment caching in view haml files' do
+      create_file('app/views/widgets/index.html.haml', <<~HAML)
+        - cache @widgets do
+          = render @widgets
+      HAML
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to eq(['app/views/widgets/index.html.haml'])
+      expect(units.first.metadata[:file_type]).to eq(:view)
+      expect(units.first.metadata[:cache_strategy]).to eq(:fragment)
+    end
+
+    it 'discovers jbuilder cache! blocks in view jbuilder files' do
+      create_file('app/views/ledgers/show.json.jbuilder', <<~JBUILDER)
+        json.cache! ['v1', @ledger], expires_in: 10.minutes do
+          json.extract! @ledger, :id, :balance
+        end
+      JBUILDER
+
+      units = described_class.new.extract_all
+      expect(units.map(&:identifier)).to eq(['app/views/ledgers/show.json.jbuilder'])
+      expect(units.first.metadata[:cache_strategy]).to eq(:fragment)
+    end
+
+    it 'does not scan slim views, which have no template engine' do
+      create_file('app/views/widgets/index.html.slim', "- cache @widgets do\n  = render @widgets\n")
+
+      expect(described_class.new.extract_all).to eq([])
     end
 
     it 'skips files with no cache calls' do
@@ -424,6 +455,26 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       json = JSON.generate(hash)
       parsed = JSON.parse(json)
       expect(parsed['type']).to eq('caching')
+    end
+  end
+
+  # ── Incremental dispatch ─────────────────────────────────────────────
+
+  # PathDispatcher derives the caching file rules from SCAN_PATTERNS, so an
+  # incremental run reaches every view engine a full extraction scans.
+  describe 'incremental dispatch' do
+    def caching_dispatched?(path)
+      Woods::PathDispatcher.new.file_rules_for(path).map(&:extractor_key).include?(:caching)
+    end
+
+    it 'routes every scanned view engine to the caching extractor' do
+      expect(caching_dispatched?('app/views/widgets/index.html.erb')).to be(true)
+      expect(caching_dispatched?('app/views/widgets/index.html.haml')).to be(true)
+      expect(caching_dispatched?('app/views/ledgers/show.json.jbuilder')).to be(true)
+    end
+
+    it 'does not route slim views to the caching extractor' do
+      expect(caching_dispatched?('app/views/widgets/index.html.slim')).to be(false)
     end
   end
 end
