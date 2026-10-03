@@ -1,0 +1,1 @@
+- Record the literal commands a rake task runs in `metadata.shell_commands`: arguments to `sh`, `system`, `exec`, `spawn` and `Open3`, backtick and `%x` strings, and string arguments to helper methods defined in the rake files or their support files that shell out themselves. Each command is cut to 200 characters. No edges are added.
