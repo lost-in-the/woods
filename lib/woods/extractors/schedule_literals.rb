@@ -91,8 +91,8 @@ module Woods
       # @param node [Prism::Node] the hash
       # @param name_node [Prism::Node, nil] the name when it is the hash's key elsewhere
       # @return [Hash] `:name`, `:job_class`, `:cron` (nil when not literal, with the
-      #   source under `:name_source`, `:job_class_source`, `:cron_source`) and the
-      #   remaining keys as `:options`
+      #   source under `:name_source`, `:job_class_source`, `:cron_source`),
+      #   `:cron_options` for the `[cron, options]` form, and the remaining keys as `:options`
       def entry(node, name_node: nil)
         values = assocs(node).to_h { |key, value| [literal(key).to_s, value] }
         name_node ||= values.delete('name')
@@ -101,9 +101,17 @@ module Woods
         {
           **literal_or_source(:name, name_node) { |n| literal_text(n) },
           **literal_or_source(:job_class, class_node) { |n| class_name(n) },
-          **literal_or_source(:cron, cron_node) { |n| n.unescaped if n.is_a?(Prism::StringNode) },
+          **cron(cron_node),
           options: values.transform_values { |value| literal(value) }
         }
+      end
+
+      # sidekiq-scheduler also takes `[cron, options]`.
+      def cron(node)
+        node, options = node.elements if node.is_a?(Prism::ArrayNode) && node.elements.size == 2
+        result = literal_or_source(:cron, node) { |n| n.unescaped if n.is_a?(Prism::StringNode) }
+        result[:cron_options] = literal(options) if options
+        result
       end
 
       def literal_text(node)
@@ -117,7 +125,7 @@ module Woods
         result
       end
 
-      private_class_method :literal_text, :literal_or_source
+      private_class_method :cron, :literal_text, :literal_or_source
     end
   end
 end

@@ -4,6 +4,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative '../source_references/runtime_lookup'
 require_relative 'periodic_registrations'
 require_relative 'sidekiq_cron_registrations'
+require_relative 'sidekiq_scheduler_registrations'
 require_relative 'cron_humanizer'
 
 require 'yaml'
@@ -27,7 +28,8 @@ module Woods
     # It also reads schedules registered from Ruby config sources
     # (`config/initializers/**/*.rb`, `config/environments/*.rb`,
     # `config/application.rb`): Sidekiq Enterprise `periodic` registrations
-    # ({PeriodicRegistrations}) and Sidekiq-Cron jobs ({SidekiqCronRegistrations}).
+    # ({PeriodicRegistrations}), Sidekiq-Cron jobs ({SidekiqCronRegistrations}),
+    # and sidekiq-scheduler schedules ({SidekiqSchedulerRegistrations}).
     #
     # Each scheduled entry becomes its own ExtractedUnit with type `:scheduled_job`.
     # Identifiers are prefixed with "scheduled:" to avoid collision with JobExtractor units.
@@ -52,13 +54,22 @@ module Woods
       PERIODIC_SOURCE_FILES = %w[config/application.rb].freeze
 
       # Formats registered from Ruby sources, where one name may repeat.
-      RUBY_FORMATS = %i[sidekiq_periodic sidekiq_cron_ruby].freeze
+      RUBY_FORMATS = %i[sidekiq_periodic sidekiq_cron_ruby sidekiq_scheduler_ruby].freeze
 
       # A Ruby source that mentions none of these registers no schedule; skip its parse.
-      RUBY_SCHEDULE_HINT = /periodic|Cron::Job/
+      RUBY_SCHEDULE_HINT = /periodic|Cron::Job|schedule/
 
       # How a Ruby format names one of its entries in a warning.
-      RUBY_FORMAT_LABELS = { sidekiq_cron_ruby: 'Sidekiq-Cron registration' }.freeze
+      RUBY_FORMAT_LABELS = {
+        sidekiq_cron_ruby: 'Sidekiq-Cron registration', sidekiq_scheduler_ruby: 'sidekiq-scheduler entry'
+      }.freeze
+
+      # Formats in sidekiq-scheduler's shape: one of SCHEDULE_TYPES per entry,
+      # and the entry name doubles as the class when `class` is omitted.
+      SCHEDULER_FORMATS = %i[sidekiq_scheduler_ruby].freeze
+
+      # sidekiq-scheduler schedule types, in the order it checks them.
+      SCHEDULE_TYPES = %w[cron every interval at in].freeze
 
       # Common cron patterns mapped to human-readable descriptions
       CRON_HUMANIZE = CronHumanizer::NAMED
@@ -415,10 +426,10 @@ module Woods
         periodic = PeriodicRegistrations.collect(program).filter_map do |registration|
           build_periodic_unit(registration, file_path, source)
         end
-        cron = SidekiqCronRegistrations.collect(program).filter_map do |entry|
-          build_ruby_entry_unit(entry, :sidekiq_cron_ruby, file_path, source)
+        named = { sidekiq_cron_ruby: SidekiqCronRegistrations, sidekiq_scheduler_ruby: SidekiqSchedulerRegistrations }
+        periodic + named.flat_map do |format, reader|
+          reader.collect(program).filter_map { |entry| build_ruby_entry_unit(entry, format, file_path, source) }
         end
-        periodic + cron
       end
 
       # @param registration [Hash] one entry from {PeriodicRegistrations.read}
@@ -470,6 +481,7 @@ module Woods
       # @param source [String] Raw file content
       # @return [ExtractedUnit, nil] nil when neither the name nor the class is literal
       def build_ruby_entry_unit(entry, format, file_path, source)
+        entry = infer_scheduler_class(entry) if SCHEDULER_FORMATS.include?(format)
         job_class = entry[:job_class]
         task_name = entry[:name] || job_class&.underscore
         unless task_name
@@ -499,10 +511,41 @@ module Woods
           line: entry[:line],
           registration: entry[:registration],
           frequency_human_readable: humanize_frequency(entry[:cron], format),
-          **entry.slice(:name_source, :job_class_source, :cron_source)
+          **entry.slice(:name_source, :job_class_source, :job_class_inferred, :cron_source, :cron_options)
         }
+        unit.metadata.merge!(scheduler_fields(entry)) if SCHEDULER_FORMATS.include?(format)
         unit.dependencies = build_dependencies(job_class)
         unit
+      end
+
+      # sidekiq-scheduler uses the entry name as the class when `class` is omitted.
+      def infer_scheduler_class(entry)
+        name = entry[:name]
+        return entry if entry[:job_class] || entry[:job_class_source]
+        return entry unless name&.match?(SourceReferences::RuntimeLookup::CONSTANT)
+
+        entry.merge(job_class: name.delete_prefix('::'), job_class_inferred: true)
+      end
+
+      # @param entry [Hash] a schedule entry with `:cron`, `:cron_source`, and `:options`
+      # @return [Hash] `:schedule_type`, any of `:every`/`:interval`/`:at`/`:in`, and
+      #   `:frequency_human_readable`
+      def scheduler_fields(entry)
+        options = entry[:options]
+        cron_given = entry[:cron] || entry[:cron_source]
+        type = cron_given ? 'cron' : SCHEDULE_TYPES.find { |key| options.key?(key) }
+        fields = SCHEDULE_TYPES.drop(1).select { |key| options.key?(key) }.to_h { |key| [key.to_sym, options[key]] }
+        fields.merge(schedule_type: type&.to_sym, frequency_human_readable: scheduler_frequency(type, entry))
+      end
+
+      def scheduler_frequency(type, entry)
+        value = entry[:options][type]
+        case type
+        when 'cron' then humanize_frequency(entry[:cron], :sidekiq_scheduler)
+        when 'every', 'interval' then CronHumanizer.every(value)
+        when 'at' then "once at #{value}"
+        when 'in' then "once in #{Array(value).first}"
+        end
       end
 
       def warn_ruby_entry(entry, format, file_path, problem)

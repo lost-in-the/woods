@@ -721,6 +721,15 @@ expanded mailer and schedule identities in an existing index.
   edge (`metadata[:job_class_source]`); an entry with neither is skipped with a warning. A computed
   argument such as `load_from_hash(YAML.load_file(...))` is not read. Repeats of one name are numbered
   like periodic repeats.
+- Reads sidekiq-scheduler schedules set in Ruby (format `:sidekiq_scheduler_ruby`) from the same
+  sources: `Sidekiq.schedule = { name => definition }` and `Sidekiq.set_schedule(name, definition)`
+  with literal hashes (receiver `Sidekiq`, `Sidekiq::Scheduler`, or `SidekiqScheduler::Scheduler`,
+  optionally `.instance`). `metadata[:schedule_type]` is the first of `cron`, `every`, `interval`, `at`,
+  `in` present; the `every`/`interval`/`at`/`in` values are kept under keys of the same name.
+  `every` and `interval` durations are humanized (`45m` is `every 45 minutes`); `at` and `in` read
+  `once at ...` / `once in ...`. The `[cron, options]` form keeps the options in
+  `metadata[:cron_options]`. When `class` is omitted and the name is a constant name, the name is the
+  class (`metadata[:job_class_inferred]`), as sidekiq-scheduler does.
 - Extracts job class name, cron expression, queue, and any arguments
 - `metadata[:frequency_human_readable]` describes standard cron lines in words (`0 7 * * *` is
   `daily at 07:00`, `0 8 * * 0` is `weekly on Sunday at 08:00`), including nicknames such as `@daily`,

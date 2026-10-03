@@ -1055,6 +1055,111 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
     end
   end
 
+  # ── sidekiq-scheduler Ruby DSL (config/initializers/**/*.rb) ───────
+
+  describe 'sidekiq-scheduler Ruby schedules' do
+    before do
+      stub_const('Ledger::PurgeWorker', Class.new)
+      stub_const('SweepWorker', Class.new)
+      stub_const('HeartbeatWorker', Class.new)
+    end
+
+    def scheduler_ruby_units
+      described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_scheduler_ruby }
+    end
+
+    it 'reads Sidekiq.schedule = with a literal hash of every schedule type' do
+      path = create_file('config/initializers/scheduler.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.on(:startup) do
+            Sidekiq.schedule = {
+              'purge' => { 'cron' => '0 0 7 * * * America/Chicago', 'class' => 'Ledger::PurgeWorker', 'queue' => 'low' },
+              'sweep' => { 'every' => ['45m', { 'first_in' => '10s' }], 'class' => 'SweepWorker' },
+              'drain' => { 'interval' => '1h', 'class' => 'SweepWorker' },
+              'launch' => { 'at' => '3001/01/01', 'class' => 'Ledger::PurgeWorker' },
+              'warmup' => { 'in' => '1h', 'class' => 'SweepWorker', 'args' => ['all'] }
+            }
+            SidekiqScheduler::Scheduler.instance.reload_schedule!
+          end
+        end
+      RUBY
+
+      units = scheduler_ruby_units
+      expect(units.map(&:identifier)).to eq(%w[scheduled:purge scheduled:sweep scheduled:drain
+                                               scheduled:launch scheduled:warmup])
+      expect(units.map { |u| u.metadata.values_at(:schedule_type, :frequency_human_readable) }).to eq(
+        [[:cron, 'daily at 07:00 (America/Chicago)'], [:every, 'every 45 minutes'], [:interval, 'every hour'],
+         [:at, 'once at 3001/01/01'], [:in, 'once in 1h']]
+      )
+      expect(units.first.metadata).to include(cron_expression: '0 0 7 * * * America/Chicago', queue: 'low',
+                                              job_class: 'Ledger::PurgeWorker', registration: :schedule)
+      expect(units[1].metadata).to include(cron_expression: nil, every: ['45m', { 'first_in' => '10s' }])
+      expect(units[3].metadata[:at]).to eq('3001/01/01')
+      expect(units[4].metadata).to include(in: '1h', args: ['all'])
+      expect(units.map(&:file_path)).to all(eq(path))
+      expect(units.first.dependencies).to eq([{ type: :job, target: 'Ledger::PurgeWorker', via: :scheduled }])
+    end
+
+    it 'reads Sidekiq.set_schedule with a literal hash' do
+      create_file('config/initializers/scheduler.rb', <<~RUBY)
+        Sidekiq::Scheduler.dynamic = true
+        Sidekiq.set_schedule('heartbeat', { 'every' => ['1m'], 'class' => 'HeartbeatWorker' })
+        Sidekiq.set_schedule(:sweep, every: '30s', class: SweepWorker)
+        Sidekiq.set_schedule('purge', 'cron' => ['0 7 * * *', { 'first_in' => '1m' }], 'class' => 'Ledger::PurgeWorker')
+      RUBY
+
+      units = scheduler_ruby_units
+      expect(units.map { |u| [u.identifier, u.metadata[:job_class], u.metadata[:frequency_human_readable]] })
+        .to eq([['scheduled:heartbeat', 'HeartbeatWorker', 'every minute'],
+                ['scheduled:sweep', 'SweepWorker', 'every 30 seconds'],
+                ['scheduled:purge', 'Ledger::PurgeWorker', 'daily at 07:00']])
+      expect(units.last.metadata).to include(cron_expression: '0 7 * * *',
+                                             cron_options: { 'first_in' => '1m' })
+      expect(units.map { |u| u.metadata[:registration] }).to all(eq(:set_schedule))
+    end
+
+    it 'takes the job name as the class when the class is omitted' do
+      create_file('config/initializers/scheduler.rb', <<~RUBY)
+        Sidekiq.schedule = { 'SweepWorker' => { 'cron' => '0 */5 * * * *' }, 'nightly' => { 'cron' => '0 2 * * *' } }
+      RUBY
+
+      sweep, nightly = scheduler_ruby_units
+      expect(sweep.metadata).to include(job_class: 'SweepWorker', job_class_inferred: true,
+                                        frequency_human_readable: 'every 5 minutes')
+      expect(sweep.dependencies).to eq([{ type: :job, target: 'SweepWorker', via: :scheduled }])
+      expect(nightly.metadata).to include(job_class: nil)
+      expect(nightly.dependencies).to eq([])
+    end
+
+    it 'skips a schedule assigned from a computed value' do
+      create_file('config/initializers/scheduler.rb', <<~RUBY)
+        Sidekiq.schedule = YAML.load_file(File.expand_path('../scheduler.yml', __dir__))
+        Sidekiq.set_schedule('heartbeat', heartbeat_options)
+      RUBY
+
+      expect(scheduler_ruby_units).to eq([])
+    end
+
+    it 'ignores schedule assignments on other receivers' do
+      create_file('config/initializers/widgets.rb', <<~RUBY)
+        Widget.schedule = { 'purge' => { 'cron' => '0 7 * * *', 'class' => 'Ledger::PurgeWorker' } }
+        Widget.set_schedule('sweep', { 'every' => '1m', 'class' => 'SweepWorker' })
+      RUBY
+
+      expect(scheduler_ruby_units).to eq([])
+    end
+
+    it 'records a computed cron and warns' do
+      create_file('config/initializers/scheduler.rb', <<~RUBY)
+        Sidekiq.set_schedule('purge', { 'cron' => ENV['PURGE_CRON'], 'class' => 'Ledger::PurgeWorker' })
+      RUBY
+
+      expect(scheduler_ruby_units.first.metadata)
+        .to include(schedule_type: :cron, cron_expression: nil, cron_source: "ENV['PURGE_CRON']")
+      expect(logger).to have_received(:warn).with(/sidekiq-scheduler entry at .*scheduler\.rb:1.*cron is not a literal/)
+    end
+  end
+
   # ── Human-readable frequency ───────────────────────────────────────
 
   describe 'human-readable frequency' do
