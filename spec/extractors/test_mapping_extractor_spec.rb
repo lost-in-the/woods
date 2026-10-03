@@ -160,6 +160,66 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(targets).not_to include('validations')
       end
 
+      it 'qualifies a constant described inside a module block by its lexical nesting' do
+        path = create_file('spec/services/nested/assign_positions_spec.rb', <<~RUBY)
+          module Nested
+            describe AssignPositions do
+              it 'assigns' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Nested::AssignPositions')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Nested::AssignPositions', via: :test_coverage }])
+      end
+
+      it 'qualifies through several nested modules and a compact module name' do
+        path = create_file('spec/services/x_spec.rb', <<~RUBY)
+          module Billing::Ledger
+            module Jobs
+              RSpec.describe RebuildJob, type: :job do
+              end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Billing::Ledger::Jobs::RebuildJob')
+        expect(unit.dependencies.first).to include(type: :job, target: 'Billing::Ledger::Jobs::RebuildJob')
+      end
+
+      it 'does not qualify a constant described after the module block closed, or one already rooted' do
+        after_close = create_file('spec/services/after_spec.rb', <<~RUBY)
+          module Helpers
+            def self.build; end
+          end
+
+          describe AssignPositions do
+          end
+        RUBY
+        rooted = create_file('spec/services/rooted_spec.rb', <<~RUBY)
+          module Nested
+            describe ::AssignPositions do
+            end
+          end
+        RUBY
+
+        expect(described_class.new.extract_test_file(after_close).metadata[:subject_class]).to eq('AssignPositions')
+        expect(described_class.new.extract_test_file(rooted).metadata[:subject_class]).to eq('AssignPositions')
+      end
+
+      it 'leaves a quoted subject inside a module block as written' do
+        path = create_file('spec/features/nested_spec.rb', <<~RUBY)
+          module Nested
+            RSpec.feature 'Widget checkout' do
+            end
+          end
+        RUBY
+
+        expect(described_class.new.extract_test_file(path).metadata).to include(description: 'Widget checkout')
+      end
+
       it 'preserves namespaced constants in type-metadata describes' do
         path = create_file('spec/policies/user_policy_spec.rb', <<~RUBY)
           RSpec.describe Admin::UserPolicy, type: :policy do

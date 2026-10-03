@@ -4,7 +4,9 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'line_neutralizer'
 require_relative 'rake_task_extractor'
+require_relative 'source_nesting'
 require_relative 'test_route_resolver'
 require_relative 'test_support_catalog'
 
@@ -39,6 +41,7 @@ module Woods
     class TestMappingExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       RSPEC_GLOB = 'spec/**/*_spec.rb'
       MINITEST_GLOB = 'test/**/*_test.rb'
@@ -48,7 +51,7 @@ module Woods
       # followed by whitespace OR a comma — the rspec-rails generator default is
       # `RSpec.describe User, type: :model do` (B-082 / #194). Capybara's
       # `feature` / `RSpec.feature` is an example group in the same position.
-      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+([A-Z][\w:]*)(?=[\s,]|$)/
+      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+((?:::)?[A-Z][\w:]*)(?=[\s,]|$)/
 
       # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`,
       # `RSpec.feature 'Widget checkout' do`.
@@ -277,7 +280,47 @@ module Woods
         group = first_example_group(source)
         return nil unless group
 
-        (group.match(RSPEC_CONSTANT_DESCRIBE) || group.match(RSPEC_STRING_DESCRIBE))[1]
+        constant = group[RSPEC_CONSTANT_DESCRIBE, 1]
+        return group[RSPEC_STRING_DESCRIBE, 1] unless constant
+
+        qualify_described_constant(constant, source, group)
+      end
+
+      # A constant described inside a `module` block is resolved through the
+      # file's lexical nesting first: `module Nested; describe AssignPositions`
+      # names `Nested::AssignPositions`. A rooted constant (`::Widget`) and a
+      # describe after the module closed stay as written.
+      #
+      # @param constant [String] constant as written on the describe line
+      # @param source [String] RSpec file source code
+      # @param group [String] the line opening the first example group
+      # @return [String]
+      def qualify_described_constant(constant, source, group)
+        return constant.delete_prefix('::') if constant.start_with?('::')
+
+        nesting = enclosing_modules(source, group)
+        nesting.empty? ? constant : "#{nesting.join('::')}::#{constant}"
+      end
+
+      # Module declarations still open on the line that opens the example
+      # group, outermost first.
+      #
+      # @return [Array<String>]
+      def enclosing_modules(source, group)
+        stack = []
+        source.each_line do |line|
+          return stack.compact if line == group
+
+          stripped = LineNeutralizer.neutralize_line(line).strip
+          if (declaration = SourceNesting::DECLARATION_PATTERN.match(stripped))
+            stack << declaration[2] if block_opener?(stripped)
+          elsif stripped.match?(SourceNesting::END_LINE)
+            stack.pop
+          elsif block_opener?(stripped)
+            stack << nil
+          end
+        end
+        []
       end
 
       # Find the line that opens the file's first describe or feature block.
