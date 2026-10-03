@@ -259,7 +259,6 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
         'config/boot.rb' => "require 'bundler/setup'\n",
         'config/environment.rb' => "require_relative 'application'\nRails.application.initialize!\n",
         'config/importmap.rb' => "pin 'application'\n",
-        'config/coverage.rb' => "SimpleCov.configure do\n  add_filter '/spec/'\nend\n",
         'config/deploy.rb' => "set :application, 'ledger'\n",
         'config/deploy/production.rb' => "server 'ledger.example'\n",
         'db/seeds.rb' => "Widget.create!(name: 'seed')\n",
@@ -272,7 +271,7 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
 
       expect(kinds).to eq(
         'boot.rb' => 'boot', 'environment.rb' => 'environment', 'importmap.rb' => 'importmap',
-        'coverage.rb' => 'configuration', 'deploy.rb' => 'deploy', 'deploy/production.rb' => 'deploy',
+        'deploy.rb' => 'deploy', 'deploy/production.rb' => 'deploy',
         'db/seeds.rb' => 'seeds', 'db/seeds/widgets.rb' => 'seeds', 'Gemfile' => 'gemfile', 'Rakefile' => 'rakefile'
       )
     end
@@ -287,7 +286,8 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
       )
     end
 
-    it 'leaves the route file and the application file to their own units' do
+    it 'leaves the route file, the application file and other config Ruby alone' do
+      create_file('config/puma.rb', "threads 1, 5\n")
       create_file('config/routes.rb', "Rails.application.routes.draw {}\n")
       create_file('config/application.rb', "module Ledger; class Application < Rails::Application; end; end\n")
       create_file('config/routes/admin.rb', "resources :widgets\n")
@@ -363,8 +363,8 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
 
     it 'answers ownership from the path alone' do
       owned = %w[config/initializers/a.rb config/environments/test.rb config/boot.rb config/deploy/x.rb
-                 db/seeds/a/b.rb Gemfile Rakefile config/puma.rb]
-      unowned = %w[config/routes.rb config/application.rb config/routes/admin.rb config/settings.yml
+                 db/seeds/a/b.rb Gemfile Rakefile config/importmap.rb config/deploy.rb]
+      unowned = %w[config/puma.rb config/routes.rb config/application.rb config/routes/admin.rb config/settings.yml
                    config/locales/en.rb lib/tasks/a.rb Gemfile.lock db/schema.rb app/models/widget.rb]
 
       expect(owned.select { |path| described_class.configuration_path?(path) }).to eq(owned)

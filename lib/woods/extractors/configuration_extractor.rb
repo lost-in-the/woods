@@ -13,8 +13,9 @@ module Woods
     #
     # Scans `config/initializers/` and `config/environments/` for Ruby
     # configuration files, plus the Ruby an application boots, seeds and builds
-    # from: the files directly under `config/`, `config/deploy/`, `db/seeds.rb`,
-    # `db/seeds/`, and the root `Gemfile` and `Rakefile`. Each file becomes one
+    # from: `config/boot.rb`, `config/environment.rb`, `config/importmap.rb`,
+    # `config/deploy.rb`, `config/deploy/`, `db/seeds.rb`, `db/seeds/`, and the
+    # root `Gemfile` and `Rakefile`. Each file becomes one
     # ExtractedUnit with metadata about config type, gem references, and
     # detected settings.
     #
@@ -23,7 +24,10 @@ module Woods
     #
     # `config/routes.rb` belongs to RouteExtractor (a `route_file` unit) and
     # `config/application.rb` is the nominal path of the behavioral profile, so
-    # neither is extracted here.
+    # neither is extracted here. Other Ruby directly under `config/` is not
+    # extracted either: {Woods::ReloadPolicy} leaves it unclassified so the
+    # watch daemon can restart for the helpers its process loaded at boot, and
+    # a file the daemon ignores cannot be kept current.
     #
     # @example
     #   extractor = ConfigurationExtractor.new
@@ -51,8 +55,7 @@ module Woods
       # Directories scanned in addition to {CONFIG_DIRECTORIES}.
       SOURCE_DIRECTORIES = (DIRECTORY_TYPES.keys - CONFIG_DIRECTORIES).freeze
 
-      # Config type of each file named exactly. Any other Ruby file directly
-      # under `config/` is a plain `configuration`.
+      # Config type of each file named exactly.
       FILE_TYPES = {
         'Gemfile' => 'gemfile',
         'Rakefile' => 'rakefile',
@@ -65,12 +68,6 @@ module Woods
 
       # Root-relative files named exactly, including the two with no extension.
       SOURCE_FILES = FILE_TYPES.keys.freeze
-
-      # The directory whose direct Ruby children are configuration.
-      TOP_LEVEL_DIRECTORY = 'config'
-
-      # Files directly under `config/` that other units own.
-      TOP_LEVEL_EXCLUDED = %w[config/routes.rb config/application.rb].freeze
 
       GEM_DECLARATION = /^[ \t]*+gem[ \t]*+\(?+[ \t]*+["']([\w.-]++)["']/
 
@@ -90,10 +87,7 @@ module Woods
           return nil unless relative_path.end_with?('.rb')
 
           directory = DIRECTORY_TYPES.keys.find { |dir| relative_path.start_with?("#{dir}/") }
-          return DIRECTORY_TYPES[directory] if directory
-
-          top_level = File.dirname(relative_path) == TOP_LEVEL_DIRECTORY
-          'configuration' if top_level && !TOP_LEVEL_EXCLUDED.include?(relative_path)
+          DIRECTORY_TYPES[directory]
         end
       end
 
@@ -170,14 +164,13 @@ module Woods
         ConfigSourceGuard.inside_root?(file_path.to_s, Rails.root.to_s)
       end
 
-      # Files outside {CONFIG_DIRECTORIES}: the exact files, the Ruby directly
-      # under `config/`, then the extra directories. Sorted, so repeat runs agree.
+      # Files outside {CONFIG_DIRECTORIES}: the exact files, then the extra
+      # directories. Sorted, so repeat runs agree.
       #
       # @return [Array<String>] absolute paths
       def boot_and_root_files
         root = Rails.root.to_s
         relative = SOURCE_FILES.select { |path| File.file?(File.join(root, path)) }
-        relative += Dir.glob("#{TOP_LEVEL_DIRECTORY}/*.rb", base: root)
         relative += SOURCE_DIRECTORIES.flat_map { |dir| Dir.glob("#{dir}/**/*.rb", base: root) }
         relative.uniq.sort.select { |path| self.class.configuration_path?(path) }.map { |path| File.join(root, path) }
       end
