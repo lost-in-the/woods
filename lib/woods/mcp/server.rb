@@ -726,8 +726,9 @@ module Woods
             description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, bridges, ' \
                          'cross_database_edges (associations and foreign keys across databases), ' \
                          'volatile_dependencies (edges into units that change far more often than the dependent), ' \
-                         'and undeclared_package_edges (edges that cross a package boundary the source package ' \
-                         'never declared).',
+                         'undeclared_package_edges (edges that cross a package boundary the source package ' \
+                         'never declared), and unresolvable_routes (routes whose controller has no unit or whose ' \
+                         'action the controller does not have).',
             input_schema: {
               properties: {
                 analysis: {

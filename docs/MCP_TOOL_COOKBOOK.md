@@ -658,6 +658,20 @@ Static tools miss all of these because they only exist after Rails processes the
 
 ---
 
+### "Which routes point at a controller or action that doesn't exist?"
+
+**Tool:** `graph_analysis` (Index Server)
+
+```json
+{
+  "analysis": "unresolvable_routes"
+}
+```
+
+**What you'll get:** `route`, `controller`, `action`, and `reason` for every route whose controller has no unit (`missing_controller`) or whose action the controller does not have (`missing_action`). Controllers a gem or engine defines, and routed actions a controller inherits from a gem, resolve and are not listed.
+
+---
+
 ### "How does Rails implement has_many?"
 
 **Tool:** `framework` (Index Server)

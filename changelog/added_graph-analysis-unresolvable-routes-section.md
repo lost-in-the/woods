@@ -1,0 +1,1 @@
+- The MCP `graph_analysis` tool now serves the `unresolvable_routes` section: `analysis: "unresolvable_routes"` is accepted, `analysis: "all"` pages and renders it, and the markdown and plain renderers print each entry as the route, its `Controller#action` target and the reason.

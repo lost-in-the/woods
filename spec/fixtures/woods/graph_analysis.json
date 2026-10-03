@@ -81,6 +81,14 @@
       "to_package": "admin"
     }
   ],
+  "unresolvable_routes": [
+    {
+      "route": "DELETE /posts/:id",
+      "controller": "PostsController",
+      "action": "destroy",
+      "reason": "missing_action"
+    }
+  ],
   "stats": {
     "orphan_count": 1,
     "dead_end_count": 1,
@@ -89,6 +97,7 @@
     "cross_database_edge_count": 2,
     "volatile_dependency_count": 1,
     "volatile_dependencies_limit": 20,
-    "undeclared_package_edge_count": 2
+    "undeclared_package_edge_count": 2,
+    "unresolvable_route_count": 1
   }
 }

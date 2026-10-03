@@ -140,6 +140,20 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
       expect(out).not_to include('****')
     end
 
+    it 'renders an unresolvable_routes entry as route, dispatch target and reason' do
+      out = renderer.render(:graph_analysis, {
+                              'unresolvable_routes' => [
+                                { 'route' => 'DELETE /posts/:id', 'controller' => 'PostsController',
+                                  'action' => 'destroy', 'reason' => 'missing_action' }
+                              ],
+                              'stats' => { 'unresolvable_route_count' => 1 }
+                            })
+
+      expect(out).to include('UNRESOLVABLE ROUTES:')
+      expect(out).to include('  DELETE /posts/:id -> PostsController#destroy (missing_action)')
+      expect(out).not_to include('dependents')
+    end
+
     it 'renders an undeclared_package_edges entry generically, with no dedicated branch' do
       out = renderer.render(:graph_analysis, {
                               'undeclared_package_edges' => [
