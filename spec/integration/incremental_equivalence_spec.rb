@@ -1784,6 +1784,48 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(sweep_units(full_extraction, marker: 'owner_fallback')).to eq(['SweepFlipService'])
     end
 
+    describe 'a class whose family changes through another file' do
+      before do
+        stub_const('Sidekiq::Job', Module.new) unless defined?(Sidekiq::Job)
+        write_and_load('app/models/sweep_parent.rb', "class SweepParent\n  def base = 1\nend\n")
+        write_and_load('app/models/sweep_child.rb', "class SweepChild < SweepParent\n  def perform = 1\nend\n")
+      end
+
+      after do
+        %i[SweepChild SweepParent].each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+      end
+
+      it 'drops the stale poro unit when a parent gains a job mixin outside the blast radius' do
+        index = full_extraction
+        expect(unit_snapshot(index).values.map { |unit| unit['identifier'] }).to include('SweepChild')
+
+        hook = write_and_load('app/lib/sweep_parent_job.rb', "SweepParent.include(Sidekiq::Job)\n")
+        Woods::Extractor.new(output_dir: index).extract_changed([hook])
+
+        expect(unit_snapshot(index).values.select do |unit|
+          unit['identifier'] == 'SweepChild' && unit['type'] == 'poro'
+        end)
+          .to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'restores the poro unit after a reload drops the job mixin' do
+        hook = write_and_load('app/lib/sweep_parent_job.rb', "SweepParent.include(Sidekiq::Job)\n")
+        index = full_extraction
+
+        %i[SweepChild SweepParent].each { |name| Object.send(:remove_const, name) }
+        delete_file(hook)
+        load app_path('app/models/sweep_parent.rb')
+        load app_path('app/models/sweep_child.rb')
+        Woods::Extractor.new(output_dir: index).extract_changed([hook])
+
+        expect(differences(index, full_extraction)).to be_empty
+        expect(unit_snapshot(index).values.map { |unit| unit['identifier'] }).to include('SweepChild')
+      end
+    end
+
     it 'parses each PORO source once per full extraction' do
       write_and_load('app/helpers/sweep_date_helper.rb', "module SweepDateHelper\n  def d = 1\nend\n")
       parses = Hash.new(0)

@@ -471,7 +471,10 @@ extractor emits nothing (helpers beside a serializer base, a module in a
 services directory, a batch loader under `app/graphql`), falls back to the same
 PORO path. Those units carry `metadata.discovered_via: "owner_fallback"`. The
 decision is made per file after every typed extractor has run, in full and
-incremental extraction alike.
+incremental extraction alike. When a class later joins or leaves a
+class-discovered family through another file (a parent gains
+`include Sidekiq::Job`), incremental extraction drops or restores its PORO unit
+to match a full run.
 
 A file with no class or module body can still own top-level constants
 (`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment

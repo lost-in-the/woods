@@ -1,8 +1,13 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'source_references/runtime_lookup'
+require_relative 'extractors/class_families'
 
 module Woods
+  # Keeps PORO units equal to a full extraction when ownership changes without
+  # the file changing.
+  #
   # Owner fallback: owned Ruby under the sweep globs whose owning extractors
   # emit no unit for it (helpers beside a serializer base, a module in a
   # services directory) goes to the PORO path instead of vanishing.
@@ -70,6 +75,40 @@ module Woods
     def result_types_by_path
       @results.each_value.with_object(Hash.new { |hash, path| hash[path] = Set.new }) do |units, present|
         units.each { |unit| path_spellings(unit.file_path).each { |path| present[path].add(unit.type) } }
+      end
+    end
+
+    # Incremental: a class can join a class-discovered family through another
+    # file (a parent gains `include Sidekiq::Job`). Its PORO unit goes, as a
+    # full extraction would leave it out.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers removed
+    def prune_family_owned_poros(affected_types)
+      lookup = SourceReferences::RuntimeLookup.new
+      @dependency_graph.units_of_type(:poro).each_with_object(Set.new) do |identifier, touched|
+        value = lookup.call("::#{identifier}", allow_private: true)[:value]
+        next unless lookup.class_object?(value) && Extractors::ClassFamilies.owner_of(value, lookup)
+
+        touched.add(identifier) if remove_unit(identifier, affected_types, type: :poro)
+      end
+    end
+
+    # Incremental: a swept file with no unit left can be PORO again after a
+    # change elsewhere (a reload drops the job mixin a parent had). Unitless
+    # swept files are few, so each run re-extracts all of them.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers written
+    def extract_unitless_poro_files(affected_types)
+      poros = extractor_for(:poros)
+      return Set.new unless poros.respond_to?(:swept_files)
+
+      poros.swept_files.each_with_object(Set.new) do |path, touched|
+        next if path_spellings(path).any? { |spelling| @dependency_graph.units_for_path(spelling).any? }
+
+        units = checked_extraction(:poros, poros) { poros.extract_poro_units(path, ar_names: active_record_names) }
+        touched.merge(register_and_write(:poros, units, affected_types)) if units
       end
     end
 

@@ -648,8 +648,10 @@ module Woods
         touched.merge(reconcile_class_based_types(
                         affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
                       ))
-        # Last: owner presence is final only after every family reconciled.
+        # Last: ownership is final only after every family reconciled.
         touched.merge(reconcile_owner_fallbacks(affected_types))
+        touched.merge(prune_family_owned_poros(affected_types))
+        touched.merge(extract_unitless_poro_files(affected_types))
       end
 
       raise_on_handled_extraction_failure!
