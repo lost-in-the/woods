@@ -23,7 +23,7 @@ RSpec.describe Woods::SourceFile do
     it 'returns multibyte source as valid UTF-8 under a US-ASCII default external encoding' do
       path = write_source("# Widget — ledger entry\nclass Widget; end\n")
 
-      source = with_us_ascii_default_external { described_class.read(path) }
+      source = with_posix_default_external { described_class.read(path) }
 
       expect(source.encoding).to eq(Encoding::UTF_8)
       expect(source).to be_valid_encoding
@@ -40,7 +40,7 @@ RSpec.describe Woods::SourceFile do
     it 'scrubs bytes that are not valid UTF-8 instead of returning a broken string' do
       path = write_source("# caf\xE9\nclass Widget; end\n".b)
 
-      source = with_us_ascii_default_external { described_class.read(path) }
+      source = with_posix_default_external { described_class.read(path) }
 
       expect(source).to be_valid_encoding
       expect(source).to eq("# caf�\nclass Widget; end\n")
@@ -55,7 +55,7 @@ RSpec.describe Woods::SourceFile do
     it 'returns valid UTF-8 lines under a US-ASCII default external encoding' do
       path = write_source("# Widget — ledger\nclass Widget; end\n")
 
-      lines = with_us_ascii_default_external { described_class.readlines(path) }
+      lines = with_posix_default_external { described_class.readlines(path) }
 
       expect(lines).to eq(["# Widget — ledger\n", "class Widget; end\n"])
       expect(lines).to all(be_valid_encoding)

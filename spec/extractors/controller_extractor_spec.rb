@@ -1028,7 +1028,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         controller = controller_double('PostsController', mod)
         source = "class PostsController < ApplicationController\nend\n"
 
-        inlined, names = with_us_ascii_default_external do
+        inlined, names = with_posix_default_external do
           extractor.send(:build_controller_source_with_concerns, controller, source)
         end
 

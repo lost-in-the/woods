@@ -873,7 +873,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
         end
       end
 
-      unit = with_us_ascii_default_external { described_class.new.send(:extract_job_class, job_class) }
+      unit = with_posix_default_external { described_class.new.send(:extract_job_class, job_class) }
 
       expect(unit.source_code).to be_valid_encoding
       expect(unit.source_code).to include('Shipment — dispatch')

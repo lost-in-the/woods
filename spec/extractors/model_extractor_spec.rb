@@ -1766,7 +1766,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     after { FileUtils.rm_rf(tmp_dir) }
 
     it 'extracts the model with its concern inlined' do
-      unit = with_us_ascii_default_external { extractor.send(:extract_model, model) }
+      unit = with_posix_default_external { extractor.send(:extract_model, model) }
 
       expect(unit.source_code).to be_valid_encoding
       expect(unit.source_code).to include('Ledger — the book', 'Postable — posting rules')
@@ -1774,25 +1774,25 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
 
     it 'inlines the concern when it reads the model source itself' do
-      source, = with_us_ascii_default_external { extractor.send(:build_model_source_with_concerns, model) }
+      source, = with_posix_default_external { extractor.send(:build_model_source_with_concerns, model) }
 
       expect(source).to include('Ledger — the book', 'Postable — posting rules')
     end
 
     it 'extracts scopes when it reads the model source itself' do
-      scopes = with_us_ascii_default_external { extractor.send(:extract_scopes, model) }
+      scopes = with_posix_default_external { extractor.send(:extract_scopes, model) }
 
       expect(scopes.map { |scope| scope[:name] }).to eq(['unreconciled'])
     end
 
     it 'scans dependencies when it reads the model source itself' do
-      deps = with_us_ascii_default_external { extractor.send(:extract_dependencies, model) }
+      deps = with_posix_default_external { extractor.send(:extract_dependencies, model) }
 
       expect(deps).to include({ type: :concern, target: 'Postable', via: :include })
     end
 
     it 'counts lines of code when it reads the model source itself' do
-      expect(with_us_ascii_default_external { extractor.send(:count_loc, model) }).to eq(3)
+      expect(with_posix_default_external { extractor.send(:count_loc, model) }).to eq(3)
     end
   end
 end

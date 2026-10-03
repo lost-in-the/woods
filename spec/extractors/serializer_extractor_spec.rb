@@ -479,7 +479,7 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
         end
       RUBY
 
-      classes, units = with_us_ascii_default_external do
+      classes, units = with_posix_default_external do
         [described_class.new.discoverable_classes, units_by_id]
       end
 

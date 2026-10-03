@@ -140,7 +140,7 @@ RSpec.describe Woods::Extractors::RailsSourceExtractor do
       create_file('lib/active_record/callbacks.rb',
                   "# Callbacks — lifecycle hooks\nmodule ActiveRecord\n  module Callbacks\n  end\nend\n")
 
-      units = with_us_ascii_default_external { described_class.new.extract_rails_sources }
+      units = with_posix_default_external { described_class.new.extract_rails_sources }
 
       expect(units.map(&:identifier)).to include(a_string_including('callbacks.rb'))
       expect(units.first.source_code).to include('Callbacks — lifecycle hooks')
@@ -150,7 +150,7 @@ RSpec.describe Woods::Extractors::RailsSourceExtractor do
       stub_gem('devise', version: '4.9.3')
       create_file('lib/devise/models/authenticatable.rb', "# Authenticatable — sign-in\nmodule Authenticatable\nend\n")
 
-      units = with_us_ascii_default_external { described_class.new.extract_gem_sources }
+      units = with_posix_default_external { described_class.new.extract_gem_sources }
 
       expect(units.map(&:identifier)).to include(a_string_including('authenticatable.rb'))
       expect(units.first.source_code).to include('Authenticatable — sign-in')

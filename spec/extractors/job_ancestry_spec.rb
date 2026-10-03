@@ -70,7 +70,7 @@ RSpec.describe Woods::Extractors::JobAncestry do
       declare('app/models/ancestry_jobs/import_manager.rb',
               "# Import — nightly\nclass ImportManager\n  include Sidekiq::Worker\nend")
 
-      admitted = with_us_ascii_default_external do
+      admitted = with_posix_default_external do
         described_class.admitted?(AncestryJobs::ImportManager, app_root: app_root)
       end
 
