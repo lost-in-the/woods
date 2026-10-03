@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 require 'active_support/core_ext/object/blank'
 require 'woods/model_name_cache'
 require 'woods/extractors/caching_extractor'
@@ -612,6 +613,64 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       calls = calls_for('app/views/widgets/index.html.haml', "- cache #{key} do\n  %p hi\n")
 
       expect(calls.first[:key_pattern]).to eq(key[0, 120])
+    end
+  end
+
+  # ── Adversarial input complexity ─────────────────────────────────────
+
+  # Every scan must stay linear. Ruby 3.2+ fails a slow match through
+  # Regexp.timeout; older Rubies (no regex memoization, the real exposure)
+  # rely on the wall-clock budget.
+  describe 'adversarial input complexity' do
+    def within_budget(&block)
+      return Timeout.timeout(5, &block) unless Regexp.respond_to?(:timeout=)
+
+      previous = Regexp.timeout
+      Regexp.timeout = 1.0
+      begin
+        Timeout.timeout(5, &block)
+      ensure
+        Regexp.timeout = previous
+      end
+    end
+
+    repeats = 50_000
+    {
+      'cache tokens with no do' => 'cache ' * repeats,
+      'cache then a long blank run' => "cache#{' ' * repeats}x",
+      'cache then mixed blanks' => "cache \t" * repeats,
+      'conditional cache tokens' => 'cache_if ' * repeats,
+      'near-miss do' => 'cache dox ' * repeats,
+      'json.cache without a bang' => 'json.cache ' * repeats,
+      'Rails.cache.fetch then blanks' => "Rails.cache.fetch#{' ' * repeats}x",
+      'cache_key-prefixed words' => 'cache_keyx ' * repeats
+    }.each do |label, input|
+      it "matches every cache pattern in linear time: #{label}" do
+        within_budget do
+          described_class::CACHE_PATTERNS.each_value { |pattern| pattern.match?(input) }
+        end
+      end
+    end
+
+    it 'extracts 10k near-miss lines in linear time' do
+      path = create_file('app/views/widgets/index.html.erb',
+                         "#{"<% cache [@widget, 'v1'] dox %>\n" * 10_000}<% cache @widget do %>\n<% end %>\n")
+
+      unit = within_budget { described_class.new.extract_caching_file(path, :view) }
+      expect(unit.metadata[:cache_calls].size).to eq(1)
+    end
+
+    it 'extracts 10k fragment caches keyed by a bare cache_key in linear time' do
+      path = create_file('app/views/widgets/index.html.erb', "<% cache [cache_key, 'v1'] do %><% end %>\n" * 10_000)
+
+      unit = within_budget { described_class.new.extract_caching_file(path, :view) }
+      expect(unit.metadata[:cache_calls].map { |c| c[:type] }.uniq).to eq([:fragment])
+    end
+
+    it 'finds the end of an ERB tag in linear time' do
+      source = "cache @widget do #{'-' * repeats}%>"
+
+      within_budget { Woods::Extractors::CacheCallArguments.read(source, 0) }
     end
   end
 
