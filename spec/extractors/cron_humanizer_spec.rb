@@ -13,13 +13,22 @@ RSpec.describe Woods::Extractors::CronHumanizer do
       '* * * * *' => 'every minute',
       '0 * * * *' => 'every hour',
       '0 0 * * *' => 'daily at midnight',
-      '0 0 * * 0' => 'weekly on Sunday',
-      '0 0 * * 1' => 'weekly on Monday',
-      '0 0 1 * *' => 'monthly on the 1st',
-      '0 0 1 1 *' => 'yearly on January 1st',
       '*/5 * * * *' => 'every 5 minutes'
     }.each do |cron, text|
       it "keeps #{cron.inspect} as #{text.inspect}" do
+        expect(humanize(cron)).to eq(text)
+      end
+    end
+  end
+
+  describe 'named shapes that left out the time or used ordinals' do
+    {
+      '0 0 * * 0' => 'weekly on Sunday at 00:00',
+      '0 0 * * 1' => 'weekly on Monday at 00:00',
+      '0 0 1 * *' => 'monthly on day 1 at 00:00',
+      '0 0 1 1 *' => 'yearly on January 1 at 00:00'
+    }.each do |cron, text|
+      it "describes #{cron.inspect} as #{text.inspect}, with its time and a plain day number" do
         expect(humanize(cron)).to eq(text)
       end
     end
@@ -74,10 +83,10 @@ RSpec.describe Woods::Extractors::CronHumanizer do
       '@hourly' => 'every hour',
       '@daily' => 'daily at midnight',
       '@midnight' => 'daily at midnight',
-      '@weekly' => 'weekly on Sunday',
-      '@monthly' => 'monthly on the 1st',
-      '@yearly' => 'yearly on January 1st',
-      '@annually' => 'yearly on January 1st',
+      '@weekly' => 'weekly on Sunday at 00:00',
+      '@monthly' => 'monthly on day 1 at 00:00',
+      '@yearly' => 'yearly on January 1 at 00:00',
+      '@annually' => 'yearly on January 1 at 00:00',
       '0 7 * * * America/Chicago' => 'daily at 07:00 (America/Chicago)',
       '0 0 * * * UTC' => 'daily at midnight (UTC)',
       '0 0 7 * * *' => 'daily at 07:00',

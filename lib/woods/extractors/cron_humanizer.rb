@@ -18,11 +18,7 @@ module Woods
       NAMED = {
         '* * * * *' => 'every minute',
         '0 * * * *' => 'every hour',
-        '0 0 * * *' => 'daily at midnight',
-        '0 0 * * 0' => 'weekly on Sunday',
-        '0 0 * * 1' => 'weekly on Monday',
-        '0 0 1 * *' => 'monthly on the 1st',
-        '0 0 1 1 *' => 'yearly on January 1st'
+        '0 0 * * *' => 'daily at midnight'
       }.freeze
 
       NICKNAMES = {

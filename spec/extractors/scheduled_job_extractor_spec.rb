@@ -1318,7 +1318,7 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       expect(units.first.metadata[:frequency_human_readable]).to eq('daily at midnight')
     end
 
-    it 'humanizes "0 0 * * 0" to "weekly on Sunday"' do
+    it 'humanizes "0 0 * * 0" to "weekly on Sunday at 00:00"' do
       path = create_file('config/sidekiq_cron.yml', <<~YAML)
         weekly_job:
           cron: "0 0 * * 0"
@@ -1326,10 +1326,10 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       YAML
 
       units = described_class.new.extract_scheduled_job_file(path, :sidekiq_cron)
-      expect(units.first.metadata[:frequency_human_readable]).to eq('weekly on Sunday')
+      expect(units.first.metadata[:frequency_human_readable]).to eq('weekly on Sunday at 00:00')
     end
 
-    it 'humanizes "0 0 1 * *" to "monthly on the 1st"' do
+    it 'humanizes "0 0 1 * *" to "monthly on day 1 at 00:00"' do
       path = create_file('config/sidekiq_cron.yml', <<~YAML)
         monthly_job:
           cron: "0 0 1 * *"
@@ -1337,7 +1337,7 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       YAML
 
       units = described_class.new.extract_scheduled_job_file(path, :sidekiq_cron)
-      expect(units.first.metadata[:frequency_human_readable]).to eq('monthly on the 1st')
+      expect(units.first.metadata[:frequency_human_readable]).to eq('monthly on day 1 at 00:00')
     end
 
     it 'passes through Solid Queue frequency as human readable' do
