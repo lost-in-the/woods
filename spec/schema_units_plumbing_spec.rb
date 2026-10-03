@@ -84,6 +84,16 @@ RSpec.describe 'Schema unit registration' do
       expect(policy.classify('config/woods/external_consumers.yml')).to eq(:reextract)
     end
 
+    # Changed paths are uncontrolled input; the per-database dump pattern
+    # must stay linear on a long near-match.
+    ["db/#{'a_' * 50_000}", "db/#{'_schema.r' * 10_000}", "db/#{'a' * 50_000}/schema.rb"].each_with_index do |path, i|
+      it "classifies adversarial dump-like path #{i + 1} within a second" do
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        policy.classify(path)
+        expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
+      end
+    end
+
     it 'does not mistake other db files for schema dumps' do
       expect(%w[db/seeds.rb db/schema.rb.bak db/nested/billing_schema.rb].map { |path| policy.classify(path) })
         .to eq(%i[ignore ignore ignore])
