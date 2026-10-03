@@ -31,6 +31,7 @@ require_relative 'woods/extractors/external_consumer_declarations'
 require_relative 'woods/graph_analyzer'
 # Configuration's `source_reference_callers` default lives with the pass it feeds.
 require_relative 'woods/source_references/caller_policy'
+require_relative 'woods/javascript_paths'
 
 module Woods
   class Error < StandardError; end
@@ -159,7 +160,7 @@ module Woods
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
-                :test_support_paths, :test_subdomain_helpers, :source_reference_callers
+                :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :javascript_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -261,6 +262,8 @@ module Woods
       # Which unit types publish verified code_reference edges, and to which
       # target types. See the setter.
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(nil)
+      # Globs JsModuleExtractor scans for JavaScript/TypeScript modules.
+      @javascript_paths = JavascriptPaths::DEFAULT_GLOBS
     end
 
     def embedding_model=(value)
@@ -679,6 +682,20 @@ module Woods
     # @raise [ConfigurationError] for an unknown type or malformed entry; the previous value is kept
     def source_reference_callers=(value)
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(value)
+    end
+
+    # Root-relative globs {Woods::Extractors::JsModuleExtractor} scans for
+    # JavaScript and TypeScript modules. Vendored, generated, minified and
+    # declaration files are never indexed; see {Woods::JavascriptPaths}. An
+    # empty list disables the unit type. Changing it needs a full extraction.
+    #
+    # @example
+    #   config.javascript_paths = ['app/javascript/**/*.{js,ts}', 'frontend/src/**/*.{ts,tsx}']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def javascript_paths=(value)
+      @javascript_paths = JavascriptPaths.validate!(value)
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
