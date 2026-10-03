@@ -18,6 +18,15 @@ RSpec.describe Woods::Extractors::ClassFamilies do
     path
   end
 
+  it 'never assigns a module to a family' do
+    stub_const('ActiveModel::Serializer', Class.new)
+    namespace = Module.new
+    stub_const('FamilyFixture::Admin', namespace)
+
+    expect(described_class.owner_of(namespace)).to be_nil
+    expect(described_class.owner_of(Module)).to be_nil
+  end
+
   it 'gives the job family exactly the classes JobAncestry admits' do
     load_source('app/models/family_fixture/sync.rb', "class FamilyFixture::Sync < ActiveJob::Base\nend\n")
     load_source('app/models/family_fixture/factory.rb',

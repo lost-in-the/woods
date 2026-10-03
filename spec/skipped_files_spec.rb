@@ -56,6 +56,13 @@ RSpec.describe Woods::SkippedFiles do
     expect(reason_for('app/lib/broken.rb')).to eq('parse_error')
   end
 
+  it 'calls a namespace-only file under an owned directory namespace_only' do
+    stub_const('SkipFixture::Admin', Module.new)
+    stub_const('SkipFixture::Admin::Application', Class.new)
+    create_file('app/serializers/skip_fixture/admin.rb', "module SkipFixture\n  module Admin; end\nend\n")
+    expect(reason_for('app/serializers/skip_fixture/admin.rb')).to eq('namespace_only')
+  end
+
   it 'names the owning extractor when a claimed file yields no unit' do
     create_file('app/services/skip_fixture/helper.rb', "class SkipFixture::Helper\nend\n")
     expect(reason_for('app/services/skip_fixture/helper.rb')).to eq('rejected_by:services')

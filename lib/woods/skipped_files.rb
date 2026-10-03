@@ -67,11 +67,15 @@ module Woods
       end
     end
 
+    # The file's own shape decides first, so `module Admin; end` under an
+    # owned directory reads namespace_only, not rejected_by its owner.
     def reason_for(relative)
-      key = PathDispatcher.claiming_key_for(relative)
-      return "rejected_by:#{key}" if key
+      path = File.join(@root, relative)
+      static = @poro.static_skip_reason(path)
+      return static if static
 
-      @poro.skip_reason(File.join(@root, relative))
+      key = PathDispatcher.claiming_key_for(relative)
+      key ? "rejected_by:#{key}" : @poro.skip_reason(path)
     end
 
     def relativize(path)

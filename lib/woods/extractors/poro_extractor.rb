@@ -158,21 +158,28 @@ module Woods
         end
       end
 
+      # The skip reason the file decides on its own, before any ownership or
+      # runtime question: `parse_error`, `no_declaration` or `namespace_only`.
+      #
+      # @param file_path [String] absolute path of a file that produced no unit
+      # @return [String, nil] nil when the file declares something of its own
+      def static_skip_reason(file_path)
+        source, analysis, declarations = skip_inputs(file_path)
+        return 'parse_error' if analysis['parse_error']
+        return 'no_declaration' if declarations.empty? && ConstantAssignments.new.call(source).empty?
+
+        'namespace_only' if declarations.any? && namespace_only?(source, declarations)
+      end
+
       # Why a scanned file yields no unit. See {Woods::SkippedFiles} for the reasons.
       #
       # @param file_path [String] absolute path of a file that produced no unit
       # @return [String] skip reason
       def skip_reason(file_path)
-        source = File.read(file_path)
-        analysis = collector.call(source)
-        return 'parse_error' if analysis['parse_error']
+        static = static_skip_reason(file_path)
+        return static if static
 
-        declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
-        if declarations.empty?
-          return ConstantAssignments.new.call(source).empty? ? 'no_declaration' : 'not_owned'
-        end
-        return 'namespace_only' if namespace_only?(source, declarations)
-
+        _source, _analysis, declarations = skip_inputs(file_path)
         family = declarations.select { |declaration| declaration['kind'] == 'class' }
                              .map { |declaration| declaration['owner'] }.uniq
                              .filter_map { |identifier| runtime_family(identifier) }.first
@@ -180,6 +187,13 @@ module Woods
       end
 
       private
+
+      def skip_inputs(file_path)
+        source = File.read(file_path)
+        analysis = collector.call(source)
+        declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
+        [source, analysis, declarations]
+      end
 
       def extract_units(file_path, ar_names, fallback:)
         source = File.read(file_path)
