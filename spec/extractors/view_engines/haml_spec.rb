@@ -110,6 +110,14 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
       expect(engine.scan_partials(source)).to eq(['widgets/real'])
     end
 
+    it 'reads render calls inside a filter interpolation' do
+      source = <<~'HAML'
+        :plain
+          Note: #{render 'widgets/note'} and render 'plain/text'
+      HAML
+      expect(engine.scan_partials(source)).to eq(['widgets/note'])
+    end
+
     it 'ignores render calls inside -# silent comments' do
       source = <<~HAML
         -# = render 'widgets/old'
@@ -151,6 +159,14 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
 
     it 'detects the render helper for a component render' do
       expect(engine.scan_helpers('= render WidgetComponent.new(widget: @widget)')).to eq(['render'])
+    end
+
+    it 'detects helpers inside a :javascript filter interpolation' do
+      source = <<~'HAML'
+        :javascript
+          var img = "#{image_tag(@widget.photo)}";
+      HAML
+      expect(engine.scan_helpers(source)).to eq(['image_tag'])
     end
 
     it 'ignores helper names inside a :javascript filter' do
@@ -224,10 +240,34 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
       expect(helpers_via(source, :form_action)).to eq([])
     end
 
-    it 'ignores route helpers inside a :javascript filter' do
+    it 'ignores route helper names in literal :javascript filter text' do
+      source = <<~HAML
+        :javascript
+          // see widgets_path in the docs
+      HAML
+      expect(engine.scan_navigation_candidates(source)).to eq([])
+    end
+
+    it 'emits route helpers from a :javascript filter interpolation' do
       source = <<~'HAML'
         :javascript
-          var url = "#{widgets_path}";
+          frame.src = "#{review_path}";
+      HAML
+      expect(engine.scan_navigation_candidates(source)).to eq([{ helper: 'review_path', via: :link_to }])
+    end
+
+    it 'reads an interpolation with nested braces to its matching close' do
+      source = <<~'HAML'
+        :css
+          .x { background: url("#{frame_url_for(options.fetch(:frame) { 1 }, review_path)}") } ledgers_path
+      HAML
+      expect(engine.scan_navigation_candidates(source).map { |c| c[:helper] }).to eq(['review_path'])
+    end
+
+    it 'ignores interpolations inside -# silent comments' do
+      source = <<~'HAML'
+        -#
+          #{link_to 'Old', widgets_path}
       HAML
       expect(engine.scan_navigation_candidates(source)).to eq([])
     end
