@@ -194,7 +194,7 @@ RSpec.describe 'Lexically scoped references' do
     end
 
     it 'records the resolved job as the edge target' do
-      expect(scanner.scan_job_dependencies(source).map { |d| d[:target] }).to eq(['Billing::Shipment::PingJob'])
+      expect(scanner.scan_job_dependencies(source).map { |d| d[:target] }.uniq).to eq(['Billing::Shipment::PingJob'])
     end
 
     it 'records the resolved service as the edge target' do

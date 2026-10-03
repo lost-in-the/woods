@@ -197,26 +197,51 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       source = 'FooJob.perform_later; FooJob.perform_async'
       result = scanner.scan_job_dependencies(source)
       foo_deps = result.select { |d| d[:target] == 'FooJob' }
-      expect(foo_deps.size).to eq(1)
+      expect(foo_deps.map { |d| d[:via] }).to eq(%i[code_reference job_enqueue])
+    end
+
+    # Any unit that enqueues a job records the enqueue, not only job units:
+    # a model whose callback enqueues gets the same :job_enqueue edge a job
+    # enqueuing another job does, beside its plain code reference.
+    it 'records a :job_enqueue edge beside the reference' do
+      result = scanner.scan_job_dependencies('SyncJob.set(wait: 5).perform_later(id)')
+
+      expect(result).to eq([
+                             { type: :job, target: 'SyncJob', via: :code_reference },
+                             { type: :job, target: 'SyncJob', via: :job_enqueue }
+                           ])
+    end
+
+    it 'records one edge when the label is already :job_enqueue' do
+      result = scanner.scan_job_dependencies('SyncJob.perform_async(id)', via: :job_enqueue)
+
+      expect(result).to eq([{ type: :job, target: 'SyncJob', via: :job_enqueue }])
+    end
+
+    it 'keeps the :job_enqueue edge through scan_common_dependencies' do
+      vias = scanner.scan_common_dependencies('SyncJob.perform_in(5, id)')
+                    .select { |d| d[:target] == 'SyncJob' }.map { |d| d[:via] }
+
+      expect(vias).to eq(%i[code_reference job_enqueue])
     end
 
     it 'finds Sidekiq Worker.perform_async patterns (EXTA-4)' do
       # `*Worker` is the dominant Sidekiq naming convention and app/workers
       # is a scanned directory, yet no unit anywhere recorded an edge to one.
       source = 'HardWorker.perform_async(1)'
-      result = scanner.scan_job_dependencies(source)
+      result = scanner.scan_job_dependencies(source).select { |d| d[:via] == :code_reference }
       expect(result.map { |d| d[:target] }).to eq(['HardWorker'])
     end
 
     it 'finds a delayed .set(...).perform_later chain (EXTA-4)' do
       source = 'SyncJob.set(wait: 5.minutes).perform_later(id)'
-      result = scanner.scan_job_dependencies(source)
+      result = scanner.scan_job_dependencies(source).select { |d| d[:via] == :code_reference }
       expect(result.map { |d| d[:target] }).to eq(['SyncJob'])
     end
 
     it 'keeps the namespace of a fully-qualified job reference (EXTA-2)' do
       source = 'Billing::SyncJob.perform_later(id)'
-      result = scanner.scan_job_dependencies(source)
+      result = scanner.scan_job_dependencies(source).select { |d| d[:via] == :code_reference }
       expect(result.map { |d| d[:target] }).to eq(['Billing::SyncJob'])
     end
 
@@ -311,7 +336,7 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result).to eq([])
     end
 
-    it 'all returned dependencies use :code_reference via' do
+    it 'labels every reference :code_reference, adding :job_enqueue for an enqueue' do
       source = <<~RUBY
         User.find(1)
         FooService.call
@@ -320,7 +345,8 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       RUBY
 
       result = scanner.scan_common_dependencies(source)
-      expect(result).to all(satisfy { |d| d[:via] == :code_reference })
+      expect(result.reject { |d| d[:via] == :code_reference })
+        .to eq([{ type: :job, target: 'BarJob', via: :job_enqueue }])
     end
   end
 
@@ -344,6 +370,13 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
 
       result = scanner.consolidate_dependencies([first], [second])
       expect(result).to eq([first])
+    end
+
+    it 'keeps a :job_enqueue edge beside another edge to the same job' do
+      reference = { type: :job, target: 'SyncJob', via: :code_reference }
+      enqueue = { type: :job, target: 'SyncJob', via: :job_enqueue }
+
+      expect(scanner.consolidate_dependencies([reference, enqueue], [reference, enqueue])).to eq([reference, enqueue])
     end
 
     it 'keeps entries with the same target but different types' do
@@ -655,7 +688,7 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
 
   describe 'reference chain rules' do
     def targets(method, source)
-      scanner.public_send(method, source).map { |d| d[:target] }
+      scanner.public_send(method, source).select { |d| d[:via] == :code_reference }.map { |d| d[:target] }
     end
 
     it 'takes the last Service segment of a chain that is followed by . or ::' do

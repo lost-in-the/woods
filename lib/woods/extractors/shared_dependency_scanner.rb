@@ -150,12 +150,16 @@ module Woods
       # Scan for background job references (e.g., FooJob.perform_later,
       # HardWorker.perform_async, SyncJob.set(wait: 5).perform_later).
       #
+      # Every match is an enqueue, so each job also gets a +:job_enqueue+
+      # edge beside the +via+ one: whichever unit enqueues (a model, a
+      # controller, another job) records the enqueue the same way.
+      #
       # @param source [String] Ruby source code to scan
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes
       def scan_job_dependencies(source, via: :code_reference)
-        ReferencePatterns.job_enqueues(source).uniq.map do |job|
-          { type: :job, target: job, via: via }
+        ReferencePatterns.job_enqueues(source).uniq.flat_map do |job|
+          [via, :job_enqueue].uniq.map { |label| { type: :job, target: job, via: label } }
         end
       end
 
@@ -194,12 +198,14 @@ module Woods
       # methods. Arrays are flattened one level and nils removed; the first
       # occurrence of each +[type, target]+ pair wins, so the first +:via+
       # label recorded is preserved — identical to the inline chains this
-      # replaces.
+      # replaces. A +:job_enqueue+ edge is the exception: it is kept beside
+      # the first edge to the same job, so an enqueue stays visible to
+      # readers that follow enqueue edges.
       #
       # @param dependency_arrays [Array<Array<Hash>>] One or more dependency arrays
       # @return [Array<Hash>] Flattened, nil-free, deduplicated dependency hashes
       def consolidate_dependencies(*dependency_arrays)
-        dependency_arrays.flatten(1).compact.uniq { |d| [d[:type], d[:target]] }
+        dependency_arrays.flatten(1).compact.uniq { |d| [d[:type], d[:target], d[:via] == :job_enqueue] }
       end
 
       # Match _path/_url route helpers anywhere in source.
