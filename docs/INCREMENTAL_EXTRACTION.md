@@ -277,6 +277,15 @@ step before it.
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 
+   Components and view components re-run with them on a Ruby edit. A `render`
+   edge names the component the running app would reach, resolved against the
+   loaded constant tables (lexical scope, included Phlex Kits, top level), so
+   creating `Billing::V2::TierGrid` retargets an unchanged
+   `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
+   edge leads there. Only units whose output changed are rewritten. The same
+   reload requirement applies: a constant the process has not loaded, or has not
+   unloaded, resolves as that process sees it.
+
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.
 6. **Prune vanished units**, so anything steps 2–5 resurrected against a

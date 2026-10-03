@@ -247,6 +247,12 @@ module Woods
     # classes, while a descendant-only pass cannot see source-only units.
     HYBRID_DISCOVERY_EXTRACTORS = %i[jobs serializers].freeze
 
+    # Families whose edges are resolved against the loaded constant tables: a
+    # component's render target can move when any Ruby file adds or removes a
+    # constant, with no graph edge to walk. They re-run with the hybrid
+    # families on a Ruby edit; an unchanged unit is not rewritten.
+    RUNTIME_RESOLVED_EXTRACTORS = %i[components view_components].freeze
+
     # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
     #
     # Wholesale replacement of an extractor's output has to know every type it
@@ -3000,7 +3006,9 @@ module Woods
     # therefore refreshes both complete hybrid inventories after Rails reload.
     # Non-Ruby batches retain the narrower pre-change graph selection.
     def hybrid_discovery_keys(change_set, affected_ids)
-      return HYBRID_DISCOVERY_EXTRACTORS.to_set if change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
+      if change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
+        return (HYBRID_DISCOVERY_EXTRACTORS + RUNTIME_RESOLVED_EXTRACTORS).to_set
+      end
 
       affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
                   .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
