@@ -155,7 +155,7 @@ module Woods
     attr_reader :retrieval_mode, :embedding_model, :max_context_tokens, :similarity_threshold, :extractors,
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
-                :graph_cycle_limit, :graph_cycle_max_length,
+                :graph_cycle_limit, :graph_cycle_max_length, :method_effects_limit,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
@@ -225,6 +225,7 @@ module Woods
       @volatile_dependency_limit_per_target = nil
       @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
       @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+      @method_effects_limit = 50
       # nil = the unbounded transitive closure. See the setter for why the
       # default is not a small number.
       @incremental_blast_radius_depth = nil
@@ -427,6 +428,16 @@ module Woods
     # @raise [ConfigurationError] otherwise
     def graph_cycle_max_length=(value)
       @graph_cycle_max_length = validate_optional_positive_integer!(:graph_cycle_max_length, value)
+    end
+
+    # How many public methods one unit records in `metadata.method_effects`
+    # before the map is cut off and `method_effects_truncated` is set. `nil`
+    # removes the cap.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def method_effects_limit=(value)
+      @method_effects_limit = validate_optional_positive_integer!(:method_effects_limit, value)
     end
 
     # How many reverse hops an incremental run walks from a changed file
