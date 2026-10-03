@@ -155,13 +155,16 @@ module Woods
       end
 
       # Add a `js_module` edge for each frontend name +source+ references and
-      # record the names no module registers.
+      # record the names no module registers. A component's sidecar template
+      # (`metadata[:sidecar_template]`, root-relative) is scanned too.
       #
       # @param unit [ExtractedUnit] component or template unit, mutated
       # @param source [String] the source to scan
       # @return [ExtractedUnit]
       def apply_frontend_references(unit, source)
         references = Scanner.scan(source)
+        sidecar = sidecar_template_source(unit)
+        references = references.merge(Scanner.scan(sidecar)) { |_kind, a, b| (a + b).uniq.sort } if sidecar
         return unit if references.each_value.all?(&:empty?)
 
         edges, unresolved = resolve_frontend_references(references)
@@ -176,6 +179,17 @@ module Woods
       # when first needed, so every unit of a run resolves against one map.
       def frontend_registry
         @frontend_registry ||= JsModuleRegistry.current
+      end
+
+      # @return [String, nil] the sidecar template's contents, when the unit names one that exists
+      def sidecar_template_source(unit)
+        relative = unit.metadata.is_a?(Hash) && unit.metadata[:sidecar_template]
+        return nil unless relative.is_a?(String) && defined?(Rails) && Rails.root
+
+        path = Rails.root.join(relative)
+        File.read(path, encoding: Encoding::UTF_8) if File.file?(path)
+      rescue SystemCallError
+        nil
       end
 
       def resolve_frontend_references(references)

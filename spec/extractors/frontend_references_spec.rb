@@ -147,6 +147,21 @@ RSpec.describe Woods::Extractors::FrontendReferences do
       expect(unit.metadata).to eq(template_engine: 'erb')
     end
 
+    it 'scans the sidecar template a component names' do
+      Dir.mktmpdir do |root|
+        FileUtils.mkdir_p(File.join(root, 'app/components'))
+        File.write(File.join(root, 'app/components/widget_component.html.erb'),
+                   %(<div data-controller="clipboard" x-data="dropdown"></div>))
+        stub_const('Rails', double('Rails', root: Pathname.new(root)))
+        unit.metadata[:sidecar_template] = 'app/components/widget_component.html.erb'
+
+        host.apply_frontend_references(unit, 'class WidgetComponent < ViewComponent::Base; end')
+
+        expect(unit.dependencies.select { |d| d[:type] == :js_module }.map { |d| d[:via] })
+          .to eq(%i[alpine_data stimulus_controller])
+      end
+    end
+
     it 'does not duplicate an edge the unit already carries' do
       2.times { host.apply_frontend_references(unit, '<div x-data="dropdown"></div>') }
 
