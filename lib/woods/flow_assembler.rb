@@ -32,6 +32,16 @@ module Woods
     # index in memory.
     MEMO_LIMIT = 1_000
 
+    # A call target that can name a unit: a constant, or a `::`-joined
+    # constant chain. A lowercase receiver is a local, a method, or an ivar;
+    # resolving it by name matched FactoryBot factories (`widget`, `order`),
+    # whose identifiers are the factory names.
+    CONSTANT_RECEIVER = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
+
+    # Unit types that exist only for the test suite. Application code never
+    # calls one, so they are never flow callees.
+    SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
+
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
     def initialize(graph:, extracted_dir:)
@@ -366,18 +376,24 @@ module Woods
     #   `{ ambiguous: true, candidates: }` marker when several namespaces
     #   share +target+'s short name; or nil when nothing resolves
     def compute_resolved_target(target)
+      return nil unless target.match?(CONSTANT_RECEIVER)
+
       # Tier 1: Graph-wide lookup
-      return target if @graph.node_exists?(target)
+      return callee(target) if @graph.node_exists?(target)
 
       suffix_matches = @graph.find_all_by_suffix(target)
-      return suffix_matches.first if suffix_matches.size == 1
+      return callee(suffix_matches.first) if suffix_matches.size == 1
       return { ambiguous: true, candidates: suffix_matches } if suffix_matches.size > 1
 
       # Tier 2: Disk fallback (unit JSON exists but isn't in the graph)
-      unit_data = load_unit(target)
-      return target if unit_data
+      callee(target) if load_unit(target)
+    end
 
-      nil
+    # @param identifier [String] a resolved unit identifier
+    # @return [String, nil] +identifier+, or nil when its unit exists only
+    #   for the test suite
+    def callee(identifier)
+      SPEC_ONLY_TYPES.include?(load_unit(identifier)&.dig(:type).to_s) ? nil : identifier
     end
 
     # Parse an identifier into [unit_id, method_name].

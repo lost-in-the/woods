@@ -632,6 +632,57 @@ RSpec.describe Woods::FlowAssembler do
         expect(flow.steps.size).to eq(1)
         expect(flow.steps[0][:unit]).to eq('PostsController#create')
       end
+
+      describe 'spec-only units are never callees' do
+        before do
+          write_unit('ShipmentsController', source_code: <<~RUBY)
+            class ShipmentsController < ApplicationController
+              def create
+                shipment.dispatch!
+                Ledger.post!(shipment)
+              end
+            end
+          RUBY
+          write_unit('shipment', type: 'factory', source_code: "factory :shipment do\n  carrier { 'post' }\nend\n")
+          stub_graph_defaults
+        end
+
+        def callee_units
+          described_class.new(graph: graph, extracted_dir: extracted_dir)
+                         .assemble('ShipmentsController#create').steps.drop(1).map { |s| s[:unit] }
+        end
+
+        it 'does not resolve a lowercase receiver to the graph node of the same name' do
+          allow(graph).to receive(:node_exists?).with('shipment').and_return(true)
+
+          expect(callee_units).to be_empty
+        end
+
+        it 'does not resolve a lowercase receiver to a unit file on disk' do
+          expect(callee_units).to be_empty
+        end
+
+        it 'does not resolve a constant receiver to a factory unit' do
+          write_unit('Ledger', type: 'factory', source_code: "factory :Ledger do\n  total { 1 }\nend\n")
+          allow(graph).to receive(:node_exists?).with('Ledger').and_return(true)
+
+          expect(callee_units).to be_empty
+        end
+
+        it 'does not resolve a constant receiver to a test mapping unit' do
+          write_unit('Ledger', type: 'test_mapping', source_code: "RSpec.describe Ledger do\nend\n")
+          allow(graph).to receive(:node_exists?).with('Ledger').and_return(true)
+
+          expect(callee_units).to be_empty
+        end
+
+        it 'still resolves a constant receiver to an application unit' do
+          write_unit('Ledger', type: 'model', source_code: "class Ledger\n  def post!(x)\n    save!\n  end\nend\n")
+          allow(graph).to receive(:node_exists?).with('Ledger').and_return(true)
+
+          expect(callee_units).to eq(['Ledger'])
+        end
+      end
     end
 
     # verified P1: expand_operation discarded op[:method], so the callee
