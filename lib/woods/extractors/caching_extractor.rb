@@ -48,10 +48,10 @@ module Woods
         exist: /Rails\.cache\.exist\?\s*[(\[]/,
         caches_action: /\bcaches_action\b/,
         fragment: /\bcache(?:_if|_unless)?\s+.*?\bdo\b|\bcache(?:_if|_unless)?\s*\(|\bjson\.cache(?:_if)?!/,
-        # Key methods count only as a receiver call or a definition. A bare
-        # identifier is usually a local passed as a key (`cache cache_key do`).
-        cache_key: /\.cache_key(?:_with_version)?\b|\bdef\s+(?:self\.)?cache_key(?:_with_version)?\b/,
-        cache_version: /\.cache_version\b|\bdef\s+(?:self\.)?cache_version\b/
+        # Key methods stay last: a bare one inside the arguments of a call
+        # matched above is skipped (see #extract_cache_calls).
+        cache_key: /\bcache_key(?:_with_version)?\b/,
+        cache_version: /\bcache_version\b/
       }.freeze
 
       # Call types whose first argument (after the condition, for
@@ -61,6 +61,10 @@ module Woods
       # Call types whose arguments are read at all. `cache_key` and
       # `cache_version` are key methods, not calls that take cache options.
       ARGUMENT_TYPES = (KEYED_TYPES + %i[caches_action]).freeze
+
+      # Cache key methods, counted as calls unless they are a bare
+      # identifier passed to another cache call.
+      KEY_METHOD_TYPES = %i[cache_key cache_version].freeze
 
       def initialize
         @rails_root = Rails.root
@@ -177,18 +181,42 @@ module Woods
       # ttl rather than a neighbor's. :key_pattern is the key expression's
       # source text; :options holds the literal-valued cache options.
       #
+      # A key method named bare inside another cache call's arguments
+      # (`json.cache! cache_key do`) is that call's key, usually a local,
+      # so it is not counted. A receiver call (`record.cache_key`) there,
+      # or an implicit-self call anywhere else, still counts.
+      #
       # @param source [String] Source code
       # @return [Array<Hash>] Cache call descriptors
       def extract_cache_calls(source)
         calls = []
+        argument_ranges = []
 
         CACHE_PATTERNS.each do |type, pattern|
           each_occurrence(source, pattern) do |offset|
-            calls << { type: type }.merge(call_arguments(source, offset, type))
+            next if KEY_METHOD_TYPES.include?(type) && bare_cache_argument?(source, offset, argument_ranges)
+
+            arguments = call_arguments(source, offset, type)
+            range = arguments.delete(:argument_range)
+            argument_ranges << range if range
+            calls << { type: type }.merge(arguments)
           end
         end
 
         calls
+      end
+
+      # Whether a key method occurrence is a bare identifier (no receiver)
+      # inside the arguments of a cache call already read.
+      #
+      # @param source [String] Source code
+      # @param offset [Integer] Character offset of the key method name
+      # @param argument_ranges [Array<Range>] Argument ranges of cache calls
+      # @return [Boolean]
+      def bare_cache_argument?(source, offset, argument_ranges)
+        return false if offset.positive? && source[offset - 1] == '.'
+
+        argument_ranges.any? { |range| range.cover?(offset) }
       end
 
       # Yield the start offset of every non-overlapping occurrence of a pattern.
@@ -210,9 +238,9 @@ module Woods
       # @param source [String] Source code
       # @param offset [Integer] Character offset where the occurrence begins
       # @param type [Symbol] The cache call type
-      # @return [Hash] :key_pattern, :ttl, and :options
+      # @return [Hash] :key_pattern, :ttl, :options, and :argument_range
       def call_arguments(source, offset, type)
-        return { key_pattern: nil, ttl: nil, options: {} } unless ARGUMENT_TYPES.include?(type)
+        return { key_pattern: nil, ttl: nil, options: {}, argument_range: nil } unless ARGUMENT_TYPES.include?(type)
 
         arguments = CacheCallArguments.read(source, offset)
         KEYED_TYPES.include?(type) ? arguments : arguments.merge(key_pattern: nil)

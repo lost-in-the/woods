@@ -888,7 +888,7 @@ namespace.
   - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
   - `ttl`: the `expires_in:` expression, literal or not.
   - `options`: `expires_in`, `race_condition_ttl`, `if`, and `unless`, only where the value is a literal (number, string, symbol, boolean, `nil`, or a `1.hour`-style duration).
-- `cache_key`, `cache_key_with_version`, and `cache_version` count only when called on a receiver or defined, never as a bare identifier
+- `cache_key`, `cache_key_with_version`, and `cache_version` count as cache signals, except a bare identifier inside another cache call's arguments (`json.cache! cache_key do`), which is that call's key
 - The `file_type` parameter on `extract_caching_file` defaults to `nil` (auto-detected from path)
 
 ---

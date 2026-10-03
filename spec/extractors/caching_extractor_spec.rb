@@ -454,6 +454,52 @@ RSpec.describe Woods::Extractors::CachingExtractor do
         expect(calls.map { |c| c[:type] }).to eq([:fragment])
       end
     end
+
+    it 'keeps an implicit-self cache_key call as the only cache signal of a model' do
+      path = create_file('app/models/ledger.rb', <<~'RUBY')
+        class Ledger
+          def archive_path
+            "archives/#{cache_key}/#{cache_key_with_version}/#{cache_version}.csv"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_caching_file(path, :model)
+      expect(unit.metadata[:cache_calls].map { |c| c[:type] }).to eq(%i[cache_key cache_key cache_version])
+    end
+
+    it 'does not count a bare cache_key argument nested in a cache key or a Rails.cache call' do
+      path = create_file('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def totals = Rails.cache.fetch(cache_key) { compute }
+          def summary = Rails.cache.read([cache_key_with_version, "summary"])
+        end
+      RUBY
+
+      types = described_class.new.extract_caching_file(path, :model).metadata[:cache_calls].map { |c| c[:type] }
+      expect(types).to eq(%i[fetch read])
+    end
+
+    # A byte-measured argument range runs past a multibyte key and would
+    # swallow the implicit-self call in the block body.
+    it 'ends the argument range by character, not byte, after a multibyte key' do
+      path = create_file('app/views/widgets/show.html.erb',
+                         "<% cache ['☃☃☃☃☃☃', @widget] do %><%= cache_key %>\n<% end %>\n")
+
+      calls = described_class.new.extract_caching_file(path, :view).metadata[:cache_calls]
+      expect(calls.map { |c| c[:type] }).to eq(%i[fragment cache_key])
+    end
+
+    it 'still counts a receiver cache_key call inside cache call arguments' do
+      path = create_file('app/views/ledgers/show.json.jbuilder', <<~JBUILDER)
+        json.cache! [ledger.cache_key, cache_key], expires_in: 1.hour do
+          json.id ledger.id
+        end
+      JBUILDER
+
+      types = described_class.new.extract_caching_file(path, :view).metadata[:cache_calls].map { |c| c[:type] }
+      expect(types).to eq(%i[fragment cache_key])
+    end
   end
 
   # ── Cache call arguments ─────────────────────────────────────────────

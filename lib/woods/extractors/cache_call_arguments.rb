@@ -39,13 +39,15 @@ module Woods
       # @param source [String] File source
       # @param offset [Integer] Character offset where the cache call begins
       # @return [Hash] `:key_pattern` (String, nil), `:ttl` (String, nil),
-      #   `:options` (Hash{Symbol => String})
+      #   `:options` (Hash{Symbol => String}), and `:argument_range`
+      #   (Range, nil): the character range of the call's arguments in `source`
       def read(source, offset)
         call = parse_call(source, offset)
-        return { key_pattern: nil, ttl: nil, options: {} } unless call
+        return { key_pattern: nil, ttl: nil, options: {}, argument_range: nil } unless call
 
         options = keyword_options(call)
         {
+          argument_range: argument_range(call, offset),
           key_pattern: key_expression(call)&.slice&.[](0, KEY_LIMIT),
           ttl: options[:expires_in]&.slice,
           options: OPTION_KEYS.each_with_object({}) do |name, literal|
@@ -82,6 +84,11 @@ module Woods
         (1..[lines.size, MAX_LINES].min).map { |count| lines.first(count).join.chomp }
       end
 
+      def argument_range(call, offset)
+        location = call.arguments&.location
+        location && ((offset + location.start_character_offset)...(offset + location.end_character_offset))
+      end
+
       def positional_arguments(call)
         (call.arguments&.arguments || []).reject do |node|
           node.is_a?(Prism::KeywordHashNode) || node.is_a?(Prism::BlockArgumentNode)
@@ -109,7 +116,7 @@ module Woods
         node.is_a?(Prism::CallNode) && DURATION_METHODS.include?(node.name) && node.arguments.nil? &&
           (node.receiver.is_a?(Prism::IntegerNode) || node.receiver.is_a?(Prism::FloatNode))
       end
-      private_class_method :parse_call, :leading_call, :snippets, :positional_arguments, :key_expression,
+      private_class_method :parse_call, :leading_call, :snippets, :argument_range, :positional_arguments, :key_expression,
                            :keyword_options, :literal?
     end
   end
