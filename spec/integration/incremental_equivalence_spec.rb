@@ -1226,13 +1226,14 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         [['app/javascript/application.js', 'alpine_data'],
          ['app/javascript/components/shipment-card.tsx', 'custom_element']]
       )
-      expect(unit_json(index, 'view_templates', 'posts/panel.html.erb').dig('metadata', 'unresolved_frontend_references'))
+      panel = unit_json(index, 'view_templates', 'posts/panel.html.erb')
+      expect(panel.dig('metadata', 'unresolved_frontend_references'))
         .to eq([{ 'kind' => 'stimulus_controller', 'name' => 'clipboard' }])
       expect(js_edges(index, 'view_templates', 'posts/_badge.html.haml'))
         .to eq([['app/javascript/controllers/copier_controller.js', 'stimulus_controller']])
       expect(js_edges(index, 'components', 'BadgeComponent')).to eq([['app/javascript/application.js', 'alpine_data']])
-      expect(unit_json(index, 'js_modules', 'app/javascript/application.js').fetch('dependents').map { |d| d['identifier'] })
-        .to include('BadgeComponent', 'posts/panel.html.erb')
+      dependents = unit_json(index, 'js_modules', 'app/javascript/application.js').fetch('dependents')
+      expect(dependents.map { |d| d['identifier'] }).to include('BadgeComponent', 'posts/panel.html.erb')
     end
 
     it 'drops every edge and unit when the last module is deleted' do
@@ -1258,7 +1259,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         ]
       )
 
-      expect(js_edges(index, 'js_modules', 'app/javascript/entry.js')).to eq([['app/javascript/ledger/index.js', 'import']])
+      expect(js_edges(index, 'js_modules',
+                      'app/javascript/entry.js')).to eq([['app/javascript/ledger/index.js', 'import']])
     end
 
     it 'omits and restores source as a module crosses the size cap' do
@@ -1273,7 +1275,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       )
 
       expect(unit_json(index, 'js_modules', 'app/javascript/big.js')).to include('source_code' => '')
-      expect(unit_json(index, 'js_modules', 'app/javascript/big.js').fetch('metadata')).to include('source_omitted' => true)
+      expect(unit_json(index, 'js_modules',
+                       'app/javascript/big.js').fetch('metadata')).to include('source_omitted' => true)
     end
 
     it 'ignores vendored and generated JavaScript in both modes' do
@@ -1307,7 +1310,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         ]
       )
 
-      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq([['app/javascript/alpine/b.js', 'alpine_data']])
+      expect(js_edges(index, 'view_templates',
+                      'posts/panel.html.erb')).to eq([['app/javascript/alpine/b.js', 'alpine_data']])
     ensure
       Woods.configuration.incremental_blast_radius_depth = nil
     end
@@ -1318,7 +1322,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file('app/javascript/util.js', "export const one = 1\n")
       index = full_extraction
       reruns = []
-      allow_any_instance_of(Woods::Extractors::ViewTemplateExtractor).to receive(:extract_all).and_wrap_original do |original|
+      templates = Woods::Extractors::ViewTemplateExtractor
+      allow_any_instance_of(templates).to receive(:extract_all).and_wrap_original do |original|
         reruns << :view_templates
         original.call
       end
@@ -1330,7 +1335,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file('app/javascript/util.js', "Alpine.data(\"dropdown\", () => ({}))\n")
       Woods::Extractor.new(output_dir: index).extract_changed(['app/javascript/util.js'])
       expect(reruns).to eq([:view_templates])
-      allow_any_instance_of(Woods::Extractors::ViewTemplateExtractor).to receive(:extract_all).and_call_original
+      allow_any_instance_of(templates).to receive(:extract_all).and_call_original
       expect(differences(index, full_extraction)).to be_empty
     end
 
