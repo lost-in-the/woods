@@ -313,7 +313,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                   }),
       'structure' => contract(:always, {}, exact_data({
                                                         'manifest' => expected_manifest,
-                                                        'template_engines' => ['erb']
+                                                        'template_engines' => %w[erb haml jbuilder]
                                                       }), properties: {
                                                         'detail' => enum_contract(%w[summary full], nil, 10_000)
                                                       }),
@@ -926,7 +926,7 @@ RSpec.describe 'Index MCP tool contracts' do
     when 'pipeline_repair'
       assert_repair_enum(data, value)
     when 'structure'
-      expected = { 'manifest' => expected_manifest, 'template_engines' => ['erb'] }
+      expected = { 'manifest' => expected_manifest, 'template_engines' => %w[erb haml jbuilder] }
       expected['summary'] = expected_summary if value == 'full'
       expect(data).to eq(expected)
     else
