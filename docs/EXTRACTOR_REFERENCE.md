@@ -1143,7 +1143,10 @@ A target carries one edge: when a test refers to one support file several ways, 
 **Route coverage.** In `:feature`, `:system` and `:request` tests, `visit`, `get`, `post`, `put`, `patch`, `delete` and `head` become `:exercises_route` edges to route units, listed in `metadata[:routes_exercised]`:
 
 - A route helper (`visit new_widget_path`, `post widgets_url`) resolves through the live named-route map to the route with that path and the call's verb
-- A literal path (`get "/widgets/42"`) is matched against each route's path pattern in route order. An interpolation (`"/widgets/#{widget.id}"`) stands for one segment value; the query string, fragment, format and a trailing slash are ignored
+- A literal path (`get "/widgets/42"`) is matched the way Rails routes it: the first route, in route order, whose shape fits and whose constraints the request satisfies. An interpolation (`"/widgets/#{widget.id}"`) stands for one segment value; the query string, fragment, format and a trailing slash are ignored
+- A subdomain constraint is checked against the one subdomain the file names: `host!("shop.example.test")`, `Capybara.app_host = "http://shop..."`, a `subdomain:` option, or a call to a helper in `config.test_subdomain_helpers` with a literal argument. A file that names several subdomains, or interpolates one, has an unknown subdomain
+- With the subdomain unknown, a single fully static route (`/settings`) wins over `/:param` and `*glob` routes. A callable `constraints` block is never assumed to pass. A request still undecided is recorded in `metadata[:routes_ambiguous]` as `{ request:, candidates: }` with no edge
+- A path inside `redirect_to`, `have_current_path`, `assert_redirected_to` or `assert_current_path` is a claim about a response: recorded in `metadata[:routes_asserted]`, never as exercised
 - Unknown helpers, unrouted paths and verbs a path does not accept yield no edge
 - Not modeled: segment constraints, the second and later verbs of a multi-verb `match` route, and routes drawn inside mounted engines
 
