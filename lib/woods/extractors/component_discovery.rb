@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'render_target_resolver'
+
 module Woods
   module Extractors
     # Finds component classes the eager load never reached.
@@ -33,6 +35,7 @@ module Woods
       #
       # @return [void]
       def load_component_files
+        @component_files_loaded = true
         unowned = 0
         undefined = 0
         component_directories.each do |directory|
@@ -62,6 +65,20 @@ module Woods
           "[Woods] #{undefined} component file(s) resolved to no constant; " \
             'each file and the constant expected of it are logged above.'
         end
+      end
+
+      # Name the components a component's source renders.
+      #
+      # A target is resolved against the loaded constant tables, so every
+      # component file is asked for first: the same load state a full
+      # extraction resolves in, whichever entry point reached this component.
+      #
+      # @param component [Class] the rendering component
+      # @param source [String] the source of the file that defines it
+      # @return [RenderTargetResolver::Result]
+      def resolve_render_targets(component, source)
+        load_component_files unless @component_files_loaded
+        (@render_target_resolver ||= RenderTargetResolver.new).call(component, source)
       end
 
       # @return [Array<String>] absolute directories to walk, nested entries

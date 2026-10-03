@@ -84,8 +84,9 @@ module Woods
 
         unit.namespace = extract_namespace(component)
         unit.source_code = read_source(unit.file_path)
-        unit.metadata = extract_metadata(component, unit.source_code)
-        unit.dependencies = extract_dependencies(component, unit.source_code)
+        renders = resolve_render_targets(component, unit.source_code)
+        unit.metadata = extract_metadata(component, unit.source_code).merge(unresolved_renders: renders.unresolved)
+        unit.dependencies = extract_dependencies(unit.source_code, renders.targets)
 
         unit
       rescue StandardError => e
@@ -232,23 +233,10 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(component, source)
-        deps = []
-
-        # Other components rendered
-        # Phlex style: render ComponentName.new(...)
-        source.scan(/render\s+(\w+(?:::\w+)*)(?:\.new|\()/).flatten.uniq.each do |comp|
-          next if comp == component.name # Skip self-references
-
-          deps << { type: :component, target: comp, via: :render }
-        end
-
-        # ViewComponent style: render(ComponentName.new(...))
-        source.scan(/render\((\w+(?:::\w+)*)\.new/).flatten.uniq.each do |comp|
-          next if comp == component.name
-
-          deps << { type: :component, target: comp, via: :render }
-        end
+      # @param source [String]
+      # @param render_targets [Array<String>] identifiers from {#resolve_render_targets}
+      def extract_dependencies(source, render_targets)
+        deps = render_targets.map { |target| { type: :component, target: target, via: :render } }
 
         # Model references (often passed as props)
         deps.concat(scan_model_dependencies(source, via: :data_dependency))

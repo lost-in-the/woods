@@ -392,6 +392,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       base = build_view_component_base(descendants: [component_class])
       component_class.define_singleton_method(:superclass) { base }
       stub_const('ViewComponent::Base', base)
+      stub_const('FooterComponent', Class.new(ViewComponent::Base))
     end
 
     it 'detects rendered sub-components' do
@@ -433,6 +434,51 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       unit.dependencies.each do |dep|
         expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
       end
+    end
+  end
+
+  # ── Render target resolution ──────────────────────────────────────────
+
+  describe 'render target resolution' do
+    let(:file_system) do
+      {
+        '/rails/app/components/ledger/page_component.rb' => <<~RUBY
+          module Ledger
+            class PageComponent < ViewComponent::Base
+              def call
+                render SummaryComponent.new(rows)
+                render(RowComponent.with_collection(rows))
+                render Ghost.new
+                render partial("x")
+              end
+            end
+          end
+        RUBY
+      }
+    end
+
+    let(:unit) { described_class.new.extract_component(Ledger::PageComponent) }
+
+    before do
+      # Real classes, not the name-faking doubles above: resolution reads the
+      # constant tables, so the components have to be constants.
+      stub_const('ViewComponent::Base', Class.new)
+      %w[Page Summary Row].each do |name|
+        stub_const("Ledger::#{name}Component", Class.new(ViewComponent::Base))
+      end
+    end
+
+    it 'targets the qualified sibling unit' do
+      render_deps = unit.dependencies.select { |d| d[:via] == :render }
+
+      expect(render_deps).to eq(
+        [{ type: :component, target: 'Ledger::RowComponent', via: :render },
+         { type: :component, target: 'Ledger::SummaryComponent', via: :render }]
+      )
+    end
+
+    it 'records a capitalized render that names no component instead of emitting an edge' do
+      expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
     end
   end
 

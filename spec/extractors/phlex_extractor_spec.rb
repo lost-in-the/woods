@@ -442,6 +442,8 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
 
     before do
       stub_const('Phlex::HTML', build_phlex_base)
+      stub_const('HeaderComponent', Class.new(Phlex::HTML))
+      stub_const('FooterComponent', Class.new(Phlex::HTML))
     end
 
     it 'detects Phlex-style rendered sub-components' do
@@ -534,6 +536,76 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
         targets = unit.dependencies.select { |d| d[:type] == :component }.map { |d| d[:target] }
         expect(targets).to eq(['HeaderComponent'])
       end
+    end
+  end
+
+  # ── Render target resolution ────────────────────────────────────────────
+
+  describe 'render target resolution' do
+    let(:file_system) do
+      {
+        '/rails/app/components/billing/v2/manage_page.rb' => <<~RUBY
+          module Billing
+            module V2
+              class ManagePage < Phlex::HTML
+                include Ui
+
+                def view_template
+                  Header(title: "x")
+                  render TierGrid.new(tiers)
+                  render Ui::NavMenu.new { |m| m.NavItem("a") }
+                  render Ghost.new
+                  form_with(model: @x) { }
+                  t(".title")
+                  render partial("x")
+                end
+              end
+            end
+          end
+        RUBY
+      }
+    end
+
+    let(:unit) { described_class.new.extract_component(Billing::V2::ManagePage) }
+    let(:render_targets) { unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] } }
+
+    before do
+      # Real classes, not the name-faking doubles above: resolution reads the
+      # constant tables, so the components have to be constants.
+      stub_const('Phlex::Kit', Module.new)
+      stub_const('Phlex::HTML', Class.new)
+      stub_const('Ui', Module.new.tap { |kit| kit.extend(Phlex::Kit) })
+      %w[Header NavMenu NavItem].each { |name| stub_const("Ui::#{name}", Class.new(Phlex::HTML) { include Ui }) }
+      stub_const('Billing::V2::TierGrid', Class.new(Phlex::HTML))
+      stub_const('Billing::V2::ManagePage', Class.new(Phlex::HTML) { include Ui })
+    end
+
+    it 'targets the qualified unit for Kit calls, siblings, and block-yielded Kit calls' do
+      expect(render_targets).to eq(%w[Billing::V2::TierGrid Ui::Header Ui::NavItem Ui::NavMenu])
+    end
+
+    it 'emits every render edge as a component dependency' do
+      render_deps = unit.dependencies.select { |d| d[:via] == :render }
+
+      expect(render_deps.map { |d| d[:type] }.uniq).to eq([:component])
+    end
+
+    it 'emits no edge for a helper call' do
+      expect(render_targets).not_to include('partial', 'form_with', 't')
+    end
+
+    it 'records a capitalized render that names no component instead of emitting an edge' do
+      expect(render_targets).not_to include('Ghost')
+      expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+    end
+
+    it 'loads the component files before resolving, once per extractor' do
+      extractor = described_class.new
+      allow(extractor).to receive(:load_component_files).and_call_original
+
+      2.times { extractor.extract_component(Billing::V2::ManagePage) }
+
+      expect(extractor).to have_received(:load_component_files).once
     end
   end
 
