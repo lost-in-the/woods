@@ -1349,6 +1349,16 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reason).not_to eq(:already_running)
     end
 
+    it 'reads a claim with a multibyte host under a US-ASCII default external encoding' do
+      FileUtils.mkdir_p(output_dir)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: Process.pid, host: 'ledger-café'))
+
+      reason = with_posix_default_external { Timeout.timeout(10) { build_racer.run } }
+
+      expect(reason).not_to eq(:already_running)
+    end
+
     # A pid is only meaningful inside the namespace that issued it — the same
     # reasoning {Status#alive?} already applies to the status file. Without
     # mirroring it here, a dead container daemon's claim (container pid 47)
@@ -1431,7 +1441,7 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build
       raced = false
       winner_content = JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity)
-      allow(File).to receive(:read).and_wrap_original do |original, path, *args|
+      allow(File).to receive(:binread).and_wrap_original do |original, path, *args|
         result = original.call(path, *args)
         if path == claim_path && !raced
           raced = true
