@@ -24,26 +24,31 @@ module Woods
         # Stable engine identifier — see Base#name.
         ENGINE_NAME = :jbuilder
 
-        # Arguments of one Ruby call: any character up to the end of the
-        # line, crossing a line break only after a trailing comma.
-        CALL_ARGUMENTS = '(?:[^\n]|,[ \t]*\n)*?'
+        # Every quantifier that could meet another one over the same
+        # characters is possessive, so scans stay linear on uncontrolled
+        # template text.
 
         # `json.partial! 'path'` and `json.partial!('path', ...)`.
-        POSITIONAL_PARTIAL = /\bjson\.partial!\s*\(?\s*['"]([^'"]+)['"]/
+        POSITIONAL_PARTIAL = /\bjson\.partial!\s*+(?:\(\s*+)?['"]([^'"]+)['"]/
 
-        # A literal `partial:` (or `:partial =>`) option on any `json.*` call.
-        PARTIAL_OPTION = /\bjson\.\w+!?#{CALL_ARGUMENTS}(?:\bpartial:|:partial\s*=>)\s*['"]([^'"]+)['"]/
+        # The start of a `json.*` call within a statement.
+        JSON_CALL = /\bjson\.\w/
+
+        # A literal `partial:` (or `:partial =>`) option, read from the
+        # arguments that follow a `json.*` call.
+        PARTIAL_OPTION = /(?:\bpartial:|:partial\s*+=>)\s*+['"]([^'"]+)['"]/
 
         # A Ruby expression where a partial path is expected: a method call
-        # or an object reference such as `@order.customer`. The lookahead
-        # keeps a keyword like `partial:` from matching as an expression.
-        RUNTIME_EXPRESSION = '(@?[a-z_]\w*(?:\.\w+)*)(?![\w:])(\()?'
+        # or an object reference such as `@order.customer`. The expression
+        # is read whole, and the lookahead rejects a keyword like `partial:`.
+        RUNTIME_EXPRESSION = '(@?[a-z_]\w*+(?:\.\w++)*+)(?![\w:])(\()?'
 
         # `json.partial! <expression>` as the first argument.
-        POSITIONAL_RUNTIME_PARTIAL = /\bjson\.partial!\s*\(?\s*#{RUNTIME_EXPRESSION}/
+        POSITIONAL_RUNTIME_PARTIAL = /\bjson\.partial!\s*+(?:\(\s*+)?#{RUNTIME_EXPRESSION}/
 
-        # `partial: <expression>` on any `json.*` call.
-        RUNTIME_PARTIAL_OPTION = /\bjson\.\w+!?#{CALL_ARGUMENTS}\bpartial:\s*#{RUNTIME_EXPRESSION}/
+        # `partial: <expression>`, read from the arguments that follow a
+        # `json.*` call.
+        RUNTIME_PARTIAL_OPTION = /\bpartial:\s*+#{RUNTIME_EXPRESSION}/
 
         # @see Base#name
         def name
@@ -58,8 +63,9 @@ module Woods
         # @see Base#scan_partials
         def scan_partials(source)
           partials = Set.new
-          [POSITIONAL_PARTIAL, PARTIAL_OPTION].each do |pattern|
-            source.scan(pattern) { |(name)| partials << name }
+          source.scan(POSITIONAL_PARTIAL) { |(name)| partials << name }
+          json_call_arguments(source).each do |arguments|
+            arguments.scan(PARTIAL_OPTION) { |(name)| partials << name }
           end
           partials.to_a
         end
@@ -70,12 +76,18 @@ module Woods
         #
         # @see Base#scan_unresolved_partials
         def scan_unresolved_partials(source)
-          references = [POSITIONAL_RUNTIME_PARTIAL, RUNTIME_PARTIAL_OPTION].flat_map do |pattern|
-            source.scan(pattern).map do |expression, call_paren|
-              { kind: call_paren ? 'helper' : 'object', name: expression }
-            end
+          matches = source.scan(POSITIONAL_RUNTIME_PARTIAL) +
+                    json_call_arguments(source).flat_map { |arguments| arguments.scan(RUNTIME_PARTIAL_OPTION) }
+          matches.map { |expression, call_paren| { kind: call_paren ? 'helper' : 'object', name: expression } }.uniq
+        end
+
+        # Route helpers only: a JSON template has no forms.
+        #
+        # @see Base#scan_navigation_candidates
+        def scan_navigation_candidates(source)
+          source.scan(ROUTE_HELPER_PATTERN).map do |route_name, suffix|
+            { helper: "#{route_name}_#{suffix}", via: :link_to }
           end
-          references.uniq
         end
 
         private
@@ -83,6 +95,17 @@ module Woods
         # @see Erb#partial_extension
         def partial_extension
           '.json.jbuilder'
+        end
+
+        # Each statement's text from its first `json.*` call onward.
+        #
+        # @param source [String]
+        # @return [Array<String>]
+        def json_call_arguments(source)
+          statements(source).filter_map do |statement|
+            start = statement =~ JSON_CALL
+            statement[start..] if start
+          end
         end
       end
     end

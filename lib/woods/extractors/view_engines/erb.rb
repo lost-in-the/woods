@@ -162,6 +162,22 @@ module Woods
         def partial_extension
           '.html.erb'
         end
+
+        # Source lines joined into Ruby statements: a line ending in a comma
+        # continues on the next line. One linear pass, so callers can scan a
+        # call's arguments with anchored patterns instead of a lazy span.
+        #
+        # @param source [String]
+        # @return [Array<String>]
+        def statements(source)
+          joined = []
+          continued = false
+          source.each_line do |line|
+            continued ? joined.last << line : joined << line.dup
+            continued = line.rstrip.end_with?(',')
+          end
+          joined
+        end
       end
     end
   end

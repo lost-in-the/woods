@@ -28,22 +28,25 @@ module Woods
         # Stable engine identifier — see Base#name.
         ENGINE_NAME = :haml
 
-        # Arguments of one Ruby call: any character up to the end of the
-        # line, crossing a line break only after a trailing comma.
-        CALL_ARGUMENTS = '(?:[^\n]|,[ \t]*\n)*?'
+        # Every quantifier that could meet another one over the same
+        # characters is possessive, so scans stay linear on uncontrolled
+        # template text.
 
         # `render 'path'` and `render('path', ...)`.
-        POSITIONAL_PARTIAL = /\brender\b\s*\(?\s*['"]([^'"]+)['"]/
-
-        # A `partial:` (or `:partial =>`) option anywhere in a render call's
-        # arguments, e.g. after `collection:`.
-        PARTIAL_OPTION = /\brender\b#{CALL_ARGUMENTS}(?:\bpartial:|:partial\s*=>)\s*['"]([^'"]+)['"]/
+        POSITIONAL_PARTIAL = /\brender\b\s*+(?:\(\s*+)?['"]([^'"]+)['"]/
 
         # `render :name` shorthand.
-        SYMBOL_PARTIAL = /\brender\b\s*\(?\s*:(\w+)/
+        SYMBOL_PARTIAL = /\brender\b\s*+(?:\(\s*+)?:(\w+)/
 
-        # form_with / form_for whose arguments name a route helper.
-        FORM_ACTION_HELPER = /\bform_(?:with|for)\b#{CALL_ARGUMENTS}\b(\w+)_(path|url)\b/
+        # The start of a render call within a statement.
+        RENDER_CALL = /\brender\b/
+
+        # A `partial:` (or `:partial =>`) option, read from the arguments
+        # that follow a render call, e.g. after `collection:`.
+        PARTIAL_OPTION = /(?:\bpartial:|:partial\s*+=>)\s*+['"]([^'"]+)['"]/
+
+        # A form_with / form_for call, or a route helper (captured).
+        FORM_OR_ROUTE_HELPER = /\bform_(?:with|for)\b|\b(\w+)_(path|url)\b/
 
         # A filter line such as `:javascript`; the capture is the filter name.
         FILTER_LINE = /\A[ \t]*:(\w+)[ \t]*$/
@@ -68,11 +71,13 @@ module Woods
         def scan_partials(source)
           code = scannable_source(source)
           partials = Set.new
-          [POSITIONAL_PARTIAL, PARTIAL_OPTION].each do |pattern|
-            code.scan(pattern) { |(name)| partials << name }
-          end
+          code.scan(POSITIONAL_PARTIAL) { |(name)| partials << name }
           code.scan(SYMBOL_PARTIAL) do |(name)|
             partials << name unless RESERVED_RENDER_OPTIONS.include?(name)
+          end
+          statements(code).each do |statement|
+            start = statement =~ RENDER_CALL
+            statement[start..].scan(PARTIAL_OPTION) { |(name)| partials << name } if start
           end
           partials.to_a
         end
@@ -88,10 +93,7 @@ module Woods
           link_to_candidates = code.scan(ROUTE_HELPER_PATTERN).map do |route_name, suffix|
             { helper: "#{route_name}_#{suffix}", via: :link_to }
           end
-          form_candidates = code.scan(FORM_ACTION_HELPER).map do |route_name, suffix|
-            { helper: "#{route_name}_#{suffix}", via: :form_action }
-          end
-          link_to_candidates + form_candidates
+          link_to_candidates + form_action_candidates(code)
         end
 
         private
@@ -99,6 +101,27 @@ module Woods
         # @see Erb#partial_extension
         def partial_extension
           '.html.haml'
+        end
+
+        # The first route helper after each form_with / form_for call in the
+        # same statement, found in one token pass.
+        #
+        # @param code [String]
+        # @return [Array<Hash>]
+        def form_action_candidates(code)
+          statements(code).flat_map do |statement|
+            form_open = false
+            statement.scan(FORM_OR_ROUTE_HELPER).filter_map do |route_name, suffix|
+              if route_name.nil?
+                form_open = true
+                next
+              end
+              next unless form_open
+
+              form_open = false
+              { helper: "#{route_name}_#{suffix}", via: :form_action }
+            end
+          end
         end
 
         # The source with silent-comment bodies removed and non-Ruby filter
