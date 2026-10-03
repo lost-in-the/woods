@@ -829,6 +829,7 @@ namespace.
 - Two-pass approach: first collects all `publish`/`instrument` calls, then `subscribe`/`on` calls, then merges them
 - No single-file extraction method, incremental re-extraction re-runs `EventExtractor` wholesale on any `.rb` change under `app/` (a publish or subscribe site can appear anywhere)
 - Useful for tracing event-driven flows: "what subscribes to order.created?"
+- Each event depends on the class or module that owns each publisher file (`via: published_by`) and each subscriber file (`via: subscribed_by`), so `dependents` of an emitting class lists its events. The owner is the constant the file's autoload path governs, else its first class, else its primary module; a file declaring neither yields no edge. Edge `type` is the generic `class`: the graph resolves targets by identifier
 - Application event wrappers are added with `config.event_patterns` (see [Event patterns](CONFIGURATION_REFERENCE.md#event-patterns)). Their `system` label is recorded in `metadata.pattern` / `metadata.systems`, never in the identifier
 - **Included in Woods 2.1:** app-owned `metadata.publishers` and `metadata.subscribers` paths, and the same paths in generated source annotations, are relative to `Rails.root`. Their array order, counts and event identifiers stay unchanged. Explicitly scanned paths outside the application remain absolute. Re-extract event units after upgrading: removing the checkout prefix changes existing `source_hash` values once, then identical app sources produce the same annotations and hashes across checkout roots.
 

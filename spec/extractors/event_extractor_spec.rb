@@ -418,21 +418,145 @@ RSpec.describe Woods::Extractors::EventExtractor do
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependencies' do
-    it 'includes :via key on all dependencies' do
-      create_file('app/services/order_service.rb', <<~RUBY)
-        class OrderService
+    def edges_of(unit)
+      unit.dependencies
+    end
+
+    it 'points an event at the class that publishes it, not at constants that class mentions' do
+      create_file('app/services/checkout_service.rb', <<~SRC)
+        class CheckoutService
           def call
-            ActiveSupport::Notifications.instrument("order.completed")
-            NotifyService.call
-            CleanupJob.perform_later
+            ActiveSupport::Notifications.instrument("checkout.completed")
+            ShipmentService.call
+            ReceiptJob.perform_later
           end
         end
-      RUBY
+      SRC
 
-      units = described_class.new.extract_all
-      units.first.dependencies.each do |dep|
-        expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
-      end
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'CheckoutService', via: :published_by }])
+    end
+
+    it 'points an event at the class that subscribes to it' do
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          ActiveSupport::Notifications.subscribe("checkout.completed") { |*args| LedgerEntry.create! }
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'ReceiptListener', via: :subscribed_by }])
+    end
+
+    it 'lists publisher edges before subscriber edges, one per file' do
+      create_file('app/services/checkout_service.rb', <<~SRC)
+        class CheckoutService
+          ActiveSupport::Notifications.instrument("checkout.completed")
+        end
+      SRC
+      create_file('app/services/refund_service.rb', <<~SRC)
+        class RefundService
+          ActiveSupport::Notifications.instrument("checkout.completed")
+        end
+      SRC
+      create_file('app/listeners/receipt_listener.rb', <<~SRC)
+        class ReceiptListener
+          ActiveSupport::Notifications.subscribe("checkout.completed") {}
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'CheckoutService', via: :published_by },
+          { type: :class, target: 'RefundService', via: :published_by },
+          { type: :class, target: 'ReceiptListener', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'keeps both edges when one class publishes and subscribes to the same event' do
+      create_file('app/services/widget_relay.rb', <<~SRC)
+        class WidgetRelay
+          ActiveSupport::Notifications.instrument("widget.moved")
+          ActiveSupport::Notifications.subscribe("widget.moved") {}
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'WidgetRelay', via: :published_by },
+          { type: :class, target: 'WidgetRelay', via: :subscribed_by }
+        ]
+      )
+    end
+
+    it 'names the publisher by the constant its path governs, not the first class it declares' do
+      create_file('app/services/billing/container/parser.rb', <<~SRC)
+        module Billing
+          class Container
+            class Parser
+              def call
+                ActiveSupport::Notifications.instrument("billing.parsed")
+              end
+            end
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit).map { |d| d[:target] }).to eq(['Billing::Container::Parser'])
+    end
+
+    it 'names a module publisher by its module name' do
+      create_file('app/lib/ledger.rb', <<~SRC)
+        module Ledger
+          class Error < StandardError; end
+
+          def self.close
+            ActiveSupport::Notifications.instrument("ledger.closed")
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq([{ type: :class, target: 'Ledger', via: :published_by }])
+    end
+
+    it 'emits no edge for a file that declares no class or module' do
+      create_file('app/services/order_service.rb', <<~SRC)
+        ActiveSupport::Notifications.instrument("order.created", order: order)
+        OrderMailer.deliver_later
+      SRC
+
+      expect(edges_of(described_class.new.extract_all.first)).to eq([])
+    end
+
+    it 'gives Wisper publishers and subscribers the same edges' do
+      create_file('app/services/shipment_service.rb', <<~SRC)
+        class ShipmentService
+          include Wisper::Publisher
+          def call
+            broadcast(:shipment_sent, self)
+          end
+        end
+      SRC
+      create_file('app/listeners/shipment_listener.rb', <<~SRC)
+        class ShipmentListener
+          def self.wire(service)
+            service.on(:shipment_sent) { Wisper.clear }
+          end
+        end
+      SRC
+
+      unit = described_class.new.extract_all.first
+      expect(edges_of(unit)).to eq(
+        [
+          { type: :class, target: 'ShipmentService', via: :published_by },
+          { type: :class, target: 'ShipmentListener', via: :subscribed_by }
+        ]
+      )
     end
   end
 
@@ -506,7 +630,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
       counts
     end
 
-    it 'builds both shared-file events with dependencies from the combined source' do
+    it 'builds both shared-file events with an edge to each owning class' do
       units = described_class.new.extract_all
       by_name = units.to_h { |unit| [unit.identifier, unit] }
 
@@ -514,8 +638,10 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(by_name['order.shipped'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
       expect(by_name['order.shipped'].metadata[:subscribers]).to eq(['app/listeners/order_listener.rb'])
       expect(by_name['order.paid'].metadata[:publishers]).to eq(['app/services/order_bus.rb'])
-      expect(by_name['order.shipped'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
-      expect(by_name['order.paid'].dependencies.map { |d| d[:target] }).to include('OrderService', 'ShippingJob')
+      expect(by_name['order.shipped'].dependencies.map { |d| [d[:target], d[:via]] })
+        .to eq([['OrderBus', :published_by], ['OrderListener', :subscribed_by]])
+      expect(by_name['order.paid'].dependencies.map { |d| [d[:target], d[:via]] })
+        .to eq([['OrderBus', :published_by], ['OrderListener', :subscribed_by]])
     end
 
     it 'reads each shared file once for the whole run' do
@@ -564,7 +690,7 @@ RSpec.describe Woods::Extractors::EventExtractor do
       expect(unit.identifier).to eq('checkout_completed')
       expect(unit.metadata[:publishers]).to eq(['app/services/checkout_service.rb'])
       expect(unit.metadata[:pattern]).to eq(:ledger)
-      expect(unit.dependencies.map { |d| d[:target] }).to include('ShipmentService')
+      expect(unit.dependencies).to eq([{ type: :class, target: 'CheckoutService', via: :published_by }])
     end
 
     it 'captures a string event name from a configured publisher' do

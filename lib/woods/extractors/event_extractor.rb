@@ -3,7 +3,6 @@
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
-require_relative 'shared_dependency_scanner'
 
 module Woods
   module Extractors
@@ -21,6 +20,10 @@ module Woods
     # 1. Scan all files, collecting publishers and subscribers per event name
     # 2. Merge by event name → one ExtractedUnit per unique event
     #
+    # An event depends on the class or module that owns each publisher file
+    # (+via: :published_by+) and each subscriber file (+via: :subscribed_by+),
+    # so +dependents+ of an emitting class reaches its events.
+    #
     # @example
     #   extractor = EventExtractor.new
     #   units = extractor.extract_all
@@ -31,7 +34,6 @@ module Woods
     #
     class EventExtractor
       include SharedUtilityMethods
-      include SharedDependencyScanner
 
       APP_DIRECTORIES = %w[app].freeze
 
@@ -227,8 +229,7 @@ module Woods
         return nil if data[:publishers].empty? && data[:subscribers].empty?
 
         file_path = data[:publishers].first || data[:subscribers].first
-        all_paths = (data[:publishers] + data[:subscribers]).uniq
-        combined_source = load_source_files(all_paths)
+        dependencies = build_dependencies(data)
 
         # Keep absolute paths for source reads; emitted paths must not make
         # metadata or annotation hashes depend on the checkout directory.
@@ -255,25 +256,15 @@ module Woods
         }
         # Only when configured, so an app that sets nothing keeps byte-identical units.
         unit.metadata[:systems] = data[:systems] if @configured_patterns.any?
-        unit.dependencies = build_dependencies(combined_source)
+        unit.dependencies = dependencies
         unit
-      end
-
-      # Load source from multiple files for dependency scanning.
-      #
-      # Silently skips files that cannot be read.
-      #
-      # @param file_paths [Array<String>] File paths to read
-      # @return [String] Combined source
-      def load_source_files(file_paths)
-        file_paths.filter_map { |path| cached_source(path) }.join("\n")
       end
 
       # One read per distinct path per extractor instance (audit P2).
       #
-      # Pass 2 ({#build_unit}) recombines the same publisher/subscriber files
-      # for every event that references them, so a widely-shared file was
-      # re-read once per event on top of the pass-1 {#scan_file} read. The
+      # Pass 2 ({#build_unit}) names the owner of the same publisher/subscriber
+      # files for every event that references them, so a widely-shared file
+      # was re-read once per event on top of the pass-1 {#scan_file} read. The
       # bytes cannot change mid-run, so the first read answers the rest.
       #
       # A failed read is memoized as nil, matching the per-event skip it
@@ -304,13 +295,37 @@ module Woods
         lines.join("\n")
       end
 
-      # Build dependencies by scanning combined source of publisher/subscriber files.
+      # One edge per publisher file, then one per subscriber file, to the
+      # class or module that file is named for. A file that declares neither
+      # yields no edge.
       #
-      # @param combined_source [String] Combined source from all related files
+      # @param data [Hash] Accumulated publishers/subscribers (absolute paths)
       # @return [Array<Hash>]
-      def build_dependencies(combined_source)
-        deps = scan_common_dependencies(combined_source)
-        consolidate_dependencies(deps)
+      def build_dependencies(data)
+        edges = data[:publishers].filter_map { |path| owner_edge(path, :published_by) } +
+                data[:subscribers].filter_map { |path| owner_edge(path, :subscribed_by) }
+        edges.uniq { |edge| [edge[:target], edge[:via]] }
+      end
+
+      # @param path [String] Absolute publisher or subscriber path
+      # @param via [Symbol] :published_by or :subscribed_by
+      # @return [Hash, nil]
+      def owner_edge(path, via)
+        owner = owner_name(path)
+        owner && { type: :class, target: owner, via: via }
+      end
+
+      # The constant a file is named for, as the extractor that owns the file
+      # would name it: the Zeitwerk-governed constant first, then the first
+      # class, then the primary module.
+      #
+      # @param path [String] Absolute file path
+      # @return [String, nil]
+      def owner_name(path)
+        source = cached_source(path)
+        return nil unless source
+
+        governed_class_name(path, source) || qualified_first_class_name(source) || qualified_outer_module_name(source)
       end
     end
   end
