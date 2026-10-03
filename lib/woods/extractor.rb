@@ -897,8 +897,11 @@ module Woods
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
       profile_phase('graph write') { write_dependency_graph }
       # A skip reason can change while no unit does (a namespace-only file
-      # turns into a parse error), so the report alone can warrant a publish.
-      skipped_changed = profile_phase('skipped files') { refresh_skipped_files(@dependency_graph.registered_paths) }
+      # turns into a parse error), so a changed report alone warrants a publish.
+      # A payload without one predates the report and gains it on its next
+      # publishing run; that absence alone does not publish.
+      skipped, published_skipped = profile_phase('skipped files') { skipped_files_report }
+      skipped_changed = !published_skipped.nil? && skipped != published_skipped
 
       if touched.empty? && !withdrew_flows && !skipped_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
@@ -907,6 +910,7 @@ module Woods
 
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
+      SkippedFiles.write(payload_dir, skipped, durable: payload_writes_durable?) unless skipped == published_skipped
       profile_phase('manifest and summary') do
         write_manifest(incremental: true)
         write_structural_summary
@@ -2528,16 +2532,10 @@ module Woods
       SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
     end
 
-    # Rewrite the report only when it differs from the one this payload holds.
-    #
-    # @param unit_paths [Enumerable<String, nil>] every unit file_path
-    # @return [Hash, nil] the report written, or nil when it was unchanged
-    def refresh_skipped_files(unit_paths)
-      report = SkippedFiles.new(root: Rails.root).build(unit_paths)
-      return if report == SkippedFiles.read(payload_dir)
-
-      SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
-      report
+    # @return [Array(Hash, Hash)] the report for the reconciled graph and the
+    #   one this payload holds (nil when the payload predates the report)
+    def skipped_files_report
+      [SkippedFiles.new(root: Rails.root).build(@dependency_graph.registered_paths), SkippedFiles.read(payload_dir)]
     end
 
     def write_graph_analysis
