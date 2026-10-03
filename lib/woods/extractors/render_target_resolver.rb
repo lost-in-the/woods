@@ -78,20 +78,35 @@ module Woods
         @ownership = ownership
       end
 
+      TEMPLATE_KINDS = %i[constant kit kit_path yielded].freeze
+      private_constant :TEMPLATE_KINDS
+
       # @param component [Class] the rendering component
       # @param source [String] the source of the file that defines it
+      # @param fragments [Array<String>] Ruby from the component's templates
+      #   ({TemplateRubyFragments}). A compiled template is evaluated in the
+      #   component class, so its constants are looked up from that class
+      #   alone, not from the modules the class file nests it in.
       # @return [Result]
-      def call(component, source)
+      def call(component, source, fragments: [])
         run = { component: component, bases: loaded(COMPONENT_BASES), kit: loaded(%w[Phlex::Kit]).first,
                 targets: {}, unresolved: {}, slot_targets: {}, unresolved_slots: {}, yielded: [] }
 
-        RenderCallScan.call(source).each { |candidate| resolve(candidate, run) }
+        (RenderCallScan.call(source) + template_candidates(component, fragments))
+          .each { |candidate| resolve(candidate, run) }
         run[:yielded].each { |candidate| record(run, candidate.name, yielded_verdict(candidate, run)) }
 
         result(run)
       end
 
       private
+
+      def template_candidates(component, fragments)
+        scope = [component.name].compact
+        fragments.flat_map { |fragment| RenderCallScan.call(fragment) }
+                 .select { |candidate| TEMPLATE_KINDS.include?(candidate.kind) }
+                 .each { |candidate| candidate.nesting = scope }
+      end
 
       # A component class the application does not define has no unit, so an
       # edge to it would point at nothing. It is reported instead.

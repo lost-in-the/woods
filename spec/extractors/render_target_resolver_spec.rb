@@ -295,6 +295,34 @@ RSpec.describe Woods::Extractors::RenderTargetResolver do
     end
   end
 
+  describe 'template fragments' do
+    let(:class_source) { "module Billing\n  module V2\n    class ManagePage < ApplicationView\n    end\n  end\nend\n" }
+
+    def render_fragments(*fragments)
+      resolver.call(page, class_source, fragments: fragments)
+    end
+
+    it 'resolves renders and Kit calls in fragments, each parsed on its own' do
+      result = render_fragments(' render Ui::NavMenu.new do |menu| ', ' menu.NavItem("a") ', ' end ', ' Header() ')
+
+      expect(result.targets).to eq(%w[Ui::Header Ui::NavItem Ui::NavMenu])
+      expect(result.unresolved).to eq([])
+    end
+
+    it 'looks a constant up from the component class alone, as a compiled template does' do
+      result = render_fragments('render TierGrid.new', 'render Billing::V2::TierGrid.new', 'render Header.new')
+
+      expect(result.targets).to eq(%w[Billing::V2::TierGrid Ui::Header])
+      expect(result.unresolved).to eq([{ name: 'TierGrid', reason: 'constant_missing' }])
+    end
+
+    it 'takes no slot declaration from a template' do
+      result = render_fragments('renders_one :grid, Billing::V2::TierGrid')
+
+      expect(result.slot_targets).to eq([])
+    end
+  end
+
   it 'never reports a lowercase helper call' do
     result = resolve('form_with(model: @x) { }; t(".title"); partial("x"); render partial("x")')
 

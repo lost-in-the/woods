@@ -528,6 +528,38 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       expect(unit.metadata[:unresolved_slots]).to eq([{ name: 'Phantom', reason: 'constant_missing' }])
     end
 
+    describe 'sidecar templates' do
+      let(:render_targets) { unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] } }
+
+      before do
+        stub_const('Ledger::NoteComponent', Class.new(ViewComponent::Base))
+        file_system['/rails/app/components/ledger/note_component.rb'] = ''
+      end
+
+      it 'attributes a render in an ERB template beside the component to the component unit' do
+        file_system['/rails/app/components/ledger/page_component.html.erb'] = <<~ERB
+          <section><%= render Ledger::NoteComponent.new(text: "a") %></section>
+          <%# render Ledger::CellComponent.new %>
+        ERB
+
+        expect(render_targets).to eq(%w[Ledger::NoteComponent Ledger::RowComponent Ledger::SummaryComponent])
+      end
+
+      it 'reads a HAML template in the sidecar directory' do
+        file_system['/rails/app/components/ledger/page_component/page_component.html.haml'] =
+          "%section\n  = render Ledger::NoteComponent.new(text: 'a')\n"
+
+        expect(render_targets).to include('Ledger::NoteComponent')
+      end
+
+      it 'records a template render that names no component' do
+        file_system['/rails/app/components/ledger/page_component.html.erb'] = '<%= render NoteComponent.new %>'
+
+        expect(render_targets).not_to include('Ledger::NoteComponent')
+        expect(unit.metadata[:unresolved_renders].map { |entry| entry[:name] }).to eq(%w[Ghost NoteComponent])
+      end
+    end
+
     it 'records a component no application file defines as external and emits no edge' do
       file_system.delete('/rails/app/components/ledger/row_component.rb')
 

@@ -75,11 +75,12 @@ module Woods
       #
       # @param component [Class] the rendering component
       # @param source [String] the source of the file that defines it
+      # @param fragments [Array<String>] Ruby from the component's templates
       # @return [RenderTargetResolver::Result]
-      def resolve_render_targets(component, source)
+      def resolve_render_targets(component, source, fragments: [])
         load_component_files unless @component_files_loaded
         @render_target_resolver ||= RenderTargetResolver.new(ownership: method(:render_target_owner))
-        @render_target_resolver.call(component, source)
+        @render_target_resolver.call(component, source, fragments: fragments)
       end
 
       # @param result [RenderTargetResolver::Result]
