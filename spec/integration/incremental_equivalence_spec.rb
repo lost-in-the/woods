@@ -62,6 +62,8 @@ ARTIFACT_TEMPLATES = [
   # Initializers require a new Rails boot and full extraction. Their task
   # equivalence is covered in incremental_runtime_spec, not this live process.
   ->(i) { "app/views/gen/erb_#{i}.html.erb" },
+  ->(i) { "app/views/gen/hml_#{i}.html.haml" },
+  ->(i) { "app/views/gen/jbd_#{i}.json.jbuilder" },
   ->(i) { "spec/models/spc_#{i}_spec.rb" },
   ->(i) { "spec/factories/fac_#{i}.rb" },             # whole-app: factories
   ->(i) { "db/migrate/2024010100000#{i}_mig_#{i}.rb" },
@@ -2263,6 +2265,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when /\.yml\z/ then "en:\n  #{base}: value_#{nonce}\n"
     when /\.sql\z/ then "SELECT #{nonce} AS answer;\n"
     when /\.erb\z/ then "<div><%= Rails.cache.fetch('#{base}_#{nonce}') { 1 } %></div>\n"
+    when /\.haml\z/ then "%div= Rails.cache.fetch('#{base}_#{nonce}') { 1 }\n"
+    when /\.jbuilder\z/ then "json.answer #{nonce}\n"
     when %r{\Adb/migrate/} then migration_source(base, nonce)
     when %r{\Aspec/factories/} then factory_source(base, nonce)
     when %r{\Aapp/graphql/} then graphql_source(relative, base, nonce)
