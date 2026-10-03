@@ -32,9 +32,11 @@ RSpec.describe Woods::SourceReferences::Pass do
       'metadata' => { 'git' => { 'commit_count' => 7 } }, 'extracted_at' => 'preserved' }
   end
 
+  let(:policy) { Woods::SourceReferences::CallerPolicy.new }
+
   def run_pass(baseline: nil, refreshed: [], full: true)
     described_class.new(root: root, session: session, units: units, baseline: baseline,
-                        refreshed: refreshed, full: full, collector: collector,
+                        refreshed: refreshed, full: full, collector: collector, policy: policy,
                         extractor_keys: { poro: :poros, lib: :lib, model: :models }).call
   end
 
@@ -59,6 +61,31 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(Woods::SourceReferences::Cache).to receive(:write).and_call_original
     Dir.mktmpdir do |dir|
       Woods::SourceReferences::Cache.write(File.join(dir, 'cache.json'), result.cache)
+    end
+  end
+
+  context 'with a caller policy that narrows targets' do
+    let(:policy) { Woods::SourceReferences::CallerPolicy.new(poro: %i[lib]) }
+
+    it 'drops a verified edge to a target type the caller may not reference' do
+      result = run_pass
+      expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+      expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => []))
+    end
+
+    it 'keeps a verified edge to a permitted target type' do
+      units.last['type'] = 'lib'
+      expect(run_pass.dependencies.fetch(%w[poro RefCaller])).to eq([edge.merge('type' => 'lib')])
+    end
+  end
+
+  context 'with a caller policy that excludes the caller type' do
+    let(:policy) { Woods::SourceReferences::CallerPolicy.new(poro: false) }
+
+    it 'leaves the unit out of the dependency rewrites and keeps its ownership record' do
+      result = run_pass
+      expect(result.dependencies).to be_empty
+      expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => []))
     end
   end
 

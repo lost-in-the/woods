@@ -93,8 +93,9 @@ module Woods
         owned = Array(@source_reference_baseline&.fetch('owners')).to_set do |owner|
           [owner['type'], owner['identifier']]
         end
+        policy = source_reference_policy
         source_reference_identities.to_h do |type, identifier|
-          read_caller = Pass::CALLER_TYPES.include?(type.to_s) &&
+          read_caller = policy.caller?(type) &&
                         (source_reference_node?(type, identifier) || owned.include?([type.to_s, identifier]))
           record = if read_caller
                      source_reference_caller_record(type, identifier)
@@ -121,7 +122,12 @@ module Woods
       def reference_pass(units, full:)
         Pass.new(root: Rails.root, session: @source_inputs, units: units,
                  extractor_keys: self.class::TYPE_TO_EXTRACTOR_KEY, baseline: @source_reference_baseline,
-                 refreshed: @source_reference_refreshed || [], full: full, collector: source_collector).call
+                 refreshed: @source_reference_refreshed || [], full: full, collector: source_collector,
+                 policy: source_reference_policy).call
+      end
+
+      def source_reference_policy
+        CallerPolicy.new
       end
 
       def rewrite_source_reference_edges(record, edges, affected_types)

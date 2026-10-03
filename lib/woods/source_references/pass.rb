@@ -6,6 +6,7 @@ require_relative 'collector'
 require_relative 'registry'
 require_relative 'inputs'
 require_relative 'cache'
+require_relative 'caller_policy'
 
 module Woods
   module SourceReferences
@@ -18,7 +19,6 @@ module Woods
     # Runtime lookup is repeated every run: source text alone cannot fingerprint
     # changed ancestors, aliases or lexical shadows in a reloaded application.
     class Pass
-      CALLER_TYPES = %w[model controller service poro lib concern job].freeze
       Result = Struct.new(:dependencies, :cache, :paths, keyword_init: true)
 
       # @param root [String, Pathname] application root
@@ -29,9 +29,10 @@ module Woods
       # @param refreshed [Array<Array<String>>] units genuinely re-extracted
       # @param full [Boolean] all runtime units were re-extracted
       # @param collector [Collector] source-only parser
+      # @param policy [CallerPolicy] caller types and the targets each may reference
       # rubocop:disable Metrics/ParameterLists -- explicit per-run collaborators and provenance state
       def initialize(root:, session:, units:, extractor_keys:, baseline: nil, refreshed: [], full: false,
-                     collector: Collector.new)
+                     collector: Collector.new, policy: CallerPolicy.new)
         @root = File.expand_path(root.to_s)
         @session = session
         @units = units
@@ -40,6 +41,7 @@ module Woods
         @refreshed = refreshed.to_set
         @full = full
         @collector = collector
+        @policy = policy
       end
 
       # rubocop:enable Metrics/ParameterLists
@@ -64,7 +66,7 @@ module Woods
           key = [unit['type'], unit['identifier']]
           path = @inputs.relative(unit['file_path'])
           additions = []
-          if CALLER_TYPES.include?(unit['type'])
+          if @policy.caller?(unit['type'])
             base = original_dependencies(unit, key)
             additions = all_resolved_dependencies(unit) - base
             dependencies[key] = base + additions
@@ -140,6 +142,7 @@ module Woods
         owned = records.select { |reference| reference['owner'] == unit['identifier'] }
         edges = owned.filter_map { |reference| @registry.resolve(reference, file_path: path) }
         edges.map! { |edge| normalize_edge(edge) }
+        edges.select! { |edge| @policy.permits?(unit['type'], edge['type']) }
         edges.uniq.sort_by { |edge| [edge['type'], edge['target'], edge['via']] }
       end
 
