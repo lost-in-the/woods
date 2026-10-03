@@ -22,15 +22,44 @@ RSpec.describe Woods::Retrieval::ScopedVectorStore do
     id
   end
 
-  it 'searches all bounded partitions and finds the best hit beyond the first partition' do
+  # N-ip-1. The in-memory adapter walks its whole buffer per call, so slicing
+  # a 5,990-id scope into batches of 100 cost 60 full scans (208 ms vs 115 ms
+  # for one id-filtered call, identical output). An adapter now says whether
+  # its id filter needs bounding: the in-memory one answers nil and gets one
+  # call; adapters that bind every id (pgvector, Qdrant) keep the bound.
+  it 'issues one native call to an adapter whose id filter needs no bound, and finds the best hit' do
     205.times { |i| add("Unit#{i}", [0.1, 1.0]) }
     best = add('Winner', [1.0, 0.0])
+    allow(vectors).to receive(:search).and_call_original
+    expect(wrapper.search([1.0, 0.0], limit: 1).map(&:id)).to eq([best])
+    expect(vectors).to have_received(:search).once
+    expect(vectors).to have_received(:search).with(anything, hash_including(ids: satisfy { |ids| ids.size == 206 }))
+  end
+
+  it 'searches all bounded partitions of an adapter that declares a bound, and finds the best hit beyond the first' do
+    205.times { |i| add("Unit#{i}", [0.1, 1.0]) }
+    best = add('Winner', [1.0, 0.0])
+    allow(vectors).to receive(:id_filter_batch_size).and_return(100)
     allow(vectors).to receive(:search).and_call_original
     expect(wrapper.search([1.0, 0.0], limit: 1).map(&:id)).to eq([best])
     expect(vectors).to have_received(:search).exactly(3).times
     expect(vectors).to have_received(:search).with(anything, hash_including(ids: satisfy { |ids|
       ids.size <= 100
     })).exactly(3).times
+  end
+
+  it 'keeps the default bound for an adapter that does not declare one' do
+    bounded = Class.new(Woods::Storage::VectorStore::InMemory) do
+      undef_method :id_filter_batch_size
+    end.new
+    205.times { |i| add("Unit#{i}", [0.1, 1.0]) }
+    bounded_scope = Woods::Retrieval::Scope.new(metadata_store: metadata, packages: ['packs/billing'])
+    vectors.each_id { |id| bounded.store(id, [0.1, 1.0]) }
+    allow(bounded).to receive(:search).and_call_original
+
+    described_class.new(store: bounded, scope: bounded_scope).search([1.0, 0.0], limit: 1)
+
+    expect(bounded).to have_received(:search).exactly(3).times
   end
 
   it 'keeps the same result prefix across limits despite a backend with reversed score ties' do

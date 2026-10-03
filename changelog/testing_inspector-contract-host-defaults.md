@@ -1,0 +1,1 @@
+- Make the MCP Inspector contract spec pass under host defaults: the server it spawns receives the bundler path Bundler resolved for the test process (the Inspector's redirected `HOME` hid a `~/.bundle/config` path), and captured Inspector output is read as UTF-8 whatever the host locale.

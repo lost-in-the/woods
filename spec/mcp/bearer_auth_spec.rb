@@ -92,6 +92,22 @@ RSpec.describe Woods::MCP::BearerAuth do
   # Regression for #183: the railtie used to mount BearerAuth with no path
   # scoping, so enabling the console 401'd the ENTIRE host app (GET /
   # included). With `path:` set, only requests under that prefix are guarded.
+  describe '.static_token_from' do
+    it 'returns nil when the variable is unset or blank' do
+      expect(described_class.static_token_from({})).to be_nil
+      expect(described_class.static_token_from('WOODS_MCP_HTTP_TOKEN' => '')).to be_nil
+    end
+
+    it 'returns a usable token unchanged' do
+      expect(described_class.static_token_from('WOODS_MCP_HTTP_TOKEN' => token)).to eq(token)
+    end
+
+    it 'refuses a short token before any middleware is built' do
+      expect { described_class.static_token_from('WOODS_MCP_HTTP_TOKEN' => 'too-short') }
+        .to raise_error(ArgumentError, /at least 32 characters \(got 9\)/)
+    end
+  end
+
   describe 'path scoping (path: kwarg)' do
     let(:seen_paths) { [] }
     let(:inner_app) do

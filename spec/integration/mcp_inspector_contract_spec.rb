@@ -46,7 +46,17 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
       '--method', method, '--format', 'json', *arguments
     ]
     stdout, stderr, status = Open3.capture3(inspector_env, *command, chdir: gem_root)
-    [command, stdout, stderr, status]
+    # The Inspector writes UTF-8 whatever the host locale. Tag the captured
+    # bytes as such so a POSIX-locale host (default external US-ASCII) can
+    # parse the JSON and interpolate the output into failure messages.
+    [command, stdout.force_encoding(Encoding::UTF_8), stderr.force_encoding(Encoding::UTF_8), status]
+  end
+
+  # The Inspector runs with HOME redirected to a scratch directory, which hides
+  # a bundler path configured only in ~/.bundle/config from the server it
+  # spawns. Resolve the path here, where Bundler is loaded, and pass it on.
+  def bundler_path
+    ENV.fetch('BUNDLE_PATH') { Bundler.settings[:path] if defined?(Bundler) }
   end
 
   def run_inspector(method, *arguments)
@@ -176,7 +186,7 @@ RSpec.describe 'official MCP Inspector v2 contract', :mcp_inspector do
       'env' => {
         'PATH' => ENV.fetch('PATH'),
         'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
-        'BUNDLE_PATH' => ENV.fetch('BUNDLE_PATH', nil)
+        'BUNDLE_PATH' => bundler_path
       }.compact
     }
   end

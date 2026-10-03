@@ -34,11 +34,19 @@ module Woods
 
       def scan
         TreeScan.files(root: @root, ignored: Watcher::DEFAULT_IGNORED_DIRECTORIES).each_with_object({}) do |path, files|
-          next unless %i[restart reload].include?(@policy.classify(path.delete_prefix("#{@root}/")))
+          relative = path.delete_prefix("#{@root}/")
+          next unless %i[restart reload].include?(@policy.classify(relative)) || boot_helper?(relative)
 
           stamp = fingerprint(path)
           files[path] = stamp if stamp
         end
+      end
+
+      # Config Ruby the policy ignores but the daemon restarts for when its
+      # process loaded it at boot (F3). Fingerprinted so a supervisor restart
+      # reconciles the change instead of exiting 75 over the same file forever.
+      def boot_helper?(relative)
+        relative.match?(%r{\Aconfig/.+\.rb\z})
       end
 
       def fingerprint(path)

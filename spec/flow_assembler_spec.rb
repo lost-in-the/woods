@@ -601,7 +601,7 @@ RSpec.describe Woods::FlowAssembler do
         expect(callee_targets).not_to include('Cache')
       end
 
-      it 'falls back to the whole unit when the callee does not define the called method' do
+      it 'yields no operations when the callee does not define the called method (F5)' do
         write_unit('PostsController', source_code: <<~RUBY)
           class PostsController < ApplicationController
             def create
@@ -610,8 +610,8 @@ RSpec.describe Woods::FlowAssembler do
           end
         RUBY
 
-        # perform is not defined in source (inherited/dynamic) — extract_method
-        # finds nothing, so the callee must fall back to its whole source.
+        # perform is not defined in source (inherited/dynamic). The whole-unit
+        # fallback used to report cleanup's operations as perform's.
         write_unit('PostService', type: 'service', source_code: <<~RUBY)
           class PostService
             def cleanup
@@ -626,8 +626,69 @@ RSpec.describe Woods::FlowAssembler do
         assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
         flow = assembler.assemble('PostsController#create')
 
+        expect(flow.steps[1][:unit]).to eq('PostService')
+        expect(flow.steps[1][:operations]).to eq([])
+      end
+
+      it 'extracts a class method\'s operations instead of the whole unit (F5)' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.build(params)
+            end
+          end
+        RUBY
+
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def self.build(params)
+              Audit.record(params)
+            end
+
+            def cleanup
+              Cache.clear!
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
         callee_targets = flow.steps[1][:operations].map { |op| op[:target] }
-        expect(callee_targets).to include('Cache')
+        expect(callee_targets).to eq(['Audit'])
+      end
+
+      it 'prefers the instance method when a unit defines both def call and def self.call' do
+        write_unit('PostsController', source_code: <<~RUBY)
+          class PostsController < ApplicationController
+            def create
+              PostService.call(params)
+            end
+          end
+        RUBY
+
+        write_unit('PostService', type: 'service', source_code: <<~RUBY)
+          class PostService
+            def self.call(params)
+              new(params).call
+            end
+
+            def call
+              Post.create!
+            end
+          end
+        RUBY
+
+        stub_graph_defaults
+        allow(graph).to receive(:node_exists?).with('PostService').and_return(true)
+
+        assembler = described_class.new(graph: graph, extracted_dir: extracted_dir)
+        flow = assembler.assemble('PostsController#create')
+
+        expect(flow.steps[1][:operations].map { |op| op[:target] }).to eq(['Post'])
       end
     end
 

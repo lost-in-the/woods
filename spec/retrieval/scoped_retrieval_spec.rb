@@ -70,6 +70,48 @@ RSpec.describe 'Explicit retrieval scope' do
       .to include(outcome: :empty_scope, eligible_units: 0)
   end
 
+  # F6 step 2. The scope's read of the metadata store happens once per store
+  # snapshot, not per request: the pipeline keeps the corpus while the
+  # store's version stands, and reads again only after a content change.
+  it 'reads the metadata store once across scoped requests and again only after it changes' do
+    add('Invoice')
+    add('Outside', package: 'packs/other')
+    reference = retriever.retrieve('How does billing work?', packages: ['packs/billing'])
+    allow(metadata).to receive(:find).and_call_original
+    allow(metadata).to receive(:all_identifiers).and_call_original
+
+    first = retriever.retrieve('How does billing work?', packages: ['packs/billing'])
+    second = retriever.retrieve('billing', packages: ['packs/billing'], types: ['model'])
+
+    expect(metadata).not_to have_received(:find)
+    expect(metadata).not_to have_received(:all_identifiers)
+    expect([first.context, first.sources]).to eq([reference.context, reference.sources])
+    expect(second.sources.map { |source| source[:identifier] }).to eq(['Invoice'])
+
+    add('Statement')
+    third = retriever.retrieve('billing', packages: ['packs/billing'])
+    expect(metadata).to have_received(:all_identifiers).once
+    expect(metadata).to have_received(:find).exactly(metadata.count).times
+    expect(third.sources.map { |source| source[:identifier] }).to contain_exactly('Invoice', 'Statement')
+    expect(third.applied_scope).to include(eligible_units: 2)
+  end
+
+  it 'reads a store that tracks no changes on every scoped request, with the same answer' do
+    durable = Woods::Storage::MetadataStore::SQLite.new(database: ':memory:')
+    add('Invoice')
+    add('Outside', package: 'packs/other')
+    metadata.all_identifiers.each { |key| durable.store(key, metadata.find(key)) }
+    reference = retriever.retrieve('How does billing work?', packages: ['packs/billing'])
+    versionless = Woods::Retriever.new(metadata_store: durable, vector_store: vectors, graph_store: graph,
+                                       embedding_provider: provider)
+    allow(durable).to receive(:find).and_call_original
+
+    results = Array.new(2) { versionless.retrieve('How does billing work?', packages: ['packs/billing']) }
+
+    expect(durable).to have_received(:find).at_least(2 * durable.count).times
+    results.each { |result| expect([result.context, result.sources]).to eq([reference.context, reference.sources]) }
+  end
+
   it 'keeps unscoped calls byte-identical and leaves scope metadata absent' do
     add('Invoice')
     ordinary = retriever.retrieve('How does billing work?')

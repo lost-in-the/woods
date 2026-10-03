@@ -212,7 +212,7 @@ module Woods
         'gem_version' => gem_version,
         'created_at' => created_at.iso8601,
         'embedding_provider' => embedding_provider.transform_keys(&:to_s),
-        'stores' => stores.transform_keys(&:to_s).transform_values(&:to_s),
+        'stores' => stores.compact.transform_keys(&:to_s).transform_values(&:to_s),
         'store_options' => stringify_nested_keys(store_options)
       }
     end
@@ -347,10 +347,17 @@ module Woods
       def parse_stores(raw)
         data = normalize_keys(raw)
         {
-          vector_store: data[:vector_store]&.to_sym,
-          metadata_store: data[:metadata_store]&.to_sym,
-          graph_store: data[:graph_store]&.to_sym
+          vector_store: store_type(data[:vector_store]),
+          metadata_store: store_type(data[:metadata_store]),
+          graph_store: store_type(data[:graph_store])
         }
+      end
+
+      # A snapshot written before unset stores were defaulted carries "" for
+      # them. Blank means unset, so the resolver's in_memory fallback applies.
+      def store_type(value)
+        text = value.to_s.strip
+        text.empty? ? nil : text.to_sym
       end
 
       DURABLE_VECTOR_OPTION_KEYS = %i[collection dimensions distance allow_private_hosts table schema].freeze

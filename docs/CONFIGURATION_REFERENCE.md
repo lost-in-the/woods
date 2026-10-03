@@ -253,9 +253,13 @@ before relying on these snapshot improvements.
 |--------|------|---------|-------------|
 | `vector_store` | Symbol | n/a | Vector backend: `:in_memory`, `:pgvector`, `:qdrant` |
 | `vector_store_options` | Hash | `nil` | Backend-specific connection options |
-| `metadata_store` | Symbol | n/a | Metadata backend: `:in_memory`, `:sqlite` |
+| `metadata_store` | Symbol | `:in_memory` when unset at embed time | Metadata backend: `:in_memory`, `:sqlite`. `woods:embed` applies the fallback before it records `woods.json`, so the snapshot and the metadata dump match the store the server boots. |
 | `metadata_store_options` | Hash | `nil` | Backend-specific options |
-| `graph_store` | Symbol | n/a | Graph backend: `:in_memory` |
+| `graph_store` | Symbol | `:in_memory` when unset at embed time | Graph backend: `:in_memory`; the same embed-time fallback applies. |
+
+Both metadata backends stamp each record with `updated_at`, and the stamp records the **last content change**: re-storing a record whose type and JSON text are unchanged leaves it untouched (SQLite issues no write and no journal fsync; a key-order-only difference counts as a change). The stamp is persisted (SQLite) and carried by the in-memory dump, but nothing in Woods reads it back: `find` and `search` strip it.
+
+The indexer writes each embed batch's records inside one metadata-store transaction (one SQLite commit per batch of `batch_size` records; a batch whose embedding fails rolls its records back). The transaction spans the whole batch, provider call included, so the SQLite write lock is held for the batch's duration. The indexer is the store's only writer and pipeline runs serialise on the pipeline lock; in SQLite's rollback-journal mode an open write transaction does not block readers such as the Index Server's retrieval, only the commit itself does, within the connection's 5 s `busy_timeout`.
 
 ### pgvector (PostgreSQL)
 
@@ -770,6 +774,15 @@ Nested entries collapse into their ancestor, so the default list walks
 `app/components` and `app/views` and never hands a file under
 `app/views/components` to the autoloader twice.
 
+The constant expected of a file comes from the owning Zeitwerk loader
+(`cpath_expected_at`), so the app's inflections (`api_card` => `APICard`),
+collapsed directories and namespaces are honoured; a plain `camelize` of the
+relative path is the fallback for a loader that predates that API. Included in
+Woods `2.1.1`: earlier releases camelized only, and a component whose expected
+name was wrong was never loaded and silently missing from both families. A
+file whose expected constant resolves to nothing is counted as unresolved and
+logged at debug level with the constant that was expected.
+
 A file is loaded only when a Rails autoload path owns it, so the constant its
 path implies is the one Zeitwerk manages. A directory that is not autoloaded is
 walked and skipped; one `Rails.logger.debug` line per extraction says how many
@@ -810,7 +823,7 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_RETRIEVAL_MODE` | `semantic` | Explicit packaged MCP retrieval mode: `semantic` or `lexical`. Lexical reads extraction unit JSON without provider autodetection, credentials or vector artifacts. |
 | `WOODS_DIR` | unset | MCP extraction-index path, after a positional argument and before `WOODS_OUTPUT`. See precedence below. |
 | `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; included in Woods `2.0.0`. |
-| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present. By default an extract-only host boots in pattern/structural mode without it. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
+| `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present, a static source map (`woods:self_map`) included. By default an extract-only host boots in pattern/structural mode without it and `woods_status` reports `bootstrap.status: not_configured` with a reason. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | `500` | Cap on unit files loaded during a phase-2 (metadata/source_code) `search`. Hitting the cap sets `partial: true` in the response. |
 | `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |
@@ -850,7 +863,7 @@ existing index before deciding another extraction is needed.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. |
+| `WOODS_MCP_HTTP_TOKEN` | unset | Bearer token required for non-loopback binds; startup refuses without one. A token shorter than 32 characters is refused before hydration with a `ConfigurationError` (exit 2). |
 | `WOODS_MCP_HTTP_ALLOWED_ORIGINS` | loopback only | Comma-separated origin allow-list. |
 | `WOODS_MCP_HTTP_STATELESS` | `1` (stateless) | Set to `0`/`false`/`no` to restore session-based mode. |
 
@@ -909,6 +922,7 @@ See [hook coverage and retry](WATCH_DAEMON.md#hooks-for-agent-sessions) and
 | `WOODS_HOOK_CONTEXT_ENABLED` | unset (disabled) | Exact `1` enables separate bounded Claude orientation/impact hints; independent of refresh enablement. |
 | `WOODS_HOOK_CONTEXT_COMMAND` | `bundle exec woods-hook-context` | Installed helper argv prefix; startup counts toward the fixed context deadline. Use a wrapper for quoting/container environment. |
 | `WOODS_HOOK_CONTEXT_ROOT` | payload cwd | Explicit runtime-visible application root for context path mapping; set inside a container when host paths differ. |
+| `WOODS_HOOK_CONTEXT_DEADLINE_MS` | `850` | Private process-group deadline for the context hint, integer 100–5000 ms; other values keep the default. The helper stops at three quarters of it. Raise it only on a host where the helper's startup needs more headroom: every millisecond is added to a supported tool call. |
 | `WOODS_HOOK_RAKE` | `bundle exec rake` | Application command prefix; supports `docker compose exec -T app bundle exec rake`. Use a wrapper for shell quoting or explicit container environment. |
 | `WOODS_SOURCE_CAPTURE` | internal | Private, one-use `woods-extract` child handoff. Do not set or persist this variable manually; see [source freshness](SOURCE_FRESHNESS.md). |
 | `WOODS_HOOK_TIMEOUT_SECONDS` | `600` | PostToolUse worker deadline (SessionStart uses a fixed ten seconds), integer 1–3600 seconds; failed/deferred batches remain queued. Docker-side cancellation requires separate verification. |

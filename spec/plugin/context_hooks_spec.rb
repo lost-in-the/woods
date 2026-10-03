@@ -20,7 +20,16 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
   let(:env) do
     { 'WOODS_HOOK_CONTEXT_ENABLED' => '1', 'WOODS_HOOKS_ENABLED' => '0', 'WOODS_HOOKS_DISABLED' => '0',
       'WOODS_OUTPUT' => 'tmp/woods',
-      'WOODS_HOOK_CONTEXT_COMMAND' => "#{RbConfig.ruby} -I#{gem_root}/lib #{gem_root}/exe/woods-hook-context" }
+      'WOODS_HOOK_CONTEXT_COMMAND' => "#{RbConfig.ruby} -I#{gem_root}/lib #{gem_root}/exe/woods-hook-context",
+      # The real hook runs in the client's shell, where Bundler's
+      # RUBYOPT=-rbundler/setup is absent. Under `bin/rspec` it is inherited
+      # and makes every interpreter the hook starts load Bundler for nothing.
+      'RUBYOPT' => nil,
+      # The happy-path examples assert what the hook produces, not how fast a
+      # given host loads the helper (its own work is milliseconds; loading the
+      # index reader and dispatch rules is most of its time). Give those
+      # examples a wide deadline; the deadline examples below pin the default.
+      'WOODS_HOOK_CONTEXT_DEADLINE_MS' => '3000' }
   end
 
   before do
@@ -96,13 +105,35 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
     File.write(blocked, "#!/usr/bin/env bash\nexec sleep 10\n")
     File.chmod(0o755, blocked)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    stdout, _stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked)
+    stdout, _stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked, 'WOODS_HOOK_CONTEXT_DEADLINE_MS' => nil)
     elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
     expect(status).to be_success
     expect(stdout).to eq('')
-    # The worker is killed at850ms; allow scheduler/exec bookkeeping jitter.
+    # The worker is killed at 850 ms by default; allow scheduler/exec bookkeeping jitter.
     expect(elapsed).to be < 1.25
     expect(File.exist?(File.join(output, 'hook-context-state.json'))).to be(false)
+  end
+
+  it 'honours a bounded WOODS_HOOK_CONTEXT_DEADLINE_MS and keeps the default for values outside 100..5000' do
+    blocked = File.join(root, 'blocked')
+    File.write(blocked, "#!/usr/bin/env bash\nexec sleep 10\n")
+    File.chmod(0o755, blocked)
+    timed = lambda do |deadline|
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      stdout, _stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked,
+                                       'WOODS_HOOK_CONTEXT_DEADLINE_MS' => deadline)
+      expect([stdout, status.success?]).to eq(['', true])
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    end
+    expect(timed.call('300')).to be_between(0.3, 0.75)
+    %w[abc 50 99999 0x300].each { |invalid| expect(timed.call(invalid)).to be_between(0.85, 1.25) }
+  end
+
+  it 'stops the helper at three quarters of the plugin deadline' do
+    require 'woods/hooks/context_cli'
+    expect(Woods::Hooks::ContextCLI.inner_deadline_seconds({})).to eq(0.6375)
+    expect(Woods::Hooks::ContextCLI.inner_deadline_seconds('WOODS_HOOK_CONTEXT_DEADLINE_MS' => '2000')).to eq(1.5)
+    expect(Woods::Hooks::ContextCLI.inner_deadline_seconds('WOODS_HOOK_CONTEXT_DEADLINE_MS' => '7')).to eq(0.6375)
   end
 
   %w[mktemp wc cat].each do |utility|
@@ -114,7 +145,8 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
       File.chmod(0o755, shim)
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       stdout, stderr, status = invoke('PATH' => "#{shims}:#{ENV.fetch('PATH')}")
-      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.25
+      # Well under the shim's two-second sleep: the hook must not have waited on it.
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 2.0
       expect(status).to be_success
       expect(stderr).to eq('')
       expect(JSON.parse(stdout).dig('hookSpecificOutput', 'additionalContext')).to include('generation 1')
@@ -126,7 +158,7 @@ RSpec.describe 'Opt-in Claude context hook entry points' do
     File.write(blocked, "#!/bin/bash\nprintf '{\"hookSpecificOutput\":'\nsleep 10\n")
     File.chmod(0o755, blocked)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    stdout, stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked)
+    stdout, stderr, status = invoke('WOODS_HOOK_CONTEXT_COMMAND' => blocked, 'WOODS_HOOK_CONTEXT_DEADLINE_MS' => nil)
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.25
     expect([stdout, stderr]).to eq(['', ''])
     expect(status).to be_success

@@ -12,22 +12,21 @@ module Woods
     module GenerationCatalog
       # The published generation pointer, distinguishing "no pointer file"
       # (a flat index, where {Woods::Generation::UNPUBLISHED} is the honest
-      # answer) from "a pointer file that will not parse" (a corrupt install,
-      # which {Woods::Generation#current} silently maps to that same
-      # UNPUBLISHED sentinel). Only this method's caller has already checked
-      # which one it is, so only here can the two be told apart.
+      # answer) from "a pointer file that will not parse or names no valid
+      # generation" (a corrupt install). {Woods::Generation#current!} is the
+      # strict reader that already draws that line for every long-lived
+      # reader; this only translates its {Woods::Generation::InvalidMarker}
+      # into the {PublishedIndex} error its callers rescue (F7).
       #
       # @param root [Pathname]
       # @return [Woods::Generation::Marker]
-      # @raise [PublishedIndex::CorruptPointerError] when the file exists but will not parse
+      # @raise [PublishedIndex::CorruptPointerError] when the file exists but
+      #   will not parse or does not describe a generation
       def self.pointer(root)
         generation = Woods::Generation.new(output_dir: root)
-        return Woods::Generation::UNPUBLISHED unless File.exist?(generation.path)
-
-        marker = generation.current
-        return marker unless marker.equal?(Woods::Generation::UNPUBLISHED)
-
-        raise PublishedIndex::CorruptPointerError, "Unreadable generation pointer: #{generation.path}"
+        generation.current!
+      rescue Woods::Generation::InvalidMarker => e
+        raise PublishedIndex::CorruptPointerError, "Unreadable generation pointer: #{generation.path} (#{e.message})"
       end
 
       # Published generation numbers, ascending. See

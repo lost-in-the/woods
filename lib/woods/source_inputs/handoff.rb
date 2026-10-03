@@ -7,7 +7,7 @@ module Woods
   module SourceInputs
     # Private one-process launch handoff. Its environment token names neither an
     # existing index manifest nor a user-supplied proof of runtime freshness.
-    module Handoff
+    module Handoff # rubocop:disable Metrics/ModuleLength -- one-use capture consumption plus its binding diagnostics
       ENV_KEY = 'WOODS_SOURCE_CAPTURE'
       class OutputMismatch < StandardError; end
 
@@ -38,34 +38,70 @@ module Woods
         nil # Ordinary handoff validation will refuse unverifiable capture.
       end
 
-      # rubocop:disable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
       # Every independent handoff binding must match before a token is consumed.
+      # A capture the launcher handed off but this process cannot consume is
+      # reported once on stderr by the binding that failed, never by value: the
+      # run then publishes boot_verified: false, and without the line that
+      # downgrade was invisible (F4). A descriptor without a capture path (the
+      # launcher ran without capture and said so itself) is not a handoff.
       def read(root:, output_dir:, operation:, rules:, key_id:)
         token = ENV.fetch(ENV_KEY, nil)
         return nil if token.nil? || token.empty?
 
-        descriptor = JSON.parse(token)
-        return nil unless descriptor.is_a?(Hash)
-
-        data = private_data(descriptor.fetch('path'))
-        return nil unless data.is_a?(Hash)
-
-        expected = { 'version' => 1, 'nonce' => descriptor.fetch('nonce'),
-                     'root' => File.expand_path(root.to_s), 'output' => File.expand_path(output_dir.to_s),
-                     'operation' => operation.to_s, 'rules' => rules, 'launcher_pid' => Process.ppid }
-        return nil unless expected.all? { |key, value| data[key] == value }
-        return nil unless valid_nonce?(data['nonce'])
-
-        snapshot = data.fetch('snapshot')
-        return nil unless valid_snapshot?(snapshot, expected, key_id)
-
-        ENV.delete(ENV_KEY)
+        snapshot, failed = consume(token, root: root, output_dir: output_dir, operation: operation,
+                                          rules: rules, key_id: key_id)
+        if snapshot.nil? && failed
+          warn "woods-extract: launch handoff discarded (#{failed}); source freshness is unverified for this run"
+        end
         snapshot
-      rescue JSON::ParserError, KeyError, TypeError, SystemCallError, IOError
-        nil
       end
 
-      # rubocop:enable Metrics/AbcSize, Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+      # @return [Array(Hash, nil), Array(nil, String), Array(nil, nil)] the
+      #   consumed snapshot, or the failed binding, or nothing to consume
+      def consume(token, **bindings)
+        descriptor = JSON.parse(token)
+        return [nil, nil] unless descriptor.is_a?(Hash) && descriptor.key?('path')
+
+        data = private_data(descriptor.fetch('path'))
+        return [nil, 'capture file'] unless data.is_a?(Hash)
+
+        expected = expected_bindings(descriptor, **bindings.slice(:root, :output_dir, :operation, :rules))
+        failed = failed_binding(data, expected, bindings.fetch(:key_id))
+        return [nil, failed] if failed
+
+        ENV.delete(ENV_KEY)
+        [data.fetch('snapshot'), nil]
+      rescue JSON::ParserError, KeyError, TypeError, SystemCallError, IOError
+        [nil, 'capture file']
+      end
+
+      # The root binds to the physical path on both sides: the launcher
+      # resolves --root with File.realpath before capturing, and the child
+      # resolves its own root here, so a symlink alias on either side matches.
+      def expected_bindings(descriptor, root:, output_dir:, operation:, rules:)
+        { 'version' => 1, 'nonce' => descriptor.fetch('nonce'),
+          'root' => physical_root(root), 'output' => File.expand_path(output_dir.to_s),
+          'operation' => operation.to_s, 'rules' => rules, 'launcher_pid' => Process.ppid }
+      end
+
+      def physical_root(root)
+        expanded = File.expand_path(root.to_s)
+        File.realpath(expanded)
+      rescue SystemCallError
+        expanded
+      end
+
+      BINDING_LABELS = { 'launcher_pid' => 'parent process' }.freeze
+
+      # The first binding that does not hold, as a label safe to print.
+      def failed_binding(data, expected, key_id)
+        mismatch = expected.find { |key, value| data[key] != value }
+        return BINDING_LABELS.fetch(mismatch.first, mismatch.first) if mismatch
+        return 'nonce' unless valid_nonce?(data['nonce'])
+        return 'snapshot' unless valid_snapshot?(data.fetch('snapshot'), expected, key_id)
+
+        nil
+      end
 
       def private_data(path)
         flags = File::RDONLY | File::NONBLOCK

@@ -146,24 +146,21 @@ module Woods
     end
 
     # Extract operations from source code for a specific method — or, when no
-    # method is named or the unit does not define one by that name, from the
-    # entire source.
+    # method is named, from the entire source.
     #
-    # A named method that isn't found falls back to the whole unit rather
-    # than yielding no operations: {#expand_operation} now threads the
-    # calling operation's `op[:method]` through, and that method need not be
-    # one the callee actually defines locally (inherited, dynamically
-    # defined, or metaprogrammed) — losing the trace entirely would be worse
-    # than over-including it.
+    # A named method the unit does not define locally (inherited, dynamically
+    # defined, metaprogrammed) yields no operations. It used to fall back to
+    # the whole unit, which reported every other method's operations as the
+    # called method's; a flow that says nothing is honest, one that lists
+    # unrelated side effects is not (F5).
     def extract_operations(unit_id, source_code, method_name, metadata, unit_type)
       operations = []
 
       # For controllers, prepend before_action callbacks
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
-      scope_node = method_node(unit_id, source_code, method_name)
-      scope_node ||= parsed_source(unit_id, source_code)
-      operations.concat(@operation_extractor.extract(scope_node))
+      scope_node = method_name ? method_node(unit_id, source_code, method_name) : parsed_source(unit_id, source_code)
+      operations.concat(@operation_extractor.extract(scope_node)) if scope_node
 
       operations
     end
@@ -181,11 +178,15 @@ module Woods
       memoize(@ast_cache, unit_id) { @parser.parse(source_code) }
     end
 
-    # The `def` node for +method_name+, from a per-unit index built off the
-    # memoized parse.
+    # The `def` or `def self.` node for +method_name+, from a per-unit index
+    # built off the memoized parse.
     #
     # First definition wins for a name defined more than once, matching
-    # {Ast::MethodExtractor#extract_method}'s first-match lookup.
+    # {Ast::MethodExtractor#extract_method}'s first-match lookup. An instance
+    # method wins over a class method of the same name: the common
+    # `def self.call(*args) = new(*args).call` shape does its work in the
+    # instance method, and the unit is expanded only once per flow. A class
+    # method with no instance twin used to fall through to the whole unit (F5).
     #
     # @param unit_id [String] cache key
     # @param source_code [String] the unit's source
@@ -196,7 +197,8 @@ module Woods
       return nil unless method_name
 
       nodes = memoize(@method_node_cache, unit_id) do
-        parsed_source(unit_id, source_code).find_all(:def).each_with_object({}) do |node, index|
+        root = parsed_source(unit_id, source_code)
+        (root.find_all(:def) + root.find_all(:defs)).each_with_object({}) do |node, index|
           index[node.method_name] ||= node
         end
       end

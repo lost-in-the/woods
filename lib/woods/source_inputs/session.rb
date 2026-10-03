@@ -203,12 +203,24 @@ module Woods
 
         identity = @snapshot.fetch('files')[relative]
         if identity
-          (@identities[scope] ||= {})[relative] = identity
+          record_identity(scope, relative, identity)
         elsif File.exist?(File.join(@root, relative))
           record_error('reason' => 'uncaptured_source_path', 'path' => relative)
         else
           @identities[scope]&.delete(relative)
         end
+      end
+
+      # A consumer proving the bytes also proves the declared capture scope
+      # that lists them; a full run rebuilds that scope wholesale, and an
+      # incremental run used to leave the baseline identity in it (F15).
+      def record_identity(scope, relative, identity)
+        (@identities[scope] ||= {})[relative] = identity
+        (@identities['declared'] ||= {})[relative] = identity if declared_path?(relative)
+      end
+
+      def declared_path?(relative)
+        @rules.extra_roots.any? { |root| relative.start_with?("#{root}/") }
       end
 
       def relative_path(path)

@@ -135,7 +135,7 @@ RSpec.describe 'Inflected Zeitwerk naming', :booted_app do
     Woods::Watch::Daemon.new(
       output_dir: @output_dir,
       root: root,
-      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false),
       debounce: 0
     )
   end

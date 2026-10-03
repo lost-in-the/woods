@@ -35,8 +35,14 @@ RSpec.describe Woods::Evaluation::AblationTimedExecutor do
             Process.wait(child) unless #{parent_exits}
           RUBY
           executor = Woods::Evaluation::AblationExecutor.new
-          timed = described_class.new(executor, timeout: 0.5)
-          _, error, success = timed.call([RbConfig.ruby, parent_script].shelljoin, chdir: dir)
+          # The budget must cover two interpreter starts (parent, then the
+          # child it spawns) before the timeout fires. Under `bin/rspec`,
+          # Bundler exports RUBYOPT=-rbundler/setup to every child, which
+          # costs ~0.25 s per interpreter on this host and is irrelevant to
+          # these fixtures, so clear it; keep the budget generous for loaded
+          # runners (the assertions are about cleanup, not speed).
+          timed = described_class.new(executor, timeout: 1.0)
+          _, error, success = timed.call("RUBYOPT= #{[RbConfig.ruby, parent_script].shelljoin}", chdir: dir)
           expect(success).to be(false)
           expect(error).to include('timed out')
           expect(File).to exist(heartbeat)
@@ -84,6 +90,89 @@ RSpec.describe Woods::Evaluation::AblationTimedExecutor do
       expect(stderr).to include('timed out')
       expect(stdout).to eq('')
       expect(pid).to be_a(Integer)
+      expect { Process.kill(0, pid) }.to raise_error(Errno::ESRCH)
+    end
+
+    # F10. The timeout interrupts the wrapped executor's own Process.wait2,
+    # so a leader that dies to the TERM stays a zombie until someone reaps
+    # it, and a zombie still answers kill(0) for its group: the probe used to
+    # spend the whole TERM grace (2 s) on a process that was already dead.
+    it 'returns as soon as a leader that dies to TERM has been reaped, not after the whole grace' do
+      executor = Woods::Evaluation::AblationExecutor.new
+      timed = described_class.new(executor, timeout: 0.2)
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      _, stderr, success = timed.call("ruby -e 'sleep 30'", chdir: Dir.pwd)
+      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+
+      expect(success).to be(false)
+      expect(stderr).to include('timed out')
+      expect(elapsed).to be < 1.5
+      expect { Process.kill(0, executor.pid) }.to raise_error(Errno::ESRCH)
+    end
+
+    # The fix above must not become "reap the leader, then KILL": a
+    # descendant that honours TERM but needs a moment to shut down cleanly
+    # keeps the original grace even when its parent, the group leader,
+    # exited at once.
+    it 'lets a TERM-compliant descendant of an exited leader finish within the grace instead of killing it' do
+      Dir.mktmpdir('woods-ablation-compliant') do |dir|
+        child_script = File.join(dir, 'child.rb')
+        parent_script = File.join(dir, 'parent.rb')
+        marker = File.join(dir, 'marker')
+        pid_path = File.join(dir, 'child.pid')
+        File.write(child_script, <<~RUBY)
+          stopping = false
+          trap('TERM') { stopping = true }
+          sleep 0.01 until stopping
+          sleep 0.6
+          File.write(#{marker.inspect}, 'clean')
+        RUBY
+        File.write(parent_script, <<~RUBY)
+          require 'rbconfig'
+          child = Process.spawn(RbConfig.ruby, #{child_script.inspect})
+          File.write(#{pid_path.inspect}, child.to_s)
+        RUBY
+        executor = Woods::Evaluation::AblationExecutor.new
+        timed = described_class.new(executor, timeout: 1.0)
+
+        _, error, success = timed.call("RUBYOPT= #{[RbConfig.ruby, parent_script].shelljoin}", chdir: dir)
+
+        expect(success).to be(false)
+        expect(error).to include('timed out')
+        expect(File).to exist(marker)
+        expect(File.read(marker)).to eq('clean')
+      ensure
+        if pid_path && File.file?(pid_path)
+          begin
+            Process.kill('KILL', Integer(File.read(pid_path)))
+          rescue Errno::ESRCH
+            nil
+          end
+        end
+      end
+    end
+
+    # macOS has refused the group probe with EPERM; the error used to escape
+    # `call`, so the timed-out result was never returned and the runner
+    # aborted with a process still running.
+    it 'treats a permission-denied probe as alive, KILLs at the deadline and still returns the timed-out result' do
+      stub_const("#{described_class}::TERM_GRACE_SECONDS", 0.3)
+      executor = Woods::Evaluation::AblationExecutor.new
+      timed = described_class.new(executor, timeout: 0.2)
+      allow(Process).to receive(:kill).and_wrap_original do |original, signal, target|
+        raise Errno::EPERM if signal == 0 && target.negative?
+
+        original.call(signal, target)
+      end
+
+      stdout, stderr, success = timed.call(%(ruby -e 'trap("TERM"){}; sleep 30'), chdir: Dir.pwd)
+      pid = executor.pid
+
+      expect(success).to be(false)
+      expect(stderr).to include('timed out')
+      expect(stdout).to eq('')
+      expect(Process).to have_received(:kill).with('KILL', -pid)
       expect { Process.kill(0, pid) }.to raise_error(Errno::ESRCH)
     end
 

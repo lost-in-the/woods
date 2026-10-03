@@ -810,28 +810,29 @@ module Woods
     end
     private :published_reverse_via
 
-    # A copy whose edge containers are the caller's alone.
+    # A copy that is the caller's alone: every container and every unfrozen
+    # string in it is duplicated, so neither the live graph nor the memo can
+    # be reached through a snapshot.
     #
     # `dup` copies only the top level, so `to_h[:edges][id]` used to be the
     # very Array `@edges` holds: appending to it polluted the live graph and
-    # the memo, both silently (EXTB-11). {#primary_edges} and
-    # {#variant_records} already detach from the graph; this detaches each
-    # handed-out snapshot from the memo as well.
+    # the memo, both silently (EXTB-11). Duplicating the edge hashes was not
+    # enough either: their `:target`/`:through` strings were still the live
+    # graph's, and nodes, reverse, file_map, type_index and stats were the
+    # memo's own containers, so `to_h[:edges]['Post'][0][:target] << '_x'`
+    # rewrote what {#dependencies_of} answered and every later `to_h` (F12).
+    # Every string is copied, frozen or not: a returned string is the
+    # caller's to change in place, which the reverse-record pin relies on.
     #
-    # @param memo [Hash] the memoized serialization
-    # @return [Hash]
+    # @param memo [Object] the memoized serialization, or a part of it
+    # @return [Object]
     def detached_snapshot(memo)
-      snapshot = memo.dup
-      snapshot[:edges] = memo[:edges].transform_values { |list| list.map(&:dup) }
-      snapshot[:reverse_via] = memo[:reverse_via].transform_values do |records|
-        records.map { |record| record.transform_values { |value| value.is_a?(String) ? value.dup : value } }
+      case memo
+      when Hash then memo.transform_values { |value| detached_snapshot(value) }
+      when Array then memo.map { |value| detached_snapshot(value) }
+      when String then memo.dup
+      else memo
       end
-      if memo.key?(:variants)
-        snapshot[:variants] = memo[:variants].map do |record|
-          record.merge(edges: record[:edges].map(&:dup))
-        end
-      end
-      snapshot
     end
     private :detached_snapshot
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'local_corpus_stats'
+require_relative 'search_text'
 
 require 'json'
 require 'fileutils'
@@ -133,12 +134,38 @@ module Woods
           raise NotImplementedError
         end
 
+        # Run the block's writes as one unit where the backend can (N-ip-3).
+        # The indexer wraps each embed batch in one, so SQLite pays one
+        # journal commit per batch instead of one autocommit per record, and
+        # a batch that fails after its records were stored rolls them back.
+        # This default is a real implementation, not a raising stub: a
+        # backend with nothing durable to protect simply yields.
+        #
+        # @yield the writes to group
+        # @return [Object] the block's value
+        def transaction
+          yield
+        end
+
         # Delete a unit by ID.
         #
         # @param id [String] The identifier to delete
         # @raise [NotImplementedError] if not implemented by adapter
         def delete(id)
           raise NotImplementedError
+        end
+
+        # A version that moves on every content change of this store, or nil
+        # when the adapter tracks none (F6 step 2). A caller that derives
+        # state from the whole store (the retriever's scope corpus) keeps it
+        # while the version it was read at still stands; nil means "rebuild
+        # every time", never "unchanged". This default is a real
+        # implementation: a durable adapter shared between processes cannot
+        # cheaply know whether another writer changed it.
+        #
+        # @return [Integer, nil]
+        def snapshot_version
+          nil
         end
 
         # Return the total number of stored units.
@@ -190,11 +217,31 @@ module Woods
 
         def initialize
           @data = {}
+          @haystacks = {}
+          @snapshot_version = 0
         end
 
+        # @see Interface#snapshot_version
+        #
+        # Moves on every write that changes content: a changed {#store}, a
+        # {#delete}, a {#bulk_load} or a {#clear!}. An unchanged re-store
+        # (F18) leaves it alone, so an unchanged incremental embed keeps the
+        # retriever's scope corpus as well as the records' timestamps.
+        attr_reader :snapshot_version
+
         # @see Interface#store
+        #
+        # Same definition as the SQLite adapter (F18): `updated_at` is the
+        # last content change, compared on the JSON text, so an unchanged
+        # re-store keeps the record and its stamp.
         def store(id, metadata)
-          @data[id] = normalize(metadata).merge('updated_at' => Time.now.iso8601)
+          text = JSON.generate(metadata)
+          existing = @data[id]
+          return existing if existing && JSON.generate(existing.except('updated_at')) == text
+
+          @snapshot_version += 1
+          @haystacks.delete(id)
+          @data[id] = JSON.parse(text).merge('updated_at' => Time.now.iso8601)
         end
 
         # @see Interface#find
@@ -239,17 +286,7 @@ module Woods
           # different results depending on which backend a host had configured.
           needle = query.to_s.downcase
           @data.each_with_object([]) do |(id, record), out|
-            # `updated_at` is excluded from the whole-record haystack: SQLite's
-            # `data` column never carries it (it's a store-level column there,
-            # not part of the JSON blob), so leaving it in here made a query
-            # that only matched a timestamp (e.g. "2026-08") return every
-            # record on InMemory and none on SQLite.
-            haystacks = if fields
-                          fields.map { |f| field_haystack(record[f]) }
-                        else
-                          [JSON.generate(record.except('updated_at'))]
-                        end
-            next unless haystacks.compact.any? { |h| h.downcase.include?(needle) }
+            next unless matches?(id, record, fields, needle)
 
             out << record.except('updated_at').merge('id' => id)
           end
@@ -262,6 +299,8 @@ module Woods
 
         # @see Interface#delete
         def delete(id)
+          @snapshot_version += 1
+          @haystacks.delete(id)
           @data.delete(id)
         end
 
@@ -300,13 +339,19 @@ module Woods
         # @param entries [Enumerable<Array(String, Hash)>] Pairs of +[id, metadata]+
         # @return [void]
         def bulk_load(entries)
-          entries.each { |id, meta| @data[id] = meta }
+          @snapshot_version += 1
+          entries.each do |id, meta|
+            @haystacks.delete(id)
+            @data[id] = meta
+          end
         end
 
         # Drop every stored entry. Used by the MCP +reload+ tool to pick up a
         # fresh embed run without restarting the process. Safe on an empty store.
         def clear!
+          @snapshot_version += 1
           @data = {}
+          @haystacks = {}
         end
 
         private
@@ -327,21 +372,22 @@ module Woods
           JSON.parse(JSON.generate(metadata))
         end
 
-        # The searchable text for one field value: strings come back raw,
-        # structured values as JSON text, Booleans as true/false, and numbers
-        # as their decimal form. A Ruby
-        # +Hash#to_s+ haystack used to leak `=>` and `:sym` syntax that no
-        # JSON document contains (STO-8).
-        #
-        # @param value [Object] the stored field value
-        # @return [String, nil] nil for a missing field, which never matches
-        def field_haystack(value)
-          case value
-          when nil then nil
-          when String then value
-          when Hash, Array then JSON.generate(value)
-          else value.to_s
-          end
+        # `updated_at` is excluded from the whole-record haystack: SQLite's
+        # `data` column never carries it (it's a store-level column there,
+        # not part of the JSON blob), so leaving it in here made a query
+        # that only matched a timestamp (e.g. "2026-08") return every
+        # record on InMemory and none on SQLite.
+        def matches?(id, record, fields, needle)
+          return record_haystack(id, record).include?(needle) unless fields
+
+          fields.any? { |field| SearchText.field(record[field])&.downcase&.include?(needle) }
+        end
+
+        # The whole-record haystack, serialised and downcased once per stored
+        # record (N-ip-2) instead of on every all-fields search; +store+,
+        # +delete+, +bulk_load+ and +clear!+ drop the entry they replace.
+        def record_haystack(id, record)
+          @haystacks[id] ||= SearchText.record(record.except('updated_at'))
         end
       end
 
@@ -401,11 +447,19 @@ module Woods
 
           data = JSON.generate(metadata)
 
+          # The WHERE clause is the whole of F18: without it every re-store
+          # rewrote the row and paid a journal write plus fsyncs, so an
+          # unchanged incremental embed over N units cost N synchronous
+          # writes for nothing. Equality is on the JSON text (a key-order-only
+          # difference counts as a change), and `updated_at` is therefore the
+          # last content change. The column's NUMERIC affinity cannot reach a
+          # record: its text always starts with "{".
           with_lock_retry do
             @db.execute(<<~SQL, [id, type.to_s, data, Time.now.iso8601])
               INSERT INTO units (id, type, data, updated_at) VALUES (?, ?, ?, ?)
               ON CONFLICT(id) DO UPDATE SET
                 type = excluded.type, data = excluded.data, updated_at = excluded.updated_at
+              WHERE units.type IS NOT excluded.type OR units.data IS NOT excluded.data
             SQL
           end
         end
@@ -476,6 +530,19 @@ module Woods
         # @see Interface#count
         def count
           @db.get_first_value('SELECT COUNT(*) FROM units')
+        end
+
+        # @see Interface#transaction
+        #
+        # One BEGIN/COMMIT around the block; a block that raises is rolled
+        # back and its error re-raised. An already-open transaction is joined
+        # rather than nested (SQLite has no nested BEGIN). Busy waits are the
+        # connection's busy_timeout: nothing in here is retried, since the
+        # block's side effects (embedding calls) must not run twice.
+        def transaction(&block)
+          return yield if @db.transaction_active?
+
+          @db.transaction(&block)
         end
 
         # Reads only grouped type counts from the local SQLite database.

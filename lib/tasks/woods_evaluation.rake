@@ -151,7 +151,7 @@ module Woods
       puts
       puts(passed ? 'Evaluation complete!' : 'Evaluation FAILED — one or more thresholds not met.')
       puts '=' * 50
-      report.aggregates.each do |key, value|
+      report.aggregates.merge(token_efficiency_basis: report.token_efficiency_basis).each do |key, value|
         formatted = value.is_a?(Float) ? format('%.4f', value) : value.to_s
         puts "  #{key.to_s.ljust(25)}: #{formatted}"
       end

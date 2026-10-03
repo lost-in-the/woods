@@ -64,8 +64,31 @@ RSpec.describe Woods::Hooks::Refresh do
   end
 
   it 'acknowledges a supported but now irrelevant input without publishing' do
-    refresh([{ path: 'docs/readme.md', operation: 'update' }]).call
+    expect { refresh([{ path: 'docs/readme.md', operation: 'update' }]).call }.not_to output.to_stderr
     expect(extractor).not_to have_received(:extract_changed)
+  end
+
+  it 'says on stderr which Ruby paths it dropped, naming the roots it knows (F15)' do
+    expect { refresh([{ path: 'scripts/tool.rb', operation: 'update' }]).call }
+      .to output(%r{dropped 1 Ruby path.*scripts/tool\.rb.*app/, lib/}).to_stderr
+    expect(extractor).not_to have_received(:extract_changed)
+  end
+
+  it 'refreshes a path under a source root the index declares (F15)' do
+    allow(Woods::InputRules).to receive(:for_index).with('/application/tmp/woods')
+                                                   .and_return(Woods::InputRules.new(extra_roots: ['domain']))
+
+    refresh([{ path: 'domain/billing/ledger.rb', operation: 'update' }]).call
+
+    expect(extractor).to have_received(:extract_changed).with(['domain/billing/ledger.rb'])
+  end
+
+  it 'honours the roots the launcher handed over even before the first manifest exists' do
+    allow(Woods::SourceInputs::Handoff).to receive(:extra_roots).and_return(['domain'])
+
+    refresh([{ path: 'domain/billing/ledger.rb', operation: 'delete' }]).call
+
+    expect(extractor).to have_received(:extract_all)
   end
 
   it 'rejects malformed, oversized, foreign and unsupported event records' do

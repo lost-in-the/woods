@@ -124,6 +124,10 @@ Reconnect the client, then call:
 
 Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Modern MCP 2026-07-28 requests carry per-request protocol metadata and can use `server/discover` without an initialization handshake; older clients still use `initialize`. A valid raw smoke test must implement one complete flow rather than sending an isolated `tools/list` or `tools/call` request.
 
+### Malformed stdio frames
+
+Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woods::MCP::StdioTransport`, which answers a frame that is not valid UTF-8, or whose JSON escapes decode to invalid UTF-8 (an unpaired surrogate), with the JSON-RPC parse error (`-32700`), logs one `rejected frame` line on stderr, and keeps serving. The frame is never rewritten. Earlier releases exited with status 1 on such a frame (the `mcp` gem strips and parses it unguarded), and `woods-mcp-start` has no restart loop, so the server stayed down until the client reconnected. A frame that is merely not JSON is still answered by the SDK's own parse error.
+
 ### Initialization guidance
 
 The Index Server supplies a short, client-neutral `instructions` field through
@@ -288,6 +292,13 @@ filters; search aliases do not change those contracts.
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.
 
+**Included in Woods 2.1.1:** `lookup` refuses a `type` it cannot resolve with
+`invalid_params` and lists `accepted_types` in `_meta`, the same contract as
+`search`, instead of answering `not_found` with a hint to search. An untyped
+`lookup` of an identifier published under more than one type still returns one
+unit (the type directory that sorts last) and names every type in
+`_meta.ambiguous_types`; pass the intended `type` to choose.
+
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the
 returned count, stopping reason, known/unknown remainder, and total explicitly.
@@ -301,8 +312,10 @@ successful partial completeness with reason `unreadable_or_corrupt_source`;
 an empty partial answer does not establish absence. Identifier-only matches can
 use published summaries without opening unit bodies, so search is not an
 artifact-integrity check. Inspect `woods_status` and run `woods:validate`.
-Explicit package/source-path scope first reads the full unit set and still
-returns an error if that preflight encounters a damaged body.
+Explicit package/source-path scope first reads the full unit set, once per loaded
+generation, and still returns an error if that preflight encounters a damaged
+body; a scoped search that reuses the read treats a body damaged since like an
+unscoped search does.
 
 Damaged index-wide artifacts, such as a manifest or type index, remain
 `isError: true` with `_meta.error_code: "corrupt_artifact"`. Their `_meta.completeness` has

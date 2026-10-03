@@ -19,6 +19,10 @@ require 'open3'
 #
 # Tagged :booted_app — excluded from the default `rake spec`.
 RSpec.describe 'Watch daemon against a booted app', :booted_app do
+  def once_subclass_supported?
+    Gem::Version.new(Rails.version) >= Gem::Version.new('7.0')
+  end
+
   before(:all) do
     require 'rails'
     require 'active_record/railtie'
@@ -43,6 +47,22 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       Object.const_set(:WoodsDummyApplication, app_class)
       WoodsDummyApplication.config.root = @app_root
       WoodsDummyApplication.config.secret_key_base = 'woods-dummy-secret'
+      # A directory the once loader owns (F14): constants under it are never
+      # reloaded, so the daemon must restart for an edit there.
+      [@pristine_root, @app_root].each do |base|
+        FileUtils.mkdir_p(File.join(base, 'app/once'))
+        File.write(File.join(base, 'app/once/once_setting.rb'), "class OnceSetting\n  def call = :before\nend\n")
+        # A once-owned subclass of a reloadable base (N-ra-2): a main-loader
+        # reload leaves it pointing at the old ApplicationController object.
+        # Rails 6.x also eager loads app/once through the main loader, so the
+        # file would be re-evaluated against the new base after a reload
+        # (superclass mismatch); the shape is only exercised from 7.0 on.
+        if once_subclass_supported?
+          File.write(File.join(base, 'app/once/legacy_controller.rb'),
+                     "class LegacyController < ApplicationController\n  def index = head(:ok)\nend\n")
+        end
+      end
+      WoodsDummyApplication.config.autoload_once_paths << File.join(@app_root, 'app/once')
       WoodsDummyApplication.initialize!
     end
 
@@ -66,6 +86,8 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       end
     end
     Rails.application.eager_load!
+    # The once loader is not eager loaded; resolve the subclass so the baseline index carries it.
+    LegacyController.name if once_subclass_supported?
 
     require 'woods'
     require 'woods/extractor'
@@ -110,7 +132,7 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
     Woods::Watch::Daemon.new(
       output_dir: @index_dir,
       root: @app_root,
-      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false),
       debounce: 0,
       **overrides
     )
@@ -233,7 +255,7 @@ end
       reader = Woods::MCP::IndexReader.new(@index_dir)
       expect(reader.find_unit('Post')).not_to be_nil
 
-      failing = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      failing = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, once_owned?: false)
       allow(failing).to receive(:reload!).and_raise(SyntaxError, 'unexpected end-of-input')
       write_file('app/models/post.rb', "class Post < ApplicationRecord
   # half-edited")
@@ -273,7 +295,9 @@ end
   #
   # Placed in this file rather than its own so it rides an existing boot: a new
   # `:booted_app` file is a new CI step and a new Rails application per row.
-  describe 'the real Rails reloader' do
+  # Defined order: the N-ra-2 example needs the once-owned subclass still attached
+  # to its base, and every real reload below detaches it for the process lifetime.
+  describe 'the real Rails reloader', order: :defined do
     subject(:reloader) { Woods::Watch::Daemon::RailsReloader.new }
 
     # A real reload unloads every autoloaded constant, so anything that ran
@@ -285,6 +309,19 @@ end
 
     def post_source
       File.read(File.join(@app_root, 'app/models/post.rb'))
+    end
+
+    it 'names a once-owned subclass that an unrelated reload detached and reconciliation pruned (N-ra-2)' do
+      skip 'once-owned subclass fixture is unsupported before Rails 7.0' unless once_subclass_supported?
+      expect(Woods::MCP::IndexReader.new(@index_dir).find_unit('LegacyController')).not_to be_nil
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+      write_file('app/models/post.rb', "#{post_source}\n# unrelated edit\n")
+
+      result = instance.process(['app/models/post.rb'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController', 'once-owned', 'restart')
     end
 
     it 'picks up changed source, which is the property `enabled?` promises' do
@@ -340,6 +377,29 @@ end
       end
     end
 
+    it 'does not list routes among the config Ruby it loaded at boot, so a routes edit still reloads (F3)' do
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+
+      expect(instance.send(:loaded_boot_paths).grep(%r{\Aconfig/routes})).to be_empty
+      write_file('config/routes.rb', "#{File.read(File.join(@app_root, 'config/routes.rb'))}\n# routes edit\n")
+      expect(instance.process(['config/routes.rb'])[:action]).to eq(:incremental)
+    end
+
+    it 'restarts for an edit the once loader owns instead of publishing a stale unit (F14)' do
+      expect(reloader.once_owned?(File.join(@app_root, 'app/once/once_setting.rb'))).to be(true)
+      expect(reloader.once_owned?(File.join(@app_root, 'app/models/post.rb'))).to be(false)
+      write_file('app/once/once_setting.rb', "class OnceSetting\n  def call = :after\nend\n")
+      instance = Woods::Watch::Daemon.new(output_dir: @index_dir, root: @app_root,
+                                          reloader: reloader, debounce: 0, catch_up: false)
+
+      result = instance.process(['app/once/once_setting.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('autoload_once_paths', 'app/once/once_setting.rb')
+    end
+
     it 'escalates a reload-class change to a restart when reloading is off' do
       config = Rails.application.config
       original = config.cache_classes
@@ -361,7 +421,7 @@ end
   describe 'degraded operation' do
     it 'leaves the index intact and the generation frozen when a reload fails' do
       write_file('app/services/broken_service.rb', "class BrokenService\n  def call\n") # deliberately unterminated
-      failing_reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true)
+      failing_reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, once_owned?: false)
       allow(failing_reloader).to receive(:reload!).and_raise(SyntaxError, 'unexpected end-of-input')
       broken = daemon(reloader: failing_reloader)
 

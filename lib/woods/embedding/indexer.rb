@@ -587,10 +587,22 @@ module Woods
       def embed_batches(units, checkpoint, stats, incremental:)
         batch_count = 0
         units.each_slice(@batch_size) do |batch|
-          process_batch(batch, checkpoint, stats, incremental: incremental)
+          metadata_transaction { process_batch(batch, checkpoint, stats, incremental: incremental) }
           batch_count += 1
           save_checkpoint(checkpoint) if interval_checkpoints? && (batch_count % @checkpoint_interval).zero?
         end
+      end
+
+      # One metadata-store transaction per batch (N-ip-3): SQLite then pays
+      # one journal commit per batch rather than one autocommit per record,
+      # and a batch whose embedding fails after its records were stored rolls
+      # them back instead of leaving partial rows. `respond_to?` is safe here,
+      # unlike for the Interface's raising stubs (B-108): the Interface's
+      # +transaction+ is a real, yielding default.
+      def metadata_transaction(&block)
+        return yield unless @metadata_store.respond_to?(:transaction)
+
+        @metadata_store.transaction(&block)
       end
 
       # Never let a disagreement between checkpoint.json and the dump pass

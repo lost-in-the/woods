@@ -20,6 +20,19 @@ RSpec.describe Woods::ReloadPolicy do
         expect(policy.classify('config/application.rb')).to eq(:restart)
       end
 
+      # These were captured as boot inputs for freshness but classified
+      # :ignore, so a resident process kept serving config values the file no
+      # longer sets (F3). Generic config/*.rb stays :ignore here: only the
+      # process that booted knows which helpers it loaded (see Daemon).
+      it 'demands a restart for the Rakefile, config.ru and root gemspecs' do
+        expect(policy.classify('Rakefile')).to eq(:restart)
+        expect(policy.classify('config.ru')).to eq(:restart)
+        expect(policy.classify('woods.gemspec')).to eq(:restart)
+        expect(policy.classify('config/time_zone.rb')).to eq(:ignore)
+        expect(policy.classify('packs/billing/billing.gemspec')).to eq(:ignore)
+        expect(policy.classify('lib/tasks/woods.rake')).to eq(:reextract)
+      end
+
       it 'demands a restart for schema changes' do
         expect(policy.classify('db/schema.rb')).to eq(:restart)
         expect(policy.classify('db/structure.sql')).to eq(:restart)

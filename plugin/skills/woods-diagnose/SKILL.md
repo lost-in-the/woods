@@ -388,6 +388,15 @@ family alias `type: "graphql"` and returns the actual subtype. Prefer the
 concrete type from `search` for follow-up checks. On older readers, retry with
 that concrete type before concluding that a published GraphQL unit is absent.
 
+From Woods 2.1.1 (check the installed gem), `lookup` refuses a `type` it
+cannot resolve with `invalid_params` and lists `accepted_types`; retry with a
+listed type or take the concrete type from `search`. Older readers answer
+`not_found` for an unknown type: do not loop between `search` and `lookup` on
+that hint, correct the type instead. An untyped `lookup` of an identifier
+published under several types returns one unit and, from 2.1.1, names every
+type in `_meta.ambiguous_types`; pass the intended `type` rather than trusting
+the single unit returned.
+
 Woods 2.0.0 can omit schema classes, resolvers inherited through application
 superclasses, and runtime types owned by additional schemas (#558, #562, #563).
 The fixes are **included in Woods 2.1**; check the writer's loaded
@@ -534,6 +543,14 @@ isolation is included in Woods `2.0.0`: verify a patched installed revision
 before relying on it. Prefer `bundle exec rake woods:console`; direct Rails
 runner invocation cannot capture output already emitted during Rails boot.
 See the [Console logging diagnosis](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONSOLE_MCP_SETUP.md#rails-logs-break-mcp-protocol).
+
+A stdio server that exits with status 1 right after one request, with
+`Encoding::CompatibilityError` or `EncodingError` on stderr, received a frame
+that is not valid UTF-8 (a byte-passthrough bridge or a non-conforming client).
+Included in Woods `2.1.1`: both stdio servers answer such a frame with JSON-RPC
+`-32700` plus one `[woods stdio] rejected frame` line on stderr and keep serving;
+verify the installed revision before relying on it, and fix the client either way,
+since the frame is refused, not repaired.
 
 For MySQL SQL refusals, inspect the executing session's `sql_mode` and the installed version's Console guide. Do not change quote modes to bypass a security refusal.
 

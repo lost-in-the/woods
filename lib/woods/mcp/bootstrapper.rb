@@ -129,7 +129,8 @@ module Woods
       #   4. Hydrate in-memory stores from dumps (stubs in PR 2; real in PR 3).
       #   5. Probe the provider. If reachable, state :hydrated. If unreachable,
       #      state :degraded — retriever is still returned, queries will
-      #      retry on first use.
+      #      retry on first use. With no provider at all the state is
+      #      :not_configured (terminal, with a reason) and the retriever nil.
       #
       # Config-invalid failures raise typed BootstrapError subclasses;
       # exe/woods-mcp's top-level catches them and prints a one-line
@@ -154,13 +155,24 @@ module Woods
 
         artifact = build_artifact(index_dir)
         if static_source_map_without_embeddings?(artifact)
+          refuse_static_map_under_require_index!(artifact)
           state.mark(:degraded, reason: Woods::Error.new('static source map has no embedding artifact'))
           return [nil, state]
         end
         config, _source = ConfigResolver.resolve(Woods.configuration,
                                                  artifact: artifact,
                                                  ollama_probe: method(:ollama_reachable?))
-        return [nil, state] unless config.embedding_provider
+        unless config.embedding_provider
+          # Terminal by design: the server serves pattern/structural tools
+          # only. Leaving the state at :hydrating here made woods_status
+          # report a boot that never finished (N-mcp-5).
+          state.mark(:not_configured, reason: Woods::Error.new(
+            'no embedding provider configured and no woods.json snapshot; semantic retrieval is not ' \
+            'configured. Pattern and structural tools stay available; run woods:embed, or set ' \
+            'WOODS_RETRIEVAL_MODE=lexical for ranked discovery without embeddings.'
+          ))
+          return [nil, state]
+        end
 
         # Build the provider once so {ResolvedConfig.from_configuration} can
         # probe +provider.dimensions+ — without this, Ollama's runtime-only
@@ -174,7 +186,7 @@ module Woods
         # artifact to validate against.
         resolved = build_resolved_config(config)
         state.resolved_config = resolved
-        retriever = build_retriever_from_config(config, resolved, artifact, state)
+        retriever = build_stores_or_fail(config, resolved, artifact, state)
         probe_and_mark_state(config, state)
         derive_state_from_store_health(state)
         corpus = retriever.corpus_status(include_types: false) if retriever.respond_to?(:corpus_status)
@@ -189,7 +201,10 @@ module Woods
         state.mark(:hydrating)
         retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir,
                                                   default_budget: Woods.configuration.max_context_tokens)
-        retriever.warmup!
+        # Not warmed here: {Server.build} binds its own reader, which clears
+        # any snapshot built against this one, and warms the retriever once
+        # after binding. Warming twice cost a second corpus build on the
+        # first codebase_retrieve (F17).
         state.mark(:hydrated)
         warn '[woods-mcp] lexical retrieval: hydrated (published extraction units; no embeddings)'
         [retriever, state]
@@ -197,6 +212,28 @@ module Woods
         raise BootstrapError, "lexical index could not be loaded: #{e.class}: #{e.message}"
       end
       private_class_method :build_lexical_retriever
+
+      # +WOODS_REQUIRE_INDEX=1+ demands a real embedding index. A static source
+      # map (+woods:self_map+, {Woods::GemMapper}) never carries one, so strict
+      # mode must refuse it here: the static-map early return in
+      # {.build_retriever} sits above {ConfigResolver.resolve}, which is where
+      # every other index is held to the flag (N-mcp-5).
+      #
+      # @param artifact [Woods::IndexArtifact]
+      # @param env [Hash] environment to read +WOODS_REQUIRE_INDEX+ from
+      # @return [void]
+      # @raise [Woods::MCP::MissingArtifact] when strict mode is on
+      def self.refuse_static_map_under_require_index!(artifact, env = ENV)
+        return unless env['WOODS_REQUIRE_INDEX'] == '1'
+
+        raise MissingArtifact.new(
+          'WOODS_REQUIRE_INDEX=1 demands a real index, but this is a static source map with no ' \
+          'embedding artifact (woods.json). Run `bundle exec rake woods:extract` then `woods:embed` in ' \
+          'the host app, or unset WOODS_REQUIRE_INDEX to serve pattern/structural tools from the static map.',
+          details: { output_dir: artifact.output_dir.to_s }
+        )
+      end
+      private_class_method :refuse_static_map_under_require_index!
 
       def self.static_source_map_without_embeddings?(artifact)
         return false unless artifact
@@ -752,6 +789,27 @@ module Woods
         IndexArtifact.new(dir) if dir
       end
       private_class_method :build_artifact
+
+      UNKNOWN_STORE_MESSAGE = /\AUnknown (?:vector|metadata|graph)_store: /
+
+      # A store type the Builder cannot construct is a configuration fault (a
+      # hand-edited woods.json, or a snapshot written before unset stores were
+      # defaulted), not a programming bug: surface it as the one-line operator
+      # message the exes print for BootstrapError instead of a backtrace. Every
+      # other ArgumentError keeps propagating.
+      def self.build_stores_or_fail(config, resolved, artifact, state)
+        build_retriever_from_config(config, resolved, artifact, state)
+      rescue ArgumentError => e
+        raise unless e.message.match?(UNKNOWN_STORE_MESSAGE)
+
+        raise BootstrapError.new(
+          "#{e.message.strip}: woods.json or the host configuration names a store adapter this gem cannot " \
+          'build. Re-run woods:embed, or set vector_store, metadata_store and graph_store explicitly.',
+          details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
+                               graph_store: config.graph_store } }
+        )
+      end
+      private_class_method :build_stores_or_fail
 
       def self.build_retriever_from_config(config, resolved, artifact, state = nil)
         builder = Woods::Builder.new(config)

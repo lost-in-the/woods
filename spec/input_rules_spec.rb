@@ -5,6 +5,9 @@ require 'woods/extractor'
 require 'woods/input_rules'
 require 'woods/hooks/rule_projection'
 require 'open3'
+require 'tmpdir'
+require 'fileutils'
+require 'json'
 
 RSpec.describe Woods::InputRules do
   subject(:rules) { described_class.new }
@@ -27,6 +30,51 @@ RSpec.describe Woods::InputRules do
     %w[README.md docs/guide.md tmp/output.json spec/README.md vendor/package.yml].each do |path|
       expect(rules.action(path)).to eq(:ignore), path
     end
+  end
+
+  it 'treats Ruby under a declared source root as incremental input, removals as full (F15)' do
+    declared = described_class.new(extra_roots: %w[domain packs/billing])
+    expect(declared.action('domain/billing/ledger.rb')).to eq(:incremental)
+    expect(declared.action('packs/billing/app/models/invoice.rb')).to eq(:incremental)
+    expect(declared.action('domain/billing/ledger.rb', operation: 'delete')).to eq(:full)
+    expect(declared.action('domain/README.md')).to eq(:ignore)
+    expect(declared.action('domains/other.rb')).to eq(:ignore)
+    expect(rules.action('domain/billing/ledger.rb')).to eq(:ignore)
+  end
+
+  it 'reads declared roots from the published index manifest, and none from a missing or odd one' do
+    Dir.mktmpdir('woods-input-rules-index') do |dir|
+      expect(described_class.for_index(dir).extra_roots).to eq([])
+
+      payload = File.join(dir, 'payloads', 'gen-1')
+      FileUtils.mkdir_p(payload)
+      File.write(File.join(dir, 'generation.json'),
+                 JSON.generate('number' => 1, 'token' => 'abc', 'payload' => 'payloads/gen-1'))
+      File.write(File.join(payload, 'source_inputs.json'), JSON.generate('extra_roots' => ['domain']))
+      expect(described_class.for_index(dir).extra_roots).to eq(['domain'])
+      expect(described_class.for_index(dir).action('domain/billing/ledger.rb')).to eq(:incremental)
+
+      File.write(File.join(payload, 'source_inputs.json'), JSON.generate('extra_roots' => 'domain'))
+      expect(described_class.for_index(dir).extra_roots).to eq([])
+      File.write(File.join(payload, 'source_inputs.json'), '{not json')
+      expect(described_class.for_index(dir).extra_roots).to eq([])
+    end
+  end
+
+  it 'lets the portable predicate honour declared roots handed over in WOODS_DECLARED_ROOTS' do
+    declared = described_class.new(extra_roots: %w[domain packs/billing])
+    paths = %w[domain/billing/ledger.rb domain/README.md packs/billing/app/models/invoice.rb domains/other.rb
+               app/models/post.rb]
+    script = 'source "$1"; shift; for path in "$@"; do woods_input_action "$path"; printf "\\n"; done'
+    projection = File.expand_path('../plugin/hooks/woods-input-rules.sh', __dir__)
+    out, err, status = Open3.capture3({ 'WOODS_DECLARED_ROOTS' => 'domain:packs/billing' },
+                                      'bash', '-c', script, '--', projection, *paths)
+    expect(status).to be_success, err
+    expect(out.lines.map(&:strip)).to eq(paths.map { |path| declared.action(path).to_s })
+    with_operation = 'source "$1"; woods_input_action "$2" "$3"'
+    out, = Open3.capture3({ 'WOODS_DECLARED_ROOTS' => 'domain' }, 'bash', '-c', with_operation, '--', projection,
+                          'domain/billing/ledger.rb', 'delete')
+    expect(out.strip).to eq('full')
   end
 
   it 'keeps the portable plugin rules identical to their generated projection' do

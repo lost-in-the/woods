@@ -23,9 +23,11 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
           recall: 1.0,
           mrr: 1.0,
           context_completeness: 1.0,
-          token_efficiency: 0.6667
+          unit_precision: 0.6667,
+          token_efficiency: 0.15
         },
-        tokens_used: 500
+        tokens_used: 500,
+        token_efficiency_basis: :rendered_tokens
       ),
       Woods::Evaluation::Evaluator::QueryResult.new(
         query: 'Trace order creation',
@@ -37,9 +39,11 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
           recall: 0.5,
           mrr: 1.0,
           context_completeness: 0.5,
+          unit_precision: 0.5,
           token_efficiency: 0.5
         },
-        tokens_used: 300
+        tokens_used: 300,
+        token_efficiency_basis: :unit_precision
       )
     ]
   end
@@ -51,7 +55,8 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
       mean_recall: 0.75,
       mean_mrr: 1.0,
       mean_context_completeness: 0.75,
-      mean_token_efficiency: 0.5833,
+      mean_unit_precision: 0.5833,
+      mean_token_efficiency: 0.325,
       total_queries: 2,
       mean_tokens_used: 400.0
     }
@@ -60,7 +65,8 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
   let(:report) do
     Woods::Evaluation::Evaluator::EvaluationReport.new(
       results: query_results,
-      aggregates: aggregates
+      aggregates: aggregates,
+      token_efficiency_basis: :mixed
     )
   end
 
@@ -110,7 +116,15 @@ RSpec.describe Woods::Evaluation::ReportGenerator do
       json = generator.generate(report)
       data = JSON.parse(json)
 
-      expect(data['aggregates']['mean_token_efficiency']).to eq(0.5833)
+      expect(data['aggregates']['mean_unit_precision']).to eq(0.5833)
+    end
+
+    it 'serializes the token efficiency basis per query and per report' do
+      data = JSON.parse(generator.generate(report))
+
+      expect(data['results'].map { |r| r['token_efficiency_basis'] }).to eq(%w[rendered_tokens unit_precision])
+      expect(data['token_efficiency_basis']).to eq('mixed')
+      expect(data['aggregates']).not_to have_key('token_efficiency_basis')
     end
 
     it 'includes custom metadata' do

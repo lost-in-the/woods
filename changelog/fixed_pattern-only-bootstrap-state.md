@@ -1,0 +1,1 @@
+- A pattern-only Index Server boot (no embedding provider, no `woods.json`) now ends in a terminal `not_configured` bootstrap state with a reason in `woods_status`, instead of reporting `hydrating` forever; `WOODS_REQUIRE_INDEX=1` now also refuses a static source map, which previously bypassed the check.

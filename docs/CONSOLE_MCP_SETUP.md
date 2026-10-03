@@ -15,7 +15,7 @@ The Console MCP Server gives MCP-capable coding tools and agents live access to 
 
 ## Option A: Stdio via Rake (recommended)
 
-The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. All queries run in-process via ActiveRecord, no separate bridge process needed.
+The simplest setup. The `woods:console` rake task boots Rails, then starts the embedded MCP server using stdio transport. The transport is `Woods::Console::StdioTransport`, which keeps protocol writes off the application's stdout and, from Woods `2.1.1`, answers a frame that is not valid UTF-8 with a JSON-RPC parse error instead of exiting (see [Malformed stdio frames](MCP_SERVERS.md#malformed-stdio-frames)). All queries run in-process via ActiveRecord, no separate bridge process needed.
 
 ### Prerequisites
 

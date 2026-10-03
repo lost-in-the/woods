@@ -2095,6 +2095,39 @@ RSpec.describe Woods::Extractor do
         expect(reconcile).to be_empty
       end
 
+      # N-ra-2: a once-owned subclass keeps its pre-reload base after a
+      # main-loader reload, drops out of `descendants`, and is pruned here on a
+      # cycle in which no once-owned file changed. The prune is still what a
+      # full extraction in this process produces; what was missing is the
+      # signal that a constant the process can still resolve lost its unit.
+      it 'records a pruned unit whose constant still resolves, as a diagnostic (N-ra-2)' do
+        stub_const('Sidecar', Class.new)
+        warnings = []
+        allow(Rails.logger).to receive(:warn) { |message| warnings << message }
+
+        expect(reconcile).to contain_exactly('Sidecar')
+        expect(extractor.pruned_resolvable_classes).to contain_exactly(
+          a_hash_including(identifier: 'Sidecar', type: :model, reason: a_string_matching(/still resolves/))
+        )
+        expect(warnings).to include(a_string_matching(/Sidecar.*still resolves/))
+      end
+
+      it 'names the once loader when it owns the pruned class' do
+        stub_const('Sidecar', Class.new)
+        once = double('once loader')
+        allow(once).to receive(:cpath_expected_at).and_return('Sidecar')
+        allow(Rails).to receive(:autoloaders).and_return(double('Autoloaders', once: once))
+
+        reconcile
+
+        expect(extractor.pruned_resolvable_classes.first[:reason]).to match(/once-owned/)
+      end
+
+      it 'records nothing for a pruned unit whose constant is gone' do
+        expect(reconcile).to contain_exactly('Sidecar')
+        expect(extractor.pruned_resolvable_classes).to eq([])
+      end
+
       # A factory named `Sidecar` is a second node under the same identifier,
       # not a replacement for the model node. Removing the stale model must
       # take that node and only that node.

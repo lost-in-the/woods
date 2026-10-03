@@ -64,6 +64,69 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(search(exact_name).first.identifier).to eq(target)
   end
 
+  # F6 step 2. A scoped request used to build a whole new index over the
+  # eligible records, re-reading and re-tokenising every one of them per
+  # request (4.8 s for a 6,130-unit scope on the self-map). A view over this
+  # index's own documents answers exactly what that rebuilt index did: the
+  # BM25 statistics are recomputed over the subset, the documents are shared.
+  it 'answers a restricted view exactly like an index built over the subset, without re-reading the store' do
+    billing = add('Invoice', source: 'charge the customer ledger', path: 'packs/billing/app/models/invoice.rb')
+    add('Ledger', source: 'ledger ledger entries', path: 'packs/billing/app/models/ledger.rb')
+    add('Shipment', source: 'ledger of parcels', path: 'packs/shipping/app/models/shipment.rb')
+    index = described_class.new(metadata_store: store)
+    subset = Woods::Storage::MetadataStore::InMemory.new
+    [billing, Woods::StorageIdentity.key('Ledger', 'model')].each { |key| subset.store(key, store.find(key)) }
+    direct = described_class.new(metadata_store: subset)
+    allow(store).to receive(:find).and_call_original
+
+    view = index.restricted_to(subset.all_identifiers)
+
+    expect(store).not_to have_received(:find)
+    %w[ledger customer parcels Invoice].each do |query|
+      shape = ->(result) { result.candidates.map { |c| [c.identifier, c.score, c.matched_fields, c.metadata] } }
+      expect(shape.call(view.execute(query: query))).to eq(shape.call(direct.execute(query: query)))
+    end
+    # Statistics are the subset's: "ledger" is rarer in the full index than in the view.
+    full_score = index.execute(query: 'ledger').candidates.find { |c| c.identifier == billing }.score
+    view_score = view.execute(query: 'ledger').candidates.find { |c| c.identifier == billing }.score
+    expect(view_score).not_to eq(full_score)
+    expect(view.execute(query: 'parcels').candidates).to be_empty
+  end
+
+  # The restricted view derives its statistics either by recounting the
+  # subset or, when the subset is most of the index, by subtracting the
+  # excluded documents from the full-index tallies. Both must equal a fresh
+  # index over the subset, including for a term only the excluded document
+  # carried and for one whose rarity the exclusion changes.
+  it 'derives majority and minority views by the same statistics as a fresh index over the subset' do
+    keys = [add('Invoice', source: 'charge the customer ledger'),
+            add('Ledger', source: 'ledger ledger entries'),
+            add('Payment', source: 'customer payment entries'),
+            add('Refund', source: 'refund the customer'),
+            add('Shipment', source: 'ledger of parcels')]
+    index = described_class.new(metadata_store: store)
+    shape = ->(result) { result.candidates.map { |c| [c.identifier, c.score, c.matched_fields, c.metadata] } }
+    [keys.first(4), keys.first(2)].each do |subset|
+      eligible = Woods::Storage::MetadataStore::InMemory.new
+      subset.each { |key| eligible.store(key, store.find(key)) }
+      fresh = described_class.new(metadata_store: eligible)
+      view = index.restricted_to(subset)
+      %w[ledger parcels customer entries Invoice refund].each do |query|
+        expect(shape.call(view.execute(query: query))).to eq(shape.call(fresh.execute(query: query)))
+      end
+      expect(view.execute(query: 'parcels').candidates).to be_empty
+    end
+  end
+
+  it 'exposes its immutable units by key for a shared scope corpus' do
+    key = add('Invoice', source: 'charge', path: 'app/models/invoice.rb')
+    index = described_class.new(metadata_store: store)
+    expect(index.units.keys).to eq([key])
+    expect(index.units).to be_frozen
+    expect(index.units.fetch(key)).to be_frozen
+    expect(index.units.fetch(key)).to equal(index.execute(query: 'charge').candidates.first.metadata)
+  end
+
   it 'retains an immutable snapshot when the underlying store changes' do
     key = add('Record', source: 'oldword')
     index = described_class.new(metadata_store: store)

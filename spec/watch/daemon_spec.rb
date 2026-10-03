@@ -21,7 +21,9 @@ RSpec.describe Woods::Watch::Daemon do
       allow(double).to receive(:extract_all) { publish_generation('full') && {} }
     end
   end
-  let(:reloader) { instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true) }
+  let(:reloader) do
+    instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false)
+  end
 
   after { FileUtils.rm_rf([root, output_dir]) }
 
@@ -51,17 +53,21 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
-  def publish_generation(reason, payload: nil)
+  def publish_generation(reason, payload: nil, extra_roots: [])
     generation = Woods::Generation.new(output_dir: output_dir)
     key = Woods::SourceInputs::PrivateKey.new(output_dir: output_dir, create: true)
-    snapshot = Woods::SourceInputs::Scanner.new(root: root, output_dir: output_dir, key: key).call
+    scopes = Woods::SourceInputs::Scopes.new(extra_roots: extra_roots)
+    snapshot = Woods::SourceInputs::Scanner.new(root: root, output_dir: output_dir, key: key, scopes: scopes).call
+    manifest = build_manifest(snapshot, generation.current.number + 1)
+    File.write(File.join(output_dir, payload || '', 'source_inputs.json'), JSON.generate(manifest.data))
+    generation.bump!(reason: reason, payload: payload)
+  end
+
+  def build_manifest(snapshot, number)
     scopes = snapshot.fetch('scope_paths').transform_values do |paths|
       paths.to_h { |path| [path, snapshot.fetch('files').fetch(path)] }
     end
-    manifest = Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: scopes, boot_verified: true,
-                                                   generation: generation.current.number + 1)
-    File.write(File.join(output_dir, payload || '', 'source_inputs.json'), JSON.generate(manifest.data))
-    generation.bump!(reason: reason, payload: payload)
+    Woods::SourceInputs::Manifest.build(snapshot: snapshot, scopes: scopes, boot_verified: true, generation: number)
   end
 
   def touch(relative)
@@ -128,6 +134,31 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  describe 'declared source roots (F15, N-ra-1)' do
+    it 'reloads and extracts a Ruby file under a root the published index declares, on its own' do
+      publish_generation('full', extra_roots: ['domain'])
+      touch('domain/billing/ledger.rb')
+
+      result = build.process(['domain/billing/ledger.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(reloader).to have_received(:reload!)
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(a_string_ending_with('domain/billing/ledger.rb'))
+      end
+    end
+
+    it 'still ignores the same path when the index declares no such root' do
+      publish_generation('full')
+      touch('domain/billing/ledger.rb')
+
+      result = build.process(['domain/billing/ledger.rb'])
+
+      expect(result[:action]).to eq(:ignore)
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+  end
+
   describe 'restart triggers' do
     it 'refuses to extract when boot-captured state changed' do
       result = build.process(['config/initializers/redis.rb'])
@@ -147,11 +178,89 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reloader).not_to have_received(:reload!)
     end
 
+    it 'restarts for an edit the once loader owns, since reload! never touches that constant (F14)' do
+      allow(reloader).to receive(:once_owned?).with(File.join(root, 'app/once/setting.rb')).and_return(true)
+
+      result = build.process(['app/once/setting.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('autoload_once_paths', 'app/once/setting.rb')
+      expect(reloader).not_to have_received(:reload!)
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'names the changed paths when the restart comes from reloading being disabled' do
+      allow(reloader).to receive(:enabled?).and_return(false)
+
+      result = build.process(['app/models/user.rb'])
+
+      expect(result[:reason]).to include('reloading disabled', 'app/models/user.rb')
+    end
+
+    it 'restarts for a config Ruby helper this process loaded at boot, naming it (F3)' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/time_zone.rb']
+
+      result = daemon.process(['config/time_zone.rb'])
+
+      expect(result[:action]).to eq(:restart)
+      expect(result[:reason]).to include('config/time_zone.rb')
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'keeps the policy answer for a loaded file the policy classifies itself (routes reload, not restart)' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/routes.rb', 'config/time_zone.rb']
+
+      result = daemon.process(['config/routes.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(reloader).to have_received(:reload!)
+    end
+
+    it 'still ignores a config Ruby helper this process never loaded' do
+      daemon = build
+      daemon.loaded_boot_paths = ['config/time_zone.rb']
+
+      result = daemon.process(['config/other_helper.rb'])
+
+      expect(result[:action]).to eq(:ignore)
+    end
+
     it 'records the restart in the status file so a reader can see why' do
       build.process(['Gemfile.lock'])
 
       expect(status['state']).to eq('degraded')
       expect(status['reason']).to include('restart required')
+    end
+  end
+
+  describe 'reconciliation diagnostics (N-ra-2)' do
+    let(:pruned) do
+      [{ identifier: 'LegacyController', type: :controller,
+         reason: 'still resolves; once-owned subclass of a base the main loader reloaded' }]
+    end
+
+    it 'reports a degraded cycle naming a pruned unit whose class still resolves' do
+      allow(extractor).to receive(:pruned_resolvable_classes).and_return(pruned)
+
+      result = build.process(['app/models/post.rb'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController', 'once-owned', 'restart')
+    end
+
+    it 'keeps reporting the pruned unit on later cycles, since none of them restores it' do
+      allow(extractor).to receive(:pruned_resolvable_classes).and_return(pruned, [])
+      daemon = build
+
+      daemon.process(['app/models/post.rb'])
+      result = daemon.process(['app/models/comment.rb'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(result[:reason]).to include('LegacyController')
     end
   end
 
@@ -600,6 +709,27 @@ RSpec.describe Woods::Watch::Daemon do
       expect(extractor).to have_received(:extract_changed) do |paths|
         expect(paths).to include(a_string_ending_with('app/services/before_the_daemon.rb'))
       end
+    end
+
+    it 'fully reconciles a once-owned edit the boot snapshot covers, like any restart trigger (F14)' do
+      touch('app/once/setting.rb')
+      allow(reloader).to receive(:once_owned?).with(a_string_ending_with('app/once/setting.rb')).and_return(true)
+
+      result = build(watcher: fake_watcher, catch_up: true).run
+
+      expect(result).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'requires a restart for a once-owned edit made after the boot snapshot (F14)' do
+      allow(reloader).to receive(:once_owned?).with(a_string_ending_with('app/once/setting.rb')).and_return(true)
+      daemon = build(watcher: fake_watcher, catch_up: true)
+      touch('app/once/setting.rb')
+
+      expect(daemon.run).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_all)
+      expect(extractor).not_to have_received(:extract_changed)
     end
 
     it 'does nothing when every file predates the last successful extraction' do
@@ -1497,6 +1627,44 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(Woods::Watch::Watcher).to have_received(:build)
         .with(hash_including(ignored: array_including('.woods'), force_polling: true, poll_interval: 2.5))
+    end
+  end
+  describe Woods::Watch::Daemon::RailsReloader do
+    subject(:rails_reloader) { described_class.new }
+
+    let(:once_root) { File.join(root, 'app', 'once') }
+    let(:owned) { File.join(once_root, 'setting.rb') }
+    let(:config) { double('Config', autoload_once_paths: [once_root]) }
+
+    def stub_rails(once_loader)
+      autoloaders = double('Autoloaders', once: once_loader)
+      stub_const('Rails', double('Rails', application: double('Application', config: config), autoloaders: autoloaders))
+    end
+
+    it 'asks the once loader for the path where cpath_expected_at exists' do
+      loader = double('once loader')
+      allow(loader).to receive(:cpath_expected_at) { |path| path == owned ? 'Setting' : nil }
+      stub_rails(loader)
+
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+      expect(rails_reloader.once_owned?(File.join(root, 'app/models/user.rb'))).to be(false)
+    end
+
+    it 'falls back to the configured once paths below Zeitwerk 2.6.2 or when the file is gone' do
+      stub_rails(double('zeitwerk 2.2 loader'))
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+      expect(rails_reloader.once_owned?(File.join(root, 'app/models/user.rb'))).to be(false)
+
+      raising = double('once loader')
+      allow(raising).to receive(:cpath_expected_at).and_raise(StandardError, 'does not exist')
+      stub_rails(raising)
+      expect(rails_reloader.once_owned?(owned)).to be(true)
+    end
+
+    it 'answers false without a booted application' do
+      stub_const('Rails', double('Rails', application: nil))
+
+      expect(rails_reloader.once_owned?(owned)).to be(false)
     end
   end
 end

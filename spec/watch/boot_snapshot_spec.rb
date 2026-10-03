@@ -48,6 +48,21 @@ RSpec.describe Woods::Watch::BootSnapshot do
     expect { snapshot.covers?('Gemfile.lock') }.to raise_error(Errno::EACCES)
   end
 
+  # The policy ignores a generic config helper, but the daemon restarts for
+  # one it loaded at boot; without a fingerprint a supervisor restart would
+  # not reconcile it and the daemon would exit 75 over the same file forever.
+  it 'fingerprints config Ruby helpers the policy ignores, so a boot can cover them (F3)' do
+    helper = File.join(@root, 'config', 'time_zone.rb')
+    FileUtils.mkdir_p(File.dirname(helper))
+    File.write(helper, "Rails.application.config.time_zone = 'UTC'\n")
+    snapshot = described_class.new(root: @root)
+
+    expect(snapshot.covers?('config/time_zone.rb')).to be(true)
+    File.write(helper, "Rails.application.config.time_zone = 'Hawaii'\n")
+    expect(snapshot.covers?('config/time_zone.rb')).to be(false)
+    expect(snapshot.changed_paths).to eq([helper])
+  end
+
   it 'covers unchanged inputs and ignores files that do not require a reload' do
     path = File.join(@root, 'Gemfile.lock')
     File.write(path, '# unchanged')

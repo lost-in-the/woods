@@ -41,7 +41,7 @@ module Woods
     #     model_validator: validator,
     #     safe_context: safe_context
     #   )
-    #   transport = MCP::Server::Transports::StdioTransport.new(server)
+    #   transport = Woods::Console::StdioTransport.new(server, output: $stdout.dup)
     #   transport.open
     #
     module Server # rubocop:disable Metrics/ModuleLength

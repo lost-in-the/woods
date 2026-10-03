@@ -90,6 +90,26 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
       expect(async_ops.map { |o| o[:method] }).to eq(%w[perform_async perform_later perform_in perform_at])
     end
 
+    it 'extracts an async enqueue nested in another call\'s arguments, and nothing else nested (F5)' do
+      source = <<~RUBY
+        def create
+          Audit.record(NotifyJob.perform_later(user.id), user.name)
+          Audit.record(wrap(MailJob.perform_async(user.id)))
+        end
+      RUBY
+
+      ops = extract_method_ops(source, 'create')
+
+      expect(ops.map { |o| [o[:type], o[:target], o[:method]] }).to eq(
+        [
+          [:call, 'Audit', 'record'],
+          [:async, 'NotifyJob', 'perform_later'],
+          [:call, 'Audit', 'record'],
+          [:async, 'MailJob', 'perform_async']
+        ]
+      )
+    end
+
     it 'extracts response calls' do
       source = <<~RUBY
         def show

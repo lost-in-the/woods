@@ -1,0 +1,1 @@
+- Run the ablation timed-executor descendant fixtures without the Bundler `RUBYOPT` the test process hands every child interpreter, and budget the two interpreter starts they need; the examples assert process cleanup, not startup speed, and no longer fail on a host where `bundler/setup` costs a quarter second per start.

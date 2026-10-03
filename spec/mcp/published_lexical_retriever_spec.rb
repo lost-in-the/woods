@@ -195,6 +195,58 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     expect(retriever.retrieve('oldword').context).to include('oldword')
   end
 
+  # F17: the bootstrapper used to warm a reader the server replaced at bind,
+  # so the first codebase_retrieve paid a second corpus build (4-6 s on a
+  # 6,000-unit index). The server now binds its reader and then warms once.
+  it 'builds the lexical corpus once from bootstrap to the first answer' do
+    Woods.configuration.retrieval_mode = :lexical
+    publish_payload('one', 'class Post; def payment; "published_original"; end; end')
+    builds = 0
+    allow(Woods::Retrieval::LexicalIndex).to receive(:new).and_wrap_original do |original, **kwargs|
+      builds += 1
+      original.call(**kwargs)
+    end
+    built, state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+    expect(state.status).to eq(:hydrated)
+    server = Woods::MCP::Server.build(index_dir: index_dir, retriever: built)
+    response = server.tools.fetch('codebase_retrieve').call(query: 'payment', server_context: {})
+    expect(response.error?).to be(false)
+    expect(response.content.first[:text]).to include('published_original')
+    expect(builds).to eq(1)
+  end
+
+  it 'leaves the corpus to the first request when the server is built without warmup' do
+    Woods.configuration.retrieval_mode = :lexical
+    publish_payload('one', 'class Post; def payment; "published_original"; end; end')
+    built, = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+    Woods::MCP::Server.build(index_dir: index_dir, retriever: built, warmup: false)
+    expect(built.snapshot).to be_nil
+    expect(built.retrieve('payment').context).to include('published_original')
+  end
+
+  # The public metadata_store is writable after warmup; binding the server's
+  # reader is the invalidation point that discards such a write. A scoped
+  # query builds its pipeline from the metadata store, so it must be covered
+  # alongside the unscoped one (an identity-preserving bind passed only the
+  # latter).
+  it 'discards a public metadata_store write made before bind for scoped and unscoped retrieval alike' do
+    publish_payload('one', 'class Post; def payment; "published_original"; end; end')
+    retriever.warmup!
+    key = Woods::StorageIdentity.key('Post', 'model')
+    replacement = retriever.metadata_store.find(key)
+                           .merge('source_code' => 'class Post; def payment; "caller_mutation"; end; end')
+    retriever.metadata_store.store(key, replacement)
+    server = Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever)
+    tool = server.tools.fetch('codebase_retrieve')
+    scoped = tool.call(query: 'payment', budget: 2000, source_paths: ['app/models/post.rb'], server_context: {})
+    unscoped = tool.call(query: 'payment', budget: 2000, server_context: {})
+    [scoped, unscoped].each do |response|
+      expect(response.error?).to be(false)
+      expect(response.content.first[:text]).to include('published_original')
+      expect(response.content.first[:text]).not_to include('caller_mutation')
+    end
+  end
+
   it 'fails explicit lexical bootstrap when the published manifest is absent' do
     Woods.configuration.retrieval_mode = :lexical
     FileUtils.rm(File.join(index_dir, 'manifest.json'))

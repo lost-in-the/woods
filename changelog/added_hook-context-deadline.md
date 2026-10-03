@@ -1,0 +1,1 @@
+- Add `WOODS_HOOK_CONTEXT_DEADLINE_MS` (integer 100–5000, default 850) so a host where the context helper's startup needs more headroom can raise the plugin hook's private deadline; the helper's inner deadline follows at three quarters of it. The hook spec now drives the helper with the client shell's environment.

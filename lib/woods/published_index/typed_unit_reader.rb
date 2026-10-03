@@ -1,36 +1,18 @@
 # frozen_string_literal: true
 
-require 'digest'
-require 'json'
-
 module Woods
   class PublishedIndex
-    # Reads one type's unit file directly from a pinned payload, bypassing
-    # {Woods::MCP::IndexReader#find_unit}'s identifier-only map, which lets a
-    # later `TYPE_DIRS` entry silently overwrite an earlier one when two
-    # types share an identifier.
+    # Maps the type names {PublishedIndex#units} accepts onto the reader's
+    # type directories and labels index entries with each unit's actual type.
+    #
+    # Unit bodies are read through {Woods::MCP::IndexReader#find_unit} with
+    # +type:+, the one guarded typed-read path (F7); nothing here opens a
+    # payload file itself.
     #
     # Split out of {PublishedIndex} for the same reason as {EdgeShaper}: a
-    # pure function of the payload directory and the reader's own per-type
-    # index, with no need to touch the retention lock.
+    # pure function of the reader and its per-type index, with no need to
+    # touch the retention lock.
     module TypedUnitReader
-      # @param payload_dir [Pathname] the pinned generation's payload directory
-      # @param reader [Woods::MCP::IndexReader]
-      # @param identifier [String]
-      # @param type [String] singular type name
-      # @return [Hash, nil] string-keyed unit, or nil when this type has no
-      #   such identifier
-      def self.call(payload_dir, reader, identifier, type)
-        dir = directory_for(type)
-        return nil unless dir
-
-        family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
-        return nil unless reader.list_units(type: family).any? { |entry| entry['identifier'] == identifier }
-
-        unit = read_unit(payload_dir, dir, identifier)
-        unit if unit && (unit['type'] == type || type == family)
-      end
-
       # Resolve actual published types as well as historical directory-family aliases.
       #
       # @param type [String]
@@ -40,17 +22,35 @@ module Woods
           Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.find { |_, types| types.include?(type) }&.first
       end
 
+      # Read one unit through the reader's guarded typed path. A directory
+      # family (`graphql`; `rails_source`, which the MCP `lookup` tool treats
+      # as the unit type) selects any member, as {PublishedIndex} documents.
+      #
+      # @param reader [Woods::MCP::IndexReader]
+      # @param identifier [String]
+      # @param type [String] actual unit type or directory-family alias
+      # @return [Hash, nil]
+      # @raise [IOError] when the typed read fails the reader's guards
+      def self.call(reader, identifier, type)
+        if reader.unit_types_for(type).size > 1
+          reader.find_family_unit(identifier, type)
+        else
+          reader.find_unit(identifier, type: type)
+        end
+      end
+
       # Preserve subtype identity in an index entry from a shared type directory.
       #
-      # @param payload_dir [Pathname]
+      # @param reader [Woods::MCP::IndexReader]
       # @param entry [Hash] published index entry
       # @param dir [String] type directory
       # @param requested_type [String, nil] actual type or family alias
       # @return [Hash, nil] entry with actual type, or nil when filtered out
-      def self.entry(payload_dir, entry, dir, requested_type)
+      # @raise [IOError] when a multi-type directory's unit fails the reader's guards
+      def self.entry(reader, entry, dir, requested_type)
         family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
         actual_type = if Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch(dir).size > 1
-                        read_unit(payload_dir, dir, entry['identifier'])&.fetch('type')
+                        call(reader, entry['identifier'], family)&.fetch('type')
                       else
                         family
                       end
@@ -59,27 +59,6 @@ module Woods
 
         entry.merge('type' => actual_type)
       end
-
-      # Read a unit whose directory-index membership has already been established.
-      def self.read_unit(payload_dir, dir, identifier)
-        path = payload_dir.join(dir, filename_for(identifier))
-        return nil unless path.file?
-
-        JSON.parse(path.binread.force_encoding(Encoding::UTF_8))
-      end
-
-      # The on-disk filename for a unit, matching
-      # `Woods::MCP::IndexReader#build_identifier_map`'s naming exactly.
-      #
-      # @param identifier [String]
-      # @return [String]
-      def self.filename_for(identifier)
-        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-        digest = Digest::SHA256.hexdigest(identifier)[0, 8]
-        "#{base}_#{digest}.json"
-      end
-
-      private_class_method :filename_for, :read_unit
     end
   end
 end

@@ -295,6 +295,69 @@ RSpec.describe Woods::Embedding::Indexer do
       expect(metadata_store.find('User#chunk_0')).to be_nil
     end
 
+    # N-ip-3. One metadata-store transaction per embed batch: SQLite then pays
+    # one journal commit per batch rather than one autocommit per record (the
+    # fsync-per-row cost F18 measured), and a batch whose embedding fails
+    # after its records were stored rolls them back.
+    describe 'batch transactions' do
+      let(:recording_store_class) do
+        Class.new do
+          attr_reader :log
+
+          def initialize
+            @log = []
+            @records = {}
+          end
+
+          def transaction
+            @log << :begin
+            result = yield
+            @log << :commit
+            result
+          end
+
+          def store(id, metadata)
+            @log << [:store, id]
+            @records[id] = metadata
+          end
+
+          def find(id) = @records[id]
+          def count = @records.size
+        end
+      end
+
+      it 'stores each batch inside one transaction' do
+        recording = recording_store_class.new
+        described_class.new(provider: provider, text_preparer: text_preparer, vector_store: vector_store,
+                            metadata_store: recording, output_dir: output_dir, batch_size: 1).index_all
+
+        expect(recording.log).to eq([:begin, [:store, 'PaymentService'], :commit,
+                                     :begin, [:store, 'User'], :commit])
+      end
+
+      it 'leaves no partial metadata rows when a batch fails after its records were stored' do
+        failing_second_batch = Class.new(stub_provider_class) do
+          def embed_batch(texts)
+            raise StandardError, 'provider down' if @embed_batch_calls == 1
+
+            super
+          end
+        end
+        sqlite = Woods::Storage::MetadataStore::SQLite.new(database: ':memory:')
+        third = second_unit_data.merge('identifier' => 'ZebraService', 'source_hash' => 'ghi789')
+        File.write(File.join(output_dir, 'zebra_service.json'), JSON.generate(third))
+        indexer = described_class.new(provider: failing_second_batch.new, text_preparer: text_preparer,
+                                      vector_store: vector_store, metadata_store: sqlite,
+                                      output_dir: output_dir, batch_size: 2)
+
+        expect { indexer.index_all }.to raise_error(Woods::Error, /Embedding failed/)
+
+        # Batch one (two units) committed; batch two (ZebraService) rolled back.
+        expect(sqlite.count).to eq(2)
+        expect(sqlite.find('ZebraService')).to be_nil
+      end
+    end
+
     it 'is a no-op when metadata_store is nil (pre-persistence-arc hosts)' do
       nil_indexer = described_class.new(
         provider: provider,

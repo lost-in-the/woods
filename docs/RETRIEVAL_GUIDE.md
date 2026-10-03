@@ -287,7 +287,10 @@ result.trace        # => RetrievalTrace with elapsed_ms, candidate_count, etc.
 `context`, including the optional formatter output and type-rank table. Counting
 uses the same injected token counter or chars-per-token estimate as assembly;
 it does not guarantee an exact count for the downstream model. `budget` limits
-context assembly, so postprocessing can make the final count exceed it.
+context assembly, so postprocessing can make the final count exceed it. Each
+source's `tokens` is the same estimate for the text rendered for that unit (the
+truncated text when it was cut to fit), so the per-source figures sum to at most
+the assembled context's count; `woods:evaluate` reads them for `token_efficiency`.
 
 Override the token budget per call:
 
@@ -467,6 +470,12 @@ retriever.retrieve('How are payments collected?', budget: 1200,
 These filters select eligible published units **before candidate limits**. Each
 list uses OR; package, path, and type restrictions combine with AND. Empty or
 omitted scope lists add no restriction. Existing unscoped calls keep their behavior.
+Eligibility resolves from a scope corpus the pipeline reads once (see
+[storage and cost](#storage-and-cost)), and in lexical mode a scoped request is
+answered by a view over the pipeline's existing index (the BM25 statistics are
+derived for the eligible units, the tokenised documents are shared), so a scoped
+request costs the eligibility pass plus the search, not a read of every record
+and a second index build.
 
 - **Packages:** exact, case-sensitive published nearest owners. A parent package
   excludes its nested packages unless both names are requested. `.` selects only
@@ -500,10 +509,31 @@ search means no match. A partial zero-match search remains inconclusive.
 
 ### Storage and cost
 
-Scope preparation reads the complete metadata snapshot from the selected store
-bundle. Packaged discovery and lexical retrieval keep that read and the query on
-one published generation. Discovery's deep-field scan budget applies to matching
-after scope preparation; it does **not** cap the initial metadata read.
+Scope preparation reads the complete metadata snapshot of the selected store
+bundle once into a scope corpus (`Woods::Retrieval::ScopeCorpus`: per record, its
+type, owning packages and physical paths), and every scoped request resolves its
+eligibility from that corpus. How long the corpus lives depends on the store:
+
+- **In-memory metadata store** (`metadata_store = :in_memory`: the
+  `:shared_filesystem` preset and the hydrated Index Server; `:local` uses
+  SQLite): the corpus also holds an immutable copy of each
+  record, answers the scoped pipeline's metadata reads through a read-only view,
+  and is kept while the store's `snapshot_version` is unchanged. In-place writes
+  advance the version; a reload swaps the whole pipeline and retires the corpus
+  with it. The copy costs roughly the metadata's size again in resident memory,
+  in place of the per-request copy of the eligible records it replaces.
+- **SQLite metadata store**: the adapter tracks no change version
+  (`snapshot_version` is nil), so every scoped request reads the store as before.
+- **Lexical mode**: the corpus shares the index's own immutable units and lives
+  as long as the pipeline.
+- **Index Server discovery** (`search`): the corpus holds facts only, read once
+  per loaded generation from every published unit and dropped with the reader's
+  other caches; deep-field matching reads candidate bodies the same bounded way
+  with or without a scope.
+
+Packaged discovery and lexical retrieval keep that read and the query on one
+published generation. Discovery's deep-field scan budget applies to matching
+after scope preparation; it does **not** cap the initial read.
 
 Vector search enumerates eligible raw vector IDs, including typed and chunk IDs,
 and searches every batch of at most 100 IDs before merging the best candidates.

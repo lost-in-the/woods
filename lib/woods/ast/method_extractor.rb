@@ -64,16 +64,29 @@ module Woods
       # A name defined more than once keeps its first definition, matching
       # {#extract_method_source}'s first-match lookup, so
       # `extract_method_sources(source)[name]` is byte-identical to
-      # `extract_method_source(source, name)` for every name.
+      # `extract_method_source(source, name)` for every name. A caller that
+      # knows which definition Ruby dispatches selects it through
+      # {#extract_method_definitions} instead.
       #
       # @param source [String] Ruby source code
       # @return [Hash{String => String}] method name => source text
       def extract_method_sources(source)
-        root = @parser.parse(source)
-        root.find_all(:def).each_with_object({}) do |node, map|
-          next if map.key?(node.method_name)
+        extract_method_definitions(source).each_with_object({}) do |((name, _line), text), map|
+          map[name] ||= text
+        end
+      end
 
-          map[node.method_name] = node.source || extract_source_span(source, node.line, node.end_line)
+      # Every `def` in the file keyed by `[name, line]`, in tree order, so a
+      # name defined more than once (a redefinition, two classes in one file,
+      # a `class << self` def beside an instance method of the same name) can
+      # be selected by the line Ruby's `source_location` reports (F5).
+      #
+      # @param source [String] Ruby source code
+      # @return [Hash{Array(String, Integer) => String}] [name, line] => source text
+      def extract_method_definitions(source)
+        root = @parser.parse(source)
+        root.find_all(:def).to_h do |node|
+          [[node.method_name, node.line], node.source || extract_source_span(source, node.line, node.end_line)]
         end
       end
     end

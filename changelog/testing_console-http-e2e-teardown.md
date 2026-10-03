@@ -1,0 +1,1 @@
+- Let the Console HTTP end-to-end teardown wait for TERM and then escalate to KILL instead of failing an already-passed example when a loaded host takes longer than ten seconds to drain the server; the TERM shutdown contract keeps its own example.

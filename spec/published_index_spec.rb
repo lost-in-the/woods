@@ -134,6 +134,16 @@ RSpec.describe Woods::PublishedIndex do
         .to raise_error(Woods::PublishedIndex::CorruptPointerError, /#{Regexp.escape(pointer_path)}/)
     end
 
+    it 'raises CorruptPointerError when generation.json parses but names no valid generation (F7)' do
+      pointer_path = File.join(@index_dir, 'generation.json')
+      File.write(pointer_path, JSON.generate('number' => 'two', 'payload' => 'payloads/gen-2'))
+
+      expect { described_class.available_generations(@index_dir) }
+        .to raise_error(Woods::PublishedIndex::CorruptPointerError, /#{Regexp.escape(pointer_path)}/)
+      expect { described_class.new(@index_dir) }
+        .to raise_error(Woods::PublishedIndex::CorruptPointerError, /#{Regexp.escape(pointer_path)}/)
+    end
+
     it 'releases the retention lock when construction fails after the lock is acquired' do
       allow(Woods::MCP::IndexReader).to receive(:new).and_raise(StandardError, 'boom')
 
@@ -244,6 +254,73 @@ RSpec.describe Woods::PublishedIndex do
         expect(index.table_database_map).to eq('foos' => 'primary')
 
         index.close
+      end
+    end
+  end
+
+  describe 'typed reads share the MCP reader guards (F7)' do
+    # Build a flat index with one model unit, then corrupt it in one way per
+    # example. Before F7, PublishedIndex read typed units through its own
+    # unguarded path and happily served every one of these.
+    def write_typed_fixture(dir)
+      File.write(File.join(dir, 'manifest.json'), JSON.generate('total_units' => 1))
+      model_dir = File.join(dir, 'models')
+      FileUtils.mkdir_p(model_dir)
+      File.write(File.join(model_dir, '_index.json'),
+                 JSON.generate([{ 'identifier' => 'Foo', 'file_path' => 'app/models/foo.rb', 'namespace' => nil }]))
+      File.write(File.join(model_dir, "Foo_#{Digest::SHA256.hexdigest('Foo')[0, 8]}.json"),
+                 JSON.generate('type' => 'model', 'identifier' => 'Foo', 'file_path' => 'app/models/foo.rb',
+                               'metadata' => { 'table_name' => 'foos' }))
+      model_dir
+    end
+
+    it 'refuses a type directory that is a symlink out of the payload' do
+      Dir.mktmpdir('woods-published-index-f7') do |dir|
+        model_dir = write_typed_fixture(dir)
+        outside = File.join(dir, 'outside')
+        FileUtils.mv(model_dir, outside)
+        File.symlink(outside, model_dir)
+
+        described_class.open(dir) do |index|
+          expect { index.unit('Foo', type: 'model') }.to raise_error(IOError, /symlink unit directory: models/)
+          expect { index.table_database_map }.to raise_error(IOError, /symlink unit directory: models/)
+        end
+      end
+    end
+
+    it 'refuses a unit file whose body carries another identifier' do
+      Dir.mktmpdir('woods-published-index-f7') do |dir|
+        model_dir = write_typed_fixture(dir)
+        File.write(File.join(model_dir, "Foo_#{Digest::SHA256.hexdigest('Foo')[0, 8]}.json"),
+                   JSON.generate('type' => 'model', 'identifier' => 'Someone::Else', 'source_code' => 'x'))
+
+        described_class.open(dir) do |index|
+          expect { index.unit('Foo', type: 'model') }.to raise_error(IOError, /typed unit identity mismatch/)
+        end
+      end
+    end
+
+    it 'refuses a unit file that is a symlink' do
+      Dir.mktmpdir('woods-published-index-f7') do |dir|
+        model_dir = write_typed_fixture(dir)
+        unit_path = File.join(model_dir, "Foo_#{Digest::SHA256.hexdigest('Foo')[0, 8]}.json")
+        FileUtils.mv(unit_path, File.join(dir, 'elsewhere.json'))
+        File.symlink(File.join(dir, 'elsewhere.json'), unit_path)
+
+        described_class.open(dir) do |index|
+          expect { index.unit('Foo', type: 'model') }.to raise_error(IOError, /symlink unit file/)
+        end
+      end
+    end
+
+    it 'still answers nil for an identifier the type does not list, and the unit otherwise' do
+      Dir.mktmpdir('woods-published-index-f7') do |dir|
+        write_typed_fixture(dir)
+        described_class.open(dir) do |index|
+          expect(index.unit('Foo', type: 'model')).to include('identifier' => 'Foo', 'type' => 'model')
+          expect(index.unit('Bar', type: 'model')).to be_nil
+          expect(index.unit('Foo', type: 'service')).to be_nil
+        end
       end
     end
   end

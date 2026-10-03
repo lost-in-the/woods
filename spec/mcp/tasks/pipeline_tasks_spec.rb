@@ -214,6 +214,37 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
   end
 
+  describe 'when the run fails with an Exception that is neither a StandardError nor a ScriptError' do
+    let(:fatal) { Class.new(Exception) } # rubocop:disable Lint/InheritException -- a non-StandardError is the point
+
+    before do
+      allow(Logger).to receive(:new).and_call_original
+      allow(Logger).to receive(:new).with($stderr).and_return(double('Logger', error: nil))
+      allow(fake_extractor).to receive(:extract_all).and_raise(fatal, 'out of memory')
+    end
+
+    # The thread dies with the exception either way (re-raised after the
+    # record is written); without the record the task sat at "working" with
+    # its slot and lock already released (F11).
+    it 'still records the task as failed before the thread dies' do
+      previous = Thread.report_on_exception
+      Thread.report_on_exception = false
+      task_id = extract_call(tasks_meta).dig('result', 'taskId')
+      settle { rpc('tasks/get', task_params(task_id)).dig('result', 'status') == 'failed' }
+
+      task = rpc('tasks/get', task_params(task_id)).fetch('result')
+      expect(task['status']).to eq('failed')
+      expect(task.dig('error', 'message')).to include('out of memory')
+    ensure
+      # The record lands before the thread dies, so the hooks' drain could
+      # still find the thread alive and join it; Thread#join re-raises the
+      # error a thread died with, which would fail this example for the
+      # very behaviour it asserts. Let the thread finish dying first.
+      settle { (Thread.list - [Thread.current]).empty? }
+      Thread.report_on_exception = previous
+    end
+  end
+
   describe 'a client that did not declare the extension' do
     before { allow(fake_extractor).to receive(:extract_all).and_return(true) }
 

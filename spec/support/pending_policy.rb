@@ -37,7 +37,21 @@ module PendingPolicy
     ['spec/mcp/tasks/pipeline_tasks_spec.rb',
      'pipeline tools and the Tasks extension when opted-in task storage is read-only ' \
      'fails closed without starting untrackable work',
-     'requires non-root: chmod 0o555 does not stop root from writing', -> { Process.uid.zero? }]
+     'requires non-root: chmod 0o555 does not stop root from writing', -> { Process.uid.zero? }],
+    # The refusal can only be observed from a bundle without Active Record
+    # (the base Gemfile); the booted Rails rows carry it, so the example
+    # skips there and runs in the unit lane (#618).
+    ['spec/generators/install_generator_spec.rb',
+     'Install generator refuses --legacy-migration before writing anything when Active Record is not available',
+     'Active Record is in this bundle; the refusal needs a railties-only bundle',
+     -> { Gem.loaded_specs.key?('activerecord') }],
+    # The once-owned subclass fixture needs the Rails 7.0 reloader; the 6.0
+    # and 6.1 booted rows skip this example (N-ra-2).
+    ['spec/integration/watch_daemon_spec.rb',
+     'Watch daemon against a booted app the real Rails reloader names a once-owned subclass that an ' \
+     'unrelated reload detached and reconciliation pruned (N-ra-2)',
+     'once-owned subclass fixture is unsupported before Rails 7.0',
+     -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('7.0') }]
   ].freeze
 
   def self.allowed?(example)

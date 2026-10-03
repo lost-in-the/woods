@@ -44,7 +44,7 @@ module Woods
     #
     # @example
     #   server = Woods::MCP::Server.build(index_dir: "/path/to/output")
-    #   transport = MCP::Server::Transports::StdioTransport.new(server)
+    #   transport = Woods::MCP::StdioTransport.new(server) # SDK transport + frame guard
     #   transport.open
     #
     module Server
@@ -98,6 +98,12 @@ module Woods
           reader = IndexReader.new(index_dir)
           retriever.bind_reader(reader) if retriever.respond_to?(:bind_reader)
           reader.warmup! if warmup
+          # Warm the lexical corpus against the reader just bound, once, so the
+          # first codebase_retrieve does not build it (F17). bind_reader keeps
+          # clearing any earlier snapshot: a corpus warmed against another
+          # reader, or mutated through the public metadata store, never
+          # survives a bind.
+          retriever.warmup! if warmup && retriever.respond_to?(:warmup!)
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
           renderer = ToolResponseRenderer.for(format)
@@ -252,17 +258,19 @@ module Woods
           !token.nil? && ids && !ids.empty?
         end
 
-        def text_response(text, data: nil)
+        def text_response(text, data: nil, meta: nil)
           structured = { text: text }
           structured[:data] = data.nil? ? JSON.parse(text) : data
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
-            structured_content: structured
+            structured_content: structured,
+            meta: meta
           )
         rescue JSON::ParserError
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
-            structured_content: structured
+            structured_content: structured,
+            meta: meta
           )
         end
 
@@ -486,8 +494,28 @@ module Woods
             rescue ArgumentError => e
               next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
             end
+            if type && !reader.lookup_type?(type)
+              # Same contract as search: an unknown type is a bad argument, not
+              # a missing unit, so the not_found hint ("use search") cannot
+              # send an agent in a circle.
+              next respond_err.call(
+                "unknown lookup type: #{type}",
+                code: :invalid_params, tool: 'lookup', argument: 'type',
+                accepted_types: reader.lookup_types,
+                hint: 'Pass the actual published type that search returned (e.g. "model", "graphql_mutation") ' \
+                      'or a family alias ("graphql", "rails_source").'
+              )
+            end
             unit = type ? reader.find_unit(identifier, type: type) : reader.find_unit(identifier)
             if unit
+              # An untyped lookup of an identifier published under several
+              # types returns one unit (the type directory that sorts last);
+              # say so rather than let the caller mistake it for the only one.
+              lookup_meta = nil
+              if type.nil?
+                shared = reader.identifier_types(identifier)
+                lookup_meta = { ambiguous_types: shared } if shared.size > 1
+              end
               if source_sha256 && Digest::SHA256.hexdigest(unit['source_code'].to_s) != source_sha256
                 next respond_err.call('Published source changed since the excerpt; retrieve fresh evidence before verification.',
                                       code: :stale_index, tool: 'lookup', argument: 'source_sha256')
@@ -497,7 +525,8 @@ module Woods
                                                     .render(mode: evidence, budget: budget || 2000,
                                                             counter: ->(text) { (text.length / 4.0).ceil })
                 next ::MCP::Tool::Response.new([{ type: 'text', text: selected.text }],
-                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } })
+                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } },
+                                               meta: lookup_meta)
               end
               always_include = %w[type identifier file_path namespace]
               filtered = unit
@@ -506,7 +535,7 @@ module Woods
                 allowed = (always_include + sections).to_set
                 filtered = filtered.slice(*allowed)
               end
-              respond.call(renderer.render(:lookup, filtered))
+              respond.call(renderer.render(:lookup, filtered), meta: lookup_meta)
             else
               respond_err.call(
                 "Unit not found: #{identifier}",
@@ -1616,6 +1645,13 @@ module Woods
               # error reached a log the agent cannot read, and the tool had
               # already reported success.
               task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+            rescue Exception => e # rubocop:disable Lint/RescueException -- record the terminal state, then let the thread die with it
+              # Neither a StandardError nor a ScriptError (NoMemoryError, a
+              # custom Exception subclass): the thread is going to die with it
+              # either way, but an opted-in task record used to stay "working"
+              # with its slot and lock already released (F11).
+              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+              raise
             ensure
               lock&.release
               Woods::MCP::Server.send(:pipeline_finish, kind)
@@ -2109,7 +2145,7 @@ module Woods
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
-                         'bootstrap state (hydrated / degraded / failed + reason), and feature flags. ' \
+                         'bootstrap state (hydrated / degraded / not_configured / failed + reason), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \

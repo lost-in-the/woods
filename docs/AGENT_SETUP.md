@@ -81,13 +81,7 @@ bin/rails generate woods:install
 git diff -- config/initializers/woods.rb db/migrate
 ```
 
-The generator emits a legacy application migration for:
-
-- `woods_units`
-- `woods_edges`
-- `woods_embeddings`
-
-Woods 2's shipped structural index and storage backends do not use those application tables. For a new default installation, propose removing the generated migration from the working tree and get approval before doing so. Keep or run it only when repository history shows an older/custom integration uses the tables; confirm name conflicts and obtain explicit migration authorization first.
+A default run writes `config/initializers/woods.rb` and nothing under `db/migrate`; the diff of the migrations directory should be empty. Woods 2's shipped structural index and storage backends do not use the `woods_units`, `woods_edges`, and `woods_embeddings` application tables, so that legacy migration is written only by `bin/rails generate woods:install --legacy-migration`. Pass the option only when repository history shows an older/custom integration uses the tables; confirm name conflicts and obtain explicit migration authorization first.
 
 Follow repository policy for generated files and schema changes. Never run a production migration as an incidental setup step.
 

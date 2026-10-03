@@ -101,14 +101,27 @@ RSpec.describe 'Console MCP HTTP end to end', :booted_app, :http_server do
     { 'Authorization' => "Bearer #{token}" }
   end
 
+  # Teardown, not an assertion: the TERM shutdown contract has its own example
+  # below. A loaded host can take longer than 10 s to drain the server, so wait
+  # for TERM and then escalate to KILL instead of failing an example that has
+  # already passed.
   def stop_process
     return unless @wait
 
     Process.kill('TERM', @wait.pid) if @wait.alive?
-    Timeout.timeout(10) { @wait.value }
+    kill_after_grace(@wait) unless @wait.join(15)
   rescue Errno::ESRCH, Errno::ECHILD
     nil
   ensure
+    close_handles
+  end
+
+  def kill_after_grace(wait)
+    Process.kill('KILL', wait.pid)
+    wait.join(5)
+  end
+
+  def close_handles
     [@stdin, @output].each { |io| io&.close unless io&.closed? }
   end
 

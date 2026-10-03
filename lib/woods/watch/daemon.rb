@@ -6,6 +6,7 @@ require_relative '../coordination/pipeline_lock'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../reload_policy'
+require_relative '../input_rules'
 require_relative 'status'
 require_relative 'tree_scan'
 require_relative 'watcher'
@@ -202,6 +203,12 @@ module Woods
         @lock = lock || default_lock
         reset_cycle_state
       end
+
+      # Hosts that embed the daemon can name the config Ruby their boot loaded
+      # instead of having it read from `$LOADED_FEATURES`.
+      #
+      # @param paths [Array<String>] root-relative paths
+      attr_writer :loaded_boot_paths
 
       # Watch until stopped, a restart is required, or the idle timeout fires.
       #
@@ -414,21 +421,94 @@ module Woods
         heartbeat.join(HEARTBEAT_SHUTDOWN_TIMEOUT) || heartbeat.kill
       end
 
-      # What this batch demands, with one escalation applied: an app that cannot
-      # reload at all (`config.enable_reloading = false` — the production
-      # default, and common in staging-shaped dev containers) can only honour a
-      # `:reload` by restarting, since extracting against constants that no
-      # longer match their source is the thing the classification exists to
-      # prevent.
+      # What this batch demands, with two escalations applied. An app that
+      # cannot reload at all (`config.enable_reloading = false` — the
+      # production default, and common in staging-shaped dev containers) can
+      # only honour a `:reload` by restarting, since extracting against
+      # constants that no longer match their source is the thing the
+      # classification exists to prevent. And a `:reload` path the once loader
+      # owns (`config.autoload_once_paths`) needs a restart for the same
+      # reason: `reload!` touches the main loader only, so the edited source
+      # would be published around a class still shaped as it was at boot
+      # (F14). At startup the environment-boot snapshot decides, as for any
+      # restart trigger: a once-owned edit the boot already saw is reconciled
+      # with one full extraction, one made after the boot stops the daemon.
       def required_action(change_set, startup: false)
         paths = change_set.absolute_paths
         paths = paths.reject { |path| startup_covered?(path) } if startup
         relative = ChangeSet.new(paths: paths, root: @root).relative_paths
-        action = @policy.classify_all(relative)
-        action = :reextract if action == :ignore && reconciliation_required?
-        return :restart if action == :reload && !@reloader.enabled?
+        action = classify_batch(relative)
+        return :restart if action == :reload && reload_needs_restart?(paths)
 
         action
+      end
+
+      # The policy's answer with the index's declared roots and a pending
+      # reconciliation applied.
+      def classify_batch(relative_paths)
+        return :restart if relative_paths.any? { |path| loaded_boot_helper?(path) }
+
+        action = @policy.classify_all(relative_paths)
+        return :reload if %i[ignore reextract].include?(action) && declared_root_change?(relative_paths)
+        return :reextract if action == :ignore && reconciliation_required?
+
+        action
+      end
+
+      # A Ruby file under a source root the published index declares
+      # (`--source-root`, the manifest's `extra_roots`) is reload input like
+      # any `app/` file. {ReloadPolicy} is deliberately root-blind so it can
+      # run without an index; the index is what knows the roots. Decided per
+      # batch, so a declared-root edit lands on its own and not only when an
+      # `app/` edit happens to share its debounce window (F15, N-ra-1).
+      def declared_root_change?(relative_paths)
+        rules = InputRules.for_index(@output_dir)
+        return false if rules.extra_roots.empty?
+
+        relative_paths.any? { |path| rules.declared_root_ruby?(path) }
+      end
+
+      # A loaded config file the policy has no answer for. Routes (`:reload`)
+      # and initializers (`:restart`) keep the policy's classification even if
+      # a boot happened to register them as features.
+      def loaded_boot_helper?(relative_path)
+        loaded_boot_paths.include?(relative_path) && @policy.classify(relative_path) == :ignore
+      end
+
+      # Ruby under config/ this process loaded at boot: helpers required from
+      # the Rakefile or application.rb that set values the extraction captures.
+      # {ReloadPolicy} ignores generic config Ruby because only the booted
+      # process knows which helpers it loaded (F3); injectable for hosts that
+      # embed the daemon, read from `$LOADED_FEATURES` otherwise.
+      #
+      # @return [Array<String>] root-relative paths
+      def loaded_boot_paths
+        @loaded_boot_paths ||= begin
+          root = begin
+            File.realpath(@root)
+          rescue SystemCallError
+            @root
+          end
+          $LOADED_FEATURES.filter_map do |feature|
+            next unless feature.start_with?("#{root}/config/") && feature.end_with?('.rb')
+
+            feature.delete_prefix("#{root}/")
+          end.uniq
+        end
+      end
+
+      # @return [Boolean] whether this process cannot honour a `:reload` in place
+      def reload_needs_restart?(absolute_paths)
+        !@reloader.enabled? || once_owned_paths(absolute_paths).any?
+      end
+
+      # @param absolute_paths [Array<String>]
+      # @return [Array<String>] the reload-class paths the once loader owns
+      def once_owned_paths(absolute_paths)
+        absolute_paths.select do |path|
+          @policy.classify(ChangeSet.new(paths: [path], root: @root).relative_paths.first) == :reload &&
+            @reloader.once_owned?(path)
+        end
       end
 
       # An all-ignorable batch is not evidence that a previously degraded
@@ -929,11 +1009,25 @@ module Woods
 
       def require_restart(change_set)
         carry_forward(change_set)
-        triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
-        reason = "restart required: #{triggers.first(5).join(', ')}"
+        reason = "restart required: #{restart_reason(change_set)}"
         @logger.warn("[Woods] watch: #{reason}")
         @stop_reason = :restart_required
         outcome(:restart, :degraded, reason: reason, count: change_set.size)
+      end
+
+      # Why this batch needs a restart, naming the paths behind it. A restart
+      # reached through an escalation used to report an empty trigger list.
+      def restart_reason(change_set)
+        triggers = @policy.paths_requiring(change_set.relative_paths, :restart)
+        return triggers.first(5).join(', ') if triggers.any?
+
+        loaded = change_set.relative_paths.select { |path| loaded_boot_helper?(path) }
+        return "config Ruby loaded at boot changed: #{loaded.first(5).join(', ')}" if loaded.any?
+
+        once = once_owned_paths(change_set.absolute_paths).map { |path| change_set.relativize(path) }
+        return "autoload_once_paths constant changed: #{once.first(5).join(', ')}" if once.any?
+
+        "reloading disabled; changed: #{change_set.relative_paths.first(5).join(', ')}"
       end
 
       def extract(change_set)
@@ -1003,6 +1097,7 @@ module Woods
                     extractor.extract_changed(change_set.absolute_paths)
                   end
         extractor.raise_on_publication_failure! if extractor.respond_to?(:raise_on_publication_failure!)
+        note_pruned_resolvable(extractor)
 
         action = full ? :full : :incremental
         return unpublished(action, change_set, started) if wrote_without_publishing?(touched, before)
@@ -1044,7 +1139,8 @@ module Woods
       end
 
       def actionable_count(change_set)
-        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore }
+        rules = InputRules.for_index(@output_dir)
+        change_set.relative_paths.count { |path| @policy.classify(path) != :ignore || rules.declared_root_ruby?(path) }
       end
 
       # Did the extractor write units without the generation moving?
@@ -1088,8 +1184,44 @@ module Woods
         @logger.info("[Woods] watch: #{action} over #{change_set.size} path(s) " \
                      "in #{duration}ms → generation #{marker.number}")
 
-        outcome(action, :running, generation: marker.number, count: change_set.size,
-                                  duration_ms: duration, touched: touched)
+        state = detached_units.empty? ? :running : :degraded
+        outcome(action, state, reason: detached_units_reason, generation: marker.number, count: change_set.size,
+                               duration_ms: duration, touched: touched)
+      end
+
+      # Units reconciliation pruned although this process still resolves their
+      # class (N-ra-2). No later cycle restores them — the detached constant
+      # outlives every reload — so the daemon stays degraded over them until it
+      # restarts, instead of reporting `running` over an index a fresh process
+      # would not publish.
+      def note_pruned_resolvable(extractor)
+        return unless extractor.respond_to?(:pruned_resolvable_classes)
+
+        entries = extractor.pruned_resolvable_classes
+        return unless entries.is_a?(Array)
+
+        entries.each do |entry|
+          next unless entry.is_a?(Hash) && entry[:identifier].is_a?(String)
+
+          identifier = entry[:identifier]
+          next if detached_units.key?(identifier)
+
+          detached_units[identifier] = entry[:reason].to_s
+          @logger.warn("[Woods] watch: reconciliation pruned #{identifier}: #{entry[:reason]}")
+        end
+      end
+
+      # Persist for the daemon's lifetime: a cycle cannot restore a detached unit.
+      def detached_units
+        @detached_units ||= {}
+      end
+
+      def detached_units_reason
+        return nil if detached_units.empty?
+
+        named = detached_units.first(3).map { |identifier, reason| "#{identifier} (#{reason})" }
+        "reconciliation pruned #{detached_units.size} unit(s) whose class still resolves: " \
+          "#{named.join('; ')}; restart to restore"
       end
 
       def log_storm(actionable)
@@ -1529,6 +1661,47 @@ module Woods
         # @return [void]
         def reload!
           Rails.application.reloader.reload!
+        end
+
+        # Does the once loader (`config.autoload_once_paths`) own this file?
+        #
+        # Constants it defines are never reloaded: `reload!` touches the main
+        # loader only, so re-extracting after an edit there introspects the
+        # class as it was at boot while publishing the new source (F14). The
+        # loader is asked through `cpath_expected_at` where it exists
+        # (Zeitwerk >= 2.6.2; the Rails 6.0 floor may run older), and the
+        # configured once paths answer otherwise, or when the file is gone.
+        #
+        # @param absolute_path [String]
+        # @return [Boolean]
+        def once_owned?(absolute_path)
+          return false unless defined?(Rails) && Rails.application
+
+          answer = once_loader_answer(absolute_path)
+          return answer unless answer.nil?
+
+          Array(Rails.application.config.autoload_once_paths).map(&:to_s)
+                                                             .any? { |dir| absolute_path.start_with?("#{dir}#{File::SEPARATOR}") }
+        rescue StandardError
+          false
+        end
+
+        private
+
+        # The once loader's verdict, or nil when it cannot give one (no
+        # `cpath_expected_at` on this Zeitwerk, or the file is gone and the
+        # call raises). A deleted file's owner is still told by the paths.
+        #
+        # @return [Boolean, nil]
+        def once_loader_answer(absolute_path)
+          return nil unless Rails.respond_to?(:autoloaders) && Rails.autoloaders.respond_to?(:once)
+
+          once = Rails.autoloaders.once
+          return nil unless once.respond_to?(:cpath_expected_at)
+
+          !once.cpath_expected_at(absolute_path).nil?
+        rescue StandardError
+          nil
         end
       end
     end

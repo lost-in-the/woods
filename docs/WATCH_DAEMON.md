@@ -273,8 +273,17 @@ database/schema files, `config/settings.yml`, `config/settings/*.yml`, or
 boot-captured service config
 (`config/{cable,storage,sidekiq,puma,cache,queue}.yml`, including `.yaml`)
 make the daemon write a degraded status, stop, and exit `75` for a supervisor
-to restart it. Scheduled-job YAML remains an in-process re-extraction input.
+to restart it. Included in Woods `2.1.1`, so do the `Rakefile`, `config.ru`, root
+gemspecs, and any Ruby under `config/` the daemon's own process loaded at boot (a
+helper required from the Rakefile or `config/application.rb`); earlier releases
+captured those for freshness but kept serving the values they no longer set
+(F3). Scheduled-job YAML remains an in-process re-extraction input.
 The exact matchers live in `lib/woods/reload_policy.rb`.
+
+A Ruby file under a source root the published index declares (`woods-extract
+--source-root PATH`, the manifest's `extra_roots`) is reload input like a file
+under `app/`; included in Woods `2.1.1`, earlier releases ignored such an edit
+unless an `app/` edit happened to share its debounce window.
 
 This is `rails/spring`'s contract, copied deliberately: Spring's staleness bugs
 came from under-scoping exactly this set, so the boundary here is drawn on the
@@ -290,6 +299,28 @@ when the preceding extraction has advanced the generation watermark.
 The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
+
+It also happens for a Ruby file the once loader owns (`config.autoload_once_paths`):
+Rails' reloader never replaces those constants, so a live edit there would be
+published around a class still shaped as it was at boot. Included in Woods `2.1.1`,
+earlier releases re-extracted and published an internally inconsistent unit with a
+healthy status. The daemon decides through the once loader's `cpath_expected_at`
+where Zeitwerk provides it (2.6.2 and later), and through the configured paths
+otherwise. A once-owned change found at startup follows the environment-boot
+snapshot like any restart trigger: covered by the boot, it is reconciled with one
+full extraction; made after the boot, it stops the daemon. The degraded reason names the paths behind
+an escalated restart (`autoload_once_paths constant changed: …` or
+`reloading disabled; changed: …`).
+
+A once-owned subclass of a reloadable base is a shape Rails documents as
+unsupported: after any main-loader reload it keeps the old base object, leaves
+`descendants`, and reconciliation prunes its unit on the next cycle even when
+only an unrelated file changed. Included in Woods `2.1.1`: the extractor logs
+each pruned unit whose constant the process still resolves, with the reason, and
+the daemon reports `degraded` naming them (`reconciliation pruned 1 unit(s) whose
+class still resolves: LegacyController (…); restart to restore`) on that cycle and
+every later one until it restarts, since no reload restores the unit. Earlier
+releases reported `running` over the vanished unit.
 
 ## Failure posture
 
@@ -1075,10 +1106,13 @@ An index is refused above 16 MiB per required artifact or 50,000 combined graph
 nodes/variants. These preparation checks, JSON parsing, cache construction,
 source verification, path/content hashing, formatting and suppression state all
 run within the hook's private process-group deadline: the worker is killed at
-850 ms, leaving dispatch/cleanup headroom within a one-second work budget.
-The helper also has a 650 ms inner deadline. OS scheduling can delay observation
-of a deadline. Cold bundle/container startup can therefore produce no hint;
-the deadline is not extended. Oversized evidence is marked truncated; missing,
+850 ms by default, leaving dispatch/cleanup headroom within a one-second work
+budget. `WOODS_HOOK_CONTEXT_DEADLINE_MS` (100–5000) raises or lowers that
+deadline for a host where the helper's startup needs more headroom, at the
+cost of a longer tool call; the helper also stops at three quarters of the
+deadline (637 ms by default). OS scheduling can delay observation of a
+deadline. Cold bundle/container startup can therefore produce no hint; the
+deadline is never extended dynamically. Oversized evidence is marked truncated; missing,
 corrupt, unsupported or timed-out input produces a short unknown notice or
 silence. Silence is never a complete/no-impact claim. The hint boots no Rails
 application and calls no provider.

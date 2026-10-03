@@ -1,9 +1,8 @@
 # frozen_string_literal: true
 
-require 'json'
 require 'set'
-require_relative '../storage_identity'
-require_relative '../source_contributors'
+require_relative 'scope_error'
+require_relative 'scope_corpus'
 require_relative '../storage/metadata_store'
 
 module Woods
@@ -11,35 +10,54 @@ module Woods
     # Resolves explicit scope from published metadata, never host filesystem
     # paths. Ownership is exact; path prefixes match complete directory segments.
     # Every eligible unit is selected before any search strategy applies a limit.
+    #
+    # A scope resolves from one of two sources: a metadata store, read once
+    # here (F6 step 1), with the eligible records copied into the scope's own
+    # in-memory store; or a {ScopeCorpus}, an earlier read of such a store
+    # shared across requests (F6 step 2), from which the scope's store is a
+    # read-only view and nothing is read or copied per request.
     class Scope
-      class InvalidScopeError < ArgumentError; end
-
-      attr_reader :packages, :source_paths, :keys, :metadata_store
+      attr_reader :packages, :source_paths, :keys
 
       def self.requested?(packages: nil, source_paths: nil)
         [packages, source_paths].any? { |list| !list.nil? && list != [] }
       end
 
-      def initialize(metadata_store:, packages: nil, source_paths: nil, types: nil, exclude_types: nil)
+      # @param metadata_store [Storage::MetadataStore::Interface, nil] the
+      #   store to read, exclusive with +corpus+
+      # @param corpus [ScopeCorpus, nil] an existing read of the store
+      # @raise [ArgumentError] unless exactly one source is given
+      # @raise [InvalidScopeError] for a malformed list, an escaping path, an
+      #   unknown package, or a record the store lists but cannot find
+      def initialize(metadata_store: nil, corpus: nil, packages: nil, source_paths: nil, types: nil,
+                     exclude_types: nil)
+        raise ArgumentError, 'give exactly one of metadata_store: or corpus:' if metadata_store.nil? == corpus.nil?
+
         @packages = normalize_list(packages, 'packages').freeze
         @source_paths = normalize_list(source_paths, 'source_paths').map do |path|
           normalize_path(path)
         end.uniq.sort.freeze
-        records = metadata_store.all_identifiers.sort.to_h do |key|
-          record = metadata_store.find(key)
-          raise InvalidScopeError, "missing metadata for scoped unit #{key.inspect}" unless record.is_a?(Hash)
-
-          [key, JSON.parse(JSON.generate(record))]
-        end
-        validate_packages!(records.values)
-        @metadata_store = Storage::MetadataStore::InMemory.new
-        records.each do |key, record|
-          next unless eligible?(record, types, exclude_types)
-
-          @metadata_store.store(key, record)
-        end
-        @keys = @metadata_store.all_identifiers.sort.freeze
+        # The store form's corpus is per request and lives only through this
+        # method: once the eligible records are copied, nothing holds the
+        # other records' references.
+        corpus ||= ScopeCorpus.from_store(metadata_store, records: :share)
+        validate_packages!(corpus)
+        @keys = select_keys(corpus, types, exclude_types)
         @key_set = @keys.to_set.freeze
+        if metadata_store
+          @metadata_store = copy_eligible_records(corpus)
+        else
+          @corpus = corpus
+        end
+      end
+
+      # The eligible records as a metadata store: the scope's own in-memory
+      # copy for the store form, a read-only view of the corpus otherwise.
+      #
+      # @return [Storage::MetadataStore::Interface]
+      # @raise [InvalidScopeError] for a corpus that kept no records
+      def metadata_store
+        @metadata_store ||= @corpus.view(@keys)
       end
 
       def include?(key)
@@ -51,6 +69,22 @@ module Woods
       end
 
       private
+
+      def select_keys(corpus, types, excluded)
+        allowed = Array(types).map(&:to_s)
+        excluded = Array(excluded).map(&:to_s)
+        keys = []
+        corpus.each_fact { |fact| keys << fact.key if eligible?(fact, allowed, excluded) }
+        keys.freeze
+      end
+
+      # The store form keeps the one copy it needs: the scope's own store
+      # copies each eligible record as the store returned it (F6 step 1).
+      def copy_eligible_records(corpus)
+        store = Storage::MetadataStore::InMemory.new
+        @keys.each { |key| store.store(key, corpus.fact(key).record) }
+        store
+      end
 
       def normalize_list(list, name)
         return [] if list.nil?
@@ -81,34 +115,20 @@ module Woods
         (segments.empty? ? '.' : segments.join('/')).freeze
       end
 
-      def validate_packages!(records)
-        names = records.filter_map { |unit| unit['identifier'] if unit['type'] == 'package' }
-        names.concat(records.filter_map { |unit| unit.dig('metadata', 'package') })
-        names.concat(records.flat_map do |unit|
-          SourceContributors.records(unit).filter_map do |record|
-            record['package']
-          end
-        end)
-        unknown = packages - names
+      def validate_packages!(corpus)
+        unknown = packages.reject { |name| corpus.package_names.include?(name) }
         raise InvalidScopeError, "unknown package scope: #{unknown.join(', ')}" unless unknown.empty?
       end
 
-      def eligible?(unit, types, excluded)
-        contributors = SourceContributors.records(unit)
-        owners = if contributors.empty?
-                   [unit.dig('metadata', 'package')]
-                 else
-                   contributors.map do |record|
-                     record['package']
-                   end
-                 end
-        return false unless packages.empty? || owners.all? { |owner| packages.include?(owner) }
+      def eligible?(fact, allowed, excluded)
+        return false unless packages.empty? || fact.owners.all? { |owner| packages.include?(owner) }
 
-        paths = SourceContributors.paths(unit)
+        paths = fact.paths
         return false unless source_paths.empty? || (paths.any? && paths.all? { |path| path_match?(path) })
-        return Array(types).map(&:to_s).include?(unit['type']) if types && !types.empty?
 
-        !Array(excluded).map(&:to_s).include?(unit['type'])
+        return allowed.include?(fact.type) unless allowed.empty?
+
+        !excluded.include?(fact.type)
       end
 
       def path_match?(path)

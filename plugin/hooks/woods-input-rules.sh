@@ -4,6 +4,8 @@ woods_input_action() {
   if [[ "$path" == Gemfile ]]; then printf full; return; fi
   if [[ "$path" == Gemfile.lock ]]; then printf full; return; fi
   if [[ "$path" == .ruby-version ]]; then printf full; return; fi
+  if [[ "$path" == Rakefile ]]; then printf full; return; fi
+  if [[ "$path" == config.ru ]]; then printf full; return; fi
   if [[ "$path" == config/application.rb ]]; then printf full; return; fi
   if [[ "$path" == config/boot.rb ]]; then printf full; return; fi
   if [[ "$path" == config/environment.rb ]]; then printf full; return; fi
@@ -15,10 +17,19 @@ woods_input_action() {
   if [[ "$path" == config/initializers/* ]]; then printf full; return; fi
   if [[ "$path" == config/environments/* ]]; then printf full; return; fi
   if [[ "$path" == config/credentials/* ]]; then printf full; return; fi
+  if [[ "$path" =~ ^[^/]+\.gemspec$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings/[^/]+\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^\.env(\..+)?$ ]]; then printf full; return; fi
+  local -a declared_roots=()
+  IFS=: read -r -a declared_roots <<< "${WOODS_DECLARED_ROOTS:-}"
+  local declared_root
+  for declared_root in "${declared_roots[@]+"${declared_roots[@]}"}"; do
+    [[ -n "$declared_root" && "$path" == *.rb && "$path" == "${declared_root%/}"/* ]] || continue
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  done
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

@@ -16,19 +16,27 @@ module Woods
     #   report.aggregates[:mean_mrr]  # => 0.75
     #
     class Evaluator
-      # Result for a single evaluation query.
+      # Result for a single evaluation query. +token_efficiency_basis+ is
+      # +:rendered_tokens+ when every source reported its rendered +tokens+
+      # and +:unit_precision+ when the score fell back to the unit count.
       QueryResult = Struct.new(:query, :expected_units, :retrieved_units, :scores, :tokens_used,
-                               keyword_init: true)
+                               :token_efficiency_basis, keyword_init: true)
 
       # Aggregate report across all queries. +threshold_report+ is nil unless
       # thresholds were given — absent thresholds stay report-only.
-      EvaluationReport = Struct.new(:results, :aggregates, :threshold_report, keyword_init: true)
+      # +token_efficiency_basis+ is the basis every query's +token_efficiency+
+      # used (+:rendered_tokens+ or +:unit_precision+), +:mixed+ when they
+      # disagree, +:none+ for an empty query set; it lives beside the
+      # aggregates, which stay numeric.
+      EvaluationReport = Struct.new(:results, :aggregates, :threshold_report, :token_efficiency_basis,
+                                    keyword_init: true)
 
       # Structured pass/fail against a thresholds hash. +metrics+ maps each
       # thresholded aggregate key to { threshold:, actual:, delta:, passed: }.
       ThresholdReport = Struct.new(:thresholds, :metrics, :passed, keyword_init: true)
 
-      METRIC_KEYS = %i[precision_at5 precision_at10 recall mrr context_completeness token_efficiency].freeze
+      METRIC_KEYS = %i[precision_at5 precision_at10 recall mrr context_completeness unit_precision
+                       token_efficiency].freeze
 
       # @param retriever [Woods::Retriever] Configured retriever instance
       # @param query_set [QuerySet] Set of evaluation queries with ground truth
@@ -51,7 +59,8 @@ module Woods
         results = @query_set.queries.map { |q| evaluate_query(q) }
         aggregates = compute_aggregates(results)
         EvaluationReport.new(results: results, aggregates: aggregates,
-                             threshold_report: evaluate_thresholds(aggregates))
+                             threshold_report: evaluate_thresholds(aggregates),
+                             token_efficiency_basis: token_efficiency_basis(results))
       end
 
       private
@@ -79,15 +88,17 @@ module Woods
         retrieval_result = @retriever.retrieve(query.query, budget: @budget)
         retrieved_ids = extract_identifiers(retrieval_result)
 
-        scores = compute_scores(retrieved_ids, query.expected_units, retrieval_result,
-                                required: query.completeness_units)
+        efficiency, basis = token_efficiency_for(retrieved_ids, query.expected_units, retrieval_result)
+        scores = compute_scores(retrieved_ids, query.expected_units, required: query.completeness_units)
+                 .merge(token_efficiency: efficiency)
 
         QueryResult.new(
           query: query.query,
           expected_units: query.expected_units,
           retrieved_units: retrieved_ids,
           scores: scores,
-          tokens_used: retrieval_result.tokens_used
+          tokens_used: retrieval_result.tokens_used,
+          token_efficiency_basis: basis
         )
       end
 
@@ -101,7 +112,7 @@ module Woods
         result.sources.map { |s| s.is_a?(Hash) ? s[:identifier] || s['identifier'] : s.to_s }
       end
 
-      # Compute all metrics for a query result.
+      # Compute the identifier-based metrics for a query result.
       #
       # +required+ is what separates `context_completeness` from `recall`
       # (EXP-10): passing `expected` for both made the two metrics one number
@@ -110,35 +121,55 @@ module Woods
       #
       # @param retrieved [Array<String>] Retrieved identifiers
       # @param expected [Array<String>] Expected identifiers
-      # @param result [Retriever::RetrievalResult] Retrieval result
       # @param required [Array<String>] Identifiers the retrieval must surface
-      # @return [Hash] Metric scores
-      def compute_scores(retrieved, expected, result, required: expected)
+      # @return [Hash] Metric scores (without +token_efficiency+)
+      def compute_scores(retrieved, expected, required: expected)
         {
           precision_at5: Metrics.precision_at_k(retrieved, expected, cutoff: 5),
           precision_at10: Metrics.precision_at_k(retrieved, expected, cutoff: 10),
           recall: Metrics.recall(retrieved, expected),
           mrr: Metrics.mrr(retrieved, expected),
           context_completeness: Metrics.context_completeness(retrieved, required),
-          token_efficiency: compute_token_efficiency(retrieved, expected, result)
+          unit_precision: Metrics.unit_precision(retrieved, expected)
         }
       end
 
-      # Compute token efficiency from the retrieval result.
+      # Token efficiency: the share of the rendered context spent on expected
+      # units, read from the +tokens+ each source reports (F11). Before it
+      # measured rendered tokens this was `ceil(tokens_used * relevant / retrieved) / tokens_used` —
+      # the unit share, blind to how many tokens each unit cost, so a lone
+      # expected unit scored 1.0 whether it rendered 50 tokens or 8,000. That
+      # number survives as +unit_precision+ and is still the answer when a
+      # source carries no token figure (a retriever that bypasses the
+      # assembler, or an older recorded result); the basis says which.
       #
       # @param retrieved [Array<String>] Retrieved identifiers
       # @param expected [Array<String>] Expected identifiers
       # @param result [Retriever::RetrievalResult] Retrieval result
-      # @return [Float]
-      def compute_token_efficiency(retrieved, expected, result)
-        return 0.0 if result.tokens_used.nil? || result.tokens_used.zero?
+      # @return [Array(Float, Symbol)] score and its basis
+      def token_efficiency_for(retrieved, expected, result)
+        counted = source_token_counts(result)
+        return [Metrics.unit_precision(retrieved, expected), :unit_precision] unless counted
+
+        tokens_used = result.tokens_used
+        return [0.0, :rendered_tokens] if tokens_used.nil? || tokens_used.zero?
 
         expected_set = expected.to_set
-        relevant_count = retrieved.count { |id| expected_set.include?(id) }
-        total_count = [retrieved.size, 1].max
-        relevant_ratio = relevant_count.to_f / total_count
+        relevant_tokens = counted.sum { |identifier, tokens| expected_set.include?(identifier) ? tokens : 0 }
+        [Metrics.token_efficiency(relevant_tokens, tokens_used), :rendered_tokens]
+      end
 
-        Metrics.token_efficiency((result.tokens_used * relevant_ratio).ceil, result.tokens_used)
+      # @param result [Retriever::RetrievalResult] Retrieval result
+      # @return [Array<Array(String, Integer)>, nil] identifier and rendered
+      #   tokens per source, or nil when any source lacks an Integer +tokens+
+      def source_token_counts(result)
+        counts = Array(result.sources).map do |source|
+          next unless source.is_a?(Hash)
+
+          tokens = source[:tokens] || source['tokens']
+          [source[:identifier] || source['identifier'], tokens] if tokens.is_a?(Integer)
+        end
+        counts.all? ? counts : nil
       end
 
       # Compute aggregate metrics across all query results.
@@ -158,6 +189,16 @@ module Woods
         aggregates[:total_queries] = results.size
         aggregates[:mean_tokens_used] = results.sum(&:tokens_used) / results.size.to_f
         aggregates
+      end
+
+      # @param results [Array<QueryResult>] Individual query results
+      # @return [Symbol] the basis every query used, :mixed when they
+      #   disagree, :none without queries
+      def token_efficiency_basis(results)
+        bases = results.map(&:token_efficiency_basis).uniq
+        return :none if bases.empty?
+
+        bases.size == 1 ? bases.first : :mixed
       end
 
       # Return zero-valued aggregates for empty result sets.

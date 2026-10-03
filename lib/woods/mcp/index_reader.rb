@@ -11,6 +11,7 @@ require_relative '../generation'
 require_relative '../source_inputs/status'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
+require_relative '../retrieval/scope_corpus'
 require_relative 'traversal_evidence'
 
 module Woods
@@ -295,6 +296,8 @@ module Woods
         end
         @identifier_map = nil
         @index_cache = {}
+        @index_identifier_sets = {}
+        @scope_corpus = nil
         @manifest = nil
         @summary = nil
         @dependency_graph = nil
@@ -373,19 +376,29 @@ module Woods
 
       # Find a single unit by identifier.
       #
+      # With +type:+ the read is guarded (symlinked directory or file refused,
+      # the index entry and the unit body must both name +identifier+, bytes
+      # decoded as UTF-8 regardless of locale) and reads the one type
+      # directory, so an identifier shared across types cannot be shadowed.
+      # +type+ is an actual unit type, or the `graphql` family alias, which
+      # matches every GraphQL subtype. `rails_source` is both a family and a
+      # unit type and resolves to the unit type here (a `gem_source` unit is
+      # found only as `gem_source`); {Woods::PublishedIndex#unit} expands the
+      # family through {#unit_types_for}. This is the one typed-read path:
+      # {Woods::PublishedIndex#unit} delegates here (F7).
+      #
       # @param identifier [String] Unit identifier (e.g. "Post", "Api::V1::HealthController")
+      # @param type [String, nil] actual unit type or directory-family alias
       # @return [Hash, nil] Full unit data or nil if not found
+      # @raise [IOError] on a typed read of a payload that fails a guard
       def find_unit(identifier, type: nil)
         if type
           return with_pinned_generation do
             dir = UNIT_TYPE_TO_DIR[type] || TYPE_TO_DIR[type]
             next nil unless dir
-            raise IOError, "symlink unit directory: #{dir}" if current_payload_dir.join(dir).symlink?
 
-            next nil unless search_index_entries(dir).any? { |entry| entry['identifier'] == identifier }
-
-            unit = read_published_unit(dir, identifier)
-            unit if unit['type'] == type || !UNIT_TYPE_TO_DIR.key?(type)
+            unit = typed_unit(dir, identifier)
+            unit if unit && (unit['type'] == type || !UNIT_TYPE_TO_DIR.key?(type))
           end
         end
         ensure_fresh!
@@ -393,6 +406,75 @@ module Woods
         return nil unless location
 
         load_unit(location[:type_dir], location[:filename])
+      end
+
+      # The unit +identifier+ names in a directory family, whatever its member
+      # type: a `gem_source` unit under `rails_source`, any GraphQL subtype
+      # under `graphql`. Same guards as a typed {#find_unit}; one read. This is
+      # the family-alias meaning {Woods::PublishedIndex} documents, kept apart
+      # from {#find_unit}, where `rails_source` names the unit type.
+      #
+      # @param identifier [String]
+      # @param family [String] directory family name (`graphql`, `rails_source`)
+      # @return [Hash, nil] nil when +family+ is not a directory or does not
+      #   list +identifier+
+      # @raise [IOError] when the read fails a payload guard
+      def find_family_unit(identifier, family)
+        with_pinned_generation do
+          dir = TYPE_TO_DIR[family]
+          next nil unless dir
+
+          typed_unit(dir, identifier)
+        end
+      end
+
+      # Types `lookup`'s +type:+ accepts: every actual published unit type plus
+      # the `graphql` directory-family alias. `rails_source` is accepted as the
+      # unit type it also names; the family read is {#find_family_unit}.
+      #
+      # @return [Array<String>] sorted
+      def lookup_types
+        (TYPE_TO_DIR.keys | UNIT_TYPE_TO_DIR.keys).sort
+      end
+
+      # @param type [String]
+      # @return [Boolean] whether {#find_unit} can resolve +type:+ at all
+      def lookup_type?(type)
+        TYPE_TO_DIR.key?(type) || UNIT_TYPE_TO_DIR.key?(type)
+      end
+
+      # The actual unit types a +type:+ argument stands for: itself for a unit
+      # type (`model`, `gem_source`), every member of the directory for a family
+      # name (`graphql`, and `rails_source`, which is also a member and comes
+      # first), nothing for an unknown type. {Woods::PublishedIndex#unit} uses
+      # this to expand a family alias over {#find_unit}.
+      #
+      # @param type [String]
+      # @return [Array<String>]
+      def unit_types_for(type)
+        dir = UNIT_TYPE_TO_DIR[type] || TYPE_TO_DIR[type]
+        return [] unless dir
+
+        members = UNIT_TYPES_BY_DIR.fetch(dir)
+        TYPE_TO_DIR[type] == dir ? members : [type]
+      end
+
+      # Every published type an identifier is indexed under, read from the
+      # per-type index files, so an untyped lookup can disclose a shared
+      # identifier instead of silently returning whichever type directory
+      # sorts last in {TYPE_DIRS}.
+      #
+      # @param identifier [String]
+      # @return [Array<String>] sorted actual unit types; empty when unknown
+      def identifier_types(identifier)
+        ensure_fresh!
+        TYPE_DIRS.flat_map do |dir|
+          read_index(dir).filter_map do |entry|
+            next unless entry.is_a?(Hash) && entry['identifier'] == identifier
+
+            entry['scope_type'] || entry['type'] || single_type_for(dir)
+          end
+        end.uniq.sort
       end
 
       # List units, optionally filtered by type.
@@ -572,11 +654,10 @@ module Woods
                 type_name = search_entry_type(entry, dir, results)
                 next unless type_name
 
-                unit = if scope
-                         scope.metadata_store.find(StorageIdentity.key(id, type_name))
-                       else
-                         readable_search_unit(type_name, id, results)
-                       end
+                # Scoped and unscoped deep matching read the candidate body the
+                # same bounded way; the scope decided eligibility by key and
+                # holds no bodies (F6 step 2).
+                unit = readable_search_unit(type_name, id, results)
                 next unless unit
 
                 type_name = unit['type']
@@ -605,16 +686,29 @@ module Woods
         response
       end
 
-      # Scope preparation reads the complete pinned unit snapshot. Search's
-      # deep-field scan budget still governs matching work after this read.
+      # Scope preparation resolves from the scope facts of the complete pinned
+      # unit snapshot, read once per loaded generation (F6 step 2) rather than
+      # on every scoped search. Search's deep-field scan budget still governs
+      # matching work after this read.
       def search_scope(packages, source_paths, types)
         return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
 
-        metadata = Storage::MetadataStore::InMemory.new
-        each_unit { |unit| metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit) }
-        Retrieval::Scope.new(metadata_store: metadata, packages: packages, source_paths: source_paths, types: types)
+        Retrieval::Scope.new(corpus: scope_corpus, packages: packages, source_paths: source_paths, types: types)
       end
       private :search_scope
+
+      # The scope facts of every published unit of the loaded generation:
+      # facts only, since search decides eligibility by key and never reads a
+      # record through the scope. Populated inside the caller's generation pin
+      # and dropped with the other caches in {#reload!}.
+      def scope_corpus
+        @scope_corpus ||= begin
+          pairs = []
+          each_unit { |unit| pairs << [StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit] }
+          Retrieval::ScopeCorpus.new(pairs, records: :none)
+        end
+      end
+      private :scope_corpus
 
       def normalize_search_types(types)
         return nil if types.nil? || types == []
@@ -1319,16 +1413,42 @@ module Woods
         "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
       end
 
+      # The duplicate scan is linear in the directory, and typed reads need it
+      # plus a membership test once per unit; a PublishedIndex consumer walking
+      # a directory would pay both n times over. The validated identifier set
+      # is memoized on the same lifecycle as the cached index it validates
+      # (+@index_cache+, cleared by {#reload!}); the cheap manifest-count and
+      # symlink checks in {#published_unit_entries} still run on every read.
       def search_index_entries(dir)
         entries = published_unit_entries(dir)
-        seen = Set.new
-        entries.each do |entry|
-          id = entry.is_a?(Hash) && entry['identifier']
-          unless id.is_a?(String) && !id.empty? && seen.add?(id)
-            raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
-          end
-        end
+        index_identifier_set(dir, entries)
         entries
+      end
+
+      # The validated identifier set of one directory, built once per cached
+      # index. Returned rather than re-read from the ivar so a caller holds the
+      # set it validated even if {#reload!} replaces the memo meanwhile.
+      def index_identifier_set(dir, entries = published_unit_entries(dir))
+        (@index_identifier_sets ||= {})[dir] ||= begin
+          seen = Set.new
+          entries.each do |entry|
+            id = entry.is_a?(Hash) && entry['identifier']
+            unless id.is_a?(String) && !id.empty? && seen.add?(id)
+              raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
+            end
+          end
+          seen
+        end
+      end
+
+      # One guarded typed read: the directory must not be a symlink, the
+      # validated index must list +identifier+, and the unit body must name it
+      # (see {#read_published_unit}). Callers hold the generation pin.
+      def typed_unit(dir, identifier)
+        raise IOError, "symlink unit directory: #{dir}" if current_payload_dir.join(dir).symlink?
+        return nil unless index_identifier_set(dir).include?(identifier)
+
+        read_published_unit(dir, identifier)
       end
 
       def published_unit_entries(dir)
@@ -1375,6 +1495,13 @@ module Woods
 
       def valid_published_unit?(data, dir, identifier)
         data.is_a?(Hash) && data['identifier'] == identifier && UNIT_TYPES_BY_DIR.fetch(dir).include?(data['type'])
+      end
+
+      # The one public type a directory publishes, or the family name when a
+      # legacy entry under a multi-type directory carries no type of its own.
+      def single_type_for(dir)
+        types = UNIT_TYPES_BY_DIR.fetch(dir)
+        types.size == 1 ? types.first : dir
       end
 
       # Read and cache an _index.json file for a type directory.

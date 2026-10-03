@@ -142,6 +142,21 @@ RSpec.describe Woods::Evaluation::Metrics do
     end
   end
 
+  describe '.unit_precision' do
+    it 'is precision over the whole retrieved set, not a top-k slice' do
+      retrieved = %w[A X B Y C Z]
+      relevant = %w[A B C]
+
+      expect(described_class.unit_precision(retrieved, relevant)).to eq(0.5)
+      expect(described_class.precision_at_k(retrieved, relevant, cutoff: 1)).to eq(1.0)
+    end
+
+    it 'returns 0.0 for empty retrieved or relevant sets' do
+      expect(described_class.unit_precision([], %w[A])).to eq(0.0)
+      expect(described_class.unit_precision(%w[A], [])).to eq(0.0)
+    end
+  end
+
   describe '.token_efficiency' do
     it 'returns 1.0 when all tokens are relevant' do
       expect(described_class.token_efficiency(1000, 1000)).to eq(1.0)

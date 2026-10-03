@@ -1099,7 +1099,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       generation = Woods::Generation.new(output_dir: baseline)
       token = generation.current.token
       extractor = Woods::Extractor.new(output_dir: baseline)
-      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true)
+      reloader = instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false)
       daemon = Woods::Watch::Daemon.new(output_dir: baseline, root: @app_root,
                                         extractor_factory: -> { extractor }, reloader: reloader,
                                         catch_up: false, debounce: 0)

@@ -72,7 +72,7 @@ namespace :woods do
     # PathDispatcher alongside the dispatch itself — a second hand-maintained
     # pattern list here would drift, and a path this filter drops never
     # reaches the index however good the dispatch behind it is (#164).
-    input_rules = Woods::InputRules.new
+    input_rules = Woods::InputRules.for_index(output_dir)
     changed_files = changed_files.reject(&:empty?).reject { |path| input_rules.action(path) == :ignore }
     full = changed_files.any? { |path| input_rules.action(path) == :full }
 

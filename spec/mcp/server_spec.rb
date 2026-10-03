@@ -160,6 +160,39 @@ RSpec.describe Woods::MCP::Server do
       expect(response_text(response)).to include('not found')
     end
 
+    # N-mcp-3: an unknown type answered not_found with a hint to search, while
+    # search refused the same type as invalid_params; an agent following the
+    # hint looped between the two.
+    it 'refuses an unknown type with invalid_params and the accepted types instead of not_found' do
+      response = call_tool(server, 'lookup', identifier: 'Post', type: 'class')
+      expect(response.error?).to be(true)
+      expect(response.meta).to include(error_code: :invalid_params, tool: 'lookup', argument: 'type')
+      expect(response.meta[:accepted_types]).to include('model', 'graphql_mutation', 'graphql', 'rails_source')
+      expect(response.meta[:accepted_types]).not_to include('class')
+      expect(response_text(response)).to include('unknown lookup type: class')
+    end
+
+    it 'still answers not_found for an unknown identifier under a known type' do
+      response = call_tool(server, 'lookup', identifier: 'NonExistent', type: 'model')
+      expect(response.meta).to include(error_code: :not_found)
+    end
+
+    it 'names every type of a shared identifier when the lookup is untyped' do
+      Dir.mktmpdir('woods-shared-identifier') do |dir|
+        FileUtils.cp_r("#{fixture_dir}/.", dir)
+        add_factory_named_post(dir)
+        shared = described_class.build(index_dir: dir, response_format: :json)
+
+        untyped = call_tool(shared, 'lookup', identifier: 'Post')
+        expect(untyped.error?).to be(false)
+        expect(untyped.meta).to include(ambiguous_types: %w[factory model])
+
+        typed = call_tool(shared, 'lookup', identifier: 'Post', type: 'model')
+        expect(parse_response(typed)['type']).to eq('model')
+        expect(typed.meta).to be_nil.or(satisfy { |meta| !meta.key?(:ambiguous_types) })
+      end
+    end
+
     it 'excludes source_code when include_source is false' do
       response = call_tool(server, 'lookup', identifier: 'Post', include_source: false)
       data = parse_response(response)
@@ -2098,6 +2131,22 @@ RSpec.describe Woods::MCP::Server do
 
   # Call a tool on the server by name with the given arguments.
   # MCP stores tools as Hash<String, Class>.
+  # Publish a second unit named Post under factories/ so the identifier is
+  # shared across two types; manifest counts must match the typed index.
+  def add_factory_named_post(dir)
+    FileUtils.mkdir_p(File.join(dir, 'factories'))
+    unit = { 'identifier' => 'Post', 'type' => 'factory', 'file_path' => 'spec/factories/posts.rb',
+             'namespace' => nil, 'source_code' => "FactoryBot.define { factory :post }\n" }
+    File.write(File.join(dir, 'factories', "Post_#{Digest::SHA256.hexdigest('Post')[0, 8]}.json"), JSON.generate(unit))
+    File.write(File.join(dir, 'factories', '_index.json'),
+               JSON.generate([{ 'identifier' => 'Post', 'file_path' => unit['file_path'], 'namespace' => nil,
+                                'estimated_tokens' => 10, 'chunk_count' => 1 }]))
+    manifest = JSON.parse(File.read(File.join(dir, 'manifest.json')))
+    manifest['counts']['factories'] = 1
+    manifest['total_units'] = manifest['total_units'].to_i + 1
+    File.write(File.join(dir, 'manifest.json'), JSON.generate(manifest))
+  end
+
   def call_tool(server, tool_name, **args)
     tools = server.instance_variable_get(:@tools)
     tool_class = tools[tool_name]

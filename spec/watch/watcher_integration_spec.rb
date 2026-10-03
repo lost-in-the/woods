@@ -44,7 +44,7 @@ RSpec.describe 'a real watcher driving a real daemon' do
     Woods::Watch::Daemon.new(
       output_dir: output_dir, root: root, watcher: watcher,
       extractor_factory: -> { extractor },
-      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true),
+      reloader: instance_double(Woods::Watch::Daemon::RailsReloader, enabled?: true, reload!: true, once_owned?: false),
       debounce: 0.1, catch_up: false
     )
   end

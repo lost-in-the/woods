@@ -623,8 +623,17 @@ same question as "what has to happen before re-reading it is worth anything".
 |---|---|---|
 | `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
-| `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
+| `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
+| `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
+| `:restart` (daemon, from its own boot) | Ruby under `config/` the watch daemon's process loaded at boot | Only the booted process knows which helpers it required; the classifier ignores generic `config/*.rb` so a fresh-process hook does not restart over files nothing loads (F3). |
 | `:ignore` | everything else | Not extraction input. |
+
+The watch daemon applies two escalations on top of this table: a `:reload`
+path becomes `:restart` when the app cannot reload (`config.enable_reloading =
+false`) and, included in Woods `2.1.1`, when the once loader owns the file
+(`config.autoload_once_paths`), whose constants `reload!` never replaces. The
+classifier itself stays loader-blind so it can run in a fresh process without
+Rails; see [WATCH_DAEMON.md](WATCH_DAEMON.md#restart-triggers).
 
 The `:restart` set is drawn generously on purpose. Rails' reloader replaces
 autoloaded constants and nothing else, it does not re-run initializers,

@@ -1,12 +1,15 @@
 # frozen_string_literal: true
 
 require 'mcp'
+require_relative '../mcp/stdio_transport'
 
 module Woods
   module Console
     # Keeps protocol writes separate from the host application's stdout.
-    # The SDK still owns framing, negotiation, notifications and shutdown.
-    class StdioTransport < ::MCP::Server::Transports::StdioTransport
+    # The SDK still owns framing, negotiation, notifications and shutdown;
+    # {Woods::MCP::StdioTransport} adds the frame guard both stdio servers
+    # share, and its rejections go through {#send_response} to the saved pipe.
+    class StdioTransport < Woods::MCP::StdioTransport
       # @param server [::MCP::Server] Console server
       # @param output [IO] Original stdout saved before redirecting Rails output
       def initialize(server, output:)

@@ -1,0 +1,1 @@
+- The watch daemon now reports `degraded`, naming the units and the reason, when reconciliation prunes a unit whose class the process still resolves (a once-owned subclass detached from its base by a main-loader reload), and keeps reporting it until the process restarts; the extractor logs each such prune. Previously the unit vanished silently behind a `running` status.

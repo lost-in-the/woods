@@ -11,6 +11,8 @@ require_relative 'retrieval/context_assembler'
 require_relative 'retrieval/lexical_index'
 require_relative 'retrieval/lexical_assembler'
 require_relative 'retrieval/scope'
+require_relative 'retrieval/scope_corpus'
+require_relative 'retrieval/scope_corpus_cell'
 require_relative 'retrieval/scoped_vector_store'
 require_relative 'retrieval/scoped_graph_store'
 require_relative 'retrieval/corpus_status'
@@ -179,9 +181,12 @@ module Woods
     # resolves the pipeline once at the top of {#retrieve}. An in-flight query
     # keeps the struct it resolved and finishes entirely against the old
     # stores; a new query sees only the complete new bundle (M7 — build-then-
-    # swap, never clear!+bulk_load on live stores).
+    # swap, never clear!+bulk_load on live stores). +scope_corpus+ is the
+    # bundle's {Retrieval::ScopeCorpusCell}: the one read of the metadata
+    # store that every scoped query resolves its eligibility from (F6 step 2),
+    # retired with the bundle.
     Pipeline = Struct.new(:executor, :ranker, :assembler,
-                          :vector_store, :metadata_store, :graph_store,
+                          :vector_store, :metadata_store, :graph_store, :scope_corpus,
                           keyword_init: true)
     private_constant :Pipeline
 
@@ -292,16 +297,30 @@ module Woods
         ),
         vector_store: vector_store,
         metadata_store: metadata_store,
-        graph_store: graph_store
+        graph_store: graph_store,
+        scope_corpus: scope_corpus_cell(metadata_store, translated_metadata)
       )
     end
 
+    # The lexical index is immutable, so its scope corpus shares the index's
+    # own units and lives as long as the pipeline.
     def build_lexical_pipeline(metadata_store, graph_store)
       executor = Retrieval::LexicalIndex.new(metadata_store: translate_store(metadata_store, :metadata))
+      corpus = Retrieval::ScopeCorpusCell.pinned { Retrieval::ScopeCorpus.from_units(executor.units) }
       Pipeline.new(executor: executor, assembler: Retrieval::LexicalAssembler.new, metadata_store: metadata_store,
-                   vector_store: nil, graph_store: graph_store)
+                   vector_store: nil, graph_store: graph_store, scope_corpus: corpus)
     end
     private :build_lexical_pipeline
+
+    # The semantic corpus is an immutable copy of the store's records, kept
+    # while the raw store's version stands (in-memory stores track one; a
+    # SQLite store does not, and keeps the per-request read). It is read
+    # through the translated facade so a failing adapter raises the typed
+    # {StoreError} like every other pipeline read.
+    def scope_corpus_cell(metadata_store, translated_metadata)
+      Retrieval::ScopeCorpusCell.versioned(metadata_store) { Retrieval::ScopeCorpus.from_store(translated_metadata) }
+    end
+    private :scope_corpus_cell
 
     private :build_pipeline
 
@@ -438,18 +457,36 @@ module Woods
 
     private
 
+    # Eligibility resolves from the bundle's scope corpus when it has one
+    # (F6 step 2); a store that tracks no changes is read per request, as
+    # before.
     def resolve_scope(pipeline, packages, source_paths, types, excluded)
       return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
 
-      Retrieval::Scope.new(metadata_store: translate_store(pipeline.metadata_store, :metadata),
-                           packages: packages, source_paths: source_paths, types: types,
-                           exclude_types: DEFAULT_EXCLUDE_TYPES + Array(excluded).map(&:to_s))
+      options = { packages: packages, source_paths: source_paths, types: types,
+                  exclude_types: DEFAULT_EXCLUDE_TYPES + Array(excluded).map(&:to_s) }
+      corpus = pipeline.scope_corpus&.current
+      return Retrieval::Scope.new(corpus: corpus, **options) if corpus
+
+      Retrieval::Scope.new(metadata_store: translate_store(pipeline.metadata_store, :metadata), **options)
     end
 
     def scoped_pipeline(pipeline, scope)
-      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
       graph = Retrieval::ScopedGraphStore.new(store: pipeline.graph_store, scope: scope)
+      return scoped_lexical_pipeline(pipeline, scope, graph) if @mode == :lexical
+
+      vector = Retrieval::ScopedVectorStore.new(store: pipeline.vector_store, scope: scope)
       build_pipeline(vector_store: vector, metadata_store: scope.metadata_store, graph_store: graph)
+    end
+
+    # The lexical pipeline's index is immutable and built once, so a scoped
+    # request derives a view over the eligible keys instead of re-reading
+    # and re-tokenising them into a second index (F6 step 2): on the
+    # 6,139-unit self-map that rebuild cost 4.8 s per request for a `lib/`
+    # scope and 126 ms for a 176-unit one.
+    def scoped_lexical_pipeline(pipeline, scope, graph)
+      Pipeline.new(executor: pipeline.executor.restricted_to(scope.keys), assembler: Retrieval::LexicalAssembler.new,
+                   metadata_store: scope.metadata_store, vector_store: nil, graph_store: graph)
     end
 
     def attach_scope(result, scope)

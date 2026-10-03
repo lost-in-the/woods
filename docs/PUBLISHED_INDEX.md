@@ -105,9 +105,13 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
+What a reader returns is the caller's. `#edges` and `#dependents_of` build their records from a deep-frozen copy of `dependency_graph.json`, so a returned string cannot be changed in place (`FrozenError`), and `#dependents_of` returns a fresh array. Inside the gem, `Woods::DependencyGraph#to_h` hands out a snapshot whose containers and strings are all copies: mutating a snapshot, however deeply, changes neither what `#dependencies_of` answers nor what the next publish writes, and a mutated snapshot fed back through `.from_h` carries only the caller's own change.
+
 ### `#unit`: an identifier shared across types
 
 `Woods::MCP::IndexReader#find_unit` keys its identifier map on identifier alone. If two type directories both list the same identifier (a model and a service both named `Foo`, for example), whichever type sorts last in `Woods::MCP::IndexReader::TYPE_DIRS` silently wins, and `unit(identifier)` returns that one. Pass `type:` to read a specific type's unit file directly and skip the collision entirely; `#table_database_map` always does this internally (`type: 'model'`), so a same-named non-model unit can never shadow a model's `table_name`/`database`.
+
+A typed read goes through the MCP reader's own guarded path (`Woods::MCP::IndexReader#find_unit(identifier, type:)`), not a second implementation: a type directory or unit file that is a symlink, or a unit body naming a different identifier, raises `IOError` instead of being served, and `_index.json` is validated against the manifest's `counts`. Treat `IOError`/`JSON::ParserError` from `#unit` or `#units` as a corrupt payload.
 
 ### Actual unit types and directory families
 
@@ -135,7 +139,7 @@ A generation is listed only when both hold:
 
 A directory numbered above the pointer (a payload built but never bumped to) and a directory missing its manifest (an interrupted or corrupted publish) are never listed, and `.new(index_dir, generation: N)` raises `ArgumentError` for either. Retention itself is bounded by `WOODS_PAYLOAD_RETENTION` (default 3).
 
-A *missing* `generation.json` is not an error: it means a flat (pre-2.0) index, generation 0. A `generation.json` that **exists but will not parse** is different, a corrupt install, not an empty index, so `.available_generations` and `.new`/`.open` raise `Woods::PublishedIndex::CorruptPointerError` naming the file's path instead of silently reporting zero published generations.
+A *missing* `generation.json` is not an error: it means a flat (pre-2.0) index, generation 0. A `generation.json` that **exists but will not parse**, or parses but does not describe a generation (no integer `number`, a non-string field), is different, a corrupt install, not an empty index, so `.available_generations` and `.new`/`.open` raise `Woods::PublishedIndex::CorruptPointerError` naming the file's path instead of silently reporting zero published generations. The check is `Woods::Generation#current!`, the same strict read every long-lived Woods reader performs.
 
 ### Durability: the pointer is the commit point
 

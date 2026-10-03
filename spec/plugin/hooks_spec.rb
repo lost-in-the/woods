@@ -150,6 +150,25 @@ RSpec.describe 'plugin hooks (#280)' do
       end
     end
 
+    it 'queues a refresh for a Ruby file under a source root the index declares, and only then (F15)' do
+      Dir.mktmpdir('woods-hook') do |dir|
+        output_dir = make_app(dir)
+        rake, log, = recorder(dir)
+        env = base_env.merge('WOODS_HOOK_RAKE' => rake)
+
+        run_hook(post_edit, edit_payload(dir, 'domain/billing/ledger.rb'), env)
+        expect(File.exist?(log)).to be(false)
+
+        FileUtils.mkdir_p(File.join(output_dir, 'payloads/gen-3'))
+        File.write(File.join(output_dir, 'payloads/gen-3/source_inputs.json'),
+                   JSON.generate('extra_roots' => ['domain']))
+        _out, err, status = run_hook(post_edit, edit_payload(dir, 'domain/billing/ledger.rb'), env)
+
+        expect(status).to be_success, err
+        expect(File.read(log)).to include('domain/billing/ledger.rb')
+      end
+    end
+
     it 'fires for routes, migrations, schema, and package.yml' do
       Dir.mktmpdir('woods-hook') do |dir|
         make_app(dir)

@@ -380,6 +380,19 @@ module Woods
 
     attr_reader :output_dir, :dependency_graph
 
+    # Units {#remove_stale_classes} pruned although this process still
+    # resolves their constant: the runtime no longer discovers the class, so a
+    # full extraction here would not produce the unit either, but a fresh
+    # process may. The one shape seen in the wild is a once-owned subclass of
+    # a base the main loader reloaded (N-ra-2): it keeps the pre-reload base
+    # object, leaves `descendants`, and no later reload restores it. Without
+    # this record the unit vanished silently behind a healthy status.
+    #
+    # @return [Array<Hash>] `{ identifier:, type:, reason: }` per pruned unit
+    def pruned_resolvable_classes
+      @pruned_resolvable_classes ||= []
+    end
+
     def initialize(output_dir: nil)
       @output_dir = Pathname.new(output_dir || Rails.root.join('tmp/woods'))
       @payload_store = PayloadStore.new(@output_dir)
@@ -3211,8 +3224,47 @@ module Woods
 
       Rails.logger.info "[Woods] removing #{stale.size} #{spec[:type]} unit(s) whose class no longer exists"
       stale.each_with_object(Set.new) do |identifier, removed|
+        note_pruned_resolvable(identifier, spec[:type])
         removed.add(identifier) if remove_unit(identifier, affected_types, type: spec[:type])
       end
+    end
+
+    def note_pruned_resolvable(identifier, type)
+      klass = resolvable_constant(identifier)
+      return unless klass
+
+      reason = 'still resolves in this process but is no longer discovered by the runtime' \
+               "#{once_owned_detail(identifier)}"
+      Rails.logger.warn "[Woods] pruned #{type} unit #{identifier}: #{reason}"
+      pruned_resolvable_classes << { identifier: identifier, type: type, reason: reason }
+    end
+
+    def resolvable_constant(identifier)
+      Object.const_get(identifier)
+    rescue StandardError, ScriptError
+      nil
+    end
+
+    # Names the once loader when it owns the pruned class's file; the main
+    # loader never reloads that constant, so only a restart brings it back.
+    def once_owned_detail(identifier)
+      path = Object.const_source_location(identifier)&.first
+      return '' unless path && once_owned_path?(path)
+
+      '; once-owned subclass of a base the main loader reloaded, so no reload restores it ' \
+        '(a fresh process still defines it; restart to restore)'
+    end
+
+    def once_owned_path?(path)
+      return false unless Rails.respond_to?(:autoloaders) && Rails.autoloaders.respond_to?(:once)
+
+      once = Rails.autoloaders.once
+      return !once.cpath_expected_at(path).nil? if once.respond_to?(:cpath_expected_at)
+
+      Array(Rails.application.config.autoload_once_paths).map(&:to_s)
+                                                         .any? { |dir| path.start_with?("#{dir}#{File::SEPARATOR}") }
+    rescue StandardError
+      false
     end
 
     # Class-based units the graph still holds that a full extraction would not

@@ -51,6 +51,17 @@ RSpec.describe Woods::ResolvedConfig do
       expect(config.dimension).to eq(768)
     end
 
+    it 'treats blank store types as unset so the resolver can apply its in_memory fallback' do
+      stores = { 'vector_store' => 'in_memory', 'metadata_store' => '', 'graph_store' => ' ' }
+      config = described_class.from_hash(v1_hash.merge('stores' => stores))
+      expect(config.stores).to eq(vector_store: :in_memory, metadata_store: nil, graph_store: nil)
+    end
+
+    it 'omits unset stores from the snapshot instead of recording blank types' do
+      config = described_class.from_hash(v1_hash.merge('stores' => { 'vector_store' => 'in_memory' }))
+      expect(config.to_snapshot_json['stores']).to eq('vector_store' => 'in_memory')
+    end
+
     it 'parses created_at as Time' do
       config = described_class.from_hash(v1_hash)
       expect(config.created_at).to be_a(Time)

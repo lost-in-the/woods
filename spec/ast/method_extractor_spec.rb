@@ -60,6 +60,43 @@ RSpec.describe Woods::Ast::MethodExtractor do
     end
   end
 
+  describe '#extract_method_definitions' do
+    it 'keys every instance-method definition by name and line, duplicates and singleton defs included (F5)' do
+      source = <<~RUBY
+        class Foo
+          def show
+            'first'
+          end
+
+          class << self
+            def show
+              'singleton'
+            end
+          end
+
+          def show
+            'second'
+          end
+        end
+
+        class Bar
+          def show
+            'bar'
+          end
+        end
+      RUBY
+
+      definitions = extractor.extract_method_definitions(source)
+
+      expect(definitions.keys).to contain_exactly(['show', 2], ['show', 7], ['show', 12], ['show', 18])
+      expect(definitions[['show', 2]]).to include("'first'")
+      expect(definitions[['show', 7]]).to include("'singleton'")
+      expect(definitions[['show', 12]]).to include("'second'")
+      expect(definitions[['show', 18]]).to include("'bar'")
+      expect(extractor.extract_method_sources(source)['show']).to eq(definitions[['show', 2]])
+    end
+  end
+
   describe '#extract_method_source' do
     it 'returns exact text of a method' do
       source = <<~RUBY

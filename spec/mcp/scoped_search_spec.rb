@@ -84,6 +84,30 @@ RSpec.describe 'Published scoped discovery and retrieval' do
     ENV['WOODS_SEARCH_MAX_SCAN'] = original
   end
 
+  # F6 step 2. Scope preparation read every published unit on each scoped
+  # search. The reader now keeps the scope facts of the loaded generation and
+  # drops them with its other caches, so the units are read once per
+  # generation, and a search after a reload sees the newly published unit.
+  it 'reads the published units once per loaded generation across scoped searches' do
+    publish('NeedleInvoice', package: 'packs/billing')
+    publish('NeedleOther', package: 'packs/other')
+    allow(reader).to receive(:each_unit).and_call_original
+
+    first = reader.search('needle', packages: ['packs/billing'])
+    second = reader.search('needle', source_paths: ['packs/other'], fields: ['source_code'])
+
+    expect(reader).to have_received(:each_unit).once
+    expect(first[:results].map { |unit| unit[:identifier] }).to eq(['NeedleInvoice'])
+    expect(second[:results].map { |unit| unit[:identifier] }).to eq(['NeedleOther'])
+
+    publish('NeedleStatement', package: 'packs/billing')
+    reader.reload!
+    third = reader.search('needle', packages: ['packs/billing'])
+    expect(reader).to have_received(:each_unit).twice
+    expect(third[:results].map { |unit| unit[:identifier] }).to contain_exactly('NeedleInvoice', 'NeedleStatement')
+    expect(third[:applied_scope]).to include(eligible_units: 2)
+  end
+
   it 'exposes applied scope on retrieval structured output without hiding source provenance' do
     publish('Invoice', package: 'packs/billing')
     response = call_tool('codebase_retrieve', query: 'needle', packages: ['packs/billing'])
