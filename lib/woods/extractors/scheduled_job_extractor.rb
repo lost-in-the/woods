@@ -2,7 +2,11 @@
 
 require_relative '../source_inputs/consumer_errors'
 require_relative '../source_references/runtime_lookup'
+require_relative 'schedule_literals'
 require_relative 'periodic_registrations'
+require_relative 'sidekiq_cron_registrations'
+require_relative 'sidekiq_scheduler_registrations'
+require_relative 'cron_humanizer'
 
 require 'yaml'
 require 'set'
@@ -17,14 +21,19 @@ module Woods
   module Extractors
     # ScheduledJobExtractor handles scheduled/recurring job configuration extraction.
     #
-    # Scans three schedule file formats to extract one unit per scheduled entry:
+    # Scans these schedule files to extract one unit per scheduled entry:
     # - `config/recurring.yml` — Solid Queue recurring tasks
     # - `config/sidekiq_cron.yml` — Sidekiq-Cron scheduled jobs
     # - `config/schedule.rb` — Whenever DSL
+    # - `config/schedule.yml` — Sidekiq-Cron's default schedule file, also a
+    #   common home for a sidekiq-scheduler schedule (format `:sidekiq_schedule`)
+    # - `config/sidekiq.yml` — sidekiq-scheduler's `:scheduler: :schedule:` section
     #
-    # It also reads Sidekiq Enterprise `periodic` registrations from Ruby config
-    # sources (`config/initializers/**/*.rb`, `config/environments/*.rb`,
-    # `config/application.rb`); see {PeriodicRegistrations}.
+    # It also reads schedules registered from Ruby config sources
+    # (`config/initializers/**/*.rb`, `config/environments/*.rb`,
+    # `config/application.rb`): Sidekiq Enterprise `periodic` registrations
+    # ({PeriodicRegistrations}), Sidekiq-Cron jobs ({SidekiqCronRegistrations}),
+    # and sidekiq-scheduler schedules ({SidekiqSchedulerRegistrations}).
     #
     # Each scheduled entry becomes its own ExtractedUnit with type `:scheduled_job`.
     # Identifiers are prefixed with "scheduled:" to avoid collision with JobExtractor units.
@@ -39,25 +48,38 @@ module Woods
       SCHEDULE_FILES = {
         'config/recurring.yml' => :solid_queue,
         'config/sidekiq_cron.yml' => :sidekiq_cron,
-        'config/schedule.rb' => :whenever
+        'config/schedule.rb' => :whenever,
+        'config/schedule.yml' => :sidekiq_schedule,
+        'config/sidekiq.yml' => :sidekiq_scheduler
       }.freeze
 
-      # Directories whose Ruby files may register Sidekiq periodic jobs
+      # Directories whose Ruby files may register schedules
       PERIODIC_SOURCE_DIRECTORIES = %w[config/initializers config/environments].freeze
 
-      # Single files that may register Sidekiq periodic jobs
+      # Single files that may register schedules
       PERIODIC_SOURCE_FILES = %w[config/application.rb].freeze
 
-      # Common cron patterns mapped to human-readable descriptions
-      CRON_HUMANIZE = {
-        '* * * * *' => 'every minute',
-        '0 * * * *' => 'every hour',
-        '0 0 * * *' => 'daily at midnight',
-        '0 0 * * 0' => 'weekly on Sunday',
-        '0 0 * * 1' => 'weekly on Monday',
-        '0 0 1 * *' => 'monthly on the 1st',
-        '0 0 1 1 *' => 'yearly on January 1st'
+      # Formats registered from Ruby sources, where one name may repeat.
+      RUBY_FORMATS = %i[sidekiq_periodic sidekiq_cron_ruby sidekiq_scheduler_ruby].freeze
+
+      # A Ruby source that mentions none of these registers no schedule; skip its parse.
+      RUBY_SCHEDULE_HINT = /periodic|Cron::Job|schedule/
+
+      # How a named-entry format names one of its entries in a warning.
+      ENTRY_LABELS = {
+        sidekiq_cron_ruby: 'Sidekiq-Cron registration', sidekiq_scheduler_ruby: 'sidekiq-scheduler entry',
+        sidekiq_scheduler: 'sidekiq-scheduler entry', sidekiq_schedule: 'Schedule entry'
       }.freeze
+
+      # Formats in sidekiq-scheduler's shape: one of SCHEDULE_TYPES per entry,
+      # and the entry name doubles as the class when `class` is omitted.
+      SCHEDULER_FORMATS = %i[sidekiq_scheduler_ruby sidekiq_scheduler sidekiq_schedule].freeze
+
+      # sidekiq-scheduler schedule types, in the order it checks them.
+      SCHEDULE_TYPES = %w[cron every interval at in].freeze
+
+      # Common cron patterns mapped to human-readable descriptions
+      CRON_HUMANIZE = CronHumanizer::NAMED
 
       # A quoted Whenever command argument in either style. The body runs to
       # the *matching* delimiter, so the inner quotes of `command "echo 'hi'"`
@@ -69,7 +91,7 @@ module Woods
           full_path = Rails.root.join(relative_path)
           hash[full_path.to_s] = format if File.exist?(full_path)
         end
-        periodic_source_paths.each { |path| @schedule_files[path] = :sidekiq_periodic }
+        periodic_source_paths.each { |path| @schedule_files[path] = :ruby_config }
       end
 
       # Extract all scheduled job entries from all discovered schedule files.
@@ -85,7 +107,9 @@ module Woods
       # this returns an Array because each schedule file contains multiple entries.
       #
       # @param file_path [String] Path to the schedule file
-      # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever, :sidekiq_periodic
+      # @param format [Symbol] One of :solid_queue, :sidekiq_cron, :whenever, :sidekiq_schedule,
+      #   :sidekiq_scheduler, or :ruby_config
+      #   (a Ruby config source; :sidekiq_periodic is accepted as an alias)
       # @return [Array<ExtractedUnit>] List of scheduled job units
       def extract_scheduled_job_file(file_path, format)
         path = File.expand_path(file_path.to_s)
@@ -96,7 +120,7 @@ module Woods
       private
 
       def schedule_units(files)
-        number_periodic_repeats(files.flat_map { |path, format| extract_schedule_file(path, format) })
+        number_ruby_repeats(files.flat_map { |path, format| extract_schedule_file(path, format) })
       end
 
       def periodic_source_paths
@@ -111,8 +135,10 @@ module Woods
           extract_yaml_schedule(file_path, format)
         when :whenever
           extract_whenever_schedule(file_path)
-        when :sidekiq_periodic
-          extract_periodic_schedule(file_path)
+        when :sidekiq_schedule, :sidekiq_scheduler
+          extract_scheduler_yaml(file_path, format)
+        when :ruby_config, :sidekiq_periodic
+          extract_ruby_schedule(file_path)
         else
           []
         end
@@ -277,6 +303,71 @@ module Woods
       end
 
       # ──────────────────────────────────────────────────────────────────────
+      # Sidekiq schedule YAML (config/schedule.yml, config/sidekiq.yml)
+      # ──────────────────────────────────────────────────────────────────────
+
+      # Both files are safe-loaded like `config/sidekiq_cron.yml`; ERB is not run.
+      #
+      # @param file_path [String] Path to the YAML file
+      # @param format [Symbol] :sidekiq_schedule or :sidekiq_scheduler
+      # @return [Array<ExtractedUnit>]
+      def extract_scheduler_yaml(file_path, format)
+        source = File.read(file_path)
+        # Most Sidekiq configs carry no schedule; skip the parse for them.
+        return [] if format == :sidekiq_scheduler && !source.include?('schedule')
+
+        data = YAML.safe_load(source, permitted_classes: [Symbol], aliases: true)
+        return [] unless data.is_a?(Hash) && data.any?
+
+        entries = format == :sidekiq_scheduler ? sidekiq_config_schedule(data) : unwrap_environment_nesting(data)
+        return [] unless entries.is_a?(Hash)
+
+        entries.filter_map do |name, config|
+          next unless config.is_a?(Hash)
+
+          build_named_entry_unit(yaml_entry(name, config), format, file_path, source)
+        end
+      end
+
+      # Sidekiq merges the current environment's section over the root, so a
+      # schedule there wins; `:schedule:` at the root is the legacy location.
+      #
+      # @param data [Hash] parsed `config/sidekiq.yml`
+      # @return [Hash, nil] name => definition
+      def sidekiq_config_schedule(data)
+        environment = current_environment
+        sections = [environment && config_value(data, environment), data]
+        sections.each do |section|
+          next unless section.is_a?(Hash)
+
+          scheduler = config_value(section, 'scheduler')
+          schedule = (config_value(scheduler, 'schedule') if scheduler.is_a?(Hash)) || config_value(section, 'schedule')
+          return schedule if schedule.is_a?(Hash)
+        end
+        nil
+      end
+
+      def config_value(hash, key)
+        hash.key?(key.to_sym) ? hash[key.to_sym] : hash[key]
+      end
+
+      # Shape a YAML definition like {ScheduleLiterals.entry}.
+      #
+      # @param name [String, Symbol] the entry key
+      # @param config [Hash] the definition
+      # @return [Hash]
+      def yaml_entry(name, config)
+        options = config.transform_keys(&:to_s)
+        job_class = ScheduleLiterals::CLASS_KEYS.filter_map { |key| options.delete(key) }.first
+        cron = options.delete('cron')
+        cron, cron_options = cron if cron.is_a?(Array)
+        entry = { name: name.to_s, job_class: job_class&.to_s, cron: (cron if cron.is_a?(String)), options: options }
+        entry[:cron_source] = cron.to_s unless cron.nil? || cron.is_a?(String)
+        entry[:cron_options] = cron_options if cron_options
+        entry
+      end
+
+      # ──────────────────────────────────────────────────────────────────────
       # Whenever DSL (config/schedule.rb)
       # ──────────────────────────────────────────────────────────────────────
 
@@ -389,7 +480,7 @@ module Woods
           job_class: block[:job_class],
           cron_expression: block[:frequency],
           command_type: block[:command_type],
-          frequency_human_readable: block[:frequency]
+          frequency_human_readable: humanize_whenever_frequency(block[:frequency])
         }
         unit.dependencies = build_dependencies(block[:job_class])
 
@@ -397,18 +488,22 @@ module Woods
       end
 
       # ──────────────────────────────────────────────────────────────────────
-      # Sidekiq Enterprise periodic registrations (Ruby config sources)
+      # Schedules registered from Ruby config sources
       # ──────────────────────────────────────────────────────────────────────
 
       # @param file_path [String] Path to a Ruby config source
       # @return [Array<ExtractedUnit>]
-      def extract_periodic_schedule(file_path)
+      def extract_ruby_schedule(file_path)
         source = File.read(file_path)
-        # Most initializers never mention periodic; skip the parse for them.
-        return [] unless source.include?('periodic')
+        return [] unless source.match?(RUBY_SCHEDULE_HINT)
 
-        PeriodicRegistrations.read(source).filter_map do |registration|
+        program = ScheduleLiterals.parse(source)
+        periodic = PeriodicRegistrations.collect(program).filter_map do |registration|
           build_periodic_unit(registration, file_path, source)
+        end
+        named = { sidekiq_cron_ruby: SidekiqCronRegistrations, sidekiq_scheduler_ruby: SidekiqSchedulerRegistrations }
+        periodic + named.flat_map do |format, reader|
+          reader.collect(program).filter_map { |entry| build_named_entry_unit(entry, format, file_path, source) }
         end
       end
 
@@ -428,6 +523,10 @@ module Woods
         unless resolved
           Rails.logger.warn("[Woods] Periodic registration at #{location} names #{job_class}, which is not a loaded class")
         end
+        if registration[:cron_source]
+          Rails.logger.warn("[Woods] Periodic registration at #{location}: cron is not a literal " \
+                            "(#{registration[:cron_source]})")
+        end
 
         unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{job_class.underscore}",
                                  file_path: file_path)
@@ -444,8 +543,87 @@ module Woods
           line: registration[:line],
           frequency_human_readable: humanize_frequency(registration[:cron], :sidekiq_periodic)
         }
+        unit.metadata[:cron_source] = registration[:cron_source] if registration[:cron_source]
         unit.dependencies = build_dependencies(job_class)
         unit
+      end
+
+      # A named schedule entry (Sidekiq-Cron or sidekiq-scheduler, from Ruby or YAML).
+      #
+      # @param entry [Hash] one {ScheduleLiterals.entry}, plus `:line` and `:registration` from Ruby
+      # @param format [Symbol] a key of {ENTRY_LABELS}
+      # @param file_path [String] Path to the schedule source
+      # @param source [String] Raw file content
+      # @return [ExtractedUnit, nil] nil when neither the name nor the class is literal
+      def build_named_entry_unit(entry, format, file_path, source)
+        entry = infer_scheduler_class(entry) if SCHEDULER_FORMATS.include?(format)
+        job_class = entry[:job_class]
+        task_name = entry[:name] || job_class&.underscore
+        return warn_entry(entry, format, file_path, 'has neither a literal name nor a literal class') unless task_name
+
+        resolved = job_class && job_class_loaded?(job_class)
+        problems = []
+        problems << 'job class is not a literal name' if entry[:job_class_source]
+        problems << "names #{job_class}, which is not a loaded class" if job_class && !resolved
+        problems << "cron is not a literal (#{entry[:cron_source]})" if entry[:cron_source]
+        problems.each { |problem| warn_entry(entry, format, file_path, problem) }
+
+        unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{task_name}", file_path: file_path)
+        unit.namespace = job_class.split('::')[0..-2].join('::') if job_class&.include?('::')
+        unit.source_code = source
+        options = entry[:options]
+        unit.metadata = {
+          schedule_format: format,
+          task_name: task_name,
+          job_class: job_class,
+          job_class_resolved: resolved || false,
+          cron_expression: entry[:cron],
+          queue: options['queue'],
+          args: options['args'],
+          options: options,
+          frequency_human_readable: humanize_frequency(entry[:cron], format),
+          **entry.slice(:line, :registration, :name_source, :job_class_source, :job_class_inferred, :cron_source,
+                        :cron_options)
+        }
+        unit.metadata.merge!(scheduler_fields(entry)) if SCHEDULER_FORMATS.include?(format)
+        unit.dependencies = build_dependencies(job_class)
+        unit
+      end
+
+      # sidekiq-scheduler uses the entry name as the class when `class` is omitted.
+      def infer_scheduler_class(entry)
+        name = entry[:name]
+        return entry if entry[:job_class] || entry[:job_class_source]
+        return entry unless name&.match?(SourceReferences::RuntimeLookup::CONSTANT)
+
+        entry.merge(job_class: name.delete_prefix('::'), job_class_inferred: true)
+      end
+
+      # @param entry [Hash] a schedule entry with `:cron`, `:cron_source`, and `:options`
+      # @return [Hash] `:schedule_type`, any of `:every`/`:interval`/`:at`/`:in`, and
+      #   `:frequency_human_readable`
+      def scheduler_fields(entry)
+        options = entry[:options]
+        cron_given = entry[:cron] || entry[:cron_source]
+        type = cron_given ? 'cron' : SCHEDULE_TYPES.find { |key| options.key?(key) }
+        fields = SCHEDULE_TYPES.drop(1).select { |key| options.key?(key) }.to_h { |key| [key.to_sym, options[key]] }
+        fields.merge(schedule_type: type&.to_sym, frequency_human_readable: scheduler_frequency(type, entry))
+      end
+
+      def scheduler_frequency(type, entry)
+        value = entry[:options][type]
+        case type
+        when 'cron' then humanize_frequency(entry[:cron], :sidekiq_scheduler)
+        when 'every', 'interval' then CronHumanizer.every(value)
+        when 'at' then "once at #{value}"
+        when 'in' then "once in #{Array(value).first}"
+        end
+      end
+
+      def warn_entry(entry, format, file_path, problem)
+        location = entry[:line] ? "#{file_path}:#{entry[:line]}" : "#{file_path} (#{entry[:name]})"
+        Rails.logger.warn("[Woods] #{ENTRY_LABELS.fetch(format)} at #{location} #{problem}")
+        nil
       end
 
       def job_class_loaded?(job_class)
@@ -453,11 +631,12 @@ module Woods
         @runtime_lookup.call(job_class)[:status] == :resolved
       end
 
-      # Sidekiq accepts one job class under several crons. Number the repeats
+      # Ruby registrations may repeat a name (one job class under several
+      # crons, or one name in several environment files). Number the repeats
       # by source position so the names hold whatever order files arrive in.
-      def number_periodic_repeats(units)
-        periodic = units.select { |unit| unit.metadata[:schedule_format] == :sidekiq_periodic }
-        periodic.group_by(&:identifier).each_value do |entries|
+      def number_ruby_repeats(units)
+        ruby = units.select { |unit| RUBY_FORMATS.include?(unit.metadata[:schedule_format]) }
+        ruby.group_by { |unit| [unit.metadata[:schedule_format], unit.identifier] }.each_value do |entries|
           entries.sort_by { |unit| [unit.file_path, unit.metadata[:line]] }.drop(1).each.with_index(2) do |unit, n|
             unit.identifier = "#{unit.identifier}:#{n}"
           end
@@ -490,14 +669,17 @@ module Woods
         # Solid Queue schedules are already human-readable
         return expression if format == :solid_queue
 
-        # Check exact matches
-        return CRON_HUMANIZE[expression] if CRON_HUMANIZE.key?(expression)
+        CronHumanizer.humanize(expression) || expression
+      end
 
-        # Check */N minute pattern
-        return "every #{::Regexp.last_match(1)} minutes" if expression =~ %r{\A\*/(\d+) \* \* \* \*\z}
-
-        # Fallback: return raw expression
-        expression
+      # Whenever frequencies are Ruby (`1.day`, `:hour`); only a quoted cron
+      # line is described, the rest stay as written.
+      #
+      # @param frequency [String] the `every` argument as written
+      # @return [String]
+      def humanize_whenever_frequency(frequency)
+        cron = frequency[/\A#{QUOTED_ARGUMENT}\z/o, 2]
+        (cron && CronHumanizer.humanize(cron)) || frequency
       end
     end
   end

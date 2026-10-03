@@ -104,8 +104,8 @@ module Woods
       %r{\A[^/]+\.gemspec\z},
       %r{\Aconfig/settings\.ya?ml\z},
       %r{\Aconfig/settings/[^/]+\.ya?ml\z},
-      # Note what is absent: `config/recurring.yml` and `config/sidekiq_cron.yml`
-      # are scheduled-job *sources* that Woods reads as bytes
+      # Note what is absent: `config/recurring.yml`, `config/sidekiq_cron.yml`
+      # and `config/schedule.yml` are scheduled-job *sources* that Woods reads as bytes
       # (`ScheduledJobExtractor::SCHEDULE_FILES`), so they stay `:reextract`.
       # `spec/reload_policy_spec.rb` asserts that, which is how the first draft
       # of this list got caught.
@@ -147,6 +147,7 @@ module Woods
       config/recurring.yml
       config/sidekiq_cron.yml
       config/schedule.rb
+      config/schedule.yml
     ].freeze
 
     # Packwerk boundary files, read as bytes by PackageExtractor (#280).

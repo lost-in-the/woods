@@ -706,15 +706,48 @@ expanded mailer and schedule identities in an existing index.
 **What it captures:** Scheduled job definitions from cron-style config files. Supports multiple scheduling backends.
 
 **Key details:**
-- Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever)
+- Reads: `config/recurring.yml` (Solid Queue), `config/sidekiq_cron.yml` (Sidekiq Cron), `config/schedule.rb` (Whenever),
+  `config/schedule.yml` (format `:sidekiq_schedule`: Sidekiq-Cron's default schedule file, and a common
+  separate file for a sidekiq-scheduler schedule), and the `:scheduler: :schedule:` section of
+  `config/sidekiq.yml` (format `:sidekiq_scheduler`; a legacy root `:schedule:` and a section for the
+  current environment are honoured, and a `config/sidekiq.yml` that never mentions `schedule` is not
+  parsed). Both new files take the sidekiq-scheduler shape described below (schedule types, the name
+  as class when `class` is omitted); `config/schedule.yml` also selects an environment section like
+  the other YAML formats.
 - Reads Sidekiq Enterprise periodic registrations (`mgr.register(cron, job_class, options)` inside a
   `periodic` block, format `:sidekiq_periodic`) from `config/initializers/**/*.rb`,
   `config/environments/*.rb` and `config/application.rb` with a static Prism scan; the code is never run.
-  Files that never mention `periodic` are not parsed. The job class may be a string or a constant;
-  options are kept in `metadata[:options]`. A class that is not loaded is logged as a warning and the
+  Files that never mention `periodic` are not parsed. The block parameter may be named, `_1`, or `it`.
+  The job class may be a string or a constant; options are kept in `metadata[:options]`. A computed
+  cron keeps the unit with `cron_expression: nil` and its source in `metadata[:cron_source]`, and is
+  logged as a warning. A class that is not loaded is logged as a warning and the
   unit is kept with `job_class_resolved: false`. Identifiers are `scheduled:<job_class.underscore>`;
   repeat registrations of one class are numbered `:2`, `:3` by file and line.
+- Reads Sidekiq-Cron jobs registered in Ruby (format `:sidekiq_cron_ruby`) from the same sources:
+  `Sidekiq::Cron::Job.create(...)`, `Sidekiq::Cron::Job.new(...).save` (directly or through a local
+  that is saved), and `load_from_hash(!)` / `load_from_array(!)` with a literal Hash or Array.
+  `metadata[:registration]` names the form. String or symbol keys and `class` or `klass` are
+  accepted. Identifiers are `scheduled:<name>`, or `scheduled:<job_class.underscore>` with
+  `metadata[:name_source]` when the name is computed; a computed class keeps the unit without an
+  edge (`metadata[:job_class_source]`); an entry with neither is skipped with a warning. A computed
+  argument such as `load_from_hash(YAML.load_file(...))` is not read. Repeats of one name are numbered
+  like periodic repeats.
+- Reads sidekiq-scheduler schedules set in Ruby (format `:sidekiq_scheduler_ruby`) from the same
+  sources: `Sidekiq.schedule = { name => definition }` and `Sidekiq.set_schedule(name, definition)`
+  with literal hashes (receiver `Sidekiq`, `Sidekiq::Scheduler`, or `SidekiqScheduler::Scheduler`,
+  optionally `.instance`). `metadata[:schedule_type]` is the first of `cron`, `every`, `interval`, `at`,
+  `in` present; the `every`/`interval`/`at`/`in` values are kept under keys of the same name.
+  `every` and `interval` durations are humanized (`45m` is `every 45 minutes`); `at` and `in` read
+  `once at ...` / `once in ...`. The `[cron, options]` form keeps the options in
+  `metadata[:cron_options]`. When `class` is omitted and the name is a constant name, the name is the
+  class (`metadata[:job_class_inferred]`), as sidekiq-scheduler does.
 - Extracts job class name, cron expression, queue, and any arguments
+- `metadata[:frequency_human_readable]` describes standard cron lines in words (`0 7 * * *` is
+  `daily at 07:00`, `0 8 * * 0` is `weekly on Sunday at 08:00`, `*/15 9-17 * * 1-5` is
+  `every 15 minutes from 09:00 to 17:45 on weekdays`, `0 9 * 6 *` is `daily at 09:00 in June`;
+  ranges end at the last firing time), including nicknames such as `@daily`,
+  a leading seconds field and a trailing time zone. Shapes it cannot describe exactly keep the raw
+  expression; `metadata[:cron_expression]` always holds the cron line as written.
 - Resolves trusted application `recurring.yml` through Rails' configuration loader,
   including ERB, filename-relative `require_relative`, and YAML aliases. On Rails
   6.0 (before that loader existed), evaluates ERB with its filename and retains
@@ -723,12 +756,13 @@ expanded mailer and schedule identities in an existing index.
 - Environment-wrapped task maps select the current Rails environment, including
   custom names; an absent environment falls back to the first section, while an
   explicitly empty section stays empty. Flat task maps remain supported.
-- Sidekiq-Cron remains safe-loaded YAML; Whenever remains a static DSL scan.
+- Sidekiq-Cron, `config/schedule.yml` and `config/sidekiq.yml` are safe-loaded YAML (ERB is not
+  run); Whenever remains a static DSL scan.
   Invalid YAML/ERB, missing required files and runtime configuration errors are
   logged and omit that schedule file. Source remains the original file text.
 - No per-file mapping, so incremental re-extraction re-runs `ScheduledJobExtractor` wholesale whenever one of the schedule files above changes.
-  The Ruby config sources are restart-sensitive: incremental extraction refuses them and a full
-  `woods:extract` picks up changed periodic registrations.
+  The Ruby config sources and `config/sidekiq.yml` are restart-sensitive: incremental extraction
+  refuses them and a full `woods:extract` picks up changed registrations and schedules.
 
 ---
 

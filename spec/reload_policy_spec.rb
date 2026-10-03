@@ -74,10 +74,12 @@ RSpec.describe Woods::ReloadPolicy do
         expect(policy.classify('app/views/posts/index.html.erb')).to eq(:reextract)
       end
 
-      it 'only needs re-extraction for schedule files' do
+      it 'only needs re-extraction for schedule files Sidekiq does not read at boot' do
         Woods::Extractors::ScheduledJobExtractor::SCHEDULE_FILES.each_key do |path|
-          expect(policy.classify(path)).to eq(:reextract)
+          expected = path == 'config/sidekiq.yml' ? :restart : :reextract
+          expect(policy.classify(path)).to eq(expected), path
         end
+        expect(policy.classify('config/schedule.yml')).to eq(:reextract)
       end
     end
 
