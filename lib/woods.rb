@@ -27,6 +27,8 @@ require_relative 'woods/extractors/component_discovery'
 require_relative 'woods/graphql_document_paths'
 # Configuration validates declared external table consumers at assignment.
 require_relative 'woods/extractors/external_consumer_declarations'
+# Configuration validates `rake_task_paths` at assignment.
+require_relative 'woods/extractors/rake_task_paths'
 # Configuration defaults the cycle caps to the analyzer's own constants.
 require_relative 'woods/graph_analyzer'
 # Configuration's `source_reference_callers` default lives with the pass it feeds.
@@ -159,7 +161,7 @@ module Woods
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
-                :test_support_paths, :test_subdomain_helpers, :source_reference_callers
+                :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -261,6 +263,8 @@ module Woods
       # Which unit types publish verified code_reference edges, and to which
       # target types. See the setter.
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(nil)
+      # Files RakeTaskExtractor reads. See Extractors::RakeTaskPaths.
+      @rake_task_paths = Extractors::RakeTaskPaths::DEFAULT_PATHS
     end
 
     def embedding_model=(value)
@@ -679,6 +683,19 @@ module Woods
     # @raise [ConfigurationError] for an unknown type or malformed entry; the previous value is kept
     def source_reference_callers=(value)
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(value)
+    end
+
+    # Files {Woods::Extractors::RakeTaskExtractor} reads for task definitions,
+    # relative to Rails.root. Ruby files under a listed directory are indexed
+    # as the tasks' support code. Changing it needs a full extraction.
+    #
+    # @example
+    #   config.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/*.rake', 'Rakefile']
+    #
+    # @param value [Array<String>] file paths, +dir/**/*.ext+ or +dir/*.ext+ globs
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def rake_task_paths=(value)
+      @rake_task_paths = Extractors::RakeTaskPaths.validate!(value)
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
