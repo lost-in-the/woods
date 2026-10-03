@@ -93,6 +93,19 @@ module Woods
              .map { |relative| File.join(root, relative) }
       end
 
+      # Owned Ruby under the sweep globs, each with the extractors that own it.
+      # Extractor runs {#extract_fallback_units} on a path when none of its
+      # owners emitted a unit for it.
+      #
+      # @return [Hash{String => Array<Symbol>}] absolute path => owning extractor keys
+      def fallback_files
+        root = Rails.root.to_s
+        Array(Woods.configuration&.unclaimed_ruby_paths)
+          .flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: root) }
+          .uniq.sort.select { |relative| PathDispatcher.fallback_candidate?(relative) }
+          .to_h { |relative| [File.join(root, relative), PathDispatcher.claiming_keys_for(relative)] }
+      end
+
       # Preserve the historical single-unit return contract. A class remains
       # primary when a file also declares callable standalone modules.
       #

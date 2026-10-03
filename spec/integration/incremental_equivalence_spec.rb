@@ -1660,7 +1660,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   describe 'unclaimed Ruby under app/ (#672, #673)' do
     after do
       %i[SweepDateHelper SweepBillingView SweepConstraint SweepSlugifier SweepTailwind SweepNamespace
-         SweepMapper SweepPattern].each do |name|
+         SweepMapper SweepPattern SweepSerializerHelpers SweepFormatter SweepVersionCapabilities
+         SweepFlipService].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
       end
     end
@@ -1671,8 +1672,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       relative
     end
 
-    def sweep_units(index)
-      unit_snapshot(index).values.select { |unit| unit.dig('metadata', 'discovered_via') == 'unclaimed_sweep' }
+    def sweep_units(index, marker: 'unclaimed_sweep')
+      unit_snapshot(index).values.select { |unit| unit.dig('metadata', 'discovered_via') == marker }
                           .map { |unit| unit['identifier'] }
     end
 
@@ -1731,6 +1732,56 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                      end,
                      -> { delete_file('app/constraints/sweep_constraint.rb') }
                    ])
+    end
+
+    it 'falls back to the PORO path where an owning extractor emits nothing, in both modes' do
+      helpers = 'app/serializers/sweep_serializer_helpers.rb'
+      run_sequence([
+                     lambda do
+                       write_and_load(helpers, <<~RUBY)
+                         module SweepSerializerHelpers
+                           def money(value) = value.to_s
+                         end
+                         class SweepFormatter
+                           def call(value) = value
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load('app/graphql/sweep_version_capabilities.rb', <<~RUBY)
+                         module SweepVersionCapabilities
+                           def self.supports?(capability, version) = true
+                         end
+                       RUBY
+                     end,
+                     lambda do
+                       write_and_load(helpers, <<~RUBY)
+                         module SweepSerializerHelpers
+                           def money(value) = value.to_s
+                           def percent(value) = "\#{value}%"
+                         end
+                         class SweepFormatter
+                           def call(value) = value
+                         end
+                       RUBY
+                     end,
+                     -> { delete_file(helpers) }
+                   ])
+      index = full_extraction
+      expect(sweep_units(index, marker: 'owner_fallback')).to eq(['SweepVersionCapabilities'])
+    end
+
+    it 'moves a file between its owner and the fallback as its shape changes' do
+      flip = 'app/services/sweep_flip_service.rb'
+      service = "class SweepFlipService\n  def call = :ok\nend\n"
+      helper = "module SweepFlipService\n  module_function\n  def call = :ok\nend\n"
+      swap = lambda do |source|
+        Object.send(:remove_const, :SweepFlipService) if Object.const_defined?(:SweepFlipService, false)
+        write_and_load(flip, source)
+      end
+      run_sequence([-> { swap.call(service) }, -> { swap.call(helper) }, -> { swap.call(service) },
+                    -> { swap.call(helper) }])
+      expect(sweep_units(full_extraction, marker: 'owner_fallback')).to eq(['SweepFlipService'])
     end
 
     it 'parses each PORO source once per full extraction' do

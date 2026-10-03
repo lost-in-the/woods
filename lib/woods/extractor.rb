@@ -61,6 +61,7 @@ require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
 require_relative 'module_reconciliation'
+require_relative 'poro_reconciliation'
 require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
 
@@ -84,6 +85,7 @@ module Woods
     include Extractors::SourceNesting
     include SourceReferences::Extraction
     include ModuleReconciliation
+    include PoroReconciliation
 
     # Directories under app/ that contain classes we need to extract.
     # Used by eager_load_extraction_directories as a fallback when
@@ -456,6 +458,9 @@ module Woods
         end
       end
 
+      # Phase 1.2: Owned files whose owners emitted nothing go to the PORO path.
+      profile_phase('owner fallback') { extract_owner_fallbacks }
+
       # Phase 1.5: Deduplicate results
       Rails.logger.info '[Woods] Deduplicating results...'
       profile_phase('deduplication') { deduplicate_results }
@@ -643,6 +648,8 @@ module Woods
         touched.merge(reconcile_class_based_types(
                         affected_types, except: pruned - readdable_pruned_classes(pruned, change_set)
                       ))
+        # Last: owner presence is final only after every family reconciled.
+        touched.merge(reconcile_owner_fallbacks(affected_types))
       end
 
       raise_on_handled_extraction_failure!

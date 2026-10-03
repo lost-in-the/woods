@@ -114,9 +114,19 @@ module Woods
       # @param relative_path [String] Rails.root-relative path
       # @return [Symbol, nil]
       def claiming_key_for(relative_path)
-        file_rules.find do |rule|
-          !NON_CLAIMING_RULES.include?([rule.extractor_key, rule.method_name]) && rule.matches?(relative_path)
-        end&.extractor_key
+        claiming_keys_for(relative_path).first
+      end
+
+      # Every extractor whose file rule owns +relative_path+, in rule order.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Array<Symbol>]
+      def claiming_keys_for(relative_path)
+        file_rules.filter_map do |rule|
+          next if NON_CLAIMING_RULES.include?([rule.extractor_key, rule.method_name])
+
+          rule.extractor_key if rule.matches?(relative_path)
+        end.uniq
       end
 
       # Is this a Ruby file the PORO extractor sweeps because nothing owns it?
@@ -124,10 +134,16 @@ module Woods
       # @param relative_path [String] Rails.root-relative path
       # @return [Boolean]
       def unclaimed?(relative_path)
-        relative_path.end_with?('.rb') &&
-          UNSWEPT_PREFIXES.none? { |prefix| relative_path.start_with?(prefix) } &&
-          unclaimed_globs.any? { |glob| File.fnmatch?(glob, relative_path, GLOB_FLAGS) } &&
-          claiming_key_for(relative_path).nil?
+        sweepable?(relative_path) && claiming_key_for(relative_path).nil?
+      end
+
+      # Is this owned Ruby under the sweep globs? When its owners emit no unit
+      # for it, the PORO extractor takes it (owner fallback).
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def fallback_candidate?(relative_path)
+        sweepable?(relative_path) && !claiming_key_for(relative_path).nil?
       end
 
       # The PORO extractor's surface: app/models outside concerns, plus every
@@ -169,6 +185,12 @@ module Woods
       end
 
       private
+
+      def sweepable?(relative_path)
+        relative_path.end_with?('.rb') &&
+          UNSWEPT_PREFIXES.none? { |prefix| relative_path.start_with?(prefix) } &&
+          unclaimed_globs.any? { |glob| File.fnmatch?(glob, relative_path, GLOB_FLAGS) }
+      end
 
       def unclaimed_globs
         Woods.configuration&.unclaimed_ruby_paths || []

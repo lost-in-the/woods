@@ -466,6 +466,13 @@ units carry `metadata.discovered_via: "unclaimed_sweep"`. Classes owned by a
 class-discovered extractor (controllers, mailers, channels, components, jobs,
 serializers, GraphQL) are never emitted by the sweep.
 
+A file under the globs that another extractor owns, but for which that
+extractor emits nothing (helpers beside a serializer base, a module in a
+services directory, a batch loader under `app/graphql`), falls back to the same
+PORO path. Those units carry `metadata.discovered_via: "owner_fallback"`. The
+decision is made per file after every typed extractor has run, in full and
+incremental extraction alike.
+
 A file with no class or module body can still own top-level constants
 (`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment
 whose runtime `const_source_location` is that file, and whose value is not a

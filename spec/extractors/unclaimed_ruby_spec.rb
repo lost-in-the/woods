@@ -282,6 +282,16 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
                                                          'SweepFixture::AnalyticsConsumer')
     end
 
+    it 'lists fallback candidates with every extractor that owns each one' do
+      helper = create_file('app/serializers/serializer_helpers.rb', "module SerializerHelpers; end\n")
+      policy = create_file('app/policies/post_policy.rb', "class PostPolicy; end\n")
+      create_file('app/helpers/date_helper.rb', "module DateHelper; end\n")
+      expect(described_class.new.fallback_files).to eq(helper => %i[serializers],
+                                                       policy => %i[
+                                                         policies pundit_policies
+                                                       ])
+    end
+
     it 'leaves the sweep and app/models scans unchanged' do
       load_source('app/services/sweep_fixture/checkout.rb', "class SweepFixture::Checkout\n  def call = nil\nend\n")
       expect(identifiers).to eq([])

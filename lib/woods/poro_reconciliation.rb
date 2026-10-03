@@ -1,0 +1,94 @@
+# frozen_string_literal: true
+
+require 'set'
+
+module Woods
+  # Owner fallback: owned Ruby under the sweep globs whose owning extractors
+  # emit no unit for it (helpers beside a serializer base, a module in a
+  # services directory) goes to the PORO path instead of vanishing.
+  #
+  # The rule is per path and identical in both modes: after typed extraction,
+  # a candidate from {Extractors::PoroExtractor#fallback_files} with no unit of
+  # any owner's type gets {Extractors::PoroExtractor#extract_fallback_units}.
+  # Full extraction reads the run's results; incremental extraction reads the
+  # reconciled graph and re-checks every candidate, so hybrid owners replaced
+  # wholesale and owners that moved without a path change are both seen.
+  module PoroReconciliation
+    private
+
+    # Full extraction: add fallback units to the PORO results.
+    #
+    # @return [void]
+    def extract_owner_fallbacks
+      poros = @extractors[:poros]
+      return unless poros.respond_to?(:fallback_files)
+
+      present = result_types_by_path
+      ar_names = fallback_ar_names
+      units = poros.fallback_files.flat_map do |path, keys|
+        owned = path_spellings(path).any? { |spelling| owner_types(keys).intersect?(present[spelling]) }
+        owned ? [] : poros.extract_fallback_units(path, ar_names: ar_names)
+      end
+      (@results[:poros] ||= []).concat(units)
+    end
+
+    # Incremental extraction: bring every candidate's fallback units in line
+    # with the reconciled graph.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers written or removed
+    def reconcile_owner_fallbacks(affected_types)
+      poros = extractor_for(:poros)
+      return Set.new unless poros.respond_to?(:fallback_files)
+
+      poros.fallback_files.each_with_object(Set.new) do |(path, keys), touched|
+        present = path_spellings(path).flat_map { |spelling| @dependency_graph.units_for_path(spelling) }.uniq
+        produced = fallback_units_for(poros, path, keys, present)
+        next if produced.nil?
+
+        touched.merge(register_and_write(:poros, produced, affected_types))
+        touched.merge(remove_stale_poros(present, produced, affected_types))
+      end
+    end
+
+    # @return [Array<ExtractedUnit>, nil] nil when the extraction failed
+    def fallback_units_for(poros, path, keys, present)
+      return [] if present.any? { |_identifier, type| owner_types(keys).include?(type) }
+
+      checked_extraction(:poros, poros) { poros.extract_fallback_units(path, ar_names: active_record_names) }
+    end
+
+    def remove_stale_poros(present, produced, affected_types)
+      kept = produced.to_set(&:identifier)
+      present.each_with_object(Set.new) do |(identifier, type), removed|
+        next unless type == :poro && !kept.include?(identifier)
+
+        removed.add(identifier) if remove_unit(identifier, affected_types, type: :poro)
+      end
+    end
+
+    def result_types_by_path
+      @results.each_value.with_object(Hash.new { |hash, path| hash[path] = Set.new }) do |units, present|
+        units.each { |unit| path_spellings(unit.file_path).each { |path| present[path].add(unit.type) } }
+      end
+    end
+
+    def owner_types(keys)
+      keys.flat_map { |key| self.class::EXTRACTOR_KEY_TO_TYPES.fetch(key, []) }.to_set
+    end
+
+    # A runtime-discovered owner can report the realpath of a file the glob
+    # named through a symlinked root.
+    def path_spellings(path)
+      return [] unless path
+
+      expanded = File.expand_path(path.to_s, Rails.root.to_s)
+      real = File.exist?(expanded) ? File.realpath(expanded) : expanded
+      [expanded, real].uniq
+    end
+
+    def fallback_ar_names
+      defined?(ActiveRecord::Base) ? ActiveRecord::Base.descendants.filter_map(&:name).to_set : Set.new
+    end
+  end
+end

@@ -915,6 +915,9 @@ never emitted by the sweep, so typed units are not duplicated. Its plain
 neighbours are. Outside `app/models`, a class unit also needs its canonical
 declaration in that file.
 
+An owned path under the globs whose owning extractors emit no unit for it falls
+back to the same PORO path, marked `metadata.discovered_via: "owner_fallback"`.
+
 Swept units are `poro` units with `metadata.discovered_via: "unclaimed_sweep"`.
 `app/models` is always scanned and its units carry no marker.
 

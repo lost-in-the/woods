@@ -211,6 +211,19 @@ RSpec.describe Woods::PathDispatcher do
       expect(described_class.unclaimed?('app/view_models/billing_view.rb')).to be(false)
     end
 
+    it 'lists every owning extractor of a path' do
+      expect(described_class.claiming_keys_for('app/policies/post_policy.rb')).to contain_exactly(:policies,
+                                                                                                  :pundit_policies)
+      expect(described_class.claiming_keys_for('app/helpers/date_helper.rb')).to eq([])
+    end
+
+    it 'offers owned Ruby under the globs as a fallback candidate, and nothing else' do
+      expect(described_class.fallback_candidate?('app/serializers/serializer_helpers.rb')).to be(true)
+      expect(described_class.fallback_candidate?('app/graphql/loaders/association_loader.rb')).to be(true)
+      %w[app/helpers/date_helper.rb app/assets/config/x.rb lib/reporting/csv.rb app/views/posts/index.html.erb]
+        .each { |path| expect(described_class.fallback_candidate?(path)).to(be(false), path) }
+    end
+
     it 'routes swept paths and app/models to the PORO extractor, whatever the globs say' do
       Woods.configuration.unclaimed_ruby_paths = []
 
