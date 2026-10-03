@@ -486,7 +486,8 @@ RSpec.describe Woods::PathDispatcher do
         Woods.configuration.javascript_paths = ['frontend/**/*.ts']
 
         expect(JSON.parse(JSON.generate(js_rule.to_h)))
-          .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?', 'extensions' => %w[.js .ts .jsx .tsx .mjs])
+          .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?',
+                      'extensions' => %w[.js .ts .jsx .tsx .mjs])
         expect(js_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
       end
     end
