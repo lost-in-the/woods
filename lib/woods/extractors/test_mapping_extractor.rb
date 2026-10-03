@@ -47,6 +47,11 @@ module Woods
       # it names no unit, so it must never become a :test_coverage target.
       CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
 
+      # Outside a typed directory, the first example group's `type:` metadata
+      # or a Capybara `feature` block decides the test type.
+      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system)\b/
+      RSPEC_FEATURE_GROUP = /^\s*(?:RSpec\.)?feature\s/
+
       def initialize
         @rails_root = Rails.root
       end
@@ -110,7 +115,7 @@ module Woods
       def extract_metadata(source, file_path, framework)
         subject = extract_subject(source, framework)
         subject_class = subject if subject&.match?(CONSTANT_PATH)
-        test_type = infer_test_type(file_path)
+        test_type = infer_test_type(file_path, source)
 
         metadata = {
           subject_class: subject_class,
@@ -149,15 +154,20 @@ module Woods
       # @param source [String] RSpec file source code
       # @return [String, nil]
       def extract_rspec_subject(source)
-        source.each_line do |line|
-          constant = line.match(RSPEC_CONSTANT_DESCRIBE)
-          return constant[1] if constant
+        group = first_example_group(source)
+        return nil unless group
 
-          string = line.match(RSPEC_STRING_DESCRIBE)
-          return string[1] if string
+        (group.match(RSPEC_CONSTANT_DESCRIBE) || group.match(RSPEC_STRING_DESCRIBE))[1]
+      end
+
+      # Find the line that opens the file's first describe or feature block.
+      #
+      # @param source [String] RSpec file source code
+      # @return [String, nil]
+      def first_example_group(source)
+        source.each_line.find do |line|
+          line.match?(RSPEC_CONSTANT_DESCRIBE) || line.match?(RSPEC_STRING_DESCRIBE)
         end
-
-        nil
       end
 
       # Extract subject class from Minitest test class name.
@@ -206,18 +216,33 @@ module Woods
         source.scan(/^\s*(?:include_examples|it_behaves_like)\s+['"]([^'"]+)['"]/).flatten
       end
 
-      # Infer test type from the directory structure of the file path.
+      # Infer test type from the directory structure of the file path, then
+      # from the first example group for files outside a typed directory.
       #
       # @param file_path [String] Absolute path to the test file
-      # @return [Symbol] One of :model, :controller, :request, :system, :unit
-      def infer_test_type(file_path)
+      # @param source [String] File source code
+      # @return [Symbol] One of :model, :controller, :request, :system, :feature, :unit
+      def infer_test_type(file_path, source)
         case file_path
         when %r{/spec/models/}, %r{/test/models/} then :model
         when %r{/spec/controllers/}, %r{/test/controllers/} then :controller
         when %r{/spec/requests/}, %r{/test/integration/} then :request
         when %r{/spec/system/}, %r{/test/system/} then :system
-        else :unit
+        when %r{/spec/features/} then :feature
+        else declared_test_type(source)
         end
+      end
+
+      # Read the test type the first example group declares.
+      #
+      # @param source [String] File source code
+      # @return [Symbol] :feature, :system, or :unit when nothing is declared
+      def declared_test_type(source)
+        group = first_example_group(source)
+        return :unit unless group
+        return :feature if group.match?(RSPEC_FEATURE_GROUP)
+
+        group[RSPEC_DECLARED_TYPE, 1]&.to_sym || :unit
       end
 
       # Extract dependencies by linking the test file to the unit under test.

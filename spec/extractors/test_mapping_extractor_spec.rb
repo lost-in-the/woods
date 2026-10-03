@@ -308,6 +308,70 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:test_type]).to eq(:system)
       end
 
+      it 'infers :feature test_type from spec/features/ path' do
+        path = create_file('spec/features/widget_checkout_spec.rb', 'describe "Widget checkout" do; end')
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'infers :feature test_type from type: :feature metadata outside spec/features/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe 'Widget checkout', type: :feature do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'infers :system test_type from type: :system metadata outside spec/system/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.describe "Widget checkout", type: :system do
+            it 'shows the form' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:system)
+      end
+
+      it 'infers :feature test_type from a feature block outside spec/features/' do
+        path = create_file('spec/acceptance/widget_checkout_spec.rb', <<~RUBY)
+          RSpec.feature 'Widget checkout' do
+            scenario 'with a saved card' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:feature)
+      end
+
+      it 'keeps the directory test_type when the describe declares a different type' do
+        path = create_file('spec/requests/widgets_spec.rb', <<~RUBY)
+          RSpec.describe 'Widgets', type: :feature do
+            it 'lists widgets' do; end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:request)
+      end
+
+      it 'reads type metadata from the first example group only' do
+        path = create_file('spec/lib/widget_formatter_spec.rb', <<~RUBY)
+          RSpec.describe WidgetFormatter do
+            describe 'rendering', type: :system do
+              it 'formats' do; end
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:test_type]).to eq(:unit)
+      end
+
       it 'defaults to :unit test_type for unrecognized paths' do
         path = create_file('spec/support/helpers_spec.rb', 'describe "Helpers" do; end')
 
