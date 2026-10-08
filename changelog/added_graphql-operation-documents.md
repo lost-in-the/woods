@@ -8,6 +8,8 @@
   documents that use it. Selections the schema no longer has are recorded in
   `metadata.unknown_fields`, never as edges. Documents are parsed with the
   graphql gem when the host loads it; without it the family is skipped with a
-  logged note. Incremental runs and the watch daemon re-run the family on a
+  logged note and every document is listed in `skipped_files.json` as
+  `graphql_unavailable`. A schema dump (`schema.graphql`) or an unparseable
+  document is listed there too (`schema_definitions`, `parse_error`). Incremental runs and the watch daemon re-run the family on a
   document change and on any `.rb` change under `app/graphql`. The dispatch rule
   fingerprint changes, so run one full extraction after upgrading.

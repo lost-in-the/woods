@@ -102,6 +102,30 @@ RSpec.describe Woods::SkippedFiles do
     expect(report.fetch('files')).to eq([])
   end
 
+  context 'with GraphQL operation documents' do
+    before { hide_const('GraphQL') if defined?(GraphQL) }
+
+    it 'reports an uncovered document as graphql_unavailable when the gem is not loaded' do
+      create_file('app/javascript/widgets/widget_list.graphql', 'query WidgetList { widgets { id } }')
+      expect(reason_for('app/javascript/widgets/widget_list.graphql')).to eq('graphql_unavailable')
+    end
+
+    it 'never lists a document a unit covers, one under node_modules, or one outside the roots' do
+      create_file('app/javascript/widgets/covered.graphql', 'query Covered { widgets { id } }')
+      create_file('app/javascript/node_modules/pkg/vendored.graphql', 'query Vendored { widgets { id } }')
+      create_file('docs/outside.graphql', 'query Outside { widgets { id } }')
+      report = described_class.new(root: rails_root.to_s)
+                              .build([File.join(rails_root.to_s, 'app/javascript/widgets/covered.graphql')])
+      expect(report.fetch('files')).to eq([])
+    end
+
+    it 'sorts documents and Ruby files together by path' do
+      create_file('app/models/zed.rb', "module Zed; end\n")
+      create_file('app/javascript/a.graphql', 'query A { widgets { id } }')
+      expect(report.fetch('files').map { |entry| entry['path'] }).to eq(%w[app/javascript/a.graphql app/models/zed.rb])
+    end
+  end
+
   it 'summarises counts by reason, sorted by path' do
     create_file('app/models/b.rb', "module B; end\n")
     create_file('app/models/a.rb', "module A; end\n")

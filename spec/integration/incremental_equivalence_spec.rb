@@ -857,6 +857,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
     expect(result.fetch('checks')).to include(
       'every edge target is a published unit',
+      'schema dump and unparseable document appear in the skipped-files report with reasons',
       'dependents of a mutation list the client document that calls it',
       'repeat full extraction is identical',
       'document edit full/incremental equivalence',

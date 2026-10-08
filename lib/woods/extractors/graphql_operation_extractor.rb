@@ -32,6 +32,39 @@ module Woods
 
       EDGE_ORDER = %i[root_field type_reference fragment_spread].freeze
 
+      class << self
+        # @return [Boolean] whether graphql-ruby's parser is loaded
+        def parser_available?
+          return false unless defined?(GraphQL) && GraphQL.respond_to?(:parse)
+
+          defined?(GraphQL::Language::Nodes::OperationDefinition) ? true : false
+        end
+
+        # Why a document under the configured roots yields no unit.
+        #
+        # Shared with {SkippedFiles}, so the report and the extractor give one
+        # verdict per document.
+        #
+        # @param absolute_path [String]
+        # @return [String, nil] +graphql_unavailable+, +schema_definitions+,
+        #   +parse_error+, or nil when the document holds only operations and fragments
+        def document_skip_reason(absolute_path)
+          return 'graphql_unavailable' unless parser_available?
+
+          nodes = GraphQL.parse(File.read(absolute_path, encoding: Encoding::UTF_8)).definitions
+          nodes.all? { |node| executable?(node) } ? nil : 'schema_definitions'
+        rescue StandardError
+          'parse_error'
+        end
+
+        # @param node [GraphQL::Language::Nodes::AbstractNode]
+        # @return [Boolean] an operation or fragment definition
+        def executable?(node)
+          node.is_a?(GraphQL::Language::Nodes::OperationDefinition) ||
+            node.is_a?(GraphQL::Language::Nodes::FragmentDefinition)
+        end
+      end
+
       def initialize
         @root = Rails.root.to_s
       end
@@ -43,7 +76,7 @@ module Woods
         paths = GraphQLDocumentPaths.under(@root)
         return [] if paths.empty?
 
-        unless parser_available?
+        unless self.class.parser_available?
           Rails.logger.info('[Woods] Skipping GraphQL operation documents: the graphql gem is not loaded')
           return []
         end
@@ -57,10 +90,6 @@ module Woods
 
       private
 
-      def parser_available?
-        defined?(GraphQL) && GraphQL.respond_to?(:parse) && defined?(GraphQL::Language::Nodes::OperationDefinition)
-      end
-
       # ──────────────────────────────────────────────────────────────────────
       # Documents
       # ──────────────────────────────────────────────────────────────────────
@@ -69,7 +98,7 @@ module Woods
       def definitions_in(relative_path)
         source = File.read(File.join(@root, relative_path), encoding: Encoding::UTF_8)
         nodes = GraphQL.parse(source).definitions
-        unless nodes.all? { |node| executable?(node) }
+        unless nodes.all? { |node| self.class.executable?(node) }
           Rails.logger.info("[Woods] Skipping #{relative_path}: schema definitions, not an operation document")
           return []
         end
@@ -82,11 +111,6 @@ module Woods
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract GraphQL document #{relative_path}: #{e.message}")
         []
-      end
-
-      def executable?(node)
-        node.is_a?(GraphQL::Language::Nodes::OperationDefinition) ||
-          node.is_a?(GraphQL::Language::Nodes::FragmentDefinition)
       end
 
       def definition_for(relative_path, node, source)

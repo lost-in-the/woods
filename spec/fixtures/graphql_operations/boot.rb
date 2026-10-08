@@ -17,6 +17,7 @@ require 'json'
 require 'woods'
 require 'woods/extractor'
 require 'woods/mcp/index_reader'
+require 'woods/skipped_files'
 require_relative '../../support/index_comparison'
 
 def write(root, relative, source)
@@ -106,6 +107,8 @@ Dir.mktmpdir('woods_graphql_operations') do |root|
       createWidget(name: $name) { widget { ...WidgetFields } }
     }
   GQL
+  write(root, 'app/javascript/schema.graphql', "type Widget { id: ID! }\n")
+  write(root, 'app/javascript/broken.graphql', "query {\n")
 
   app = Class.new(Rails::Application)
   Object.const_set(:GraphqlOperationsApplication, app)
@@ -149,6 +152,12 @@ Dir.mktmpdir('woods_graphql_operations') do |root|
         reader.find_unit(dependency['target'], type: dependency['type'])
       end
     end
+  end
+  assert_fact(report, 'schema dump and unparseable document appear in the skipped-files report with reasons') do
+    skipped = Woods::SkippedFiles.read(Woods::Generation.new(output_dir: output).payload_dir).fetch('files')
+    skipped.include?('path' => 'app/javascript/schema.graphql', 'reason' => 'schema_definitions') &&
+      skipped.include?('path' => 'app/javascript/broken.graphql', 'reason' => 'parse_error') &&
+      skipped.none? { |entry| entry['path'].end_with?('widget_list.graphql') }
   end
   assert_fact(report, 'dependents of a mutation list the client document that calls it') do
     dependent = ->(identifier) { { 'type' => 'graphql_operation', 'identifier' => identifier } }

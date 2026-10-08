@@ -640,7 +640,7 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 
 **Key details:**
 - Scans `.graphql` / `.gql` files matching `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}` and `app/frontend/**/*.{graphql,gql}`; see [GraphQL document paths](CONFIGURATION_REFERENCE.md#graphql-document-paths)). Paths under `node_modules` never match.
-- Parses with graphql-ruby's own parser. The gem is optional: when it is not loaded the family is skipped and one `info` line says so. A document that does not parse, or that holds schema definitions (an SDL dump such as `schema.graphql`), is skipped and logged.
+- Parses with graphql-ruby's own parser. The gem is optional: when it is not loaded the family is skipped and one `info` line says so. A document that does not parse, or that holds schema definitions (an SDL dump such as `schema.graphql`), is skipped, logged, and listed in `skipped_files.json` with reason `parse_error` or `schema_definitions`; with the gem absent every document is listed as `graphql_unavailable` (see [Index layout](INDEX_LAYOUT.md)).
 - Identifier: `gql:<OperationName>`. An anonymous operation is `gql:<document path>`. A later definition of a name another document already uses is `gql:<Name>@<document path>` (documents are read in path order).
 - Selections resolve against the booted schema by reading field metadata only; no field, resolver or `resolve_type` body runs. With several schemas, each definition uses the schema that leaves the fewest selections unresolved (ties go to the first by name), recorded in `metadata.schema`.
 - Edges (`via`):
