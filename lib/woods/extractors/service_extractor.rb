@@ -212,7 +212,7 @@ module Woods
 
         # HTTP calls
         if source.match?(/HTTParty|Faraday|RestClient|Net::HTTP/)
-          deps << { type: :external, target: :http_api, via: :code_reference }
+          deps << { type: :external, target: :http_api, via: :external_call }
         end
 
         # Redis

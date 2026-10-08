@@ -1647,8 +1647,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                  }
                                ])
 
-      reverse = read_json(index_dir, 'dependency_graph.json').fetch('reverse')
-      expect(reverse.fetch('http_api')).to include('FirstHttpService', 'SecondHttpService')
+      graph = read_json(index_dir, 'dependency_graph.json')
+      expect(graph.fetch('reverse').fetch('http_api')).to include('FirstHttpService', 'SecondHttpService')
+      expect(graph.fetch('edges').fetch('FirstHttpService'))
+        .to include('target' => 'http_api', 'via' => 'external_call')
+      expect(graph.fetch('edges').fetch('FirstHttpService').map { |edge| edge['via'] }).not_to include('code_reference')
     end
   end
 

@@ -574,8 +574,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
       RUBY
 
       unit = described_class.new.extract_job_file(path)
-      http_deps = unit.dependencies.select { |d| d[:target] == :http_api }
-      expect(http_deps).not_to be_empty
+      expect(unit.dependencies).to include({ type: :external, target: :http_api, via: :external_call })
     end
 
     it 'detects Redis dependencies' do
