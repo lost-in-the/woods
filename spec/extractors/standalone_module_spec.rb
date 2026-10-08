@@ -6,6 +6,8 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
+require 'woods'
+require 'woods/extractor'
 require 'woods/extractors/poro_extractor'
 require 'woods/extractors/concern_extractor'
 

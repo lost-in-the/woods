@@ -6,6 +6,7 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/class/subclasses'
+require 'woods'
 require 'woods/extractors/job_extractor'
 
 RSpec.describe Woods::Extractors::JobExtractor do
