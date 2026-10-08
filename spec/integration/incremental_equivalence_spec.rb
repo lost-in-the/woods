@@ -4,6 +4,8 @@ require 'spec_helper'
 require 'tmpdir'
 require 'json'
 require 'fileutils'
+require 'open3'
+require 'rbconfig'
 
 # Differential harness for incremental extraction (#164, phase 0).
 #
@@ -844,6 +846,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   ensure
     Object.send(:remove_const, :ParentMetadataOwner) if Object.const_defined?(:ParentMetadataOwner)
     Object.send(:remove_const, :ParentMetadataLibrary) if Object.const_defined?(:ParentMetadataLibrary)
+  end
+
+  # Operation documents need the real graphql gem and a booted schema; this
+  # process loads neither, so the scenarios run in their own Rails boot.
+  it 'keeps GraphQL operation documents equivalent through document, fragment and schema changes' do
+    script = File.expand_path('../fixtures/graphql_operations/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), "#{error}\n#{output}"
+    result = JSON.parse(output.lines.last.force_encoding('UTF-8'))
+    expect(result.fetch('checks')).to include(
+      'every edge target is a published unit',
+      'schema dump and unparseable document appear in the skipped-files report with reasons',
+      'dependents of a mutation list the client document that calls it',
+      'repeat full extraction is identical',
+      'document edit full/incremental equivalence',
+      'document creation full/incremental equivalence',
+      'duplicate fragment full/incremental equivalence',
+      'document deletion full/incremental equivalence',
+      'schema drift full/incremental equivalence',
+      'refresh full equivalence'
+    )
   end
 
   it 'publishes GraphQL declaration parents and chunks consistently (#480)' do

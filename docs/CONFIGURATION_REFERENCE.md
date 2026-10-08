@@ -688,7 +688,7 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 35 extractors always run during a full extraction,
+not implemented**. All 36 extractors always run during a full extraction,
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
@@ -738,6 +738,7 @@ Leave it at its default. The full list of what always runs:
 | `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
 | `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
+| `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
@@ -941,6 +942,30 @@ without `..`, raising `Woods::ConfigurationError` and keeping the previous value
 part of any incremental fingerprint. Incremental runs dispatch with the current
 globs, so a file outside the changed set keeps its old classification until
 `woods:extract` runs.
+
+### GraphQL document paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `graphql_document_paths` | Array&lt;String&gt; | `["app/javascript/**/*.{graphql,gql}", "app/frontend/**/*.{graphql,gql}"]` | Globs, relative to `Rails.root`, that `GraphQLOperationExtractor` scans for client operation documents. |
+
+```ruby
+Woods.configure do |config|
+  config.graphql_document_paths = ['app/javascript/**/*.graphql', 'client/**/*.{graphql,gql}']
+end
+```
+
+Use `[]` to turn the family off. A path under `node_modules` never matches. The
+setter rejects a value that is not an Array and any entry that is not a
+non-empty, relative glob without `..`, raising `Woods::ConfigurationError` and
+keeping the previous value.
+
+The same globs decide what an incremental run and the watch daemon treat as a
+document change. The generated plugin hook predicate has no Ruby and uses the
+default roots.
+
+**Changing `graphql_document_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint.
 
 ## Console MCP options
 

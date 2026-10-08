@@ -401,9 +401,10 @@ cheap, which is what makes wholesale replacement the right shape.
 | `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
 | `spec/factories/**`, `test/factories/**` | factories |
 | `db/views/**/*.sql` | database_views |
+| `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`), `app/graphql/**/*.rb` | graphql_operations |
 | any `package.yml`, `packwerk.yml` | packages |
 
-Four of these deserve a note:
+Five of these deserve a note:
 
 - **Rake tasks merge definitions across files.** Any changed or deleted `.rake`
   file reruns the task extractor over all task files. Removing the primary
@@ -417,6 +418,11 @@ Four of these deserve a note:
   against it. The graph cannot express this, because a route unit depends *on*
   its controller, not the other way round, so walking dependents from
   `config/routes.rb` never reaches them.
+- **GraphQL operation documents are wholesale, not per file.** A unit's edges
+  come from resolving its selections against the booted schema, and a spread can
+  name a fragment in another document. So a document change and a server-side
+  change under `app/graphql` both re-run the whole family. The document trigger
+  is a named matcher over `config.graphql_document_paths`, read at call time.
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
@@ -621,7 +627,7 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml` | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |

@@ -166,6 +166,14 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/graphql/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && { [[ "$path" == *.graphql ]] || [[ "$path" == *.gql ]]; } && { [[ "$path" == app/javascript/* ]] || [[ "$path" == app/frontend/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

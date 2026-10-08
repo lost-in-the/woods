@@ -24,6 +24,7 @@
 require_relative 'woods/version'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
+require_relative 'woods/graphql_document_paths'
 # Configuration defaults the cycle caps to the analyzer's own constants.
 require_relative 'woods/graph_analyzer'
 
@@ -152,7 +153,7 @@ module Woods
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
-                :unclaimed_ruby_paths
+                :unclaimed_ruby_paths, :graphql_document_paths
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -235,6 +236,8 @@ module Woods
       @event_paths = %w[app].freeze
       # Globs PoroExtractor sweeps for Ruby no other extractor claims.
       @unclaimed_ruby_paths = ['app/**/*.rb'].freeze
+      # Globs GraphQLOperationExtractor scans for client operation documents.
+      @graphql_document_paths = GraphQLDocumentPaths::DEFAULT
     end
 
     def embedding_model=(value)
@@ -483,6 +486,26 @@ module Woods
 
       value.each_with_index { |glob, index| validate_relative_glob!(glob, index) }
       @unclaimed_ruby_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Root-relative globs {Woods::Extractors::GraphQLOperationExtractor} scans
+    # for client-side GraphQL operation documents. An empty list turns the
+    # family off. Paths under `node_modules` never match.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.graphql_document_paths = ['app/javascript/**/*.graphql', 'client/**/*.{graphql,gql}']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def graphql_document_paths=(value)
+      unless value.is_a?(Array) && value.all? { |glob| GraphQLDocumentPaths.valid_glob?(glob) }
+        raise ConfigurationError, "graphql_document_paths must be an Array of relative globs, got #{value.inspect}"
+      end
+
+      @graphql_document_paths = value.map { |glob| glob.dup.freeze }.freeze
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

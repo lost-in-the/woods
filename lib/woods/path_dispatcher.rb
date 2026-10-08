@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'graphql_document_paths'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -160,6 +161,14 @@ module Woods
         model_path || unclaimed?(relative_path)
       end
 
+      # Is this a client GraphQL operation document under the configured roots?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def graphql_document_path?(relative_path)
+        GraphQLDocumentPaths.match?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -288,6 +297,18 @@ module Woods
                        extensions: %w[.rb], exact_paths: exact_paths)
       end
 
+      # Operation documents resolve their selections against the booted
+      # schema, so a server-side change re-runs them as well. The document rule
+      # names its matcher: the roots are configuration, read at call time. Its
+      # dirs and extensions are the defaults, for the generated hook predicate.
+      def graphql_operation_rules
+        [whole_app_rule(:graphql_operations, [Woods::Extractors::GraphQLExtractor::GRAPHQL_DIRECTORY],
+                        extensions: %w[.rb]),
+         whole_app_rule(:graphql_operations, %w[app/javascript app/frontend],
+                        extensions: %w[.graphql .gql], exclude: [GraphQLDocumentPaths::EXCLUDED_SEGMENT],
+                        matcher: :graphql_document_path?)]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -303,6 +324,7 @@ module Woods
           whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
                          extensions: %w[.rb]),
           whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
+          *graphql_operation_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

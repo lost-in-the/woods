@@ -609,6 +609,36 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#graphql_document_paths' do
+    it 'defaults to operation documents under app/javascript and app/frontend' do
+      expect(described_class.new.graphql_document_paths)
+        .to eq(['app/javascript/**/*.{graphql,gql}', 'app/frontend/**/*.{graphql,gql}'])
+    end
+
+    it 'accepts relative globs and freezes them' do
+      config.graphql_document_paths = ['client/**/*.graphql']
+
+      expect(config.graphql_document_paths).to eq(['client/**/*.graphql'])
+      expect(config.graphql_document_paths).to be_frozen
+    end
+
+    it 'accepts an empty list, which turns the family off' do
+      config.graphql_document_paths = []
+
+      expect(config.graphql_document_paths).to eq([])
+    end
+
+    it 'rejects a non-Array, an absolute glob and a parent traversal, keeping the previous value' do
+      config.graphql_document_paths = ['client/**/*.graphql']
+
+      ['client/**/*.graphql', ['/srv/**/*.graphql'], ['app/../../x/*.gql'], [''], [:app]].each do |value|
+        expect { config.graphql_document_paths = value }
+          .to raise_error(Woods::ConfigurationError, /graphql_document_paths/)
+      end
+      expect(config.graphql_document_paths).to eq(['client/**/*.graphql'])
+    end
+  end
+
   describe '#unclaimed_ruby_paths' do
     it 'defaults to every Ruby file under app/' do
       expect(described_class.new.unclaimed_ruby_paths).to eq(['app/**/*.rb'])

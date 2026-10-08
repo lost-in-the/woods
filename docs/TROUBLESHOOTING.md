@@ -225,7 +225,7 @@ does not guarantee a speedup. See the [incremental contract](INCREMENTAL_EXTRACT
 
 **Symptom:** You expect state machines, events, decorators, or other unit types but they don't appear in the output directory.
 
-**Cause:** All 35 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
+**Cause:** All 36 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
 
 - The expected directory doesn't exist (e.g., no `app/decorators/` for decorators)
 - The required gem isn't installed (e.g., `aasm` or `state_machines` for state machine extraction)
@@ -249,7 +249,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 **Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Nine unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
+**Cause:** Ten unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `graphql_operation`, and `rails_source`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
 | Type | Trigger path |
 |------|--------------|
@@ -261,6 +261,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 | `factory` | any `.rb` change under `spec/factories`/`test/factories` |
 | `event` | any `.rb` change under `app/` |
 | `database_view` | any `.sql` change under `db/views` |
+| `graphql_operation` | any document matching `config.graphql_document_paths`, any `.rb` change under `app/graphql` |
 | `rails_source` | `Gemfile.lock` (only when `include_framework_sources` is enabled) |
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.

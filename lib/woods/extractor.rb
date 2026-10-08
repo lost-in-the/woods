@@ -46,6 +46,7 @@ require_relative 'extractors/state_machine_extractor'
 require_relative 'extractors/event_extractor'
 require_relative 'extractors/decorator_extractor'
 require_relative 'extractors/database_view_extractor'
+require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -148,7 +149,8 @@ module Woods
       rails_source: Extractors::RailsSourceExtractor,
       poros: Extractors::PoroExtractor,
       libs: Extractors::LibExtractor,
-      packages: Extractors::PackageExtractor
+      packages: Extractors::PackageExtractor,
+      graphql_operations: Extractors::GraphQLOperationExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -201,7 +203,8 @@ module Woods
       gem_source: :rails_source,
       poro: :poros,
       lib: :libs,
-      package: :packages
+      package: :packages,
+      graphql_operation: :graphql_operations
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -347,7 +350,11 @@ module Woods
       # and the undeclared-edge report reads the whole declared set, so any
       # package.yml change re-runs the extractor wholesale (#280). Task 8
       # re-annotates unit membership in the same run.
-      packages: :package
+      packages: :package,
+      # Operation documents resolve selections against the booted schema and
+      # fragments across documents, so their units are a function of every
+      # document plus app/graphql, not of each file.
+      graphql_operations: :graphql_operation
     }.freeze
 
     # Extractors whose output embeds the route table, and which therefore go
