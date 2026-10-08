@@ -30,7 +30,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                    Rails Application                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐             │
 │  │ Extract  │──▶│ Resolve  │──▶│  Enrich  │             │
-│  │ 35 types │   │  graph   │   │   git    │             │
+│  │ 40 types │   │  graph   │   │   git    │             │
 │  └──────────┘   └──────────┘   └──────────┘             │
 │                                     │                    │
 │                                     ▼                    │

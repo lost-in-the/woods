@@ -1038,10 +1038,17 @@
     "presets": 4,
     "public_woods_methods": 9,
     "rake_tasks": 37,
-    "tasks_methods": 4
+    "tasks_methods": 4,
+    "unit_types": 40
   },
   "documentation_claims": {
     "README.md": [],
+    "context7.json": [
+      {
+        "surface": "extractor_registrations",
+        "count": 36
+      }
+    ],
     "docs/AGENT_GUIDE.md": [],
     "docs/AGENT_SETUP.md": [],
     "docs/AUTOMATIC_MAINTENANCE.md": [],
@@ -1070,9 +1077,38 @@
       {
         "surface": "extractor_registrations",
         "count": 36
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 36
+      },
+      {
+        "surface": "extractor_registrations",
+        "count": 36
+      },
+      {
+        "surface": "unit_types",
+        "count": 40
+      },
+      {
+        "surface": "unit_types",
+        "count": 40
+      },
+      {
+        "surface": "unit_types",
+        "count": 40
       }
     ],
-    "docs/FAQ.md": [],
+    "docs/FAQ.md": [
+      {
+        "surface": "extractor_registrations",
+        "count": 36
+      },
+      {
+        "surface": "unit_types",
+        "count": 40
+      }
+    ],
     "docs/GETTING_STARTED.md": [],
     "docs/INCREMENTAL_EXTRACTION.md": [],
     "docs/INDEX_LAYOUT.md": [],
@@ -1080,6 +1116,10 @@
       {
         "surface": "extractor_registrations",
         "count": 36
+      },
+      {
+        "surface": "unit_types",
+        "count": 40
       },
       {
         "surface": "console_mcp_read_tools",
