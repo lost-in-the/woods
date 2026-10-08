@@ -887,6 +887,7 @@ module Woods
       # @return [Array<Hash>] type, model-call and field-resolver edges
       def constant_path_dependencies(source, identifier)
         lookup = SourceReferences::RuntimeLookup.new
+        @resolutions = {}
         targets = {}
         ConstantPaths.references(source).filter_map do |reference|
           # A file repeats a handful of paths (`String`, its own base class).
@@ -899,6 +900,12 @@ module Woods
           via = reference_via(reference, target)
           { type: reference_type(reference, target, via), target: target, via: via } if via
         end
+      end
+
+      # Resolutions of this file's paths, for typing an edge by the loaded class.
+      # @return [Hash{String => ConstantPaths::Resolution}]
+      def resolutions
+        @resolutions ||= {}
       end
 
       # The constant a reference names, or nil when it names nothing indexable:
@@ -914,6 +921,7 @@ module Woods
         return if resolution.status == :value || resolution.target.start_with?('GraphQL::')
         return if resolution.status == :resolved && !indexable_constant?(resolution)
 
+        resolutions[resolution.target] = resolution
         resolution.target
       end
 
@@ -942,6 +950,7 @@ module Woods
       # @return [Symbol, nil] the edge label, or nil when the reference is not an edge
       def reference_via(reference, target)
         return :field_resolver if FIELD_WIRING.key?(reference.keyword)
+        return :code_reference if plain_class?(target)
 
         segments = target.split('::')
         return :type_reference if segments[0...-1].include?('Types')
@@ -955,8 +964,29 @@ module Woods
         case via
         when :field_resolver then FIELD_WIRING.fetch(reference.keyword)
         when :type_reference then :graphql_type
-        else NAMESPACE_UNIT_TYPES.fetch(target.split('::').first, :model)
+        else plain_class_type(target) || NAMESPACE_UNIT_TYPES.fetch(target.split('::').first, :model)
         end
+      end
+
+      # A loaded class under a GraphQL namespace that graphql-ruby does not
+      # own: a nested error, input or value class the PORO path indexes.
+      # Decidable only with graphql-ruby loaded; otherwise the namespace rules.
+      #
+      # @param target [String]
+      # @return [Boolean]
+      def plain_class?(target)
+        value = resolutions[target]&.value
+        return false unless value.is_a?(Class) && defined?(GraphQL::Schema)
+
+        !graphql_runtime_class?(value) && !ruby_resolver_helper?(value)
+      end
+
+      # @return [Symbol, nil] :model for an Active Record class, :poro for another plain class
+      def plain_class_type(target)
+        return unless plain_class?(target)
+
+        value = resolutions[target].value
+        defined?(ActiveRecord::Base) && value < ActiveRecord::Base ? :model : :poro
       end
 
       # ──────────────────────────────────────────────────────────────────────

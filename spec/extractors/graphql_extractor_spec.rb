@@ -982,7 +982,7 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
             module R2Types
               module Types
                 LIMIT = 5
-                class BaseType; end
+                class BaseType < ::GraphQL::Schema::Object; end
                 class CrateType < BaseType; end
                 Timestamp = ::Woods::Extractors::ConstantPaths
               end
@@ -1008,6 +1008,34 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
             [{ type: :graphql_type, target: 'R2Types::Types::BaseType', via: :type_reference },
              { type: :graphql_type, target: 'R2Types::Types::CrateType', via: :type_reference }]
           )
+        end
+
+        it 'types an edge to a loaded plain class nested in a type as a poro code reference' do
+          load create_file('app/graphql/types/crate_nested.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class CrateType
+                  class Discount
+                    def amount; end
+                  end
+                end
+              end
+            end
+          RUBY
+
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  def discount
+                    CrateType::Discount.new
+                  end
+                end
+              end
+            end
+          RUBY
+
+          expect(deps).to include({ type: :poro, target: 'R2Types::Types::CrateType::Discount', via: :code_reference })
         end
 
         it 'keeps an edge to a loaded constant whose definition site is unknown' do
