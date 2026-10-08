@@ -55,6 +55,19 @@ RSpec.describe 'release-v2 public-surface inventory' do
       .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, %r{docs/README\.md})
   end
 
+  it 'rejects a drifted unit-type count in current public documentation' do
+    documentation_path = File.join(root, 'docs/EXTRACTOR_REFERENCE.md')
+    original = File.read(documentation_path, encoding: Encoding::UTF_8)
+    unit_types = Woods::Extractor::TYPE_TO_EXTRACTOR_KEY.count
+    changed = original.sub("#{unit_types} distinct unit types", "#{unit_types + 1} distinct unit types")
+    expect(changed).not_to eq(original)
+
+    allow(surface_inventory).to receive(:read_utf8).with(Pathname.new(documentation_path)).and_return(changed)
+
+    expect { surface_inventory.verify! }
+      .to raise_error(Woods::ReleaseV2::SurfaceInventory::DriftError, /unit_types/)
+  end
+
   it 'rejects a drifted Index MCP count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
     original = File.read(documentation_path, encoding: Encoding::UTF_8)

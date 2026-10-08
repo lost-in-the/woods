@@ -22,7 +22,8 @@ module Woods
       BUILDER_PATH = ROOT.join('lib/woods/builder.rb').freeze
       DOCUMENTATION_INDEX_PATH = ROOT.join('docs/README.md').freeze
       DOCUMENTATION_SURFACE_CLAIM_PATTERNS = [
-        { surface: 'extractor_registrations', pattern: /(?<count>\d+) extractors\b/i },
+        { surface: 'extractor_registrations', pattern: /(?<count>\d+) extractor(?:s| classes)\b/i },
+        { surface: 'unit_types', pattern: /(?<count>\d+) (?:distinct )?(?:unit )?types\b/i },
         { surface: 'index_mcp_tools', pattern: /\b(?:MCP )?Index Server\b[^\n]{0,40}?\b(?<count>\d+) tools\b/i },
         { surface: 'index_mcp_tools', pattern: /\b(?<count>\d+) tools, 2 resources, 2 templates\b/i },
         { surface: 'index_mcp_tools', pattern: /\b(?<count>\d+)-tool index server\b/i },
@@ -315,6 +316,7 @@ module Woods
             'configuration_attributes' => configuration_attributes.count,
             'presets' => presets.count,
             'extractor_registrations' => Woods::Extractor::EXTRACTORS.count,
+            'unit_types' => Woods::Extractor::TYPE_TO_EXTRACTOR_KEY.count,
             'rake_tasks' => rake_tasks.count,
             'executables' => executables.count,
             'index_mcp_tools' => index_mcp.fetch('tools').count,
@@ -336,7 +338,8 @@ module Woods
         end
 
         def current_public_documentation_paths
-          ([ROOT.join('README.md'), DOCUMENTATION_INDEX_PATH] + indexed_current_guides).uniq.sort
+          ([ROOT.join('README.md'), ROOT.join('context7.json'), DOCUMENTATION_INDEX_PATH] +
+            indexed_current_guides).uniq.sort
         end
 
         def indexed_current_guides
