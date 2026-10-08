@@ -554,6 +554,15 @@ class-discovered family through another file (a parent gains
 `include Sidekiq::Job`), incremental extraction drops or restores its PORO unit
 to match a full run.
 
+A file a GraphQL extractor owns also contributes its nested classes through the
+same fallback, never its primary class: `Types::CartType::DiscountWithCart`, a
+nested `Error < StandardError`, or a `Line = Struct.new(...)` inside a type file
+becomes a `poro` unit at that path. A nested class is a unit when it has a method
+of its own, is a `Struct.new` / `Data.define` subclass, or has an `Error` /
+`Exception` superclass; a bare class is a namespace. The same rule applies to
+classes nested in a namespace file. Incremental extraction redoes a type file's
+nested units when its GraphQL unit is written, and prunes them with the file.
+
 A file with no class or module body can still own top-level constants
 (`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment
 whose runtime `const_source_location` is that file, and whose value is not a

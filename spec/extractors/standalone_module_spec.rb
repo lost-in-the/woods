@@ -147,7 +147,7 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
     expect(Woods::Extractors::ConcernExtractor.new.runtime_model_mixins[path]).to include(StandaloneFixture::Included)
   end
 
-  it 'never emits a second class-shaped unit for a path-governed module containing a helper class' do
+  it 'keeps a path-governed module a module unit beside its nested exception class' do
     path = load_source('standalone_fixture/with_helper', <<~RUBY)
       module StandaloneFixture::WithHelper
         class Error < StandardError; end
@@ -155,8 +155,10 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
       end
     RUBY
     values = described_class.new.extract_poro_units(path)
-    expect(values.map(&:identifier)).to eq(['StandaloneFixture::WithHelper'])
-    expect(values.first.metadata).to include(ruby_kind: 'module', parent_class: nil)
+    expect(values.map(&:identifier))
+      .to contain_exactly('StandaloneFixture::WithHelper', 'StandaloneFixture::WithHelper::Error')
+    helper = values.find { |unit| unit.identifier == 'StandaloneFixture::WithHelper' }
+    expect(helper.metadata).to include(ruby_kind: 'module', parent_class: nil)
   end
 
   it 'recomputes module ownership after an includer changes without editing the module' do
@@ -368,15 +370,18 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
       expect(units).to eq([])
     end
 
-    it 'still leaves a bodiless nested exception class out of a namespace file' do
+    it 'makes a bodiless nested exception class in a namespace file a unit, but not a bare class' do
       path = load_source('standalone_fixture/errors', <<~RUBY)
         module StandaloneFixture
           module Errors
             class Missing < StandardError; end
+            class Marker; end
           end
         end
       RUBY
-      expect(described_class.new.extract_poro_units(path)).to eq([])
+      units = described_class.new.extract_poro_units(path)
+      expect(units.map(&:identifier)).to eq(['StandaloneFixture::Errors::Missing'])
+      expect(units.first.metadata).to include(parent_class: 'StandardError')
     end
   end
 end

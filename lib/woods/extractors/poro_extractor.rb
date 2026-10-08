@@ -62,6 +62,9 @@ module Woods
       # Value-class factories AssignedValueDiscovery can promote to a unit.
       VALUE_CLASS_CONSTRUCTOR = /\b(?:Struct\.new|Data\.define)\b/
 
+      # The written superclass of an exception class.
+      EXCEPTION_SUPERCLASS = /(?:Error|Exception)\z/
+
       # The `app/<directory>/` prefix of a root-relative path.
       APP_DIRECTORY_PREFIX = %r{\Aapp/[^/]++/}
 
@@ -151,6 +154,24 @@ module Woods
       # @return [Array<ExtractedUnit>]
       def extract_fallback_units(file_path, ar_names: Set.new)
         extract_units(file_path, ar_names, fallback: true)
+      end
+
+      # Nested classes of a file whose primary class another unit owns (a
+      # GraphQL type file). The owner itself is never emitted; units carry
+      # {FALLBACK_MARKER}.
+      #
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @param owners [Array<String>] identifiers of the file's owning units
+      # @return [Array<ExtractedUnit>]
+      def extract_nested_units(file_path, ar_names: Set.new, owners: [])
+        source = File.read(file_path)
+        analysis = collector.call(source)
+        @module_discovery ||= StandaloneModuleDiscovery.new
+        mark(nested_class_units(file_path, source, ar_names, analysis, owners: owners.to_set), FALLBACK_MARKER)
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract nested PORO units #{file_path}: #{e.message}")
+        []
       end
 
       # Recompute unclaimed module identities for includer-only reconciliation.
@@ -301,19 +322,18 @@ module Woods
       end
 
       # A namespace file's governed constant is a module, so no class is
-      # primary. Classes nested only in modules, with a method of their own
-      # and canonically declared here, are units; bodiless helpers
-      # (`class Error < StandardError; end`) are not.
-      def nested_class_units(file_path, source, ar_names, analysis)
+      # primary. Classes nested in modules, or in a class another unit owns,
+      # canonically declared here and {#unit_worthy?}, are units.
+      def nested_class_units(file_path, source, ar_names, analysis, owners: Set.new)
         declarations = analysis.fetch('declarations')
         modules = declarations.select { |declaration| declaration['kind'] == 'module' }.to_set { |d| d['owner'] }
         lines = source.lines
         candidates = declarations.select do |declaration|
           declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero? &&
-            !declaration['constructor'] && !modules.include?(declaration['owner']) &&
+            !modules.include?(declaration['owner']) && !owners.include?(declaration['owner']) &&
             !ar_names.include?(declaration['owner']) &&
-            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) } &&
-            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
+            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) || owners.include?(name) } &&
+            unit_worthy?(declaration, source, lines)
         end
         @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
           next if runtime_family(identifier)
@@ -321,6 +341,16 @@ module Woods
           declaration = candidates.find { |candidate| candidate['owner'] == identifier }
           nested_class_unit(file_path, source, identifier, lines[(declaration['line'] - 1)...declaration['end_line']].join)
         end
+      end
+
+      # A nested class is a unit when it has behavior or data of its own: a
+      # method, a Struct/Data body, or an exception superclass. A bare class
+      # is a namespace.
+      def unit_worthy?(declaration, source, lines)
+        return true if declaration['constructor'] || lines[declaration['line'] - 1].match?(VALUE_CLASS_CONSTRUCTOR)
+        return true if lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
+
+        extract_parent_class(source, declaration['owner']).to_s.match?(EXCEPTION_SUPERCLASS)
       end
 
       # @return [Symbol, nil] the class-discovered extractor owning a loaded class
