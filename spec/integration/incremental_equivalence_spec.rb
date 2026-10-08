@@ -1095,7 +1095,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file('app/graphql/types/forgotten_type.rb', <<~SRC)
         module Types
           class ForgottenType < Types::BaseObject
-            field :id, ID, null: false
+            field :id, String, null: false
           end
         end
       SRC
@@ -3045,6 +3045,115 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       %i[PathPersistence PathCountable PathTallyService].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
       end
+    end
+  end
+
+  describe 'nested classes in GraphQL type files' do
+    # A loaded type counts as GraphQL only through graphql-ruby's ancestry, so
+    # this process stands in for the gem: a schema with no descendants and an
+    # Object base the fixture types inherit from.
+    before do
+      stub_const('GraphQL::Schema', Class.new { def self.descendants = [] })
+      stub_const('GraphQL::Schema::Object', Class.new { def self.field(*, **); end })
+    end
+
+    after { Object.send(:remove_const, :Types) if Object.const_defined?(:Types, false) }
+
+    def nested_units(index)
+      unit_snapshot(index).values.select do |data|
+        data['type'] == 'poro' && data['identifier'].start_with?('Types::NestCartType::')
+      end
+    end
+
+    def cart_source(method: 'amount', coupon: false, error: true)
+      <<~RUBY
+        module Types
+          class NestCartType < Types::NestBaseType
+            field :id, String, null: false
+
+            class Discount
+              def #{method}; end
+            end
+            Line = Struct.new(:sku, :qty)
+            #{'class Error < StandardError; end' if error}
+            #{"class Coupon\n      def code; end\n    end" if coupon}
+            class Bare
+            end
+          end
+        end
+      RUBY
+    end
+
+    it 'adds, changes, removes and references nested classes equivalently to a full extraction' do
+      base = write_file('app/graphql/types/nest_base_type.rb', <<~RUBY)
+        module Types
+          class NestBaseType < GraphQL::Schema::Object
+          end
+        end
+      RUBY
+      load app_path(base)
+      cart = write_file('app/graphql/types/nest_cart_type.rb', cart_source)
+      load app_path(cart)
+      # Unloaded in this process: its references resolve against the loaded nested classes.
+      mutation = write_file('app/graphql/mutations/nest_apply_discount.rb', <<~RUBY)
+        module Mutations
+          class NestApplyDiscount < Mutations::BaseMutation
+            field :ok, Boolean, null: false
+
+            def resolve
+              Types::NestCartType::Discount.new
+            end
+          end
+        end
+      RUBY
+      index = full_extraction
+
+      units = nested_units(index)
+      expect(units.map { |data| data['identifier'] }).to contain_exactly(
+        'Types::NestCartType::Discount', 'Types::NestCartType::Line', 'Types::NestCartType::Error'
+      )
+      expect(units.map { |data| data['file_path'] }.uniq).to eq([cart])
+      expect(units.map { |data| data.dig('metadata', 'discovered_via') }.uniq).to eq(['owner_fallback'])
+      expect(unit_snapshot(index).values.count { |data| data['identifier'] == 'Types::NestCartType' }).to eq(1)
+      graph = read_json(index, 'dependency_graph.json')
+      expect(graph.fetch('edges').fetch('Mutations::NestApplyDiscount'))
+        .to include('target' => 'Types::NestCartType::Discount', 'via' => 'code_reference')
+      mutation_unit = unit_snapshot(index).values.find { |data| data['identifier'] == 'Mutations::NestApplyDiscount' }
+      expect(mutation_unit.fetch('dependencies'))
+        .to include('type' => 'poro', 'target' => 'Types::NestCartType::Discount', 'via' => 'code_reference')
+      expect(graph.fetch('reverse').fetch('Types::NestCartType::Discount')).to include('Mutations::NestApplyDiscount')
+
+      # Change: the nested unit's own source moves with the type file.
+      write_file(cart, cart_source(method: 'total'))
+      load app_path(cart)
+      Woods::Extractor.new(output_dir: index).extract_changed([cart])
+      expect(differences(index, full_extraction)).to be_empty
+      discount = nested_units(index).find { |data| data['identifier'] == 'Types::NestCartType::Discount' }
+      expect(discount.fetch('source_code')).to include('def total')
+
+      # Add: a new nested class joins without a full run.
+      write_file(cart, cart_source(method: 'total', coupon: true))
+      load app_path(cart)
+      Woods::Extractor.new(output_dir: index).extract_changed([cart])
+      expect(differences(index, full_extraction)).to be_empty
+      expect(nested_units(index).map { |data| data['identifier'] }).to include('Types::NestCartType::Coupon')
+
+      # Remove: the constant outlives its declaration, the unit does not.
+      write_file(cart, cart_source(method: 'total', coupon: true, error: false))
+      Woods::Extractor.new(output_dir: index).extract_changed([cart])
+      expect(differences(index, full_extraction)).to be_empty
+      expect(nested_units(index).map { |data| data['identifier'] }).not_to include('Types::NestCartType::Error')
+
+      # An unrelated edit does not redo the file's nested units.
+      write_file(mutation, File.read(app_path(mutation)).sub('null: false', 'null: true'))
+      Woods::Extractor.new(output_dir: index).extract_changed([mutation])
+      expect(differences(index, full_extraction)).to be_empty
+
+      # Delete the type file: every unit at that path goes.
+      delete_file(cart)
+      Woods::Extractor.new(output_dir: index).extract_changed([cart])
+      expect(differences(index, full_extraction)).to be_empty
+      expect(nested_units(index)).to be_empty
     end
   end
 
