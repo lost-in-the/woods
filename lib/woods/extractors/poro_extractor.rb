@@ -9,6 +9,7 @@ require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
 require_relative 'assigned_value_discovery'
 require_relative '../source_references/runtime_lookup'
+require_relative '../source_references/value_class'
 require_relative 'class_families'
 require_relative 'constant_assignments'
 require_relative '../path_dispatcher'
@@ -333,7 +334,7 @@ module Woods
             !modules.include?(declaration['owner']) && !owners.include?(declaration['owner']) &&
             !ar_names.include?(declaration['owner']) &&
             declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) || owners.include?(name) } &&
-            unit_worthy?(declaration, source, lines)
+            unit_worthy?(declaration, source, lines, file_path)
         end
         @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
           next if runtime_family(identifier)
@@ -345,9 +346,13 @@ module Woods
 
       # A nested class is a unit when it has behavior or data of its own: a
       # method, a Struct/Data body, or an exception superclass. A bare class
-      # is a namespace.
-      def unit_worthy?(declaration, source, lines)
-        return true if declaration['constructor'] || lines[declaration['line'] - 1].match?(VALUE_CLASS_CONSTRUCTOR)
+      # is a namespace. An assigned value class counts only when the factory
+      # it names is the core one, never a shadowing constant.
+      def unit_worthy?(declaration, source, lines, file_path)
+        if declaration['constructor']
+          return SourceReferences::ValueClass.new.call(declaration, file_path: file_path) == declaration['owner']
+        end
+        return true if lines[declaration['line'] - 1].match?(VALUE_CLASS_CONSTRUCTOR)
         return true if lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
 
         extract_parent_class(source, declaration['owner']).to_s.match?(EXCEPTION_SUPERCLASS)
