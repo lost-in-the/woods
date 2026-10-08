@@ -12,10 +12,12 @@ RSpec.describe Woods::ReleaseV2::SurfaceCounts do
              "│ 4 types │ one of the 5 types in `TYPE_TO_EXTRACTOR_KEY`; the 29-tool index server\n"
     rewritten = described_class.rewrite(source)
 
+    extractors = counts.fetch('extractor_registrations')
+    types = counts.fetch('unit_types')
     expect(rewritten).to eq(
-      "Woods ships **#{counts.fetch('extractor_registrations')} extractor classes** producing " \
-      "**#{counts.fetch('unit_types')} distinct unit types**. All #{counts.fetch('extractor_registrations')} extractors run.\n" \
-      "│ #{counts.fetch('unit_types')} types │ one of the #{counts.fetch('unit_types')} types in `TYPE_TO_EXTRACTOR_KEY`; " \
+      "Woods ships **#{extractors} extractor classes** producing **#{types} distinct unit types**. " \
+      "All #{extractors} extractors run.\n" \
+      "│ #{types} types │ one of the #{types} types in `TYPE_TO_EXTRACTOR_KEY`; " \
       "the #{counts.fetch('index_mcp_tools')}-tool index server\n"
     )
     expect(described_class.rewrite(rewritten)).to eq(rewritten)
