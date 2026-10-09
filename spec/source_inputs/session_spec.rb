@@ -75,6 +75,40 @@ RSpec.describe Woods::SourceInputs::Session do
     Woods::SourceInputs::Verifier.new(manifest: manifest, output_dir: @output).call
   end
 
+  describe 'the publication recheck under machine load' do
+    # Every visited file costs this much wall clock on the recheck, as if the
+    # machine were heavily loaded. The capture itself runs unstubbed.
+    def slow_recheck(seconds_per_file)
+      allow_any_instance_of(Woods::SourceInputs::Scanner).to receive(:monotonic) do |scanner|
+        1_000.0 + (scanner.instance_variable_get(:@visited).to_i * seconds_per_file)
+      end
+    end
+
+    it 'allows an unchanged tree the time its captured work needs instead of refusing' do
+      1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      run = session
+      slow_recheck(0.02)
+      manifest = finish(run)
+      expect(manifest.data.fetch('errors')).not_to include(include('reason' => 'scan_time_budget'))
+      expect(manifest.data.fetch('errors')).to be_empty
+    end
+
+    it 'still refuses a recheck that outruns the work-scaled budget' do
+      3.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      run = session
+      slow_recheck(5.0)
+      expect(finish(run).data.fetch('errors')).to include('reason' => 'scan_time_budget')
+    end
+
+    it 'keeps the reader budget wall-clock' do
+      1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      manifest = finish(session)
+      slow_recheck(0.02)
+      expect(verify(manifest)['state']).to eq('unknown')
+      expect(verify(manifest)['reasons']).to include('scan_time_budget')
+    end
+  end
+
   describe 'source read capability' do
     it 'keeps an undecodable consumer path unverified with JSON-safe diagnostics' do
       path = 'app/services/bad_'.b + "\xFF.rb".b

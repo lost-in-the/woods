@@ -278,7 +278,11 @@ Do not replace a key and assume the old generation now has valid source evidence
 Failed/no-op extraction does not advance the artifact's published generation.
 Flat fallback and older indexes lack verified atomic source evidence.
 `WOODS_PROFILE=1` reports `source capture` and `source verification` separately.
-Capture/recheck each allow up to ten seconds with the same file/byte caps.
+Capture allows up to ten seconds with the file/byte caps. The publication
+recheck repeats the capture's work, so its time budget scales with that work:
+50 ms per visited file plus one second per 4 MiB hashed, never below ten
+seconds. Machine load cannot turn an unchanged tree into a refusal, while the
+file and byte caps still bound the work. Reader budgets are unchanged.
 
 **Included in Woods 2.1:** the published manifest and private launcher handoff
 have a 16 MiB serialized-size limit. If size alone exceeds that limit, extraction
