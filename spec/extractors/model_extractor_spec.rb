@@ -1246,14 +1246,25 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(deps).to eq([])
     end
 
-    it 'labels a polymorphic belongs_to as :polymorphic_interface when a constant carries the interface name' do
+    it 'labels a polymorphic belongs_to as :polymorphic_interface when the application defines the interface name' do
       stub_const('Commentable', Module.new)
+      allow(extractor).to receive(:app_source?).and_return(true)
       poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
                                           class_name: 'Commentable', polymorphic?: true, options: {})
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
 
       expect(deps).to eq([{ type: :model, target: 'Commentable', via: :polymorphic_interface }])
+    end
+
+    it 'emits no edge when only a gem defines the interface name' do
+      stub_const('Addressable', Module.new)
+      poly = double('Assoc(addressable)', name: :addressable, macro: :belongs_to,
+                                          class_name: 'Addressable', polymorphic?: true, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
+
+      expect(deps).to eq([])
     end
 
     it 'records the interface names of polymorphic belongs_to and as: associations' do

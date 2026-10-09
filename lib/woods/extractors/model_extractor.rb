@@ -739,7 +739,7 @@ module Woods
       # node, or worse, at an unrelated real constant (an app's Commentable
       # concern) mislabeled as a +:belongs_to+ model edge (#199). The
       # interface name lives in +metadata[:polymorphic_interfaces]+; an edge
-      # is emitted only when a constant of that name is loaded, and carries
+      # is emitted only when the application defines a constant of that name, and carries
       # +via: :polymorphic_interface+ instead of the macro so it stays
       # distinguishable from a resolvable model reference.
       def extract_dependencies(model, source = nil)
@@ -750,7 +750,7 @@ module Woods
         deps = model.reflect_on_all_associations.filter_map do |assoc|
           polymorphic = polymorphic_reflection?(assoc)
           target = association_target(model, assoc)
-          next if polymorphic && ConstantPaths.resolve("::#{target}").status != :resolved
+          next if polymorphic && !application_constant?(target)
 
           dep = { type: :model, target: target, via: polymorphic ? :polymorphic_interface : assoc.macro }
           if assoc.options[:through]
@@ -843,6 +843,16 @@ module Woods
         model.reflect_on_all_associations.flat_map do |assoc|
           [(assoc.name if polymorphic_reflection?(assoc)), assoc.options[:as]]
         end.compact.map(&:to_s).uniq.sort
+      end
+
+      # Whether the application itself defines a class or module of this name.
+      # A gem that happens to define the interface name is not a unit.
+      #
+      # @param name [String]
+      # @return [Boolean]
+      def application_constant?(name)
+        resolution = ConstantPaths.resolve("::#{name}")
+        resolution.status == :resolved && app_source?(resolution.source_file, Rails.root.to_s)
       end
 
       # Whether an association reflection declares a polymorphic interface.
