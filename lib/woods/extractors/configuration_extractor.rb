@@ -8,6 +8,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'behavioral_profile'
 require_relative 'config_source_guard'
+require_relative 'gemfile_declarations'
 
 module Woods
   module Extractors
@@ -74,8 +75,6 @@ module Woods
       # Root-relative files named exactly, including the two with no extension.
       SOURCE_FILES = FILE_TYPES.keys.freeze
 
-      GEM_DECLARATION = /^[ \t]*+gem[ \t]*+\(?+[ \t]*+["']([\w.-]++)["']/
-
       class << self
         # Whether this extractor owns a path. A pure function of the path.
         #
@@ -140,6 +139,7 @@ module Woods
 
         # Credential-shaped text never reaches the published source or metadata.
         source = ConfigSourceGuard.redact(File.read(file_path))
+        gems = config_type == 'gemfile' ? GemfileDeclarations.call(source) : []
         identifier = build_identifier(file_path)
 
         unit = ExtractedUnit.new(
@@ -149,8 +149,8 @@ module Woods
         )
 
         unit.namespace = config_type
-        unit.source_code = annotate_source(source, identifier, config_type)
-        unit.metadata = extract_metadata(source, config_type)
+        unit.source_code = annotate_source(source, identifier, config_type, gems: gems)
+        unit.metadata = extract_metadata(source, config_type, gems: gems)
         unit.dependencies = extract_dependencies(source, config_type)
 
         unit
@@ -210,9 +210,10 @@ module Woods
       # @param source [String]
       # @param identifier [String]
       # @param config_type [String]
+      # @param gems [Array<Hash>] parsed Gemfile declarations
       # @return [String]
-      def annotate_source(source, identifier, config_type)
-        gem_refs = detect_gem_references(source, config_type)
+      def annotate_source(source, identifier, config_type, gems:)
+        gem_refs = detect_gem_references(source, gems)
 
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -231,28 +232,31 @@ module Woods
 
       # @param source [String]
       # @param config_type [String]
+      # @param gems [Array<Hash>] parsed Gemfile declarations
       # @return [Hash]
-      def extract_metadata(source, config_type)
-        {
+      def extract_metadata(source, config_type, gems:)
+        metadata = {
           config_type: config_type,
-          gem_references: detect_gem_references(source, config_type),
+          gem_references: detect_gem_references(source, gems),
           config_settings: detect_config_settings(source),
           rails_config_blocks: detect_rails_config_blocks(source),
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') },
           method_count: source.scan(/def\s+(?:self\.)?\w+/).size
         }
+        metadata[:gems] = gems if config_type == 'gemfile'
+        metadata
       end
 
       # Detect gem/library references in configuration.
       #
       # @param source [String]
-      # @param config_type [String, nil] a Gemfile also counts its `gem` declarations
+      # @param gems [Array<Hash>] parsed Gemfile declarations, if any
       # @return [Array<String>]
-      def detect_gem_references(source, config_type = nil)
-        refs = config_type == 'gemfile' ? source.scan(GEM_DECLARATION).flatten : []
+      def detect_gem_references(source, gems = [])
+        refs = gems.map { |gem| gem[:name] }
 
         # Gem.configure style: Devise.setup, Sidekiq.configure_server
-        source.scan(/(\w+)\.(setup|configure\w*|config)\b/).each do |match|
+        source.scan(/(?<![\w:])([A-Z]\w*(?:::[A-Z]\w*)*)\.(setup|configure\w*|config)\b/).each do |match|
           name = match[0]
           refs << name unless generic_config_name?(name)
         end
@@ -305,7 +309,7 @@ module Woods
       # @param config_type [String, nil]
       # @return [Array<Hash>]
       def extract_dependencies(source, config_type = nil)
-        deps = detect_gem_references(source, config_type).map do |gem_ref|
+        deps = detect_gem_references(source).map do |gem_ref|
           { type: :gem, target: gem_ref, via: :configuration }
         end
 
@@ -318,7 +322,14 @@ module Woods
           deps.concat(scan_common_dependencies(source))
         end
 
-        consolidate_dependencies(deps)
+        consolidate_dependencies(deps).select do |edge|
+          next true if edge[:type] == :config_file
+
+          target = edge[:target]
+          target.match?(/\A[A-Z]/) && app_source?(Object.const_source_location(target)&.first, Rails.root.to_s)
+        rescue NameError
+          false
+        end
       end
     end
   end
