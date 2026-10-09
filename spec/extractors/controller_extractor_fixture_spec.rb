@@ -335,6 +335,18 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
 
   describe 'controller dependency extraction' do
     it 'detects Phlex/ViewComponent render dependencies' do
+      # The edge targets a component the application defines, so there has
+      # to be one: a loaded constant with a file under the app root.
+      stub_const('ApplicationComponent', Class.new)
+      component = Class.new(ApplicationComponent)
+      stub_const('PageComponent', component)
+      component_path = create_file('app/views/page_component.rb', "class PageComponent < ApplicationComponent\nend\n")
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('PageComponent').and_return([component_path, 1])
+      roots = double('Config', autoload_paths: [], eager_load_paths: [], autoload_once_paths: [])
+      extractor # stubs Rails
+      allow(Rails.application).to receive(:config).and_return(roots)
+
       source_path = create_file('app/controllers/pages_controller.rb', <<~RUBY)
         class PagesController < ApplicationController
           def show

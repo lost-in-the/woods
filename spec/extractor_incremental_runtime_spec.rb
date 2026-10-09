@@ -21,9 +21,27 @@ RSpec.describe 'incremental runtime inputs' do
 
   describe 'hybrid runtime refresh selection' do
     %w[app/models/queue_settings.rb lib/runtime_settings.rb].each do |path|
-      it "refreshes both runtime families after changing #{path} without recorded dependencies" do
+      it "refreshes the hybrid and runtime-resolved families after changing #{path} without recorded dependencies" do
         changes = Woods::ChangeSet.new(paths: [path], root: @root)
-        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
+        expect(extractor.send(:hybrid_discovery_keys, changes, []))
+          .to eq(Set[:jobs, :serializers, :components, :view_components])
+      end
+    end
+
+    it 'refreshes controllers as well when a Ruby file under a component directory changes' do
+      FileUtils.mkdir_p(@root.join('app/components'))
+      changes = Woods::ChangeSet.new(paths: ['app/components/shelf/row_component.rb'], root: @root)
+
+      expect(extractor.send(:hybrid_discovery_keys, changes, [])).to include(:controllers)
+    end
+
+    %w[app/components/shelf_component.html.erb app/components/shelf_component/shelf_component.html.haml].each do |path|
+      it "refreshes view components after changing the sidecar template #{path}" do
+        FileUtils.mkdir_p(@root.join('app/components'))
+        File.write(@root.join('app/components/shelf_component.rb'), "class ShelfComponent\nend\n")
+        changes = Woods::ChangeSet.new(paths: [path], root: @root)
+
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:view_components])
       end
     end
 

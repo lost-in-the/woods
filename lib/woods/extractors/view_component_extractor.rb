@@ -7,6 +7,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
 require_relative 'template_extensions'
+require_relative 'template_ruby_fragments'
 
 module Woods
   module Extractors
@@ -90,8 +91,9 @@ module Woods
         unit.source_code = read_source(unit.file_path)
 
         unit.namespace = extract_namespace(component)
-        unit.metadata = extract_metadata(component, unit.source_code)
-        unit.dependencies = extract_dependencies(component, unit.source_code)
+        renders = resolve_render_targets(component, unit.source_code, fragments: sidecar_fragments(unit.file_path))
+        unit.metadata = extract_metadata(component, unit.source_code).merge(component_resolution_metadata(renders))
+        unit.dependencies = extract_dependencies(unit.source_code, renders)
 
         unit
       rescue StandardError => e
@@ -103,7 +105,7 @@ module Woods
 
       def app_component?(component)
         @component_base && component.name && component < @component_base &&
-          !preview_class?(component) && app_source_file?(source_file_for(component))
+          !preview_class?(component) && current_constant?(component) && app_source_file?(source_file_for(component))
       end
 
       # Find the ViewComponent::Base class if the gem is loaded
@@ -148,6 +150,34 @@ module Woods
         return '' unless file_path && File.exist?(file_path)
 
         File.read(file_path, encoding: Encoding::UTF_8)
+      end
+
+      # The Ruby in every template that sits beside the component file or in
+      # its sidecar directory, for each registered view engine. A component
+      # renders its children there as often as in its class, and those renders
+      # belong to the component unit.
+      #
+      # @param file_path [String] the component's Ruby file
+      # @return [Array<String>] Ruby fragments, in engine then path order
+      def sidecar_fragments(file_path)
+        base = file_path.delete_suffix('.rb')
+        sidecar_engines.flat_map do |engine|
+          sidecar_paths(base, engine).flat_map do |path|
+            TemplateRubyFragments.call(read_source(path), engine: engine.name)
+          end
+        end
+      end
+
+      # @return [Array<String>] existing templates this engine handles
+      def sidecar_paths(base, engine)
+        candidates = engine.extensions.flat_map do |extension|
+          ["#{base}#{extension}", File.join(base, "#{File.basename(base)}#{extension}")]
+        end
+        candidates.uniq.select { |path| File.exist?(path) }
+      end
+
+      def sidecar_engines
+        @sidecar_engines ||= ViewTemplateExtractor::ENGINES.map(&:new)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -299,24 +329,10 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(component, source)
-        deps = []
-
-        # Other components rendered via render()
-        source.scan(/render\s*\(?\s*(\w+(?:::\w+)*)\.new/).flatten.uniq.each do |comp|
-          next if comp == component.name
-
-          deps << { type: :component, target: comp, via: :render }
-        end
-
-        # Components rendered via slot classes
-        source.scan(/renders_one\s+:\w+,\s*(\w+(?:::\w+)*)/).flatten.uniq.each do |comp|
-          deps << { type: :component, target: comp, via: :slot }
-        end
-
-        source.scan(/renders_many\s+:\w+,\s*(\w+(?:::\w+)*)/).flatten.uniq.each do |comp|
-          deps << { type: :component, target: comp, via: :slot }
-        end
+      # @param source [String]
+      # @param renders [RenderTargetResolver::Result] from {#resolve_render_targets}
+      def extract_dependencies(source, renders)
+        deps = component_dependencies(renders)
 
         # Model references
         deps.concat(scan_model_dependencies(source, via: :data_dependency))

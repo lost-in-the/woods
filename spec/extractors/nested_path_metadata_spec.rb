@@ -72,6 +72,10 @@ RSpec.describe 'App-owned nested extractor paths' do
   ['.html.erb', '.html.haml', '.html.slim', '/portable_metadata_component.html.erb'].each do |suffix|
     it "keeps ViewComponent metadata and source hashes equal across checkouts for #{suffix}" do
       stub_const('ViewComponent::Base', Class.new)
+      # Render resolution walks the component directories, which asks the
+      # application for its autoload roots.
+      roots = double('Config', autoload_paths: [], eager_load_paths: [], autoload_once_paths: [])
+      allow(Rails.application).to receive(:config).and_return(roots)
       source = <<~RUBY
         class PortableMetadataComponent < ViewComponent::Base
           def initialize(title:)

@@ -795,6 +795,95 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
   # same {type: :concern, via: :include} edge shape as ModelExtractor and
   # are inlined into source_code in the same commented display form.
 
+  describe 'component render edges' do
+    let(:tmp_dir) { Dir.mktmpdir }
+
+    let(:extractor) do
+      roots = double('Config', autoload_paths: [], eager_load_paths: [], autoload_once_paths: [])
+      app_double = double('Application', routes: double('Routes', routes: [], named_routes: {}), config: roots)
+      stub_const('Rails', double('Rails', application: app_double, root: Pathname.new(tmp_dir),
+                                          logger: double('Logger').as_null_object))
+      described_class.new
+    end
+
+    let(:controller_source) do
+      <<~RUBY
+        module Shelf
+          class ItemsController
+            def show
+              render RowComponent.new(item: @item)
+              render Ghost.new
+              render json: Shelf::RowComponent.new
+              render "shelf/items"
+              Integer("3")
+            end
+          end
+        end
+      RUBY
+    end
+
+    let(:controller) do
+      Shelf::ItemsController.tap do |klass|
+        klass.define_singleton_method(:action_methods) { Set.new }
+        klass.define_singleton_method(:_process_action_callbacks) { [] }
+        klass.define_singleton_method(:included_modules) { [] }
+      end
+    end
+
+    def write_and_load(relative, source)
+      path = File.join(tmp_dir, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, source)
+      load path
+    end
+
+    before do
+      allow(Object).to receive(:const_source_location).and_call_original
+      stub_const('ApplicationComponent', Class.new)
+      write_and_load('app/components/shelf/row_component.rb',
+                     "module Shelf\n  class RowComponent < ApplicationComponent\n  end\nend\n")
+      write_and_load('app/controllers/shelf/items_controller.rb', controller_source)
+    end
+
+    after do
+      Object.send(:remove_const, :Shelf)
+      FileUtils.rm_rf(tmp_dir)
+    end
+
+    it 'targets the component unit through the lexical scope of the controller' do
+      deps = extractor.send(:extract_dependencies, controller, controller_source, action_sources: {})
+
+      expect(deps.select { |dep| dep[:type] == :component })
+        .to eq([{ type: :component, target: 'Shelf::RowComponent', via: :render }])
+    end
+
+    it 'keeps the template render edge and takes no ordinary method for a render' do
+      deps = extractor.send(:extract_dependencies, controller, controller_source, action_sources: {})
+
+      expect(deps).to include(type: :view, target: 'shelf/items', via: :render)
+      expect(deps.map { |dep| dep[:target] }).not_to include('Ghost', 'Integer')
+    end
+
+    it 'records a render that names no component in the unit metadata' do
+      unit = extractor.extract_controller(controller)
+
+      expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+      expect(unit.metadata[:external_renders]).to eq([])
+      expect(unit.dependencies).to include(type: :component, target: 'Shelf::RowComponent', via: :render)
+    end
+
+    it 'records a component no application file defines as external and emits no edge' do
+      stub_const('ShelfUi::Banner', Class.new(ApplicationComponent))
+      source = "module Shelf\n  class ItemsController\n    def show = render(ShelfUi::Banner.new)\n  end\nend\n"
+      File.write(File.join(tmp_dir, 'app/controllers/shelf/items_controller.rb'), source)
+
+      unit = extractor.extract_controller(controller)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :component }).to eq([])
+      expect(unit.metadata[:external_renders].map { |entry| entry[:name] }).to eq(['ShelfUi::Banner'])
+    end
+  end
+
   describe 'concern detection and inlining (#175)' do
     let(:tmp_dir) { Dir.mktmpdir }
     let(:rails_root) { Pathname.new(tmp_dir) }

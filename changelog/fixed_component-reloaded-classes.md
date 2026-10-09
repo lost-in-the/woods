@@ -1,0 +1,1 @@
+- Component extraction no longer emits a Phlex or ViewComponent class object that a Rails reload left behind. The previous object stays in `descendants` under the name its replacement now holds, so a wholesale component re-run after a reload could publish the stale class's metadata.

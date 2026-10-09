@@ -425,7 +425,7 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
 
     let(:file_system) do
       {
-        '/rails/app/components/page_component.rb' => <<~RUBY
+        '/rails/app/components/page_component.rb' => <<~RUBY,
           class PageComponent < Phlex::HTML
             include ApplicationHelper
 
@@ -437,11 +437,17 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
             end
           end
         RUBY
+        '/rails/app/components/header_component.rb' => '',
+        '/rails/app/components/footer_component.rb' => ''
       }
     end
 
     before do
       stub_const('Phlex::HTML', build_phlex_base)
+      # The base double fakes `name`, and its subclasses inherit the fake.
+      %w[HeaderComponent FooterComponent].each do |name|
+        stub_const(name, Class.new(Phlex::HTML) { define_singleton_method(:name) { name } })
+      end
     end
 
     it 'detects Phlex-style rendered sub-components' do
@@ -507,7 +513,7 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
     context 'with self-references and duplicates' do
       let(:file_system) do
         {
-          '/rails/app/components/page_component.rb' => <<~RUBY
+          '/rails/app/components/page_component.rb' => <<~RUBY,
             class PageComponent < Phlex::HTML
               def view_template
                 render PageComponent.new
@@ -516,6 +522,7 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
               end
             end
           RUBY
+          '/rails/app/components/header_component.rb' => ''
         }
       end
 
@@ -534,6 +541,138 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
         targets = unit.dependencies.select { |d| d[:type] == :component }.map { |d| d[:target] }
         expect(targets).to eq(['HeaderComponent'])
       end
+    end
+  end
+
+  # ── Reloaded classes ────────────────────────────────────────────────────
+
+  describe 'a class object a reload left behind' do
+    let(:file_system) { { '/rails/app/components/shelf_card.rb' => "class ShelfCard < Phlex::HTML\nend\n" } }
+
+    before do
+      base = Class.new
+      stub_const('Phlex::HTML', base)
+      stale = Class.new(base)
+      stub_const('ShelfCard', stale)
+      current = Class.new(base) { def restocked; end }
+      stub_const('ShelfCard', current)
+      base.define_singleton_method(:descendants) { [stale, current] }
+    end
+
+    it 'extracts only the class its name still resolves to' do
+      units = described_class.new.extract_all
+
+      expect(units.map { |unit| unit.metadata[:public_methods] }).to eq([[:restocked]])
+    end
+  end
+
+  # ── Render target resolution ────────────────────────────────────────────
+
+  describe 'render target resolution' do
+    let(:file_system) do
+      {
+        '/rails/app/components/billing/v2/manage_page.rb' => <<~RUBY,
+          module Billing
+            module V2
+              class ManagePage < Phlex::HTML
+                include Ui
+
+                def view_template
+                  Header(title: "x")
+                  render TierGrid.new(tiers)
+                  render Ui::NavMenu.new { |m| m.NavItem("a") }
+                  render Ghost.new
+                  form_with(model: @x) { }
+                  t(".title")
+                  render partial("x")
+                end
+              end
+            end
+          end
+        RUBY
+        '/rails/app/components/billing/v2/tier_grid.rb' => '',
+        '/rails/app/components/ui/header.rb' => '',
+        '/rails/app/components/ui/nav_menu.rb' => '',
+        '/rails/app/components/ui/nav_item.rb' => ''
+      }
+    end
+
+    let(:unit) { described_class.new.extract_component(Billing::V2::ManagePage) }
+    let(:render_targets) { unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] } }
+
+    before do
+      # Real classes, not the name-faking doubles above: resolution reads the
+      # constant tables, so the components have to be constants.
+      stub_const('Phlex::Kit', Module.new)
+      stub_const('Phlex::HTML', Class.new)
+      stub_const('Ui', Module.new.tap { |kit| kit.extend(Phlex::Kit) })
+      %w[Header NavMenu NavItem].each { |name| stub_const("Ui::#{name}", Class.new(Phlex::HTML) { include Ui }) }
+      stub_const('Billing::V2::TierGrid', Class.new(Phlex::HTML))
+      stub_const('Billing::V2::ManagePage', Class.new(Phlex::HTML) { include Ui })
+    end
+
+    it 'targets the qualified unit for Kit calls, siblings, and block-yielded Kit calls' do
+      expect(render_targets).to eq(%w[Billing::V2::TierGrid Ui::Header Ui::NavItem Ui::NavMenu])
+    end
+
+    it 'emits every render edge as a component dependency' do
+      render_deps = unit.dependencies.select { |d| d[:via] == :render }
+
+      expect(render_deps.map { |d| d[:type] }.uniq).to eq([:component])
+    end
+
+    it 'emits no edge for a helper call' do
+      expect(render_targets).not_to include('partial', 'form_with', 't')
+    end
+
+    it 'records a capitalized render that names no component instead of emitting an edge' do
+      expect(render_targets).not_to include('Ghost')
+      expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+    end
+
+    it 'emits a slot edge to the qualified unit and records a slot that names no component' do
+      file_system['/rails/app/components/billing/v2/manage_page.rb'] = <<~RUBY
+        module Billing
+          module V2
+            class ManagePage < Phlex::HTML
+              renders_one :grid, TierGrid
+              renders_one :phantom, Phantom
+            end
+          end
+        end
+      RUBY
+
+      expect(unit.dependencies.select { |d| d[:via] == :slot })
+        .to eq([{ type: :component, target: 'Billing::V2::TierGrid', via: :slot }])
+      expect(unit.metadata[:unresolved_slots]).to eq([{ name: 'Phantom', reason: 'constant_missing' }])
+    end
+
+    it 'records a component no application file defines as external, with its gem, and emits no edge' do
+      stub_const('ShelfUi::Button', Class.new(Phlex::HTML))
+      file_system['/rails/app/components/billing/v2/manage_page.rb'] = <<~RUBY
+        class Billing::V2::ManagePage < Phlex::HTML
+          def view_template = render(ShelfUi::Button.new)
+        end
+      RUBY
+      # stub_const assigns the constant from inside rspec-mocks, so that gem
+      # is where Ruby says ShelfUi::Button was defined.
+      definition_site = Object.const_source_location('ShelfUi::Button').first
+      file_system[definition_site] = ''
+      gem_root = Gem.loaded_specs.fetch('rspec-mocks').full_gem_path
+      gem_spec = double('Gem::Specification', name: 'shelf_ui', full_gem_path: gem_root)
+      allow(Gem).to receive(:loaded_specs).and_return('shelf_ui' => gem_spec)
+
+      expect(render_targets).to eq([])
+      expect(unit.metadata[:external_renders]).to eq([{ name: 'ShelfUi::Button', gem: 'shelf_ui' }])
+    end
+
+    it 'loads the component files before resolving, once per extractor' do
+      extractor = described_class.new
+      allow(extractor).to receive(:load_component_files).and_call_original
+
+      2.times { extractor.extract_component(Billing::V2::ManagePage) }
+
+      expect(extractor).to have_received(:load_component_files).once
     end
   end
 

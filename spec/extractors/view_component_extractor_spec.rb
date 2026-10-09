@@ -373,7 +373,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
 
     let(:file_system) do
       {
-        '/rails/app/components/page_component.rb' => <<~RUBY
+        '/rails/app/components/page_component.rb' => <<~RUBY,
           class PageComponent < ViewComponent::Base
             renders_one :header, HeaderComponent
             renders_many :cards, CardComponent
@@ -385,6 +385,9 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
             end
           end
         RUBY
+        '/rails/app/components/footer_component.rb' => '',
+        '/rails/app/components/header_component.rb' => '',
+        '/rails/app/components/card_component.rb' => ''
       }
     end
 
@@ -392,6 +395,10 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       base = build_view_component_base(descendants: [component_class])
       component_class.define_singleton_method(:superclass) { base }
       stub_const('ViewComponent::Base', base)
+      # The base double fakes `name`, and its subclasses inherit the fake.
+      %w[FooterComponent HeaderComponent CardComponent].each do |name|
+        stub_const(name, Class.new(ViewComponent::Base) { define_singleton_method(:name) { name } })
+      end
     end
 
     it 'detects rendered sub-components' do
@@ -433,6 +440,132 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       unit.dependencies.each do |dep|
         expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
       end
+    end
+  end
+
+  # ── Reloaded classes ──────────────────────────────────────────────────
+
+  describe 'a class object a reload left behind' do
+    let(:file_system) { { '/rails/app/components/shelf_card.rb' => "class ShelfCard < ViewComponent::Base\nend\n" } }
+
+    before do
+      base = Class.new
+      stub_const('ViewComponent::Base', base)
+      stale = Class.new(base)
+      stub_const('ShelfCard', stale)
+      current = Class.new(base) { def restocked; end }
+      stub_const('ShelfCard', current)
+      base.define_singleton_method(:descendants) { [stale, current] }
+    end
+
+    it 'extracts only the class its name still resolves to' do
+      units = described_class.new.extract_all
+
+      expect(units.map { |unit| unit.metadata[:public_methods] }).to eq([[:restocked]])
+    end
+  end
+
+  # ── Render target resolution ──────────────────────────────────────────
+
+  describe 'render target resolution' do
+    let(:file_system) do
+      {
+        '/rails/app/components/ledger/page_component.rb' => <<~RUBY,
+          module Ledger
+            class PageComponent < ViewComponent::Base
+              renders_one :title, TitleComponent
+              renders_many :cells, "Ledger::CellComponent"
+              renders_one :phantom, Phantom
+
+              def call
+                render SummaryComponent.new(rows)
+                render(RowComponent.with_collection(rows))
+                render Ghost.new
+                render partial("x")
+              end
+            end
+          end
+        RUBY
+        '/rails/app/components/ledger/summary_component.rb' => '',
+        '/rails/app/components/ledger/row_component.rb' => '',
+        '/rails/app/components/ledger/title_component.rb' => '',
+        '/rails/app/components/ledger/cell_component.rb' => ''
+      }
+    end
+
+    let(:unit) { described_class.new.extract_component(Ledger::PageComponent) }
+
+    before do
+      # Real classes, not the name-faking doubles above: resolution reads the
+      # constant tables, so the components have to be constants.
+      stub_const('ViewComponent::Base', Class.new)
+      %w[Page Summary Row Title Cell].each do |name|
+        stub_const("Ledger::#{name}Component", Class.new(ViewComponent::Base))
+      end
+    end
+
+    it 'targets the qualified sibling unit' do
+      render_deps = unit.dependencies.select { |d| d[:via] == :render }
+
+      expect(render_deps).to eq(
+        [{ type: :component, target: 'Ledger::RowComponent', via: :render },
+         { type: :component, target: 'Ledger::SummaryComponent', via: :render }]
+      )
+    end
+
+    it 'records a capitalized render that names no component instead of emitting an edge' do
+      expect(unit.metadata[:unresolved_renders]).to eq([{ name: 'Ghost', reason: 'constant_missing' }])
+    end
+
+    it 'targets the qualified unit for constant and string slot classes' do
+      expect(unit.dependencies.select { |d| d[:via] == :slot }).to eq(
+        [{ type: :component, target: 'Ledger::CellComponent', via: :slot },
+         { type: :component, target: 'Ledger::TitleComponent', via: :slot }]
+      )
+    end
+
+    it 'records a slot class that names no component instead of emitting an edge' do
+      expect(unit.metadata[:unresolved_slots]).to eq([{ name: 'Phantom', reason: 'constant_missing' }])
+    end
+
+    describe 'sidecar templates' do
+      let(:render_targets) { unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] } }
+
+      before do
+        stub_const('Ledger::NoteComponent', Class.new(ViewComponent::Base))
+        file_system['/rails/app/components/ledger/note_component.rb'] = ''
+      end
+
+      it 'attributes a render in an ERB template beside the component to the component unit' do
+        file_system['/rails/app/components/ledger/page_component.html.erb'] = <<~ERB
+          <section><%= render Ledger::NoteComponent.new(text: "a") %></section>
+          <%# render Ledger::CellComponent.new %>
+        ERB
+
+        expect(render_targets).to eq(%w[Ledger::NoteComponent Ledger::RowComponent Ledger::SummaryComponent])
+      end
+
+      it 'reads a HAML template in the sidecar directory' do
+        file_system['/rails/app/components/ledger/page_component/page_component.html.haml'] =
+          "%section\n  = render Ledger::NoteComponent.new(text: 'a')\n"
+
+        expect(render_targets).to include('Ledger::NoteComponent')
+      end
+
+      it 'records a template render that names no component' do
+        file_system['/rails/app/components/ledger/page_component.html.erb'] = '<%= render NoteComponent.new %>'
+
+        expect(render_targets).not_to include('Ledger::NoteComponent')
+        expect(unit.metadata[:unresolved_renders].map { |entry| entry[:name] }).to eq(%w[Ghost NoteComponent])
+      end
+    end
+
+    it 'records a component no application file defines as external and emits no edge' do
+      file_system.delete('/rails/app/components/ledger/row_component.rb')
+
+      expect(unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] })
+        .to eq(['Ledger::SummaryComponent'])
+      expect(unit.metadata[:external_renders]).to eq([{ name: 'Ledger::RowComponent', gem: nil }])
     end
   end
 

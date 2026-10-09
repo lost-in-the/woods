@@ -1655,12 +1655,121 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'component render targets' do
+    let(:render_target_files) do
+      %w[
+        app/components/rt_parts.rb
+        app/components/rt_parts/chip.rb
+        app/components/rt_shelf/page_component.rb
+        app/components/rt_shelf/row_component.rb
+        app/components/rt_desk/card_component.rb
+        app/controllers/rt_desk_controller.rb
+      ]
+    end
+
+    def write_and_load(relative, source)
+      write_file(relative, source)
+      load app_path(relative)
+      relative
+    end
+
+    def render_edges(index, identifier)
+      unit = unit_snapshot(index).values.find { |candidate| candidate['identifier'] == identifier }
+      [unit['dependencies'].select { |dep| dep['via'] == 'render' }.map { |dep| dep['target'] },
+       unit.dig('metadata', 'unresolved_renders').map { |entry| entry['name'] }]
+    end
+
+    # The classes stay in ApplicationComponent.descendants for the rest of the
+    # process, as `Tag` does above, so the files join the pristine tree.
+    after do
+      render_target_files.each do |relative|
+        next unless File.exist?(app_path(relative))
+
+        FileUtils.mkdir_p(File.dirname(File.join(@pristine_root, relative)))
+        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+      end
+    end
+
+    it 'retargets an unchanged renderer when its sibling and its Kit constant are created' do
+      index = run_sequence([
+                             lambda do
+                               [write_and_load('app/components/rt_parts.rb', "module RtParts\nend\n"),
+                                write_and_load('app/components/rt_shelf/page_component.rb', <<~RUBY)]
+                                  module RtShelf
+                                    class PageComponent < ApplicationComponent
+                                      include RtParts
+
+                                      def call
+                                        render RowComponent.new
+                                        Chip("a")
+                                        render partial("x")
+                                      end
+                                    end
+                                  end
+                                RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/components/rt_shelf/row_component.rb', <<~RUBY)
+                                 module RtShelf
+                                   class RowComponent < ApplicationComponent
+                                     def call = "row"
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               [write_and_load('app/components/rt_parts/chip.rb', <<~RUBY),
+                                 module RtParts
+                                   class Chip < ApplicationComponent
+                                     def call = "chip"
+                                   end
+                                 end
+                               RUBY
+                                write_and_load('app/components/rt_parts.rb', <<~RUBY)]
+                                  module RtParts
+                                    def Chip(*args) = RtParts::Chip.new(*args).call
+                                  end
+                                RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtShelf::PageComponent')).to eq([%w[RtParts::Chip RtShelf::RowComponent], []])
+    end
+
+    it 'retargets an unchanged controller when the component it renders is created' do
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_desk_controller.rb', <<~RUBY)
+                                 class RtDeskController < ApplicationController
+                                   def show
+                                     render RtDesk::CardComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/components/rt_desk/card_component.rb', <<~RUBY)
+                                 module RtDesk
+                                   class CardComponent < ApplicationComponent
+                                     def call = "card"
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
+    end
+  end
+
   it 'keeps an unrelated locale edit out of hybrid family extraction' do
     path = 'config/locales/hybrid_control.yml'
     index = full_extraction
     write_file(path, "en:\n  hybrid_control: independent edit\n")
     expect_any_instance_of(Woods::Extractors::JobExtractor).not_to receive(:extract_all)
     expect_any_instance_of(Woods::Extractors::SerializerExtractor).not_to receive(:extract_all)
+    expect_any_instance_of(Woods::Extractors::PhlexExtractor).not_to receive(:extract_all)
+    expect_any_instance_of(Woods::Extractors::ViewComponentExtractor).not_to receive(:extract_all)
 
     touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
 
