@@ -757,6 +757,7 @@ module Woods
         acc.merge(replace_type_wholesale(key, affected_types))
       end
 
+      touched.merge(reconcile_model_table_edges(affected_types)) if known.include?(:database_tables)
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
@@ -3473,8 +3474,38 @@ module Woods
       # run drops its flow scope and reassembles every touched controller.
       @flow_scope = nil if keys.include?(:routes)
 
-      keys.each_with_object(Set.new) do |key, touched|
-        touched.merge(replace_type_wholesale(key, affected_types))
+      touched = keys.each_with_object(Set.new) do |key, acc|
+        acc.merge(replace_type_wholesale(key, affected_types))
+      end
+      touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
+      touched
+    end
+
+    # Re-extract the models whose table edge no longer matches the live
+    # schema: a loaded model whose table was just created, dropped or moved
+    # to a qualified identifier. A model's columns and schema header move
+    # with the same event, so the whole unit is re-derived.
+    #
+    # Only models whose edge disagrees are touched. Re-running every model
+    # with the tables would make each `app/models` edit cost a full model
+    # extraction.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers re-extracted
+    def reconcile_model_table_edges(affected_types)
+      extractor = extractor_for(:models)
+      return Set.new unless extractor.respond_to?(:discoverable_classes)
+
+      catalog = Extractors::TableCatalog.from_runtime
+      classes = extractor.discoverable_classes.to_h { |klass| [klass.name, klass] }
+      @dependency_graph.units_of_type(:model).sort.each_with_object(Set.new) do |identifier, touched|
+        klass = classes[identifier]
+        next unless klass
+
+        current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
+        next if current == Array(catalog.for_model(klass)&.identifier)
+
+        touched.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
       end
     end
 

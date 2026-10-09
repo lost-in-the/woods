@@ -3018,6 +3018,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    describe 'a loaded model whose table appears and vanishes' do
+      # `ParcelNote` stays in ActiveRecord::Base.descendants for the rest of
+      # the process, so its file and its table join the pristine state.
+      after do
+        FileUtils.cp(app_path('app/models/parcel_note.rb'), File.join(@pristine_root, 'app/models/parcel_note.rb'))
+        connection.create_table(:parcel_notes, if_not_exists: true) { |t| t.string :body }
+      end
+
+      it 'refreshes the unchanged model table edge when only the migration and the database change' do
+        write_file('app/models/parcel_note.rb', "class ParcelNote < ApplicationRecord\nend\n")
+        load app_path('app/models/parcel_note.rb')
+        path = 'db/migrate/20240306000000_create_parcel_notes.rb'
+        index = run_sequence(
+          [
+            lambda {
+              connection.create_table(:parcel_notes) { |t| t.string :body }
+              write_file(path, migration('CreateParcelNotes', 'create_table(:parcel_notes) { |t| t.string :body }'))
+            },
+            lambda {
+              connection.drop_table(:parcel_notes)
+              write_file(path, migration('CreateParcelNotes', 'drop_table :parcel_notes'))
+            }
+          ]
+        )
+
+        expect(edges(unit_json(index, 'models', 'ParcelNote'), 'table')).to eq([])
+      end
+    end
+
     it 'gives an unchanged view an edge when its source table appears' do
       index = run_sequence(
         [

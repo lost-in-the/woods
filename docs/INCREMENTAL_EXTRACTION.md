@@ -455,9 +455,12 @@ Five of these deserve a note:
   model edge. The trigger paths are a proxy. **A schema change applied
   with no file change is not seen; run a full extraction.** Schema dumps are
   restart inputs, so `woods:incremental` already selects a full extraction for
-  them, and the direct `extract_changed` API refuses them. Model units are not
-  part of the cascade: a model's own columns and its `table` edge refresh when
-  the model is re-extracted or on the full extraction a schema change selects.
+  them, and the direct `extract_changed` API refuses them. Models are not
+  re-run wholesale with the tables: after the tables re-run, only a model
+  whose `table` edge disagrees with the live schema (its table was created,
+  dropped, or moved to a qualified identifier) is re-extracted
+  (`Extractor#reconcile_model_table_edges`), which also refreshes its columns
+  and schema header.
 - **Packages don't yet claim their members.** `PackageExtractor` (#280) only
   produces `package` units from `package.yml`; it does not annotate which
   package every other unit belongs to. A pack-resident file-based unit is not
