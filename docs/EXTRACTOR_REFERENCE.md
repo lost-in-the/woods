@@ -1045,7 +1045,7 @@ namespace.
 
 **Key details:**
 - One `external_consumer` unit per declared application, identifier `external:<name>`, with a `via: :reads_table` edge to each declared table's unit. `dependents` of a table therefore lists the other application
-- `metadata[:declared]` is always true: these edges are declared, never observed. `declared_in` names the source, `tables_missing` lists declared tables the live schema does not have
+- `metadata[:declared]` is always true: these edges are declared, never observed. `declared_in` names the source, `tables_missing` lists declared tables the live schema does not have, and `woods:validate` warns once per such table
 - Emits nothing when nothing is declared
 - A malformed declared file emits no units and is reported as an extractor failure. An incremental run then keeps the previously published consumers
 - Incremental runs re-run the extractor when the declared file changes, and whenever the table extractor re-runs. A change to the in-process setting needs a full extraction
