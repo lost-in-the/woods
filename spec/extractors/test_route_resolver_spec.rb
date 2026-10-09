@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'tmpdir'
+require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
 require 'woods'
@@ -188,6 +189,131 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(analysis(%(with_subdomain "shop"\nvisit "/pricing"\n)).exercised).to eq([])
     ensure
       Woods.configuration = original
+    end
+  end
+
+  describe 'Capybara support defaults and redirect routes' do
+    let(:root) { Pathname.new(Dir.mktmpdir('woods_route_defaults')) }
+    let(:routes) do
+      [
+        route_double(verb: 'GET', path: '/settings', controller: 'settings', action: 'show',
+                     constraints: { subdomain: 'app' }),
+        route_double(verb: 'GET', path: '/settings', controller: 'settings', action: 'show',
+                     constraints: { subdomain: 'my' })
+      ]
+    end
+
+    before { stub_route_set(routes, root: root, logger: logger) }
+    after { FileUtils.remove_entry(root) }
+
+    def support_file(path, source)
+      file = root.join(path)
+      FileUtils.mkdir_p(file.dirname)
+      File.write(file, source)
+    end
+
+    def analysis(source = %(visit "/settings"\n))
+      described_class.new.analyze(source)
+    end
+
+    it 'uses Capybara.app_host from spec support when the file names no host' do
+      support_file('spec/support/capybara.rb', 'Capybara.app_host = "http://my.example.test:3000"')
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'uses Capybara.default_host from rails_helper when the file names no host' do
+      support_file('spec/rails_helper.rb', 'Capybara.default_host = "http://my.example.test"')
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'uses the configured tld_length for the support host' do
+      stub_const('ActionDispatch::Http::URL', double('URL', tld_length: 2))
+      support_file('spec/rails_helper.rb', 'Capybara.app_host = "https://my.example.co.test"')
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'prefers app_host over default_host' do
+      support_file('spec/rails_helper.rb', <<~RUBY)
+        Capybara.default_host = "http://app.example.test"
+        Capybara.app_host = "http://my.example.test"
+      RUBY
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'reads a literal default subdomain helper call from support' do
+      support_file('spec/support/capybara.rb', <<~'RUBY')
+        def use_subdomain(subdomain)
+          Capybara.app_host = "http://#{subdomain}.example.test"
+        end
+        RSpec.configure { |config| config.before { use_subdomain "my" } }
+      RUBY
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'keeps an explicit file host ahead of the support default' do
+      support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"')
+
+      expect(analysis(%(host! "app.example.test"\nvisit "/settings"\n)).exercised)
+        .to eq(['GET /settings [subdomain=app]'])
+    end
+
+    it 'keeps a file with multiple hosts ambiguous even with a support default' do
+      support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"')
+      result = analysis(%(host! "app.example.test"\nhost! "my.example.test"\nvisit "/settings"\n))
+
+      expect(result.exercised).to eq([])
+      expect(result.ambiguous).to eq(
+        [{ request: 'GET /settings', candidates: ['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'] }]
+      )
+    end
+
+    it 'preserves ambiguity when no default host is configured' do
+      result = analysis
+
+      expect(result.exercised).to eq([])
+      expect(result.ambiguous).to eq(
+        [{ request: 'GET /settings', candidates: ['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'] }]
+      )
+    end
+
+    it 'lets a redirect win over a route on a different subdomain' do
+      stub_const('ActionDispatch::Routing::Redirect', Struct.new(:block, :status))
+      redirect = route_double(verb: 'GET', path: '/settings', controller: nil, action: nil,
+                              constraints: { subdomain: 'my' })
+      allow(redirect).to receive(:app).and_return(ActionDispatch::Routing::Redirect.new('/profile', 302))
+      stub_route_set([routes.first, redirect], root: root, logger: logger)
+      support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"')
+
+      result = analysis(%(visit "/settings"\nexpect(page).to have_current_path("/settings")\n))
+      expect(result.exercised).to eq(['GET /settings [subdomain=my] (redirect)'])
+      expect(result.asserted).to eq(['GET /settings [subdomain=my] (redirect)'])
+      expect(result.ambiguous).to eq([])
+    end
+
+    it 'prefers a matching subdomain constraint over an earlier unconstrained route' do
+      fallback = route_double(verb: 'GET', path: '/settings', controller: 'pages', action: 'show')
+      stub_route_set([fallback, *routes], root: root, logger: logger)
+
+      expect(analysis(%(host! "my.example.test"\nvisit "/settings"\n)).exercised)
+        .to eq(['GET /settings [subdomain=my]'])
+    end
+
+    it 'does not assume a matching callable constraint passes' do
+      fallback = route_double(verb: 'GET', path: '/settings', controller: 'pages', action: 'show')
+      constrained = route_double(verb: 'GET', path: '/settings', controller: 'settings', action: 'show',
+                                 constraints: { subdomain: 'my' }, callable: true)
+      stub_route_set([fallback, constrained], root: root, logger: logger)
+
+      result = analysis(%(host! "my.example.test"\nvisit "/settings"\n))
+      expect(result.exercised).to eq([])
+      expect(result.ambiguous).to eq(
+        [{ request: 'GET /settings', candidates: ['GET /settings', 'GET /settings [subdomain=my, constraint=proc]'] }]
+      )
     end
   end
 

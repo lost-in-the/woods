@@ -5,7 +5,7 @@ module Woods
     # Works out which subdomain a test file's requests are made on, when the
     # file says so with a literal.
     #
-    # Recognized: `host! "shop.example.test"`, `Capybara.app_host = "http://..."`,
+    # Recognized: `host! "shop.example.test"`, Capybara app/default hosts,
     # a `subdomain:` option, and a call to one of the configured helper names
     # (`config.test_subdomain_helpers`) with a literal argument. The subdomain
     # is known only when the file names exactly one; several, none, or an
@@ -22,7 +22,8 @@ module Woods
 
       LITERAL = /(?:"([^"\n]*)"|'([^'\n]*)'|:(\w+))/
       HOST = /\bhost![ \t(]+(?:"([^"\n]*)"|'([^'\n]*)')/
-      APP_HOST = %r{\bapp_host[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
+      APP_HOST = %r{\b(?:app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
+      CAPYBARA_HOST = %r{\bCapybara\.(app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
       OPTION = /(?:\bsubdomain:|:subdomain[ \t]*=>)[ \t]*#{LITERAL}/
 
       module_function
@@ -34,6 +35,36 @@ module Woods
         found = hosts(source).map { |host| subdomain_of(host) } + named(source)
         found = found.reject { |value| value.include?('#{') }.uniq
         found.one? && hosts_literal?(source) ? found.first : nil
+      end
+
+      # Does the file supply its own host hints, even when ambiguous?
+      #
+      # @param source [String] Ruby source of a test file
+      # @return [Boolean]
+      def specifies_host?(source)
+        (hosts(source) + named(source)).any?
+      end
+
+      # Resolve the Capybara default from the catalog's support source.
+      # app_host takes precedence over default_host. A helper's literal
+      # default can resolve an app_host interpolated by that helper; competing
+      # defaults remain unknown. No support code is executed.
+      #
+      # @param source [String] Ruby source of the test support files
+      # @return [String, nil]
+      def capybara_subdomain(source)
+        source = source.each_line.grep_v(/\A[ \t]*#/).join
+        configured = source.scan(CAPYBARA_HOST).group_by(&:first)
+        hosts = (configured['app_host'] || configured['default_host'] || []).map(&:last)
+        found = hosts.map { |host| subdomain_of(host) }
+        if found.empty? || found.any? { |value| value.include?('#{') }
+          defaults = helper_pattern ? source.scan(helper_pattern).map { |captures| captures.compact.first } : []
+          return nil if defaults.empty?
+
+          found = found.reject { |value| value.include?('#{') } + defaults
+        end
+        found = found.uniq
+        found.one? && !found.first.include?('#{') ? found.first : nil
       end
 
       # @return [Array<String>] the configured helper names

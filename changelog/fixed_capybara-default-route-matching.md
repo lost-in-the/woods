@@ -1,0 +1,1 @@
+- Resolve test navigation using Capybara hosts configured in test support, include redirect routes, and prefer matching subdomain constraints over unconstrained routes.

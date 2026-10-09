@@ -175,7 +175,7 @@ module Woods
           return { routes_exercised: [], routes_asserted: [], routes_ambiguous: [] }
         end
 
-        analysis = (@route_resolver ||= TestRouteResolver.new).analyze(source)
+        analysis = (@route_resolver ||= TestRouteResolver.new(support_catalog: @support_catalog)).analyze(source)
         { routes_exercised: analysis.exercised, routes_asserted: analysis.asserted,
           routes_ambiguous: analysis.ambiguous }
       end

@@ -4,6 +4,7 @@ require 'strscan'
 
 require_relative 'route_extractor'
 require_relative 'test_request_host'
+require_relative 'test_support_catalog'
 
 module Woods
   module Extractors
@@ -24,8 +25,9 @@ module Woods
     #
     # A literal can fit several routes when routes are constrained by
     # subdomain or by a callable. See {#decide}: the file's subdomain is used
-    # when {TestRequestHost} can read it, a lone static route beats parameter
-    # and glob routes, and a request that stays undecided is reported as
+    # when {TestRequestHost} can read it (falling back to Capybara support
+    # defaults only when the file supplies no host), a lone static route beats
+    # parameter and glob routes, and a request that stays undecided is reported as
     # ambiguous with no edge. A path inside an assertion (`redirect_to`,
     # `have_current_path`) is reported as asserted, never as exercised.
     #
@@ -67,8 +69,10 @@ module Woods
       # lists requests several routes could serve: `{ request:, candidates: }`.
       Analysis = Struct.new(:exercised, :asserted, :ambiguous, keyword_init: true)
 
-      def initialize
+      # @param support_catalog [TestSupportCatalog, nil] the extractor's support catalog
+      def initialize(support_catalog: nil)
         @routes = load_routes
+        @support_catalog = support_catalog
         @by_name = @routes.select(&:name).each_with_object({}) { |route, map| map[route.name] ||= route }
         @by_verb_and_path = @routes.each_with_object({}) { |route, map| map[[route.verb, route.path]] ||= route }
         @patterns = {}
@@ -91,6 +95,7 @@ module Woods
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
         subdomain = TestRequestHost.subdomain(source)
+        subdomain = default_subdomain unless TestRequestHost.specifies_host?(source)
         requests = []
         asserted = []
         source.each_line do |line|
@@ -103,6 +108,13 @@ module Woods
       end
 
       private
+
+      def default_subdomain
+        return @default_subdomain if defined?(@default_subdomain)
+
+        catalog = @support_catalog || TestSupportCatalog.new
+        @default_subdomain = TestRequestHost.capybara_subdomain(catalog.entries.map(&:source).join("\n"))
+      end
 
       def build_analysis(requests, asserted)
         ambiguous, exercised = requests.partition { |outcome| outcome.is_a?(Hash) }
@@ -161,6 +173,12 @@ module Woods
       #
       # @return [String, Hash, nil]
       def decide(matches, subdomain, request)
+        # For a known host, matching subdomain constraints are more specific
+        # than an unconstrained fallback; retain route order within each group.
+        if subdomain
+          matches = matches.select { |route| satisfied?(route, subdomain, true) }
+                           .partition(&:subdomain).flatten(1)
+        end
         winners = worlds(matches, subdomain).filter_map do |host, callables_pass|
           matches.find { |route| satisfied?(route, host, callables_pass) }
         end.uniq
@@ -211,13 +229,13 @@ module Woods
         Regexp.new("#{pattern}(?:\\.\\w+)?\\z")
       end
 
-      # Controller routes of the live route set, in route order.
+      # Controller and redirect routes of the live route set, in route order.
       #
       # @return [Array<Route>]
       def load_routes
         RouteExtractor.new.extract_all.filter_map do |unit|
           metadata = unit.metadata
-          next unless metadata[:action] && metadata[:path]
+          next unless metadata[:path] && (metadata[:action] || metadata[:kind] == 'redirect')
 
           build_route(unit.identifier, metadata, metadata[:path].to_s)
         end
