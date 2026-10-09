@@ -1339,6 +1339,17 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       end
     end
 
+    it 'treats a through association whose source is polymorphic as an interface' do
+      source = double('Assoc(referrer source)', name: :referrer, macro: :belongs_to, polymorphic?: true, options: {})
+      through = double('Assoc(referrer)', name: :referrer, macro: :has_one, class_name: 'Referrer',
+                                          polymorphic?: false, source_reflection: source,
+                                          options: { through: :account_referral, source: :referrer })
+      model = model_with_associations(through)
+
+      expect(extractor.send(:extract_dependencies, model, nil)).to eq([])
+      expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq(['referrer'])
+    end
+
     it 'strips a leading :: from an association edge target' do
       rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
                                          class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})

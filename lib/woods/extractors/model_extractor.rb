@@ -864,7 +864,23 @@ module Woods
       # @param assoc [ActiveRecord::Reflection::AbstractReflection]
       # @return [Boolean]
       def polymorphic_reflection?(assoc)
-        assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
+        return true if assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
+
+        assoc.respond_to?(:source_reflection) && polymorphic_source?(assoc)
+      end
+
+      # A `through` association whose source association is polymorphic has
+      # no single target class either: `has_one :referrer, through:
+      # :account_referral, source: :referrer` over a polymorphic `belongs_to
+      # :referrer` names an interface.
+      #
+      # @param assoc [ActiveRecord::Reflection::ThroughReflection]
+      # @return [Boolean]
+      def polymorphic_source?(assoc)
+        source = assoc.source_reflection
+        !source.nil? && !source.equal?(assoc) && polymorphic_reflection?(source)
+      rescue StandardError
+        false
       end
 
       # The database a class resolves to, by runtime reflection.
