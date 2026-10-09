@@ -17,6 +17,8 @@ module Woods
         restart_conditions.each { |condition| lines << "  if #{condition}; then printf full; return; fi" }
         lines.concat(declared_root_lines)
         rules.each do |rule|
+          next lines << unprojectable_line(rule) unless projectable?(rule)
+
           lines << "  if #{condition_for(rule)}; then"
           lines << '    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac'
           lines << '    return'
@@ -46,6 +48,17 @@ module Woods
       def rules
         PathDispatcher.runtime_rules +
           PathDispatcher.file_rules + PathDispatcher.whole_app_rules
+      end
+
+      # A rule whose only surface is a named predicate over configuration
+      # has nothing the shell can test. The daemon and `woods:incremental`
+      # still reach it through the Ruby rules.
+      def projectable?(rule)
+        rule.dirs.to_a.any? || rule.exact_paths.to_a.any? || rule.basenames.to_a.any?
+      end
+
+      def unprojectable_line(rule)
+        "  # #{rule.extractor_key}: the declared file is configuration; the Ruby rules handle it"
       end
 
       def restart_conditions
