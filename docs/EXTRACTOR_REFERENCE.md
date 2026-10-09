@@ -1032,7 +1032,7 @@ namespace.
 - `metadata`: `columns` (name, type, SQL type, null, `has_default`; default values are not recorded), `indexes`, `foreign_keys`, `primary_key`, `database`, `model`, `models`, `model_less`
 - `model` is the Active Record class that owns the table, or nil. Inheritance roots own a table; subclasses share it. `model_less: true` marks a table no model owns: a legacy table, another application's table, a join or backup table
 - `schema_migrations` and `ar_internal_metadata` are skipped. Views are not tables and get no unit here
-- Edges: table → table for each foreign key (`via: :foreign_key`). Inbound: model → table (`via: :table`), migration → table (`via: :migrates`), view → table (`via: :view_source`), external consumer → table (`via: :reads_table`)
+- Edges: table → table for each foreign key (`via: :foreign_key`). Inbound: model → table (`via: :table`), migration → table (`via: :migrates`), view → table (`via: :view_source`), external consumer → table (`via: :reads_table`, `via: :writes_table`)
 - The unit has no `file_path`. The live schema is its source
 - Table units score zero in PageRank and are left out of the hub, orphan, dead-end and cross-database lists. `graph_analysis.json` lists tables no model reads under `unmodelled_tables`
 - Incremental runs re-run the extractor wholesale, together with migrations, database views and external consumers, when a schema dump, a file under `db/migrate`, or a file under `app/models` changes. **A schema change applied with no file change needs a full extraction**
@@ -1041,10 +1041,10 @@ namespace.
 
 ### ExternalConsumerExtractor
 
-**What it captures:** other applications that read this application's tables, as declared in `config.external_table_consumers` and the optional YAML file named by `config.external_table_consumers_path`.
+**What it captures:** other applications that read or write this application's tables, as declared in `config.external_table_consumers` and the optional YAML file named by `config.external_table_consumers_path`.
 
 **Key details:**
-- One `external_consumer` unit per declared application, identifier `external:<name>`, with a `via: :reads_table` edge to each declared table's unit. `dependents` of a table therefore lists the other application
+- One `external_consumer` unit per declared application, identifier `external:<name>`, with a `via: :reads_table` edge to each table it reads and a `via: :writes_table` edge to each table it writes (`metadata[:tables_read]`, `metadata[:tables_written]`). `dependents` of a table therefore lists the other application
 - `metadata[:declared]` is always true: these edges are declared, never observed. `declared_in` names the source, `tables_missing` lists declared tables the live schema does not have, and `woods:validate` warns once per such table
 - Emits nothing when nothing is declared
 - A malformed declared file emits no units and is reported as an extractor failure. An incremental run then keeps the previously published consumers

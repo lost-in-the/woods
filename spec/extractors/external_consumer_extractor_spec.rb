@@ -65,6 +65,20 @@ RSpec.describe Woods::Extractors::ExternalConsumerExtractor do
       expect(unit.dependencies.map { |dep| dep[:target] }).to eq(%w[table:billing.orders table:primary.orders])
     end
 
+    it 'links written tables with writes_table, alongside reads_table for a table both read and written' do
+      configuration.external_table_consumers = { 'storefront' => { reads: %w[products carts], writes: %w[carts] } }
+
+      unit = units.first
+
+      expect(unit.dependencies).to eq(
+        [{ type: :database_table, target: 'table:carts', via: :reads_table },
+         { type: :database_table, target: 'table:products', via: :reads_table },
+         { type: :database_table, target: 'table:carts', via: :writes_table }]
+      )
+      expect(unit.metadata).to include(tables_read: %w[carts products], tables_written: %w[carts],
+                                       tables: %w[carts products])
+    end
+
     it 'describes the declaration in the unit source' do
       configuration.external_table_consumers = { 'storefront' => %w[products] }
 
@@ -85,13 +99,16 @@ RSpec.describe Woods::Extractors::ExternalConsumerExtractor do
         expect(unit.dependencies.map { |dep| dep[:target] }).to eq(%w[table:carts table:products])
       end
 
-      it 'merges a consumer declared in both places' do
-        create_file('config/woods/external_consumers.yml', "storefront:\n  - carts\n")
+      it 'merges a consumer declared in both places, reads and writes separately' do
+        create_file('config/woods/external_consumers.yml',
+                    "storefront:\n  reads:\n    - carts\n  writes:\n    - orders\n")
         configuration.external_table_consumers = { 'storefront' => %w[products] }
 
         unit = units.first
 
-        expect(unit.metadata[:tables]).to eq(%w[carts products])
+        expect(unit.metadata[:tables]).to eq(%w[carts orders products])
+        expect(unit.metadata[:tables_written]).to eq(%w[orders])
+        expect(unit.dependencies.map { |dep| [dep[:target], dep[:via]] }).to include(['table:orders', :writes_table])
         expect(unit.metadata[:declared_in]).to eq(['config/woods/external_consumers.yml', 'configuration'])
       end
 
@@ -139,11 +156,22 @@ RSpec.describe Woods::Extractors::ExternalConsumerExtractor do
       expect(configuration.external_table_consumers_path).to be_nil
     end
 
-    it 'normalizes names and tables to sorted, frozen strings' do
+    it 'normalizes an Array to reads, with sorted frozen strings' do
       configuration.external_table_consumers = { storefront: [:products, 'orders', 'orders'] }
 
-      expect(configuration.external_table_consumers).to eq('storefront' => %w[orders products])
+      expect(configuration.external_table_consumers).to eq('storefront' => { reads: %w[orders products], writes: [] })
       expect(configuration.external_table_consumers).to be_frozen
+      expect(configuration.external_table_consumers['storefront'][:reads]).to be_frozen
+    end
+
+    it 'normalizes a reads/writes Hash with symbol or string keys' do
+      configuration.external_table_consumers = { 'storefront' => { 'reads' => %w[products], writes: [:carts] },
+                                                 'reporting' => { reads: %w[orders] } }
+
+      expect(configuration.external_table_consumers).to eq(
+        'reporting' => { reads: %w[orders], writes: [] },
+        'storefront' => { reads: %w[products], writes: %w[carts] }
+      )
     end
 
     [
@@ -152,13 +180,15 @@ RSpec.describe Woods::Extractors::ExternalConsumerExtractor do
       ['an empty consumer name', { '' => %w[orders] }],
       ['a non-Array table list', { 'storefront' => 'orders' }],
       ['a Proc in a table list', { 'storefront' => [-> { 'orders' }] }],
+      ['an unknown key in a reads/writes Hash', { 'storefront' => { reads: %w[orders], deletes: %w[carts] } }],
+      ['a non-Array writes list', { 'storefront' => { writes: 'carts' } }],
       ['an empty table name', { 'storefront' => [''] }]
     ].each do |label, value|
       it "rejects #{label} at assignment and keeps the previous value" do
         configuration.external_table_consumers = { 'reporting' => %w[orders] }
 
         expect { configuration.external_table_consumers = value }.to raise_error(Woods::ConfigurationError)
-        expect(configuration.external_table_consumers).to eq('reporting' => %w[orders])
+        expect(configuration.external_table_consumers).to eq('reporting' => { reads: %w[orders], writes: [] })
       end
     end
 

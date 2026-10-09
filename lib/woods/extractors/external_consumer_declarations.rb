@@ -15,22 +15,47 @@ module Woods
     module ExternalConsumerDeclarations
       module_function
 
-      # @param value [Hash] consumer name => table names
+      # Table lists a consumer can declare.
+      ROLES = %i[reads writes].freeze
+
+      # @param value [Hash] consumer name => table names (reads), or
+      #   `{ reads: [...], writes: [...] }`
       # @param label [String] setting name used in error messages
-      # @return [Hash{String => Array<String>}] frozen; names and tables sorted
+      # @return [Hash{String => Hash{Symbol => Array<String>}}] frozen;
+      #   `{ "name" => { reads: [...], writes: [...] } }`, names and tables sorted
       # @raise [ConfigurationError] if the value is malformed
       def normalize!(value, label:)
         raise ConfigurationError, "#{label} must be a Hash, got #{value.inspect}" unless value.is_a?(Hash)
 
-        entries = value.map do |name, tables|
+        entries = value.map do |name, declared|
           consumer = name_of(name, "#{label} consumer name")
-          unless tables.is_a?(Array)
-            raise ConfigurationError, "#{label}[#{consumer.inspect}] must be an Array of table names, " \
-                                      "got #{tables.inspect}"
-          end
-          [consumer, tables.map { |table| name_of(table, "#{label}[#{consumer.inspect}] table") }.uniq.sort.freeze]
+          [consumer, normalize_roles!(declared, "#{label}[#{consumer.inspect}]")]
         end
         entries.sort_by(&:first).to_h.freeze
+      end
+
+      # @return [Hash{Symbol => Array<String>}] frozen, every role present
+      def normalize_roles!(declared, label)
+        declared = { reads: declared } if declared.is_a?(Array)
+        unless declared.is_a?(Hash)
+          raise ConfigurationError, "#{label} must be an Array of table names or a reads/writes Hash, " \
+                                    "got #{declared.inspect}"
+        end
+
+        by_role = declared.to_h { |role, tables| [role.to_s.to_sym, tables] }
+        unknown = by_role.keys - ROLES
+        raise ConfigurationError, "#{label} has unknown keys #{unknown.inspect}; use reads and writes" if unknown.any?
+
+        ROLES.to_h { |role| [role, table_list!(by_role.fetch(role, []), "#{label} #{role}")] }.freeze
+      end
+
+      # @return [Array<String>] frozen, sorted, deduplicated
+      def table_list!(tables, label)
+        unless tables.is_a?(Array)
+          raise ConfigurationError, "#{label} must be an Array of table names, got #{tables.inspect}"
+        end
+
+        tables.map { |table| name_of(table, "#{label} table") }.uniq.sort.freeze
       end
 
       # @param value [String, nil] Rails.root-relative path, or nil for no file

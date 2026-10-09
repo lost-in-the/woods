@@ -12,8 +12,9 @@ module Woods
     #
     # A single-repository index cannot observe another application reading
     # the same database. The declaration makes that gap explicit: one unit
-    # per declared application, with a `via: :reads_table` edge to each table
-    # unit it names. The units are marked `declared`, never observed.
+    # per declared application, with a `via: :reads_table` or
+    # `via: :writes_table` edge to each table unit it names. The units are
+    # marked `declared`, never observed.
     #
     # @example
     #   Woods.configure { |c| c.external_table_consumers = { "storefront" => %w[products orders] } }
@@ -70,31 +71,51 @@ module Woods
         ExternalConsumerDeclarations.load_file(Rails.root.join(declared_path))
       end
 
-      def extract_consumer(name, file_tables, configured_tables, catalog)
-        tables = (Array(file_tables) | Array(configured_tables)).sort
+      def extract_consumer(name, from_file, from_configuration, catalog)
+        roles = merged_roles(from_file, from_configuration)
+        tables = roles.values.flatten.uniq.sort
         resolved = tables.to_h { |table| [table, catalog.named(table)] }
 
         unit = ExtractedUnit.new(type: :external_consumer, identifier: "#{IDENTIFIER_PREFIX}#{name}",
-                                 file_path: file_tables ? Rails.root.join(declared_path).to_s : nil)
+                                 file_path: from_file ? Rails.root.join(declared_path).to_s : nil)
         unit.namespace = nil
         unit.metadata = {
           consumer: name,
           declared: true,
-          declared_in: [(declared_path if file_tables), (CONFIGURATION_SOURCE if configured_tables)].compact,
+          declared_in: [(declared_path if from_file), (CONFIGURATION_SOURCE if from_configuration)].compact,
           tables: tables,
+          tables_read: roles[:reads],
+          tables_written: roles[:writes],
           tables_missing: tables.select { |table| resolved[table].empty? }
         }
         unit.source_code = render_source(unit.metadata)
-        unit.dependencies = resolved.values.flatten.map(&:identifier).uniq.sort.map do |identifier|
-          { type: :database_table, target: identifier, via: :reads_table }
-        end
+        unit.dependencies = table_edges(roles, resolved)
         unit
+      end
+
+      # @return [Hash{Symbol => Array<String>}] reads and writes, each the sorted union of both sources
+      def merged_roles(from_file, from_configuration)
+        ExternalConsumerDeclarations::ROLES.to_h do |role|
+          [role, (Array(from_file&.fetch(role, [])) | Array(from_configuration&.fetch(role, []))).sort]
+        end
+      end
+
+      # One edge per table unit per role. A table both read and written has
+      # two edges to one target; the vias keep them distinct.
+      def table_edges(roles, resolved)
+        { reads: :reads_table, writes: :writes_table }.flat_map do |role, via|
+          roles[role].flat_map { |table| resolved[table] }.map(&:identifier).uniq.sort.map do |identifier|
+            { type: :database_table, target: identifier, via: via }
+          end
+        end
       end
 
       def render_source(metadata)
         lines = ["External consumer: #{metadata[:consumer]}",
                  "Another application that reads this database (declared in #{metadata[:declared_in].join(', ')}).",
-                 '', 'Tables read:', *metadata[:tables].map { |table| "  #{table}" }]
+                 '', 'Tables read:', *metadata[:tables_read].map { |table| "  #{table}" }]
+        written = metadata[:tables_written]
+        lines.push('', 'Tables written:', *written.map { |table| "  #{table}" }) if written.any?
         missing = metadata[:tables_missing]
         lines.push('', 'Declared tables missing from the live schema:', *missing.map { |t| "  #{t}" }) if missing.any?
         "#{lines.join("\n")}\n"

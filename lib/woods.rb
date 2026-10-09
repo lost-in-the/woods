@@ -570,15 +570,19 @@ module Woods
       @settings_readers = value.each_with_index.map { |entry, index| settings_reader(entry, index) }.freeze
     end
 
-    # Other applications that read tables in this application's database,
-    # declared so `dependents` of a table shows them. Each entry becomes an
-    # `external_consumer` unit with `reads_table` edges to the table units.
-    # Plain data only: consumer name => table names.
+    # Other applications that read or write tables in this application's
+    # database, declared so `dependents` of a table shows them. Each entry
+    # becomes an `external_consumer` unit with `reads_table` and
+    # `writes_table` edges to the table units. Plain data only: consumer
+    # name => table names read, or `{ reads: [...], writes: [...] }`.
     #
     # @example
-    #   config.external_table_consumers = { "storefront" => %w[products orders] }
+    #   config.external_table_consumers = {
+    #     "storefront" => %w[products orders],
+    #     "public-site" => { reads: %w[products], writes: %w[carts] }
+    #   }
     #
-    # @param value [Hash{String, Symbol => Array<String, Symbol>}]
+    # @param value [Hash{String, Symbol => Array<String, Symbol>, Hash}]
     # @raise [ConfigurationError] if the declaration is malformed; the previous value is kept
     def external_table_consumers=(value)
       @external_table_consumers =

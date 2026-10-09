@@ -798,12 +798,15 @@ app with no components.
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `external_table_consumers` | Hash&lt;String, Array&lt;String&gt;&gt; | `{}` | Other applications that read this database, as consumer name => table names. Each becomes an `external_consumer` unit with `reads_table` edges to the table units. |
+| `external_table_consumers` | Hash&lt;String, Array&lt;String&gt; or Hash&gt; | `{}` | Other applications that read or write this database, as consumer name => table names read, or `{ reads: [...], writes: [...] }`. Each becomes an `external_consumer` unit with `reads_table` and `writes_table` edges to the table units. |
 | `external_table_consumers_path` | String, nil | `nil` | A YAML file of the same shape, relative to `Rails.root`, merged with the setting above. |
 
 ```ruby
 Woods.configure do |config|
-  config.external_table_consumers = { "storefront" => %w[products orders] }
+  config.external_table_consumers = {
+    "storefront" => %w[products orders],                          # reads only
+    "public-site" => { reads: %w[products], writes: %w[carts] }
+  }
   config.external_table_consumers_path = "config/woods/external_consumers.yml"
 end
 ```
@@ -813,7 +816,15 @@ end
 storefront:
   - products
   - orders
+public-site:
+  reads:
+    - products
+  writes:
+    - carts
 ```
+
+An Array is shorthand for `reads`. A table both read and written gets one
+edge per role.
 
 Both settings are validated at assignment and raise
 `Woods::ConfigurationError` on anything but plain data. Procs are refused.

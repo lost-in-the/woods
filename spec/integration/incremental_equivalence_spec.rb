@@ -3066,13 +3066,18 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         index = run_sequence(
           [
             -> { write_file(declared, "storefront:\n  - posts\n  - audit_rows\n") },
-            -> { write_file(declared, "storefront:\n  - posts\n  - comments\nreporting:\n  - posts\n") }
+            lambda {
+              write_file(declared, "storefront:\n  reads:\n    - posts\n    - comments\n  writes:\n    - comments\n" \
+                                   "reporting:\n  - posts\n")
+            }
           ]
         )
 
         storefront = unit_json(index, 'external_consumers', 'external:storefront')
         expect(edges(storefront, 'reads_table')).to eq(%w[table:comments table:posts])
-        expect(storefront['metadata']).to include('declared' => true, 'tables_missing' => [])
+        expect(edges(storefront, 'writes_table')).to eq(%w[table:comments])
+        expect(storefront['metadata']).to include('declared' => true, 'tables_missing' => [],
+                                                  'tables_written' => ['comments'])
         expect(edges(unit_json(index, 'external_consumers', 'external:reporting'), 'reads_table'))
           .to eq(%w[table:comments table:posts])
         expect(unit_json(index, 'database_tables', 'table:posts')['dependents'])
