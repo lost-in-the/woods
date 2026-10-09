@@ -9,4 +9,5 @@
   `via: :table` edge to their table and foreign keys become table-to-table
   `via: :foreign_key` edges. Table units take no part in PageRank or the hub,
   orphan and dead-end lists. A schema change applied with no file change
-  needs a full extraction.
+  needs a full extraction. The Rails 6.0 database-name fallback (no
+  `connection_db_config`) is untested in CI.

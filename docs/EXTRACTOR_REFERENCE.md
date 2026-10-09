@@ -1036,6 +1036,7 @@ namespace.
 - The unit has no `file_path`. The live schema is its source
 - Table units score zero in PageRank and are left out of the hub, orphan, dead-end and cross-database lists. `graph_analysis.json` lists tables no model reads under `unmodelled_tables`
 - Incremental runs re-run the extractor wholesale, together with migrations, database views and external consumers, when a schema dump, a file under `db/migrate`, or a file under `app/models` changes. **A schema change applied with no file change needs a full extraction**
+- On Rails 6.0 there is no `connection_db_config`; the database name comes from the pool's connection specification matched against the configured databases. That path is untested in CI
 
 ---
 
