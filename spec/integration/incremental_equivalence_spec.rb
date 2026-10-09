@@ -962,6 +962,29 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  it 'omits ignored configuration YAML in both full and incremental extraction' do
+    _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'init', '--quiet'))
+    raise err unless status.success?
+
+    write_file('.gitignore', "config/settings.local.yml\n")
+    _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'add', '.'))
+    raise err unless status.success?
+
+    baseline = full_extraction
+    path = write_file('config/settings.local.yml', "private_local_key: withheld\n")
+    Woods::Extractor.new(output_dir: baseline).extract_changed([path])
+    full = full_extraction
+    expect(differences(baseline, full)).to be_empty
+    [baseline, full].each do |index|
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      expect(index_snapshot(index).fetch('config_files', []).map { |unit| unit['identifier'] }).not_to include(path)
+      expect(Woods::SkippedFiles.read(payload).fetch('files')).to include('path' => path, 'reason' => 'git_ignored')
+    end
+  ensure
+    FileUtils.rm_rf(app_path('.git'))
+    FileUtils.rm_f(app_path('.gitignore'))
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)

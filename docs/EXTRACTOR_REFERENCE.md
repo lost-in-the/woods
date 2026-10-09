@@ -353,6 +353,13 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 ---
 
+Configuration source discovery (`configuration`, `config_file`, `route_file`, and Ruby under
+`lib/**/generators/`) excludes Git-ignored and untracked files, rooted at the
+application directory. Incremental dispatch and reload classification apply the
+same filter. `skipped_files.json` lists exclusions as `git_ignored` or `untracked`.
+When Git cannot run or the application has no `.git`, discovery includes all
+otherwise eligible files and the manifest records `metadata.git_filter: "unavailable"`.
+
 ### ConfigFileExtractor
 
 **What it captures:** YAML configuration and application data files. Each file under `config.config_file_paths` becomes one `config_file` unit identified by its root-relative path (`"config/settings.yml"`).

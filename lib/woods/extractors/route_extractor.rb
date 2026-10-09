@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../git_source_filter'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -99,6 +101,10 @@ module Woods
       def route_file?(relative)
         files = (@route_files ||= {})
         return files[relative] if files.key?(relative)
+
+        if (@git_filter ||= GitSourceFilter.new(root: application_root)).skip_reason(relative)
+          return files[relative] = false
+        end
 
         named = relative == ROUTES_FILE || (relative.start_with?("#{ROUTES_DIRECTORY}/") && relative.end_with?('.rb'))
         files[relative] = named && !relative.split('/').include?('..') &&

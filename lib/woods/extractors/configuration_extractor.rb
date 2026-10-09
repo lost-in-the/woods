@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../git_source_filter'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -133,6 +135,8 @@ module Woods
       def extract_configuration_file(file_path)
         config_type = detect_config_type(file_path)
         return nil unless config_type && readable?(file_path)
+
+        return nil if (@git_filter ||= GitSourceFilter.new(root: Rails.root)).skip_reason(file_path)
 
         # Credential-shaped text never reaches the published source or metadata.
         source = ConfigSourceGuard.redact(File.read(file_path))

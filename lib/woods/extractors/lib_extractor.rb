@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../git_source_filter'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -106,6 +108,9 @@ module Woods
           entries = files.filter_map do |relative|
             path = @lib_dir.join(relative).to_s
             next if excluded_path?(path)
+
+            next if "/#{relative}".include?(GENERATOR_SEGMENT) &&
+                    (@git_filter ||= GitSourceFilter.new(root: Rails.root)).skip_reason(path)
 
             build_file(path)
           end

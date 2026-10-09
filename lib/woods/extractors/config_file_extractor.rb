@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../git_source_filter'
+
 require 'psych'
 require 'set'
 require 'strscan'
@@ -144,6 +146,8 @@ module Woods
       def extract_config_file(file_path)
         relative = file_path.to_s.delete_prefix("#{@root}/")
         return nil unless self.class.config_file_path?(relative) && readable_target?(file_path.to_s)
+
+        return nil if (@git_filter ||= GitSourceFilter.new(root: @root)).skip_reason(relative)
 
         build_unit(file_path.to_s, relative)
       rescue StandardError => e

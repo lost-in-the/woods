@@ -2,6 +2,7 @@
 
 require 'set'
 require_relative 'graphql_document_paths'
+require_relative 'git_source_filter'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -112,6 +113,16 @@ module Woods
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
     class << self
+      # Paths introduced by configuration-source discovery, including generators.
+      # @param path [String] root-relative path
+      # @return [Boolean]
+      def configuration_source_path?(path)
+        Extractors::ConfigFileExtractor.config_file_path?(path) ||
+          Extractors::ConfigurationExtractor.configuration_path?(path) ||
+          path.match?(%r{\Aconfig/routes(?:\.rb|/.*\.rb)\z}) ||
+          (path.start_with?('lib/') && path.include?('/generators/') && path.end_with?('.rb'))
+      end
+
       # The extractor whose file rule owns +relative_path+, ignoring scans in
       # {NON_CLAIMING_RULES}. Static: it never consults extraction output.
       #
@@ -385,11 +396,25 @@ module Woods
       end
     end
 
+    # @param root [String, Pathname, nil] application root (Rails.root by default)
+    def initialize(root: nil)
+      root ||= Rails.root if defined?(Rails) && Rails.respond_to?(:root)
+      @git_filter = GitSourceFilter.new(root: root)
+    end
+
+    # @param path [String] root-relative path
+    # @return [Boolean] whether a configuration source is excluded by Git
+    def git_excluded?(path)
+      self.class.configuration_source_path?(path) && !@git_filter.skip_reason(path).nil?
+    end
+
     # File-based rules matching a path.
     #
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Rule>]
     def file_rules_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.file_rules.select { |rule| rule.matches?(relative_path) }
     end
 
@@ -398,6 +423,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Symbol>]
     def whole_app_keys_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.whole_app_rules
           .select { |rule| rule.matches?(relative_path) }
           .map(&:extractor_key).uniq
@@ -417,6 +444,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean]
     def relevant?(relative_path)
+      return false if git_excluded?(relative_path)
+
       return true if self.class.runtime_rules.any? { |rule| rule.matches?(relative_path) }
 
       file_rules_for(relative_path).any? || whole_app_keys_for(relative_path).any?

@@ -3,6 +3,7 @@
 require_relative 'graphql_document_paths'
 
 require_relative 'extractors/config_file_extractor'
+require_relative 'path_dispatcher'
 
 module Woods
   # What a resident, booted Woods process must do before a changed path can be
@@ -165,12 +166,18 @@ module Woods
     # Packwerk boundary files, read as bytes by PackageExtractor (#280).
     REEXTRACT_BASENAMES = %w[package.yml packwerk.yml].freeze
 
+    # @param root [String, Pathname, nil] application root (Rails.root by default)
+    def initialize(root: nil)
+      @dispatcher = PathDispatcher.new(root: root)
+    end
+
     # What has to happen before this path can be re-extracted truthfully.
     #
     # @param relative_path [String] Rails.root-relative path
     # @return [Symbol] one of {ACTIONS}
     def classify(relative_path)
       path = relative_path.to_s
+      return :ignore if @dispatcher.git_excluded?(path)
       return :restart if restart?(path)
       return :reload if reload?(path)
       return :reextract if reextract?(path)

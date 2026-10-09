@@ -2615,6 +2615,8 @@ module Woods
         schema_sha: schema_sha
       }
 
+      manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
+
       AtomicFile.write(
         payload_dir.join('manifest.json'),
         json_serialize(manifest),
