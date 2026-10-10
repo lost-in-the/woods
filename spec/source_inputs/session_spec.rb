@@ -100,6 +100,22 @@ RSpec.describe Woods::SourceInputs::Session do
       expect(finish(run).data.fetch('errors')).to include('reason' => 'scan_time_budget')
     end
 
+    def recheck_seconds(visited_files:, bytes:)
+      capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+      capture['metrics'] = capture.fetch('metrics').merge('visited_files' => visited_files, 'bytes' => bytes)
+      allow(Woods::SourceInputs::Handoff).to receive(:read).and_return(capture)
+      described_class.new(root: @root, output_dir: @output, baseline_path: @baseline, operation: 'full')
+                     .send(:recheck_seconds)
+    end
+
+    it 'scales the recheck budget between a ten-second floor and a two-minute ceiling' do
+      write('app/services/svc.rb', 'class Svc; end')
+      expect(recheck_seconds(visited_files: 1, bytes: 14)).to eq(10.0)
+      expect(recheck_seconds(visited_files: 1_000, bytes: 4 * 1024 * 1024)).to eq(51.0)
+      expect(recheck_seconds(visited_files: 11_192, bytes: 20_500_000)).to eq(120.0)
+      expect(recheck_seconds(visited_files: 50_000, bytes: 128 * 1024 * 1024)).to eq(120.0)
+    end
+
     it 'keeps the reader budget wall-clock' do
       1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
       manifest = finish(session)

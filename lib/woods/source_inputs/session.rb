@@ -19,6 +19,10 @@ module Woods
       # hashed byte of the capture it repeats, on top of the scanner default.
       RECHECK_SECONDS_PER_FILE = 0.05
       RECHECK_SECONDS_PER_BYTE = 1.0 / (4 * 1024 * 1024)
+      # The scaled budget never drops below the scanner default (small trees
+      # are unchanged) and never exceeds this ceiling: at the file and byte
+      # caps the scaling alone would wait ten minutes on a stuck scan.
+      RECHECK_SECONDS_MAX = 120.0
 
       def initialize(root:, output_dir:, baseline_path:, operation:)
         @root = SourcePathEncoding.expand(root)
@@ -359,7 +363,7 @@ module Woods
         metrics = @snapshot.fetch('metrics', {})
         files = [metrics['visited_files'].to_i, @snapshot.fetch('files').size].max
         scaled = (files * RECHECK_SECONDS_PER_FILE) + (metrics['bytes'].to_i * RECHECK_SECONDS_PER_BYTE)
-        [Scanner::DEFAULT_LIMITS[:max_seconds], scaled].max
+        scaled.clamp(Scanner::DEFAULT_LIMITS[:max_seconds], RECHECK_SECONDS_MAX)
       end
 
       def unavailable_snapshot(reason)

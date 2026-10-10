@@ -281,7 +281,7 @@ Flat fallback and older indexes lack verified atomic source evidence.
 Capture allows up to ten seconds with the file/byte caps. The publication
 recheck repeats the capture's work, so its time budget scales with that work:
 50 ms per visited file plus one second per 4 MiB hashed, never below ten
-seconds. Machine load cannot turn an unchanged tree into a refusal, while the
+seconds and never above 120 seconds. Machine load cannot turn an unchanged tree into a refusal, while the
 file and byte caps still bound the work. Reader budgets are unchanged.
 
 **Included in Woods 2.1:** the published manifest and private launcher handoff
