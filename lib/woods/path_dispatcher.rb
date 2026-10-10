@@ -3,6 +3,10 @@
 require 'set'
 require_relative 'graphql_document_paths'
 require_relative 'git_source_filter'
+# The Git filter asks the configuration extractors which paths they own, and a
+# resident process (the watch daemon, a rake task) loads this file without them.
+require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/configuration_extractor'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.

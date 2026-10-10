@@ -1,11 +1,27 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'rbconfig'
+require 'tmpdir'
 require 'woods/extractor'
 require 'woods/reload_policy'
 
 RSpec.describe Woods::ReloadPolicy do
   subject(:policy) { described_class.new }
+
+  # The watch daemon and the rake tasks load the policy without the extractor
+  # set; the Git filter must not reach for a constant only the orchestrator loads.
+  it 'classifies a configuration source in a process that loaded only the policy' do
+    Dir.mktmpdir('woods_policy_only') do |root|
+      script = "require 'woods/reload_policy'; " \
+               "print Woods::ReloadPolicy.new(root: #{root.inspect}).classify('config/initializers/widgets.rb')"
+      out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), '-e', script)
+
+      expect(status.success?).to be(true), err
+      expect(out).to eq('restart')
+    end
+  end
 
   describe '#classify' do
     context 'with boot-captured state' do
