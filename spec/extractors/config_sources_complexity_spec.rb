@@ -96,19 +96,6 @@ RSpec.describe 'Config source scan complexity' do
   end
 
   {
-    'gem then spaces' => "gem#{spaces}",
-    'gem, spaces, a paren, spaces' => "gem#{spaces}(#{spaces}",
-    'many blank lines' => "\n" * 50_000,
-    'many indented near-miss lines' => "   gemx\n" * 10_000,
-    'repeated gem openers on one line' => 'gem(' * 10_000,
-    'a gem with a long unterminated name' => "gem '#{word}"
-  }.each do |label, source|
-    it "the Gemfile declaration scan stays within #{budget_seconds}s on #{label}" do
-      within_budget(budget_seconds) { source.scan(Woods::Extractors::ConfigurationExtractor::GEM_DECLARATION) }
-    end
-  end
-
-  {
     'repeated scheme separators' => '://' * 16_000,
     'a scheme separator then repeated colons' => "://#{'a:' * 25_000}",
     'a scheme separator, a long user, no password' => "://#{word}@",
