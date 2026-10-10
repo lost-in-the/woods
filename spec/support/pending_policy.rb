@@ -55,7 +55,16 @@ module PendingPolicy
      'Watch daemon against a booted app the real Rails reloader names a once-owned subclass that an ' \
      'unrelated reload detached and reconciliation pruned (N-ra-2)',
      'once-owned subclass fixture is unsupported before Rails 7.0',
-     -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('7.0') }]
+     -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('7.0') }],
+    # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1; the 6.0 booted
+    # row cannot write a draw file.
+    *['tracks draw files, their routes and route lines through edits and removal',
+      'locates routes in a draw file while it exists'].map do |description|
+      ['spec/integration/incremental_equivalence_spec.rb',
+       "Incremental extraction equivalence configuration sources (#678) route files #{description}",
+       'draw files need Rails 6.1',
+       -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('6.1') }]
+    end
   ].freeze
 
   def self.allowed?(example)
