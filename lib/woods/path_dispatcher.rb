@@ -116,6 +116,15 @@ module Woods
     # Fixed glob flags: `**/` spans directories, `{a,b}` alternation works.
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
+    # Extractors whose directory constants the rules name. Loaded when the
+    # rules are built, not at require time, so a process that loads only
+    # the dispatcher (one extractor's specs, a resident daemon) still builds
+    # them.
+    RULE_EXTRACTORS = %w[
+      caching config_file configuration decorator event factory graphql i18n job lib manager package
+      policy pundit rake_task scheduled_job serializer service state_machine validator view_template
+    ].freeze
+
     class << self
       # Paths introduced by configuration-source discovery, including generators.
       # @param path [String] root-relative path
@@ -215,6 +224,7 @@ module Woods
         roots = event_roots
         @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
         @whole_app_rules_event_roots = roots
+        require_rule_extractors
         @whole_app_rules ||= build_whole_app_rules.freeze
       end
 
@@ -244,7 +254,12 @@ module Woods
       end
 
       def build_file_rules
+        require_rule_extractors
         plain_ruby_rules + configuration_rules + specialized_rules + caching_rules
+      end
+
+      def require_rule_extractors
+        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}_extractor" }
       end
 
       # Ruby and YAML configuration sources.
