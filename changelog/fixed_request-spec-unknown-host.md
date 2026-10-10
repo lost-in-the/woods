@@ -1,0 +1,1 @@
+- Apply the Capybara support default host only to feature and system specs, and treat a request spec whose host! argument is not a literal as on an unknown host.

@@ -23,6 +23,12 @@ module Woods
 
       LITERAL = /(?:"([^"\n]*)"|'([^'\n]*)'|:(\w+))/
       HOST = /\bhost![ \t(]+(?:"([^"\n]*)"|'([^'\n]*)')/
+      HOST_CALL = /\bhost![ \t(]/
+      CAPYBARA_SPEC = /
+        (?<![\w:@$])visit[ \t(]|\.visit[ \t(]
+        |(?:\btype:|:type[ \t]*=>)[ \t]*:(?:feature|system)\b
+        |\brequire(?:_relative)?[ \t(]+["'][^"'\n]*acceptance_helper["']
+      /x
       APP_HOST = %r{\b(?:app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
       CAPYBARA_HOST = %r{\bCapybara\.(app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
       OPTION = /(?:\bsubdomain:|:subdomain[ \t]*=>)[ \t]*#{LITERAL}/
@@ -59,7 +65,17 @@ module Woods
       # @param source [String] Ruby source of a test file
       # @return [Boolean]
       def specifies_host?(source)
-        (hosts(source) + named(source)).any?
+        (hosts(source) + named(source)).any? || source.match?(HOST_CALL)
+      end
+
+      # Does the Capybara default host apply? Only to feature and system
+      # specs: a file that visits, is tagged `type: :feature` or `:system`,
+      # or requires the acceptance helper. A request spec never gets it.
+      #
+      # @param source [String] Ruby source of a test file
+      # @return [Boolean]
+      def capybara_spec?(source)
+        source.match?(CAPYBARA_SPEC)
       end
 
       # Resolve the Capybara default from the catalog's support source.

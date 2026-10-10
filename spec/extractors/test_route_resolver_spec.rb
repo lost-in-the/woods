@@ -396,6 +396,44 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       end
     end
 
+    describe 'request specs' do
+      let(:routes) do
+        [route_double(verb: 'GET', path: '/account', controller: 'accounts', action: 'show',
+                      constraints: { subdomain: 'app' }),
+         route_double(verb: 'GET', path: '/account', controller: 'accounts', action: 'show',
+                      constraints: { subdomain: 'my' }),
+         route_double(verb: 'GET', path: '/health', controller: 'health', action: 'show')]
+      end
+      let(:both) { ['GET /account [subdomain=app]', 'GET /account [subdomain=my]'] }
+
+      before { support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"') }
+
+      it 'leaves the host unknown for a non-literal host!, ignoring the Capybara default' do
+        result = analysis(<<~RUBY)
+          def sign_in_to_api
+            host! Rails.configuration.app_domain
+          end
+          before { sign_in_to_api }
+          it { get '/account.json' }
+          it { get '/health' }
+        RUBY
+
+        expect(result.exercised).to eq(['GET /health'])
+        expect(result.ambiguous).to eq([{ request: 'GET /account.json', candidates: both }])
+      end
+
+      it 'does not give a request spec without host! the Capybara default' do
+        expect(analysis(%(get "/account"\n)).ambiguous).to eq([{ request: 'GET /account', candidates: both }])
+      end
+
+      it 'gives the Capybara default to a feature or system tag, or the acceptance helper' do
+        ["RSpec.describe 'Account', type: :feature do\n", "describe 'Account', :type => :system do\n",
+         "require 'acceptance_helper'\n"].each do |line|
+          expect(analysis(%(#{line}get "/account"\n)).exercised).to eq(['GET /account [subdomain=my]']), line
+        end
+      end
+    end
+
     it 'prefers a matching subdomain constraint over an earlier unconstrained route' do
       fallback = route_double(verb: 'GET', path: '/settings', controller: 'pages', action: 'show')
       stub_route_set([fallback, *routes], root: root, logger: logger)

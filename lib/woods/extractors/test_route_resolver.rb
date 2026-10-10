@@ -95,12 +95,16 @@ module Woods
       def analyze(source)
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
+        capybara = TestRequestHost.capybara_spec?(source)
         if TestRequestHost.specifies_host?(source)
           hosts = TestRequestHost.subdomains(source)
-          reachable = TestRequestHost.literal_subdomains(source) | Array(default_hosts)
-        else
+          reachable = TestRequestHost.literal_subdomains(source) | (capybara ? Array(default_hosts) : [])
+        elsif capybara
           hosts = default_hosts
           reachable = support_hosts
+        else
+          hosts = nil
+          reachable = []
         end
         requests = []
         asserted = []
