@@ -199,6 +199,37 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(extractor.dependency_graph.to_h[:reverse_via]).not_to have_key('RefIntegrationTarget')
   end
 
+  describe 'a refused incremental run' do
+    def payload_names
+      Dir.children(File.join(@output, 'payloads')).sort
+    end
+
+    it 'removes the seeded payload when the baseline cache is an older format' do
+      previous = full
+      active = payload_names
+      cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
+      File.write(cache_path, JSON.generate(JSON.parse(File.read(cache_path)).merge('version' => 3)))
+      expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired)
+      expect(payload_names).to eq(active)
+      expect(Dir.exist?(previous.payload_dir)).to be(true)
+    end
+
+    it 'removes the seeded payload when the caller policy changed since the baseline' do
+      previous = full
+      active = payload_names
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.source_reference_callers = { poro: false }
+      extractor = incremental
+      expect { extractor.send(:enrich_source_references_incremental, Set.new) }
+        .to raise_error(Woods::SourceReferences::RebuildRequired, /source_reference_callers changed/)
+      expect(payload_names).to eq(active)
+      expect(Dir.exist?(previous.payload_dir)).to be(true)
+    ensure
+      Woods.configuration = original
+    end
+  end
+
   it 'requires a full rebuild before mutating old or corrupt source-reference baselines' do
     previous = full
     cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)

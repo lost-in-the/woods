@@ -39,12 +39,30 @@ module Woods
 
       # Called before any incremental consumer mutates the seeded generation.
       def prepare_source_reference_baseline
-        @source_reference_baseline = Cache.read(payload_dir.join(Cache::FILE_NAME))
-        return if @source_reference_baseline
+        discarding_seed_on_refusal do
+          @source_reference_baseline = Cache.read(payload_dir.join(Cache::FILE_NAME))
+          empty_source_reference_baseline! unless @source_reference_baseline
+        rescue Cache::Invalid
+          empty_source_reference_baseline!
+        end
+      end
 
-        empty_source_reference_baseline!
-      rescue Cache::Invalid
-        empty_source_reference_baseline!
+      # A refused run is never published, so nothing references the payload
+      # seeded for it. Leaving it would only wait for the next run's create
+      # to empty it; the active generation's payload is never touched.
+      def discarding_seed_on_refusal
+        yield
+      rescue RebuildRequired
+        discard_unpublished_seed
+        raise
+      end
+
+      def discard_unpublished_seed
+        seed = payload_dir
+        active = Generation.new(output_dir: @output_dir).current.payload
+        return if active && File.expand_path(active, @output_dir) == File.expand_path(seed)
+
+        FileUtils.rm_rf(seed.to_s)
       end
 
       def empty_source_reference_baseline!
@@ -77,7 +95,9 @@ module Woods
 
       def enrich_source_references_incremental(affected_types)
         records = source_reference_payload_records
-        result = reference_pass(records.values.map { |entry| entry.fetch(:data) }, full: false)
+        result = discarding_seed_on_refusal do
+          reference_pass(records.values.map { |entry| entry.fetch(:data) }, full: false)
+        end
         touched = Set.new
         result.dependencies.each do |identity, edges|
           record = records.fetch(identity)
