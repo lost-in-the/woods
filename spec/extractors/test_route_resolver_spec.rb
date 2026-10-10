@@ -422,6 +422,24 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
         expect(result.ambiguous).to eq([{ request: 'GET /account.json', candidates: both }])
       end
 
+      it 'counts literal host strings that host! reads from data as named hosts' do
+        result = analysis(<<~RUBY)
+          [{ host: 'my.example.test' }, { host: 'app.example.test' }].each do |site|
+            it { host! site[:host]; get '/account' }
+          end
+        RUBY
+
+        expect(result.exercised).to eq(both)
+        expect(result.ambiguous).to eq([])
+      end
+
+      it 'does not read file names or addresses as hosts' do
+        source = %(host! Rails.configuration.app_domain\nfixture_file_upload("avatar.png")\n) +
+                 %(email = "buyer@my.example.test"\nget "/account"\n)
+
+        expect(analysis(source).ambiguous).to eq([{ request: 'GET /account', candidates: both }])
+      end
+
       it 'does not give a request spec without host! the Capybara default' do
         expect(analysis(%(get "/account"\n)).ambiguous).to eq([{ request: 'GET /account', candidates: both }])
       end

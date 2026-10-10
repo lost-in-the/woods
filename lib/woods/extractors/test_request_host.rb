@@ -24,6 +24,10 @@ module Woods
       LITERAL = /(?:"([^"\n]*)"|'([^'\n]*)'|:(\w+))/
       HOST = /\bhost![ \t(]+(?:"([^"\n]*)"|'([^'\n]*)')/
       HOST_CALL = /\bhost![ \t(]/
+      # A whole string literal shaped like a host name, read in a file that
+      # calls host!, since host! may read it from data.
+      HOST_STRING = /(?:"([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)"|'([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)')/i
+      FILE_EXTENSION = /\.(?:rb|erb|json|csv|txt|png|jpe?g|gif|svg|webp|pdf|ya?ml|xml|html?|zip|gz|js|css|md|log)\z/i
       CAPYBARA_SPEC = /
         (?<![\w:@$])visit[ \t(]|\.visit[ \t(]
         |(?:\btype:|:type[ \t]*=>)[ \t]*:(?:feature|system)\b
@@ -120,7 +124,17 @@ module Woods
       end
 
       def hosts(source)
-        (source.scan(HOST) + source.scan(APP_HOST)).map { |captures| captures.compact.first }
+        found = (source.scan(HOST) + source.scan(APP_HOST)).map { |captures| captures.compact.first }
+        found + host_strings(source)
+      end
+
+      # Every literal host string counts as a named host once the file calls
+      # host!, whether host! takes it directly or reads it from data.
+      def host_strings(source)
+        return [] unless source.match?(HOST_CALL)
+
+        source.scan(HOST_STRING).map { |captures| captures.compact.first }
+              .select { |host| host.split('.').last.match?(/\A[a-z]+\z/i) && !host.match?(FILE_EXTENSION) }
       end
 
       # An interpolated host or subdomain anywhere makes the file's subdomain

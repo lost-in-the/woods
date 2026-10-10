@@ -1,0 +1,1 @@
+- Count literal host strings that a test file passes to host! through data, such as an array of hashes, as named hosts, so the request resolves under each of them.
