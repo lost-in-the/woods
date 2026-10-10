@@ -43,8 +43,15 @@ module Woods
       def subdomains(source)
         return nil unless hosts_literal?(source)
 
-        found = (hosts(source).map { |host| subdomain_of(host) } + named(source)).uniq
+        found = literal_subdomains(source)
         found.empty? ? nil : found
+      end
+
+      # @param source [String] Ruby source of a test file
+      # @return [Array<String>] the subdomains the file names with a literal,
+      #   even beside an interpolated one
+      def literal_subdomains(source)
+        (hosts(source).map { |host| subdomain_of(host) } + named(source)).reject { |value| value.include?('#{') }.uniq
       end
 
       # Does the file supply its own host hints, even when ambiguous?

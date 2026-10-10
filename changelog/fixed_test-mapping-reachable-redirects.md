@@ -1,0 +1,1 @@
+- List a subdomain-constrained redirect as a test route candidate only when a host the test file names, or the Capybara support default, satisfies its constraint.

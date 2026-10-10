@@ -325,6 +325,23 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(result.ambiguous).to eq([])
     end
 
+    it 'lists a subdomain-constrained redirect only when a named or default host reaches it' do
+      stub_const('ActionDispatch::Routing::Redirect', Struct.new(:block, :status))
+      redirect = route_double(verb: 'GET', path: '/settings', controller: nil, action: nil,
+                              constraints: { subdomain: 'old' })
+      allow(redirect).to receive(:app).and_return(ActionDispatch::Routing::Redirect.new('/profile', 301))
+      stub_route_set([*routes, redirect], root: root, logger: logger)
+      dynamic = "host! \"\#{shop.subdomain}.example.test\"\n"
+
+      expect(analysis.ambiguous).to eq(
+        [{ request: 'GET /settings', candidates: ['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'] }]
+      )
+      expect(analysis(%(#{dynamic}host! "old.example.test"\nvisit "/settings"\n)).ambiguous.first[:candidates])
+        .to include('GET /settings [subdomain=old] (redirect)')
+      expect(analysis(%(host! "old.example.test"\nvisit "/settings"\n)).exercised)
+        .to eq(['GET /settings [subdomain=old] (redirect)'])
+    end
+
     it 'prefers a matching subdomain constraint over an earlier unconstrained route' do
       fallback = route_double(verb: 'GET', path: '/settings', controller: 'pages', action: 'show')
       stub_route_set([fallback, *routes], root: root, logger: logger)

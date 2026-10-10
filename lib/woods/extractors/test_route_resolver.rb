@@ -61,7 +61,7 @@ module Woods
         (?:(?:main_app\.)?([a-z_]\w*_(?:path|url))\b|"(/[^"\n]*)"|'(/[^'\n]*)')
       }x
 
-      Route = Struct.new(:identifier, :verb, :path, :name, :prefix, :subdomain, :callable, :static,
+      Route = Struct.new(:identifier, :verb, :path, :name, :prefix, :subdomain, :callable, :static, :redirect,
                          keyword_init: true)
 
       # What one source does with the route table.
@@ -96,13 +96,16 @@ module Woods
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
         hosts = TestRequestHost.specifies_host?(source) ? TestRequestHost.subdomains(source) : default_hosts
+        reachable = TestRequestHost.literal_subdomains(source) | Array(default_hosts)
         requests = []
         asserted = []
         source.each_line do |line|
           next if line.match?(COMMENT_LINE)
 
-          line.scan(NAVIGATION) { |captures| requests.concat([resolve(hosts, *captures)].flatten(1)) }
-          line.scan(ASSERTION) { |captures| asserted.concat([resolve(hosts, 'get', nil, *captures)].flatten(1)) }
+          line.scan(NAVIGATION) { |captures| requests.concat([resolve(hosts, reachable, *captures)].flatten(1)) }
+          line.scan(ASSERTION) do |captures|
+            asserted.concat([resolve(hosts, reachable, 'get', nil, *captures)].flatten(1))
+          end
         end
         build_analysis(requests.compact, asserted.compact)
       end
@@ -125,12 +128,12 @@ module Woods
 
       # @return [String, Array<String>, Hash, nil] route identifiers, an
       #   ambiguity record, or nil
-      def resolve(hosts, verb, receiver_visit, helper, interpolated, literal)
+      def resolve(hosts, reachable, verb, receiver_visit, helper, interpolated, literal)
         verb = (verb || receiver_visit) == 'visit' ? 'GET' : verb.upcase
         return helper_route(verb, helper) if helper
 
         path = normalize(interpolated || literal, interpolated: !interpolated.nil?)
-        path && literal_route(verb, path, hosts)
+        path && literal_route(verb, path, hosts, reachable)
       end
 
       # @return [String, nil] the route with the helper's path and this verb
@@ -155,12 +158,13 @@ module Woods
         path.empty? ? '/' : path
       end
 
-      def literal_route(verb, path, hosts)
-        key = [verb, path, hosts]
+      def literal_route(verb, path, hosts, reachable)
+        key = [verb, path, hosts, reachable]
         return @literals[key] if @literals.key?(key)
 
         matches = @routes.select do |route|
-          route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
+          route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path) &&
+            reachable?(route, reachable)
         end
         request = "#{verb} #{path}"
         @literals[key] = hosts && hosts.size > 1 ? decide_each(matches, hosts, request) : decide(matches, hosts&.first, request)
@@ -218,6 +222,12 @@ module Woods
         hosts.product(matches.any?(&:callable) ? [true, false] : [true])
       end
 
+      # A redirect constrained to a subdomain that no named or default host
+      # satisfies is never a candidate.
+      def reachable?(route, reachable)
+        !route.redirect || route.subdomain.nil? || reachable.any? { |host| satisfied?(route, host, true) }
+      end
+
       def satisfied?(route, host, callables_pass)
         return false if route.callable && !callables_pass
 
@@ -269,7 +279,7 @@ module Woods
         Route.new(identifier: identifier, verb: metadata[:http_method].to_s, path: path,
                   name: metadata[:route_name]&.to_s, prefix: path[/\A[^:*(]*/].chomp('/'),
                   subdomain: constraint, callable: identifier.include?('constraint=proc'),
-                  static: !path.match?(/[:*]/))
+                  static: !path.match?(/[:*]/), redirect: metadata[:kind] == 'redirect')
       end
     end
   end
