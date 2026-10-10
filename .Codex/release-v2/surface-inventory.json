@@ -17,6 +17,10 @@
     "component_paths=",
     "concurrent_extraction",
     "concurrent_extraction=",
+    "config_file_paths",
+    "config_file_paths=",
+    "config_file_values",
+    "config_file_values=",
     "console_blocked_tables",
     "console_blocked_tables=",
     "console_credential_defense_enabled",
@@ -111,6 +115,8 @@
     "session_tracer_allow_production=",
     "session_tracer_enabled",
     "session_tracer_enabled=",
+    "settings_readers",
+    "settings_readers=",
     "similarity_threshold",
     "similarity_threshold=",
     "unblocked_api_token",
@@ -161,6 +167,7 @@
     "caching",
     "components",
     "concerns",
+    "config_files",
     "configurations",
     "controllers",
     "database_views",
@@ -1026,12 +1033,12 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 123,
+    "configuration_attributes": 129,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
     "executables": 9,
-    "extractor_registrations": 36,
+    "extractor_registrations": 37,
     "index_mcp_resource_templates": 2,
     "index_mcp_resources": 2,
     "index_mcp_tools": 29,
@@ -1039,14 +1046,14 @@
     "public_woods_methods": 9,
     "rake_tasks": 37,
     "tasks_methods": 4,
-    "unit_types": 40
+    "unit_types": 42
   },
   "documentation_claims": {
     "README.md": [],
     "context7.json": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ],
     "docs/AGENT_GUIDE.md": [],
@@ -1057,7 +1064,7 @@
     "docs/CONFIGURATION_REFERENCE.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ],
     "docs/CONSOLE_MCP_SETUP.md": [],
@@ -1072,41 +1079,41 @@
     "docs/EXTRACTOR_REFERENCE.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "unit_types",
-        "count": 40
+        "count": 42
       },
       {
         "surface": "unit_types",
-        "count": 40
+        "count": 42
       },
       {
         "surface": "unit_types",
-        "count": 40
+        "count": 42
       }
     ],
     "docs/FAQ.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "unit_types",
-        "count": 40
+        "count": 42
       }
     ],
     "docs/GETTING_STARTED.md": [],
@@ -1115,11 +1122,11 @@
     "docs/INTERNALS.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       },
       {
         "surface": "unit_types",
-        "count": 40
+        "count": 42
       },
       {
         "surface": "console_mcp_read_tools",
@@ -1153,7 +1160,7 @@
     "docs/README.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ],
     "docs/RETRIEVAL_GUIDE.md": [],
@@ -1163,7 +1170,7 @@
     "docs/TROUBLESHOOTING.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ],
     "docs/UNBLOCKED_INTEGRATION.md": [],
@@ -1171,13 +1178,13 @@
     "docs/WATCH_DAEMON.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ],
     "docs/WHY_WOODS.md": [
       {
         "surface": "extractor_registrations",
-        "count": 36
+        "count": 37
       }
     ]
   }

@@ -104,4 +104,4 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Published filesystem layout for external readers | [INDEX_LAYOUT.md](INDEX_LAYOUT.md) |
 | Evaluation harnesses | [EVALUATION.md](EVALUATION.md) |
 
-The current public surface is generated from 36 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.
+The current public surface is generated from 37 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.

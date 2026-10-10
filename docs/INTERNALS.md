@@ -10,7 +10,7 @@ Woods runs in three phases across two environments:
 
 ```
 Inside Rails app (rake task):
-  1. Extract, 36 extractors introspect the live Rails environment
+  1. Extract, 37 extractors introspect the live Rails environment
   2. Resolve, dependency graph is built and enriched with git data
   3. Write, one JSON file per code unit to tmp/woods/
 
@@ -30,7 +30,7 @@ The key insight: **extraction requires a booted Rails application** (`ActiveReco
 │                    Rails Application                     │
 │  ┌──────────┐   ┌──────────┐   ┌──────────┐             │
 │  │ Extract  │──▶│ Resolve  │──▶│  Enrich  │             │
-│  │ 40 types │   │  graph   │   │   git    │             │
+│  │ 42 types │   │  graph   │   │   git    │             │
 │  └──────────┘   └──────────┘   └──────────┘             │
 │                                     │                    │
 │                                     ▼                    │
