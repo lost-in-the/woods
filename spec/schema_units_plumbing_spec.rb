@@ -97,7 +97,7 @@ RSpec.describe 'Schema unit registration' do
     end
 
     it 'does not mistake other db files for schema dumps' do
-      expect(%w[db/helpers/cleanup.rb db/schema.rb.bak db/nested/billing_schema.rb].map { |path| policy.classify(path) })
+      expect(%w[db/tools/prune.rb db/schema.rb.bak db/nested/billing_schema.rb].map { |path| policy.classify(path) })
         .to eq(%i[ignore ignore ignore])
     end
   end
