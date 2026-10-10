@@ -46,9 +46,10 @@ module Woods
       end
 
       # Resolve the Capybara default from the catalog's support source.
-      # app_host takes precedence over default_host. A helper's literal
-      # default can resolve an app_host interpolated by that helper; competing
-      # defaults remain unknown. No support code is executed.
+      # app_host takes precedence over default_host. A literal host wins; an
+      # interpolated host is ignored unless a configured helper's literal
+      # default resolves it. Competing defaults remain unknown. No support
+      # code is executed.
       #
       # @param source [String] Ruby source of the test support files
       # @return [String, nil]
@@ -59,8 +60,6 @@ module Woods
         found = hosts.map { |host| subdomain_of(host) }
         if found.empty? || found.any? { |value| value.include?('#{') }
           defaults = helper_pattern ? source.scan(helper_pattern).map { |captures| captures.compact.first } : []
-          return nil if defaults.empty?
-
           found = found.reject { |value| value.include?('#{') } + defaults
         end
         found = found.uniq

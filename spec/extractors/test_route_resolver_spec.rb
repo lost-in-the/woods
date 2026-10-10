@@ -255,6 +255,20 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
     end
 
+    it 'reads a literal support host beside a host an unconfigured helper interpolates' do
+      support_file('spec/support/capybara.rb', <<~'RUBY')
+        def use_default_host
+          Capybara.app_host = "http://my.example.test:#{port}"
+        end
+
+        def set_testing_subdomain(sub)
+          Capybara.app_host = "http://#{sub}.example.test:#{port}"
+        end
+      RUBY
+
+      expect(analysis.exercised).to eq(['GET /settings [subdomain=my]'])
+    end
+
     it 'keeps an explicit file host ahead of the support default' do
       support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"')
 
