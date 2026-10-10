@@ -3498,15 +3498,17 @@ module Woods
 
       catalog = Extractors::TableCatalog.from_runtime
       classes = extractor.discoverable_classes.to_h { |klass| [klass.name, klass] }
-      @dependency_graph.units_of_type(:model).sort.each_with_object(Set.new) do |identifier, touched|
+      touched = @dependency_graph.units_of_type(:model).sort.each_with_object(Set.new) do |identifier, moved|
         klass = classes[identifier]
         next unless klass
 
         current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
         next if current == Array(catalog.for_model(klass)&.identifier)
 
-        touched.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
+        moved.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
       end
+      Rails.logger.info "[Woods] Model table edges reconciled: #{touched.size} model(s) re-extracted"
+      touched
     end
 
     # Replace every unit an extractor owns with a fresh extraction.
