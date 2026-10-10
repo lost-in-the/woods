@@ -7,12 +7,13 @@ module Woods
     #
     # Recognized: `host! "shop.example.test"`, Capybara app/default hosts,
     # a `subdomain:` option, and a call to one of the configured helper names
-    # (`config.test_subdomain_helpers`) with a literal argument. The subdomain
-    # is known only when the file names exactly one; several, none, or an
-    # interpolated value all mean unknown.
+    # (`config.test_subdomain_helpers`) with a literal argument. A file may
+    # name several subdomains; none, or an interpolated value anywhere, means
+    # unknown.
     #
     # @example
     #   TestRequestHost.subdomain(%(before { host! "shop.example.test" }))  # => "shop"
+    #   TestRequestHost.subdomains(%(host! "shop.example.test"\nhost! "app.example.test"))  # => ["shop", "app"]
     #   TestRequestHost.subdomain(%(visit "/settings"))                     # => nil
     #
     module TestRequestHost
@@ -32,9 +33,18 @@ module Woods
       # @return [String, nil] the one subdomain the file names ("" for a host
       #   without one), or nil when it is unknown
       def subdomain(source)
-        found = hosts(source).map { |host| subdomain_of(host) } + named(source)
-        found = found.reject { |value| value.include?('#{') }.uniq
-        found.one? && hosts_literal?(source) ? found.first : nil
+        found = subdomains(source)
+        found&.one? ? found.first : nil
+      end
+
+      # @param source [String] Ruby source of a test file
+      # @return [Array<String>, nil] every subdomain the file names, or nil
+      #   when it names none or interpolates one
+      def subdomains(source)
+        return nil unless hosts_literal?(source)
+
+        found = (hosts(source).map { |host| subdomain_of(host) } + named(source)).uniq
+        found.empty? ? nil : found
       end
 
       # Does the file supply its own host hints, even when ambiguous?

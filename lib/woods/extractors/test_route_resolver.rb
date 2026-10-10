@@ -24,8 +24,9 @@ module Woods
     # route consumer and re-runs when routes change.
     #
     # A literal can fit several routes when routes are constrained by
-    # subdomain or by a callable. See {#decide}: the file's subdomain is used
-    # when {TestRequestHost} can read it (falling back to Capybara support
+    # subdomain or by a callable. See {#decide}: the file's subdomains are used
+    # when {TestRequestHost} can read them, each one deciding separately
+    # (falling back to Capybara support
     # defaults only when the file supplies no host), a lone static route beats
     # parameter and glob routes, and a request that stays undecided is reported as
     # ambiguous with no edge. A path inside an assertion (`redirect_to`,
@@ -94,26 +95,26 @@ module Woods
       def analyze(source)
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
-        subdomain = TestRequestHost.subdomain(source)
-        subdomain = default_subdomain unless TestRequestHost.specifies_host?(source)
+        hosts = TestRequestHost.specifies_host?(source) ? TestRequestHost.subdomains(source) : default_hosts
         requests = []
         asserted = []
         source.each_line do |line|
           next if line.match?(COMMENT_LINE)
 
-          line.scan(NAVIGATION) { |captures| requests << resolve(subdomain, *captures) }
-          line.scan(ASSERTION) { |captures| asserted << resolve(subdomain, 'get', nil, *captures) }
+          line.scan(NAVIGATION) { |captures| requests.concat([resolve(hosts, *captures)].flatten(1)) }
+          line.scan(ASSERTION) { |captures| asserted.concat([resolve(hosts, 'get', nil, *captures)].flatten(1)) }
         end
         build_analysis(requests.compact, asserted.compact)
       end
 
       private
 
-      def default_subdomain
-        return @default_subdomain if defined?(@default_subdomain)
+      def default_hosts
+        return @default_hosts if defined?(@default_hosts)
 
         catalog = @support_catalog || TestSupportCatalog.new
-        @default_subdomain = TestRequestHost.capybara_subdomain(catalog.entries.map(&:source).join("\n"))
+        default = TestRequestHost.capybara_subdomain(catalog.entries.map(&:source).join("\n"))
+        @default_hosts = default && [default]
       end
 
       def build_analysis(requests, asserted)
@@ -122,13 +123,14 @@ module Woods
                      ambiguous: ambiguous.uniq.sort_by { |entry| entry[:request] })
       end
 
-      # @return [String, Hash, nil] a route identifier, an ambiguity record, or nil
-      def resolve(subdomain, verb, receiver_visit, helper, interpolated, literal)
+      # @return [String, Array<String>, Hash, nil] route identifiers, an
+      #   ambiguity record, or nil
+      def resolve(hosts, verb, receiver_visit, helper, interpolated, literal)
         verb = (verb || receiver_visit) == 'visit' ? 'GET' : verb.upcase
         return helper_route(verb, helper) if helper
 
         path = normalize(interpolated || literal, interpolated: !interpolated.nil?)
-        path && literal_route(verb, path, subdomain)
+        path && literal_route(verb, path, hosts)
       end
 
       # @return [String, nil] the route with the helper's path and this verb
@@ -153,14 +155,32 @@ module Woods
         path.empty? ? '/' : path
       end
 
-      def literal_route(verb, path, subdomain)
-        key = [verb, path, subdomain]
+      def literal_route(verb, path, hosts)
+        key = [verb, path, hosts]
         return @literals[key] if @literals.key?(key)
 
         matches = @routes.select do |route|
           route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
         end
-        @literals[key] = decide(matches, subdomain, "#{verb} #{path}")
+        request = "#{verb} #{path}"
+        @literals[key] = hosts && hosts.size > 1 ? decide_each(matches, hosts, request) : decide(matches, hosts&.first, request)
+      end
+
+      # A file naming several hosts makes its requests on each of them, so a
+      # request exercises every route some named host decides. It is
+      # ambiguous only when no named host decides it.
+      #
+      # @return [Array<String>, Hash, nil]
+      def decide_each(matches, hosts, request)
+        return nil if matches.empty?
+
+        outcomes = hosts.map { |host| decide(matches, host, request) }
+        decided = outcomes.grep(String).uniq
+        return decided unless decided.empty?
+
+        candidates = outcomes.grep(Hash).flat_map { |outcome| outcome[:candidates] }
+        candidates = matches.map(&:identifier) if candidates.empty?
+        { request: request, candidates: candidates.uniq.sort }
       end
 
       # Rails serves the first route, in table order, whose constraints the

@@ -171,12 +171,17 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(analysis(%(host! "example.test"\nvisit "/settings"\n)).exercised).to eq(['GET /:slug'])
     end
 
-    it 'treats the subdomain as unknown when the file names several or interpolates one' do
+    it 'exercises the route each named host decides when the file names several' do
       several = analysis(%(host! "shop.example.test"\nhost! "app.example.test"\nvisit "/pricing"\n))
-      dynamic = analysis("host! \"\#{shop.subdomain}.example.test\"\nvisit \"/pricing\"\n")
 
-      expect(several.exercised + dynamic.exercised).to eq([])
-      expect(several.ambiguous.size).to eq(1)
+      expect(several.exercised).to eq(['GET /:id [subdomain=shop]', 'GET /:slug'])
+      expect(several.ambiguous).to eq([])
+    end
+
+    it 'treats the subdomain as unknown when the file interpolates one' do
+      dynamic = analysis("host! \"\#{shop.subdomain}.example.test\"\nhost! \"app.example.test\"\nvisit \"/pricing\"\n")
+
+      expect(dynamic.exercised).to eq([])
       expect(dynamic.ambiguous.size).to eq(1)
     end
 
@@ -276,14 +281,25 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
         .to eq(['GET /settings [subdomain=app]'])
     end
 
-    it 'keeps a file with multiple hosts ambiguous even with a support default' do
-      support_file('spec/rails_helper.rb', 'Capybara.app_host = "http://my.example.test"')
-      result = analysis(%(host! "app.example.test"\nhost! "my.example.test"\nvisit "/settings"\n))
+    it 'exercises one route per named host when each host picks a different route' do
+      result = analysis(<<~RUBY)
+        context("app") { before { host! "app.example.test" } }
+        context("my") { before { host! "my.example.test" } }
+        visit "/settings"
+      RUBY
 
-      expect(result.exercised).to eq([])
-      expect(result.ambiguous).to eq(
-        [{ request: 'GET /settings', candidates: ['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'] }]
-      )
+      expect(result.exercised).to eq(['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'])
+      expect(result.ambiguous).to eq([])
+    end
+
+    it 'reports a request no named host decides as ambiguous, without an edge' do
+      status = route_double(verb: 'GET', path: '/status', controller: 'status', action: 'show',
+                            constraints: { subdomain: 'api' })
+      stub_route_set([*routes, status], root: root, logger: logger)
+      result = analysis(%(host! "app.example.test"\nhost! "my.example.test"\nvisit "/settings"\nvisit "/status"\n))
+
+      expect(result.exercised).to eq(['GET /settings [subdomain=app]', 'GET /settings [subdomain=my]'])
+      expect(result.ambiguous).to eq([{ request: 'GET /status', candidates: ['GET /status [subdomain=api]'] }])
     end
 
     it 'preserves ambiguity when no default host is configured' do
