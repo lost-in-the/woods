@@ -556,4 +556,63 @@ RSpec.describe Woods::Extractors::PoroExtractor do
       expect(parsed['identifier']).to eq('Money')
     end
   end
+
+  # ── Nested classes in a file another unit owns ──────────────────────
+
+  describe '#extract_nested_units' do
+    after do
+      Object.send(:remove_const, :NestedFixture) if Object.const_defined?(:NestedFixture, false)
+    end
+
+    let(:path) do
+      path = create_file('app/graphql/nested_fixture/cart_type.rb', <<~RUBY)
+        module NestedFixture
+          class CartType < Object
+            class DiscountWithCart
+              def total; end
+            end
+            Line = Struct.new(:sku, :qty)
+            class Row < Struct.new(:sku)
+            end
+            class Missing < StandardError; end
+            class Bare
+            end
+            module Helpers
+              def self.fmt; end
+            end
+          end
+        end
+      RUBY
+      load path
+      path
+    end
+
+    def nested(owners:)
+      described_class.new.extract_nested_units(path, owners: owners)
+    end
+
+    it 'emits classes with methods, value classes and exception classes nested in an owned class' do
+      units = nested(owners: ['NestedFixture::CartType'])
+
+      expect(units.map(&:identifier)).to eq(
+        %w[NestedFixture::CartType::DiscountWithCart NestedFixture::CartType::Line
+           NestedFixture::CartType::Row NestedFixture::CartType::Missing]
+      )
+      expect(units.map(&:type).uniq).to eq([:poro])
+      expect(units.map(&:file_path).uniq).to eq([path])
+      expect(units.map { |unit| unit.metadata[:discovered_via] }.uniq).to eq(['owner_fallback'])
+      expect(units.find { |unit| unit.identifier.end_with?('Missing') }.metadata[:parent_class]).to eq('StandardError')
+    end
+
+    it 'never emits the owner itself, a bare class, or a nested module' do
+      identifiers = nested(owners: ['NestedFixture::CartType']).map(&:identifier)
+
+      expect(identifiers).not_to include('NestedFixture::CartType', 'NestedFixture::CartType::Bare',
+                                         'NestedFixture::CartType::Helpers')
+    end
+
+    it 'treats the enclosing class as the unit when no other unit owns it' do
+      expect(nested(owners: []).map(&:identifier)).to eq(['NestedFixture::CartType'])
+    end
+  end
 end

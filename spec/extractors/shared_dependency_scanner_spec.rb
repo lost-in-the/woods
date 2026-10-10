@@ -746,6 +746,14 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result.map { |d| d[:target] }).to include('Library::Book')
     end
 
+    it 'strips a leading :: from constantize and const_get arguments' do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Library::Book])
+
+      source = %("::Library::Book".constantize; Object.const_get('::User'))
+      result = scanner.scan_model_dependencies(source)
+      expect(result.map { |d| d[:target] }).to contain_exactly('Library::Book', 'User')
+    end
+
     it 'ignores .constantize on unknown string literals' do
       allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User])
 

@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -35,6 +36,9 @@ module Woods
         app/models/concerns
         app/controllers/concerns
       ].freeze
+
+      # Initializers are loaded once at boot and sit outside every autoload path.
+      INITIALIZERS_GLOB = 'config/initializers/**/*.rb'
 
       def initialize
         # Discover all concerns/ directories under app/, including deeply nested ones
@@ -79,7 +83,7 @@ module Woods
         unit.namespace = extract_namespace(module_name)
         unit.source_code = annotate_source(source, module_name)
         unit.metadata = extract_metadata(source, file_path)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, module_name)
 
         unit
       rescue StandardError => e
@@ -125,7 +129,8 @@ module Woods
       # @return [Hash<String, Array<Module>>] Reflected module source locations
       def discover_model_mixin_paths
         models = ActiveRecord::Base.descendants.reject { |model| model.respond_to?(:abstract_class?) && model.abstract_class? }
-        models.flat_map(&:included_modules).uniq.each_with_object({}) do |mod, paths|
+        candidates = models.flat_map(&:included_modules) + class_methods_owners(models) + initializer_modules
+        candidates.uniq.each_with_object({}) do |mod, paths|
           next unless mod.name
 
           definition = begin
@@ -141,6 +146,68 @@ module Woods
 
           (paths[path] ||= []) << mod
         end
+      end
+
+      # Modules whose `ClassMethods` a model extends. Extending
+      # `Mixin::ClassMethods` directly (an initializer extending
+      # ActiveRecord::Base) mixes in the same source an include would, without
+      # the mixin itself ever joining +included_modules+.
+      #
+      # @param models [Array<Class>]
+      # @return [Array<Module>]
+      def class_methods_owners(models)
+        lookup = SourceReferences::RuntimeLookup.new
+        names = models.flat_map { |model| model.singleton_class.included_modules.filter_map(&:name) }.uniq
+        names.filter_map do |name|
+          owner = ConstantPaths.mixin_owner(name)
+          next if owner == name
+
+          value = lookup.call("::#{owner}", allow_private: true)[:value]
+          value if lookup.module_object?(value) && !lookup.class_object?(value)
+        end
+      end
+
+      # Modules with behavior that an initializer canonically declares. No
+      # autoload path reaches `config/initializers`, so no other extractor
+      # gives such a module a unit, whichever class mixes it in. A reopening
+      # of a module declared elsewhere (a gem's, typically) is not one.
+      #
+      # @return [Array<Module>]
+      def initializer_modules
+        lookup = SourceReferences::RuntimeLookup.new
+        Dir[Rails.root.join(INITIALIZERS_GLOB)].flat_map do |path|
+          declared_module_names(path).filter_map do |name|
+            value = lookup.call("::#{name}", allow_private: true)[:value]
+            next unless lookup.module_object?(value) && !lookup.class_object?(value)
+
+            value if declared_in?(name, path) && behavior?(value)
+          end
+        end
+      end
+
+      # @return [Array<String>] qualified module names the file declares
+      def declared_module_names(path)
+        names = []
+        each_declaration(File.read(path, encoding: Encoding::UTF_8)) do |kind, _name, qualified|
+          next unless kind == 'module' && SourceReferences::RuntimeLookup::CONSTANT.match?(qualified)
+          next if qualified.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
+
+          names << ConstantPaths.normalize(qualified)
+        end
+        names.uniq
+      end
+
+      def declared_in?(name, path)
+        file = Object.const_source_location(name)&.first
+        file.is_a?(String) && File.expand_path(file) == File.expand_path(path)
+      rescue NameError
+        false
+      end
+
+      # A namespace wrapper has nothing to mix in.
+      def behavior?(mod)
+        mod.instance_methods(false).any? || mod.private_instance_methods(false).any? ||
+          mod.singleton_methods(false).any? || mod.const_defined?(:ClassMethods, false)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -284,6 +351,7 @@ module Woods
       # @return [Array<String>] Module names
       def detect_included_modules(source)
         source.scan(/(?:include|extend)\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -295,6 +363,7 @@ module Woods
       # @return [Array<String>] Included module names
       def detect_includes(source)
         source.scan(/\binclude\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -306,6 +375,7 @@ module Woods
       # @return [Array<String>] Extended module names
       def detect_extends(source)
         source.scan(/\bextend\s+([\w:]+)/).flatten
+              .map { |m| ConstantPaths.normalize(m) }
               .reject { |m| m == 'ActiveSupport::Concern' }
       end
 
@@ -338,16 +408,20 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       # @param source [String] Ruby source code
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Array<Hash>] Dependency hashes
-      def extract_dependencies(source)
+      def extract_dependencies(source, module_name = nil)
         # Concerns included by this concern (add instance-level behavior)
         deps = detect_includes(source).map do |mod|
           { type: :concern, target: mod, via: :include }
         end
 
-        # Concerns extended by this concern (add class-level behavior)
+        # Concerns extended by this concern (add class-level behavior). A
+        # `ClassMethods` module belongs to the mixin that declares it, and the
+        # concern's own is no dependency at all.
         detect_extends(source).each do |mod|
-          deps << { type: :concern, target: mod, via: :extend }
+          owner = mod == 'ClassMethods' ? module_name : ConstantPaths.mixin_owner(mod)
+          deps << { type: :concern, target: owner, via: :extend } unless owner == module_name
         end
 
         # Standard dependency scanning

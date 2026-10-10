@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'rbconfig'
+require 'tmpdir'
 require 'woods/extractor'
 
 RSpec.describe Woods::PathDispatcher do
@@ -8,6 +11,20 @@ RSpec.describe Woods::PathDispatcher do
 
   def keys_for(path)
     dispatcher.file_rules_for(path).map(&:extractor_key)
+  end
+
+  # The rules name constants of most extractors; one extractor's specs and a
+  # resident daemon load the dispatcher without them.
+  it 'builds its rules in a process that loaded only the dispatcher' do
+    Dir.mktmpdir('woods_dispatcher_only') do |root|
+      script = "require 'woods/path_dispatcher'; " \
+               "print Woods::PathDispatcher.claiming_key_for('app/services/checkout.rb'); print ' '; " \
+               "print Woods::PathDispatcher.new(root: #{root.inspect}).whole_app_keys_for('config/routes.rb').first"
+      out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), '-e', script)
+
+      expect(status.success?).to be(true), err
+      expect(out).to eq('services routes')
+    end
   end
 
   describe '#file_rules_for' do

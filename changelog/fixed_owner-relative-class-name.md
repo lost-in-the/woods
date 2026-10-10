@@ -1,0 +1,1 @@
+- Target the class an association resolves to. `has_many :links, class_name: "PlanLink"` on `Pricing::Model` recorded `PlanLink`, though Rails resolves it to `Pricing::PlanLink`. Edges and association metadata now use the reflection's own class, then a lexical lookup from the owner's namespace, then the written name. Run a full extraction to replace the affected edges.

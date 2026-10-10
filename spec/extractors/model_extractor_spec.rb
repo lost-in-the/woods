@@ -1166,12 +1166,12 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(include_dep[:type]).to eq(:concern)
     end
 
-    it 'gives extended concerns via: :extend' do
-      extended_mod = Module.new
-      allow(extended_mod).to receive(:name).and_return('Concerns::ClassMethods')
+    it 'gives extended concerns via: :extend, naming the owner of a ClassMethods module' do
+      extended_mod = stub_const('Depot::Countable', Module.new)
+      class_methods = stub_const('Mixin::Persistence::ClassMethods', Module.new)
 
       builtin_sc = double('Object SC', included_modules: [])
-      singleton_class_double = double('SC', included_modules: [extended_mod])
+      singleton_class_double = double('SC', included_modules: [extended_mod, class_methods])
 
       model = double('Model',
                      name: 'Post',
@@ -1188,10 +1188,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(extractor).to receive(:source_file_for).and_return(nil)
 
       deps = extractor.send(:extract_dependencies, model, nil)
-      extend_dep = deps.find { |d| d[:target] == 'Concerns::ClassMethods' }
-      expect(extend_dep).not_to be_nil
-      expect(extend_dep[:via]).to eq(:extend)
-      expect(extend_dep[:type]).to eq(:concern)
+
+      expect(deps).to eq(
+        [{ type: :concern, target: 'Depot::Countable', via: :extend },
+         { type: :concern, target: 'Mixin::Persistence', via: :extend }]
+      )
     end
 
     it 'does not leak Ruby builtin modules (e.g., Kernel, PP) as extend deps' do
@@ -1233,7 +1234,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       model
     end
 
-    it 'labels a polymorphic belongs_to as :polymorphic_interface, never as a :belongs_to model edge' do
+    it 'emits no edge for a polymorphic belongs_to whose interface name is not a constant' do
       # AssociationReflection#class_name camelizes without constantizing, so
       # a polymorphic belongs_to yields an interface name ("Commentable"),
       # not a model — the NameError rescue never fires (#199).
@@ -1242,10 +1243,39 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
 
-      commentable_edges = deps.select { |d| d[:target] == 'Commentable' }
-      expect(commentable_edges).to contain_exactly(
-        { type: :model, target: 'Commentable', via: :polymorphic_interface }
+      expect(deps).to eq([])
+    end
+
+    it 'labels a polymorphic belongs_to as :polymorphic_interface when the application defines the interface name' do
+      stub_const('Commentable', Module.new)
+      allow(extractor).to receive(:app_source?).and_return(true)
+      poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
+                                          class_name: 'Commentable', polymorphic?: true, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
+
+      expect(deps).to eq([{ type: :model, target: 'Commentable', via: :polymorphic_interface }])
+    end
+
+    it 'emits no edge when only a gem defines the interface name' do
+      stub_const('Addressable', Module.new)
+      poly = double('Assoc(addressable)', name: :addressable, macro: :belongs_to,
+                                          class_name: 'Addressable', polymorphic?: true, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(poly), nil)
+
+      expect(deps).to eq([])
+    end
+
+    it 'records the interface names of polymorphic belongs_to and as: associations' do
+      model = model_with_associations(
+        double('Assoc(trackable)', name: :trackable, macro: :belongs_to, polymorphic?: true, options: {}),
+        double('Assoc(events)', name: :events, macro: :has_many, polymorphic?: false, options: { as: :subject }),
+        double('Assoc(notes)', name: :notes, macro: :has_many, polymorphic?: false, options: { as: :subject }),
+        double('Assoc(author)', name: :author, macro: :belongs_to, polymorphic?: false, options: {})
       )
+
+      expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq(%w[subject trackable])
     end
 
     it 'keeps the macro via label for a normal belongs_to' do
@@ -1258,6 +1288,77 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(deps.map { |d| d[:via] }).not_to include(:polymorphic_interface)
     end
 
+    context 'with a class_name written relative to the owner' do
+      def namespaced_model(assoc)
+        model = model_with_associations(assoc)
+        allow(model).to receive(:name).and_return('Pricing::Model')
+        model
+      end
+
+      it 'targets the class the reflection resolves to, not the written name' do
+        klass = double('Klass', name: 'Pricing::PlanLink')
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {}, klass: klass)
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'Pricing::PlanLink', via: :has_many }])
+      end
+
+      it 'resolves the written name from the owner namespace when the reflection cannot compute its class' do
+        stub_const('Pricing::Model', Class.new)
+        stub_const('Pricing::PlanLink', Class.new)
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {})
+        allow(assoc).to receive(:klass).and_raise(NameError, 'uninitialized constant PlanLink')
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'Pricing::PlanLink', via: :has_many }])
+      end
+
+      it 'keeps the written name when nothing resolves' do
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {})
+        allow(assoc).to receive(:klass).and_raise(NameError, 'uninitialized constant PlanLink')
+
+        deps = extractor.send(:extract_dependencies, namespaced_model(assoc), nil)
+
+        expect(deps).to eq([{ type: :model, target: 'PlanLink', via: :has_many }])
+      end
+
+      it 'records the same target in association metadata' do
+        klass = double('Klass', name: 'Pricing::PlanLink')
+        assoc = double('Assoc(links)', name: :links, macro: :has_many, class_name: 'PlanLink',
+                                       polymorphic?: false, options: {}, klass: klass,
+                                       foreign_key: 'model_id', inverse_of: nil)
+        model = namespaced_model(assoc)
+        allow(model).to receive(:connection_db_config).and_return(double('DbConfig', name: 'primary'))
+
+        expect(extractor.send(:extract_associations, model).first[:target]).to eq('Pricing::PlanLink')
+      end
+    end
+
+    it 'treats a through association whose source is polymorphic as an interface' do
+      source = double('Assoc(referrer source)', name: :referrer, macro: :belongs_to, polymorphic?: true, options: {})
+      through = double('Assoc(referrer)', name: :referrer, macro: :has_one, class_name: 'Referrer',
+                                          polymorphic?: false, source_reflection: source,
+                                          options: { through: :account_referral, source: :referrer })
+      model = model_with_associations(through)
+
+      expect(extractor.send(:extract_dependencies, model, nil)).to eq([])
+      expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq(['referrer'])
+    end
+
+    it 'strips a leading :: from an association edge target' do
+      rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
+                                         class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})
+
+      deps = extractor.send(:extract_dependencies, model_with_associations(rooted), nil)
+
+      expect(deps).to eq([{ type: :model, target: 'Depot::CrateVersion', via: :has_many }])
+    end
+
     it 'distinguishes polymorphic and normal associations on the same model' do
       poly = double('Assoc(commentable)', name: :commentable, macro: :belongs_to,
                                           class_name: 'Commentable', polymorphic?: true, options: {})
@@ -1266,8 +1367,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       deps = extractor.send(:extract_dependencies, model_with_associations(poly, normal), nil)
 
-      expect(deps).to include({ type: :model, target: 'Commentable', via: :polymorphic_interface })
-      expect(deps).to include({ type: :model, target: 'User', via: :belongs_to })
+      expect(deps).to eq([{ type: :model, target: 'User', via: :belongs_to }])
     end
 
     it 'treats a reflection that lacks #polymorphic? as a plain association' do
@@ -1516,6 +1616,15 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(associations[0]).to include(name: :account, from_db: 'billing', to_db: 'primary', disable_joins: false)
       expect(associations[1]).to include(name: :plans, from_db: 'billing', to_db: 'primary', disable_joins: true)
       expect(associations[1][:options]).to include(through: :account, disable_joins: true)
+    end
+
+    it 'strips a leading :: from an association class_name' do
+      model = stub_bare_model('Invoice')
+      allow(model).to receive(:reflect_on_all_associations).and_return(
+        [reflection(name: :versions, macro: :has_many, class_name: '::Depot::CrateVersion', klass: double('Klass'))]
+      )
+
+      expect(extractor.send(:extract_associations, model).first[:target]).to eq('Depot::CrateVersion')
     end
 
     it 'leaves to_db nil for a polymorphic association' do

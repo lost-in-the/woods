@@ -18,7 +18,7 @@ module Woods
   # Full extraction reads the run's results; incremental extraction reads the
   # reconciled graph and re-checks every candidate, so hybrid owners replaced
   # wholesale and owners that moved without a path change are both seen.
-  module PoroReconciliation
+  module PoroReconciliation # rubocop:disable Metrics/ModuleLength -- one ownership policy for both extraction modes
     private
 
     # Full extraction: add fallback units to the PORO results.
@@ -28,11 +28,17 @@ module Woods
       poros = @extractors[:poros]
       return unless poros.respond_to?(:fallback_files)
 
-      present = result_types_by_path
+      present = result_units_by_path
       ar_names = fallback_ar_names
       units = poros.fallback_files.flat_map do |path, keys|
-        owned = path_spellings(path).any? { |spelling| owner_types(keys).intersect?(present[spelling]) }
-        owned ? [] : poros.extract_fallback_units(path, ar_names: ar_names)
+        owners = owner_identifiers(keys, path_spellings(path).flat_map { |spelling| present[spelling].to_a })
+        if owners.empty?
+          poros.extract_fallback_units(path, ar_names: ar_names)
+        elsif nested_owner?(keys)
+          poros.extract_nested_units(path, ar_names: ar_names, owners: owners)
+        else
+          []
+        end
       end
       (@results[:poros] ||= []).concat(units)
     end
@@ -56,11 +62,46 @@ module Woods
       end
     end
 
-    # @return [Array<ExtractedUnit>, nil] nil when the extraction failed
+    # @return [Array<ExtractedUnit>, nil] nil when the extraction failed, or
+    #   when an owned file's units need no change this run
     def fallback_units_for(poros, path, keys, present)
-      return [] if present.any? { |_identifier, type| owner_types(keys).include?(type) }
+      owners = owner_identifiers(keys, present)
+      if owners.empty?
+        return checked_extraction(:poros, poros) { poros.extract_fallback_units(path, ar_names: active_record_names) }
+      end
+      return [] unless nested_owner?(keys)
+      return nil unless owners_refreshed?(present, keys)
 
-      checked_extraction(:poros, poros) { poros.extract_fallback_units(path, ar_names: active_record_names) }
+      checked_extraction(:poros, poros) do
+        poros.extract_nested_units(path, ar_names: active_record_names, owners: owners)
+      end
+    end
+
+    # Owners whose files also contribute their nested classes through the
+    # fallback. A GraphQL type file declares its errors, inputs and value
+    # classes inline; nothing else indexes them.
+    #
+    # @param keys [Array<Symbol>] the path's owning extractor keys
+    # @return [Boolean]
+    def nested_owner?(keys)
+      keys.include?(:graphql)
+    end
+
+    # @param keys [Array<Symbol>] the path's owning extractor keys
+    # @param present [Array<Array(String, Symbol)>] identifier and type pairs at the path
+    # @return [Array<String>] identifiers of the owner units, sorted
+    def owner_identifiers(keys, present)
+      types = owner_types(keys)
+      present.filter_map { |identifier, type| identifier if types.include?(type) }.uniq.sort
+    end
+
+    # Incremental: an owned file's nested units are redone only when one of
+    # its owner units was written this run (an edit, an add, or a kind change).
+    # Deleting the file prunes them by path.
+    def owners_refreshed?(present, keys)
+      types = owner_types(keys)
+      refreshed = @source_reference_refreshed || Set.new
+      present.any? { |identifier, type| types.include?(type) && refreshed.include?([type.to_s, identifier]) }
     end
 
     def remove_stale_poros(present, produced, affected_types)
@@ -72,9 +113,12 @@ module Woods
       end
     end
 
-    def result_types_by_path
+    # @return [Hash{String => Set<Array(String, Symbol)>}] identifier and type pairs by path
+    def result_units_by_path
       @results.each_value.with_object(Hash.new { |hash, path| hash[path] = Set.new }) do |units, present|
-        units.each { |unit| path_spellings(unit.file_path).each { |path| present[path].add(unit.type) } }
+        units.each do |unit|
+          path_spellings(unit.file_path).each { |path| present[path].add([unit.identifier, unit.type]) }
+        end
       end
     end
 

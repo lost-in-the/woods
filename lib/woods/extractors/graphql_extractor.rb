@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
+require_relative 'constant_paths'
 require_relative '../source_references/runtime_lookup'
 require_relative 'graphql_ancestry'
 
@@ -42,6 +43,19 @@ module Woods
 
       # Token threshold for chunking large types
       CHUNK_THRESHOLD = 1500
+
+      # Calls on a constant that mark it as a record class or a callable object.
+      MODEL_CALLS = %w[find where find_by create new first last all count exists? destroy update pluck select
+                       order limit includes joins preload eager_load].freeze
+
+      # The last segment of a class name, as opposed to an acronym or a value constant.
+      MODEL_LIKE_SEGMENT = /\A[A-Z][a-z]\w*\z/
+
+      # Unit types the conventional graphql-ruby namespaces hold.
+      NAMESPACE_UNIT_TYPES = { 'Resolvers' => :graphql_resolver, 'Mutations' => :graphql_mutation }.freeze
+
+      # Field options that hand a field to a class, and the unit type it is.
+      FIELD_WIRING = { 'resolver' => :graphql_resolver, 'mutation' => :graphql_mutation }.freeze
 
       def initialize
         @graphql_dir = defined?(Rails) ? Rails.root.join(GRAPHQL_DIRECTORY) : nil
@@ -854,60 +868,125 @@ module Woods
 
       # Extract all dependencies from source text
       #
-      # Uses pattern scanning (not AR descendant iteration) to avoid O(n^2).
+      # Constant references come from one {ConstantPaths} pass (not AR
+      # descendant iteration), recorded as whole paths and resolved lexically.
       #
       # @param source [String]
+      # @param identifier [String, nil] the unit's own identifier
       # @return [Array<Hash>]
       def extract_dependencies(source, identifier = nil)
-        # Other GraphQL type references (Types::*), excluding self-references
-        deps = source.scan(/Types::\w+/).uniq.filter_map do |type_ref|
-          next if type_ref == identifier
+        by_via = constant_path_dependencies(source, identifier).group_by { |dep| dep[:via] }
 
-          { type: :graphql_type, target: type_ref, via: :type_reference }
+        consolidate_dependencies(
+          by_via[:type_reference], by_via[:code_reference],
+          scan_service_dependencies(source), scan_job_dependencies(source), scan_mailer_dependencies(source),
+          scan_config_dependencies(source), by_via[:field_resolver]
+        )
+      end
+
+      # @return [Array<Hash>] type, model-call and field-resolver edges
+      def constant_path_dependencies(source, identifier)
+        lookup = SourceReferences::RuntimeLookup.new
+        @resolutions = {}
+        targets = {}
+        ConstantPaths.references(source).filter_map do |reference|
+          # A file repeats a handful of paths (`String`, its own base class).
+          nesting = reference.literal ? [] : reference.nesting
+          key = [reference.path, nesting]
+          targets[key] = edge_target(reference.path, nesting, lookup) unless targets.key?(key)
+          target = targets[key]
+          next if target.nil? || target == identifier
+
+          via = reference_via(reference, target)
+          { type: reference_type(reference, target, via), target: target, via: via } if via
         end
+      end
 
-        # Model references: scan for capitalized constants that look like model names.
-        # GraphQL uses its own pattern (not ModelNameCache) to avoid O(n^2).
-        source.scan(/\b([A-Z][a-z]\w*)\.(?:find|where|find_by|create|new|first|last|all|count|exists\?|destroy|update|pluck|select|order|limit|includes|joins|preload|eager_load)\b/).flatten.uniq.each do |model_ref|
-          deps << { type: :model, target: model_ref, via: :code_reference }
+      # Resolutions of this file's paths, for typing an edge by the loaded class.
+      # @return [Hash{String => ConstantPaths::Resolution}]
+      def resolutions
+        @resolutions ||= {}
+      end
+
+      # The constant a reference names, or nil when it names nothing indexable:
+      # a value constant, graphql-ruby's own namespace, or a class the
+      # application does not own.
+      #
+      # @param path [String] the constant path as written
+      # @param nesting [Array<String>] enclosing scope names, innermost first
+      # @param lookup [SourceReferences::RuntimeLookup]
+      # @return [String, nil]
+      def edge_target(path, nesting, lookup)
+        resolution = ConstantPaths.resolve(path, nesting, lookup: lookup)
+        return if resolution.status == :value || resolution.target.start_with?('GraphQL::')
+        return if resolution.status == :resolved && !indexable_constant?(resolution)
+
+        resolutions[resolution.target] = resolution
+        resolution.target
+      end
+
+      # Application source, a constant Ruby cannot place, or an ActiveRecord
+      # model a gem ships (an engine model is extracted even though no
+      # application file defines it).
+      #
+      # @param resolution [ConstantPaths::Resolution]
+      # @return [Boolean]
+      def indexable_constant?(resolution)
+        return false if resolution.builtin
+        return true if resolution.source_file.nil? || application_file?(resolution.source_file)
+
+        defined?(ActiveRecord::Base) && resolution.value.is_a?(Class) && resolution.value < ActiveRecord::Base
+      end
+
+      # Many constants share a defining file, and the answer for a file is fixed.
+      #
+      # @param file [String]
+      # @return [Boolean]
+      def application_file?(file)
+        @application_files ||= {}
+        @application_files.fetch(file) { @application_files[file] = app_source?(file, Rails.root.to_s) }
+      end
+
+      # @return [Symbol, nil] the edge label, or nil when the reference is not an edge
+      def reference_via(reference, target)
+        return :field_resolver if FIELD_WIRING.key?(reference.keyword)
+        return :code_reference if plain_class?(target)
+
+        segments = target.split('::')
+        return :type_reference if segments[0...-1].include?('Types')
+
+        model_call = !reference.literal && reference.call && MODEL_CALLS.include?(reference.call.delete_suffix('!'))
+        :code_reference if model_call && segments.last.match?(MODEL_LIKE_SEGMENT)
+      end
+
+      # @return [Symbol] the unit type an edge with this label points at
+      def reference_type(reference, target, via)
+        case via
+        when :field_resolver then FIELD_WIRING.fetch(reference.keyword)
+        when :type_reference then :graphql_type
+        else plain_class_type(target) || NAMESPACE_UNIT_TYPES.fetch(target.split('::').first, :model)
         end
+      end
 
-        # The per-constant follow-up check used to run one full-source scan
-        # for every unique capitalized constant (audit P9c). One combined
-        # scan collects the constants that are actually followed by a model
-        # call; only the exact word at a position can match (each candidate
-        # is a maximal word in this source and `\.` must immediately follow),
-        # so the collected set is identical. Candidate order drives emission
-        # below, unchanged.
-        candidates = source.scan(/\b([A-Z][a-z][a-zA-Z]*)\b/).flatten.uniq
-        model_callers = if candidates.empty?
-                          {}
-                        else
-                          source.scan(
-                            /\b(#{candidates.map { |c| Regexp.escape(c) }.join('|')})\.(?:find|where|find_by|create|new|first|last|all)\b/
-                          ).flatten.to_h { |const| [const, true] }
-                        end
+      # A loaded class under a GraphQL namespace that graphql-ruby does not
+      # own: a nested error, input or value class the PORO path indexes.
+      # Decidable only with graphql-ruby loaded; otherwise the namespace rules.
+      #
+      # @param target [String]
+      # @return [Boolean]
+      def plain_class?(target)
+        value = resolutions[target]&.value
+        return false unless value.is_a?(Class) && defined?(GraphQL::Schema)
 
-        candidates.each do |const_ref|
-          if const_ref.match?(/\A(Types|Mutations|Resolvers|GraphQL|Base|String|Integer|Float|Boolean|Array|Hash|Set|Struct|Module|Class|Object|ID|Int|ISO8601)\z/)
-            next
-          end
-          next if deps.any? { |d| d[:target] == const_ref }
+        !graphql_runtime_class?(value) && !ruby_resolver_helper?(value)
+      end
 
-          deps << { type: :model, target: const_ref, via: :code_reference } if model_callers.key?(const_ref)
-        end
+      # @return [Symbol, nil] :model for an Active Record class, :poro for another plain class
+      def plain_class_type(target)
+        return unless plain_class?(target)
 
-        deps.concat(scan_service_dependencies(source))
-        deps.concat(scan_job_dependencies(source))
-        deps.concat(scan_mailer_dependencies(source))
-        deps.concat(scan_config_dependencies(source))
-
-        # Resolver dependencies (standalone resolver classes referenced in fields)
-        source.scan(/resolver:\s*([\w:]+)/).flatten.uniq.each do |resolver|
-          deps << { type: :graphql_resolver, target: resolver, via: :field_resolver }
-        end
-
-        consolidate_dependencies(deps)
+        value = resolutions[target].value
+        defined?(ActiveRecord::Base) && value < ActiveRecord::Base ? :model : :poro
       end
 
       # ──────────────────────────────────────────────────────────────────────

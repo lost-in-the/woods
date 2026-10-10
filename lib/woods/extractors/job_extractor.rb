@@ -386,7 +386,7 @@ module Woods
 
         # External services
         if source.match?(/HTTParty|Faraday|RestClient|Net::HTTP/)
-          deps << { type: :external, target: :http_api, via: :code_reference }
+          deps << { type: :external, target: :http_api, via: :external_call }
         end
 
         deps << { type: :infrastructure, target: :redis, via: :code_reference } if source.match?(/Redis\.current|REDIS/)

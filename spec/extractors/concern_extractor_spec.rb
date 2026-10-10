@@ -63,6 +63,83 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(described_class.new.extract_all).to be_empty
     end
 
+    context 'with a ClassMethods module models extend' do
+      let(:path) do
+        create_file('config/initializers/persistence.rb', <<~RUBY)
+          module Mixin::Persistence
+            module ClassMethods
+              def persisted_scope; end
+            end
+          end
+          ActiveRecord::Base.extend(Mixin::Persistence::ClassMethods)
+        RUBY
+      end
+
+      def stub_owner(owner)
+        stub_const('Mixin', Module.new)
+        stub_const('Mixin::Persistence', owner)
+        stub_const('Mixin::Persistence::ClassMethods', Module.new)
+        model.extend(Mixin::Persistence::ClassMethods)
+        allow(Object).to receive(:const_source_location).and_call_original
+        allow(Object).to receive(:const_source_location).with('Mixin::Persistence').and_return([path, 1])
+      end
+
+      it 'discovers the owning module wherever the application declares it' do
+        stub_owner(Module.new)
+
+        units = described_class.new.extract_all
+
+        expect(units.map { |unit| [unit.type, unit.identifier, unit.file_path] })
+          .to eq([[:concern, 'Mixin::Persistence', path]])
+      end
+
+      it 'does not claim an owner that is a class' do
+        stub_owner(Class.new)
+
+        expect(described_class.new.extract_all).to be_empty
+      end
+    end
+
+    context 'with modules declared in an initializer' do
+      let(:path) do
+        create_file('config/initializers/depot.rb', <<~RUBY)
+          module Depot
+            module Countable
+              def count_all; end
+            end
+          end
+          module Rack::Throttle
+            def throttled?; end
+          end
+          Widget.extend(Depot::Countable)
+        RUBY
+      end
+
+      before do
+        stub_const('Depot', Module.new)
+        stub_const('Depot::Countable', Module.new { def count_all; end })
+        stub_const('Rack::Throttle', Module.new { def throttled?; end })
+        allow(Object).to receive(:const_source_location).and_call_original
+        allow(Object).to receive(:const_source_location).with('Depot').and_return([path, 1])
+        allow(Object).to receive(:const_source_location).with('Depot::Countable').and_return([path, 2])
+        allow(Object).to receive(:const_source_location).with('Rack::Throttle')
+                                                        .and_return(['/gems/rack/throttle.rb', 1])
+      end
+
+      it 'publishes a module with behavior that the initializer canonically declares, whoever mixes it in' do
+        units = described_class.new.extract_all
+
+        expect(units.map { |unit| [unit.type, unit.identifier, unit.file_path] })
+          .to eq([[:concern, 'Depot::Countable', path]])
+      end
+
+      it 'leaves a module no longer loaded out' do
+        hide_const('Depot::Countable')
+
+        expect(described_class.new.extract_all).to be_empty
+      end
+    end
+
     it 'excludes gem-owned modules even when the application adds their methods' do
       path = create_file('vendor/bundle/gem_mixin.rb', "module GemMixin\n def pin; end\nend\n")
       stub_const('GemMixin', Module.new)
@@ -619,6 +696,46 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(extend_dep).not_to be_nil
       expect(extend_dep[:via]).to eq(:extend)
       expect(extend_dep[:type]).to eq(:concern)
+    end
+
+    it 'strips a leading :: from included and extended modules' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          extend ::ActiveSupport::Concern
+          include ::Depot::Weighable
+          extend ::Depot::Countable
+
+          def stack; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :extend }]
+      )
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable])
+    end
+
+    it 'maps an extended ClassMethods module to the module that owns it' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          def self.included(base)
+            base.extend ClassMethods
+            base.extend Stackable::ClassMethods
+            base.extend Depot::Countable::ClassMethods
+          end
+
+          module ClassMethods
+            def stack_all; end
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
     end
 
     it 'excludes ActiveSupport::Concern from extend dependencies' do

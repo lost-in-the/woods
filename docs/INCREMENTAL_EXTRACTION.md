@@ -837,6 +837,13 @@ edit does not establish that a day of commits is below the crossover.
   partial that a template already renders, under another engine's extension
   or a parent controller's directory, does not retarget the existing edge.
   Editing the rendering template, or a full extraction, picks up both.
+- **Lexically resolved targets are fixed when the referencing unit is extracted.**
+  A GraphQL unit's relative constant path, and a model's polymorphic interface
+  name, are resolved against the constants loaded at that moment. Deleting or
+  changing a resolved target re-extracts its dependents. Creating a constant
+  that an existing relative reference or interface name would newly resolve to
+  does not re-extract the referencing unit. Editing that unit, or a full
+  extraction, picks it up.
 - **Snapshots stay full-extraction-only.** They hash the full unit set, and an
   incremental run only holds changed units in memory.
 - **A divergence floor is still worth keeping.** Incremental correctness is a

@@ -159,9 +159,13 @@ Dir.mktmpdir('woods_graphql_operations') do |root|
       skipped.include?('path' => 'app/javascript/broken.graphql', 'reason' => 'parse_error') &&
       skipped.none? { |entry| entry['path'].end_with?('widget_list.graphql') }
   end
+  # The mutation's other dependents are the schema types that wire it
+  # (`field ..., mutation:`), never another document.
   assert_fact(report, 'dependents of a mutation list the client document that calls it') do
     dependent = ->(identifier) { { 'type' => 'graphql_operation', 'identifier' => identifier } }
-    reader.find_unit('Mutations::CreateWidget')['dependents'] == [dependent.call('gql:CreateWidget')] &&
+    mutation_dependents = reader.find_unit('Mutations::CreateWidget')['dependents']
+    mutation_dependents.include?(dependent.call('gql:CreateWidget')) &&
+      (mutation_dependents - [dependent.call('gql:CreateWidget')]).all? { |entry| entry['type'] == 'graphql_type' } &&
       reader.find_unit('Types::WidgetType')['dependents'].include?(dependent.call('gql:WidgetFields'))
   end
 

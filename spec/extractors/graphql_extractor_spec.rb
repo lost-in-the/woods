@@ -902,6 +902,177 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
       expect(targets).not_to include('Types::UserType')
     end
 
+    context 'with namespaced constant paths' do
+      def dependencies_of(relative_path, source)
+        described_class.new.extract_graphql_file(create_file(relative_path, source)).dependencies
+      end
+
+      it 'records a compact path whole, never its last segment' do
+        deps = dependencies_of('app/graphql/mutations/ship_widget.rb', <<~RUBY)
+          module Mutations
+            class ShipWidget < GraphQL::Schema::Mutation
+              def resolve(**args)
+                Resolvers::Ledger::Create.new(context).call(args)
+                ::Depot::Shipment.find(args[:id])
+              end
+            end
+          end
+        RUBY
+
+        expect(deps).to include(
+          { type: :graphql_resolver, target: 'Resolvers::Ledger::Create', via: :code_reference },
+          { type: :model, target: 'Depot::Shipment', via: :code_reference }
+        )
+        expect(deps.map { |dep| dep[:target] }).not_to include('Create', 'Shipment', '::Depot::Shipment')
+      end
+
+      it 'records the class a field is wired to by mutation: or resolver:' do
+        deps = dependencies_of('app/graphql/types/mutation_type.rb', <<~RUBY)
+          module Types
+            class MutationType < Types::BaseObject
+              field :ship_widget, mutation: Mutations::ShipWidget
+              field :widgets,
+                    resolver: Resolvers::Depot::Widgets
+            end
+          end
+        RUBY
+
+        expect(deps).to include(
+          { type: :graphql_mutation, target: 'Mutations::ShipWidget', via: :field_resolver },
+          { type: :graphql_resolver, target: 'Resolvers::Depot::Widgets', via: :field_resolver }
+        )
+      end
+
+      it 'records a nested type path whole' do
+        deps = dependencies_of('app/graphql/mutations/draft_widget.rb', <<~RUBY)
+          module Mutations
+            class DraftWidget < GraphQL::Schema::Mutation
+              argument :input, Types::Inputs::DraftWidget, required: true
+              field :widget, "Types::WidgetType", null: true
+            end
+          end
+        RUBY
+
+        expect(deps).to include(
+          { type: :graphql_type, target: 'Types::Inputs::DraftWidget', via: :type_reference },
+          { type: :graphql_type, target: 'Types::WidgetType', via: :type_reference }
+        )
+        expect(deps.map { |dep| dep[:target] }).not_to include('Types::Inputs')
+      end
+
+      it 'emits no edge for a graphql-ruby built-in or a core class' do
+        deps = dependencies_of('app/graphql/types/widget_type.rb', <<~RUBY)
+          module Types
+            class WidgetType < Types::BaseObject
+              field :shipped_at, GraphQL::Types::ISO8601DateTime, null: true
+
+              def label
+                String.new(object.name)
+              end
+            end
+          end
+        RUBY
+
+        expect(deps.map { |dep| dep[:target] }).to eq(['Types::BaseObject'])
+      end
+
+      context 'when the referenced constants are loaded' do
+        before do
+          load create_file('app/graphql/types/depot_types.rb', <<~RUBY)
+            module R2Types
+              module Types
+                LIMIT = 5
+                class BaseType < ::GraphQL::Schema::Object; end
+                class CrateType < BaseType; end
+                Timestamp = ::Woods::Extractors::ConstantPaths
+              end
+            end
+          RUBY
+        end
+
+        after { Object.send(:remove_const, :R2Types) }
+
+        it 'resolves a relative path from the innermost nesting outward' do
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  field :crate, CrateType, null: true
+                  field :crates, [Types::CrateType], null: false
+                end
+              end
+            end
+          RUBY
+
+          expect(deps).to eq(
+            [{ type: :graphql_type, target: 'R2Types::Types::BaseType', via: :type_reference },
+             { type: :graphql_type, target: 'R2Types::Types::CrateType', via: :type_reference }]
+          )
+        end
+
+        it 'types an edge to a loaded plain class nested in a type as a poro code reference' do
+          load create_file('app/graphql/types/crate_nested.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class CrateType
+                  class Discount
+                    def amount; end
+                  end
+                end
+              end
+            end
+          RUBY
+
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  def discount
+                    CrateType::Discount.new
+                  end
+                end
+              end
+            end
+          RUBY
+
+          expect(deps).to include({ type: :poro, target: 'R2Types::Types::CrateType::Discount', via: :code_reference })
+        end
+
+        it 'keeps an edge to a loaded constant whose definition site is unknown' do
+          allow(Woods::Extractors::ConstantPaths).to receive(:source_location).and_call_original
+          allow(Woods::Extractors::ConstantPaths).to receive(:source_location)
+            .with('R2Types::Types::CrateType').and_return([false, 0])
+
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  field :crate, CrateType, null: true
+                end
+              end
+            end
+          RUBY
+
+          expect(deps.map { |dep| dep[:target] }).to eq(%w[R2Types::Types::BaseType R2Types::Types::CrateType])
+        end
+
+        it 'emits no edge for a value constant or an alias of a constant outside the application' do
+          deps = dependencies_of('app/graphql/types/pallet_type.rb', <<~RUBY)
+            module R2Types
+              module Types
+                class PalletType < BaseType
+                  field :size, Integer, null: false, default_value: Types::LIMIT
+                  field :at, Types::Timestamp, null: true
+                end
+              end
+            end
+          RUBY
+
+          expect(deps.map { |dep| dep[:target] }).to eq(['R2Types::Types::BaseType'])
+        end
+      end
+    end
+
     it 'includes :via key on all dependencies' do
       source = <<~RUBY
         module Mutations
