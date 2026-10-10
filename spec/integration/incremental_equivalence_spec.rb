@@ -2300,6 +2300,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     describe 'route files' do
+      # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1.
+      before do
+        skip 'draw files need Rails 6.1' unless ActionDispatch::Routing::Mapper.method_defined?(:draw)
+      end
+
       around do |example|
         mapper = ActionDispatch::Routing::Mapper
         next example.run unless mapper.respond_to?(:route_source_locations)
