@@ -76,12 +76,14 @@ RSpec.describe 'Schema unit registration' do
       expect(policy.classify('db/migrate/20240101000000_create_widgets.rb')).to eq(:reextract)
     end
 
+    # The path sits outside `config_file_paths`, so only the declaration can
+    # make it an input; YAML under config/ is a config_file source already.
     it 're-extracts for the declared external consumers file, and ignores it when undeclared' do
-      expect(policy.classify('config/woods/external_consumers.yml')).to eq(:ignore)
+      expect(policy.classify('db/woods/external_consumers.yml')).to eq(:ignore)
 
-      Woods.configuration.external_table_consumers_path = 'config/woods/external_consumers.yml'
+      Woods.configuration.external_table_consumers_path = 'db/woods/external_consumers.yml'
 
-      expect(policy.classify('config/woods/external_consumers.yml')).to eq(:reextract)
+      expect(policy.classify('db/woods/external_consumers.yml')).to eq(:reextract)
     end
 
     # Changed paths are uncontrolled input; the per-database dump pattern
@@ -95,7 +97,7 @@ RSpec.describe 'Schema unit registration' do
     end
 
     it 'does not mistake other db files for schema dumps' do
-      expect(%w[db/seeds.rb db/schema.rb.bak db/nested/billing_schema.rb].map { |path| policy.classify(path) })
+      expect(%w[db/helpers/cleanup.rb db/schema.rb.bak db/nested/billing_schema.rb].map { |path| policy.classify(path) })
         .to eq(%i[ignore ignore ignore])
     end
   end
