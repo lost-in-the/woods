@@ -392,6 +392,15 @@ module Woods
          whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
       end
 
+      # Families read from model and schema directories by their own globs.
+      def model_adjacent_rules
+        [whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql])]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -402,11 +411,7 @@ module Woods
           whole_app_rule(:middleware, %w[config/initializers config/environments],
                          exact_paths: %w[config/application.rb Gemfile.lock]),
           scheduled_job_rule,
-          whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
+          *model_adjacent_rules,
           *graphql_operation_rules,
           *schema_unit_rules,
           # EventExtractor is a two-pass scan over its configured roots
