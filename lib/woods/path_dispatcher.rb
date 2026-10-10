@@ -2,6 +2,11 @@
 
 require 'set'
 require_relative 'graphql_document_paths'
+require_relative 'git_source_filter'
+# The Git filter asks the configuration extractors which paths they own, and a
+# resident process (the watch daemon, a rake task) loads this file without them.
+require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/configuration_extractor'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -112,6 +117,16 @@ module Woods
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
     class << self
+      # Paths introduced by configuration-source discovery, including generators.
+      # @param path [String] root-relative path
+      # @return [Boolean]
+      def configuration_source_path?(path)
+        Extractors::ConfigFileExtractor.config_file_path?(path) ||
+          Extractors::ConfigurationExtractor.configuration_path?(path) ||
+          path.match?(%r{\Aconfig/routes(?:\.rb|/.*\.rb)\z}) ||
+          (path.start_with?('lib/') && path.include?('/generators/') && path.end_with?('.rb'))
+      end
+
       # The extractor whose file rule owns +relative_path+, ignoring scans in
       # {NON_CLAIMING_RULES}. Static: it never consults extraction output.
       #
@@ -169,6 +184,14 @@ module Woods
         GraphQLDocumentPaths.match?(relative_path)
       end
 
+      # Is this a YAML file ConfigFileExtractor indexes, under the configured globs?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def config_file_path?(relative_path)
+        Woods::Extractors::ConfigFileExtractor.config_file_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -221,7 +244,26 @@ module Woods
       end
 
       def build_file_rules
-        plain_ruby_rules + specialized_rules + caching_rules
+        plain_ruby_rules + configuration_rules + specialized_rules + caching_rules
+      end
+
+      # Ruby and YAML configuration sources.
+      def configuration_rules
+        ex = Woods::Extractors
+
+        [
+          # Initializers and environments, plus the boot, seed, deploy and root
+          # files ConfigurationExtractor names exactly.
+          file_rule(:configurations, :extract_configuration_file,
+                    ex::ConfigurationExtractor::DIRECTORY_TYPES.keys,
+                    exact_paths: ex::ConfigurationExtractor::SOURCE_FILES),
+          # YAML under the configured globs. The matcher reads them at call
+          # time; the static attributes describe the defaults, for projections
+          # that cannot call it.
+          file_rule(:config_files, :extract_config_file, ex::ConfigFileExtractor::DEFAULT_ROOTS,
+                    extensions: ex::ConfigFileExtractor::DEFAULT_EXTENSIONS,
+                    exclude: ex::ConfigFileExtractor::PROJECTED_EXCLUSIONS, matcher: :config_file_path?)
+        ]
       end
 
       # Extractors that glob `**/*.rb` under directories they own.
@@ -236,8 +278,7 @@ module Woods
           [:policies, :extract_policy_file, ex::PolicyExtractor::POLICY_DIRECTORIES],
           [:validators, :extract_validator_file, ex::ValidatorExtractor::VALIDATOR_DIRECTORIES],
           [:pundit_policies, :extract_pundit_file, ex::PunditExtractor::PUNDIT_DIRECTORIES],
-          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES],
-          [:configurations, :extract_configuration_file, ex::ConfigurationExtractor::CONFIG_DIRECTORIES]
+          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES]
         ].map { |key, method_name, dirs| file_rule(key, method_name, dirs) }
       end
 
@@ -359,11 +400,25 @@ module Woods
       end
     end
 
+    # @param root [String, Pathname, nil] application root (Rails.root by default)
+    def initialize(root: nil)
+      root ||= Rails.root if defined?(Rails) && Rails.respond_to?(:root)
+      @git_filter = GitSourceFilter.new(root: root)
+    end
+
+    # @param path [String] root-relative path
+    # @return [Boolean] whether a configuration source is excluded by Git
+    def git_excluded?(path)
+      self.class.configuration_source_path?(path) && !@git_filter.skip_reason(path).nil?
+    end
+
     # File-based rules matching a path.
     #
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Rule>]
     def file_rules_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.file_rules.select { |rule| rule.matches?(relative_path) }
     end
 
@@ -372,6 +427,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Symbol>]
     def whole_app_keys_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.whole_app_rules
           .select { |rule| rule.matches?(relative_path) }
           .map(&:extractor_key).uniq
@@ -391,6 +448,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean]
     def relevant?(relative_path)
+      return false if git_excluded?(relative_path)
+
       return true if self.class.runtime_rules.any? { |rule| rule.matches?(relative_path) }
 
       file_rules_for(relative_path).any? || whole_app_keys_for(relative_path).any?

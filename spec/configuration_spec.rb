@@ -639,6 +639,87 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#config_file_paths' do
+    it 'defaults to the globs the config file extractor names' do
+      require 'woods/extractors/config_file_extractor'
+
+      expect(described_class.new.config_file_paths).to eq(%w[config/*.yml config/**/*.yml app/data/**/*.yml])
+      expect(described_class.new.config_file_paths).to eq(Woods::Extractors::ConfigFileExtractor::DEFAULT_PATHS)
+    end
+
+    it 'accepts relative globs and freezes them' do
+      config = described_class.new
+      config.config_file_paths = ['config/settings/**/*.yml']
+
+      expect(config.config_file_paths).to eq(['config/settings/**/*.yml'])
+      expect(config.config_file_paths).to be_frozen
+    end
+
+    it 'rejects a non-Array, an absolute glob and a parent traversal, keeping the previous value' do
+      config = described_class.new
+      config.config_file_paths = ['config/*.yml']
+
+      expect { config.config_file_paths = 'config/*.yml' }
+        .to raise_error(Woods::ConfigurationError, /config_file_paths must be an Array/)
+      ['/etc/*.yml', '../shared/*.yml', '', nil].each do |glob|
+        expect { config.config_file_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /config_file_paths\[0\] must be a relative glob/)
+      end
+      expect(config.config_file_paths).to eq(['config/*.yml'])
+    end
+  end
+
+  describe '#config_file_values' do
+    it 'defaults to false and accepts only a boolean' do
+      config = described_class.new
+
+      expect(config.config_file_values).to be(false)
+      config.config_file_values = true
+      expect(config.config_file_values).to be(true)
+      expect { config.config_file_values = 'yes' }
+        .to raise_error(Woods::ConfigurationError, /config_file_values must be true or false/)
+      expect(config.config_file_values).to be(true)
+    end
+  end
+
+  describe '#settings_readers' do
+    it 'defaults to none' do
+      expect(described_class.new.settings_readers).to eq([])
+    end
+
+    it 'normalizes string and symbol keys and freezes the result' do
+      config = described_class.new
+      config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' },
+                                 { 'constant' => '::Billing::Limits', 'file' => 'config/limits.yml' }]
+
+      expect(config.settings_readers).to eq(
+        [{ constant: 'Settings', file: 'config/settings.yml' },
+         { constant: 'Billing::Limits', file: 'config/limits.yml' }]
+      )
+      expect(config.settings_readers).to be_frozen
+      expect(config.settings_readers.first).to be_frozen
+    end
+
+    it 'rejects malformed entries and keeps the previous value' do
+      config = described_class.new
+      config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+
+      [
+        'Settings',
+        ['Settings'],
+        [{ constant: 'settings', file: 'config/settings.yml' }],
+        [{ constant: 'Settings.x', file: 'config/settings.yml' }],
+        [{ constant: 'Settings' }],
+        [{ constant: 'Settings', file: '/etc/settings.yml' }],
+        [{ constant: 'Settings', file: 'config/../settings.yml' }],
+        [{ constant: 'Settings', file: '' }]
+      ].each do |value|
+        expect { config.settings_readers = value }.to raise_error(Woods::ConfigurationError, /settings_readers/)
+      end
+      expect(config.settings_readers).to eq([{ constant: 'Settings', file: 'config/settings.yml' }])
+    end
+  end
+
   describe '#unclaimed_ruby_paths' do
     it 'defaults to every Ruby file under app/' do
       expect(described_class.new.unclaimed_ruby_paths).to eq(['app/**/*.rb'])

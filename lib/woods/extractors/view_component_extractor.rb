@@ -336,6 +336,7 @@ module Woods
 
         # Model references
         deps.concat(scan_model_dependencies(source, via: :data_dependency))
+        deps.concat(scan_config_dependencies(source))
 
         # Helper modules
         source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|

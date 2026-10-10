@@ -320,8 +320,12 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     end
     allow(Rails.application).to receive(:routes).and_return(routes)
 
-    units = Woods::Extractors::RouteExtractor.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+    extracted = Woods::Extractors::RouteExtractor.new.extract_all
+    units = extracted.select { |unit| unit.type == :route }.to_h { |unit| [unit.identifier, unit] }
 
+    # The dummy app's own route file is a unit of its own beside the routes.
+    expect(extracted.reject { |unit| unit.type == :route }.map { |unit| [unit.type, unit.identifier] })
+      .to eq([[:route_file, 'config/routes.rb']])
     expect(units.keys).to contain_exactly(
       'ANY /cable (mount)', 'GET /settings (redirect)', 'GET /start (redirect)', 'GET /old (redirect)',
       'ANY /v1/*unmatched_route (rack_endpoint)', 'GET / [subdomain=www] (redirect)', 'GET /posts'

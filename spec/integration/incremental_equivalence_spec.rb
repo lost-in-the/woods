@@ -962,6 +962,29 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  it 'omits ignored configuration YAML in both full and incremental extraction' do
+    _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'init', '--quiet'))
+    raise err unless status.success?
+
+    write_file('.gitignore', "config/settings.local.yml\n")
+    _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'add', '.'))
+    raise err unless status.success?
+
+    baseline = full_extraction
+    path = write_file('config/settings.local.yml', "private_local_key: withheld\n")
+    Woods::Extractor.new(output_dir: baseline).extract_changed([path])
+    full = full_extraction
+    expect(differences(baseline, full)).to be_empty
+    [baseline, full].each do |index|
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      expect(index_snapshot(index).fetch('config_files', []).map { |unit| unit['identifier'] }).not_to include(path)
+      expect(Woods::SkippedFiles.read(payload).fetch('files')).to include('path' => path, 'reason' => 'git_ignored')
+    end
+  ensure
+    FileUtils.rm_rf(app_path('.git'))
+    FileUtils.rm_f(app_path('.gitignore'))
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)
@@ -2110,6 +2133,246 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       namespace = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepNamespace' }
       expect(namespace.fetch('metadata')).to include('ruby_kind' => 'module', 'constants' => ['LIMIT'])
       expect(sweep_units(index)).not_to include('SweepMapper', 'ApplicationController', 'PostsController')
+    end
+  end
+
+  describe 'configuration sources (#678)' do
+    def unit_of(index, type, identifier)
+      unit_snapshot(index).values.find { |unit| unit['type'] == type && unit['identifier'] == identifier }
+    end
+
+    def reverse_edges(index, identifier)
+      read_json(index, 'dependency_graph.json').fetch('reverse').fetch(identifier, [])
+    end
+
+    it 'adds, edits and prunes YAML config files equivalently to a full extraction' do
+      index = run_sequence([
+                             -> { write_file('config/namespaces.yml', "payments:\n  api_host: ledger.example\n") },
+                             -> { write_file('app/data/surveys/nps.yml', "title: Score\nquestions:\n  - id: q1\n") },
+                             lambda {
+                               write_file('config/namespaces.yml', <<~YAML)
+                                 default: &default
+                                   payments:
+                                     api_host: <%= ENV["LEDGER_HOST"] %>
+                                 production:
+                                   <<: *default
+                               YAML
+                             },
+                             -> { delete_file('app/data/surveys/nps.yml') }
+                           ])
+
+      settings = unit_of(index, 'config_file', 'config/namespaces.yml')
+      expect(settings.dig('metadata', 'environments')).to eq(%w[production])
+      expect(settings.dig('metadata', 'env_vars')).to eq(%w[LEDGER_HOST])
+      expect(unit_of(index, 'config_file', 'app/data/surveys/nps.yml')).to be_nil
+    end
+
+    it 'never indexes a secret-bearing file, whichever path names it' do
+      incremental = run_sequence([
+                                   -> { write_file('config/secrets.yml', "token: plaintext-marker\n") },
+                                   -> { write_file('config/ledger/api_tokens.yml', "token: plaintext-marker\n") },
+                                   -> { write_file('config/widgets.yml', "password: plaintext-marker\n") }
+                                 ])
+      write_file('config/credentials/production.yml', "token: plaintext-marker\n")
+
+      [incremental, full_extraction].each do |index|
+        config_files = unit_snapshot(index).values.select { |unit| unit['type'] == 'config_file' }
+        expect(config_files.map { |unit| unit['identifier'] })
+          .to eq(%w[config/database.yml config/recurring.yml config/widgets.yml])
+        payload = Woods::Generation.new(output_dir: index).payload_dir
+        published = Dir.glob(File.join(payload, '**', '*')).select { |path| File.file?(path) }
+        expect(published.select { |path| File.read(path).include?('plaintext-marker') }).to eq([])
+      end
+    end
+
+    it 'links readers to a config file that appears after them, and unlinks when a reader stops reading' do
+      Woods.configuration.settings_readers = [{ constant: 'LedgerSettings', file: 'config/ledger.yml' }]
+      reader = lambda do |body|
+        write_file('app/services/ledger_rate_service.rb',
+                   "class LedgerRateService\n  def call\n    #{body}\n  end\nend\n")
+      end
+
+      index = run_sequence([
+                             -> { reader.call('Rails.application.config_for(:rates)') },
+                             -> { write_file('config/rates.yml', "standard: 5\n") },
+                             lambda {
+                               reader.call('LedgerSettings.rates.standard + Rails.application.config_for(:rates)[:x]')
+                             },
+                             -> { write_file('config/ledger.yml', "rates:\n  standard: 5\n") },
+                             -> { reader.call('YAML.load_file(Rails.root.join("config/ledger.yml"))') },
+                             -> { delete_file('config/rates.yml') }
+                           ])
+
+      expect(reverse_edges(index, 'config/ledger.yml')).to eq(%w[LedgerRateService])
+      expect(unit_of(index, 'service', 'LedgerRateService').fetch('dependencies'))
+        .to include('type' => 'config_file', 'target' => 'config/ledger.yml', 'via' => 'reads_config')
+      expect(unit_of(index, 'config_file', 'config/ledger.yml').fetch('dependents'))
+        .to include(a_hash_including('identifier' => 'LedgerRateService'))
+    ensure
+      Woods.configuration.settings_readers = []
+    end
+
+    it 'links class-based units to the config files they read' do
+      with_reader = lambda do |relative|
+        source = File.read(app_path(relative))
+        cut = source.rindex('end')
+        "#{source[0...cut]}\n  def woods_rates = Rails.application.config_for(:rates)\nend\n"
+      end
+
+      index = run_sequence([
+                             -> { write_file('config/rates.yml', "standard: 5\n") },
+                             -> { write_file('app/models/comment.rb', with_reader.call('app/models/comment.rb')) },
+                             lambda {
+                               write_file('app/controllers/posts_controller.rb',
+                                          with_reader.call('app/controllers/posts_controller.rb'))
+                             }
+                           ])
+
+      expect(reverse_edges(index, 'config/rates.yml')).to eq(%w[Comment PostsController])
+    end
+
+    it 'adds, edits and prunes boot, seed and root files equivalently to a full extraction' do
+      index = run_sequence([
+                             -> { write_file('db/seeds.rb', "Post.create!(title: 'seed')\n") },
+                             -> { write_file('db/seeds/comments.rb', "Comment.create!(body: 'seed')\n") },
+                             -> { write_file('config/deploy/production.rb', "server 'ledger.example'\n") },
+                             -> { write_file('config/importmap.rb', "pin 'application'\n") },
+                             -> { write_file('db/seeds.rb', "Comment.create!(body: 'seed')\n") },
+                             -> { delete_file('config/deploy/production.rb') }
+                           ])
+
+      expect(unit_of(index, 'configuration', 'db/seeds.rb').dig('metadata', 'config_type')).to eq('seeds')
+      expect(unit_of(index, 'configuration', 'importmap.rb').dig('metadata', 'config_type')).to eq('importmap')
+      expect(reverse_edges(index, 'Comment')).to include('db/seeds.rb', 'db/seeds/comments.rb')
+      expect(unit_of(index, 'configuration', 'deploy/production.rb')).to be_nil
+    end
+
+    it 'publishes the Gemfile, Rakefile and boot files on a full run and leaves their edits to one' do
+      write_file('Gemfile', "source 'https://rubygems.org'\ngem 'rails'\n")
+      write_file('Rakefile', "require_relative 'config/application'\n")
+      write_file('config/boot.rb', "require 'bundler/setup'\n")
+
+      index = full_extraction
+      expect(unit_of(index, 'configuration', 'Gemfile').dig('metadata', 'gem_references')).to eq(%w[rails])
+      expect(unit_of(index, 'configuration', 'Rakefile').dig('metadata', 'config_type')).to eq('rakefile')
+      expect(unit_of(index, 'configuration', 'boot.rb').dig('metadata', 'config_type')).to eq('boot')
+
+      path = write_file('Gemfile', "source 'https://rubygems.org'\ngem 'rails'\ngem 'sidekiq'\n")
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([path]) }
+        .to raise_error(Woods::ExtractionError, /fresh Rails process/)
+    end
+
+    it 'publishes boot-captured YAML on a full run and leaves its edits to one' do
+      path = write_file('config/settings.yml', "payments:\n  api_host: ledger.example\n")
+
+      index = full_extraction
+      expect(unit_of(index, 'config_file', 'config/settings.yml').dig('metadata', 'key_paths'))
+        .to eq(%w[payments payments.api_host])
+
+      write_file(path, "payments:\n  api_host: other.example\n")
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([path]) }
+        .to raise_error(Woods::ExtractionError, /fresh Rails process/)
+    end
+
+    it 'indexes generators and reports their templates as skipped, through edits and removal' do
+      generator = lambda do |body|
+        write_file('lib/generators/widget/widget_generator.rb',
+                   "class WidgetGenerator < Rails::Generators::NamedBase\n  def #{body}; end\nend\n")
+      end
+      template = 'lib/generators/widget/templates/widget.rb'
+
+      index = run_sequence([
+                             -> { generator.call('create_widget') },
+                             -> { write_file(template, "class <%= class_name %> < ApplicationRecord\nend\n") },
+                             -> { generator.call('create_widget_file') },
+                             -> { write_file(template, "class <%= class_name %>\nend\n") }
+                           ])
+
+      expect(unit_of(index, 'lib', 'WidgetGenerator').dig('metadata', 'kind')).to eq('generator')
+      expect(read_json(index, 'skipped_files.json').fetch('files'))
+        .to include('path' => template, 'reason' => 'template')
+
+      Woods::Extractor.new(output_dir: index).extract_changed(
+        [delete_file(template), delete_file('lib/generators/widget/widget_generator.rb')]
+      )
+      expect(differences(index, full_extraction)).to be_empty
+      expect(unit_of(index, 'lib', 'WidgetGenerator')).to be_nil
+    end
+
+    describe 'route files' do
+      # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1.
+      before do
+        skip 'draw files need Rails 6.1' unless ActionDispatch::Routing::Mapper.method_defined?(:draw)
+      end
+
+      around do |example|
+        mapper = ActionDispatch::Routing::Mapper
+        next example.run unless mapper.respond_to?(:route_source_locations)
+
+        previous = mapper.route_source_locations
+        mapper.route_source_locations = true
+        begin
+          example.run
+        ensure
+          mapper.route_source_locations = previous
+        end
+      end
+
+      # Rails 7.1+ records where a route was drawn; older runtimes expose nothing.
+      def runtime_locates_routes?
+        ActionDispatch::Journey::Route.method_defined?(:source_location)
+      end
+
+      def draw(main, drawn = nil)
+        write_file('config/routes.rb', "Rails.application.routes.draw do\n#{main}end\n")
+        drawn ? write_file('config/routes/admin.rb', drawn) : delete_file('config/routes/admin.rb')
+        Rails.application.reload_routes!
+        %w[config/routes.rb config/routes/admin.rb]
+      end
+
+      it 'tracks draw files, their routes and route lines through edits and removal' do
+        index = run_sequence([
+                               lambda {
+                                 draw("  resources :posts, only: %i[index show]\n  draw(:admin)\n",
+                                      "resources :comments, only: [:index]\n")
+                               },
+                               lambda {
+                                 draw("  resources :posts, only: %i[index show]\n  draw(:admin)\n",
+                                      "# moved down a line\nresources :comments, only: %i[index show]\n")
+                               },
+                               -> { draw("\n  resources :posts, only: %i[index]\n") }
+                             ])
+
+        expect(unit_of(index, 'route_file', 'config/routes/admin.rb')).to be_nil
+        root_file = unit_of(index, 'route_file', 'config/routes.rb')
+        expect(root_file.dig('metadata',
+                             'declarations')).to eq([{ 'line' => 3, 'method' => 'resources', 'argument' => 'posts' }])
+        route = unit_of(index, 'route', 'GET /posts')
+        expect(root_file.dig('metadata', 'source_locations')).to eq(runtime_locates_routes?)
+        if runtime_locates_routes?
+          expect(route.fetch('file_path')).to eq('config/routes.rb')
+          expect(route.dig('metadata', 'line_number')).to eq(3)
+          expect(root_file.dig('metadata', 'routes')).to eq(['GET /posts'])
+          expect(reverse_edges(index, 'config/routes.rb')).to include('GET /posts')
+        else
+          expect(route['file_path']).to be_nil
+        end
+      end
+
+      it 'locates routes in a draw file while it exists' do
+        draw("  draw(:admin)\n", "resources :comments, only: [:index]\n")
+        index = full_extraction
+
+        admin = unit_of(index, 'route_file', 'config/routes/admin.rb')
+        expect(admin.dig('metadata', 'declarations').map { |entry| entry['method'] }).to eq(%w[resources])
+        expect(unit_of(index, 'route_file', 'config/routes.rb').fetch('dependencies'))
+          .to include('type' => 'route_file', 'target' => 'config/routes/admin.rb', 'via' => 'draw')
+        expect(admin.dig('metadata', 'source_locations')).to eq(runtime_locates_routes?)
+        next unless runtime_locates_routes?
+
+        expect(admin.dig('metadata', 'routes')).to eq(['GET /comments'])
+        expect(unit_of(index, 'route', 'GET /comments').fetch('file_path')).to eq('config/routes/admin.rb')
+      end
     end
   end
 

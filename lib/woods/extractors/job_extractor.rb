@@ -377,6 +377,7 @@ module Woods
         deps = scan_model_dependencies(source)
         deps.concat(scan_service_dependencies(source))
         deps.concat(scan_mailer_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
 
         # Job-to-job dependencies with specific :job_enqueue via and self-reference exclusion
         extract_enqueued_jobs(source, current_class_name).each do |job_name|

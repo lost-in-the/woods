@@ -46,7 +46,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
   it 'rejects a drifted count in current public documentation' do
     documentation_path = File.join(root, 'docs/README.md')
     original = File.read(documentation_path, encoding: Encoding::UTF_8)
-    changed = original.sub('36 extractors', '37 extractors')
+    changed = original.sub(/\b(\d+) extractors\b/) { "#{Regexp.last_match(1).to_i + 1} extractors" }
     expect(changed).not_to eq(original)
 
     allow(surface_inventory).to receive(:read_utf8).with(Pathname.new(documentation_path)).and_return(changed)

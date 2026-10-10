@@ -153,7 +153,8 @@ module Woods
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
-                :unclaimed_ruby_paths, :graphql_document_paths
+                :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
+                :settings_readers
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -238,6 +239,11 @@ module Woods
       @unclaimed_ruby_paths = ['app/**/*.rb'].freeze
       # Globs GraphQLOperationExtractor scans for client operation documents.
       @graphql_document_paths = GraphQLDocumentPaths::DEFAULT
+      # Globs ConfigFileExtractor indexes as config_file units. See the setter.
+      @config_file_paths = %w[config/*.yml config/**/*.yml app/data/**/*.yml].freeze
+      @config_file_values = false
+      # Settings constants whose reads link to a config_file unit. See the setter.
+      @settings_readers = [].freeze
     end
 
     def embedding_model=(value)
@@ -508,6 +514,57 @@ module Woods
       @graphql_document_paths = value.map { |glob| glob.dup.freeze }.freeze
     end
 
+    # Root-relative globs {Woods::Extractors::ConfigFileExtractor} indexes as
+    # `config_file` units. Only `.yml` and `.yaml` matches are read.
+    # `config/locales` belongs to the i18n extractor, and secret-bearing files
+    # (`credentials*`, `secrets*`, `*.enc`, `*.key`, `config/credentials/`) are
+    # never opened, whatever the globs say.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.config_file_paths = ['config/*.yml', 'config/settings/**/*.yml']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def config_file_paths=(value)
+      raise ConfigurationError, "config_file_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index, 'config_file_paths') }
+      @config_file_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Whether `config_file` units store leaf values next to their key paths.
+    # Off by default: only key paths are published. When on, a value under a
+    # credential-named key, a credential-shaped value and ERB source are still
+    # replaced by a marker.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless +value+ is true or false
+    def config_file_values=(value)
+      validate_boolean!('config_file_values', value)
+      @config_file_values = value
+    end
+
+    # Settings constants built from a YAML file. A read through one
+    # (`Settings.payments.api_host`, `Settings[:payments]`) adds a
+    # `reads_config` edge from the reading unit to that file's unit.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+    #
+    # @param value [Array<Hash>] entries with a `constant` name and a root-relative `file`
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def settings_readers=(value)
+      raise ConfigurationError, "settings_readers must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      @settings_readers = value.each_with_index.map { |entry, index| settings_reader(entry, index) }.freeze
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -579,10 +636,29 @@ module Woods
     end
 
     # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
-    def validate_relative_glob!(glob, index)
+    def validate_relative_glob!(glob, index, name = 'unclaimed_ruby_paths')
       return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') && !glob.split('/').include?('..')
 
-      raise ConfigurationError, "unclaimed_ruby_paths[#{index}] must be a relative glob, got #{glob.inspect}"
+      raise ConfigurationError, "#{name}[#{index}] must be a relative glob, got #{glob.inspect}"
+    end
+
+    SETTINGS_CONSTANT = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
+    private_constant :SETTINGS_CONSTANT
+
+    # @return [Hash] a frozen `{ constant:, file: }` entry
+    # @raise [ConfigurationError] unless the entry names a constant and a root-relative file
+    def settings_reader(entry, index)
+      label = "settings_readers[#{index}]"
+      raise ConfigurationError, "#{label} must be a Hash, got #{entry.inspect}" unless entry.is_a?(Hash)
+
+      constant = entry[:constant] || entry['constant']
+      file = entry[:file] || entry['file']
+      unless constant.is_a?(String) && SETTINGS_CONSTANT.match?(constant)
+        raise ConfigurationError, "#{label} constant must be a constant name, got #{constant.inspect}"
+      end
+
+      validate_relative_glob!(file, index, 'settings_readers file')
+      { constant: constant.delete_prefix('::').freeze, file: file.dup.freeze }.freeze
     end
 
     def validate_boolean!(name, value)

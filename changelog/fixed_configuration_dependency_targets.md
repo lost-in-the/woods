@@ -1,0 +1,1 @@
+- Record Gemfile declarations as Prism-parsed gem metadata instead of dependency edges, and restrict configuration constant edges to application-owned source.

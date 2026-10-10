@@ -392,9 +392,10 @@ automatically.
 | `app/views/**/*.erb` | view_templates, caching |
 | `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates, caching |
 | `config/locales/**/*.yml` | i18n |
-| `config/initializers`, `config/environments` | configurations |
+| `config/initializers`, `config/environments`, `config/deploy`, `db/seeds`, and `Gemfile`, `Rakefile`, `config/boot.rb`, `config/environment.rb`, `config/importmap.rb`, `config/deploy.rb`, `db/seeds.rb` | configurations |
+| YAML under `config.config_file_paths` (default `config/**/*.yml`, `app/data/**/*.yml`; never `config/locales` or a secret-bearing file) | config_files |
 | `db/migrate/*.rb` (top level only) | migrations |
-| `lib/**/*.rb` (outside `tasks/`, `generators/`) | libs |
+| `lib/**/*.rb` (outside `tasks/` and generator templates) | libs |
 | `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
 
 A path can match several rules, `app/policies` is claimed by both
@@ -411,7 +412,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | Trigger | Re-runs |
 |---|---|
 | `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task) |
-| `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
+| `config/routes.rb`, `config/routes/**` | routes (route units and the `route_file` unit of each draw file), engines, **and** controllers, mailers, components, view components, view templates |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
@@ -645,7 +646,7 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths` | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |

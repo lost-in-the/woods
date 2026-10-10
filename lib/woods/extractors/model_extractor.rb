@@ -779,6 +779,7 @@ module Woods
           deps.concat(scan_service_dependencies(source))
           deps.concat(scan_mailer_dependencies(source))
           deps.concat(scan_job_dependencies(source))
+          deps.concat(scan_config_dependencies(source))
 
           # Other models (direct references in code, not already captured via association)
           scan_model_dependencies(source).each do |dep|

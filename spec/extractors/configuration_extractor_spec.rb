@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
 require 'active_support/core_ext/object/blank'
 require 'woods/extractors/configuration_extractor'
 
@@ -209,31 +210,38 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
   describe 'dependency extraction' do
     it 'all dependencies have :via key' do
       path = create_file('config/initializers/devise.rb', <<~RUBY)
+        config_for(:settings)
         Devise.setup do |config|
           config.mailer_sender = 'noreply@example.com'
         end
       RUBY
 
       unit = described_class.new.extract_configuration_file(path)
+      expect(unit.dependencies).not_to be_empty
       unit.dependencies.each do |dep|
         expect(dep).to have_key(:via), "Dependency #{dep.inspect} missing :via key"
       end
     end
 
-    it 'detects gem dependencies from configuration' do
-      path = create_file('config/initializers/devise.rb', <<~RUBY)
-        Devise.setup do |config|
+    it 'keeps configuration edges to application-owned constants' do
+      stub_const('WoodsConfigFixture', Module.new)
+      load create_file('app/lib/config_target.rb', 'module WoodsConfigFixture::AppConfig; end')
+      path = create_file('config/initializers/app_config.rb', <<~RUBY)
+        WoodsConfigFixture::AppConfig.setup do |config|
           config.mailer_sender = 'noreply@example.com'
         end
       RUBY
 
       unit = described_class.new.extract_configuration_file(path)
       gem_deps = unit.dependencies.select { |d| d[:type] == :gem }
-      expect(gem_deps.first[:target]).to eq('Devise')
+      expect(gem_deps.first[:target]).to eq('WoodsConfigFixture::AppConfig')
       expect(gem_deps.first[:via]).to eq(:configuration)
     end
 
     it 'detects service dependencies' do
+      stub_const('NotificationService', Class.new)
+      location = create_file('app/services/notification_service.rb', '# application service')
+      allow(Object).to receive(:const_source_location).with('NotificationService').and_return([location, 1])
       path = create_file('config/initializers/custom.rb', <<~RUBY)
         NotificationService.configure do |config|
           config.enabled = true
@@ -243,6 +251,224 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
       unit = described_class.new.extract_configuration_file(path)
       service_deps = unit.dependencies.select { |d| d[:type] == :service }
       expect(service_deps.first[:target]).to eq('NotificationService')
+    end
+  end
+
+  # ── Boot, seed and root files ───────────────────────────────────────
+
+  describe 'boot, seed and root files' do
+    def config_units
+      described_class.new.extract_all.reject { |unit| unit.identifier == 'BehavioralProfile' }
+    end
+
+    it 'extracts each file with its kind' do
+      {
+        'config/boot.rb' => "require 'bundler/setup'\n",
+        'config/environment.rb' => "require_relative 'application'\nRails.application.initialize!\n",
+        'config/importmap.rb' => "pin 'application'\n",
+        'config/deploy.rb' => "set :application, 'ledger'\n",
+        'config/deploy/production.rb' => "server 'ledger.example'\n",
+        'db/seeds.rb' => "Widget.create!(name: 'seed')\n",
+        'db/seeds/widgets.rb' => "Widget.create!(name: 'nested')\n",
+        'Gemfile' => "source 'https://rubygems.org'\ngem 'rails'\n",
+        'Rakefile' => "require_relative 'config/application'\nRails.application.load_tasks\n"
+      }.each { |relative, source| create_file(relative, source) }
+
+      kinds = config_units.to_h { |unit| [unit.identifier, unit.metadata[:config_type]] }
+
+      expect(kinds).to eq(
+        'boot.rb' => 'boot', 'environment.rb' => 'environment', 'importmap.rb' => 'importmap',
+        'deploy.rb' => 'deploy', 'deploy/production.rb' => 'deploy',
+        'db/seeds.rb' => 'seeds', 'db/seeds/widgets.rb' => 'seeds', 'Gemfile' => 'gemfile', 'Rakefile' => 'rakefile'
+      )
+    end
+
+    it 'returns units in a stable order with initializers and environments first' do
+      %w[config/initializers/b.rb config/boot.rb Gemfile config/environments/test.rb db/seeds.rb].each do |relative|
+        create_file(relative, "# #{relative}\n")
+      end
+
+      expect(config_units.map(&:identifier)).to eq(
+        %w[initializers/b.rb environments/test.rb Gemfile boot.rb db/seeds.rb]
+      )
+    end
+
+    it 'leaves the route file, the application file and other config Ruby alone' do
+      create_file('config/puma.rb', "threads 1, 5\n")
+      create_file('config/routes.rb', "Rails.application.routes.draw {}\n")
+      create_file('config/application.rb', "module Ledger; class Application < Rails::Application; end; end\n")
+      create_file('config/routes/admin.rb', "resources :widgets\n")
+
+      expect(config_units).to eq([])
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'config/routes.rb'))).to be_nil
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'config/application.rb'))).to be_nil
+    end
+
+    it 'ignores nested config directories it does not own, and non-Ruby files' do
+      create_file('config/locales/en.rb', "{ en: {} }\n")
+      create_file('config/settings.yml', "a: 1\n")
+      create_file('lib/widget.rb', "class Widget; end\n")
+
+      expect(config_units).to eq([])
+      expect(described_class.new.extract_configuration_file(File.join(tmp_dir, 'lib/widget.rb'))).to be_nil
+    end
+
+    it 'records Gemfile declarations as metadata without gem-name edges' do
+      path = create_file('Gemfile', <<~RUBY)
+        source 'https://rubygems.org'
+        gem 'rails', '~> 8.0'
+        gem "sidekiq"
+        # gem 'commented'
+        group :test do
+          gem('rspec-rails')
+        end
+      RUBY
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.metadata[:gem_references]).to eq(%w[rails sidekiq rspec-rails])
+      expected = [
+        { name: 'rails', requirement: '~> 8.0', groups: ['default'], source: nil },
+        { name: 'sidekiq', requirement: nil, groups: ['default'], source: nil },
+        { name: 'rspec-rails', requirement: nil, groups: ['test'], source: nil }
+      ]
+      expect(unit.metadata[:gems]).to eq(expected)
+      expect(unit.dependencies).to be_empty
+    end
+
+    it 'parses multiline gems, nested groups, source blocks, and path/git sources with Prism' do
+      path = create_file('Gemfile', <<~RUBY)
+        # gem 'commented'
+        text = "gem 'in-a-string'"
+        source 'https://rubygems.org' do
+          group :development, :test do
+            gem(
+              'debug-tool',
+              '>= 1', '< 3',
+              groups: [:ci, :test]
+            )
+            group :tools do
+              gem 'nested', group: :ci, path: 'vendor/nested'
+            end
+          end
+        end
+        git 'https://example.invalid/tool' do
+          gem 'from-git'
+          gem 'override', path: 'vendor/override'
+        end
+        path 'vendor/local' do
+          gem 'from-path', git: 'https://example.invalid/override'
+        end
+        gem 'dynamic-version', ENV.fetch('GEM_VERSION')
+        gem ENV.fetch('GEM_NAME')
+        other.gem 'not-a-declaration'
+        raise 'must never execute the Gemfile'
+      RUBY
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expected = [
+        { name: 'debug-tool', requirement: '>= 1, < 3', groups: %w[development test ci], source: nil },
+        { name: 'nested', requirement: nil, groups: %w[development test tools ci], source: 'path' },
+        { name: 'from-git', requirement: nil, groups: ['default'], source: 'git' },
+        { name: 'override', requirement: nil, groups: ['default'], source: 'path' },
+        { name: 'from-path', requirement: nil, groups: ['default'], source: 'git' },
+        { name: 'dynamic-version', requirement: nil, groups: ['default'], source: nil }
+      ]
+      expect(unit.metadata[:gems]).to eq(expected)
+      expect(unit.dependencies).to be_empty
+    end
+
+    %w[config/initializers/ownership.rb config/deploy.rb Gemfile].each do |relative|
+      it "excludes lowercase and gem-owned references from #{relative}, preserving app and config-file edges" do
+        stub_const('WoodsConfigFixture', Module.new)
+        load create_file('app/lib/config_service.rb', 'class WoodsConfigFixture::AppService; end')
+        load create_file('vendor/bundle/gems/fixture/lib/config.rb', <<~RUBY)
+          module WoodsConfigFixture::GemConfig; end
+          class WoodsConfigFixture::GemService; end
+        RUBY
+        path = create_file(relative, <<~RUBY)
+          application.configure
+          WoodsConfigFixture::GemConfig.configure
+          WoodsConfigFixture::GemService.call
+          WoodsConfigFixture::AppService.configure
+          config_for(:settings)
+        RUBY
+
+        unit = described_class.new.extract_configuration_file(path)
+
+        expect(unit.dependencies.map { |edge| edge[:target] }).to contain_exactly(
+          'WoodsConfigFixture::AppService', 'WoodsConfigFixture::AppService', 'config/settings.yml'
+        )
+        expect(unit.dependencies).to include(type: :gem, target: 'WoodsConfigFixture::AppService', via: :configuration)
+      end
+    end
+
+    it 'scans a seed file for the usual dependencies' do
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/\bWidget\b/)
+      allow(Object).to receive(:const_source_location).and_call_original
+      %w[WidgetSeedService Widget SeedJob].each do |name|
+        location = create_file("app/lib/#{name}.rb", '# application constant')
+        allow(Object).to receive(:const_source_location).with(name).and_return([location, 1])
+      end
+      path = create_file('db/seeds.rb', "WidgetSeedService.call\nWidget.create!(name: 'seed')\nSeedJob.perform_later\n")
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.namespace).to eq('seeds')
+      expect(unit.source_code).to include('Type: seeds', 'WidgetSeedService.call')
+      expect(unit.dependencies).to include({ type: :service, target: 'WidgetSeedService', via: :code_reference },
+                                           { type: :model, target: 'Widget', via: :code_reference },
+                                           { type: :job, target: 'SeedJob', via: :code_reference })
+    end
+
+    it 'keeps the service-only scan for initializers' do
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/\bWidget\b/)
+      location = create_file('app/services/widget_service.rb', '# application service')
+      allow(Object).to receive(:const_source_location).with('WidgetService').and_return([location, 1])
+      path = create_file('config/initializers/widgets.rb', "Widget.preload\nWidgetService.call\n")
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.dependencies.map { |edge| edge[:type] }).to eq([:service])
+    end
+
+    it 'redacts credential-shaped text in the published source' do
+      gemfile = create_file('Gemfile', "source 'https://ledger:plaintext-marker@gems.example'\ngem 'rails'\n")
+      initializer = create_file('config/initializers/ledger.rb', "Ledger.api_key = 'sk_live_#{'a1B2' * 8}'\n")
+      extractor = described_class.new
+
+      published = [gemfile, initializer].map { |path| JSON.generate(extractor.extract_configuration_file(path).to_h) }
+
+      expect(published.join).not_to include('plaintext-marker')
+      expect(published.join).not_to include('sk_live_')
+      expect(published.first).to include('gems.example')
+    end
+
+    it 'refuses a boot or root file that resolves outside the application root' do
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'boot.rb'), "PLAINTEXT_MARKER = 1\n")
+      %w[Gemfile config/boot.rb db/seeds/extra.rb].each do |relative|
+        FileUtils.mkdir_p(File.dirname(File.join(tmp_dir, relative)))
+        File.symlink(File.join(outside, 'boot.rb'), File.join(tmp_dir, relative))
+      end
+      extractor = described_class.new
+
+      expect(config_units).to eq([])
+      expect(extractor.extract_configuration_file(File.join(tmp_dir, 'Gemfile'))).to be_nil
+      expect(extractor.extract_configuration_file(File.join(tmp_dir, 'config/../../x/Gemfile'))).to be_nil
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+
+    it 'answers ownership from the path alone' do
+      owned = %w[config/initializers/a.rb config/environments/test.rb config/boot.rb config/deploy/x.rb
+                 db/seeds/a/b.rb Gemfile Rakefile config/importmap.rb config/deploy.rb]
+      unowned = %w[config/puma.rb config/routes.rb config/application.rb config/routes/admin.rb config/settings.yml
+                   config/locales/en.rb lib/tasks/a.rb Gemfile.lock db/schema.rb app/models/widget.rb]
+
+      expect(owned.select { |path| described_class.configuration_path?(path) }).to eq(owned)
+      expect(unowned.select { |path| described_class.configuration_path?(path) }).to eq([])
     end
   end
 end

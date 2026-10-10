@@ -225,7 +225,7 @@ does not guarantee a speedup. See the [incremental contract](INCREMENTAL_EXTRACT
 
 **Symptom:** You expect state machines, events, decorators, or other unit types but they don't appear in the output directory.
 
-**Cause:** All 36 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
+**Cause:** All 37 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
 
 - The expected directory doesn't exist (e.g., no `app/decorators/` for decorators)
 - The required gem isn't installed (e.g., `aasm` or `state_machines` for state machine extraction)
