@@ -48,6 +48,8 @@ require_relative 'extractors/decorator_extractor'
 require_relative 'extractors/database_view_extractor'
 require_relative 'extractors/graphql_operation_extractor'
 require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/database_table_extractor'
+require_relative 'extractors/external_consumer_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
@@ -144,6 +146,8 @@ module Woods
       events: Extractors::EventExtractor,
       decorators: Extractors::DecoratorExtractor,
       database_views: Extractors::DatabaseViewExtractor,
+      database_tables: Extractors::DatabaseTableExtractor,
+      external_consumers: Extractors::ExternalConsumerExtractor,
       caching: Extractors::CachingExtractor,
       factories: Extractors::FactoryExtractor,
       test_mappings: Extractors::TestMappingExtractor,
@@ -191,6 +195,8 @@ module Woods
       event: :events,
       decorator: :decorators,
       database_view: :database_views,
+      database_table: :database_tables,
+      external_consumer: :external_consumers,
       caching: :caching,
       factory: :factories,
       test_mapping: :test_mappings,
@@ -347,6 +353,11 @@ module Woods
       # than of each file independently: dispatching db/views/foo_v01.sql to
       # the per-file method would index a version a full extraction drops.
       database_views: :database_view,
+      # Table units are a function of the live schema and of which models
+      # claim each table; declared consumers are a function of the
+      # declaration. Neither has a per-file entry point.
+      database_tables: :database_table,
+      external_consumers: :external_consumer,
       # Framework/gem sources are a function of the installed dependency set,
       # so `Gemfile.lock` is their trigger path (#169). Before this the only
       # incremental writer was `woods:extract_framework`, which hand-wrote
@@ -389,6 +400,13 @@ module Woods
       view_components
       view_templates
     ].freeze
+
+    # Extractors that resolve table names through the live table catalog, and
+    # so go stale when the table set or a table's owning model changes even
+    # though none of their own files did. Re-run wholesale with the tables.
+    #
+    # @return [Array<Symbol>] extractor keys
+    TABLE_CONSUMER_EXTRACTORS = %i[migrations database_views external_consumers].freeze
 
     # Payload artifacts that live at the top of a payload directory rather
     # than inside a per-type directory. Used when seeding a payload from a
@@ -730,6 +748,7 @@ module Woods
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
 
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
+      known += TABLE_CONSUMER_EXTRACTORS if known.include?(:database_tables)
       known.uniq!
 
       prepare_incremental_run(operation: 'refresh')
@@ -738,6 +757,7 @@ module Woods
         acc.merge(replace_type_wholesale(key, affected_types))
       end
 
+      touched.merge(reconcile_model_table_edges(affected_types)) if known.include?(:database_tables)
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
@@ -3447,15 +3467,48 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
+      keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
       # A routes re-run replaces every controller, and a flow document
       # carries the route itself, which no dependency edge connects to the
       # controller. Nothing about that is reachable by a graph walk, so the
       # run drops its flow scope and reassembles every touched controller.
       @flow_scope = nil if keys.include?(:routes)
 
-      keys.each_with_object(Set.new) do |key, touched|
-        touched.merge(replace_type_wholesale(key, affected_types))
+      touched = keys.each_with_object(Set.new) do |key, acc|
+        acc.merge(replace_type_wholesale(key, affected_types))
       end
+      touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
+      touched
+    end
+
+    # Re-extract the models whose table edge no longer matches the live
+    # schema: a loaded model whose table was just created, dropped or moved
+    # to a qualified identifier. A model's columns and schema header move
+    # with the same event, so the whole unit is re-derived.
+    #
+    # Only models whose edge disagrees are touched. Re-running every model
+    # with the tables would make each `app/models` edit cost a full model
+    # extraction.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers re-extracted
+    def reconcile_model_table_edges(affected_types)
+      extractor = extractor_for(:models)
+      return Set.new unless extractor.respond_to?(:discoverable_classes)
+
+      catalog = Extractors::TableCatalog.from_runtime
+      classes = extractor.discoverable_classes.to_h { |klass| [klass.name, klass] }
+      touched = @dependency_graph.units_of_type(:model).sort.each_with_object(Set.new) do |identifier, moved|
+        klass = classes[identifier]
+        next unless klass
+
+        current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
+        next if current == Array(catalog.for_model(klass)&.identifier)
+
+        moved.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
+      end
+      Rails.logger.info "[Woods] Model table edges reconciled: #{touched.size} model(s) re-extracted"
+      touched
     end
 
     # Replace every unit an extractor owns with a fresh extraction.

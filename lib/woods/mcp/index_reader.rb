@@ -35,7 +35,7 @@ module Woods
         concerns routes middleware i18n pundit_policies configurations
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
-        database_views caching factories test_mappings rails_source
+        database_views database_tables external_consumers caching factories test_mappings rails_source
         poros libs packages graphql_operations config_files ruby_classes ruby_modules ruby_methods ruby_files
       ].freeze
 

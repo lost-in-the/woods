@@ -82,6 +82,13 @@ RSpec.describe Woods::InputRules do
     expect(File.read(generated)).to eq(Woods::Hooks::RuleProjection.new.render)
   end
 
+  it 'projects no rule that has no path surface, and names the one it leaves to the daemon' do
+    rendered = Woods::Hooks::RuleProjection.new.render
+
+    expect(rendered).not_to include('if { { false; }; }; then')
+    expect(rendered).to include('# external_consumers: the declared file is configuration')
+  end
+
   it 'agrees with the portable predicate for every authoritative rule and near misses' do
     dispatcher_rules = Woods::PathDispatcher.runtime_rules + Woods::PathDispatcher.file_rules +
                        Woods::PathDispatcher.whole_app_rules

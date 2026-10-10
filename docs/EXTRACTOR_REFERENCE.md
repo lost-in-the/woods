@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **37 extractor classes** producing **42 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **39 extractor classes** producing **44 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 37 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 42 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 39 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 44 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **37 extractor classes** producing **42 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 37 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 39 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -961,7 +961,11 @@ expanded mailer and schedule identities in an existing index.
 - Scans `db/migrate/*.rb`
 - Extracts: tables created/dropped/modified, columns added/removed, indexes, references
 - Risk indicators: data migrations (manual SQL or bulk updates), irreversible operations (`remove_column` without type), `execute` calls with raw SQL
-- Rails internal tables (`schema_migrations`, `active_storage_blobs`, etc.) are excluded from model dependency links
+- **Table edges resolve against the live schema.** Every table a migration creates, alters, drops or references gets a `via: :migrates` edge to that table's `database_table` unit. A model edge (`via: :table_name` for a changed table, `via: :reference` for a referenced one) is kept only when a model owns the table today, and it names that owner. No class name is derived from a table name, so a migration for a renamed or removed model no longer carries a dangling model edge.
+- A named table the live schema does not have (dropped or renamed since) gets no edge and is listed in `metadata[:tables_unresolved]`. Reference and foreign key targets are in `metadata[:tables_referenced]`.
+- Table names are read as symbols or strings, with or without parentheses. `create_join_table`, the second table of `add_foreign_key`, and `to_table:` options are read too.
+- With more than one database, a name resolves to the table of that name in every database that has it.
+- `schema_migrations` and `ar_internal_metadata` are never linked.
 
 **Included in Woods 2.1:** migration identity comes from the actual Ruby
 declaration, with the filename's conventional class name selecting among eligible
@@ -1014,7 +1018,38 @@ namespace.
 - Only extracts the **latest version** of each view (highest `_vNN` suffix)
 - Older versions are skipped
 - Records whether the view is materialized and which tables it references
+- Each source table gets a `via: :view_source` edge to its `database_table` unit, resolved against the live schema. A `via: :table_name` model edge is kept only when a model owns that table today. A source that is not a live table (another view, a dropped table) gets no edge
 - Incremental re-extraction re-runs `DatabaseViewExtractor` wholesale on any `.sql` change under `db/views`, a per-file dispatch could index a version a full extraction drops
+
+---
+
+### DatabaseTableExtractor
+
+**What it captures:** one `database_table` unit per table in the live schema, for every connected database. The connection is asked directly; `db/schema.rb` is never parsed.
+
+**Key details:**
+- Identifier: `table:<name>`. With more than one connected database it is `table:<database>.<name>`
+- `metadata`: `columns` (name, type, SQL type, null, `has_default`; default values are not recorded), `indexes`, `foreign_keys`, `primary_key`, `database`, `model`, `models`, `model_less`
+- `model` is the Active Record class that owns the table, or nil. Inheritance roots own a table; subclasses share it. `model_less: true` marks a table no model owns: a legacy table, another application's table, a join or backup table
+- `schema_migrations` and `ar_internal_metadata` are skipped. Views are not tables and get no unit here
+- Edges: table → table for each foreign key (`via: :foreign_key`). Inbound: model → table (`via: :table`), migration → table (`via: :migrates`), view → table (`via: :view_source`), external consumer → table (`via: :reads_table`, `via: :writes_table`)
+- The unit has no `file_path`. The live schema is its source
+- Table units score zero in PageRank and are left out of the hub, orphan, dead-end and cross-database lists. `graph_analysis.json` lists tables no model reads under `unmodelled_tables`
+- Incremental runs re-run the extractor wholesale, together with migrations, database views and external consumers, when a schema dump, a file under `db/migrate`, or a file under `app/models` changes. A model whose `table` edge then disagrees with the live schema is re-extracted; other models are left alone. **A schema change applied with no file change needs a full extraction**
+- On Rails 6.0 there is no `connection_db_config`; the database name comes from the pool's connection specification matched against the configured databases. That path is untested in CI
+
+---
+
+### ExternalConsumerExtractor
+
+**What it captures:** other applications that read or write this application's tables, as declared in `config.external_table_consumers` and the optional YAML file named by `config.external_table_consumers_path`.
+
+**Key details:**
+- One `external_consumer` unit per declared application, identifier `external:<name>`, with a `via: :reads_table` edge to each table it reads and a `via: :writes_table` edge to each table it writes (`metadata[:tables_read]`, `metadata[:tables_written]`). `dependents` of a table therefore lists the other application
+- `metadata[:declared]` is always true: these edges are declared, never observed. `declared_in` names the source, `tables_missing` lists declared tables the live schema does not have, and `woods:validate` warns once per such table
+- Emits nothing when nothing is declared
+- A malformed declared file emits no units and is reported as an extractor failure. An incremental run then keeps the previously published consumers
+- Incremental runs re-run the extractor when the declared file changes, and whenever the table extractor re-runs. A change to the in-process setting needs a full extraction
 
 ---
 
@@ -1151,7 +1186,7 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 37 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 39 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -1168,7 +1203,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 42 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file` |
+| `type` | Symbol | Unit category, one of the 44 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

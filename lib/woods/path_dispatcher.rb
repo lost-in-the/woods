@@ -121,8 +121,9 @@ module Woods
     # the dispatcher (one extractor's specs, a resident daemon) still builds
     # them.
     RULE_EXTRACTORS = %w[
-      caching config_file configuration decorator event factory graphql i18n job lib manager package
-      policy pundit rake_task scheduled_job serializer service state_machine validator view_template
+      caching config_file configuration database_table decorator event external_consumer factory graphql i18n
+      job lib manager package policy pundit rake_task scheduled_job serializer service state_machine validator
+      view_template
     ].freeze
 
     class << self
@@ -199,6 +200,22 @@ module Woods
       # @return [Boolean]
       def config_file_path?(relative_path)
         Woods::Extractors::ConfigFileExtractor.config_file_path?(relative_path)
+      end
+
+      # Can this path change the table set or a table's owning model?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def database_schema_path?(relative_path)
+        Woods::Extractors::DatabaseTableExtractor.trigger_path?(relative_path)
+      end
+
+      # Is this the declared external consumers file?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def external_consumers_path?(relative_path)
+        Woods::Extractors::ExternalConsumerExtractor.trigger_path?(relative_path)
       end
 
       # Runtime-discovered classes have no per-file extractor method.
@@ -365,6 +382,26 @@ module Woods
                         matcher: :graphql_document_path?)]
       end
 
+      # Named predicates, read at call time: the schema-dump globs live with
+      # the table extractor, and the consumers file is configuration. The
+      # directories and exact paths restate the table predicate for the shell
+      # hook projection, which cannot call it.
+      def schema_unit_rules
+        [whole_app_rule(:database_tables, %w[db/migrate app/models],
+                        extensions: %w[.rb], exact_paths: %w[db/schema.rb db/structure.sql],
+                        matcher: :database_schema_path?),
+         whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
+      end
+
+      # Families read from model and schema directories by their own globs.
+      def model_adjacent_rules
+        [whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql])]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -375,12 +412,9 @@ module Woods
           whole_app_rule(:middleware, %w[config/initializers config/environments],
                          exact_paths: %w[config/application.rb Gemfile.lock]),
           scheduled_job_rule,
-          whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
+          *model_adjacent_rules,
           *graphql_operation_rules,
+          *schema_unit_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

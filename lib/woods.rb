@@ -25,6 +25,8 @@ require_relative 'woods/version'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
 require_relative 'woods/graphql_document_paths'
+# Configuration validates declared external table consumers at assignment.
+require_relative 'woods/extractors/external_consumer_declarations'
 # Configuration defaults the cycle caps to the analyzer's own constants.
 require_relative 'woods/graph_analyzer'
 
@@ -154,7 +156,7 @@ module Woods
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
-                :settings_readers
+                :settings_readers, :external_table_consumers, :external_table_consumers_path
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -244,6 +246,9 @@ module Woods
       @config_file_values = false
       # Settings constants whose reads link to a config_file unit. See the setter.
       @settings_readers = [].freeze
+      # Other applications that read this database's tables. See the setters.
+      @external_table_consumers = {}.freeze
+      @external_table_consumers_path = nil
     end
 
     def embedding_model=(value)
@@ -563,6 +568,40 @@ module Woods
       raise ConfigurationError, "settings_readers must be an Array, got #{value.inspect}" unless value.is_a?(Array)
 
       @settings_readers = value.each_with_index.map { |entry, index| settings_reader(entry, index) }.freeze
+    end
+
+    # Other applications that read or write tables in this application's
+    # database, declared so `dependents` of a table shows them. Each entry
+    # becomes an `external_consumer` unit with `reads_table` and
+    # `writes_table` edges to the table units. Plain data only: consumer
+    # name => table names read, or `{ reads: [...], writes: [...] }`.
+    #
+    # @example
+    #   config.external_table_consumers = {
+    #     "storefront" => %w[products orders],
+    #     "public-site" => { reads: %w[products], writes: %w[carts] }
+    #   }
+    #
+    # @param value [Hash{String, Symbol => Array<String, Symbol>, Hash}]
+    # @raise [ConfigurationError] if the declaration is malformed; the previous value is kept
+    def external_table_consumers=(value)
+      @external_table_consumers =
+        Extractors::ExternalConsumerDeclarations.normalize!(value, label: 'external_table_consumers')
+    end
+
+    # A YAML file of the same shape as {#external_table_consumers=}, relative
+    # to Rails.root, merged with it. A change to the file re-runs the
+    # consumers on an incremental extraction, which a change to the
+    # in-process setting cannot do.
+    #
+    # @example
+    #   config.external_table_consumers_path = 'config/woods/external_consumers.yml'
+    #
+    # @param value [String, nil] relative path, or nil for no file
+    # @raise [ConfigurationError] unless nil or a relative path without `..`; the previous value is kept
+    def external_table_consumers_path=(value)
+      @external_table_consumers_path =
+        Extractors::ExternalConsumerDeclarations.normalize_path!(value, label: 'external_table_consumers_path')
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

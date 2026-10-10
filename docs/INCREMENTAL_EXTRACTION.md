@@ -421,6 +421,8 @@ cheap, which is what makes wholesale replacement the right shape.
 | `spec/factories/**`, `test/factories/**` | factories |
 | `db/views/**/*.sql` | database_views |
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`), `app/graphql/**/*.rb` | graphql_operations |
+| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` | database_tables, **and** migrations, database_views, external_consumers |
+| the file named by `external_table_consumers_path` | external_consumers |
 | any `package.yml`, `packwerk.yml` | packages |
 
 Five of these deserve a note:
@@ -445,6 +447,20 @@ Five of these deserve a note:
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
+- **Tables cascade, and follow the database, not the files.** Table units are
+  read from the live schema and from which models claim each table.
+  `TABLE_CONSUMER_EXTRACTORS` (migrations, database views, external consumers)
+  resolve table names through the same catalog, so they re-run with the
+  tables: a model added for a table gives that table's unchanged migration a
+  model edge. The trigger paths are a proxy. **A schema change applied
+  with no file change is not seen; run a full extraction.** Schema dumps are
+  restart inputs, so `woods:incremental` already selects a full extraction for
+  them, and the direct `extract_changed` API refuses them. Models are not
+  re-run wholesale with the tables: after the tables re-run, only a model
+  whose `table` edge disagrees with the live schema (its table was created,
+  dropped, or moved to a qualified identifier) is re-extracted
+  (`Extractor#reconcile_model_table_edges`), which also refreshes its columns
+  and schema header.
 - **Packages don't yet claim their members.** `PackageExtractor` (#280) only
   produces `package` units from `package.yml`; it does not annotate which
   package every other unit belongs to. A pack-resident file-based unit is not
