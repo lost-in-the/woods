@@ -1,0 +1,1 @@
+- `woods:stats` prints `code_reference` edge counts grouped by caller unit type under the dependency graph section, so a host can see what the caller expansion added (#655).
