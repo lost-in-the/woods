@@ -21,6 +21,7 @@ woods_input_action() {
   if [[ "$path" =~ ^config/settings\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings/[^/]+\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml$ ]]; then printf full; return; fi
+  if [[ "$path" =~ ^db/[^/]+_(schema\.rb|structure\.sql)$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^\.env(\..+)?$ ]]; then printf full; return; fi
   local -a declared_roots=()
   IFS=: read -r -a declared_roots <<< "${WOODS_DECLARED_ROOTS:-}"
@@ -178,6 +179,11 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { [[ "$path" == db/schema.rb ]] || [[ "$path" == db/structure.sql ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == db/migrate/* ]] || [[ "$path" == app/models/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  # external_consumers: the declared file is configuration; the Ruby rules handle it
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

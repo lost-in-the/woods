@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **37 extractor classes** producing **42 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **39 extractor classes** producing **44 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 37 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 42 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 39 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 44 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **37 extractor classes** producing **42 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 37 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 39 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -1186,7 +1186,7 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 37 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 39 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
