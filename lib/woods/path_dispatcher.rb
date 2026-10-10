@@ -121,8 +121,9 @@ module Woods
     # the dispatcher (one extractor's specs, a resident daemon) still builds
     # them.
     RULE_EXTRACTORS = %w[
-      caching config_file configuration decorator event factory graphql i18n job lib manager package
-      policy pundit rake_task scheduled_job serializer service state_machine validator view_template
+      caching config_file configuration database_table decorator event external_consumer factory graphql i18n
+      job lib manager package policy pundit rake_task scheduled_job serializer service state_machine validator
+      view_template
     ].freeze
 
     class << self
