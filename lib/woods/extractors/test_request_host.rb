@@ -63,24 +63,38 @@ module Woods
       end
 
       # Resolve the Capybara default from the catalog's support source.
-      # app_host takes precedence over default_host. A literal host wins; an
-      # interpolated host is ignored unless a configured helper's literal
-      # default resolves it. Competing defaults remain unknown. No support
-      # code is executed.
+      # app_host takes precedence over default_host. A literal host wins and
+      # a configured helper's literal argument never cancels it; without a
+      # literal, a lone helper literal is the default. An interpolated host
+      # counts for nothing. Competing defaults remain unknown. No support code
+      # is executed.
       #
       # @param source [String] Ruby source of the test support files
       # @return [String, nil]
       def capybara_subdomain(source)
+        literals, helper_literals = capybara_hosts(source)
+        found = literals.empty? ? helper_literals : literals
+        found.one? ? found.first : nil
+      end
+
+      # Every subdomain the support source can put the Capybara host on: its
+      # literal hosts, widened by configured helpers' literal arguments.
+      #
+      # @param source [String] Ruby source of the test support files
+      # @return [Array<String>]
+      def capybara_subdomains(source)
+        capybara_hosts(source).inject(:|)
+      end
+
+      # @return [Array(Array<String>, Array<String>)] literal host subdomains
+      #   and configured helpers' literal arguments
+      def capybara_hosts(source)
         source = source.each_line.grep_v(/\A[ \t]*#/).join
         configured = source.scan(CAPYBARA_HOST).group_by(&:first)
         hosts = (configured['app_host'] || configured['default_host'] || []).map(&:last)
-        found = hosts.map { |host| subdomain_of(host) }
-        if found.empty? || found.any? { |value| value.include?('#{') }
-          defaults = helper_pattern ? source.scan(helper_pattern).map { |captures| captures.compact.first } : []
-          found = found.reject { |value| value.include?('#{') } + defaults
-        end
-        found = found.uniq
-        found.one? && !found.first.include?('#{') ? found.first : nil
+        literals = hosts.map { |host| subdomain_of(host) }.reject { |value| value.include?('#{') }.uniq
+        helper_literals = helper_pattern ? source.scan(helper_pattern).map { |captures| captures.compact.first } : []
+        [literals, helper_literals.uniq]
       end
 
       # @return [Array<String>] the configured helper names

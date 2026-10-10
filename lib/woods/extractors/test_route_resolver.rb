@@ -95,8 +95,13 @@ module Woods
       def analyze(source)
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
-        hosts = TestRequestHost.specifies_host?(source) ? TestRequestHost.subdomains(source) : default_hosts
-        reachable = TestRequestHost.literal_subdomains(source) | Array(default_hosts)
+        if TestRequestHost.specifies_host?(source)
+          hosts = TestRequestHost.subdomains(source)
+          reachable = TestRequestHost.literal_subdomains(source) | Array(default_hosts)
+        else
+          hosts = default_hosts
+          reachable = support_hosts
+        end
         requests = []
         asserted = []
         source.each_line do |line|
@@ -115,9 +120,18 @@ module Woods
       def default_hosts
         return @default_hosts if defined?(@default_hosts)
 
-        catalog = @support_catalog || TestSupportCatalog.new
-        default = TestRequestHost.capybara_subdomain(catalog.entries.map(&:source).join("\n"))
+        default = TestRequestHost.capybara_subdomain(support_source)
         @default_hosts = default && [default]
+      end
+
+      # Every subdomain the support default can be on: the reachable set of a
+      # file that names no host.
+      def support_hosts
+        @support_hosts ||= TestRequestHost.capybara_subdomains(support_source)
+      end
+
+      def support_source
+        @support_source ||= (@support_catalog || TestSupportCatalog.new).entries.map(&:source).join("\n")
       end
 
       def build_analysis(requests, asserted)
@@ -162,12 +176,30 @@ module Woods
         key = [verb, path, hosts, reachable]
         return @literals[key] if @literals.key?(key)
 
-        matches = @routes.select do |route|
-          route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path) &&
-            reachable?(route, reachable)
+        candidates = @routes.select do |route|
+          route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
         end
+        matches = candidates.select { |route| reachable?(route, reachable) }
         request = "#{verb} #{path}"
-        @literals[key] = hosts && hosts.size > 1 ? decide_each(matches, hosts, request) : decide(matches, hosts&.first, request)
+        @literals[key] = if hosts.nil? then decide_unknown(candidates, matches, request)
+                         elsif hosts.size > 1 then decide_each(matches, hosts, request)
+                         else decide(matches, hosts.first, request)
+                         end
+      end
+
+      # With no known host, dropping unreachable redirects may shorten an
+      # ambiguous list but must never turn it into a decision.
+      #
+      # @return [String, Hash, nil]
+      def decide_unknown(candidates, matches, request)
+        outcome = decide(matches, nil, request)
+        return outcome unless outcome.is_a?(String)
+
+        unfiltered = decide(candidates, nil, request)
+        return outcome if unfiltered == outcome
+
+        listed = unfiltered.is_a?(Hash) ? unfiltered[:candidates] : [unfiltered]
+        { request: request, candidates: (listed | [outcome]).sort }
       end
 
       # A file naming several hosts makes its requests on each of them, so a

@@ -342,6 +342,60 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
         .to eq(['GET /settings [subdomain=old] (redirect)'])
     end
 
+    describe 'a file with no host hint and a configured support helper' do
+      let(:routes) do
+        stub_const('ActionDispatch::Routing::Redirect', Struct.new(:block, :status))
+        redirect = route_double(verb: 'GET', path: '/settings', controller: nil, action: nil,
+                                constraints: { subdomain: 'my' })
+        allow(redirect).to receive(:app).and_return(ActionDispatch::Routing::Redirect.new('/profile', 302))
+        [route_double(verb: 'GET', path: '/settings', controller: 'settings', action: 'show',
+                      constraints: { subdomain: 'app' }), redirect]
+      end
+
+      around do |example|
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.test_subdomain_helpers = ['set_testing_subdomain']
+        example.run
+      ensure
+        Woods.configuration = original
+      end
+
+      before do
+        support_file('spec/support/subdomains.rb', <<~'RUBY')
+          def set_testing_subdomain(sub)
+            Capybara.app_host = "http://#{sub}.example.test:#{port}"
+          end
+        RUBY
+        support_file('spec/support/tenant_host.rb', <<~'RUBY')
+          Capybara.app_host = "http://#{tenant}.example.test"
+        RUBY
+      end
+
+      it 'resolves on the literal default, which helper literals widen but never cancel' do
+        support_file('spec/support/capybara.rb', <<~'RUBY')
+          RSpec.configure { |config| config.before { Capybara.app_host = "http://my.example.test:#{port}" } }
+        RUBY
+        support_file('spec/support/login_helpers.rb',
+                     "module LoginHelpers\n  def login_to_store\n    set_testing_subdomain 'my'\n  end\nend\n")
+        support_file('spec/support/app_helpers.rb', "def visit_app\n  set_testing_subdomain 'app'\nend\n")
+        result = analysis(%(include LoginHelpers\nbefore { login_to_store }\nvisit "/settings"\n))
+
+        expect(result.exercised).to eq(['GET /settings [subdomain=my] (redirect)'])
+        expect(result.ambiguous).to eq([])
+      end
+
+      it 'stays ambiguous when the default is unknown, rather than let filtering pick the plain route' do
+        result = analysis
+
+        expect(result.exercised).to eq([])
+        expect(result.ambiguous).to eq(
+          [{ request: 'GET /settings',
+             candidates: ['GET /settings [subdomain=app]', 'GET /settings [subdomain=my] (redirect)'] }]
+        )
+      end
+    end
+
     it 'prefers a matching subdomain constraint over an earlier unconstrained route' do
       fallback = route_double(verb: 'GET', path: '/settings', controller: 'pages', action: 'show')
       stub_route_set([fallback, *routes], root: root, logger: logger)
