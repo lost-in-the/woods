@@ -18,7 +18,7 @@ module Woods
     # cached by captured HMAC, including candidates whose targets do not yet exist.
     # Runtime lookup is repeated every run: source text alone cannot fingerprint
     # changed ancestors, aliases or lexical shadows in a reloaded application.
-    class Pass
+    class Pass # rubocop:disable Metrics/ClassLength -- keep ownership, policy and edge merging together
       Result = Struct.new(:dependencies, :cache, :paths, keyword_init: true)
 
       # @param root [String, Pathname] application root
@@ -75,7 +75,7 @@ module Woods
           additions = []
           if @policy.caller?(unit['type'])
             base = original_dependencies(unit, key)
-            additions = all_resolved_dependencies(unit) - base
+            additions = all_resolved_dependencies(unit).reject { |edge| pair_present?(base, edge) }
             dependencies[key] = base + additions
           end
           # Target-only units also crossed Inputs' consumption gate. Retain
@@ -138,6 +138,12 @@ module Woods
 
       def reference_paths(unit)
         SourceContributors.paths(unit).map { |path| @inputs.relative(path) }
+      end
+
+      # An extractor may already carry the pair with a guessed type; a second
+      # entry for the same relationship would double count in the graph.
+      def pair_present?(edges, edge)
+        edges.any? { |existing| existing.values_at('target', 'via') == edge.values_at('target', 'via') }
       end
 
       def normalize_edge(edge)

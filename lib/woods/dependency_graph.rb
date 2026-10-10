@@ -1253,6 +1253,11 @@ module Woods
     # serialized before the `{target, via}` migration still load without
     # explicit data conversion.
     #
+    # A (target, via) pair is one relationship however many times a unit
+    # emits it (an extractor's guessed edge beside the verified reference
+    # pass's edge, say). The first occurrence keeps its attributes, so the
+    # reverse index and `dependents` never count a pair twice.
+    #
     # @param edges [Array] Edge entries — either strings or hashes
     # @param strict [Boolean] require hashes for fresh units; legacy loads stay tolerant
     # @return [Array<Hash>] Normalized edges with :target and :via keys
@@ -1261,7 +1266,7 @@ module Woods
 
       return [] unless edges.is_a?(Array)
 
-      edges.map do |edge|
+      normalized = edges.map do |edge|
         raise ArgumentError, 'Fresh graph dependencies must be hashes' if strict && !edge.is_a?(Hash)
 
         if edge.is_a?(String)
@@ -1273,6 +1278,7 @@ module Woods
           { target: edge.to_s, via: nil }
         end
       end
+      normalized.uniq { |edge| [edge[:target], edge[:via]] }
     end
   end
 end

@@ -368,6 +368,17 @@ RSpec.describe Woods::SourceReferences::Pass do
       )
     end
 
+    it 'adds no second (target, via) pair when the extractor already emitted one with a guessed type' do
+      sources['app/services/ledger_totals.rb'] = 'class LedgerTotals; end'
+      stub_const('LedgerTotals', Class.new)
+      units << unit('LedgerTotals', 'app/services/ledger_totals.rb', 'service')
+      guessed = { 'type' => 'model', 'target' => 'LedgerTotals', 'via' => 'code_reference' }
+      units.first['dependencies'] = [guessed]
+      result = run_pass
+      expect(result.dependencies.fetch(caller_key)).to eq([guessed])
+      expect(result.cache['owners'].find { |owner| owner['identifier'] == 'Types::ShipmentType' }['added']).to eq([])
+    end
+
     it 'withdraws the edge when the constant goes away again' do
       sources['app/services/ledger_totals.rb'] = 'class LedgerTotals; end'
       stub_const('LedgerTotals', Class.new)
