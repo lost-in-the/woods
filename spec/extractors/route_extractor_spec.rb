@@ -54,6 +54,13 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(ids).to eq(['GET /users', 'GET /users [subdomain=api]'])
     end
 
+    it 'skips a route whose action is a dynamic path segment, which Rails defaults to index' do
+      stub_routes([build_route(verb: 'GET', path: '/pages/:action', controller: 'pages', action: 'index'),
+                   build_route(verb: 'GET', path: '/pages', controller: 'pages', action: 'index')])
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['GET /pages'])
+    end
+
     it 'does not qualify a route by a path-segment requirement' do
       stub_routes([build_route(verb: 'GET', path: '/users/:id', controller: 'users', action: 'show',
                                constraints: { id: /\d+/ })])
