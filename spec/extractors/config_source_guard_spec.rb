@@ -87,7 +87,7 @@ RSpec.describe Woods::Extractors::ConfigSourceGuard do
     end
 
     {
-      'a webhook URL' => ['set :chat_webhook, "https://hooks.example/services/T0A1B2C3/B0D4E5F6/a1B2c3D4e5F6g7H8i9J0k1L2"',
+      'a webhook URL' => ['set :chat_webhook, "https://hooks.example/T0A1B2C3/B0D4E5F6/a1B2c3D4e5F6g7H8i9J0k1L2"',
                           'set :chat_webhook, "[REDACTED]"'],
       'an encryption key' => ['config.active_record.encryption.primary_key = "EGY8WhulUOXixybod7ZWwMIL68R9o5kC"',
                               'config.active_record.encryption.primary_key = "[REDACTED]"'],
