@@ -47,8 +47,16 @@ record the loaded gem path and exact revision; the development version alone
 does not establish that this change is installed.
 
 After discovery and deduplication, extraction adds `code_reference` relationships
-from models, controllers, services, POROs, library units and concerns to verified,
-indexed class/module targets. It parses original Ruby source and attributes reads
+from every constant-owned unit type to verified, indexed class/module targets.
+The callers are models, controllers, services, POROs, library units, concerns,
+jobs, mailers, components, view components, GraphQL types, mutations, resolvers
+and queries, serializers, decorators, validators, policies, managers and
+channels. Which target types a caller may reference is set by
+[`source_reference_callers`](CONFIGURATION_REFERENCE.md#source-reference-callers);
+by default a component adds no edge to another component and a GraphQL unit adds
+none to another GraphQL unit. A caller whose class is not loaded when the pass
+runs, such as a GraphQL file in an application without graphql-ruby, publishes
+no edge. It parses original Ruby source and attributes reads
 to their declaring owner. Ordinary method bodies, singleton methods and callback
 blocks participate. Comments, plain strings and declaration names do not establish
 references. Rails relationships derived through runtime reflection stay intact.

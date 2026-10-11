@@ -15,6 +15,14 @@ module Woods
     # An incremental run starts from the preceding generation's scope ledger.
     class Session # rubocop:disable Metrics/ClassLength -- per-run consumer ledger and publication coverage
       MAX_ERRORS = 30
+      # Wall clock the publication recheck may spend per visited file and per
+      # hashed byte of the capture it repeats, on top of the scanner default.
+      RECHECK_SECONDS_PER_FILE = 0.05
+      RECHECK_SECONDS_PER_BYTE = 1.0 / (4 * 1024 * 1024)
+      # The scaled budget never drops below the scanner default (small trees
+      # are unchanged) and never exceeds this ceiling: at the file and byte
+      # caps the scaling alone would wait ten minutes on a stuck scan.
+      RECHECK_SECONDS_MAX = 120.0
 
       def initialize(root:, output_dir:, baseline_path:, operation:)
         @root = SourcePathEncoding.expand(root)
@@ -312,7 +320,7 @@ module Woods
       def verify_stability
         return unless @key
 
-        after = scan
+        after = scan(max_seconds: recheck_seconds)
         after.fetch('errors').each { |error| record_error(error) }
         changed_paths(after).first(MAX_ERRORS).each do |path|
           record_error('reason' => 'source_changed_during_extraction', 'path' => path)
@@ -344,8 +352,18 @@ module Woods
         end
       end
 
-      def scan
-        Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @rules).call
+      def scan(**limits)
+        Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @rules, **limits).call
+      end
+
+      # The recheck repeats the capture's work, so its time budget scales with
+      # that work: machine load must not turn an unchanged tree into a refusal.
+      # The file and byte caps still bound the work itself.
+      def recheck_seconds
+        metrics = @snapshot.fetch('metrics', {})
+        files = [metrics['visited_files'].to_i, @snapshot.fetch('files').size].max
+        scaled = (files * RECHECK_SECONDS_PER_FILE) + (metrics['bytes'].to_i * RECHECK_SECONDS_PER_BYTE)
+        scaled.clamp(Scanner::DEFAULT_LIMITS[:max_seconds], RECHECK_SECONDS_MAX)
       end
 
       def unavailable_snapshot(reason)

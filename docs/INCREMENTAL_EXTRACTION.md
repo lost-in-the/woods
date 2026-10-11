@@ -903,6 +903,12 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
+The cache is format 4. It records the
+[caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
+produced its edges. A format 3 cache, or one written under a different
+`source_reference_callers` value, is an incompatible baseline: run one full
+extraction after upgrading and after changing that option.
+
 This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
 source changed outside the selected batch, the writer refuses to combine its old
 runtime facts with references resolved from the new source. For example,

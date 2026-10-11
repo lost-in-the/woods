@@ -32,10 +32,13 @@ RSpec.describe Woods::SourceReferences::Pass do
       'metadata' => { 'git' => { 'commit_count' => 7 } }, 'extracted_at' => 'preserved' }
   end
 
-  def run_pass(baseline: nil, refreshed: [], full: true)
+  let(:policy) { Woods::SourceReferences::CallerPolicy.new }
+  let(:extractor_keys) { { poro: :poros, lib: :lib, model: :models } }
+
+  def run_pass(baseline: nil, refreshed: [], full: true, policy: self.policy)
     described_class.new(root: root, session: session, units: units, baseline: baseline,
-                        refreshed: refreshed, full: full, collector: collector,
-                        extractor_keys: { poro: :poros, lib: :lib, model: :models }).call
+                        refreshed: refreshed, full: full, collector: collector, policy: policy,
+                        extractor_keys: extractor_keys).call
   end
 
   def edge(target = 'RefTarget')
@@ -52,13 +55,58 @@ RSpec.describe Woods::SourceReferences::Pass do
 
   it 'records target-only typed consumption without adding caller dependency rewrites' do
     units.last['type'] = 'component'
-    result = run_pass
+    result = run_pass(policy: Woods::SourceReferences::CallerPolicy.new(component: false))
     expect(result.cache['owners']).to include(include('identifier' => 'RefTarget', 'type' => 'component',
                                                       'added' => []))
     expect(result.dependencies).not_to have_key(%w[component RefTarget])
     expect(Woods::SourceReferences::Cache).to receive(:write).and_call_original
     Dir.mktmpdir do |dir|
       Woods::SourceReferences::Cache.write(File.join(dir, 'cache.json'), result.cache)
+    end
+  end
+
+  it 'records the caller policy in the cache' do
+    expect(run_pass.cache.fetch('callers')).to eq(policy.to_h)
+  end
+
+  it 'requires a rebuild when the caller policy differs from the one that produced the baseline' do
+    initial = run_pass
+    narrowed = Woods::SourceReferences::CallerPolicy.new(poro: %i[lib])
+    expect { run_pass(baseline: initial.cache, full: false, policy: narrowed) }.to raise_error(
+      Woods::SourceReferences::RebuildRequired, /source_reference_callers changed.*woods:extract/m
+    )
+  end
+
+  it 'rebuilds from a full extraction whatever policy the baseline recorded' do
+    initial = run_pass
+    narrowed = Woods::SourceReferences::CallerPolicy.new(poro: %i[lib])
+    result = run_pass(baseline: initial.cache, full: true, policy: narrowed)
+    expect(result.cache.fetch('callers')).to eq(narrowed.to_h)
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+  end
+
+  context 'with a caller policy that narrows targets' do
+    let(:policy) { Woods::SourceReferences::CallerPolicy.new(poro: %i[lib]) }
+
+    it 'drops a verified edge to a target type the caller may not reference' do
+      result = run_pass
+      expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+      expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => []))
+    end
+
+    it 'keeps a verified edge to a permitted target type' do
+      units.last['type'] = 'lib'
+      expect(run_pass.dependencies.fetch(%w[poro RefCaller])).to eq([edge.merge('type' => 'lib')])
+    end
+  end
+
+  context 'with a caller policy that excludes the caller type' do
+    let(:policy) { Woods::SourceReferences::CallerPolicy.new(poro: false) }
+
+    it 'leaves the unit out of the dependency rewrites and keeps its ownership record' do
+      result = run_pass
+      expect(result.dependencies).to be_empty
+      expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => []))
     end
   end
 
@@ -190,6 +238,182 @@ RSpec.describe Woods::SourceReferences::Pass do
         { 'type' => 'poro', 'target' => 'LedgerRate', 'via' => 'code_reference' },
         { 'type' => 'service', 'target' => 'ShipmentPlanner', 'via' => 'code_reference' }
       )
+    end
+  end
+
+  context 'with component units as callers' do
+    let(:sources) do
+      {
+        'app/views/shipments/summary_view.rb' => <<~RUBY,
+          module Shipments
+            class SummaryView < ApplicationView
+              def view_template
+                render Ui::BadgeComponent.new(label: Shipment.count)
+                plain ShipmentQuote.for(@shipment).total
+              end
+            end
+          end
+        RUBY
+        'app/components/ledger_row_component.rb' => <<~RUBY,
+          class LedgerRowComponent < ApplicationView
+            def before_render = @policy = LedgerPolicy.new(@user)
+            def call = Shipments::SummaryView.new
+          end
+        RUBY
+        'app/views/application_view.rb' => 'class ApplicationView; end',
+        'app/components/ui/badge_component.rb' => 'module Ui; class BadgeComponent < ApplicationView; end; end',
+        'app/models/shipment.rb' => 'class Shipment; end',
+        'app/services/shipment_quote.rb' => 'class ShipmentQuote; end',
+        'app/policies/ledger_policy.rb' => 'class LedgerPolicy; end'
+      }
+    end
+    let(:units) do
+      [unit('Shipments::SummaryView', 'app/views/shipments/summary_view.rb', 'component'),
+       unit('LedgerRowComponent', 'app/components/ledger_row_component.rb', 'view_component'),
+       unit('ApplicationView', 'app/views/application_view.rb', 'component'),
+       unit('Ui::BadgeComponent', 'app/components/ui/badge_component.rb', 'component'),
+       unit('Shipment', 'app/models/shipment.rb', 'model'),
+       unit('ShipmentQuote', 'app/services/shipment_quote.rb', 'service'),
+       unit('LedgerPolicy', 'app/policies/ledger_policy.rb', 'policy')]
+    end
+
+    before do
+      base = stub_const('ApplicationView', Class.new)
+      stub_const('Shipments', Module.new)
+      stub_const('Ui', Module.new)
+      %w[Shipments::SummaryView Ui::BadgeComponent LedgerRowComponent].each do |name|
+        stub_const(name, Class.new(base))
+      end
+      %w[Shipment ShipmentQuote LedgerPolicy].each { |name| stub_const(name, Class.new) }
+    end
+
+    it 'links a component to the model and service it reads, and to no other component' do
+      expect(run_pass.dependencies.fetch(%w[component Shipments::SummaryView])).to eq(
+        [{ 'type' => 'model', 'target' => 'Shipment', 'via' => 'code_reference' },
+         { 'type' => 'service', 'target' => 'ShipmentQuote', 'via' => 'code_reference' }]
+      )
+    end
+
+    it 'links a view component to the policy it constructs, and to no other component' do
+      expect(run_pass.dependencies.fetch(%w[view_component LedgerRowComponent])).to eq(
+        [{ 'type' => 'policy', 'target' => 'LedgerPolicy', 'via' => 'code_reference' }]
+      )
+    end
+
+    it 'keeps the extractor-owned model edge beside the verified one' do
+      scanned = { 'type' => 'model', 'target' => 'Shipment', 'via' => 'data_dependency' }
+      units.first['dependencies'] = [scanned]
+      result = run_pass
+      expect(result.dependencies.fetch(%w[component Shipments::SummaryView])).to start_with(scanned)
+      owner = result.cache['owners'].find { |entry| entry['identifier'] == 'Shipments::SummaryView' }
+      expect(owner['added'].map { |added| added['target'] }).to eq(%w[Shipment ShipmentQuote])
+    end
+
+    it 'publishes no edge from a component whose class is not loaded' do
+      hide_const('Shipments::SummaryView')
+      expect(run_pass.dependencies.fetch(%w[component Shipments::SummaryView])).to eq([])
+    end
+
+    it 'publishes component-to-component edges when the policy asks for them' do
+      policy = Woods::SourceReferences::CallerPolicy.new(component: :all)
+      expect(run_pass(policy: policy).dependencies.fetch(%w[component Shipments::SummaryView])).to include(
+        { 'type' => 'component', 'target' => 'Ui::BadgeComponent', 'via' => 'code_reference' }
+      )
+    end
+  end
+
+  context 'with a GraphQL type as the caller' do
+    let(:sources) do
+      {
+        'app/graphql/types/shipment_type.rb' => <<~RUBY,
+          module Types
+            class ShipmentType < Types::BaseObject
+              field :carrier, Types::CarrierType
+              def total = LedgerTotals.for(object)
+            end
+          end
+        RUBY
+        'app/graphql/types/base_object.rb' => 'module Types; class BaseObject; end; end',
+        'app/graphql/types/carrier_type.rb' => 'module Types; class CarrierType < BaseObject; end; end'
+      }
+    end
+    let(:units) do
+      [unit('Types::ShipmentType', 'app/graphql/types/shipment_type.rb', 'graphql_type'),
+       unit('Types::BaseObject', 'app/graphql/types/base_object.rb', 'graphql_type'),
+       unit('Types::CarrierType', 'app/graphql/types/carrier_type.rb', 'graphql_type')]
+    end
+    let(:caller_key) { %w[graphql_type Types::ShipmentType] }
+    let(:extractor_keys) { { graphql_type: :graphql, service: :services } }
+
+    before do
+      stub_const('Types', Module.new)
+      base = stub_const('Types::BaseObject', Class.new)
+      %w[Types::ShipmentType Types::CarrierType].each { |name| stub_const(name, Class.new(base)) }
+    end
+
+    it 'adds no edge to another GraphQL unit or to a constant that does not exist' do
+      expect(run_pass.dependencies.fetch(caller_key)).to eq([])
+    end
+
+    it 'targets a constant created later without the type file changing or being parsed again' do
+      initial = run_pass
+      sources['app/services/ledger_totals.rb'] = 'class LedgerTotals; end'
+      stub_const('LedgerTotals', Class.new)
+      units << unit('LedgerTotals', 'app/services/ledger_totals.rb', 'service')
+      expect(collector).to receive(:call).with(sources.fetch('app/services/ledger_totals.rb')).once.and_call_original
+      expect(collector).not_to receive(:call).with(sources.fetch('app/graphql/types/shipment_type.rb'))
+      result = run_pass(baseline: initial.cache, refreshed: [%w[service LedgerTotals]], full: false)
+      expect(result.dependencies.fetch(caller_key)).to eq(
+        [{ 'type' => 'service', 'target' => 'LedgerTotals', 'via' => 'code_reference' }]
+      )
+    end
+
+    it 'adds no second (target, via) pair when the extractor already emitted one with a guessed type' do
+      sources['app/services/ledger_totals.rb'] = 'class LedgerTotals; end'
+      stub_const('LedgerTotals', Class.new)
+      units << unit('LedgerTotals', 'app/services/ledger_totals.rb', 'service')
+      guessed = { 'type' => 'model', 'target' => 'LedgerTotals', 'via' => 'code_reference' }
+      units.first['dependencies'] = [guessed]
+      result = run_pass
+      expect(result.dependencies.fetch(caller_key)).to eq([guessed])
+      expect(result.cache['owners'].find { |owner| owner['identifier'] == 'Types::ShipmentType' }['added']).to eq([])
+    end
+
+    it 'withdraws the edge when the constant goes away again' do
+      sources['app/services/ledger_totals.rb'] = 'class LedgerTotals; end'
+      stub_const('LedgerTotals', Class.new)
+      units << unit('LedgerTotals', 'app/services/ledger_totals.rb', 'service')
+      initial = run_pass
+      units.first['dependencies'] = initial.dependencies.fetch(caller_key)
+      units.pop
+      hide_const('LedgerTotals')
+      expect(run_pass(baseline: initial.cache, full: false).dependencies.fetch(caller_key)).to eq([])
+    end
+  end
+
+  context 'with the remaining constant-owned types as callers' do
+    let(:caller_types) do
+      %w[mailer serializer decorator validator policy manager pundit_policy action_cable_channel
+         graphql_mutation graphql_resolver graphql_query]
+    end
+    let(:sources) do
+      caller_types.to_h { |type| ["app/callers/ref_#{type}.rb", "class Ref#{camel(type)}; def call = RefTarget; end"] }
+                  .merge('app/models/ref_target.rb' => 'class RefTarget; end')
+    end
+    let(:units) do
+      caller_types.map { |type| unit("Ref#{camel(type)}", "app/callers/ref_#{type}.rb", type) } +
+        [unit('RefTarget', 'app/models/ref_target.rb', 'model')]
+    end
+
+    def camel(type) = type.split('_').map(&:capitalize).join
+
+    before { caller_types.each { |type| stub_const("Ref#{camel(type)}", Class.new) } }
+
+    it 'adds a verified model edge for each of them' do
+      result = run_pass
+      caller_types.each do |type|
+        expect(result.dependencies.fetch([type, "Ref#{camel(type)}"])).to eq([edge.merge('type' => 'model')])
+      end
     end
   end
 

@@ -6,6 +6,7 @@ require_relative 'collector'
 require_relative 'registry'
 require_relative 'inputs'
 require_relative 'cache'
+require_relative 'caller_policy'
 
 module Woods
   module SourceReferences
@@ -17,8 +18,7 @@ module Woods
     # cached by captured HMAC, including candidates whose targets do not yet exist.
     # Runtime lookup is repeated every run: source text alone cannot fingerprint
     # changed ancestors, aliases or lexical shadows in a reloaded application.
-    class Pass
-      CALLER_TYPES = %w[model controller service poro lib concern job].freeze
+    class Pass # rubocop:disable Metrics/ClassLength -- keep ownership, policy and edge merging together
       Result = Struct.new(:dependencies, :cache, :paths, keyword_init: true)
 
       # @param root [String, Pathname] application root
@@ -29,9 +29,10 @@ module Woods
       # @param refreshed [Array<Array<String>>] units genuinely re-extracted
       # @param full [Boolean] all runtime units were re-extracted
       # @param collector [Collector] source-only parser
+      # @param policy [CallerPolicy] caller types and the targets each may reference
       # rubocop:disable Metrics/ParameterLists -- explicit per-run collaborators and provenance state
       def initialize(root:, session:, units:, extractor_keys:, baseline: nil, refreshed: [], full: false,
-                     collector: Collector.new)
+                     collector: Collector.new, policy: CallerPolicy.new)
         @root = File.expand_path(root.to_s)
         @session = session
         @units = units
@@ -40,13 +41,14 @@ module Woods
         @refreshed = refreshed.to_set
         @full = full
         @collector = collector
+        @policy = policy
       end
 
       # rubocop:enable Metrics/ParameterLists
 
       # @return [Result] complete dependency replacements and next cache
       def call
-        raise_rebuild('reference cache is missing') if !@full && !@baseline
+        verify_baseline! unless @full
 
         @inputs = Inputs.new(root: @root, session: @session, collector: @collector)
         @files = @inputs.call(units: @units, baseline: @baseline, fresh: method(:fresh?), extractor_keys: @keys)
@@ -58,15 +60,22 @@ module Woods
 
       private
 
+      # Edges the previous policy added stay in retained units, so a changed
+      # policy cannot be applied to them piecemeal.
+      def verify_baseline!
+        raise_rebuild('reference cache is missing') unless @baseline
+        raise_rebuild('source_reference_callers changed') unless @baseline['callers'] == @policy.to_h
+      end
+
       def build_result
         dependencies = {}
         owners = @units.filter_map do |unit|
           key = [unit['type'], unit['identifier']]
           path = @inputs.relative(unit['file_path'])
           additions = []
-          if CALLER_TYPES.include?(unit['type'])
+          if @policy.caller?(unit['type'])
             base = original_dependencies(unit, key)
-            additions = all_resolved_dependencies(unit) - base
+            additions = all_resolved_dependencies(unit).reject { |edge| pair_present?(base, edge) }
             dependencies[key] = base + additions
           end
           # Target-only units also crossed Inputs' consumption gate. Retain
@@ -74,7 +83,7 @@ module Woods
           owner_record(unit, path, additions)
         end
         owners.sort_by! { |owner| [owner['type'], owner['identifier']] }
-        cache = { 'version' => Cache::VERSION, 'files' => @files, 'owners' => owners }
+        cache = { 'version' => Cache::VERSION, 'callers' => @policy.to_h, 'files' => @files, 'owners' => owners }
         Result.new(dependencies: dependencies, cache: cache, paths: @files.keys)
       end
 
@@ -131,6 +140,12 @@ module Woods
         SourceContributors.paths(unit).map { |path| @inputs.relative(path) }
       end
 
+      # An extractor may already carry the pair with a guessed type; a second
+      # entry for the same relationship would double count in the graph.
+      def pair_present?(edges, edge)
+        edges.any? { |existing| existing.values_at('target', 'via') == edge.values_at('target', 'via') }
+      end
+
       def normalize_edge(edge)
         edge.transform_keys(&:to_s).transform_values { |value| value.is_a?(Symbol) ? value.to_s : value }
       end
@@ -139,7 +154,7 @@ module Woods
         records = @files.dig(path, 'analysis', 'references') || []
         owned = records.select { |reference| reference['owner'] == unit['identifier'] }
         edges = owned.filter_map { |reference| @registry.resolve(reference, file_path: path) }
-        edges.map! { |edge| normalize_edge(edge) }
+        edges = edges.map { |edge| normalize_edge(edge) }.select { |edge| @policy.permits?(unit['type'], edge['type']) }
         edges.uniq.sort_by { |edge| [edge['type'], edge['target'], edge['via']] }
       end
 

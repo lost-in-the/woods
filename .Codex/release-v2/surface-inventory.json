@@ -123,6 +123,8 @@
     "settings_readers=",
     "similarity_threshold",
     "similarity_threshold=",
+    "source_reference_callers",
+    "source_reference_callers=",
     "test_subdomain_helpers",
     "test_subdomain_helpers=",
     "test_support_paths",
@@ -993,6 +995,9 @@
   "tasks_methods": [
     "build_embed_indexer",
     "build_resolved_config",
+    "caller_edge_records",
+    "code_reference_counts",
+    "print_code_reference_counts",
     "print_embed_stats",
     "verify_store_dimensions!"
   ],
@@ -1044,7 +1049,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 137,
+    "configuration_attributes": 139,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
@@ -1056,7 +1061,7 @@
     "presets": 4,
     "public_woods_methods": 9,
     "rake_tasks": 37,
-    "tasks_methods": 4,
+    "tasks_methods": 7,
     "unit_types": 45
   },
   "documentation_claims": {

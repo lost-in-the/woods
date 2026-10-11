@@ -220,7 +220,7 @@ RSpec.describe 'Assigned Struct and Data class ownership', :booted_app do
     end
   end
 
-  [1, 2].each do |old_version|
+  [1, 2, 3].each do |old_version|
     it "refuses analysis cache v#{old_version} atomically and repairs it with a complete full extraction" do
       index = full_index
       generation = Woods::Generation.new(output_dir: index)
@@ -234,7 +234,7 @@ RSpec.describe 'Assigned Struct and Data class ownership', :booted_app do
       expect(File.binread(File.join(index, 'generation.json'))).to eq(marker)
       Woods::Extractor.new(output_dir: index).extract_all
       path = File.join(generation.payload_dir, Woods::SourceReferences::Cache::FILE_NAME)
-      expect(JSON.parse(File.read(path))['version']).to eq(3)
+      expect(JSON.parse(File.read(path))['version']).to eq(Woods::SourceReferences::Cache::VERSION)
       expect(graph(index).fetch('reverse').fetch('ValueAPI::Container::Criteria')).to include('ValueCaller')
     end
   end

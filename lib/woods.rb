@@ -29,6 +29,8 @@ require_relative 'woods/graphql_document_paths'
 require_relative 'woods/extractors/external_consumer_declarations'
 # Configuration defaults the cycle caps to the analyzer's own constants.
 require_relative 'woods/graph_analyzer'
+# Configuration's `source_reference_callers` default lives with the pass it feeds.
+require_relative 'woods/source_references/caller_policy'
 
 module Woods
   class Error < StandardError; end
@@ -157,7 +159,7 @@ module Woods
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
-                :test_support_paths, :test_subdomain_helpers
+                :test_support_paths, :test_subdomain_helpers, :source_reference_callers
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -256,6 +258,9 @@ module Woods
       # Test helpers whose literal argument names the subdomain a test runs on.
       @test_subdomain_helpers = %w[with_subdomain use_subdomain using_subdomain set_subdomain
                                    switch_to_subdomain on_subdomain].freeze
+      # Which unit types publish verified code_reference edges, and to which
+      # target types. See the setter.
+      @source_reference_callers = SourceReferences::CallerPolicy.normalize(nil)
     end
 
     def embedding_model=(value)
@@ -652,6 +657,28 @@ module Woods
         raise ConfigurationError, "test_subdomain_helpers[#{index}] must be a method name, got #{name.inspect}"
       end
       @test_subdomain_helpers = value.map { |name| name.dup.freeze }.freeze
+    end
+
+    # Which unit types publish verified +code_reference+ edges from the
+    # source-reference pass, and which target types each may reference.
+    #
+    # The Hash names only the caller types to change; every other type keeps
+    # its default ({Woods::SourceReferences::CallerPolicy::DEFAULTS}). A value
+    # is +:all+, an Array of target types, or +false+ to stop that type being
+    # a caller. By default every constant-owned type is a caller of every
+    # type, except that components add no edge to components and GraphQL
+    # units add none to GraphQL units.
+    #
+    # The policy is recorded in the source-reference cache: after changing
+    # it, incremental extraction refuses to run until one full extraction.
+    #
+    # @example
+    #   config.source_reference_callers = { component: %i[model service], mailer: false }
+    #
+    # @param value [Hash{Symbol, String => Symbol, Array, false}] caller type to targets
+    # @raise [ConfigurationError] for an unknown type or malformed entry; the previous value is kept
+    def source_reference_callers=(value)
+      @source_reference_callers = SourceReferences::CallerPolicy.normalize(value)
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

@@ -430,6 +430,8 @@ namespace :woods do
       puts '-' * 50
       puts "  Nodes: #{stats['node_count'] || 'unknown'}"
       puts "  Edges: #{stats['edge_count'] || 'unknown'}"
+      require 'woods/tasks'
+      Woods::Tasks.print_code_reference_counts(Woods::Tasks.code_reference_counts(payload_dir))
     end
   end
 

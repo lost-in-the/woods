@@ -1,0 +1,1 @@
+- Remove the payload seeded for an incremental run or targeted refresh that is refused with a source-reference `RebuildRequired` (an older cache format or a changed `source_reference_callers`). The refused generation is never published, so the seed only occupied a hard-linked copy of the active payload until the next run replaced it. The active payload is never touched.

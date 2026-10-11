@@ -29,6 +29,7 @@ RSpec.describe Woods::SourceReferences::Cache do
   let(:data) do
     {
       'version' => described_class::VERSION,
+      'callers' => { 'poro' => %w[lib model] },
       'files' => { 'app/models/caller.rb' => { 'identity' => 'a' * 64, 'analysis' => analysis } },
       'owners' => [{ 'type' => 'poro', 'identifier' => 'Caller', 'file_path' => 'app/models/caller.rb',
                      'added' => [{ 'type' => 'lib', 'target' => 'TokenCodec', 'via' => 'code_reference' }] }]
@@ -51,8 +52,35 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(File.stat(path).mode & 0o777).to eq(0o600)
   end
 
+  it 'is format 4, which records the caller policy that produced the edges' do
+    expect(described_class::VERSION).to eq(4)
+    data.delete('callers')
+    expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /record keys/)
+  end
+
+  it 'refuses a format 3 cache so an upgraded index is rebuilt by a full extraction' do
+    data.delete('callers')
+    write_json(data.merge('version' => 3))
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
+  end
+
+  {
+    'a caller type outside the registry' => { 'route' => %w[model] },
+    'a target type outside the registry' => { 'poro' => %w[route] },
+    'an empty target list' => { 'poro' => [] },
+    'unsorted targets' => { 'poro' => %w[model lib] },
+    'repeated targets' => { 'poro' => %w[lib lib] },
+    'a non-array target list' => { 'poro' => 'all' },
+    'a non-hash policy' => [%w[poro lib]]
+  }.each do |label, callers|
+    it "rejects a caller policy with #{label}" do
+      data['callers'] = callers
+      expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /caller policy/)
+    end
+  end
+
   it 'accepts an empty cache and a library source path' do
-    empty = { 'version' => described_class::VERSION, 'files' => {}, 'owners' => [] }
+    empty = { 'version' => described_class::VERSION, 'callers' => {}, 'files' => {}, 'owners' => [] }
     described_class.write(path, empty)
     expect(described_class.read(path)).to eq(empty)
     data['files']['lib/token_codec.rb'] = data['files'].values.first

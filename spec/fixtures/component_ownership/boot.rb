@@ -77,11 +77,29 @@ Dir.mktmpdir('woods_components') do |root|
     # Components beside their templates under an autoload-only app/views root,
     # one per family with the Rails-guide inflection (api_card => APICard) and
     # one plain control each (F16).
-    write_source(root, 'app/views/ui/card_component.rb',
-                 'module Ui; class CardComponent < Phlex::HTML; end; end')
+    quoting_card = <<~CODE
+      module Ui
+        class CardComponent < Phlex::HTML
+          def view_template
+            raise 'executed component' if ENV['COMPONENT_OWNERSHIP_NO_EXECUTION']
+            plain ShipmentQuote.for(1).to_s
+          end
+        end
+      end
+    CODE
+    card_path = write_source(root, 'app/views/ui/card_component.rb', quoting_card)
+    write_source(root, 'app/services/shipment_quote.rb', "class ShipmentQuote\n  def self.for(row) = row\nend\n")
     write_source(root, 'app/views/ui/api_card.rb', 'module Ui; class APICard < Phlex::HTML; end; end')
-    write_source(root, 'app/views/ui/panel_component.rb',
-                 'module Ui; class PanelComponent < ViewComponent::Base; end; end')
+    write_source(root, 'app/views/ui/panel_component.rb', <<~CODE)
+      module Ui
+        class PanelComponent < ViewComponent::Base
+          def call
+            raise 'executed component' if ENV['COMPONENT_OWNERSHIP_NO_EXECUTION']
+            ShipmentQuote.for(Ui::CardComponent.name)
+          end
+        end
+      end
+    CODE
     write_source(root, 'app/views/ui/api_panel.rb', 'module Ui; class APIPanel < ViewComponent::Base; end; end')
     # A real Phlex Kit: its components include it, so a Kit call, a sibling
     # render and a cross-family render all have to land on qualified units.
@@ -135,9 +153,22 @@ Dir.mktmpdir('woods_components') do |root|
       end
       extractor.prepend(compatibility)
     end
+    ENV['COMPONENT_OWNERSHIP_NO_EXECUTION'] = '1'
     output = File.join(root, 'tmp/index')
     Woods::Extractor.new(output_dir: output).extract_all
     reader = Woods::MCP::IndexReader.new(output)
+    quote_edge = { 'type' => 'service', 'target' => 'ShipmentQuote', 'via' => 'code_reference' }
+    references = lambda do |identifier, type|
+      reader.find_unit(identifier, type: type)['dependencies'].select { |edge| edge['via'] == 'code_reference' }
+    end
+    quote_callers = lambda do
+      reader.find_unit('ShipmentQuote', type: 'service')['dependents'].map { |dependent| dependent['identifier'] }
+    end
+    assert_fact(checks, 'autoload-only Phlex and ViewComponent callers publish verified service references') do
+      references.call('Ui::CardComponent', 'component') == [quote_edge] &&
+        references.call('Ui::PanelComponent', 'view_component') == [quote_edge] &&
+        (%w[Ui::CardComponent Ui::PanelComponent] - quote_callers.call).empty?
+    end
     assert_fact(checks, 'legacy fixture contains external definitions') do
       %w[ExternalView ExternalPhlex ExternalChannel].all? { |identifier| reader.find_unit(identifier) }
     end
@@ -198,6 +229,23 @@ Dir.mktmpdir('woods_components') do |root|
             .include?('type' => 'component', 'target' => 'Ui::PanelComponent', 'via' => 'render')
     end
     compare.call('sidecar template edit full/incremental equivalence')
+
+    write_source(root, 'app/views/ui/card_component.rb', 'module Ui; class CardComponent < Phlex::HTML; end; end')
+    Rails.application.reloader.reload!
+    Woods::Extractor.new(output_dir: output).extract_changed([card_path])
+    assert_fact(checks, 'a component that drops its reference withdraws the edge from a held reader') do
+      references.call('Ui::CardComponent', 'component').empty? && !quote_callers.call.include?('Ui::CardComponent') &&
+        references.call('Ui::PanelComponent', 'view_component') == [quote_edge]
+    end
+    compare.call('component reference removal full/incremental equivalence')
+    write_source(root, 'app/views/ui/card_component.rb', quoting_card)
+    Rails.application.reloader.reload!
+    Woods::Extractor.new(output_dir: output).refresh(:components)
+    assert_fact(checks, 'a refresh restores the component reference') do
+      references.call('Ui::CardComponent', 'component') == [quote_edge] &&
+        quote_callers.call.include?('Ui::CardComponent')
+    end
+    compare.call('component reference refresh equivalence')
 
     cron = write_source(root, 'config/sidekiq_cron.yml',
                         "cleanup:\n  class: OtherJob\n  cron: '0 * * * *'\n  queue: alternate\n  args: [7]\n")

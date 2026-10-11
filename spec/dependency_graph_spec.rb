@@ -82,6 +82,21 @@ RSpec.describe Woods::DependencyGraph do
   end
 
   describe '#register' do
+    it 'records a (target, via) pair once however many times a unit emits it' do
+      graph = described_class.new
+      unit = Woods::ExtractedUnit.new(type: :graphql_type, identifier: 'Types::ShipmentType',
+                                      file_path: 'app/graphql/types/shipment_type.rb')
+      unit.dependencies = [{ type: :model, target: 'Shipment', via: :code_reference },
+                           { type: :service, target: 'Shipment', via: :code_reference },
+                           { type: :model, target: 'Shipment', via: :belongs_to }]
+      graph.register(unit)
+      edges = graph.edge_records('Types::ShipmentType')
+      expect(edges.map { |edge| [edge[:target], edge[:via]] })
+        .to eq([['Shipment', :code_reference], ['Shipment', :belongs_to]])
+      expect(graph.dependents_of('Shipment')).to eq(['Types::ShipmentType'])
+      expect(graph.to_h[:edges]['Types::ShipmentType'].size).to eq(2)
+    end
+
     it 'adds a node to the graph' do
       graph.register(make_unit(type: :model, identifier: 'User'))
 

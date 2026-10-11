@@ -829,4 +829,49 @@ RSpec.describe Woods::Configuration do
       expect(config.unclaimed_ruby_paths).to eq(['app/helpers/**/*.rb'])
     end
   end
+
+  describe '#source_reference_callers' do
+    let(:types) { Woods::SourceReferences::Registry::TYPES }
+
+    it 'defaults to every constant-owned type, with components and GraphQL units kept out of their own family' do
+      callers = described_class.new.source_reference_callers
+      expect(callers.keys).to match_array(types)
+      expect(callers.fetch(:model)).to match_array(types)
+      expect(callers.fetch(:component)).to match_array(types - %i[component view_component])
+      expect(callers.fetch(:graphql_type))
+        .to match_array(types - %i[graphql_type graphql_mutation graphql_resolver graphql_query])
+    end
+
+    it 'applies the named caller types over the defaults and freezes the result' do
+      config.source_reference_callers = { component: %w[model service], 'mailer' => false, graphql_type: :all }
+
+      expect(config.source_reference_callers.fetch(:component)).to eq(%i[model service])
+      expect(config.source_reference_callers.fetch(:mailer)).to eq([])
+      expect(config.source_reference_callers.fetch(:graphql_type)).to match_array(types)
+      expect(config.source_reference_callers.fetch(:model)).to match_array(types)
+      expect(config.source_reference_callers).to be_frozen
+    end
+
+    it 'starts again from the defaults on each assignment' do
+      config.source_reference_callers = { mailer: false }
+      config.source_reference_callers = { component: :all }
+
+      expect(config.source_reference_callers.fetch(:mailer)).to match_array(types)
+    end
+
+    it 'rejects a value that is not a Hash' do
+      expect { config.source_reference_callers = %i[component] }
+        .to raise_error(Woods::ConfigurationError, /source_reference_callers must be a Hash/)
+    end
+
+    it 'rejects an unknown type and keeps the previous value' do
+      config.source_reference_callers = { mailer: false }
+
+      expect { config.source_reference_callers = { component: %i[widget] } }
+        .to raise_error(Woods::ConfigurationError, /unknown target type :widget for component/)
+      expect { config.source_reference_callers = { widget: :all } }
+        .to raise_error(Woods::ConfigurationError, /unknown caller type :widget/)
+      expect(config.source_reference_callers.fetch(:mailer)).to eq([])
+    end
+  end
 end

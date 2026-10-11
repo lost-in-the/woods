@@ -39,12 +39,30 @@ module Woods
 
       # Called before any incremental consumer mutates the seeded generation.
       def prepare_source_reference_baseline
-        @source_reference_baseline = Cache.read(payload_dir.join(Cache::FILE_NAME))
-        return if @source_reference_baseline
+        discarding_seed_on_refusal do
+          @source_reference_baseline = Cache.read(payload_dir.join(Cache::FILE_NAME))
+          empty_source_reference_baseline! unless @source_reference_baseline
+        rescue Cache::Invalid
+          empty_source_reference_baseline!
+        end
+      end
 
-        empty_source_reference_baseline!
-      rescue Cache::Invalid
-        empty_source_reference_baseline!
+      # A refused run is never published, so nothing references the payload
+      # seeded for it. Leaving it would only wait for the next run's create
+      # to empty it; the active generation's payload is never touched.
+      def discarding_seed_on_refusal
+        yield
+      rescue RebuildRequired
+        discard_unpublished_seed
+        raise
+      end
+
+      def discard_unpublished_seed
+        seed = payload_dir
+        active = Generation.new(output_dir: @output_dir).current.payload
+        return if active && File.expand_path(active, @output_dir) == File.expand_path(seed)
+
+        FileUtils.rm_rf(seed.to_s)
       end
 
       def empty_source_reference_baseline!
@@ -53,7 +71,8 @@ module Woods
                 'Source-reference baseline is missing or incompatible. Run bin/rails woods:extract once for a full ' \
                 'extraction; the previous published generation remains active.'
         end
-        @source_reference_baseline = { 'version' => Cache::VERSION, 'files' => {}, 'owners' => [] }
+        @source_reference_baseline = { 'version' => Cache::VERSION, 'callers' => source_reference_policy.to_h,
+                                       'files' => {}, 'owners' => [] }
       end
 
       def source_reference_node?(type, identifier)
@@ -76,7 +95,9 @@ module Woods
 
       def enrich_source_references_incremental(affected_types)
         records = source_reference_payload_records
-        result = reference_pass(records.values.map { |entry| entry.fetch(:data) }, full: false)
+        result = discarding_seed_on_refusal do
+          reference_pass(records.values.map { |entry| entry.fetch(:data) }, full: false)
+        end
         touched = Set.new
         result.dependencies.each do |identity, edges|
           record = records.fetch(identity)
@@ -93,8 +114,9 @@ module Woods
         owned = Array(@source_reference_baseline&.fetch('owners')).to_set do |owner|
           [owner['type'], owner['identifier']]
         end
+        policy = source_reference_policy
         source_reference_identities.to_h do |type, identifier|
-          read_caller = Pass::CALLER_TYPES.include?(type.to_s) &&
+          read_caller = policy.caller?(type) &&
                         (source_reference_node?(type, identifier) || owned.include?([type.to_s, identifier]))
           record = if read_caller
                      source_reference_caller_record(type, identifier)
@@ -121,7 +143,12 @@ module Woods
       def reference_pass(units, full:)
         Pass.new(root: Rails.root, session: @source_inputs, units: units,
                  extractor_keys: self.class::TYPE_TO_EXTRACTOR_KEY, baseline: @source_reference_baseline,
-                 refreshed: @source_reference_refreshed || [], full: full, collector: source_collector).call
+                 refreshed: @source_reference_refreshed || [], full: full, collector: source_collector,
+                 policy: source_reference_policy).call
+      end
+
+      def source_reference_policy
+        CallerPolicy.new(Woods.configuration.source_reference_callers)
       end
 
       def rewrite_source_reference_edges(record, edges, affected_types)

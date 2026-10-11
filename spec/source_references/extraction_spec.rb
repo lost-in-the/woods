@@ -199,6 +199,37 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(extractor.dependency_graph.to_h[:reverse_via]).not_to have_key('RefIntegrationTarget')
   end
 
+  describe 'a refused incremental run' do
+    def payload_names
+      Dir.children(File.join(@output, 'payloads')).sort
+    end
+
+    it 'removes the seeded payload when the baseline cache is an older format' do
+      previous = full
+      active = payload_names
+      cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
+      File.write(cache_path, JSON.generate(JSON.parse(File.read(cache_path)).merge('version' => 3)))
+      expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired)
+      expect(payload_names).to eq(active)
+      expect(Dir.exist?(previous.payload_dir)).to be(true)
+    end
+
+    it 'removes the seeded payload when the caller policy changed since the baseline' do
+      previous = full
+      active = payload_names
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.source_reference_callers = { poro: false }
+      extractor = incremental
+      expect { extractor.send(:enrich_source_references_incremental, Set.new) }
+        .to raise_error(Woods::SourceReferences::RebuildRequired, /source_reference_callers changed/)
+      expect(payload_names).to eq(active)
+      expect(Dir.exist?(previous.payload_dir)).to be(true)
+    ensure
+      Woods.configuration = original
+    end
+  end
+
   it 'requires a full rebuild before mutating old or corrupt source-reference baselines' do
     previous = full
     cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
@@ -210,6 +241,18 @@ RSpec.describe 'Source-reference extraction integration' do
     expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired, /full extraction/)
   end
 
+  it 'applies the configured caller policy and records it in the cache' do
+    original = Woods.configuration
+    Woods.configuration = Woods::Configuration.new
+    Woods.configuration.source_reference_callers = { poro: false }
+    extractor = full
+    cache = Woods::SourceReferences::Cache.read(extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME))
+    expect(cache.fetch('callers')).not_to have_key('poro')
+    expect(cache.fetch('owners')).to all(include('added' => []))
+  ensure
+    Woods.configuration = original
+  end
+
   it 'allows empty indexes to initialize a reference cache' do
     extractor = Woods::Extractor.new(output_dir: @output)
     extractor.send(:begin_source_inputs, 'incremental')
@@ -217,7 +260,8 @@ RSpec.describe 'Source-reference extraction integration' do
     extractor.send(:prepare_source_reference_baseline)
     extractor.send(:enrich_source_references_incremental, Set.new)
     cache = Woods::SourceReferences::Cache.read(extractor.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME))
-    expect(cache).to eq('version' => Woods::SourceReferences::Cache::VERSION, 'files' => {}, 'owners' => [])
+    expect(cache).to eq('version' => Woods::SourceReferences::Cache::VERSION,
+                        'callers' => Woods::SourceReferences::CallerPolicy.new.to_h, 'files' => {}, 'owners' => [])
   end
 
   it 'fails a capped final scan even when the listed changed paths are unrelated to references' do
