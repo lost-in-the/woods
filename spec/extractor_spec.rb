@@ -3396,6 +3396,19 @@ RSpec.describe Woods::Extractor do
       expect(view.dependents).to eq([{ type: :model, identifier: 'Report' }])
       expect(factory.dependents).to eq([{ type: :model, identifier: 'Report' }])
     end
+
+    it 'lists a dependent once when two edges of one via name the same target under two types' do
+      target = Woods::ExtractedUnit.new(type: :model, identifier: 'ShippingService', file_path: nil)
+      dependent = Woods::ExtractedUnit.new(type: :controller, identifier: 'ShipmentsController', file_path: nil)
+      dependent.dependencies = [{ type: :model, target: 'ShippingService', via: :code_reference },
+                                { type: :service, target: 'ShippingService', via: :code_reference }]
+
+      extractor.instance_variable_set(:@results, { models: [target], controllers: [dependent] })
+
+      extractor.send(:resolve_dependents)
+
+      expect(target.dependents).to eq([{ type: :controller, identifier: 'ShipmentsController' }])
+    end
   end
 
   # ── finalize_incremental_unit_json per-type git metadata (#225) ──────

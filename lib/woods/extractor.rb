@@ -1538,10 +1538,12 @@ module Woods
         units.each { |u| map[u.identifier] << u }
       end
 
-      # Resolve dependents using the complete map.
+      # Resolve dependents using the complete map. Edges collapse as
+      # DependencyGraph.normalize_edges collapses them: `type` describes the
+      # target, so one target reached under two types counts once.
       @results.each_value do |units|
         units.each do |unit|
-          unit.dependencies.each do |dep|
+          unit.dependencies.uniq { |dep| dep.except(:type) }.each do |dep|
             unit_map[dep[:target]].each do |target_unit|
               target_unit.dependents ||= []
               target_unit.dependents << {

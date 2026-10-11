@@ -1352,6 +1352,20 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq(['referrer'])
     end
 
+    it 'keeps a through association over a polymorphic source concrete when source_type names the class' do
+      source = double('Assoc(taggable source)', name: :taggable, macro: :belongs_to, polymorphic?: true, options: {})
+      through = double('Assoc(tagged_posts)', name: :tagged_posts, macro: :has_many, class_name: 'Post',
+                                              polymorphic?: false, source_reflection: source, through_reflection: nil,
+                                              options: { through: :taggings, source: :taggable, source_type: 'Post' })
+      model = model_with_associations(through)
+
+      deps = extractor.send(:extract_dependencies, model, nil)
+
+      expect(deps.map { |dep| dep.slice(:type, :target, :via, :through) })
+        .to eq([{ type: :model, target: 'Post', via: :has_many, through: 'taggings' }])
+      expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq([])
+    end
+
     it 'strips a leading :: from an association edge target' do
       rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
                                          class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})

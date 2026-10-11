@@ -6,6 +6,9 @@
   edges remain only where a model owns the table today, and they name that
   owner. A table the live schema no longer has gets no edge and is listed in
   the migration's `tables_unresolved`, so migrations for renamed or removed
-  models no longer carry dangling model edges. Consumers that walked
+  models no longer carry dangling model edges. Every table argument is read
+  as a symbol or a string, with or without parentheses, including the new
+  name of `rename_table` and both arguments of `add_reference` and
+  `remove_reference`. Consumers that walked
   `table_name` edges from migrations to reach a table should follow
   `migrates` instead. Run a full extraction after upgrading.
