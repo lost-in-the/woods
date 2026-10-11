@@ -156,7 +156,8 @@ module Woods
                 :graph_cycle_limit, :graph_cycle_max_length,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
-                :settings_readers, :external_table_consumers, :external_table_consumers_path
+                :settings_readers, :external_table_consumers, :external_table_consumers_path,
+                :test_support_paths, :test_subdomain_helpers
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -249,6 +250,12 @@ module Woods
       # Other applications that read this database's tables. See the setters.
       @external_table_consumers = {}.freeze
       @external_table_consumers_path = nil
+      # Globs TestSupportExtractor indexes as test_support units.
+      @test_support_paths = %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
+                               test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb].freeze
+      # Test helpers whose literal argument names the subdomain a test runs on.
+      @test_subdomain_helpers = %w[with_subdomain use_subdomain using_subdomain set_subdomain
+                                   switch_to_subdomain on_subdomain].freeze
     end
 
     def embedding_model=(value)
@@ -602,6 +609,49 @@ module Woods
     def external_table_consumers_path=(value)
       @external_table_consumers_path =
         Extractors::ExternalConsumerDeclarations.normalize_path!(value, label: 'external_table_consumers_path')
+    end
+
+    # Globs, relative to Rails.root, whose Ruby files become `test_support`
+    # units: helper modules, shared examples and contexts, custom matchers,
+    # and suite configuration. `*_spec.rb` and `*_test.rb` files are never
+    # test support, whatever the globs match.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.test_support_paths += ['features/support/**/*.rb']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def test_support_paths=(value)
+      raise ConfigurationError, "test_support_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index, 'test_support_paths') }
+      @test_support_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Names of test helper methods that switch the subdomain a test's requests
+    # use, called with a literal: `with_subdomain("shop") { ... }`. A literal
+    # path in a test is matched against subdomain-constrained routes using
+    # the one subdomain its file names.
+    #
+    # @example
+    #   config.test_subdomain_helpers += ['on_storefront']
+    #
+    # @param value [Array<String>] method names
+    # @raise [ConfigurationError] if any entry is not a method name; the previous value is kept
+    def test_subdomain_helpers=(value)
+      unless value.is_a?(Array)
+        raise ConfigurationError, "test_subdomain_helpers must be an Array, got #{value.inspect}"
+      end
+
+      value.each_with_index do |name, index|
+        next if name.is_a?(String) && name.match?(/\A[a-z_]\w*[?!]?\z/)
+
+        raise ConfigurationError, "test_subdomain_helpers[#{index}] must be a method name, got #{name.inspect}"
+      end
+      @test_subdomain_helpers = value.map { |name| name.dup.freeze }.freeze
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

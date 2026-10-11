@@ -124,6 +124,27 @@ RSpec.describe Woods::ReloadPolicy do
         Woods.configuration = original
       end
 
+      it 'only needs re-extraction for test support and factory files' do
+        %w[spec/support/analytics_helpers.rb spec/rails_helper.rb spec/lib/ledger_fixtures.rb
+           test/support/sign_in.rb test/test_helper.rb spec/factories/widgets.rb].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'only needs re-extraction for test support under a configured root outside spec/ and test/' do
+        original = Woods.configuration.test_support_paths
+        expect(policy.classify('features/support/env.rb')).to eq(:ignore)
+
+        Woods.configuration.test_support_paths = ['features/support/**/*.rb', 'lib/test_kit/**/*.rb']
+
+        expect(policy.classify('features/support/env.rb')).to eq(:reextract)
+        expect(policy.classify('features/support/env.yml')).to eq(:ignore)
+        expect(policy.classify('features/support/env_spec.rb')).to eq(:ignore)
+        expect(policy.classify('lib/test_kit/helpers.rb')).to eq(:reload)
+      ensure
+        Woods.configuration.test_support_paths = original
+      end
+
       it 'only needs re-extraction for templates, which are not constants' do
         expect(policy.classify('app/views/posts/index.html.erb')).to eq(:reextract)
       end

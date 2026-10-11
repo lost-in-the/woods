@@ -121,9 +121,11 @@ module Woods
     # the dispatcher (one extractor's specs, a resident daemon) still builds
     # them.
     RULE_EXTRACTORS = %w[
-      caching config_file configuration database_table decorator event external_consumer factory graphql i18n
-      job lib manager package policy pundit rake_task scheduled_job serializer service state_machine validator
-      view_template
+      caching_extractor config_file_extractor configuration_extractor database_table_extractor
+      decorator_extractor event_extractor external_consumer_extractor factory_extractor graphql_extractor
+      i18n_extractor job_extractor lib_extractor manager_extractor package_extractor policy_extractor
+      pundit_extractor rake_task_extractor scheduled_job_extractor serializer_extractor service_extractor
+      state_machine_extractor test_support_catalog validator_extractor view_template_extractor
     ].freeze
 
     class << self
@@ -218,6 +220,29 @@ module Woods
         Woods::Extractors::ExternalConsumerExtractor.trigger_path?(relative_path)
       end
 
+      # A file the test support extractor indexes: under the configured
+      # globs, or in a factory directory (a factory file that declares no
+      # factory is test support).
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def test_support_source?(relative_path)
+        test_support_definitions?(relative_path) ||
+          (relative_path.end_with?('.rb') &&
+            Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES.any? do |dir|
+              relative_path.start_with?("#{dir}/")
+            end)
+      end
+
+      # A file whose names test mappings resolve references against. Factory
+      # directories are excluded: nothing refers to them by name.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def test_support_definitions?(relative_path)
+        Woods::Extractors::TestSupportCatalog.support_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -276,7 +301,7 @@ module Woods
       end
 
       def require_rule_extractors
-        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}_extractor" }
+        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}" }
       end
 
       # Ruby and YAML configuration sources.
@@ -402,6 +427,23 @@ module Woods
          whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql])]
       end
 
+      # Test support is resolved by name across files, so a support change
+      # re-runs the support units and the test mappings that refer to them;
+      # a rake change re-runs the test mappings that describe tasks. The
+      # matchers read the configured globs at call time. The directories and
+      # exact paths are the default locations: a static projection for the
+      # hook predicate, which cannot call a matcher.
+      def test_support_rules
+        helpers = %w[spec/spec_helper.rb spec/rails_helper.rb test/test_helper.rb]
+        dirs = %w[spec/support spec/lib test/support test/lib]
+        factories = Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES
+        [whole_app_rule(:test_support, dirs + factories, extensions: %w[.rb], exact_paths: helpers,
+                                                         matcher: :test_support_source?),
+         whole_app_rule(:test_mappings, dirs, extensions: %w[.rb], exact_paths: helpers,
+                                              matcher: :test_support_definitions?),
+         whole_app_rule(:test_mappings, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
+      end
+
       def build_whole_app_rules
         [
           # A task may combine definitions from several files; any change or
@@ -415,6 +457,7 @@ module Woods
           *model_adjacent_rules,
           *graphql_operation_rules,
           *schema_unit_rules,
+          *test_support_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

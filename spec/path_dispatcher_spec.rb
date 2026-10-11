@@ -397,6 +397,61 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).not_to include(:rails_source)
     end
 
+    # Test support is referenced by name from other files, so both the
+    # support units and the test mappings that resolve those names re-run
+    # wholesale when a support file changes.
+    it 'triggers test_support and test_mappings re-runs on a test support file' do
+      %w[spec/support/analytics_helpers.rb spec/support/shared/pages.rb spec/rails_helper.rb
+         spec/lib/ledger_fixtures.rb test/support/sign_in.rb test/test_helper.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:test_support, :test_mappings), path
+      end
+    end
+
+    it 'follows config.test_support_paths' do
+      original = Woods.configuration.test_support_paths
+      Woods.configuration.test_support_paths = ['features/support/**/*.rb']
+
+      expect(dispatcher.whole_app_keys_for('features/support/env.rb')).to include(:test_support, :test_mappings)
+      expect(dispatcher.whole_app_keys_for('spec/support/analytics_helpers.rb')).not_to include(:test_support)
+      expect(dispatcher).to be_relevant('features/support/env.rb')
+    ensure
+      Woods.configuration.test_support_paths = original
+    end
+
+    it 're-runs test_support, not test_mappings, on a factory file' do
+      keys = dispatcher.whole_app_keys_for('spec/factories/widgets.rb')
+
+      expect(keys).to include(:factories, :test_support)
+      expect(keys).not_to include(:test_mappings)
+    end
+
+    it 're-runs test_mappings on a rake file, whose task names task specs resolve against' do
+      expect(dispatcher.whole_app_keys_for('lib/tasks/ledger.rake')).to include(:rake_tasks, :test_mappings)
+    end
+
+    it 'treats a _test.rb fixture under spec/ as test support, since only test/ holds Minitest tests' do
+      expect(dispatcher.whole_app_keys_for('spec/lib/translators/spec_test.rb')).to include(:test_support)
+      expect(dispatcher.file_rules_for('spec/lib/translators/spec_test.rb')).to be_empty
+      expect(dispatcher.whole_app_keys_for('test/lib/ledger_test.rb')).not_to include(:test_support)
+    end
+
+    it 'dispatches a changed test file per file, with no wholesale re-run' do
+      %w[spec/models/widget_spec.rb spec/support/widget_helper_spec.rb test/models/widget_test.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to be_empty, path
+        expect(dispatcher.file_rules_for(path).map(&:extractor_key)).to eq([:test_mappings]), path
+      end
+    end
+
+    it 'serializes the whole-app rules without process-specific values' do
+      rules = -> { JSON.generate(described_class.whole_app_rules.map(&:to_h)) }
+      before_rules = rules.call
+
+      described_class.reset!
+
+      expect(rules.call).to eq(before_rules)
+      expect(before_rules).not_to include('Proc', 'lambda')
+    end
+
     it 'triggers nothing for an unrelated path' do
       expect(dispatcher.whole_app_keys_for('README.md')).to be_empty
     end

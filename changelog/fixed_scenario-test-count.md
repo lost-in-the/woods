@@ -1,0 +1,1 @@
+- Count Capybara `scenario` blocks in a test mapping's `test_count`.

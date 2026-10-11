@@ -1,0 +1,1 @@
+- A constant described inside a `module` block in a spec (`module Nested; describe AssignPositions do`) is resolved through the file's lexical nesting, so the `test_coverage` edge targets `Nested::AssignPositions`.

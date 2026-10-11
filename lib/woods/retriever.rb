@@ -371,9 +371,10 @@ module Woods
     # Unit types excluded from retrieval by default. +test_mapping+ units
     # make up ~33% of a typical index and lexically dominate semantic rank
     # for production queries ("stripe webhook" often surfaces
-    # stripe_webhook_spec.rb above the actual controller). Callers can
+    # stripe_webhook_spec.rb above the actual controller); +test_support+
+    # helpers are named for the same production concepts. Callers can
     # override by passing +types:+ (include-only) or an explicit +exclude_types:+.
-    DEFAULT_EXCLUDE_TYPES = %w[test_mapping].freeze
+    DEFAULT_EXCLUDE_TYPES = %w[test_mapping test_support].freeze
 
     # Suffix the Indexer appends when a single unit is split into multiple
     # embedding vectors — see {Embedding::Indexer#collect_embed_items}. The

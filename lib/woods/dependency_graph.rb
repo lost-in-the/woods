@@ -44,7 +44,7 @@ module Woods
     # These extractors describe a whole source file rather than one constant.
     # Other types remain unclassified: a path-like identifier is not evidence
     # that a unit is a profile, and an unmarked unit need not name a constant.
-    FILE_PROFILE_TYPES = %i[caching configuration test_mapping rails_source gem_source].freeze
+    FILE_PROFILE_TYPES = %i[caching configuration test_mapping test_support rails_source gem_source].freeze
 
     # Unit types that describe the database rather than application code.
     # Every migration and model points at a table, so ranking these would

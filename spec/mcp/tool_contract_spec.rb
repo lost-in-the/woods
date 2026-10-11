@@ -1209,6 +1209,20 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(result.dig('_meta', 'config_key')).to eq('embedding_provider')
   end
 
+  # The description is the only place a client learns that two unit types
+  # are hidden from retrieval; it must name both and the way back in.
+  it 'tells codebase_retrieve callers which types are excluded by default and how to opt back in' do
+    tool = listed_tools(full_server).find { |entry| entry['name'] == 'codebase_retrieve' }
+    properties = tool.dig('inputSchema', 'properties')
+
+    Woods::Retriever::DEFAULT_EXCLUDE_TYPES.each do |type|
+      expect(tool['description']).to include(type)
+      expect(properties.dig('types', 'description')).to include(type)
+      expect(properties.dig('exclude_types', 'description')).to include(type)
+    end
+    expect(tool['description']).to include('types: ["test_mapping", "test_support"]')
+  end
+
   it 'publishes closed input schemas and non-vacuous output schemas for every row' do
     aggregate_failures do
       listed_tools(full_server).each do |tool|

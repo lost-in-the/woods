@@ -971,8 +971,9 @@ module Woods
                          'Returns a token-budgeted context string ready to paste into a prompt. ' \
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
                          'Uses configured embeddings, or explicit WOODS_RETRIEVAL_MODE=lexical over extraction units. ' \
-                         'By default excludes test_mappings (~33% of a typical index) so spec filenames do not ' \
-                         'dominate semantic rank; pass types: ["test_mapping"] to opt back in. ' \
+                         'By default excludes test_mapping (~33% of a typical index) and test_support units so ' \
+                         'spec and helper filenames do not dominate semantic rank; pass ' \
+                         'types: ["test_mapping", "test_support"] to opt back in. ' \
                          'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \
                          'on sibling tools, and mapping it here would silently produce a near-empty response).',
             input_schema: {
@@ -986,7 +987,8 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
-                               'rails_source, test_mapping, etc.). Overrides the default test_mapping exclusion. ' \
+                               'rails_source, test_mapping, test_support, etc.). Overrides the default ' \
+                               'test_mapping and test_support exclusion. ' \
                                'Lexical mode and explicit package/path scopes filter before limits and omit the global rank table. ' \
                                'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
                                'falls back to rank-within-type over the available vectors. The response appends a "Type rank ' \
@@ -1003,7 +1005,8 @@ module Woods
                                 description: 'Application-relative directory prefixes. Scope applies before candidate limits; graph expansion stays inside it.' },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },
-                  description: 'Additional types to exclude on top of the default test_mapping exclusion.'
+                  description: 'Additional types to exclude on top of the default test_mapping and ' \
+                               'test_support exclusion.'
                 }
               },
               required: ['query']

@@ -688,7 +688,7 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 39 extractors always run during a full extraction,
+not implemented**. All 40 extractors always run during a full extraction,
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
@@ -737,7 +737,8 @@ Leave it at its default. The full list of what always runs:
 | `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
-| `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
+| `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
+| `:test_support` | TestSupportExtractor | Helper modules, shared examples/contexts, matchers, suite configuration |
 | `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
 | `:poros` | PoroExtractor | Plain Ruby objects in app/models |
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
@@ -1044,6 +1045,51 @@ malformed one and keeps the previous value.
 
 **Changing any of the three needs a full extraction.** The values are not part
 of any incremental fingerprint.
+
+### Test support paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `test_support_paths` | Array&lt;String&gt; | `["spec/support/**/*.rb", "spec/*_helper.rb", "spec/lib/**/*.rb", "test/support/**/*.rb", "test/*_helper.rb", "test/lib/**/*.rb"]` | Globs, relative to `Rails.root`, whose Ruby files `TestSupportExtractor` indexes as `test_support` units. |
+
+Files the test mapping extractor claims (`spec/**/*_spec.rb`, `test/**/*_test.rb`)
+are never test support, whatever the globs match. Glob syntax is the same as
+`unclaimed_ruby_paths`.
+
+```ruby
+Woods.configure do |config|
+  config.test_support_paths += ['features/support/**/*.rb']
+end
+```
+
+The setter rejects a value that is not an Array and any entry that is not a
+non-empty, relative glob without `..`, raising `Woods::ConfigurationError` and
+keeping the previous value.
+
+**Changing `test_support_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint. The hook predicate knows only the default
+locations, so an edit under an added root outside `spec/` and `test/` is picked
+up by `woods:incremental` and the watch daemon, not by the editor hook.
+
+### Test subdomain helpers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `test_subdomain_helpers` | Array&lt;String&gt; | `["with_subdomain", "use_subdomain", "using_subdomain", "set_subdomain", "switch_to_subdomain", "on_subdomain"]` | Test helper methods whose literal argument names the subdomain a test's requests use. |
+
+A literal path in a feature, system or request test is matched against
+subdomain-constrained routes using the one subdomain its file names, read from
+`host!`, `Capybara.app_host`, a `subdomain:` option, or a call to one of these
+helpers: `with_subdomain("shop") { visit "/settings" }`.
+
+```ruby
+Woods.configure do |config|
+  config.test_subdomain_helpers += ['on_storefront']
+end
+```
+
+Each entry must be a method name; anything else raises
+`Woods::ConfigurationError` and keeps the previous value.
 
 ## Console MCP options
 

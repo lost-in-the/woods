@@ -184,6 +184,18 @@ woods_input_action() {
     return
   fi
   # external_consumers: the declared file is configuration; the Ruby rules handle it
+  if { [[ "$path" == spec/spec_helper.rb ]] || [[ "$path" == spec/rails_helper.rb ]] || [[ "$path" == test/test_helper.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == spec/support/* ]] || [[ "$path" == spec/lib/* ]] || [[ "$path" == test/support/* ]] || [[ "$path" == test/lib/* ]] || [[ "$path" == spec/factories/* ]] || [[ "$path" == test/factories/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == spec/spec_helper.rb ]] || [[ "$path" == spec/rails_helper.rb ]] || [[ "$path" == test/test_helper.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == spec/support/* ]] || [[ "$path" == spec/lib/* ]] || [[ "$path" == test/support/* ]] || [[ "$path" == test/lib/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

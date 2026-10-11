@@ -67,6 +67,9 @@ ARTIFACT_TEMPLATES = [
   ->(i) { "app/views/gen/hml_#{i}.html.haml" },
   ->(i) { "app/views/gen/jbd_#{i}.json.jbuilder" },
   ->(i) { "spec/models/spc_#{i}_spec.rb" },
+  ->(i) { "spec/features/ftr_#{i}_spec.rb" },         # routes exercised + test support references
+  ->(i) { "spec/lib/tasks/rk_#{i}_spec.rb" },         # describes the rk_N rake namespace
+  ->(i) { "spec/support/sup_#{i}.rb" },               # whole-app: test_support, re-runs test_mappings
   ->(i) { "spec/factories/fac_#{i}.rb" },             # whole-app: factories
   ->(i) { "db/migrate/2024010100000#{i}_mig_#{i}.rb" },
   ->(i) { "db/views/vw_#{i}_v01.sql" },               # whole-app: latest-version-wins
@@ -3156,6 +3159,212 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── Test support, route coverage, factory classes ────────────────────────
+  #
+  # Test mappings resolve names (shared examples, contexts, matchers, helper
+  # modules, rake tasks) and routes that live in OTHER files. None of those
+  # inputs is in a spec's own bytes, so each example below changes only the
+  # input and checks that the untouched spec's unit follows.
+  describe 'test support, route coverage and factory classes' do
+    def published_unit(dir, type_dir, identifier)
+      Dir[File.join(payload_dir(dir), type_dir, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == identifier }
+    end
+
+    def edges(dir, type_dir, identifier, via)
+      published_unit(dir, type_dir, identifier)['dependencies']
+        .select { |dep| dep['via'] == via }.map { |dep| dep['target'] }
+    end
+
+    it 'follows a shared example through creation, rename and deletion of its support file' do
+      spec = 'spec/models/widget_behavior_spec.rb'
+      write_file(spec, "RSpec.describe Post do\n  it_behaves_like 'an accessible page'\nend\n")
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/support/shared/pages.rb',
+                                          "RSpec.shared_examples 'an accessible page' do\nend\n")
+                             }
+                           ])
+      expect(edges(index, 'test_mappings', spec, 'behaves_like')).to eq(['spec/support/shared/pages.rb'])
+      expect(published_unit(index, 'test_support', 'spec/support/shared/pages.rb')['metadata'])
+        .to include('kind' => 'shared_examples', 'shared_examples' => ['an accessible page'])
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/support/shared/pages.rb',
+                                          "RSpec.shared_examples 'a readable page' do\nend\n")
+                             }
+                           ])
+      expect(edges(index, 'test_mappings', spec, 'behaves_like')).to eq([])
+
+      index = run_sequence([-> { delete_file('spec/support/shared/pages.rb') }])
+      expect(published_unit(index, 'test_support', 'spec/support/shared/pages.rb')).to be_nil
+    end
+
+    it 'follows contexts, matchers and helper modules defined after the spec that uses them' do
+      spec = 'spec/features/plans_spec.rb'
+      write_file(spec, <<~RUBY)
+        RSpec.feature 'Plans' do
+          include AnalyticsHelpers
+          include_context 'with billing stubs'
+          scenario('choosing') { expect(page).to have_combobox('Plan') }
+        end
+      RUBY
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/support/billing_stubs.rb',
+                                          "RSpec.shared_context 'with billing stubs' do\nend\n")
+                             },
+                             lambda {
+                               write_file('spec/support/matchers/combobox.rb',
+                                          "RSpec::Matchers.define :have_combobox do |label|\nend\n")
+                             },
+                             lambda {
+                               write_file('spec/support/analytics_helpers.rb', "module AnalyticsHelpers\nend\n")
+                             }
+                           ])
+
+      expect(published_unit(index, 'test_mappings', spec)['dependencies']).to include(
+        { 'type' => 'test_support', 'target' => 'spec/support/billing_stubs.rb', 'via' => 'includes_context' },
+        { 'type' => 'test_support', 'target' => 'spec/support/matchers/combobox.rb', 'via' => 'uses_matcher' },
+        { 'type' => 'test_support', 'target' => 'spec/support/analytics_helpers.rb', 'via' => 'includes_helper' }
+      )
+    end
+
+    it 'recomputes included_for on a helper module when another file changes its includes' do
+      write_file('spec/support/analytics_helpers.rb', "module AnalyticsHelpers\nend\n")
+      helper = 'spec/support/analytics_helpers.rb'
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/rails_helper.rb',
+                                          "RSpec.configure { |c| c.include AnalyticsHelpers, type: :feature }\n")
+                             }
+                           ])
+      expect(published_unit(index, 'test_support', helper)['metadata']['included_for']).to eq(['feature'])
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/rails_helper.rb', <<~RUBY)
+                                 RSpec.configure { |c| c.include AnalyticsHelpers, type: %i[system request] }
+                               RUBY
+                             }
+                           ])
+      expect(published_unit(index, 'test_support', helper)['metadata']['included_for']).to eq(%w[request system])
+    end
+
+    # The route table is not in any spec file. Test mappings are route
+    # consumers, so a routes change re-extracts them.
+    it 're-extracts test mappings when the routes change' do
+      spec = 'spec/features/comments_spec.rb'
+      write_file(spec, <<~RUBY)
+        RSpec.feature 'Comments' do
+          scenario 'browsing' do
+            visit posts_path
+            visit comments_path
+            visit "/comments"
+          end
+        end
+      RUBY
+      write_file('spec/requests/posts_spec.rb', <<~RUBY)
+        RSpec.describe 'Posts' do
+          it('creates') { post posts_path }
+          it('destroys') { delete "/posts/1" }
+        end
+      RUBY
+
+      baseline = full_extraction
+      expect(edges(baseline, 'test_mappings', spec, 'exercises_route')).to eq(['GET /posts'])
+      expect(edges(baseline, 'test_mappings', 'spec/requests/posts_spec.rb', 'exercises_route')).to eq(['POST /posts'])
+
+      index = run_sequence([
+                             lambda {
+                               write_file('config/routes.rb', <<~RUBY)
+                                 Rails.application.routes.draw do
+                                   resources :posts, only: %i[index show create destroy]
+                                   resources :comments, only: [:index]
+                                 end
+                               RUBY
+                               Rails.application.reload_routes!
+                               'config/routes.rb'
+                             }
+                           ])
+
+      expect(edges(index, 'test_mappings', spec, 'exercises_route')).to eq(['GET /comments', 'GET /posts'])
+      expect(edges(index, 'test_mappings', 'spec/requests/posts_spec.rb', 'exercises_route'))
+        .to eq(['DELETE /posts/:id', 'POST /posts'])
+      expect(published_unit(index, 'routes', 'GET /comments')['dependents'])
+        .to include(hash_including('identifier' => spec))
+    end
+
+    it 'follows a rake namespace describe as tasks are added and removed' do
+      spec = 'spec/lib/tasks/reports_spec.rb'
+      write_file(spec, "RSpec.describe 'reports' do\n  it('runs') {}\nend\n")
+
+      index = run_sequence([-> { write_file('lib/tasks/reports.rake', rake_source('reports', %w[daily weekly])) }])
+      expect(edges(index, 'test_mappings', spec, 'test_coverage')).to eq(%w[reports:daily reports:weekly])
+
+      index = run_sequence([-> { write_file('lib/tasks/reports.rake', rake_source('reports', %w[daily])) }])
+      expect(edges(index, 'test_mappings', spec, 'test_coverage')).to eq(%w[reports:daily])
+
+      index = run_sequence([-> { delete_file('lib/tasks/reports.rake') }])
+      expect(published_unit(index, 'test_mappings', spec)['dependencies']).to eq([])
+    end
+
+    it 'resolves a factory class through a parent defined in another file' do
+      write_file('spec/factories/a_children.rb', "FactoryBot.define do\n  factory :featured_post, parent: :post\nend\n")
+
+      index = run_sequence([
+                             lambda {
+                               write_file('spec/factories/posts.rb',
+                                          "FactoryBot.define do\n  factory :post, class: '::Post' do\n  end\nend\n")
+                             }
+                           ])
+
+      expect(published_unit(index, 'factories', 'featured_post')['metadata']['model_class']).to eq('Post')
+      expect(edges(index, 'factories', 'featured_post', 'factory_for')).to eq(['Post'])
+    end
+
+    it 'moves a factory-directory file between test_support and factories as it gains a factory' do
+      callbacks = 'spec/factories/callbacks.rb'
+      index = run_sequence([
+                             lambda {
+                               write_file(callbacks, "FactoryBot.define do\n  after(:build) { |record| record }\nend\n")
+                             }
+                           ])
+      expect(published_unit(index, 'test_support', callbacks)['metadata']['kind']).to eq('configuration')
+
+      index = run_sequence([
+                             lambda {
+                               write_file(callbacks, <<~RUBY)
+                                 FactoryBot.define do
+                                   factory :callback_post, class: 'Post' do
+                                   end
+                                 end
+                               RUBY
+                             }
+                           ])
+      expect(published_unit(index, 'test_support', callbacks)).to be_nil
+      expect(published_unit(index, 'factories', 'callback_post')).not_to be_nil
+    end
+
+    it 'publishes byte-identical test units on repeat full extractions' do
+      write_file('spec/support/shared/pages.rb', "RSpec.shared_examples 'an accessible page' do\nend\n")
+      write_file('spec/features/pages_spec.rb', <<~RUBY)
+        RSpec.feature 'Pages' do
+          it_behaves_like 'an accessible page'
+          scenario('x') { visit posts_path }
+        end
+      RUBY
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
   # ── Randomized differential run ──────────────────────────────────────────
 
   # The gap-specific examples above pin known failures; this is the part that
@@ -3549,7 +3758,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     when /\.haml\z/ then "%div= Rails.cache.fetch('#{base}_#{nonce}') { 1 }\n"
     when /\.jbuilder\z/ then "json.answer #{nonce}\n"
     when %r{\Adb/migrate/} then migration_source(base, nonce)
-    when %r{\Aspec/factories/} then factory_source(base, nonce)
+    when %r{\Aspec/factories/} then factory_source(base, nonce, random)
+    when %r{\Aspec/support/} then support_source(base, nonce, random)
+    when %r{\Aspec/features/} then feature_spec_source(base, nonce, random)
+    when %r{\Aspec/lib/tasks/} then "RSpec.describe '#{base.delete_suffix('_spec')}' do\n  it('runs#{nonce}') {}\nend\n"
     when %r{\Aapp/graphql/} then graphql_source(relative, base, nonce)
     when %r{concerns/} then "module #{camelize(base)}\n  extend ActiveSupport::Concern\n  # #{nonce}\nend\n"
     when /_spec\.rb\z/ then "RSpec.describe Post do\n  it 'x#{nonce}' do\n    expect(Post).to be_a(Class)\n  end\nend\n"
@@ -3575,8 +3787,48 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
-  def factory_source(base, nonce)
-    "FactoryBot.define do\n  factory :#{base} do\n    title { 'x#{nonce}' }\n  end\nend\n"
+  # Three shapes: a plain factory, one inheriting from another file's
+  # factory (class resolved across files), and a definition file with no
+  # factory, which is a test_support unit instead.
+  def factory_source(base, nonce, random)
+    case random.rand(4)
+    when 0 then "FactoryBot.define do\n  after(:build) { |record| record.title ||= 'x#{nonce}' }\nend\n"
+    when 1 then "FactoryBot.define do\n  factory :#{base}, parent: :fac_#{random.rand(6)} do\n  end\nend\n"
+    when 2 then "FactoryBot.define do\n  factory :#{base}, class: '::Post' do\n    title { 'x#{nonce}' }\n  end\nend\n"
+    else "FactoryBot.define do\n  factory :#{base} do\n    title { 'x#{nonce}' }\n  end\nend\n"
+    end
+  end
+
+  # Names are keyed on a small slot number, not the file, so files collide on
+  # names and specs refer to names that come and go.
+  def support_source(base, nonce, random)
+    slot = random.rand(4)
+    case random.rand(4)
+    when 0 then "RSpec.shared_examples 'shared #{slot}' do\n  it('n#{nonce}') {}\nend\n"
+    when 1 then "RSpec.shared_context 'context #{slot}' do\n  let(:n) { #{nonce} }\nend\n"
+    when 2 then "RSpec::Matchers.define :have_slot_#{slot} do |_|\n  match { |actual| actual == #{nonce} }\nend\n"
+    else
+      "module #{camelize(base)}Helpers\n  def helper_#{nonce} = true\nend\n" \
+      "RSpec.configure { |c| c.include Slot#{slot}Helpers, type: :#{%w[feature request system][random.rand(3)]} }\n" \
+      "module Slot#{slot}Helpers\nend\n"
+    end
+  end
+
+  def feature_spec_source(base, nonce, random)
+    slot = random.rand(4)
+    <<~RUBY
+      RSpec.feature '#{base} #{nonce}' do
+        include Slot#{slot}Helpers
+        include_context 'context #{slot}'
+        it_behaves_like 'shared #{random.rand(4)}'
+        scenario 'visits' do
+          visit posts_path
+          visit "/posts/\#{post.id}"
+          visit '/comments'
+          expect(page).to have_slot_#{slot}(1)
+        end
+      end
+    RUBY
   end
 
   def migration_source(base, nonce)

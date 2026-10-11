@@ -246,6 +246,10 @@ RSpec.describe Woods::Retriever do
         Woods::Retrieval::SearchExecutor::Candidate.new(
           identifier: 'Stripe::Webhook', score: 0.8, source: :vector,
           metadata: { type: 'rails_source' }
+        ),
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'spec/support/stripe_helpers.rb', score: 0.75, source: :vector,
+          metadata: { type: 'test_support' }
         )
       ]
     end
@@ -262,6 +266,28 @@ RSpec.describe Woods::Retriever do
       end
 
       retriever.retrieve('stripe webhook')
+    end
+
+    # Test support files are the same kind of noise: a helper named for a
+    # production concept outranks the concept.
+    it 'excludes test_support candidates by default' do
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        types = kwargs[:candidates].map { |c| c.metadata[:type] }
+        expect(types).not_to include('test_support')
+        expect(types).to include('controller', 'rails_source')
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook')
+    end
+
+    it 'opts test_support back in when types: explicitly includes it' do
+      expect(assembler_double).to receive(:assemble) do |kwargs|
+        expect(kwargs[:candidates].map { |c| c.metadata[:type] }).to eq(['test_support'])
+        assembled_context
+      end
+
+      retriever.retrieve('stripe webhook', types: %w[test_support])
     end
 
     it 'opts test_mappings back in when types: explicitly includes them' do
