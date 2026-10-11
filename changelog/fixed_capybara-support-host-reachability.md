@@ -1,1 +1,0 @@
-- Keep the literal Capybara support host as the default when configured helpers are called with other literals, count those literals as reachable hosts, and keep a request ambiguous when an unknown default would otherwise let the redirect filter pick a single route.

@@ -59,6 +59,27 @@ module Woods
   #   policy.classify_all(%w[app/models/user.rb config/initializers/redis.rb])
   #   # => :restart
   #
+  # Inputs that configuration declares and boot does not capture. Woods reads
+  # them as bytes on every run, so a change re-extracts and never restarts.
+  module ConfiguredInputs
+    module_function
+
+    # YAML under `config_file_paths`, and the declared external consumers file.
+    def bytes_input?(path)
+      Extractors::ConfigFileExtractor.config_file_path?(path) ||
+        (Woods.respond_to?(:configuration) && path == Woods.configuration&.external_table_consumers_path)
+    end
+
+    # Test support under a configured root outside spec/ and test/
+    # (`features/support/**`). Without a loaded configuration nothing matches.
+    def test_support?(path)
+      return false unless path.end_with?('.rb') && !path.end_with?('_spec.rb', '_test.rb')
+
+      globs = Woods.configuration&.test_support_paths if Woods.respond_to?(:configuration)
+      Array(globs).any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME | File::FNM_EXTGLOB) }
+    end
+  end
+
   class ReloadPolicy
     # Ordered least to most disruptive. {#classify_all} returns the last one
     # any path in the set demands.
@@ -230,27 +251,7 @@ module Woods
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
         REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
-        configured_bytes_input?(path) || configured_test_support?(path)
-    end
-
-    # Test support under a configured root outside spec/ and test/
-    # (`features/support/**`). Read as bytes, like every other test file.
-    # Without a loaded configuration nothing extra matches.
-    def configured_test_support?(path)
-      return false unless path.end_with?('.rb') && !path.end_with?('_spec.rb', '_test.rb')
-      return false unless Woods.respond_to?(:configuration) && Woods.configuration.respond_to?(:test_support_paths)
-
-      Woods.configuration.test_support_paths.any? do |glob|
-        File.fnmatch?(glob, path, File::FNM_PATHNAME | File::FNM_EXTGLOB)
-      end
-    end
-
-    # Configuration that boot does not capture and Woods reads as bytes on
-    # every run: YAML under `config_file_paths`, and the declared external
-    # consumers file.
-    def configured_bytes_input?(path)
-      Extractors::ConfigFileExtractor.config_file_path?(path) ||
-        (Woods.respond_to?(:configuration) && path == Woods.configuration&.external_table_consumers_path)
+        ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path)
     end
 
     def under?(path, directories)

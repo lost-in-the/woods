@@ -1,1 +1,0 @@
-- Read a literal Capybara support host when another app_host assignment interpolates its subdomain through a helper that is not configured.

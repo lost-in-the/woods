@@ -121,9 +121,11 @@ module Woods
     # the dispatcher (one extractor's specs, a resident daemon) still builds
     # them.
     RULE_EXTRACTORS = %w[
-      caching config_file configuration database_table decorator event external_consumer factory graphql i18n
-      job lib manager package policy pundit rake_task scheduled_job serializer service state_machine validator
-      view_template
+      caching_extractor config_file_extractor configuration_extractor database_table_extractor
+      decorator_extractor event_extractor external_consumer_extractor factory_extractor graphql_extractor
+      i18n_extractor job_extractor lib_extractor manager_extractor package_extractor policy_extractor
+      pundit_extractor rake_task_extractor scheduled_job_extractor serializer_extractor service_extractor
+      state_machine_extractor test_support_catalog validator_extractor view_template_extractor
     ].freeze
 
     class << self
@@ -299,7 +301,7 @@ module Woods
       end
 
       def require_rule_extractors
-        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}_extractor" }
+        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}" }
       end
 
       # Ruby and YAML configuration sources.
