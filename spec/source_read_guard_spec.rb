@@ -31,7 +31,15 @@ module SourceReadGuard
     ['lib/woods/mcp/tasks/store.rb', 'current_boot_identity'] =>
       'kernel boot id under /proc: ASCII by definition',
     ['lib/woods/mcp/tasks/store.rb', 'linux_process_identity'] =>
-      'kernel boot id and process stat under /proc: ASCII by definition'
+      'kernel boot id and process stat under /proc: ASCII by definition',
+    ['lib/woods/extractors/config_file_extractor.rb', 'read_outline'] =>
+      'reports invalid UTF-8 as parse_error metadata (its own contract), never scrubs',
+    ['lib/woods/extractors/route_extractor.rb', 'build_route_file'] =>
+      'refuses invalid UTF-8 with ExtractionError (its own contract), never scrubs',
+    ['lib/woods/extractors/test_support_catalog.rb', 'analyze'] =>
+      'refuses invalid UTF-8 with ArgumentError (documented contract), never scrubs',
+    ['lib/woods/extractors/external_consumer_declarations.rb', 'load_file'] =>
+      'a declaration file with invalid UTF-8 is a configuration error, not source to scrub'
   }.freeze
 
   # Collects receiver-qualified File/IO reads with their enclosing method.

@@ -159,6 +159,15 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
 
   # ── Initialization ───────────────────────────────────────────────────
 
+  describe '#declared_module_names' do
+    it 'scrubs bytes that are not valid UTF-8 and still names the module' do
+      path = create_file('config/initializers/ledger_setup.rb',
+                         "# caf\xE9 setup\nmodule LedgerSetup\n  def self.call; end\nend\n".b)
+
+      expect(described_class.new.send(:declared_module_names, path)).to eq(['LedgerSetup'])
+    end
+  end
+
   describe '#initialize' do
     it_behaves_like 'handles missing directories'
   end

@@ -154,6 +154,23 @@ RSpec.describe Woods::Extractors::GraphQLOperationExtractor do
     end
   end
 
+  # graphql-ruby is only ever loaded in a child process, as run_fixture does.
+  context 'with a document holding bytes that are not valid UTF-8' do
+    it 'parses the document instead of skipping it as a parse error' do
+      Dir.mktmpdir('woods-graphql-bytes') do |dir|
+        path = File.join(dir, 'ledger.graphql')
+        File.binwrite(path, "# caf\xE9 note\nquery LedgerTotals { ledger { total } }\n".b)
+        script = "require 'graphql'; require 'woods'; require 'woods/extractors/graphql_operation_extractor'; " \
+                 'print Woods::Extractors::GraphQLOperationExtractor.document_skip_reason(ARGV.fetch(0)).inspect'
+
+        output, error, status = Open3.capture3(RbConfig.ruby, '-rbundler/setup', '-Ilib', '-e', script, path)
+
+        expect(status).to be_success, error
+        expect(output).to eq('nil')
+      end
+    end
+  end
+
   context 'without graphql-ruby' do
     include_context 'extractor setup'
 

@@ -189,7 +189,7 @@ module Woods
       # @return [Array<String>] qualified module names the file declares
       def declared_module_names(path)
         names = []
-        each_declaration(File.read(path, encoding: Encoding::UTF_8)) do |kind, _name, qualified|
+        each_declaration(SourceFile.read(path)) do |kind, _name, qualified|
           next unless kind == 'module' && SourceReferences::RuntimeLookup::CONSTANT.match?(qualified)
           next if qualified.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
 

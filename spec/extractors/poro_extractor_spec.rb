@@ -607,6 +607,19 @@ RSpec.describe Woods::Extractors::PoroExtractor do
       described_class.new.extract_nested_units(path, owners: owners)
     end
 
+    it 'emits nested classes from a multibyte file under a US-ASCII default external encoding' do
+      ledger = create_file('app/graphql/nested_fixture/ledger_type.rb',
+                           "# Ledger type — owner\nmodule NestedFixture\n  class LedgerType < Object\n    " \
+                           "class Entry\n      def total; end\n    end\n  end\nend\n")
+      load ledger
+
+      units = with_posix_default_external do
+        described_class.new.extract_nested_units(ledger, owners: ['NestedFixture::LedgerType'])
+      end
+
+      expect(units.map(&:identifier)).to eq(['NestedFixture::LedgerType::Entry'])
+    end
+
     it 'emits classes with methods, value classes and exception classes nested in an owned class' do
       units = nested(owners: ['NestedFixture::CartType'])
 

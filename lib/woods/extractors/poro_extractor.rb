@@ -167,7 +167,7 @@ module Woods
       # @param owners [Array<String>] identifiers of the file's owning units
       # @return [Array<ExtractedUnit>]
       def extract_nested_units(file_path, ar_names: Set.new, owners: [])
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         analysis = collector.call(source)
         @module_discovery ||= StandaloneModuleDiscovery.new
         mark(nested_class_units(file_path, source, ar_names, analysis, owners: owners.to_set), FALLBACK_MARKER)
