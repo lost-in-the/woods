@@ -707,6 +707,22 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
       described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_periodic }
     end
 
+    it 'publishes the initializer with credential-shaped text redacted' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.redis = { url: "redis://:plaintext-marker@redis.internal:6379/0" }
+          config.periodic do |mgr|
+            mgr.register('0 7 * * *', 'Ledger::PurgeWorker')
+          end
+        end
+      RUBY
+
+      source = periodic_units.first.source_code
+
+      expect(source).not_to include('plaintext-marker')
+      expect(source).to include('redis://[REDACTED]@redis.internal:6379/0', "mgr.register('0 7 * * *'")
+    end
+
     it 'emits one unit per registration with its cron and job class' do
       periodic_initializer(<<~RUBY)
         mgr.register('0 7 * * *', 'Ledger::PurgeWorker')

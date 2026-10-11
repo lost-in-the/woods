@@ -16,7 +16,9 @@ module Woods
     # 2. URL userinfo in any scheme, with or without a password separator.
     # 3. Private key blocks, header to footer.
     # 4. A string literal assigned to, or passed after, a credential-named key
-    #    on the same line (`password: "..."`, `ENV["API_TOKEN"] = "..."`).
+    #    on the same line (`password: "..."`, `ENV["API_TOKEN"] = "..."`), or
+    #    assigned to a sensitive-named key when the literal reads as a
+    #    generated token (`pepper = "9f86d0..."`, `slack_webhook, "https://..."`).
     #
     # Redaction is best-effort by nature: a credential with no recognizable
     # shape, held under a name that says nothing, cannot be told from any
@@ -33,10 +35,24 @@ module Woods
       PRIVATE_KEY_HEADER = '-----BEGIN'
       PRIVATE_KEY_FOOTER = '-----END'
 
-      # Name fragments that mark a key as credential-bearing.
+      # Name fragments that mark a key as credential-bearing: any literal
+      # assigned to it is withheld.
       CREDENTIAL_NAME_FRAGMENTS = %w[
         password passwd passphrase secret token api_key apikey access_key private_key credential signature
       ].freeze
+
+      # Name fragments that mark a key as sensitive: a literal assigned to it
+      # is withheld when it reads as a generated token, so `key: '_session'`
+      # and `to: 'webhooks#ledger'` stay readable. Covers every fragment the
+      # YAML extractor withholds values under.
+      SENSITIVE_NAME_FRAGMENTS = %w[
+        pass pwd secret token key credential auth sign salt dsn encrypt cert private
+        bearer cookie session hmac jwt license webhook otp pepper
+      ].freeze
+
+      # An unbroken run this long that mixes letters and digits reads as a
+      # generated token, not a setting.
+      OPAQUE_RUN = %r{[A-Za-z0-9+/=_-]{20,}+}
 
       # One token of a source line: a quoted literal, a word, a separator,
       # a whitespace run, or any single character.
@@ -85,8 +101,9 @@ module Woods
         end.join
       end
 
-      # Replace a string literal that follows a credential-named key and a
-      # separator on the same line. Lines naming no such key are untouched.
+      # Replace a string literal that follows a credential-named or
+      # sensitive-named key and a separator on the same line. Lines naming no
+      # such key are untouched.
       #
       # @param text [String]
       # @return [String]
@@ -95,12 +112,23 @@ module Woods
       end
 
       def candidate_line?(line)
-        (line.include?('"') || line.include?("'")) && credential_named?(line)
+        (line.include?('"') || line.include?("'")) && arming(line)
       end
 
-      def credential_named?(text)
+      # @return [Symbol, false] +:credential+, +:sensitive+, or false when the
+      #   text names neither kind of key
+      def arming(text)
         name = text.downcase
-        CREDENTIAL_NAME_FRAGMENTS.any? { |fragment| name.include?(fragment) }
+        return :credential if CREDENTIAL_NAME_FRAGMENTS.any? { |fragment| name.include?(fragment) }
+        return :sensitive if SENSITIVE_NAME_FRAGMENTS.any? { |fragment| name.include?(fragment) }
+
+        false
+      end
+
+      # @param text [String]
+      # @return [Boolean] whether the text holds a run that reads as a generated token
+      def opaque?(text)
+        text.scan(OPAQUE_RUN).any? { |run| run.match?(/[A-Za-z]/) && run.match?(/\d/) }
       end
 
       # A key arms the pass; a separator after an armed key makes the next
@@ -115,10 +143,16 @@ module Woods
           token = tokens.scan(LINE_TOKEN)
           return output << unterminated(token, tokens.rest, pending) if ['"', "'"].include?(token)
 
-          output << (pending && literal?(token) ? "#{token[0]}#{REDACTED}#{token[0]}" : token)
+          output << (withhold?(token, pending) ? "#{token[0]}#{REDACTED}#{token[0]}" : token)
           armed, pending = next_state(token, armed, pending)
         end
         output
+      end
+
+      def withhold?(token, pending)
+        return false unless pending && literal?(token)
+
+        pending == :credential || opaque?(token)
       end
 
       def unterminated(quote, rest, pending)
@@ -131,7 +165,7 @@ module Woods
         return [armed, pending] if token.start_with?(' ', "\t") || CLOSERS.include?(token)
         return [armed, armed] if SEPARATORS.include?(token)
         return [false, false] if pending && literal?(token)
-        return [credential_named?(token), false] if literal?(token) || token.match?(/\A[A-Za-z_]/)
+        return [arming(token), false] if literal?(token) || token.match?(/\A[A-Za-z_]/)
 
         [false, false]
       end

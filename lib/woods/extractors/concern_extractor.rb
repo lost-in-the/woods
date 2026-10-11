@@ -7,6 +7,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative 'constant_paths'
+require_relative 'config_source_guard'
 
 module Woods
   module Extractors
@@ -82,7 +83,7 @@ module Woods
         )
 
         unit.namespace = extract_namespace(module_name)
-        unit.source_code = annotate_source(source, module_name)
+        unit.source_code = annotate_source(published_source(file_path, source), module_name)
         unit.metadata = extract_metadata(source, file_path)
         unit.dependencies = extract_dependencies(source, module_name)
 
@@ -90,6 +91,19 @@ module Woods
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract concern #{file_path}: #{e.message}")
         nil
+      end
+
+      # A module declared under `config/` is published from configuration
+      # source, so credential-shaped text is withheld as ConfigurationExtractor
+      # withholds it for the same file.
+      #
+      # @param file_path [String] absolute path
+      # @param source [String] file text
+      # @return [String]
+      def published_source(file_path, source)
+        return source unless file_path.to_s.start_with?("#{Rails.root.join('config')}/")
+
+        ConfigSourceGuard.redact(source)
       end
 
       # Extract a module outside concerns directories only when a live model

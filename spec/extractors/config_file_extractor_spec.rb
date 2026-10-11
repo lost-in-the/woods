@@ -66,6 +66,21 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
     it 'returns no units when no directory exists' do
       expect(described_class.new.extract_all).to eq([])
     end
+
+    it 'redacts an opaque key, so a mapping keyed by secrets publishes no secret' do
+      create_file('config/api_clients.yml', <<~YAML)
+        webhook_secrets:
+          9f86d081884c7d659a2feaa0c55ad015a3bf4f1b: shop_1
+        partners:
+          EGY8WhulUOXixybod7ZWwMIL68R9o5kC: acme
+          acme: readable
+      YAML
+
+      unit = unit_for('config/api_clients.yml')
+
+      expect(serialized(unit)).not_to include('9f86d081', 'EGY8Whul')
+      expect(unit.metadata[:key_paths]).to include('webhook_secrets.[REDACTED]', 'partners.[REDACTED]', 'partners.acme')
+    end
   end
 
   describe 'metadata' do

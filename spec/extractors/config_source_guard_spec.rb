@@ -86,6 +86,36 @@ RSpec.describe Woods::Extractors::ConfigSourceGuard do
       expect(described_class.redact(source)).to eq(source)
     end
 
+    {
+      'a webhook URL' => ['set :chat_webhook, "https://hooks.example/services/T0A1B2C3/B0D4E5F6/a1B2c3D4e5F6g7H8i9J0k1L2"',
+                          'set :chat_webhook, "[REDACTED]"'],
+      'an encryption key' => ['config.active_record.encryption.primary_key = "EGY8WhulUOXixybod7ZWwMIL68R9o5kC"',
+                              'config.active_record.encryption.primary_key = "[REDACTED]"'],
+      'a pepper' => ['config.pepper = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"', 'config.pepper = "[REDACTED]"'],
+      'a salt' => ["config.key_derivation_salt = 'b4c0ff33b4c0ff33b4c0ff33'", "config.key_derivation_salt = '[REDACTED]'"]
+    }.each do |label, (source, expected)|
+      it "replaces an opaque literal assigned to a sensitive-named key: #{label}" do
+        expect(described_class.redact("#{source}\n")).to eq("#{expected}\n")
+      end
+    end
+
+    it 'keeps a readable literal assigned to a sensitive-named key that is not credential-named' do
+      source = <<~RUBY
+        post 'webhooks/ledger', to: 'webhooks#ledger'
+        config.session_store :cookie_store, key: '_ledger_session'
+        config.encryption = 'aes-256-gcm'
+      RUBY
+
+      expect(described_class.redact(source)).to eq(source)
+    end
+
+    it 'names every key fragment the YAML extractor treats as sensitive' do
+      require 'woods/extractors/config_file_extractor'
+
+      expect(described_class::SENSITIVE_NAME_FRAGMENTS)
+        .to include(*Woods::Extractors::ConfigFileExtractor::SENSITIVE_KEY_FRAGMENTS)
+    end
+
     it 'replaces a database URL carrying a password' do
       redacted = described_class.redact("url = 'postgres://ledger:plaintext-marker@db.example/ledger'\n")
 
