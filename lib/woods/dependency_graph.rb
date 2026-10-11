@@ -1253,7 +1253,7 @@ module Woods
     # serialized before the `{target, via}` migration still load without
     # explicit data conversion.
     #
-    # A (target, via) pair is one relationship however many times a unit
+    # A (target, via) pair with the same relationship attributes is one relationship however many times a unit
     # emits it (an extractor's guessed edge beside the verified reference
     # pass's edge, say). The first occurrence keeps its attributes, so the
     # reverse index and `dependents` never count a pair twice.
@@ -1278,7 +1278,10 @@ module Woods
           { target: edge.to_s, via: nil }
         end
       end
-      normalized.uniq { |edge| [edge[:target], edge[:via]] }
+      # `type` describes the target, not the relationship, so a guessed and a
+      # verified edge to one target collapse; two associations that differ in
+      # `through` (or any other relationship attribute) stay separate.
+      normalized.uniq { |edge| edge.except(:type) }
     end
   end
 end
