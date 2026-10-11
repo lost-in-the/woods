@@ -92,7 +92,8 @@ RSpec.describe Woods::Extractors::ConfigSourceGuard do
       'an encryption key' => ['config.active_record.encryption.primary_key = "EGY8WhulUOXixybod7ZWwMIL68R9o5kC"',
                               'config.active_record.encryption.primary_key = "[REDACTED]"'],
       'a pepper' => ['config.pepper = "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b"', 'config.pepper = "[REDACTED]"'],
-      'a salt' => ["config.key_derivation_salt = 'b4c0ff33b4c0ff33b4c0ff33'", "config.key_derivation_salt = '[REDACTED]'"]
+      'a salt' => ["config.key_derivation_salt = 'b4c0ff33b4c0ff33b4c0ff33'",
+                   "config.key_derivation_salt = '[REDACTED]'"]
     }.each do |label, (source, expected)|
       it "replaces an opaque literal assigned to a sensitive-named key: #{label}" do
         expect(described_class.redact("#{source}\n")).to eq("#{expected}\n")
