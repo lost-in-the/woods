@@ -8,6 +8,20 @@ require 'woods/extractors/migration_extractor'
 RSpec.describe Woods::Extractors::MigrationExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'db/migrate/20240115123456_create_widgets.rb',
+                  source: <<~SOURCE,
+                    # Widgets — catalogue table
+                    class CreateWidgets < ActiveRecord::Migration[7.1]
+                      def change
+                        create_table :widgets do |t|
+                          t.string :name, comment: 'display name — shown to buyers'
+                        end
+                      end
+                    end
+                  SOURCE
+                  identifier: 'CreateWidgets'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

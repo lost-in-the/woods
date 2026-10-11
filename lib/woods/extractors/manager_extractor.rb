@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -53,7 +54,7 @@ module Woods
       # @param file_path [String] Path to the manager file
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a manager
       def extract_manager_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = extract_class_name(file_path, source, 'managers')
 
         return nil unless class_name

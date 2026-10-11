@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -58,7 +59,7 @@ module Woods
       # @param file_path [String] Path to the service file
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a service
       def extract_service_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         # Zeitwerk-governed naming first (G-1): a file under a managed
         # autoload path is named for the constant its path spells, so
         # `module Domain; class Container; class Parser` names the file's

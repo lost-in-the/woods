@@ -132,6 +132,31 @@ RSpec.describe Woods::Extractors::RailsSourceExtractor do
     end
   end
 
+  # ── multibyte source under a POSIX locale ─────────────────────────────
+
+  describe 'multibyte source under a US-ASCII default external encoding' do
+    it 'extracts a framework file' do
+      stub_gem('activerecord')
+      create_file('lib/active_record/callbacks.rb',
+                  "# Callbacks — lifecycle hooks\nmodule ActiveRecord\n  module Callbacks\n  end\nend\n")
+
+      units = with_posix_default_external { described_class.new.extract_rails_sources }
+
+      expect(units.map(&:identifier)).to include(a_string_including('callbacks.rb'))
+      expect(units.first.source_code).to include('Callbacks — lifecycle hooks')
+    end
+
+    it 'extracts a gem file' do
+      stub_gem('devise', version: '4.9.3')
+      create_file('lib/devise/models/authenticatable.rb', "# Authenticatable — sign-in\nmodule Authenticatable\nend\n")
+
+      units = with_posix_default_external { described_class.new.extract_gem_sources }
+
+      expect(units.map(&:identifier)).to include(a_string_including('authenticatable.rb'))
+      expect(units.first.source_code).to include('Authenticatable — sign-in')
+    end
+  end
+
   # ── extract_gem_sources ───────────────────────────────────────────────
 
   describe '#extract_gem_sources' do

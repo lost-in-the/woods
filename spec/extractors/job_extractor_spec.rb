@@ -6,10 +6,25 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/class/subclasses'
+require 'woods'
 require 'woods/extractors/job_extractor'
 
 RSpec.describe Woods::Extractors::JobExtractor do
   include_context 'extractor setup'
+
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/jobs/shipment_job.rb',
+                  source: <<~SOURCE,
+                    # Shipment — dispatch
+                    class ShipmentJob < ApplicationJob
+                      queue_as :default
+
+                      def perform(id)
+                        id
+                      end
+                    end
+                  SOURCE
+                  identifier: 'ShipmentJob'
 
   # ── Initialization ───────────────────────────────────────────────────
 
@@ -848,6 +863,21 @@ RSpec.describe Woods::Extractors::JobExtractor do
       end
 
       expect(described_class.new.send(:source_file_for, job_class)).to eq(path)
+    end
+
+    it 'reads a multibyte job file under a US-ASCII default external encoding' do
+      create_file('app/jobs/shipment_job.rb',
+                  "# Shipment — dispatch\nclass ShipmentJob < ApplicationJob\n  def perform(id); end\nend\n")
+      job_class = Class.new do
+        def self.name
+          'ShipmentJob'
+        end
+      end
+
+      unit = with_posix_default_external { described_class.new.send(:extract_job_class, job_class) }
+
+      expect(unit.source_code).to be_valid_encoding
+      expect(unit.source_code).to include('Shipment — dispatch')
     end
 
     it 'builds a unit with a nil file_path for an unresolvable job class' do

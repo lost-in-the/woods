@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'factory_calls'
@@ -73,7 +74,7 @@ module Woods
       def parse_file(file_path)
         return nil unless file_path.to_s.end_with?('.rb')
 
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         { file_path: file_path, source: source, factories: parse_factories(source) }
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract factories from #{file_path}: #{e.message}")

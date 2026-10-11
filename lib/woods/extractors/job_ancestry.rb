@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative 'shared_utility_methods'
 
 module Woods
@@ -64,7 +65,7 @@ module Woods
           name = klass.name
           path = name && Object.const_source_location(name)&.first
           return false unless app_source?(path, app_root)
-          return true if declares_class?(File.read(path), name)
+          return true if declares_class?(SourceFile.read(path), name)
 
           Rails.logger.debug "[Woods] Skipping job #{name}: #{path} does not declare it (generated class)"
           false

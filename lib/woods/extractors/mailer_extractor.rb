@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
@@ -68,7 +69,7 @@ module Woods
           file_path: file_path
         )
 
-        source = file_path && File.exist?(file_path) ? File.read(file_path, encoding: Encoding::UTF_8) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)

@@ -10,6 +10,18 @@ require 'woods/extractors/service_extractor'
 RSpec.describe Woods::Extractors::ServiceExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/services/ledger_service.rb',
+                  source: <<~SOURCE,
+                    # Ledger — posts entries
+                    class LedgerService
+                      def call
+                        'ok'
+                      end
+                    end
+                  SOURCE
+                  identifier: 'LedgerService'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

@@ -11,6 +11,14 @@ require 'woods/extractors/view_template_extractor'
 RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/views/widgets/index.html.erb',
+                  source: <<~SOURCE,
+                    <h1>Widgets — all</h1>
+                    <%= render 'list' %>
+                  SOURCE
+                  identifier: 'widgets/index.html.erb'
+
   # Stub engine implementing the ViewEngines::Base contract. Reused by
   # the supported_template_engines aggregation tests and the engine
   # dispatch tests below.
@@ -305,7 +313,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       it 'skips the file and returns empty array' do
         allow(File).to receive(:read).and_call_original
         allow(File).to receive(:read).with(
-          a_string_matching(%r{app/views/broken/index\.html\.erb})
+          a_string_matching(%r{app/views/broken/index\.html\.erb}),
+          encoding: Encoding::UTF_8
         ).and_raise(Errno::EACCES)
 
         units = described_class.new.extract_all

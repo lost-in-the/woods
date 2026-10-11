@@ -1449,7 +1449,7 @@ module Woods
       # @return [String, nil] the claim file's current bytes, or nil if it
       #   doesn't exist
       def claim_bytes
-        @claim_lease ? @claim_lease.snapshot : File.read(claim_path)
+        @claim_lease ? @claim_lease.snapshot : File.binread(claim_path)
       rescue Errno::ENOENT
         nil
       end

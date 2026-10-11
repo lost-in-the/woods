@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../ast/method_extractor'
 
 module Woods
@@ -58,7 +59,7 @@ module Woods
       # @return [Hash{Array(String, Integer) => String}] [name, line] => source text
       def action_definitions_for(file)
         (@action_definitions ||= {})[file] ||=
-          Ast::MethodExtractor.new.extract_method_definitions(File.read(file))
+          Ast::MethodExtractor.new.extract_method_definitions(SourceFile.read(file))
       end
 
       # The definition Ruby dispatches: the `def` at the line `source_location`

@@ -11,6 +11,17 @@ require 'woods/extractors/test_mapping_extractor'
 RSpec.describe Woods::Extractors::TestMappingExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'spec/models/widget_spec.rb',
+                  source: <<~SOURCE,
+                    # Widget — model spec
+                    describe Widget do
+                      it 'is valid — with a name' do
+                      end
+                    end
+                  SOURCE
+                  identifier: 'spec/models/widget_spec.rb'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

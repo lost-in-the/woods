@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 require_relative '../graphql_document_paths'
 require_relative 'graphql_operation_schema'
@@ -51,7 +52,7 @@ module Woods
         def document_skip_reason(absolute_path)
           return 'graphql_unavailable' unless parser_available?
 
-          nodes = GraphQL.parse(File.read(absolute_path, encoding: Encoding::UTF_8)).definitions
+          nodes = GraphQL.parse(SourceFile.read(absolute_path)).definitions
           nodes.all? { |node| executable?(node) } ? nil : 'schema_definitions'
         rescue StandardError
           'parse_error'
@@ -96,7 +97,7 @@ module Woods
 
       # @return [Array<Definition>] empty for a schema dump or an unparseable file
       def definitions_in(relative_path)
-        source = File.read(File.join(@root, relative_path), encoding: Encoding::UTF_8)
+        source = SourceFile.read(File.join(@root, relative_path))
         nodes = GraphQL.parse(source).definitions
         unless nodes.all? { |node| self.class.executable?(node) }
           Rails.logger.info("[Woods] Skipping #{relative_path}: schema definitions, not an operation document")

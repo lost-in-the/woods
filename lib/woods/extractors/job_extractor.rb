@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'reference_patterns'
@@ -98,7 +99,7 @@ module Woods
       # @param file_path [String] Path to the job file
       # @return [ExtractedUnit, nil] The extracted unit
       def extract_job_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = extract_class_name(file_path, source)
 
         return nil unless class_name
@@ -129,7 +130,7 @@ module Woods
         return nil if job_class.name.nil?
 
         file_path = source_file_for(job_class)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit = ExtractedUnit.new(
           type: :job,

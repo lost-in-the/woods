@@ -314,6 +314,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Template Discovery ────────────────────────────────────────────────
 
   describe 'source encoding' do
+    it 'scrubs bytes that are not valid UTF-8 and still extracts the mailer' do
+      mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
+      create_file('app/mailers/shipment_mailer.rb',
+                  "class ShipmentMailer < ApplicationMailer\n  # caf\xE9\n  " \
+                  "def dispatched = mail(subject: \"sent\")\nend\n".b)
+
+      unit = with_posix_default_external { described_class.new.extract_mailer(mailer) }
+
+      expect(unit&.source_code).to include("# caf\uFFFD")
+    end
+
     it 'reads a multibyte mailer source the same under a POSIX default external encoding' do
       mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
       create_file('app/mailers/shipment_mailer.rb', <<~RUBY)

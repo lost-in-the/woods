@@ -9,6 +9,15 @@ require 'woods/extractors/package_extractor'
 RSpec.describe Woods::Extractors::PackageExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'packs/ledger/package.yml',
+                  source: <<~SOURCE,
+                    enforce_dependencies: true
+                    metadata:
+                      owner: "ledger — team"
+                  SOURCE
+                  identifier: 'packs/ledger'
+
   def write_package(dir, yaml)
     create_file(dir == '.' ? 'package.yml' : File.join(dir, 'package.yml'), yaml)
   end

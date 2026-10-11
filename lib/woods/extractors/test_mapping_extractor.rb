@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -97,7 +98,7 @@ module Woods
       # @param file_path [String] Absolute path to the spec or test file
       # @return [ExtractedUnit, nil] The extracted unit or nil on error
       def extract_test_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         framework = detect_framework(file_path)
         relative_path = file_path.sub("#{@rails_root}/", '')
 

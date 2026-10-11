@@ -9,6 +9,22 @@ require 'woods/extractors/policy_extractor'
 RSpec.describe Woods::Extractors::PolicyExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/policies/refund_policy.rb',
+                  source: <<~SOURCE,
+                    # Refund — eligibility
+                    class RefundPolicy
+                      def initialize(ledger)
+                        @ledger = ledger
+                      end
+
+                      def eligible?
+                        @ledger.total > 0
+                      end
+                    end
+                  SOURCE
+                  identifier: 'RefundPolicy'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

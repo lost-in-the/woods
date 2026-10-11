@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -66,7 +67,7 @@ module Woods
       # @param module_name [String, nil] Runtime identity for a discovered model mixin
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
       def extract_concern_file(file_path, module_name: nil)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         # Runtime discovery supplies each included module's identity. Ordinary
         # concern files retain their canonical identity, including nested helpers.
         module_name ||= extract_module_name(file_path, source)
@@ -188,7 +189,7 @@ module Woods
       # @return [Array<String>] qualified module names the file declares
       def declared_module_names(path)
         names = []
-        each_declaration(File.read(path, encoding: Encoding::UTF_8)) do |kind, _name, qualified|
+        each_declaration(SourceFile.read(path)) do |kind, _name, qualified|
           next unless kind == 'module' && SourceReferences::RuntimeLookup::CONSTANT.match?(qualified)
           next if qualified.split('::').any? { |part| MIXIN_INNER_MODULES.include?(part) }
 

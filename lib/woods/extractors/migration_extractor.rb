@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -111,7 +112,7 @@ module Woods
       # @param file_path [String] Path to the migration file
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a migration
       def extract_migration_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         declaration = MigrationDeclaration.new(source: source, file_path: file_path).call
         return nil unless declaration
 

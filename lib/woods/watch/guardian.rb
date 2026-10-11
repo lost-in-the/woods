@@ -132,7 +132,9 @@ end
 
 if $PROGRAM_NAME == __FILE__
   config_io = IO.for_fd(5)
-  config = JSON.parse(config_io.read)
+  # The owner writes this pipe with JSON.generate (UTF-8); before Bundler and
+  # Rails the read is tagged with the locale, US-ASCII under LC_ALL=C.
+  config = JSON.parse(config_io.read.force_encoding(Encoding::UTF_8))
   config_io.close
   parent = IO.for_fd(4)
   events = IO.for_fd(3, 'w')

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
@@ -90,7 +91,7 @@ module Woods
         )
 
         source_path = unit.file_path
-        source = source_path && File.exist?(source_path) ? File.read(source_path) : nil
+        source = source_path && File.exist?(source_path) ? SourceFile.read(source_path) : nil
 
         unit.namespace = model.module_parent.name unless model.module_parent == Object
         inlined_source, inlined_concerns = build_model_source_with_concerns(model, source)
@@ -243,7 +244,7 @@ module Woods
           source_path = source_file_for(model)
           return ['', []] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         concern_sources = resolved_concern_sources(model)
@@ -392,7 +393,7 @@ module Woods
         path = concern_path_for(mod)
         return nil unless path && File.exist?(path)
 
-        @concern_cache[mod.name] = [mod.name, File.read(path), path]
+        @concern_cache[mod.name] = [mod.name, SourceFile.read(path), path]
       end
 
       # Find the file path for a concern
@@ -668,7 +669,7 @@ module Woods
           source_path = source_file_for(model)
           return [] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         lines = source.lines
@@ -787,7 +788,7 @@ module Woods
         # Parse source for service/mailer/job references
         if source.nil?
           source_path = source_file_for(model)
-          source = File.read(source_path) if source_path && File.exist?(source_path)
+          source = SourceFile.read(source_path) if source_path && File.exist?(source_path)
         end
 
         if source
@@ -1340,7 +1341,7 @@ module Woods
           path = source_file_for(model)
           return 0 unless path && File.exist?(path)
 
-          File.readlines(path).count { |l| l.strip.present? && !l.strip.start_with?('#') }
+          SourceFile.readlines(path).count { |l| l.strip.present? && !l.strip.start_with?('#') }
         end
       end
     end

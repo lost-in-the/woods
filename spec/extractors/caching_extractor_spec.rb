@@ -664,6 +664,17 @@ RSpec.describe Woods::Extractors::CachingExtractor do
   # Under a POSIX locale a bare File.read tags source as US-ASCII, and a
   # multibyte template then fails the byte-offset scan.
   describe 'source encoding' do
+    it 'scrubs bytes that are not valid UTF-8 and still extracts the cache calls' do
+      path = create_file('app/views/widgets/index.html.haml',
+                         "-# caf\xE9 note\n- cache [@widget] do\n  %p= Rails.cache.read(\"widget/key\")\n".b)
+
+      unit = with_posix_default_external { described_class.new.extract_caching_file(path) }
+
+      expect(unit).not_to be_nil
+      expect(unit.metadata[:cache_calls].map { |c| c[:key_pattern] }).to eq(['"widget/key"', '[@widget]'])
+      expect(unit.source_code).to include("caf\uFFFD")
+    end
+
     it 'reads a multibyte source the same under a POSIX default external encoding' do
       path = create_file('app/views/widgets/show.html.haml', <<~HAML)
         -# Ünïcødé ☃ comment

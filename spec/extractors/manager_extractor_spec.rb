@@ -9,6 +9,18 @@ require 'woods/extractors/manager_extractor'
 RSpec.describe Woods::Extractors::ManagerExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/managers/ledger_manager.rb',
+                  source: <<~SOURCE,
+                    # Ledger — totals
+                    class LedgerManager < SimpleDelegator
+                      def total_with_tax
+                        total * 1.1
+                      end
+                    end
+                  SOURCE
+                  identifier: 'LedgerManager'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

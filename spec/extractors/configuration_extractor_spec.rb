@@ -11,6 +11,16 @@ require 'woods/extractors/configuration_extractor'
 RSpec.describe Woods::Extractors::ConfigurationExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'config/initializers/ledger.rb',
+                  source: <<~SOURCE,
+                    # Ledger — settings
+                    Ledger.configure do |config|
+                      config.label = 'Ledger — main'
+                    end
+                  SOURCE
+                  identifier: 'initializers/ledger.rb'
+
   # Stub Rails.application for BehavioralProfile integration
   before do
     rails_config = double('RailsConfig')

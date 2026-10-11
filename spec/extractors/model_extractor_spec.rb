@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'active_support/core_ext/object/blank' # count_loc uses present?
 require 'woods/extractors/model_extractor'
+require 'tmpdir'
+require 'fileutils'
 
 RSpec.describe Woods::Extractors::ModelExtractor do
   let(:extractor) { described_class.new }
@@ -684,7 +686,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(File).to receive(:exist?).and_call_original
       allow(File).to receive(:exist?).with(model_path).and_return(true)
       allow(File).to receive(:read).and_call_original
-      allow(File).to receive(:read).with(model_path).and_return(model_source)
+      allow(File).to receive(:read).with(model_path, encoding: Encoding::UTF_8).and_return(model_source)
 
       unit = extractor.send(:extract_model, model)
 
@@ -734,7 +736,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         allow(File).to receive(:exist?).and_call_original
         allow(File).to receive(:exist?).with(model_path).and_return(true)
         allow(File).to receive(:read).and_call_original
-        allow(File).to receive(:read).with(model_path).and_return(model_source)
+        allow(File).to receive(:read).with(model_path, encoding: Encoding::UTF_8).and_return(model_source)
       end
 
       def extract_with_concern(concern_path)
@@ -1733,6 +1735,64 @@ RSpec.describe Woods::Extractors::ModelExtractor do
                            { type: :model, target: 'Plan', via: :has_many, through: 'account',
                              through_db: 'analytics' }
                          ])
+    end
+  end
+
+  # ── multibyte source under a POSIX locale ─────────────────────────
+
+  describe 'reading multibyte model source under a US-ASCII default external encoding' do
+    let(:tmp_dir) { Dir.mktmpdir }
+    let(:model_path) { File.join(tmp_dir, 'app/models/ledger.rb') }
+    let(:concern_path) { File.join(tmp_dir, 'app/models/concerns/postable.rb') }
+    let(:model) { stub_bare_model('Ledger') }
+
+    before do
+      stub_const('Rails', double('Rails', root: Pathname.new(tmp_dir), logger: double('Logger').as_null_object))
+      FileUtils.mkdir_p(File.dirname(concern_path))
+      File.write(model_path, <<~RUBY)
+        # Ledger — the book of entries
+        class Ledger < ApplicationRecord
+          scope :unreconciled, -> { where(note: "open — pending") }
+        end
+      RUBY
+      File.write(concern_path, "# Postable — posting rules\nmodule Postable\nend\n")
+      postable = Module.new
+      allow(postable).to receive(:name).and_return('Postable')
+      allow(extractor).to receive_messages(source_file_for: model_path, extract_included_modules: [postable],
+                                           extract_extended_modules: [])
+      allow(extractor).to receive(:concern_path_for).with(postable).and_return(concern_path)
+    end
+
+    after { FileUtils.rm_rf(tmp_dir) }
+
+    it 'extracts the model with its concern inlined' do
+      unit = with_posix_default_external { extractor.send(:extract_model, model) }
+
+      expect(unit.source_code).to be_valid_encoding
+      expect(unit.source_code).to include('Ledger — the book', 'Postable — posting rules')
+      expect(unit.metadata[:inlined_concerns]).to eq(['Postable'])
+    end
+
+    it 'inlines the concern when it reads the model source itself' do
+      source, = with_posix_default_external { extractor.send(:build_model_source_with_concerns, model) }
+
+      expect(source).to include('Ledger — the book', 'Postable — posting rules')
+    end
+
+    it 'extracts scopes when it reads the model source itself' do
+      scopes = with_posix_default_external { extractor.send(:extract_scopes, model) }
+
+      expect(scopes.map { |scope| scope[:name] }).to eq(['unreconciled'])
+    end
+
+    it 'scans dependencies when it reads the model source itself' do
+      deps = with_posix_default_external { extractor.send(:extract_dependencies, model) }
+
+      expect(deps).to include({ type: :concern, target: 'Postable', via: :include })
+    end
+
+    it 'counts lines of code when it reads the model source itself' do
+      expect(with_posix_default_external { extractor.send(:count_loc, model) }).to eq(3)
     end
   end
 end

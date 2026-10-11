@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
@@ -119,7 +120,7 @@ module Woods
         )
 
         source_path = unit.file_path
-        source = source_path && File.exist?(source_path) ? File.read(source_path) : ''
+        source = source_path && File.exist?(source_path) ? SourceFile.read(source_path) : ''
 
         unit.namespace = extract_namespace(controller)
         inlined_source, inlined_concerns = build_controller_source_with_concerns(controller, source)
@@ -360,7 +361,7 @@ module Woods
       #   line of its first declaration
       def filter_declarations(path)
         (@filter_declarations ||= {})[path] ||= begin
-          parsed = Prism.parse(File.read(path))
+          parsed = Prism.parse(SourceFile.read(path))
           sites = {}
           collect_filter_declarations(parsed.value, sites) if parsed.success?
           sites
@@ -538,7 +539,7 @@ module Woods
           source_path = source_file_for(controller)
           return ['', []] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         return [source, []] if source.empty?
@@ -573,7 +574,7 @@ module Woods
         path = module_source_path(mod)
         return nil unless path && File.exist?(path)
 
-        @concern_cache[mod.name] = [mod.name, File.read(path)]
+        @concern_cache[mod.name] = [mod.name, SourceFile.read(path)]
       end
 
       # Render concern sources as a '#'-commented display block showing
@@ -855,7 +856,7 @@ module Woods
           source_path = source_file_for(controller)
           return [] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         formats = []
@@ -885,7 +886,7 @@ module Woods
           source_path = source_file_for(controller)
           return {} unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         params = {}
@@ -968,7 +969,7 @@ module Woods
 
         if source.nil?
           source_path = source_file_for(controller)
-          source = File.read(source_path) if source_path && File.exist?(source_path)
+          source = SourceFile.read(source_path) if source_path && File.exist?(source_path)
         end
 
         if source
@@ -1110,7 +1111,7 @@ module Woods
       def declaration_line_text(file, line)
         return nil unless file && line && File.exist?(file)
 
-        text = (@declaration_lines ||= {})[file] ||= File.readlines(file)
+        text = (@declaration_lines ||= {})[file] ||= SourceFile.readlines(file)
         text[line - 1]&.strip.presence
       end
 

@@ -15,6 +15,18 @@ require 'woods/extractors/event_extractor'
 RSpec.describe Woods::Extractors::EventExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/services/shipment_service.rb',
+                  source: <<~SOURCE,
+                    # Shipment — notifications
+                    class ShipmentService
+                      def call
+                        ActiveSupport::Notifications.instrument('shipment.sent', note: 'sent — ok')
+                      end
+                    end
+                  SOURCE
+                  identifier: 'shipment.sent'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -624,9 +636,9 @@ RSpec.describe Woods::Extractors::EventExtractor do
 
     def counts_per_path
       counts = Hash.new(0)
-      allow(File).to receive(:read).and_wrap_original do |method, path|
+      allow(File).to receive(:read).and_wrap_original do |method, path, **options|
         counts[path.to_s] += 1
-        method.call(path)
+        method.call(path, **options)
       end
       counts
     end

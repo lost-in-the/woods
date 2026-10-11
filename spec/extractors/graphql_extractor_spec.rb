@@ -1248,6 +1248,31 @@ RSpec.describe Woods::Extractors::GraphQLExtractor do
   # ── extract_all ───────────────────────────────────────────────────────
 
   describe '#extract_all' do
+    it 'discovers a multibyte GraphQL file under a US-ASCII default external encoding' do
+      create_file('app/graphql/types/ledger_type.rb',
+                  "# Ledger type — entries\nmodule Types\n  class LedgerType < Types::BaseObject\n    " \
+                  "field :id, ID, null: false\n  end\nend\n")
+
+      units = with_posix_default_external { described_class.new.extract_all }
+
+      expect(units.map(&:identifier)).to eq(['Types::LedgerType'])
+      expect(units.first.source_code).to include('Ledger type — entries')
+    end
+
+    it 'extracts a runtime type from a multibyte file under a US-ASCII default external encoding' do
+      stub_const('Types', Module.new)
+      path = create_file('app/graphql/types/shipment_type.rb',
+                         "# Shipment type — dispatch\nmodule Types\n  " \
+                         "class ShipmentType < GraphQL::Schema::Object\n    def total = 0\n  end\nend\n")
+      load path
+
+      unit = with_posix_default_external do
+        described_class.new.send(:extract_from_runtime_type, Types::ShipmentType)
+      end
+
+      expect(unit.source_code).to include('Shipment type — dispatch')
+    end
+
     it 'returns empty array when graphql is not available' do
       hide_const('GraphQL::Schema')
 

@@ -11,6 +11,35 @@ require 'woods/extractors/scheduled_job_extractor'
 RSpec.describe Woods::Extractors::ScheduledJobExtractor do
   include_context 'extractor setup'
 
+  describe 'multibyte schedule sources' do
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/recurring.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  class: LedgerJob\n  schedule: every day at 2am\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/sidekiq_cron.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  cron: \"0 2 * * *\"\n  class: LedgerJob\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/schedule.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  cron: \"0 2 * * *\"\n  class: LedgerJob\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/schedule.rb',
+                    source: "# Ledger — nightly\nevery 1.day do\n  runner \"LedgerJob.perform_later\"\nend\n",
+                    identifier: 'scheduled:whenever_ledger_job_0'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/initializers/sidekiq_cron.rb',
+                    source: "# Ledger — nightly\nSidekiq::Cron::Job.create(name: \"ledger sweep\", " \
+                            'cron: "0 2 * * *", ' \
+                            "class: \"LedgerJob\")\n",
+                    identifier: 'scheduled:ledger sweep'
+  end
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

@@ -9,6 +9,18 @@ require 'woods/extractors/factory_extractor'
 RSpec.describe Woods::Extractors::FactoryExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'spec/factories/widgets.rb',
+                  source: <<~SOURCE,
+                    # Widget — factory
+                    FactoryBot.define do
+                      factory :widget do
+                        name { 'Widget — one' }
+                      end
+                    end
+                  SOURCE
+                  identifier: 'widget'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

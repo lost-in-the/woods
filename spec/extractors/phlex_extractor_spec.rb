@@ -779,6 +779,15 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
 
     after { FileUtils.rm_rf(rails_root) }
 
+    it 'scrubs bytes that are not valid UTF-8 and still extracts the component' do
+      File.binwrite(rails_root.join('app/components/widget_component.rb'),
+                    "class WidgetComponent < Phlex::HTML\n  # caf\xE9\n  renders_one :header\nend\n".b)
+
+      unit = with_posix_default_external { described_class.new.extract_all.first }
+
+      expect(unit&.source_code).to include("# caf\uFFFD")
+    end
+
     it 'reads a multibyte component source the same under a POSIX default external encoding' do
       unit = with_posix_default_external { described_class.new.extract_all.first }
 

@@ -6,6 +6,8 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
+require 'woods'
+require 'woods/extractor'
 require 'woods/model_name_cache'
 require 'woods/extractors/shared_utility_methods'
 require 'woods/extractors/shared_dependency_scanner'
@@ -23,6 +25,20 @@ RSpec.describe Woods::Extractors::PoroExtractor do
 
   before do
     stub_const('ActiveRecord::Base', ar_base)
+  end
+
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/models/ledger_entry.rb',
+                  source: "# Ledger entry — one posting\nclass LedgerEntry\n  attr_reader :amount\nend\n",
+                  identifier: 'LedgerEntry'
+
+  it 'reports a multibyte namespace-only file under a US-ASCII default external encoding' do
+    path = create_file('app/models/ledger_space.rb',
+                       "# Ledger — namespace\nmodule LedgerSpace\n  module Entries; end\nend\n")
+
+    reason = with_posix_default_external { described_class.new.static_skip_reason(path) }
+
+    expect(reason).to eq('namespace_only')
   end
 
   # ── Initialization ───────────────────────────────────────────────────
@@ -589,6 +605,19 @@ RSpec.describe Woods::Extractors::PoroExtractor do
 
     def nested(owners:)
       described_class.new.extract_nested_units(path, owners: owners)
+    end
+
+    it 'emits nested classes from a multibyte file under a US-ASCII default external encoding' do
+      ledger = create_file('app/graphql/nested_fixture/ledger_type.rb',
+                           "# Ledger type — owner\nmodule NestedFixture\n  class LedgerType < Object\n    " \
+                           "class Entry\n      def total; end\n    end\n  end\nend\n")
+      load ledger
+
+      units = with_posix_default_external do
+        described_class.new.extract_nested_units(ledger, owners: ['NestedFixture::LedgerType'])
+      end
+
+      expect(units.map(&:identifier)).to eq(['NestedFixture::LedgerType::Entry'])
     end
 
     it 'emits classes with methods, value classes and exception classes nested in an owned class' do

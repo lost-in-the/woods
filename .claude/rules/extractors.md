@@ -29,7 +29,7 @@ end
 Rules:
 - Always return `ExtractedUnit` instances, never raw hashes
 - Set `unit.dependencies` as an array of `{ type:, target:, via: }` hashes
-- Use `File.read` for source, never `eval` or `load`
+- Read host source with `SourceFile.read` (UTF-8 under any locale), never a bare `File.read`, `eval` or `load`
 - Runtime introspection (reflection APIs, `descendants`, route helpers) is preferred over parsing when available
 - Handle missing directories gracefully — a host app may not have `app/interactors/`
 - Inlining concerns: resolve `include FooConcern` by reading the concern source and appending it to `source_code`. Track inlined concerns in `metadata[:inlined_concerns]`
