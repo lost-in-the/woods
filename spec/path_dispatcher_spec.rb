@@ -335,6 +335,13 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('config/initializers/inflections.yml')).not_to include(:scheduled_jobs)
     end
 
+    it 'triggers a scheduled-job re-run on a job file, whose presence decides job_class_resolved' do
+      %w[app/jobs/nightly_report_job.rb app/workers/sweep_worker.rb app/sidekiq/ledger/purge_worker.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:scheduled_jobs), path
+      end
+      expect(dispatcher.whole_app_keys_for('app/jobs/README.md')).not_to include(:scheduled_jobs)
+    end
+
     it 'triggers state-machine and event re-runs on a model change' do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).to include(:state_machines, :events)
     end
@@ -533,6 +540,18 @@ RSpec.describe Woods::PathDispatcher do
          app/javascript/node_modules/pkg/widget_list.graphql app/graphql/schema.graphql].each do |path|
         expect(dispatcher.whole_app_keys_for(path)).not_to include(:graphql_operations), path
       end
+    end
+
+    it 'ignores a root-level node_modules whatever the configured globs' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.graphql_document_paths = ['**/*.graphql']
+
+      expect(dispatcher.whole_app_keys_for('node_modules/pkg/widget_list.graphql')).to eq([])
+      expect(Woods::GraphQLDocumentPaths.match?('node_modules/pkg/widget_list.graphql')).to be(false)
+      expect(dispatcher.whole_app_keys_for('client/widgets/widget_list.graphql')).to eq([:graphql_operations])
+    ensure
+      Woods.configuration = original
     end
 
     it 'follows config.graphql_document_paths' do

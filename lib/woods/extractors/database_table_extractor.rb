@@ -41,10 +41,14 @@ module Woods
         (SCHEMA_FILE_GLOBS + MIGRATION_GLOBS).any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME) }
       end
 
+      # A model file at the application root or under a pack or engine
+      # (`packs/billing/app/models/invoice.rb`): ownership comes from the
+      # runtime, which loads both alike.
+      #
       # @param path [String]
       # @return [Boolean]
       def self.model_path?(path)
-        path.end_with?('.rb') && path.start_with?(MODEL_DIRECTORY)
+        path.end_with?('.rb') && (path.start_with?(MODEL_DIRECTORY) || path.include?("/#{MODEL_DIRECTORY}"))
       end
 
       # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
