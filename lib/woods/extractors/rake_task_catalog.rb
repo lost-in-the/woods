@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'rake_shell_redaction'
 
 module Woods
   module Extractors
@@ -82,10 +83,11 @@ module Woods
       end
 
       # @param facts [Hash] {RakeBodyFacts.collect} output
-      # @return [Array<String>] literal commands the body runs, each cut to {COMMAND_LIMIT} characters
+      # @return [Array<String>] literal commands the body runs, credentials
+      #   redacted, each cut to {COMMAND_LIMIT} characters
       def shell_commands(facts)
         called = facts[:calls].select { |call| call[:command] && shell_call?(call) }.map { |call| call[:command] }
-        (called + facts[:commands]).map { |command| command[0, COMMAND_LIMIT] }.uniq
+        (called + facts[:commands]).map { |command| RakeShellRedaction.redact(command)[0, COMMAND_LIMIT] }.uniq
       end
 
       # Edges from a body to the support files whose methods it calls or whose

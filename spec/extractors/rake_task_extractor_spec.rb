@@ -1148,6 +1148,20 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(unit.dependencies).to eq([])
     end
 
+    it 'redacts credentials in a recorded command' do
+      path = create_file('lib/tasks/backup.rake', <<~RAKE)
+        task :backup do
+          sh "PGPASSWORD=Wd8kq2Lm9x pg_dump widgets"
+          sh "curl -H 'Authorization: Bearer Wd8kq2Lm9xQ7zP3vB6nTr4Ky8' https://deploy:Wd8kq2Lm9x@ledger.example.test"
+        end
+      RAKE
+
+      expect(described_class.new.extract_rake_file(path).first.metadata[:shell_commands]).to eq(
+        ['PGPASSWORD=[REDACTED] pg_dump widgets',
+         "curl -H 'Authorization: Bearer [REDACTED]' https://[REDACTED]@ledger.example.test"]
+      )
+    end
+
     it 'records commands passed to a helper that shells out' do
       create_file('rake/lib/container.rb', <<~RUBY)
         module Container
