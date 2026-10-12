@@ -117,6 +117,7 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
           module Rack::Throttle
             def throttled?; end
           end
+          Depot.api_token = "plaintext-marker"
           Widget.extend(Depot::Countable)
         RUBY
       end
@@ -137,6 +138,13 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
 
         expect(units.map { |unit| [unit.type, unit.identifier, unit.file_path] })
           .to eq([[:concern, 'Depot::Countable', path]])
+      end
+
+      it 'publishes the initializer with credential-shaped text redacted' do
+        source = described_class.new.extract_all.first.source_code
+
+        expect(source).not_to include('plaintext-marker')
+        expect(source).to include('Depot.api_token = "[REDACTED]"', 'def count_all; end')
       end
 
       it 'leaves a module no longer loaded out' do

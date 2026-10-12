@@ -338,11 +338,12 @@ module Woods
       # @return [String]
       def redirect_target(app)
         if defined?(ActionDispatch::Routing::OptionRedirect) && app.is_a?(ActionDispatch::Routing::OptionRedirect)
-          return app.options.sort_by { |key, _| key.to_s }.map { |key, value| "#{key}=#{value}" }.join(', ')
+          options = app.options.sort_by { |key, _| key.to_s }.map { |key, value| "#{key}=#{value}" }.join(', ')
+          return ConfigSourceGuard.redact(options)
         end
 
         block = app.respond_to?(:block) ? app.block : nil
-        block.is_a?(String) ? block : 'dynamic'
+        block.is_a?(String) ? ConfigSourceGuard.redact(block) : 'dynamic'
       end
 
       # @return [String]

@@ -8,6 +8,7 @@ require 'strscan'
 require 'woods'
 
 require_relative '../source_inputs/consumer_errors'
+require_relative 'config_source_guard'
 
 module Woods
   module Extractors
@@ -84,9 +85,6 @@ module Woods
       # `scheme://user:password@host` in any scheme, which the scanner's
       # database-URL pattern covers for database schemes only.
       URL_USERINFO = %r{://[^\s/:@]++:[^\s/@]++@}
-      # An unbroken run this long that mixes letters and digits reads as a
-      # generated token, not a setting.
-      OPAQUE_RUN = %r{[A-Za-z0-9+/=_-]{20,}+}
       TOP_LEVEL_KEY = /\A([A-Za-z_:][\w.-]*+):(?:\s|\z)/
 
       class << self
@@ -157,13 +155,16 @@ module Woods
       end
 
       # @param name [String] raw key text
-      # @return [String] the key as published: ERB marked, credential shapes redacted
+      # @return [String] the key as published: ERB marked, credential shapes
+      #   and generated tokens redacted
       def display_key(name)
         text = name.to_s
         return REDACTED if text.bytesize > MAX_VALUE_SCAN_BYTES
 
         text = text.gsub(ERB_PLACEHOLDER, ERB_MARKER) if text.include?(ERB_PLACEHOLDER)
-        @scanner.scan(text).first == text ? text : REDACTED
+        return REDACTED unless @scanner.scan(text).first == text
+
+        opaque?(text) ? REDACTED : text
       end
 
       # @param name [String] raw key text
@@ -292,7 +293,7 @@ module Woods
       end
 
       def opaque?(text)
-        text.scan(OPAQUE_RUN).any? { |run| run.match?(/[A-Za-z]/) && run.match?(/\d/) }
+        ConfigSourceGuard.opaque?(text)
       end
 
       def render_source(relative, outline)

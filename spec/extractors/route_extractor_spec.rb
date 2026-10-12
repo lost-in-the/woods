@@ -345,6 +345,15 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(unit.source_code).to include("get '/settings', to: redirect('/account/settings')")
     end
 
+    it 'redacts the userinfo of a redirect target in the metadata and the source' do
+      redirect = ActionDispatch::Routing::PathRedirect.new(301, 'https://deploy:plaintext-marker@docs.example/')
+      unit = extract(endpoint_route(app: redirect, path: '/docs', verb: 'GET')).first
+
+      expect(unit.metadata).to include(redirect_target: 'https://[REDACTED]@docs.example/')
+      expect(unit.source_code).to include("redirect('https://[REDACTED]@docs.example/')")
+      expect(unit.to_h.to_s).not_to include('plaintext-marker')
+    end
+
     it 'renders an options redirect target as sorted key=value pairs' do
       redirect = ActionDispatch::Routing::OptionRedirect.new(302, { subdomain: 'app', path: '/home' })
       unit = extract(endpoint_route(app: redirect, path: '/start', verb: 'GET')).first

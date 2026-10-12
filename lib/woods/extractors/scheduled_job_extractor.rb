@@ -8,6 +8,7 @@ require_relative 'periodic_registrations'
 require_relative 'sidekiq_cron_registrations'
 require_relative 'sidekiq_scheduler_registrations'
 require_relative 'cron_humanizer'
+require_relative 'config_source_guard'
 
 require 'yaml'
 require 'set'
@@ -292,7 +293,7 @@ module Woods
         )
 
         unit.namespace = job_class.include?('::') ? job_class.split('::')[0..-2].join('::') : nil if job_class
-        unit.source_code = source
+        unit.source_code = ConfigSourceGuard.redact(source)
         unit.metadata = {
           schedule_format: format,
           task_name: task_name.to_s,
@@ -492,7 +493,7 @@ module Woods
         )
 
         unit.namespace = block[:job_class].split('::')[0..-2].join('::') if block[:job_class]&.include?('::')
-        unit.source_code = source
+        unit.source_code = ConfigSourceGuard.redact(source)
         unit.metadata = {
           schedule_format: :whenever,
           task_name: identifier.delete_prefix('scheduled:'),
@@ -550,7 +551,7 @@ module Woods
         unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{job_class.underscore}",
                                  file_path: file_path)
         unit.namespace = job_class.split('::')[0..-2].join('::') if job_class.include?('::')
-        unit.source_code = source
+        unit.source_code = ConfigSourceGuard.redact(source)
         unit.metadata = {
           schedule_format: :sidekiq_periodic,
           task_name: job_class.underscore,
@@ -589,7 +590,7 @@ module Woods
 
         unit = ExtractedUnit.new(type: :scheduled_job, identifier: "scheduled:#{task_name}", file_path: file_path)
         unit.namespace = job_class.split('::')[0..-2].join('::') if job_class&.include?('::')
-        unit.source_code = source
+        unit.source_code = ConfigSourceGuard.redact(source)
         options = entry[:options]
         unit.metadata = {
           schedule_format: format,
