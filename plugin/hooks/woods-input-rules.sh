@@ -139,7 +139,15 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == rake/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == Rakefile ]] || { false; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -192,7 +200,15 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == rake/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == Rakefile ]] || { false; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
