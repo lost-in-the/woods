@@ -60,6 +60,8 @@ ARTIFACT_TEMPLATES = [
   ->(i) { "app/models/pro_#{i}_value.rb" },           # PORO, plus caching scan
   ->(i) { "lib/gen/lb_#{i}.rb" },
   ->(i) { "lib/tasks/rk_#{i}.rake" },                 # multi-unit file
+  ->(i) { "rake/rr_#{i}.rake" },                      # whole-app: a root rake directory
+  ->(i) { "rake/lib/rs_#{i}.rb" },                    # and the support Ruby under it
   ->(i) { "config/locales/loc_#{i}.yml" },
   # Initializers require a new Rails boot and full extraction. Their task
   # equivalence is covered in incremental_runtime_spec, not this live process.
@@ -1153,6 +1155,77 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                      -> { write_file('lib/ledger/bus.rb', ledger_bus(publishes: true)) },
                      -> { delete_file('lib/ledger/bus.rb') }
                    ])
+    end
+  end
+
+  describe 'rake roots outside lib/tasks' do
+    def container_helper(shells_out:)
+      body = shells_out ? "    sh \"docker compose exec app \#{command}\"\n" : "    command\n"
+      "module Container\n  def exec_in_container(command)\n#{body}  end\nend\n"
+    end
+
+    it 'tracks a root rake file, its support file and an enhancement through edits and deletion' do
+      codegen = "namespace :graph do\n  task(:codegen) { exec_in_container 'yarn run graph-codegen' }\nend\n"
+
+      run_sequence([
+                     -> { write_file('rake/graph.rake', codegen) },
+                     -> { write_file('rake/lib/container.rb', container_helper(shells_out: true)) },
+                     lambda {
+                       write_file('lib/tasks/hooks.rake', "Rake::Task['graph:codegen'].enhance(['graph:clean'])\n")
+                     },
+                     -> { write_file('rake/lib/container.rb', container_helper(shells_out: false)) },
+                     -> { delete_file('rake/lib/container.rb') },
+                     -> { delete_file('rake/graph.rake') },
+                     lambda {
+                       write_file('lib/tasks/hooks.rake', "Rake::Task['graph:codegen'].enhance do\n  sh 'bin/x'\nend\n")
+                     },
+                     -> { delete_file('lib/tasks/hooks.rake') }
+                   ])
+    end
+
+    it 'tracks a task class, a file task and a rule in a nested root file' do
+      run_sequence([
+                     lambda {
+                       write_file('rake/dev/docs.rake', <<~RAKE)
+                         if defined?(RSpec)
+                           RSpec::Core::RakeTask.new(:docs) { |t| t.pattern = 'spec/docs/**/*_spec.rb' }
+                         end
+                         file 'public/app.css' => ['app/app.scss']
+                         rule '.o' => '.c'
+                       RAKE
+                     },
+                     -> { write_file('rake/dev/docs.rake', "RSpec::Core::RakeTask.new(:docs)\n") },
+                     -> { delete_file('rake/dev/docs.rake') }
+                   ])
+    end
+
+    it 'publishes identical bytes from two full extractions of the same rake tree' do
+      write_file('rake/graph.rake', "task(:codegen) { exec_in_container 'yarn run graph-codegen' }\n")
+      write_file('rake/lib/container.rb', container_helper(shells_out: true))
+      write_file('lib/tasks/hooks.rake', "Rake::Task['codegen'].enhance(['clean'])\n")
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+
+    context 'with a configured root' do
+      around do |example|
+        Woods.configuration.rake_task_paths = ['ops/*.rake']
+        Woods::PathDispatcher.reset!
+        example.run
+      ensure
+        Woods.configuration.rake_task_paths = Woods::Extractors::RakeTaskPaths::DEFAULT_PATHS
+        Woods::PathDispatcher.reset!
+      end
+
+      it 'tracks tasks and support Ruby under the configured directory only' do
+        run_sequence([
+                       -> { write_file('ops/deploy.rake', rake_source('deploy', %w[ship])) },
+                       -> { write_file('ops/support/shell.rb', container_helper(shells_out: true)) },
+                       -> { write_file('ops/deploy.rake', rake_source('deploy', %w[ship verify])) },
+                       -> { delete_file('ops/support/shell.rb') },
+                       -> { delete_file('ops/deploy.rake') }
+                     ])
+      end
     end
   end
 
