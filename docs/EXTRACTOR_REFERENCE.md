@@ -104,6 +104,32 @@ their source-reference edges.
 
 Once-loader ownership (#579) is included in Woods 2.1; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
+### Method side effects
+
+Model, service, job, PORO, manager, mailer and controller units record what each **public method** of the unit's class does, read from the unit's own file:
+
+```json
+"method_effects": {
+  "refund!": {
+    "jobs_enqueued": ["RefundJob"],
+    "mail_sent": [],
+    "services_called": [],
+    "columns_written": ["status"],
+    "events_published": ["ledger.refunded"],
+    "external_calls": ["Faraday"],
+    "via_method": { "notify": { "mail_sent": ["ReceiptMailer"] } }
+  }
+}
+```
+
+- **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
+- **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
+- **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
+- **Cap.** `method_effects_limit` (default 50) bounds the map per unit; past it the first methods are kept and `method_effects_truncated: true` is set.
+- **Edges.** The unit's existing `job_enqueue`, mailer and service edges gain `through`: the public methods that reach the target, sorted and joined with `, ` (`"through": "capture!, refund!"`). Controller actions are named here too. No edge is added or removed, so `dependents` answers are the same for a caller that ignores `through`.
+- **Limits.** The reading is static and heuristic, like callback side effects. Calls made through metaprogramming, through another object, from an included concern, or from a block in the class body are not attributed.
+
 ### Eager loading
 
 The orchestrator calls `Rails.application.eager_load!` once before extraction begins. If that fails with a `NameError` (common when `app/graphql/` references an uninstalled gem), it falls back to per-directory loading via `EXTRACTION_DIRECTORIES`. This fallback covers the directories that matter for extraction.

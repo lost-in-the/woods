@@ -42,17 +42,24 @@ module Woods
       # SecureRandom.uuid` in a before_create is arguably the most common
       # callback body in Rails and reported no write at all (EXTA-6). The
       # lookahead rejects `==` (comparison) and `=~` (regex match), the
-      # latter having been read as a write.
-      SELF_ASSIGNMENT_PATTERN = %r{self\.(\w+)\s*(?:\|\||&&|[+\-*/])?=(?!=|~)}
+      # latter having been read as a write. The word and the space after it
+      # are possessive: neither can end anywhere but where it does.
+      SELF_ASSIGNMENT_PATTERN = %r{self\.(\w++)\s*+(?:\|\||&&|[+\-*/])?=(?!=|~)}
 
-      # Pre-compiled regex patterns (avoid dynamic regex construction in hot loops)
+      # Pre-compiled regex patterns (avoid dynamic regex construction in hot
+      # loops). One whitespace run per side of the optional paren:
+      # `\s*\(?\s*` let both runs split the same spaces, quadratic without
+      # the Ruby 3.2+ match cache.
       SINGLE_COLUMN_WRITER_PATTERNS = SINGLE_COLUMN_WRITERS.to_h do |w|
-        [w, /\b#{Regexp.escape(w)}\s*\(?\s*[:'"](\w+)/]
+        [w, /\b#{Regexp.escape(w)}\s*+(?:\(\s*+)?[:'"](\w+)/]
       end.freeze
 
       MULTI_COLUMN_WRITER_PATTERNS = MULTI_COLUMN_WRITERS.to_h do |w|
-        [w, /\b#{Regexp.escape(w)}\s*\(([^)]+)\)/m]
+        [w, /\b#{Regexp.escape(w)}\s*+\(([^)]++)\)/m]
       end.freeze
+
+      # A `name:` key inside a multi-column writer's argument list.
+      KEYWORD_PATTERN = /\b(\w++)\s*+:(?!:)/
 
       DB_READ_PATTERNS = DB_READ_METHODS.to_h do |m|
         [m, /\.#{Regexp.escape(m)}\b/]
@@ -65,6 +72,9 @@ module Woods
       #   file relative to the application root (nil outside it). With
       #   segments, operation lines are reported in their own file; without,
       #   they stay lines of +source_code+.
+      # @return [Ast::Node, nil] the parsed source, nil when it does not parse
+      attr_reader :parsed_root
+
       def initialize(source_code:, column_names: [], segments: nil)
         @source_code = source_code
         @segments = segments
@@ -104,14 +114,43 @@ module Woods
         )
       end
 
+      # Side effects of one method definition, for a caller that already
+      # holds its node (two methods can share a name, so a filter cannot
+      # tell them apart).
+      #
+      # Unlike {#analyze}, service and mailer names are resolved in the
+      # method's lexical scope, as job names are, so each entry agrees with
+      # the unit's own edge to that class.
+      #
+      # @param method_node [Ast::Node] a :def or :defs node of {#parsed_root}
+      # @return [Hash, nil] `{ columns_written:, jobs_enqueued:,
+      #   services_called:, mailers_triggered:, source: }` where +source+ is
+      #   the neutralized method text the scans ran over; nil when the method
+      #   has no readable source
+      def method_effects(method_node)
+        method_source = scannable_source(method_source_from_node(method_node))
+        return nil if method_source.nil?
+
+        nesting = nesting_at_line(method_node.line)
+        {
+          columns_written: detect_columns_written(method_source),
+          jobs_enqueued: detect_jobs_enqueued(method_source, nesting),
+          services_called: detect_services_called(method_source, nesting),
+          mailers_triggered: detect_mailers_triggered(method_source, nesting),
+          source: method_source
+        }
+      end
+
       private
 
-      # Parse source code safely, returning nil on failure.
+      # Parse source code safely, returning nil on failure. Source nested
+      # deeper than the stack can follow (a constant path thousands of
+      # segments long) counts as a failure, not a crash.
       #
       # @return [Ast::Node, nil]
       def safe_parse
         @parser.parse(@source_code)
-      rescue StandardError
+      rescue StandardError, SystemStackError
         nil
       end
 
@@ -196,15 +235,28 @@ module Woods
         end
 
         # Pattern: update_columns(col: ...) / assign_attributes(col: ...)
+        closable = closable_source(method_source)
         MULTI_COLUMN_WRITER_PATTERNS.each_value do |pattern|
-          method_source.scan(pattern).each do |match|
-            match[0].scan(/\b(\w+)\s*:(?!:)/).flatten.each do |col|
+          closable.scan(pattern).each do |match|
+            match[0].scan(KEYWORD_PATTERN).flatten.each do |col|
               columns << col if @column_names.include?(col)
             end
           end
         end
 
         columns.to_a.sort
+      end
+
+      # The source up to its last closing paren. An argument list can only
+      # close there or earlier, and past it every unclosed `update_columns(`
+      # would be read to the end of the method before failing: quadratic in
+      # a body that repeats one.
+      #
+      # @param method_source [String]
+      # @return [String]
+      def closable_source(method_source)
+        last = method_source.rindex(')')
+        last ? method_source[0..last] : ''
       end
 
       # Detect jobs enqueued by the callback method.
@@ -248,9 +300,10 @@ module Woods
       # namespace included (EXTA-2).
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_services_called(method_source)
-        ReferencePatterns.service_references(method_source).uniq.sort
+      def detect_services_called(method_source, nesting = [])
+        ReferencePatterns.references(method_source, **ReferencePatterns::SERVICE_RULE, enclosing: nesting).uniq.sort
       end
 
       # Detect mailers triggered by the callback method.
@@ -259,9 +312,10 @@ module Woods
       # namespace included (EXTA-2).
       #
       # @param method_source [String]
+      # @param nesting [Array<String>] scopes around the method, innermost first
       # @return [Array<String>]
-      def detect_mailers_triggered(method_source)
-        ReferencePatterns.mailer_references(method_source).uniq.sort
+      def detect_mailers_triggered(method_source, nesting = [])
+        ReferencePatterns.references(method_source, **ReferencePatterns::MAILER_RULE, enclosing: nesting).uniq.sort
       end
 
       # Detect database read operations in the callback method.
