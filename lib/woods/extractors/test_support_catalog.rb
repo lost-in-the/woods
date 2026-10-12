@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'source_nesting'
+require_relative 'comment_blanking'
 
 module Woods
   module Extractors
@@ -144,14 +145,15 @@ module Woods
         source = File.read(file_path, encoding: Encoding::UTF_8)
         raise ArgumentError, 'source is not valid UTF-8' unless source.valid_encoding?
 
-        declared = declarations(source)
+        code = CommentBlanking.ruby(source)
+        declared = declarations(code)
         Entry.new(
           identifier: file_path.to_s.delete_prefix("#{@root}/"), file_path: file_path.to_s, source: source,
-          shared_examples: names_in(source, SHARED_EXAMPLES), shared_contexts: names_in(source, SHARED_CONTEXT),
-          matchers: source.scan(MATCHER).flatten.uniq,
+          shared_examples: names_in(code, SHARED_EXAMPLES), shared_contexts: names_in(code, SHARED_CONTEXT),
+          matchers: code.scan(MATCHER).flatten.uniq,
           helper_modules: declared.fetch('module', []), classes: declared.fetch('class', []),
-          method_names: source.scan(METHOD).flatten.uniq, includes: includes_in(source),
-          configuration: source.match?(CONFIGURE)
+          method_names: code.scan(METHOD).flatten.uniq, includes: includes_in(code),
+          configuration: code.match?(CONFIGURE)
         )
       end
 
@@ -187,6 +189,7 @@ module Woods
       # @param except [String, nil] identifier never linked to (the file itself)
       # @return [Usage]
       def references(source, except: nil)
+        source = CommentBlanking.ruby(source)
         used = {
           behaves_like: names_in(source, BEHAVES_LIKE), includes_context: names_in(source, INCLUDE_CONTEXT),
           includes_helper: source.scan(INCLUDE_MODULE).flatten.uniq, uses_matcher: matchers_in(source)
