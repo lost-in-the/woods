@@ -16,7 +16,7 @@ require 'woods/extractors/view_engines/jbuilder'
 RSpec.describe 'Helper call scan complexity' do
   budget_seconds = 1.0
   spaces = ' ' * 50_000
-  names = Set.new(%w[pretty_date widget_badge title admin?])
+  names = Set.new(%w[pretty_date widget_badge title staff?])
 
   adversarial_sources = {
     'a name then spaces' => "title#{spaces}",
@@ -25,7 +25,7 @@ RSpec.describe 'Helper call scan complexity' do
     'near-miss names' => 'pretty_dat ' * 10_000,
     'near-miss longer names' => 'pretty_datex ' * 10_000,
     'one long identifier' => 'a' * 50_000,
-    'repeated predicates' => 'admin? ' * 10_000,
+    'repeated predicates' => 'staff? ' * 10_000,
     'repeated helpers proxies' => 'helpers.' * 20_000,
     'repeated dots' => '.' * 50_000,
     'repeated colons' => ':' * 50_000,

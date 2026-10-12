@@ -52,8 +52,8 @@ RSpec.describe Woods::Extractors::HelperCatalog do
           def pad(value) = value
         end
       RUBY
-      create_file('app/helpers/admin/widgets_helper.rb', <<~RUBY)
-        module Admin
+      create_file('app/helpers/ledgers/widgets_helper.rb', <<~RUBY)
+        module Ledgers
           module WidgetsHelper
             def widget_badge(widget) = widget.to_s
             private def badge_class = 'badge'
@@ -79,7 +79,7 @@ RSpec.describe Woods::Extractors::HelperCatalog do
       expect(catalog.definitions('short_date'))
         .to eq([{ module: 'DateHelper', file: 'app/helpers/date_helper.rb', line: 4 }])
       expect(catalog.definitions('widget_badge'))
-        .to eq([{ module: 'Admin::WidgetsHelper', file: 'app/helpers/admin/widgets_helper.rb', line: 3 }])
+        .to eq([{ module: 'Ledgers::WidgetsHelper', file: 'app/helpers/ledgers/widgets_helper.rb', line: 3 }])
     end
 
     it 'lists every module that defines a name, sorted' do

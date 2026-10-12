@@ -11,7 +11,7 @@ require 'woods/extractors/helper_catalog'
 
 RSpec.describe Woods::Extractors::HelperCallScan do
   describe '.method_calls' do
-    let(:names) { Set.new(%w[pretty_date widget_badge title admin?]) }
+    let(:names) { Set.new(%w[pretty_date widget_badge title staff?]) }
 
     def calls(code, locals: [])
       described_class.method_calls(code, names, locals: locals)
@@ -30,7 +30,7 @@ RSpec.describe Woods::Extractors::HelperCallScan do
     end
 
     it 'reports a predicate name with its question mark' do
-      expect(calls('if admin? then 1 end')[:bare]).to eq(%w[admin?])
+      expect(calls('if staff? then 1 end')[:bare]).to eq(%w[staff?])
     end
 
     it 'reports a call through the helpers proxy as explicit' do

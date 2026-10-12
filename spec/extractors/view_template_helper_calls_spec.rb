@@ -25,8 +25,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor, 'helper call edges' do
         def short_date(value) = value.to_s
       end
     RUBY
-    create_file('app/helpers/admin/widgets_helper.rb', <<~RUBY)
-      module Admin
+    create_file('app/helpers/ledgers/widgets_helper.rb', <<~RUBY)
+      module Ledgers
         module WidgetsHelper
           def widget_badge(widget) = widget.to_s
         end
@@ -50,10 +50,10 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor, 'helper call edges' do
     ERB
 
     index = unit('widgets/index.html.erb')
-    expect(helper_edges(index)).to eq([{ type: :poro, target: 'Admin::WidgetsHelper', via: :helper_call },
-                                       { type: :poro, target: 'DateHelper', via: :helper_call }])
+    expect(helper_edges(index)).to eq([{ type: :poro, target: 'DateHelper', via: :helper_call },
+                                       { type: :poro, target: 'Ledgers::WidgetsHelper', via: :helper_call }])
     expect(index.metadata[:helper_calls])
-      .to eq('Admin::WidgetsHelper' => %w[widget_badge], 'DateHelper' => %w[pretty_date short_date])
+      .to eq('DateHelper' => %w[pretty_date short_date], 'Ledgers::WidgetsHelper' => %w[widget_badge])
   end
 
   it 'links HAML and jbuilder templates the same way' do
