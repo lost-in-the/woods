@@ -180,8 +180,14 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
       end
     end
 
+    it 'fires on a model file under a pack or engine, which owns tables like any other model' do
+      %w[packs/ledger/app/models/ledger/entry.rb engines/billing/app/models/invoice.rb].each do |path|
+        expect(described_class.trigger_path?(path)).to be(true), path
+      end
+    end
+
     it 'stays quiet for everything else' do
-      %w[db/seeds.rb db/migrate/notes.txt packs/ledger/app/models/ledger/entry.rb
+      %w[db/seeds.rb db/migrate/notes.txt packs/ledger/lib/models.rb
          db/billing_migrate/20240101000000_create_invoices.rb db/views/report_v01.sql
          app/services/widget_service.rb app/models/widget.yml
          lib/db/schema.rb config/schema.rb].each do |path|

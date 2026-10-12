@@ -386,13 +386,14 @@ module Woods
          whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
       end
 
-      # Schedule files by name, plus any Ruby config source that can register
-      # Sidekiq periodic jobs.
+      # Schedule files by name, any Ruby config source that can register
+      # Sidekiq periodic jobs, and the job directories: whether a scheduled
+      # entry's class is loaded (`job_class_resolved`) changes with them.
       def scheduled_job_rule
         schedules = Woods::Extractors::ScheduledJobExtractor
         exact_paths = schedules::SCHEDULE_FILES.keys + schedules::PERIODIC_SOURCE_FILES
-        whole_app_rule(:scheduled_jobs, schedules::PERIODIC_SOURCE_DIRECTORIES,
-                       extensions: %w[.rb], exact_paths: exact_paths)
+        directories = schedules::PERIODIC_SOURCE_DIRECTORIES + Woods::Extractors::JobExtractor::JOB_DIRECTORIES
+        whole_app_rule(:scheduled_jobs, directories, extensions: %w[.rb], exact_paths: exact_paths)
       end
 
       # Operation documents resolve their selections against the booted

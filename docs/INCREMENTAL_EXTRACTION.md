@@ -416,13 +416,14 @@ cheap, which is what makes wholesale replacement the right shape.
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
+| `app/jobs/**/*.rb`, `app/workers/**/*.rb`, `app/sidekiq/**/*.rb` | scheduled_jobs (a schedule entry's `job_class_resolved` follows whether its class is loaded) |
 | `app/models/**/*.rb` | state_machines |
 | `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
 | `spec/factories/**`, `test/factories/**` | factories, test_support |
 | files under `config.test_support_paths` (default `spec/support/**`, `spec/*_helper.rb`, `spec/lib/**`, and the same under `test/`; never the test files `test_mappings` claims) | test_support, test_mappings |
 | `db/views/**/*.sql` | database_views |
-| `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`), `app/graphql/**/*.rb` | graphql_operations |
-| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` | database_tables, **and** migrations, database_views, external_consumers |
+| `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`; never a path under `node_modules/`, root-level included), `app/graphql/**/*.rb` | graphql_operations |
+| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers |
 | the file named by `external_table_consumers_path` | external_consumers |
 | any `package.yml`, `packwerk.yml` | packages |
 

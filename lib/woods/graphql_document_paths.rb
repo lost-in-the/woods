@@ -32,7 +32,7 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean]
     def match?(relative_path)
-      return false if relative_path.include?(EXCLUDED_SEGMENT)
+      return false if "/#{relative_path}".include?(EXCLUDED_SEGMENT)
 
       globs.any? { |glob| File.fnmatch?(glob, relative_path, GLOB_FLAGS) }
     end
