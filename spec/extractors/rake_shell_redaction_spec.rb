@@ -71,6 +71,43 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
       expect(redact('bin/notify ghp_Wd8kq2Lm9xQ7zP3vB6nTr4Ky8Hc5Jf1Ae0Xb')).to eq('bin/notify [REDACTED]')
     end
 
+    it 'redacts every word of a quoted value after a credential flag or user flag' do
+      expect(redact('mysqldump --password "multi word hunter2" widgets'))
+        .to eq('mysqldump --password "[REDACTED]" widgets')
+      expect(redact('curl -u "deploy:pass hunter2" https://ledger.example.test'))
+        .to eq('curl -u "deploy:[REDACTED]" https://ledger.example.test')
+    end
+
+    it 'redacts a header whose value is attached to the name' do
+      expect(redact('curl -H "Authorization:Bearer Wd8kq2Lm9xQ7zP3vB6nTr4Ky8" https://api.example.test'))
+        .to eq('curl -H "Authorization:Bearer [REDACTED]" https://api.example.test')
+      expect(redact('curl -H "X-Api-Key:Wd8kq2Lm9xQ7zP3vB6nTr4Ky8" https://api.example.test'))
+        .to eq('curl -H "X-Api-Key:[REDACTED]" https://api.example.test')
+    end
+
+    it 'redacts an attached user and password' do
+      expect(redact('curl -udeploy:hunter2 https://ledger.example.test'))
+        .to eq('curl -udeploy:[REDACTED] https://ledger.example.test')
+    end
+
+    it 'redacts the password flag of tools that take one, and keeps ports' do
+      expect(redact('mysql -u root -phunter2 widgets')).to eq('mysql -u root -p[REDACTED] widgets')
+      expect(redact('sshpass -p hunter2 ssh deploy@ledger.example.test'))
+        .to eq('sshpass -p [REDACTED] ssh deploy@ledger.example.test')
+      expect(redact('docker login -p hunter2 registry.example.test'))
+        .to eq('docker login -p [REDACTED] registry.example.test')
+      expect(redact('redis-cli -a hunter2 ping')).to eq('redis-cli -a [REDACTED] ping')
+      expect(redact('docker run -p 8080:80 widgets && ssh -p 2222 ledger.example.test && mkdir -p tmp/cache'))
+        .to eq('docker run -p 8080:80 widgets && ssh -p 2222 ledger.example.test && mkdir -p tmp/cache')
+    end
+
+    it 'redacts a credential inside a single-quoted JSON body' do
+      expect(redact(%(curl -d '{"password":"hunter2","ledger":7}' https://api.example.test)))
+        .to eq(%(curl -d '{"password":"[REDACTED]","ledger":7}' https://api.example.test))
+      expect(redact(%(curl -d '{"api_token": "hunter2"}' https://api.example.test)))
+        .to eq(%(curl -d '{"api_token": "[REDACTED]"}' https://api.example.test))
+    end
+
     it 'leaves ordinary commands alone' do
       ['yarn run graph-codegen', "docker compose exec app \#{command}", 'git rev-parse HEAD',
        'bin/rails runner "Widget.where(password_reset: true).count"',
@@ -110,6 +147,12 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
 
       expect(redacted).to include('[REDACTED]')
       expect(redacted).not_to include('Wd8kq2Lm9x')
+    end
+
+    it 'reads 50,000 quoted arguments and an unterminated quote' do
+      line = %('{"password":"Wd8kq2Lm9x"}' "a b" -phunter2 ) * 50_000
+
+      expect(redact("mysql #{line}\"unterminated")).not_to include('Wd8kq2Lm9x', 'hunter2')
     end
 
     it 'reads a token of 50,000 query parameters' do
