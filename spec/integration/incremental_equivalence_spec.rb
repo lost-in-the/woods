@@ -1467,6 +1467,117 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       expect(read_json(index_dir, 'manifest.json')['extracted_at']).to eq(before)
     end
+
+    it 'leaves the manifest timestamp alone when a Ruby change alters no unit' do
+      index_dir = Dir.mktmpdir('woods_diff_ruby_noop')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      before = read_json(index_dir, 'manifest.json')['extracted_at']
+      sleep 1.1 # the manifest stamp has second resolution
+      FileUtils.touch(app_path('app/models/post.rb'))
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb'])
+
+      expect(touched).to be_empty
+      expect(read_json(index_dir, 'manifest.json')['extracted_at']).to eq(before)
+    end
+
+    it 'still publishes when a Ruby change alters a unit' do
+      index_dir = Dir.mktmpdir('woods_diff_ruby_change')
+      (@scratch_dirs ||= []) << index_dir
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      before = read_json(index_dir, 'manifest.json')['extracted_at']
+      sleep 1.1 # the manifest stamp has second resolution
+      write_file('app/models/post.rb', "#{File.read(app_path('app/models/post.rb'))}# a trailing remark\n")
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb'])
+
+      expect(touched).to include('Post')
+      expect(read_json(index_dir, 'manifest.json')['extracted_at']).not_to eq(before)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'leaves the manifest timestamp alone when the changed Ruby file belongs to no extractor' do
+      write_file('script/ledger_probe.rb', "puts :ledger\n")
+      index_dir = full_extraction
+
+      before = read_json(index_dir, 'manifest.json')['extracted_at']
+      sleep 1.1 # the manifest stamp has second resolution
+      write_file('script/ledger_probe.rb', "# a remark\nputs :ledger\n")
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed(['script/ledger_probe.rb'])
+
+      expect(touched).to be_empty
+      expect(read_json(index_dir, 'manifest.json')['extracted_at']).to eq(before)
+    end
+  end
+
+  describe 'units re-extracted to the same result' do
+    def job_unit(index_dir, identifier)
+      Dir[File.join(payload_dir(index_dir), 'jobs', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == identifier }
+    end
+
+    it 'keeps unrelated hybrid jobs out of the touched set when a model changes' do
+      index_dir = full_extraction
+      write_file('app/models/comment.rb', "#{File.read(app_path('app/models/comment.rb'))}# a trailing remark\n")
+
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/comment.rb'])
+
+      expect(touched).to include('Comment')
+      expect(touched).not_to include('PublishPostJob', 'SignatureJob')
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'still refreshes the dependents of a retained job when a new caller appears' do
+      index_dir = full_extraction
+      caller_path = write_file('app/services/ledger_dispatch_service.rb', <<~RUBY)
+        class LedgerDispatchService
+          def call(post) = SignatureJob.perform_later(post.id, required: true)
+        end
+      RUBY
+
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([caller_path])
+
+      expect(touched).not_to include('SignatureJob')
+      expect(job_unit(index_dir, 'SignatureJob').fetch('dependents'))
+        .to include('type' => 'service', 'identifier' => 'LedgerDispatchService')
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'refreshes git facts for a retained unit whose file was committed without altering it' do
+      path = write_file('app/jobs/ledger_idle_job.rb',
+                        "class LedgerIdleJob < ActiveJob::Base\n  def perform; end\nend\n")
+      load app_path(path)
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+      index_dir = full_extraction
+      expect(job_unit(index_dir, 'LedgerIdleJob').dig('metadata', 'git', 'commit_count')).to eq(1)
+
+      FileUtils.touch(app_path(path))
+      expect(Woods::Extractor.new(output_dir: index_dir).extract_changed([path])).to be_empty
+
+      git_in_app('commit', '--allow-empty', '-m', 'unrelated')
+      File.chmod(0o755, app_path(path))
+      git_in_app('commit', '-am', 'mode only')
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect(touched).to eq(['LedgerIdleJob'])
+      expect(job_unit(index_dir, 'LedgerIdleJob').dig('metadata', 'git', 'commit_count')).to eq(2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      FileUtils.rm_rf(app_path('.git'))
+      Object.send(:remove_const, :LedgerIdleJob) if Object.const_defined?(:LedgerIdleJob, false)
+    end
+
+    def git_in_app(*args)
+      output, status = Open3.capture2e('git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
   end
 
   describe 'package mutations (B-178)' do
