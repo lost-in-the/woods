@@ -200,6 +200,33 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.dependencies.first).to include(type: :job, target: 'Billing::Ledger::Jobs::RebuildJob')
       end
 
+      it 'resolves a constant already qualified inside its own namespace to the loaded constant' do
+        stub_const('Spree::Order', Class.new)
+        path = create_file('spec/models/spree/order_spec.rb', <<~RUBY)
+          module Spree
+            describe Spree::Order do
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to eq('Spree::Order')
+        expect(unit.dependencies).to eq([{ type: :model, target: 'Spree::Order', via: :test_coverage }])
+      end
+
+      it 'resolves a constant described inside a wrapper module that is not its namespace' do
+        stub_const('SpecHelpers', Module.new)
+        stub_const('Widget', Class.new)
+        path = create_file('spec/models/widget_spec.rb', <<~RUBY)
+          module SpecHelpers
+            describe Widget do
+            end
+          end
+        RUBY
+
+        expect(described_class.new.extract_test_file(path).metadata[:subject_class]).to eq('Widget')
+      end
+
       it 'does not qualify a constant described after the module block closed, or one already rooted' do
         after_close = create_file('spec/services/after_spec.rb', <<~RUBY)
           module Helpers

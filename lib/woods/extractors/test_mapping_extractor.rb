@@ -2,6 +2,7 @@
 
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
+require_relative '../source_references/runtime_lookup'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -287,9 +288,13 @@ module Woods
         qualify_described_constant(constant, source, group)
       end
 
-      # A constant described inside a `module` block is resolved through the
-      # file's lexical nesting first: `module Nested; describe AssignPositions`
-      # names `Nested::AssignPositions`. A rooted constant (`::Widget`) and a
+      # A constant described inside a `module` block is resolved as Ruby
+      # resolves it: through the file's lexical nesting, innermost scope
+      # first, against the loaded constants. `module Spree; describe
+      # Spree::Order` names `Spree::Order`, and `module SpecHelpers; describe
+      # Widget` names a top-level `Widget`. When nothing is loaded, the
+      # nesting is prefixed: `module Nested; describe AssignPositions` names
+      # `Nested::AssignPositions`. A rooted constant (`::Widget`) and a
       # describe after the module closed stay as written.
       #
       # @param constant [String] constant as written on the describe line
@@ -300,7 +305,10 @@ module Woods
         return constant.delete_prefix('::') if constant.start_with?('::')
 
         nesting = enclosing_modules(source, group)
-        nesting.empty? ? constant : "#{nesting.join('::')}::#{constant}"
+        return constant if nesting.empty?
+
+        resolved = SourceReferences::RuntimeLookup.new.call(constant, nesting: nesting.reverse)
+        resolved[:target] || "#{nesting.join('::')}::#{constant}"
       end
 
       # Module declarations still open on the line that opens the example
