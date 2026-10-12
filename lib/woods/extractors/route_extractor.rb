@@ -211,6 +211,10 @@ module Woods
 
         verb = route_verb(route)
         path = route_path(route)
+        # `get 'pages/:action'`: Rails defaults the action to `index`, which
+        # names no single action, so the route stays skipped.
+        return nil if path.include?(':action')
+
         identifier = route_identifier(verb, path, route)
 
         controller_class = "#{controller.camelize}Controller"
