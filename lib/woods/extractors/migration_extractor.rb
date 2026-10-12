@@ -235,8 +235,8 @@ module Woods
         source.scan(JOIN_TABLE_PATTERN).each { |match| tables << match.compact.sort.join('_') }
 
         # rename_table has two table arguments
-        source.scan(/rename_table\s+:\w+\s*,\s*:(\w+)/).each do |match|
-          tables << match[0]
+        source.scan(/rename_table\s*+\(?\s*+#{TABLE_NAME}\s*,\s*#{TABLE_NAME}/).each do |_from_symbol, _from_string, symbol, string|
+          tables << (symbol || string)
         end
 
         tables.uniq
@@ -334,9 +334,7 @@ module Woods
       # @return [Array<Hash>] Reference info hashes with :table, :reference
       def extract_references_added(source)
         # add_reference :table, :reference
-        refs = source.scan(/add_reference\s+:(\w+)\s*,\s*:(\w+)/).map do |table, reference|
-          { table: table, reference: reference }
-        end
+        refs = scan_reference_changes(source, 'add_reference')
 
         # t.references :ref inside create_table/change_table blocks
         extract_block_references(source, refs)
@@ -349,8 +347,19 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<Hash>] Reference info hashes
       def extract_references_removed(source)
-        source.scan(/remove_reference\s+:(\w+)\s*,\s*:(\w+)/).map do |table, reference|
-          { table: table, reference: reference }
+        scan_reference_changes(source, 'remove_reference')
+      end
+
+      # Both arguments of a reference change are read as symbols or strings,
+      # with or without parentheses.
+      #
+      # @param source [String] Ruby source code
+      # @param operation [String] +add_reference+ or +remove_reference+
+      # @return [Array<Hash>] Reference info hashes with :table, :reference
+      def scan_reference_changes(source, operation)
+        pattern = /#{operation}\s*+\(?\s*+#{TABLE_NAME}\s*,\s*#{TABLE_NAME}/
+        source.scan(pattern).map do |table_symbol, table_string, reference_symbol, reference_string|
+          { table: table_symbol || table_string, reference: reference_symbol || reference_string }
         end
       end
 

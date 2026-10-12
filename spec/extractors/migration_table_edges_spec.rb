@@ -42,6 +42,20 @@ RSpec.describe Woods::Extractors::MigrationExtractor, 'table edges' do
                                                       [:database_table, 'table:widgets'])
   end
 
+  it 'reads the second table of rename_table and the table of a reference change as a string or in parentheses' do
+    renamed = catalog_class.new([table('accounts'), table('posts'), table('authors'), table('editors')])
+
+    unit = extract(<<~RUBY, catalog: renamed)
+      rename_table("people", "accounts")
+      add_reference "posts", "author"
+      remove_reference(:posts, :editor)
+    RUBY
+
+    expect(edges(unit, :migrates)).to include([:database_table, 'table:accounts'], [:database_table, 'table:posts'])
+    expect(unit.metadata[:tables_referenced]).to include('authors', 'editors')
+    expect(unit.metadata[:tables_unresolved]).to eq(['people'])
+  end
+
   it 'keeps the model edge only for a table a model owns today' do
     unit = extract("add_column :widgets, :color, :string\nadd_column :ledger_entries, :memo, :string")
 

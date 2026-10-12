@@ -880,11 +880,14 @@ module Woods
       # A `through` association whose source association is polymorphic has
       # no single target class either: `has_one :referrer, through:
       # :account_referral, source: :referrer` over a polymorphic `belongs_to
-      # :referrer` names an interface.
+      # :referrer` names an interface. A `source_type:` option picks one
+      # concrete class out of that interface, so the association is ordinary.
       #
       # @param assoc [ActiveRecord::Reflection::ThroughReflection]
       # @return [Boolean]
       def polymorphic_source?(assoc)
+        return false if assoc.options[:source_type]
+
         source = assoc.source_reflection
         !source.nil? && !source.equal?(assoc) && polymorphic_reflection?(source)
       rescue StandardError
