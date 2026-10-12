@@ -104,6 +104,24 @@ RSpec.describe Woods::Extractors::ConstantPaths do
         expect(refs.map(&:nesting).uniq).to eq([[]])
       end
 
+      it 'ignores a path inside a =begin block' do
+        source = "class Broken\n=begin\nTypes::Ghost.new\n=end\n  def x\n    Resolvers::Widgets.new(1)\n"
+
+        expect(paths(source)).to eq(%w[Broken Resolvers::Widgets])
+      end
+
+      it 'keeps a path interpolated on a heredoc line that starts with #' do
+        source = <<~'RUBY'
+          class Broken
+            HEADER = <<~TEXT
+              # #{Ledger::Entry.label}
+            TEXT
+            def x
+        RUBY
+
+        expect(paths(source)).to include('Ledger::Entry')
+      end
+
       # The fallback regexes run over uncontrolled, unparseable source.
       def within_budget(&block)
         if Regexp.respond_to?(:timeout=)
