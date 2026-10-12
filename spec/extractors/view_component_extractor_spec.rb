@@ -433,6 +433,39 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       expect(helper_deps).to include(a_hash_including(target: 'ApplicationHelper', via: :include))
     end
 
+    context 'with route helpers' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~RUBY
+            class PageComponent < ViewComponent::Base
+              def call
+                link_to 'Billing', billing_url(token: 'abc')
+                link_to 'Preview', widget_preview_path
+                Shortener.new(base_url: request.host).call
+              end
+            end
+          RUBY
+        }
+      end
+
+      before do
+        Woods.configure unless Woods.configuration
+        allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+      end
+
+      it 'targets the controller a live route dispatches to and records nothing for other helper names' do
+        extractor = described_class.new
+        extractor.instance_variable_set(
+          :@route_helper_map,
+          { 'billing' => { controller: 'BillingController', action: 'show', path: '/billing', verb: 'GET' },
+            'base' => { controller: 'BaseController', action: 'show', path: '/base', verb: 'GET' } }
+        )
+        unit = extractor.extract_all.first
+
+        expect(unit.dependencies).to eq([{ type: :controller, target: 'BillingController', via: :link_to }])
+      end
+    end
+
     it 'includes :via key on all dependencies' do
       extractor = described_class.new
       unit = extractor.extract_all.first
