@@ -53,6 +53,16 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(result.cache['files'].keys).to match_array(sources.keys)
   end
 
+  it 'adds no second edge beside one the extractor annotated with the reaching methods' do
+    annotated = edge.merge('through' => 'call')
+    units.first['dependencies'] = [annotated]
+
+    result = run_pass
+
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([annotated])
+    expect(result.cache['owners']).to include(hash_including('identifier' => 'RefCaller', 'added' => []))
+  end
+
   it 'records target-only typed consumption without adding caller dependency rewrites' do
     units.last['type'] = 'component'
     result = run_pass(policy: Woods::SourceReferences::CallerPolicy.new(component: false))
