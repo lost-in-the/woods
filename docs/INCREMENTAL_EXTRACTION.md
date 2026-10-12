@@ -558,6 +558,12 @@ serializer nested in a controller retains its own identity; the controller does
 not become a serializer unit. Runtime objects left behind by a reload cannot
 claim a name now owned by another constant.
 
+Generated job classes (included in Woods 2.2; see the
+[JobExtractor reference](EXTRACTOR_REFERENCE.md#jobextractor)) follow the same
+path. Adding or removing the line that calls the generator is a Ruby change, so
+the job family is re-run against the reloaded runtime: a new constant gains a
+unit, and a constant the reload removed loses it.
+
 All members of those two families are re-extracted, even when only one file
 changed. Included in Woods 2.2: a member that re-extracts to the same result is
 retained, so it is neither rewritten nor counted as touched. A Ruby change that

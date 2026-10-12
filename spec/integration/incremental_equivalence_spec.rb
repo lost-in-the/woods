@@ -2826,6 +2826,124 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'generated job classes' do
+    after do
+      %i[LedgerWidget LedgerAsync LedgerSyncCaller].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    def widget_source(*lines)
+      "class LedgerWidget\n  extend LedgerAsync\n#{lines.map { |line| "  #{line}\n" }.join}end\n"
+    end
+
+    def write_generated_job_fixture
+      load app_path(write_file('lib/ledger_async.rb', <<~RUBY))
+        module LedgerAsync
+          def async_method(name)
+            klass = Class.new(ActiveJob::Base) do
+              def perform(id, force = false); end
+            end
+            const_set("\#{name.to_s.split('_').map(&:capitalize).join}Worker", klass)
+          end
+        end
+      RUBY
+      load app_path(write_file('app/models/ledger_widget.rb', widget_source))
+      write_file('app/services/ledger_sync_caller.rb', <<~RUBY)
+        class LedgerSyncCaller
+          def call(id) = LedgerWidget::SyncNowWorker.perform_later(id)
+        end
+      RUBY
+    end
+
+    def graph_of(index)
+      Woods::DependencyGraph.from_h(read_json(index, 'dependency_graph.json'))
+    end
+
+    def generated_unit(index)
+      Dir[File.join(payload_dir(index), 'jobs', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == 'LedgerWidget::SyncNowWorker' }
+    end
+
+    def declare_worker(index)
+      path = write_file('app/models/ledger_widget.rb', widget_source('async_method :sync_now'))
+      load app_path(path)
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+    end
+
+    it 'adds the worker when its declaring line appears, and lands the enqueue edge' do
+      write_generated_job_fixture
+      index = full_extraction
+      expect(graph_of(index).node_types('LedgerWidget::SyncNowWorker')).to be_empty
+
+      touched = declare_worker(index)
+
+      expect(touched).to include('LedgerWidget::SyncNowWorker')
+      expect(graph_of(index).node_types('LedgerWidget::SyncNowWorker')).to eq([:job])
+      expect(graph_of(index).node_types('LedgerWidget')).to eq([:poro])
+      expect(graph_of(index).dependents_of('LedgerWidget::SyncNowWorker')).to include('LedgerSyncCaller')
+      unit = generated_unit(index)
+      expect(unit).to include('file_path' => 'app/models/ledger_widget.rb')
+      expect(unit.fetch('metadata')).to include('generated' => true, 'generated_by' => 'async_method',
+                                                'job_type' => 'active_job')
+      expect(unit.fetch('source_code')).to end_with("\n  async_method :sync_now\n")
+      expect(unit.fetch('source_code')).not_to include('Class.new')
+      expect(unit.fetch('dependents')).to include('type' => 'service', 'identifier' => 'LedgerSyncCaller')
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'retains the worker when its owner file changes elsewhere, and follows the line when it moves' do
+      write_generated_job_fixture
+      index = full_extraction
+      declare_worker(index)
+
+      path = write_file('app/models/ledger_widget.rb', widget_source('async_method :sync_now', 'def total = 1'))
+      load app_path(path)
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(touched).to include('LedgerWidget')
+      expect(touched).not_to include('LedgerWidget::SyncNowWorker')
+      expect(differences(index, full_extraction)).to be_empty
+
+      write_file('app/models/ledger_widget.rb', widget_source('def total = 1', 'async_method(:sync_now)'))
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(touched).to include('LedgerWidget::SyncNowWorker')
+      expect(generated_unit(index).fetch('source_code')).to end_with("\n  async_method(:sync_now)\n")
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'removes the worker when its declaring line and constant are gone' do
+      write_generated_job_fixture
+      index = full_extraction
+      declare_worker(index)
+
+      path = write_file('app/models/ledger_widget.rb', widget_source)
+      LedgerWidget.send(:remove_const, :SyncNowWorker)
+      touched = Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(touched).to include('LedgerWidget::SyncNowWorker')
+      expect(graph_of(index).node_types('LedgerWidget::SyncNowWorker')).to be_empty
+      expect(generated_unit(index)).to be_nil
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'prunes the worker with its deleted owner file' do
+      write_generated_job_fixture
+      index = full_extraction
+      declare_worker(index)
+
+      path = delete_file('app/models/ledger_widget.rb')
+      Object.send(:remove_const, :LedgerWidget)
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+      expect(graph_of(index).node_types('LedgerWidget::SyncNowWorker')).to be_empty
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   describe 'nested hybrid ownership moves out of a surviving model file' do
     [false, true].each do |new_first|
       it "moves a nested job in either changed-path order, new first=#{new_first}" do

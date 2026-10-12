@@ -1061,25 +1061,95 @@ RSpec.describe Woods::Extractors::JobExtractor do
       end
     end
 
-    it 'skips a generated worker whose definition site does not declare it' do
-      declare('lib/job_fixture/async_dispatch.rb', <<~RUBY)
-        module AsyncDispatch
-          def async_method(name)
-            const_set("\#{name.to_s.capitalize}Worker", Class.new { include Sidekiq::Worker })
+    context 'with a worker a class macro generates' do
+      def declare_generator(root = 'lib')
+        declare("#{root}/job_fixture/async_dispatch.rb", <<~RUBY)
+          module AsyncDispatch
+            def async_method(name)
+              klass = Class.new do
+                include Sidekiq::Worker
+                def self.sidekiq_options_hash = { 'queue' => 'restocks' }
+                def perform(id, force = false, *rest, audit:, **options); end
+              end
+              const_set("\#{name.to_s.split('_').map(&:capitalize).join}Worker", klass)
+            end
           end
-        end
-      RUBY
-      declare('app/models/job_fixture/widget.rb', <<~RUBY)
-        class Widget
-          extend AsyncDispatch
-          async_method :restock
-        end
-      RUBY
-      allow(logger).to receive(:debug)
+        RUBY
+      end
 
-      expect(described_class.new.discoverable_classes).not_to include(JobFixture::Widget::RestockWorker)
-      expect(units_by_id).not_to have_key('JobFixture::Widget::RestockWorker')
-      expect(logger).to have_received(:debug).with(/JobFixture::Widget::RestockWorker/).at_least(:once)
+      def declare_widget
+        declare('app/models/job_fixture/widget.rb', <<~RUBY)
+          class Widget
+            extend AsyncDispatch
+            def restock = RestockNowWorker.perform_async(1)
+            async_method :restock_now
+          end
+        RUBY
+      end
+
+      it 'emits a job unit at the line that calls the generator' do
+        declare_generator
+        path = declare_widget
+
+        unit = units_by_id.fetch('JobFixture::Widget::RestockNowWorker')
+
+        expect(described_class.new.discoverable_classes).to include(JobFixture::Widget::RestockNowWorker)
+        expect(unit).to have_attributes(type: :job, file_path: path, namespace: 'JobFixture::Widget')
+        expect(unit.source_code.lines.grep_v(/\A#|\A\s*\z/)).to eq(["  async_method :restock_now\n"])
+        expect(unit.metadata).to include(generated: true, generated_by: 'async_method', job_type: :sidekiq,
+                                         queue: 'restocks', sidekiq_options: { 'queue' => 'restocks' }, loc: 1)
+      end
+
+      it 'reads the perform signature from the runtime method' do
+        declare_generator
+        declare_widget
+
+        expect(units_by_id.fetch('JobFixture::Widget::RestockNowWorker').metadata[:perform_params]).to eq(
+          [{ name: 'id', splat: nil, has_default: false }, { name: 'force', splat: nil, has_default: true },
+           { name: 'rest', splat: :single, has_default: false }, { name: 'audit', splat: nil, has_default: false },
+           { name: 'options', splat: :double, has_default: false }]
+        )
+      end
+
+      it 'keeps the owner out of the job family and emits the worker once' do
+        declare_generator
+        declare_widget
+
+        identifiers = described_class.new.extract_all.map(&:identifier)
+
+        expect(identifiers).not_to include('JobFixture::Widget')
+        expect(identifiers.count('JobFixture::Widget::RestockNowWorker')).to eq(1)
+      end
+
+      it 'extracts the same unit by class as the full pass does' do
+        declare_generator
+        declare_widget
+        extractor = described_class.new
+
+        by_class = extractor.extract_job_class(JobFixture::Widget::RestockNowWorker)
+
+        expect(by_class.to_h.except(:extracted_at))
+          .to eq(units_by_id.fetch('JobFixture::Widget::RestockNowWorker').to_h.except(:extracted_at))
+      end
+
+      it 'emits nothing for a worker a generator outside the application built' do
+        Dir.mktmpdir('job-fixture-gem') do |gem_root|
+          generator = File.join(gem_root, 'async_dispatch.rb')
+          File.write(generator, <<~RUBY)
+            module JobFixture
+              module AsyncDispatch
+                def async_method(name) = const_set("\#{name.to_s.capitalize}Worker", Class.new { include Sidekiq::Worker })
+              end
+            end
+          RUBY
+          load generator
+        end
+        declare('app/models/job_fixture/widget.rb',
+                "class Widget\n  extend AsyncDispatch\n  async_method :restock\nend")
+
+        expect(described_class.new.discoverable_classes).not_to include(JobFixture::Widget::RestockWorker)
+        expect(units_by_id).not_to have_key('JobFixture::Widget::RestockWorker')
+      end
     end
 
     it 'gives an enqueue call site a job_enqueue edge that the leaf unit answers' do
