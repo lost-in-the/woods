@@ -5,6 +5,7 @@ require 'strscan'
 require_relative 'route_extractor'
 require_relative 'test_request_host'
 require_relative 'test_support_catalog'
+require_relative 'comment_blanking'
 
 module Woods
   module Extractors
@@ -49,7 +50,6 @@ module Woods
         (?:(?:main_app\.)?([a-z_]\w*_(?:path|url))\b|"(/[^"\n]*)"|'(/[^'\n]*)')
       }x
 
-      COMMENT_LINE = /\A[ \t]*#/
       INTERPOLATION = /#\{[^}\n]*\}/
       # Longest literal worth matching; bounds the work of a path pattern.
       MAX_LITERAL_LENGTH = 512
@@ -95,6 +95,7 @@ module Woods
       def analyze(source)
         return Analysis.new(exercised: [], asserted: [], ambiguous: []) if @routes.empty?
 
+        source = CommentBlanking.ruby(source)
         capybara = TestRequestHost.capybara_spec?(source)
         if TestRequestHost.specifies_host?(source)
           hosts = TestRequestHost.subdomains(source)
@@ -109,8 +110,6 @@ module Woods
         requests = []
         asserted = []
         source.each_line do |line|
-          next if line.match?(COMMENT_LINE)
-
           line.scan(NAVIGATION) { |captures| requests.concat([resolve(hosts, reachable, *captures)].flatten(1)) }
           line.scan(ASSERTION) do |captures|
             asserted.concat([resolve(hosts, reachable, 'get', nil, *captures)].flatten(1))
@@ -135,7 +134,10 @@ module Woods
       end
 
       def support_source
-        @support_source ||= (@support_catalog || TestSupportCatalog.new).entries.map(&:source).join("\n")
+        return @support_source if @support_source
+
+        entries = (@support_catalog || TestSupportCatalog.new).entries
+        @support_source = entries.map { |entry| CommentBlanking.ruby(entry.source) }.join("\n")
       end
 
       def build_analysis(requests, asserted)
