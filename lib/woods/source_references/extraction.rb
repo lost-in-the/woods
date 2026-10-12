@@ -96,7 +96,7 @@ module Woods
       def enrich_source_references_incremental(affected_types)
         records = source_reference_payload_records
         result = discarding_seed_on_refusal do
-          reference_pass(records.values.map { |entry| entry.fetch(:data) }, full: false)
+          reference_pass(records.values.map { |entry| reference_pass_unit(entry.fetch(:data)) }, full: false)
         end
         touched = Set.new
         result.dependencies.each do |identity, edges|
@@ -108,6 +108,18 @@ module Woods
         end
         write_source_reference_cache(result)
         touched
+      end
+
+      # A retained unit ({Extractor#retain_unit}) is fresh to the pass, which
+      # takes a fresh unit's dependencies as the extractor's own. Its published
+      # JSON still carries the previous pass's additions, so they come off
+      # here; left in, the next cache would record no ownership for them.
+      def reference_pass_unit(data)
+        key = data.values_at('type', 'identifier')
+        return data unless @retained_units&.include?(key)
+
+        own = ExtractedForm.own_dependencies(data['dependencies'], reference_additions[key])
+        own ? data.merge('dependencies' => own) : data
       end
 
       def source_reference_payload_records

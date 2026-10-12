@@ -1546,6 +1546,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index_dir, full_extraction)).to be_empty
     end
 
+    it 'keeps source-reference edge ownership for a retained job across successive runs' do
+      write_file('app/models/ledger_rate.rb', "class LedgerRate\n  def self.for(*) = nil\nend\n")
+      job = write_file('app/jobs/ledger_rate_job.rb', <<~RUBY)
+        class LedgerRateJob < ActiveJob::Base
+          def perform(id) = LedgerRate.for(id)
+        end
+      RUBY
+      load app_path('app/models/ledger_rate.rb')
+      load app_path(job)
+      index_dir = full_extraction
+      added = read_json(index_dir, 'source_references.json').fetch('owners')
+                                                            .find { |owner| owner['identifier'] == 'LedgerRateJob' }
+      expect(added.fetch('added')).not_to be_empty
+
+      2.times do |round|
+        path = write_file("app/services/ledger_round_#{round}_service.rb", service_source("LedgerRound#{round}Service"))
+        touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+        expect(touched).not_to include('LedgerRateJob')
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+      expect(read_json(index_dir, 'source_references.json').fetch('owners'))
+        .to include(added)
+    ensure
+      %i[LedgerRateJob LedgerRate].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'refreshes git facts for a retained unit whose file was committed without altering it' do
       path = write_file('app/jobs/ledger_idle_job.rb',
                         "class LedgerIdleJob < ActiveJob::Base\n  def perform; end\nend\n")
