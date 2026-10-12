@@ -47,8 +47,10 @@ module Woods
     module LineDepthTracking
       # Multi-line `do` block opener — `items.each do |item|`. Anchored
       # to end-of-line (optionally through block args and a trailing
-      # comment) so prose containing "do" mid-line doesn't count.
-      DO_BLOCK_PATTERN = /\bdo\s*(?:\|[^|]*\|)?\s*(?:#.*)?\z/
+      # comment) so prose containing "do" mid-line doesn't count. Applied
+      # to one stripped line, so a `#` after the opener runs to its end.
+      # Possessive throughout: no position is ever rescanned.
+      DO_BLOCK_PATTERN = /\bdo(?:\s*+\|[^|]*+\|)?\s*+(?:\z|#)/
 
       # Keywords that open an `end`-terminated body only in statement
       # position: at line start, or directly after an assignment
@@ -281,11 +283,12 @@ module Woods
         chunk_type = chunk[:chunk_type] || :whole
         offset = SourceContributors.field(chunk[:embedding_slice], :start_byte) || 0
         initial_offset = offset
+        line_cursor = ContributorChunks::LineCursor.new(content)
         verified_slices(content).each_with_index.map do |slice, idx|
           first = offset
           offset += slice.bytesize
           metadata = ContributorChunks.slice_metadata(chunk[:metadata], content, first - initial_offset,
-                                                      offset - initial_offset)
+                                                      offset - initial_offset, line_cursor: line_cursor)
           chunk.merge(content: slice, chunk_type: :"#{chunk_type}_part_#{idx}", metadata: metadata,
                       embedding_slice: { start_byte: first, end_byte: offset })
         end
@@ -345,6 +348,7 @@ module Woods
         return [chunk] unless oversize?(chunk.content)
 
         offset = 0
+        line_cursor = ContributorChunks::LineCursor.new(chunk.content)
         verified_slices(chunk.content).each_with_index.map do |slice, idx|
           first = offset
           offset += slice.bytesize
@@ -353,7 +357,8 @@ module Woods
             chunk_type: :"#{chunk.chunk_type}_part_#{idx}",
             parent_identifier: unit.identifier,
             parent_type: unit.type,
-            metadata: ContributorChunks.slice_metadata(chunk.metadata, chunk.content, first, offset)
+            metadata: ContributorChunks.slice_metadata(chunk.metadata, chunk.content, first, offset,
+                                                       line_cursor: line_cursor)
           )
         end
       end
@@ -413,18 +418,33 @@ module Woods
 
         slices = []
         current = String.new
+        current_length = 0
         content.each_line do |line|
-          line_parts = line.length > limit ? line.scan(/.{1,#{limit}}/m) : [line]
-          line_parts.each do |part|
-            if current.length + part.length > limit && !current.empty?
+          line_parts(line, limit).each do |part, part_length|
+            if current_length + part_length > limit && !current.empty?
               slices << current
               current = String.new
+              current_length = 0
             end
             current << part
+            current_length += part_length
           end
         end
         slices << current unless current.empty?
         slices
+      end
+
+      # One line as pieces of at most `limit` characters, each with its
+      # character count, so the caller never recounts what it has kept.
+      #
+      # @param line [String]
+      # @param limit [Integer]
+      # @return [Array<Array(String, Integer)>]
+      def line_parts(line, limit)
+        length = line.length
+        return [[line, length]] if length <= limit
+
+        line.each_char.each_slice(limit).map { |chars| [chars.join, chars.size] }
       end
     end
 

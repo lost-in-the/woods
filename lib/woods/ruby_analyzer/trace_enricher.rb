@@ -19,6 +19,9 @@ module Woods
     #   TraceEnricher.merge(units: units, trace_data: trace_data)
     #
     class TraceEnricher
+      IDENTIFIER_SEPARATOR = /[#.]/
+      private_constant :IDENTIFIER_SEPARATOR
+
       # Record method calls during block execution using TracePoint.
       #
       # Records the current thread only, with independent stacks for its fibers.
@@ -115,11 +118,17 @@ module Woods
           grouped
         end
 
+        # Owner, method name and kind, split at the first `#` or `.` that has
+        # text on both sides. One index pass: an anchored lazy/greedy pair
+        # rescans the tail from every separator when a line break follows.
         def parse_identifier(identifier)
-          match = /\A(.+?)([#.])(.+)\z/.match(identifier)
-          return unless match
+          text = identifier.to_s
+          return if text.include?("\n")
 
-          [match[1], match[3], match[2] == '#' ? 'instance' : 'singleton']
+          separator = text.index(IDENTIFIER_SEPARATOR, 1)
+          return unless separator && separator < text.length - 1
+
+          [text[0, separator], text[(separator + 1)..], text[separator] == '#' ? 'instance' : 'singleton']
         end
 
         def event_identity(tp)

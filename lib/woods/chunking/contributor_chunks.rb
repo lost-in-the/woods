@@ -8,6 +8,27 @@ module Woods
     # Exact physical attribution for contiguous slices of validated contributors.
     # Generated composite headers and cross-file content never get a physical span.
     module ContributorChunks
+      # Counts the line breaks before a byte offset of one source, resuming
+      # from the previous answer. Slices arrive in order, so numbering them
+      # all costs one pass instead of a prefix recount per slice.
+      class LineCursor
+        # @param source [String]
+        def initialize(source)
+          @source = source
+          @byte = 0
+          @newlines = 0
+        end
+
+        # @param byte [Integer] byte offset into the source
+        # @return [Integer] line breaks in the bytes before it
+        def newlines_before(byte)
+          @byte = @newlines = 0 if byte < @byte
+          @newlines += @source.byteslice(@byte...byte).count("\n")
+          @byte = byte
+          @newlines
+        end
+      end
+
       module_function
 
       def chunks(unit)
@@ -73,20 +94,21 @@ module Woods
       end
 
       # Offsets are relative to this chunk, including for a second splitting pass.
-      def slice_metadata(metadata, source, first, last)
+      # A caller slicing one source in order passes one {LineCursor} for all slices.
+      def slice_metadata(metadata, source, first, last, line_cursor: LineCursor.new(source))
         metadata = symbol_keys(metadata)
         physical = symbol_keys(metadata[:physical_location])
         published = symbol_keys(metadata[:published_location])
         clean = metadata.except(:physical_location, :published_location)
         return clean unless mapped_slice?(physical, published, source, first, last)
 
-        clean.merge(physical_location: physical_slice(physical, source, first, last),
+        clean.merge(physical_location: physical_slice(physical, source, first, last, line_cursor),
                     published_location: { start_byte: published[:start_byte] + first,
                                           end_byte: published[:start_byte] + last })
       end
 
-      def physical_slice(physical, source, first, last)
-        start_line = physical[:start_line] + source.byteslice(0...first).count("\n")
+      def physical_slice(physical, source, first, last, line_cursor)
+        start_line = physical[:start_line] + line_cursor.newlines_before(first)
         end_line = start_line + source.byteslice(first...last).delete_suffix("\n").count("\n")
         physical.merge(start_byte: physical[:start_byte] + first, end_byte: physical[:start_byte] + last,
                        start_line: start_line, end_line: end_line)

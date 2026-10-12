@@ -23,10 +23,12 @@ module Woods
       # @return [Ast::Node] Root node of the normalized tree
       # @raise [Woods::ExtractionError] if parsing fails
       def parse(source)
-        if prism_available?
-          parse_with_prism(source)
-        else
-          parse_with_parser_gem(source)
+        with_source_lines(source) do
+          if prism_available?
+            parse_with_prism(source)
+          else
+            parse_with_parser_gem(source)
+          end
         end
       rescue StandardError => e
         raise Woods::ExtractionError, "Failed to parse source: #{e.message}"
@@ -653,8 +655,8 @@ module Woods
       # columns still identify the original source, but absolute positions do
       # not. Map through original lines to preserve both CRLF and Unicode bytes.
       def original_byte_offset(source, line, column)
-        lines = source.lines
-        lines.take(line - 1).sum(&:bytesize) + lines.fetch(line - 1)[0, column].bytesize
+        table = source_line_table(source)
+        table.byte_start(line - 1) + table.byte_column(line - 1, column)
       end
 
       def parser_body_children(body_node)

@@ -741,7 +741,7 @@ Leave it at its default. The full list of what always runs:
 | `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
 | `:test_support` | TestSupportExtractor | Helper modules, shared examples/contexts, matchers, suite configuration |
 | `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
-| `:poros` | PoroExtractor | Plain Ruby objects in app/models |
+| `:poros` | PoroExtractor | Plain Ruby objects in app/models, plus unclaimed Ruby under app/ (`unclaimed_ruby_paths`) |
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
 | `:config_files` | ConfigFileExtractor | YAML configuration and data files (key structure only) |

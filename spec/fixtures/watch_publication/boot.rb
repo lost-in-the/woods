@@ -91,7 +91,7 @@ Dir.mktmpdir('woods-watch-publication-app') do |root|
     result = build.call.run
     recovered = generation.current.number
     units = Dir[generation.payload_dir.join('view_templates/*.json')].filter_map do |path|
-      data = JSON.parse(File.read(path))
+      data = JSON.parse(Woods::AtomicFile.read(path))
       data if data.is_a?(Hash) && data['file_path'] == 'app/views/posts/show.html.erb'
     end
     build.call.run

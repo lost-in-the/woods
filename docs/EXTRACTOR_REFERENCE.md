@@ -667,10 +667,12 @@ reference cache; updating only the reader does not add them.
 
 ### ValidatorExtractor
 
-**What it captures:** Custom `ActiveModel::Validator` subclasses with their validation rules.
+**What it captures:** Every class a file under `app/validators/` is named for, with its validation rules. `ActiveModel::Validator` and `ActiveModel::EachValidator` subclasses are one shape; a plain validator object (an arg-less `validate`, `valid?`, or delegated `errors`) is another.
 
 **Key details:**
-- File-based scanning; extracts `validate` method logic and the attribute being validated
+- File-based scanning; extracts `validate`/`validate_each` logic and the attribute being validated
+- `metadata[:validator_type]` records the shape: `:each_validator`, `:validator`, or `:plain` when no ActiveModel shape is recognized
+- A model that constructs a plain validator gains a `validator` edge to it
 
 ---
 

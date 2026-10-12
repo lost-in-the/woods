@@ -34,8 +34,15 @@ module Woods
         debug: /\b(bug|error|fix|broken|failing|wrong|issue|problem|crash|exception)\b/i,
         implement: /\b(implement|add|create|build|write|make|generate)\b/i,
         compare: /\b(compare|difference|vs|versus|between|contrast)\b/i,
-        # rubocop:disable-next Layout/LineLength
-        framework: /\b(how does rails|what does rails|rails .+ work|work.+\brails\b|in rails\b|activerecord|actioncontroller|activejob|actionmailer|actioncable|actiontext|activestorage|solid_queue|solid_cache|solid_cable|kamal|propshaft|importmap|hotwire|turbo|stimulus|zeitwerk)\b/i,
+        framework: Regexp.union(
+          # rubocop:disable-next Layout/LineLength
+          /\b(how does rails|what does rails|in rails\b|activerecord|actioncontroller|activejob|actionmailer|actioncable|actiontext|activestorage|solid_queue|solid_cache|solid_cable|kamal|propshaft|importmap|hotwire|turbo|stimulus|zeitwerk)\b/i,
+          # "rails ... work" and "work ... rails" on one line. Each is pinned
+          # to the first lead on its line by an atomic group: a later lead
+          # can only see a shorter tail, so retrying from it finds nothing new.
+          /^(?>[^\n]*?\brails ).+ work\b/i,
+          /^(?>[^\n]*?\bwork).+\brails\b/i
+        ),
         reference: /\b(show me|what is|what are|list|options for|api|interface|signature)\b/i,
         understand: /\b(how|why|explain|understand|what happens|describe|overview)\b/i
       }.freeze
@@ -81,7 +88,11 @@ module Woods
         # rubocop:disable Layout/LineLength
         migration: /\b(migration|migrate|schema.?change|add.?column|remove.?column|create.?table|drop.?table|db.?migrate)\b/i,
         action_cable_channel: /\b(action.?cable|websocket|broadcast|cable.?channel|subscription.?channel|realtime|real.?time)\b/i,
-        scheduled_job: /\b(schedule[dr]?|recurring|cron|periodic|every\s+\d|daily|hourly|weekly|solid.?queue.*recur|sidekiq.?cron|whenever)\b/i,
+        scheduled_job: Regexp.union(
+          /\b(schedule[dr]?|recurring|cron|periodic|every\s+\d|daily|hourly|weekly|sidekiq.?cron|whenever)\b/i,
+          # "solid queue ... recur" on one line, pinned to the first lead.
+          /^(?>[^\n]*?\bsolid.?queue).*recur\b/i
+        ),
         rake_task: /\b(rake|rake.?task|lib.?tasks?|maintenance.?script|batch.?script)\b/i
         # rubocop:enable Layout/LineLength
       }.freeze

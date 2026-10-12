@@ -33,7 +33,7 @@ module Woods
       def analyze(source:, file_path:)
         root = @parser.parse(source)
         units = []
-        extract_definitions(root, source, file_path, [], units, [])
+        with_source_lines(source) { extract_definitions(root, source, file_path, [], units, []) }
         units
       end
 

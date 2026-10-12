@@ -85,8 +85,10 @@ module Woods
       # @return [Hash{Array(String, Integer) => String}] [name, line] => source text
       def extract_method_definitions(source)
         root = @parser.parse(source)
-        root.find_all(:def).to_h do |node|
-          [[node.method_name, node.line], node.source || extract_source_span(source, node.line, node.end_line)]
+        with_source_lines(source) do
+          root.find_all(:def).to_h do |node|
+            [[node.method_name, node.line], node.source || extract_source_span(source, node.line, node.end_line)]
+          end
         end
       end
     end

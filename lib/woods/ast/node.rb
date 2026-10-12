@@ -88,15 +88,92 @@ module Woods
       end
     end
 
+    # One source split into lines once, with byte positions derived on demand.
+    #
+    # @api private
+    class LineTable
+      # @return [String] the source this table was built from
+      attr_reader :source
+
+      # @return [Array<String>] the source's lines, terminators included
+      attr_reader :lines
+
+      # @param source [String]
+      def initialize(source)
+        @source = source
+        @lines = source.lines
+      end
+
+      # @param index [Integer] 0-based line index
+      # @return [Integer] byte offset of the line's first byte
+      # @raise [IndexError] when the line does not exist
+      def byte_start(index)
+        @byte_starts ||= begin
+          total = 0
+          @lines.map { |line| (total += line.bytesize) - line.bytesize }
+        end
+        @byte_starts.fetch(index)
+      end
+
+      # @param index [Integer] 0-based line index
+      # @param column [Integer] 0-based character column, clamped to the line
+      # @return [Integer] bytes the line spends before that column
+      # @raise [IndexError] when the line does not exist
+      def byte_column(index, column)
+        line = @lines.fetch(index)
+        return [column, line.bytesize].min if line.ascii_only?
+
+        offsets = (@column_bytes ||= {})[index] ||= character_byte_offsets(line)
+        offsets[[column, offsets.size - 1].min]
+      end
+
+      private
+
+      def character_byte_offsets(line)
+        total = 0
+        line.each_char.map { |char| (total += char.bytesize) - char.bytesize } << total
+      end
+    end
+
     # Mixin for line-range source extraction, shared across Parser, MethodExtractor,
     # and ClassAnalyzer.
     #
     # @example
     #   include Ast::SourceSpan
-    #   extract_source_span(source, node.line, node.end_line)
+    #   with_source_lines(source) { extract_source_span(source, node.line, node.end_line) }
     #
     module SourceSpan
+      LINE_TABLE_KEY = :woods_ast_source_span_line_table
+      private_constant :LINE_TABLE_KEY
+
       private
+
+      # Split +source+ once for every span requested inside the block. A walk
+      # asks for one span per definition; splitting per request is quadratic
+      # in the file. Scoped to the block and the calling thread, so a string
+      # edited between calls is never read through a stale table.
+      #
+      # @param source [String] Full source text
+      # @yield the walk that requests spans of +source+
+      # @return [Object] the block's value
+      def with_source_lines(source)
+        previous = Thread.current[LINE_TABLE_KEY]
+        return yield if previous&.source.equal?(source)
+
+        Thread.current[LINE_TABLE_KEY] = LineTable.new(source)
+        begin
+          yield
+        ensure
+          Thread.current[LINE_TABLE_KEY] = previous
+        end
+      end
+
+      # @param source [String] Full source text
+      # @return [LineTable] the enclosing {#with_source_lines} table, or a fresh one
+      def source_line_table(source)
+        table = Thread.current[LINE_TABLE_KEY]
+        table&.source.equal?(source) ? table : LineTable.new(source)
+      end
 
       # Extract source lines for a 1-based start/end line range.
       #
@@ -107,7 +184,7 @@ module Woods
       def extract_source_span(source, start_line, end_line)
         return nil unless start_line && end_line
 
-        lines = source.lines
+        lines = source_line_table(source).lines
         start_idx = start_line - 1
         end_idx = end_line - 1
         return nil if start_idx.negative? || end_idx >= lines.length

@@ -150,7 +150,7 @@ hierarchies are exactly where static tools fail and Woods shines.
 **Anyone who wants structured codebase context.** The extraction output is plain JSON, useful beyond AI tools for documentation, impact analysis, and onboarding.
 
 Woods works with any database (MySQL, PostgreSQL, SQLite), any background job
-system (Sidekiq, Solid Queue, GoodJob), and any view layer (ERB, Phlex, ViewComponent).
+system (Sidekiq, Solid Queue, GoodJob), and any view layer (ERB, HAML, jbuilder, Phlex, ViewComponent).
 See [docs/BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
 
 ---
