@@ -1039,6 +1039,7 @@ expanded mailer and schedule identities in an existing index.
 - `metadata.shell_commands` lists the literal commands a body runs through `sh`, `system`, `exec`, `spawn`, `Open3`, backticks, or a helper method that shells out itself. Credentials are redacted first (`RakeShellRedaction`: the `ConfigSourceGuard` passes, then credential-named assignments, flags, headers and query parameters, `Bearer`/`Basic` tokens and `-u user:password`), then each is cut to 200 characters. Shell commands add no edges.
 - Ruby files under a configured directory (`rake/lib/**/*.rb`) are `rake_task` units with `kind: "rake_support"`, identified by root-relative path, with `metadata.constants` and `metadata.methods`. A task has a `method_call` or `code_reference` edge to each support file it calls or names. A file another extractor owns is skipped.
 - The file is the authority for everything it states literally. The loaded Rake application is consulted only for what a file computes: a task named in a loop (`task "sync_#{name}"`) is indexed, with `metadata.name_source: "runtime"`, when the extracting process loaded that file through Rake. In a process that loaded no tasks, such a definition produces no unit.
+- `source_code` is the rake file (or support file) after `ConfigSourceGuard.redact`: credential literals, URL userinfo and private keys are withheld. Parsing reads the raw text.
 - No per-file dispatch: any change under a configured path re-runs the extractor wholesale.
 
 ---

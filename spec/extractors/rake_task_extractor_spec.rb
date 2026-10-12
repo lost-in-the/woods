@@ -1346,4 +1346,49 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       expect(described_class.new.extract_all.map(&:identifier)).to eq(['fine'])
     end
   end
+
+  # ── Published source ────────────────────────────────────────────────
+
+  describe 'published source' do
+    it 'redacts a credential literal in a rake file and keeps the task readable' do
+      path = create_file('rake/ledger.rake', <<~RAKE)
+        LEDGER_API_TOKEN = 'Wd8kq2Lm9xQ7zP3vB6nTr4Ky8'
+
+        namespace :ledger do
+          desc 'Sync the ledger'
+          task sync: :environment do
+            Ledger::Client.new(password: "hunter2", host: 'https://ledger.example.test/api').sync
+          end
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('ledger:sync')
+      expect(unit.source_code).not_to include('Wd8kq2Lm9xQ7zP3vB6nTr4Ky8', 'hunter2')
+      expect(unit.source_code).to include("LEDGER_API_TOKEN = '[REDACTED]'", 'password: "[REDACTED]"',
+                                          'task sync: :environment do', "host: 'https://ledger.example.test/api'")
+      expect(unit.metadata).to include(description: 'Sync the ledger', task_dependencies: ['environment'])
+    end
+
+    it 'redacts a credential literal in a support file' do
+      create_file('rake/lib/registry.rb', <<~RUBY)
+        module Registry
+          DEPLOY_SECRET = "Wd8kq2Lm9xQ7zP3vB6nTr4Ky8"
+          URL = 'https://deploy:Wd8kq2Lm9x@registry.example.test/v2'
+
+          def push(image)
+            sh "docker push \#{image}"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_all.find { |candidate| candidate.identifier == 'rake/lib/registry.rb' }
+
+      expect(unit.source_code).not_to include('Wd8kq2Lm9xQ7zP3vB6nTr4Ky8', 'Wd8kq2Lm9x@')
+      expect(unit.source_code).to include('DEPLOY_SECRET = "[REDACTED]"', 'https://[REDACTED]@registry.example.test/v2',
+                                          'def push(image)')
+      expect(unit.metadata).to include(constants: ['Registry'], methods: ['push'])
+    end
+  end
 end

@@ -3,6 +3,7 @@
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
+require_relative 'config_source_guard'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'rake_task_paths'
@@ -24,6 +25,10 @@ module Woods
     # The loaded Rake application resolves what a file computes (a task name
     # built in a loop); everything a file states literally comes from the
     # file. See {RakeTaskCatalog}.
+    #
+    # Rake files and their helpers are where a deploy password or an API
+    # token tends to be written down, so the raw text is parsed and the text
+    # published as `source_code` has passed through {ConfigSourceGuard.redact}.
     #
     # @example
     #   extractor = RakeTaskExtractor.new
@@ -123,6 +128,14 @@ module Woods
         end
       end
 
+      # The file text as published, credentials redacted. Parsing reads the raw text.
+      #
+      # @param data [Hash] {#rake_file_data} entry
+      # @return [String]
+      def published_source(data)
+        data[:published] ||= ConfigSourceGuard.redact(data[:source])
+      end
+
       # @param source [String] Ruby source
       # @return [RakeSourceParser::Result]
       def parse_tasks(source)
@@ -192,7 +205,7 @@ module Woods
         description = records.select { |record| record[:file] == file }.filter_map { |record| record[:description] }.first
         header = "# Rake task: #{name}"
         header += "\n# #{description}" if description
-        "#{header}\n#{rake_file_data(file)[:source]}"
+        "#{header}\n#{published_source(rake_file_data(file))}"
       end
 
       # Build metadata hash for the unit.
@@ -256,7 +269,7 @@ module Woods
 
         facts = data[:parsed].facts
         unit = ExtractedUnit.new(type: :rake_task, identifier: relative, file_path: file)
-        unit.source_code = data[:source]
+        unit.source_code = published_source(data)
         unit.metadata = {
           kind: SUPPORT_KIND, constants: data[:parsed].constants.uniq,
           methods: data[:parsed].method_definitions.map { |definition| definition[:name] }.uniq,
