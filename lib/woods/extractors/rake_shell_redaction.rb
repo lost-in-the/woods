@@ -17,18 +17,25 @@ module Woods
     #   credential-named (any value) or sensitive-named (a value that reads
     #   as a generated token). A `$VAR` or `#{...}` value is a reference and
     #   is kept.
-    # * The value after `Bearer` or `Basic`, and of a credential-named header
+    # * The value after `Bearer` or `Basic`, the credential after any
+    #   `Authorization:` scheme, and the value of a credential-named header
     #   (`X-Api-Key: ...`, `X-Api-Key:...`).
     # * The password half of `-u user:password`, `-uuser:password` and
     #   `--user=user:password`.
     # * The password flag of tools that take one (`mysql -p...`,
-    #   `sshpass -p ...`, `docker login -p ...`, `redis-cli -a ...`), unless the
-    #   value reads as a port.
-    # * Credential-named query parameters (`?token=...`), and credential
-    #   literals inside a quoted argument (a JSON body).
+    #   `sshpass -p ...`, `docker login -p ...`, `redis-cli -a ...`). For the
+    #   container tools, where `-p` also publishes a port, a port-like value
+    #   is kept.
+    # * Credential-named query parameters (`?token=...`).
+    # * What `echo` or `printf` prints on a line that pipes into
+    #   `--password-stdin`.
+    #
+    # A quoted argument is read again as a command line of its own (a
+    # `bash -c "..."` body, a quoted header), after the guard's literal pass
+    # over it (a JSON body), down to {MAX_DEPTH} levels of quoting.
     #
     # Arguments are scanned with possessive patterns and compared by bytes,
-    # so the pass is linear in the line.
+    # so each level is linear in the line.
     #
     # @example
     #   RakeShellRedaction.redact('PGPASSWORD=s3cret pg_dump widgets')
@@ -51,6 +58,15 @@ module Woods
       # Authorization schemes whose next word is the credential.
       SCHEMES = %w[bearer basic].freeze
 
+      # Headers whose value is a scheme followed by the credential.
+      AUTHORIZATION_HEADERS = %w[authorization proxy_authorization].freeze
+
+      # Programs whose `-p` may publish a port rather than take a password.
+      PORT_PROGRAMS = %w[docker podman].freeze
+
+      # Levels of quoting read as nested command lines.
+      MAX_DEPTH = 4
+
       USER_FLAGS = %w[-u --user].freeze
 
       # Short flags that take a password, by program.
@@ -62,6 +78,10 @@ module Woods
       # Words that run the next word as the program.
       WRAPPERS = %w[env sudo exec command time nice nohup].freeze
 
+      # A flag that reads a password from a pipe, and the programs that write one.
+      STDIN_PASSWORD_FLAG = '--password-stdin'
+      PRINTERS = %w[echo printf].freeze
+
       # Arguments that end one command and start the next.
       COMMAND_SEPARATORS = %w[; && || | &].freeze
 
@@ -72,25 +92,25 @@ module Woods
 
       # What the next argument must be checked for, and which program the
       # current command runs.
-      State = Struct.new(:pending, :program, :expect_program)
+      State = Struct.new(:pending, :program, :expect_program, :stdin_password)
 
       module_function
 
       # @param command [String] one command line
       # @return [String] the line with credential values replaced by {REDACTED}
       def redact(command)
-        redact_arguments(ConfigSourceGuard.redact(command), nested: false)
+        redact_arguments(ConfigSourceGuard.redact(command), 1)
       end
 
-      def redact_arguments(text, nested:)
+      def redact_arguments(text, depth)
         scanner = StringScanner.new(text)
-        state = State.new(nil, nil, true)
+        state = State.new(nil, nil, true, text.include?(STDIN_PASSWORD_FLAG))
         output = +''
         until scanner.eos?
           space = scanner.scan(SPACE)
           next output << space if space
 
-          output << redact_argument(next_argument(scanner), state, nested)
+          output << redact_argument(next_argument(scanner), state, depth)
         end
         output
       end
@@ -103,51 +123,66 @@ module Woods
         argument.empty? ? scanner.getch : argument
       end
 
-      def redact_argument(argument, state, nested)
-        if state.pending
-          redacted = pending_redaction(argument, state.pending)
-          state.pending = nil
-          return redacted if redacted
+      def redact_argument(argument, state, depth)
+        pending = state.pending
+        state.pending = nil
+        if pending
+          redacted = pending_redaction(argument, pending, state)
+          return redacted || argument if redacted || state.pending
         end
-        track_program(argument, state)
+        program_word = track_program(argument, state)
+        return REDACTED if !program_word && printed_password?(argument, state)
 
         lead, core, trail = split_quotes(argument)
-        return "#{lead}#{redact_quoted(core, nested)}#{trail}" if lead.bytesize.positive? && quoted_text?(core)
+        return "#{lead}#{redact_quoted(core, depth)}#{trail}" if !lead.empty? && !core.empty?
 
         redacted, state.pending = redact_core(core, state.program)
         redacted ? "#{lead}#{redacted}#{trail}" : argument
       end
 
-      def pending_redaction(argument, pending)
+      def pending_redaction(argument, pending, state)
         case pending
         when :userinfo then redacted_userinfo(argument)
-        when :password_flag then redacted_password(argument)
+        when :password_flag then redacted_password(argument, state.program)
+        when :authorization then authorization_value(argument, state)
         else redacted_value(argument, pending)
         end
       end
 
+      # The word after `Authorization:` is the scheme, unless it is the
+      # credential itself.
+      def authorization_value(argument, state)
+        _, core, = split_quotes(argument)
+        return redacted_value(argument, :credential) if core.match?(WHITESPACE) || ConfigSourceGuard.opaque?(core)
+
+        state.pending = :credential
+        nil
+      end
+
       # The program a command runs: its first word that is not an
       # assignment or a wrapper.
+      #
+      # @return [Boolean] true when +argument+ is a separator or the program word
       def track_program(argument, state)
         return state.expect_program = true if COMMAND_SEPARATORS.include?(argument)
-        return unless state.expect_program
-        return if assignment_name(argument)
+        return false unless state.expect_program
+        return false if assignment_name(argument)
 
         word = File.basename(argument)
         state.program = word
         state.expect_program = WRAPPERS.include?(word)
+        true
       end
 
-      # A quoted argument holding spaces or quotes: its words are arguments
-      # of their own (a header), and a quoted literal inside it is Ruby-like
-      # source to the guard (a JSON body).
-      def quoted_text?(core)
-        core.match?(WHITESPACE) || core.include?('"') || core.include?("'")
+      def printed_password?(argument, state)
+        state.stdin_password && PRINTERS.include?(state.program) && !argument.start_with?('-')
       end
 
-      def redact_quoted(core, nested)
+      # The inside of a quoted argument: a quoted literal in it is Ruby-like
+      # source to the guard (a JSON body), and its words are a command line.
+      def redact_quoted(core, depth)
         text = core.include?('"') || core.include?("'") ? ConfigSourceGuard.redact_assigned_literals(core) : core
-        nested || !text.match?(WHITESPACE) ? text : redact_arguments(text, nested: true)
+        depth < MAX_DEPTH ? redact_arguments(text, depth + 1) : text
       end
 
       # @return [Array(String, Symbol, nil)] the redacted core (nil when
@@ -157,7 +192,7 @@ module Woods
         return [nil, :userinfo] if USER_FLAGS.include?(core)
 
         password_flag = PASSWORD_FLAGS[program]
-        return redact_password_flag(core, password_flag) if password_flag && core.start_with?(password_flag)
+        return redact_password_flag(core, password_flag, program) if password_flag && core.start_with?(password_flag)
         return [redact_query(core), nil] if core.include?('?')
         return redact_flag(core) if core.start_with?('-')
 
@@ -167,10 +202,10 @@ module Woods
         redact_header(core)
       end
 
-      def redact_password_flag(core, flag)
+      def redact_password_flag(core, flag, program)
         return [nil, :password_flag] if core == flag
 
-        value = redacted_password(core.byteslice(flag.bytesize, core.bytesize - flag.bytesize))
+        value = redacted_password(core.byteslice(flag.bytesize, core.bytesize - flag.bytesize), program)
         [value && "#{flag}#{value}", nil]
       end
 
@@ -185,6 +220,7 @@ module Woods
       def redact_header(core)
         name, separator, value = core.partition(':')
         return [nil, nil] if separator.empty? || value.start_with?('//') || !name.match?(NAME)
+        return authorization_header(name, value) if AUTHORIZATION_HEADERS.include?(name.downcase.tr('-', '_'))
 
         mode = arming(name)
         return [nil, nil] unless mode
@@ -193,6 +229,13 @@ module Woods
 
         redacted = redacted_value(value, mode)
         [redacted && "#{name}:#{redacted}", nil]
+      end
+
+      def authorization_header(name, value)
+        return [nil, :authorization] if value.empty?
+        return [nil, :credential] unless ConfigSourceGuard.opaque?(value)
+
+        ["#{name}:#{REDACTED}", nil]
       end
 
       def redact_flag(core)
@@ -207,6 +250,7 @@ module Woods
 
         dashes = core.start_with?('--') ? 2 : 1
         flag = core.byteslice(dashes, core.bytesize - dashes)
+        return [nil, nil] if core == STDIN_PASSWORD_FLAG
         return [nil, flag.match?(NAME) ? arming(flag) : nil] unless flag.include?('=')
 
         redacted = redact_assignment(flag)
@@ -241,9 +285,9 @@ module Woods
         "#{lead}#{REDACTED}#{trail}"
       end
 
-      def redacted_password(value)
+      def redacted_password(value, program)
         _, core, = split_quotes(value)
-        return nil if core.match?(PORT) || core.start_with?('-')
+        return nil if core.start_with?('-') || (PORT_PROGRAMS.include?(program) && core.match?(PORT))
 
         redacted_value(value, :credential)
       end
@@ -272,8 +316,9 @@ module Woods
       end
 
       private_class_method :redact_arguments, :next_argument, :redact_argument, :pending_redaction,
-                           :track_program, :quoted_text?, :redact_quoted, :redact_core, :redact_password_flag,
-                           :redact_query, :redact_header, :redact_flag, :redact_assignment, :assignment_name,
+                           :authorization_value, :track_program, :printed_password?, :redact_quoted, :redact_core,
+                           :redact_password_flag, :redact_query, :redact_header, :authorization_header,
+                           :redact_flag, :redact_assignment, :assignment_name,
                            :redacted_value, :redacted_password, :redacted_userinfo, :arming, :split_quotes
     end
   end

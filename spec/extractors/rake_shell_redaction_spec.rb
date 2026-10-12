@@ -108,6 +108,38 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
         .to eq(%(curl -d '{"api_token": "[REDACTED]"}' https://api.example.test))
     end
 
+    it 'redacts inside a quoted command nested in another quoted command' do
+      expect(redact(%(bash -c "curl -H 'Authorization: Bearer Wd8kq2Lm9xQ7zP3vB6nTr4Ky8' https://api.example.test")))
+        .to eq(%(bash -c "curl -H 'Authorization: Bearer [REDACTED]' https://api.example.test"))
+      expect(redact(%(ssh deploy@ledger.example.test "PGPASSWORD=hunter2 pg_dump widgets")))
+        .to eq(%(ssh deploy@ledger.example.test "PGPASSWORD=[REDACTED] pg_dump widgets"))
+    end
+
+    it 'applies the argument rules to a quoted argument that holds a quote but no space' do
+      expect(redact(%(curl -d "token=Wd8kq2Lm9x'x" https://api.example.test)))
+        .to eq(%(curl -d "token=[REDACTED]" https://api.example.test))
+    end
+
+    it 'redacts a numeric password where -p never means a port' do
+      expect(redact('mysql -p123456 widgets')).to eq('mysql -p[REDACTED] widgets')
+      expect(redact('sshpass -p 123456 ssh ledger.example.test')).to eq('sshpass -p [REDACTED] ssh ledger.example.test')
+    end
+
+    it 'redacts the credential after any Authorization scheme' do
+      expect(redact('curl -H "Authorization: token Wd8kq2Lm9xQ7zP3vB6nTr4Ky8" https://api.example.test'))
+        .to eq('curl -H "Authorization: token [REDACTED]" https://api.example.test')
+      expect(redact('curl -H "Authorization:Digest Wd8kq2Lm9xQ7zP3vB6nTr4Ky8" https://api.example.test'))
+        .to eq('curl -H "Authorization:Digest [REDACTED]" https://api.example.test')
+    end
+
+    it 'redacts what echo or printf pipes into --password-stdin' do
+      expect(redact('echo hunter2 | docker login -u deploy --password-stdin registry.example.test'))
+        .to eq('echo [REDACTED] | docker login -u deploy --password-stdin registry.example.test')
+      expect(redact('echo -n "two words" | docker login --password-stdin'))
+        .to eq('echo -n [REDACTED] | docker login --password-stdin')
+      expect(redact('echo done && bin/report')).to eq('echo done && bin/report')
+    end
+
     it 'leaves ordinary commands alone' do
       ['yarn run graph-codegen', "docker compose exec app \#{command}", 'git rev-parse HEAD',
        'bin/rails runner "Widget.where(password_reset: true).count"',
@@ -153,6 +185,12 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
       line = %('{"password":"Wd8kq2Lm9x"}' "a b" -phunter2 ) * 50_000
 
       expect(redact("mysql #{line}\"unterminated")).not_to include('Wd8kq2Lm9x', 'hunter2')
+    end
+
+    it 'reads quotes nested 50,000 deep' do
+      line = "#{'"\'' * 25_000}PGPASSWORD=hunter2#{'\'"' * 25_000}"
+
+      expect(redact(line)).to be_a(String)
     end
 
     it 'reads a token of 50,000 query parameters' do
