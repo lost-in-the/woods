@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../source_file'
 require_relative 'shared_utility_methods'
 
 module Woods
@@ -66,7 +67,7 @@ module Woods
       def parsed(path)
         return @files[path] if @files.key?(path)
 
-        source = File.read(path, encoding: Encoding::UTF_8)
+        source = SourceFile.read(path)
         result = Prism.parse(source)
         @files[path] = result.success? ? { source: source, lines: source.lines, tree: result.value } : nil
       end
