@@ -2,7 +2,6 @@
 
 require 'set'
 require_relative '../model_name_cache'
-require_relative 'line_neutralizer'
 require_relative 'comment_blanking'
 require_relative 'reference_patterns'
 require_relative 'form_action_scan'
@@ -74,35 +73,6 @@ module Woods
         end
 
         targets.map { |model_name| { type: :model, target: model_name, via: via } }
-      end
-
-      # Remove `#` line comments from Ruby source without touching `#`
-      # characters that sit inside single- or double-quoted string literals.
-      #
-      # A naive `gsub(/#.*/, '')` truncates lines like
-      # `redirect "/posts#comments"; Post.touch` at the in-string `#`,
-      # silently dropping the `Post` reference. {LineNeutralizer} walks each
-      # line tracking quote state so only a genuine (unquoted) `#` starts a
-      # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs,
-      # `%`-literals, and character literals whose char is a quote (`?'`,
-      # `?"`) are not modeled — these are rare in the constant-bearing code
-      # this scans, and mis-reading one only risks a spurious edge (a comment
-      # left unstripped) or a missed edge, never a crash or a dropped-but-real
-      # reference outside those constructs.
-      #
-      # @param source [String] Ruby source code
-      # @return [String] source with unquoted `#` comments removed
-      def strip_ruby_line_comments(source)
-        LineNeutralizer.strip_comments(source)
-      end
-
-      # Strip a trailing `#` comment from a single line, ignoring `#` inside
-      # string literals. Preserves the line's trailing newline.
-      #
-      # @param line [String]
-      # @return [String]
-      def strip_line_comment(line)
-        LineNeutralizer.strip_line_comment(line)
       end
 
       # Extract string-literal arguments passed to `.constantize` or

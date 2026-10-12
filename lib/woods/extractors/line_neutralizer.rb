@@ -12,10 +12,11 @@ module Woods
     # `module Api # rename at the end` looks self-terminated because the
     # comment ends in the word "end".
     #
-    # This module centralizes the walker that removes those false signals. The
-    # quote-aware comment stripper originated in
-    # {SharedDependencyScanner#strip_line_comment}; the string-blanking and
-    # heredoc-aware variants are the same walk with the literal bodies erased.
+    # This module centralizes the walker that removes those false signals:
+    # the quote-aware comment stripper, and the string-blanking and
+    # heredoc-aware variants, which are the same walk with the literal bodies
+    # erased. Dependency scans do not use it; they read source through
+    # {CommentBlanking}, which also covers `=begin` blocks.
     #
     # Known limitations (deliberate — this is a scanner, not a parser):
     # `%`-literals (`%w[]`, `%q{}`), regular-expression literals, and character
@@ -53,15 +54,6 @@ module Woods
       # @return [String]
       def neutralize_line(line)
         walk(line, blank_strings: true).first
-      end
-
-      # Remove `#` line comments from a whole source without touching `#`
-      # characters inside string literals.
-      #
-      # @param source [String] Ruby source code
-      # @return [String]
-      def strip_comments(source)
-        source.each_line.map { |line| strip_line_comment(line) }.join
       end
 
       # Neutralize a whole source line by line, additionally blanking heredoc
