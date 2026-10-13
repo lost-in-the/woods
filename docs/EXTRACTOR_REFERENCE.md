@@ -1031,7 +1031,7 @@ expanded mailer and schedule identities in an existing index.
 **Key details:**
 - Parses with Prism and never runs a rake file. `task`, `multitask`, `file`, `directory` and `rule` are read in every signature form: `task :a`, `task a: :b`, `task :a, [:x] => :b`, `task(:a) { }`, string names, nested namespaces.
 - `metadata.kind` is one of `task`, `multitask`, `file`, `directory`, `rule`, `task_class`, `enhancement`, `rake_support`.
-- A task reopened in more than one file is one unit, as Rake sees it: the source carries every file, `metadata.defined_in` lists the defining files, and a per-file run yields the same merged unit as a full run.
+- A task reopened in more than one file is one unit, as Rake sees it: the source carries every file, `metadata.defined_in` lists the defining files, and a per-file run yields the same merged unit as a full run. The dependency graph maps every defining and enhancing file to the unit (`source_paths`, `file_map`), so a change to any of them reaches it.
 - `Rake::Task["a"].enhance(["b"])` adds a `task_dependency` edge `a` → `b` and lists the file in `metadata.enhanced_in`. A task that is only enhanced (it comes from a gem) still gets a unit, with `kind: "enhancement"`.
 - `Rake::Task["x"].invoke` and `.execute` add a `task_invoke` edge.
 - A task class (`RSpec::Core::RakeTask.new(:docs)`, `RuboCop::RakeTask.new`) becomes a unit with `metadata.task_class`. A definition inside `if`/`unless` records the predicate in `metadata.conditions`. A class called without a name uses its well-known default (`spec`, `rubocop`, `test`, `yard`, `cucumber`, `rdoc`).

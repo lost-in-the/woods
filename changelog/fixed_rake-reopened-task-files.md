@@ -1,0 +1,1 @@
+- Fix a rake task reopened or enhanced in a second file, which left that file mapped to nothing in the dependency graph. Every file that defines or enhances a task now maps to its one unit, so the file counts as covered and a change to it reaches the task.

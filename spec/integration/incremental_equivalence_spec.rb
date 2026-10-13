@@ -1199,6 +1199,22 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    it 'keeps a task reopened in a second file mapped to both files when only the second changes' do
+      write_file('lib/tasks/widgets.rake', "task :backfill_widgets do\n  puts 'first'\nend\n")
+      reopened = 'lib/tasks/one_offs/widgets_again.rake'
+
+      index = run_sequence([
+                             -> { write_file(reopened, "task :backfill_widgets do\n  puts 'second'\nend\n") },
+                             -> { write_file(reopened, "task :backfill_widgets do\n  sh 'bin/widgets'\nend\n") }
+                           ])
+
+      file_map = read_json(index, 'dependency_graph.json').fetch('file_map')
+      expect(file_map.fetch(reopened)).to eq(['backfill_widgets'])
+      expect(file_map.fetch('lib/tasks/widgets.rake')).to eq(['backfill_widgets'])
+
+      run_sequence([-> { delete_file(reopened) }])
+    end
+
     it 'publishes identical bytes from two full extractions of the same rake tree' do
       write_file('rake/graph.rake', "task(:codegen) { exec_in_container 'yarn run graph-codegen' }\n")
       write_file('rake/lib/container.rb', container_helper(shells_out: true))
