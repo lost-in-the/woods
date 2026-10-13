@@ -183,6 +183,23 @@ RSpec.describe Woods::Extractors::CallerPrefixPartials do
     end
   end
 
+  context 'when the partial sits under a superclass prefix and a nested layout reaches the caller' do
+    before do
+      create_file('app/views/layouts/storefront.html.erb', "<%= render template: 'layouts/chrome' %>\n")
+      create_file('app/views/layouts/chrome.html.erb', "<%= render 'shared/navigation' %>\n<%= yield %>\n")
+      create_file('app/views/widgets/index.html.erb', '<p>index</p>')
+      create_file('app/views/signed_in/_account_head.html.erb', '<p>signed in</p>')
+      controller('StorefrontController', %w[storefront], layout: 'storefront')
+      controller('SignedInController', %w[signed_in storefront], parent: StorefrontController, layout: 'storefront')
+      controller('WidgetsController', %w[widgets signed_in storefront],
+                 parent: SignedInController, layout: 'storefront')
+    end
+
+    it "targets the partial under the first of the controller's prefixes that holds it" do
+      expect(render_targets('shared/_navigation.html.erb')).to eq(['signed_in/_account_head.html.erb'])
+    end
+  end
+
   context 'with a partial name that carries a directory' do
     before { create_file('app/views/widgets/index.html.erb', "<%= render 'shipments/missing' %>\n") }
 

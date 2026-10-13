@@ -275,6 +275,10 @@ module Woods
           end
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
+        engine.scan_templates(code).each do |template_name|
+          target = rendered_template(engine, template_name, identifier)
+          deps << { type: :view_template, target: target, via: :render } if target
+        end
 
         owner = view_owner(extract_view_namespace(file_path))
         deps << { type: owner[:type], target: owner[:name], via: :view_render } if owner
@@ -328,6 +332,22 @@ module Woods
           prefixes = owner_prefixes(own_dir)
           candidates = partial_under_prefixes(engine, partial_name, identifier, prefixes - [own_dir]) if prefixes
         end
+        preferred_partial(engine, identifier, candidates) if candidates.any?
+      end
+
+      # The file a `render template:` call names. A layout that renders
+      # another layout this way passes its callers on to it. Only a path
+      # with a directory is read: a bare name resolves through the
+      # request's prefixes at runtime. A path no file holds gets no edge.
+      #
+      # @param engine [ViewEngines::Base] Engine of the rendering template
+      # @param template_name [String] e.g. "layouts/chrome"
+      # @param identifier [String] Identifier of the rendering template
+      # @return [String, nil] Template identifier
+      def rendered_template(engine, template_name, identifier)
+        return unless template_name.include?('/') && !template_name.include?(INTERPOLATION_MARKER)
+
+        candidates = existing_partial_identifiers(template_name)
         preferred_partial(engine, identifier, candidates) if candidates.any?
       end
 

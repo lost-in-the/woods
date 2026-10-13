@@ -40,6 +40,21 @@ RSpec.describe Woods::Extractors::ViewEngines::Erb do
     end
   end
 
+  describe '#scan_templates' do
+    it 'extracts render template: "path"' do
+      expect(engine.scan_templates("<%= render template: 'layouts/chrome' %>")).to eq(['layouts/chrome'])
+    end
+
+    it 'extracts the parenthesized and hash-rocket forms' do
+      source = "<%= render(template: \"layouts/chrome\") %>\n<%= render :template => 'layouts/print' %>"
+      expect(engine.scan_templates(source)).to eq(%w[layouts/chrome layouts/print])
+    end
+
+    it 'ignores partial renders' do
+      expect(engine.scan_templates("<%= render partial: 'widgets/row' %>\n<%= render 'widgets/row' %>")).to eq([])
+    end
+  end
+
   describe '#scan_partials' do
     it 'extracts render partial: "path" form' do
       source = "<%= render partial: 'comments/comment' %>"

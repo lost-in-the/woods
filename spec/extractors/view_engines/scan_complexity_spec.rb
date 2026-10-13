@@ -34,12 +34,14 @@ RSpec.describe 'View engine scan complexity' do
     'ERB form_with then underscored words' => "<%= form_with #{'a_' * 25_000}",
     'ERB repeated form_with calls' => '<%= form_with ' * 10_000,
     'ERB render then spaces' => "<%= render#{spaces}",
-    'ERB repeated render calls' => '<%= render ' * 10_000
+    'ERB repeated render calls' => '<%= render ' * 10_000,
+    'render template: then spaces' => "= render template:#{spaces}",
+    'repeated render template: calls' => '= render(template: ' * 10_000
   }
 
   engines = [Woods::Extractors::ViewEngines::Erb.new, Woods::Extractors::ViewEngines::Haml.new,
              Woods::Extractors::ViewEngines::Jbuilder.new]
-  scans = %i[scan_partials scan_unresolved_partials scan_helpers scan_navigation_candidates]
+  scans = %i[scan_partials scan_templates scan_unresolved_partials scan_helpers scan_navigation_candidates]
 
   around do |example|
     if Regexp.respond_to?(:timeout=)
