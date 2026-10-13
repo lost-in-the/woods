@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../git_source_filter'
 
 require_relative '../source_inputs/consumer_errors'
@@ -149,10 +150,7 @@ module Woods
       end
 
       def build_route_file(relative, path, routes, source_locations)
-        source = File.read(path, encoding: Encoding::UTF_8)
-        raise Woods::ExtractionError, 'Source is not valid UTF-8' unless source.valid_encoding?
-
-        source = ConfigSourceGuard.redact(source)
+        source = ConfigSourceGuard.redact(SourceFile.read(path))
         declarations = route_declarations(source)
         draws = declarations.select { |entry| entry[:method] == 'draw' }.filter_map { |entry| entry[:argument] }.uniq
         unit = ExtractedUnit.new(type: :route_file, identifier: relative, file_path: path)

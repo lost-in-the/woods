@@ -605,6 +605,19 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       FileUtils.rm_rf(outside)
     end
 
+    it 'reads a route file with an invalid UTF-8 byte instead of failing the extractor' do
+      path = write_routes('config/routes.rb', '')
+      File.binwrite(path, "# caf\xE9 menu\nget '/widgets', to: 'widgets#index'\n")
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
+      extractor = described_class.new
+
+      file = route_files_of(extractor.extract_all).first
+
+      expect(file.metadata[:declarations]).to eq([{ line: 2, method: 'get', argument: '/widgets' }])
+      expect(file.source_code).to be_valid_encoding
+      expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
+    end
+
     it 'emits no route_file unit when the application has no route files' do
       stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
 
