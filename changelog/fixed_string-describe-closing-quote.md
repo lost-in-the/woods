@@ -1,0 +1,1 @@
+- A string `describe` or `feature` title is read to the quote that opened it. The subject stopped at the first quote of either kind, so `describe "Account's settings page"` became the subject `Account`, a constant path that minted a phantom `:test_coverage` edge. An apostrophe in a double-quoted title, or a double quote in a single-quoted one, now stays in the description.

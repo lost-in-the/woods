@@ -346,6 +346,27 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:description]).to eq('Widget checkout')
       end
 
+      it 'reads a string describe to the quote that opened it' do
+        double_quoted = create_file('spec/features/account_settings_spec.rb', <<~RUBY)
+          RSpec.describe "Account's settings page" do
+            it 'saves' do; end
+          end
+        RUBY
+        single_quoted = create_file('spec/features/quoted_title_spec.rb', <<~RUBY)
+          RSpec.feature 'The "Ledger" export' do
+            scenario 'downloads' do; end
+          end
+        RUBY
+
+        account = described_class.new.extract_test_file(double_quoted)
+        ledger = described_class.new.extract_test_file(single_quoted)
+
+        expect(account.metadata).to include(subject_class: nil, description: "Account's settings page")
+        expect(account.dependencies).to eq([])
+        expect(ledger.metadata).to include(subject_class: nil, description: 'The "Ledger" export')
+        expect(ledger.dependencies).to eq([])
+      end
+
       it 'keeps the feature block as the subject when an inner describe names a constant' do
         path = create_file('spec/features/widget_checkout_spec.rb', <<~RUBY)
           RSpec.feature 'Widget checkout' do

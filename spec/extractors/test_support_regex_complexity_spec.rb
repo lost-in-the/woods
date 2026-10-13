@@ -89,6 +89,17 @@ RSpec.describe 'test support and test mapping regex complexity' do
     end
   end
 
+  it 'reads a string describe subject in linear time' do
+    pattern = Woods::Extractors::TestMappingExtractor::RSPEC_STRING_DESCRIBE
+
+    within_budget do
+      expect(pattern.match?("describe \"#{"a'" * 50_000}")).to be(false)
+      expect(pattern.match?("describe '#{'a"' * 50_000}")).to be(false)
+      expect(pattern.match?("describe \"x\n" * 20_000)).to be(false)
+      expect(pattern.match?("describe#{' ' * 50_000}x")).to be(false)
+    end
+  end
+
   it 'scans navigation calls in linear time' do
     stub_route_set(
       [route_double(verb: 'GET', path: '/widgets/:id', controller: 'widgets', action: 'show', name: 'widget'),
