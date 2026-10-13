@@ -466,6 +466,35 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       end
     end
 
+    context 'with a translations heredoc' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~'RUBY'
+            class PageComponent < ViewComponent::Base
+              translations <<~YAML
+                en:
+                  intro: |
+                    # User guide
+                    Every User sees this.
+                  count: "#{Post.model_name.human} total"
+              YAML
+
+              def call
+                tag.p(t('.intro'))
+              end
+            end
+          RUBY
+        }
+      end
+
+      it 'reads a model only from the interpolation, never from the prose' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.dependencies.select { |dep| dep[:via] == :data_dependency }.map { |dep| dep[:target] })
+          .to eq(['Post'])
+      end
+    end
+
     it 'includes :via key on all dependencies' do
       extractor = described_class.new
       unit = extractor.extract_all.first

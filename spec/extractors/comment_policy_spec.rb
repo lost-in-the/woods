@@ -30,13 +30,61 @@ RSpec.describe 'Comment policy for dependency scans' do
       expect(blanked.lines.map(&:rstrip)).to eq(['', 'total = 1', '', '', '', 'done'])
     end
 
-    it 'keeps a # that sits in a string, a heredoc, or an interpolation' do
+    it 'keeps a # that sits in a string or an interpolation' do
       source = <<~'RUBY'
         label = "Tag #ruby #{Widget.count}"
+      RUBY
+
+      expect(described_class.ruby(source)).to eq(source)
+    end
+
+    it 'blanks the text of a heredoc body and keeps its interpolation' do
+      source = <<~'RUBY'
         body = <<~TEXT
-          # not a comment: WidgetService.call
+          # WidgetService guide
+          Count: #{Widget.count}
         TEXT
       RUBY
+
+      blanked = described_class.ruby(source)
+
+      expect(blanked.bytesize).to eq(source.bytesize)
+      expect(blanked.lines.map(&:strip)).to eq(['body = <<~TEXT', '', "\#{Widget.count}", 'TEXT'])
+    end
+
+    it 'blanks the body of a heredoc that cannot interpolate' do
+      source = "sql = <<~'SQL'\n  SELECT * FROM widgets -- Widget \#{x}\nSQL\nrun(sql)\n"
+
+      expect(described_class.ruby(source).lines.map(&:strip)).to eq(["sql = <<~'SQL'", '', 'SQL', 'run(sql)'])
+    end
+
+    it 'blanks multibyte heredoc prose by byte' do
+      source = "notes = <<~MD\n  Café Widget notes\nMD\nWidget.count\n"
+
+      blanked = described_class.ruby(source)
+
+      expect(blanked.bytesize).to eq(source.bytesize)
+      expect(blanked).to be_valid_encoding
+      expect(blanked.lines.map(&:strip)).to eq(['notes = <<~MD', '', 'MD', 'Widget.count'])
+    end
+
+    it 'blanks every heredoc that opens on one line' do
+      source = "pair(<<~ONE, <<~TWO)\n  Widget\nONE\n  Ledger\nTWO\n"
+
+      expect(described_class.ruby(source).lines.map(&:strip)).to eq(['pair(<<~ONE, <<~TWO)', '', 'ONE', '', 'TWO'])
+    end
+
+    it 'blanks a heredoc under deep nesting without exhausting the stack' do
+      depth = 20_000
+      source = "#{'[' * depth}<<~TEXT#{']' * depth}\n  Widget\nTEXT\n"
+
+      blanked = described_class.ruby(source)
+
+      expect(blanked.lines.last(2).map(&:strip)).to eq(['', 'TEXT'])
+    end
+
+    it 'keeps a quoted string that is not a heredoc' do
+      source = "\"Ledger::Entry\".constantize\nlog('Widget << Ledger')\n"
 
       expect(described_class.ruby(source)).to eq(source)
     end

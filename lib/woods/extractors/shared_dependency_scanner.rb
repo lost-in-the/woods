@@ -51,10 +51,11 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_model_dependencies(source, via: :code_reference)
-        # Comments are blanked before every pass, so a model named only in
-        # a YARD docstring, a TODO, or a `=begin` block produces no edge.
-        # A `#` in a string, a heredoc, or an interpolation is not a comment:
-        # `link_to "Tag #ruby", Article.recent` keeps its `Article` reference.
+        # Comments and heredoc text are blanked before every pass, so a model
+        # named only in a YARD docstring, a TODO, a `=begin` block, or the
+        # prose of a heredoc produces no edge. A `#` in a quoted string or
+        # an interpolation is code: `link_to "Tag #ruby", Article.recent`
+        # keeps its `Article` reference.
         scannable = CommentBlanking.ruby(source)
 
         targets = Set.new
