@@ -190,7 +190,9 @@ module Woods
 
       # {ROUTE_HELPER_PATTERN}, except a keyword label (`base_url: host`):
       # a label names an argument, not a helper. `posts_path::X` is no label.
-      ROUTE_HELPER_CALL = /\b(\w+)_(path|url)\b(?!:(?!:))/
+      # A shorthand keyword with no value (`t('.x', posts_path:)`, ended by
+      # `,`, `)`, or `}`) passes the helper's result, so it is a call.
+      ROUTE_HELPER_CALL = /\b(\w+)_(path|url)\b(?!:(?!:|\s*+[,)}]))/
 
       # A method the source defines under a helper-shaped name
       # (`def tracking_url`). Its calls are calls to that method.

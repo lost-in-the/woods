@@ -452,6 +452,24 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result).to be_empty
     end
 
+    it 'reads a shorthand keyword argument as a call to the route helper it names' do
+      source = <<~RUBY
+        t('.message', count:, posts_path:)
+        t('.notice', users_url:, count: 1)
+      RUBY
+      result = nav_scanner.scan_navigation_dependencies(source)
+      expect(result.map { |dep| dep[:target] }).to eq(%w[PostsController UsersController])
+    end
+
+    it 'reads a shorthand keyword that ends a multi-line argument list or a hash' do
+      expect(nav_scanner.scan_navigation_dependencies("t('.message',\n  posts_path:\n)")).not_to be_empty
+      expect(nav_scanner.scan_navigation_dependencies('{ users_url: }')).not_to be_empty
+    end
+
+    it 'keeps a keyword with a value on the next line a label' do
+      expect(nav_scanner.scan_navigation_dependencies("build(posts_path:\n  root)")).to be_empty
+    end
+
     it 'keeps a helper compared with a scope-resolved constant' do
       result = nav_scanner.scan_navigation_dependencies('posts_path::SEGMENT')
       expect(result).to include(a_hash_including(target: 'PostsController'))
