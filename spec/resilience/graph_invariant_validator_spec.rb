@@ -246,4 +246,44 @@ RSpec.describe Woods::Resilience::GraphInvariantValidator do
 
     expect(described_class.new(graph: empty, index_entries: []).validate).to eq([])
   end
+
+  describe 'a graph published from rake tasks spread over several files' do
+    let(:published) do
+      allow(Woods::DependencyGraph).to receive(:graph_root).and_return('/app')
+      dependency_graph = Woods::DependencyGraph.new
+      {
+        'backfill_widgets' => { defined_in: %w[lib/tasks/widgets.rake lib/tasks/one_offs/widgets_again.rake] },
+        'widgets:sync' => { enhanced_in: %w[rake/widgets_hooks.rake] }
+      }.each do |identifier, metadata|
+        unit = Woods::ExtractedUnit.new(type: :rake_task, identifier: identifier,
+                                        file_path: '/app/lib/tasks/widgets.rake')
+        unit.metadata = metadata
+        dependency_graph.register(unit)
+      end
+      JSON.parse(JSON.generate(dependency_graph.to_h))
+    end
+    let(:index) do
+      published['nodes'].map { |identifier, node| { 'identifier' => identifier, 'type' => node['type'] } }
+    end
+
+    it 'accepts every file the graph maps to a reopened task and to an enhanced task' do
+      expect(published['file_map']).to include('lib/tasks/one_offs/widgets_again.rake' => ['backfill_widgets'],
+                                               'rake/widgets_hooks.rake' => ['widgets:sync'])
+      expect(described_class.new(graph: published, index_entries: index).validate).to eq([])
+    end
+
+    it 'reports a source file the file map lost' do
+      published['file_map'].delete('rake/widgets_hooks.rake')
+
+      expect(described_class.new(graph: published, index_entries: index).validate)
+        .to eq(['dependency_graph.json file_map["rake/widgets_hooks.rake"]: missing "widgets:sync"'])
+    end
+
+    it 'reports source_paths that are not a list of paths' do
+      published['nodes']['widgets:sync']['source_paths'] = 'rake/widgets_hooks.rake'
+
+      expect(described_class.new(graph: published, index_entries: index).validate)
+        .to include('dependency_graph.json nodes["widgets:sync"]: source_paths must be an array of paths')
+    end
+  end
 end

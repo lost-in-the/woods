@@ -1211,6 +1211,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       file_map = read_json(index, 'dependency_graph.json').fetch('file_map')
       expect(file_map.fetch(reopened)).to eq(['backfill_widgets'])
       expect(file_map.fetch('lib/tasks/widgets.rake')).to eq(['backfill_widgets'])
+      require 'woods/resilience/index_validator'
+      [index, full_extraction].each do |directory|
+        expect(Woods::Resilience::IndexValidator.new(index_dir: directory).validate.errors).to be_empty
+      end
 
       run_sequence([-> { delete_file(reopened) }])
     end

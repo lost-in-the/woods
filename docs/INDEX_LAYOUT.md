@@ -128,7 +128,10 @@ and [semantic error recovery](TROUBLESHOOTING.md#semantic-graph-validation-error
 ### File profiles and file membership
 
 `file_map[path]` lists units associated with a source file, including whole-file
-profiles. It does not promise that every identifier names a Ruby constant. New
+profiles. It does not promise that every identifier names a Ruby constant. A
+node with `source_paths` (a library unit assembled from several files, or a rake
+task defined or enhanced in several files) is mapped from every listed path
+instead of its `file_path`, and validation expects exactly those paths. New
 writers mark graph nodes of types `caching`, `configuration`, `test_mapping`,
 `rails_source`, and `gem_source` with `"kind": "file_profile"`. The same field
 appears on non-primary typed variants.

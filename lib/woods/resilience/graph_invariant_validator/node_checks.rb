@@ -47,13 +47,23 @@ module Woods
 
           @typed_nodes[key] = node
           @expected_types[type].add(identifier)
-          path = node['file_path']
-          if path.is_a?(String)
-            @expected_files[path].add(identifier)
-          elsif !path.nil?
-            error(label, 'file_path must be a string or null')
-          end
+          node_paths(node, label).each { |path| @expected_files[path].add(identifier) }
           type
+        end
+
+        # The files the graph maps to a node, as {DependencyGraph} registers
+        # them: every `source_paths` entry of a unit assembled from several
+        # files, otherwise its `file_path`.
+        def node_paths(node, label)
+          path = node['file_path']
+          error(label, 'file_path must be a string or null') unless path.nil? || path.is_a?(String)
+          return Array(path).grep(String) unless node.key?('source_paths')
+
+          paths = node['source_paths']
+          return paths if paths.is_a?(Array) && paths.all? { |entry| name?(entry) }
+
+          error(label, 'source_paths must be an array of paths')
+          []
         end
       end
     end
