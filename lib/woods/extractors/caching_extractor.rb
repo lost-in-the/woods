@@ -44,13 +44,18 @@ module Woods
         *TemplateExtensions::SCANNED.map { |ext| [:view, "app/views/**/*#{ext}"] }
       ].freeze
 
+      # What follows a `Rails.cache` method name in a call: a parenthesis or
+      # a bracketed key, or, without parentheses, a first argument on the
+      # same line (`Rails.cache.fetch "k" do`).
+      STORE_CALL_ARGUMENTS = /(?:\s*+[(\[]|[ \t]++(?=[\w"':@\[]))/
+
       # Patterns that indicate cache usage, grouped by type
       CACHE_PATTERNS = {
-        fetch: /Rails\.cache\.fetch\s*[(\[]/,
-        read: /Rails\.cache\.read\s*[(\[]/,
-        write: /Rails\.cache\.write\s*[(\[]/,
-        delete: /Rails\.cache\.delete\s*[(\[]/,
-        exist: /Rails\.cache\.exist\?\s*[(\[]/,
+        fetch: /Rails\.cache\.fetch#{STORE_CALL_ARGUMENTS}/,
+        read: /Rails\.cache\.read#{STORE_CALL_ARGUMENTS}/,
+        write: /Rails\.cache\.write#{STORE_CALL_ARGUMENTS}/,
+        delete: /Rails\.cache\.delete#{STORE_CALL_ARGUMENTS}/,
+        exist: /Rails\.cache\.exist\?#{STORE_CALL_ARGUMENTS}/,
         caches_action: /\bcaches_action\b/,
         # The scan for `do` reads tokens: a backslash pair, a quoted string,
         # or one other character, stopping at a `cache` token outside a

@@ -609,6 +609,29 @@ RSpec.describe Woods::Extractors::CachingExtractor do
                              options: { expires_in: '1.hour' } }])
     end
 
+    it 'reads a store call written without parentheses' do
+      calls = calls_for('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def balance
+            Rails.cache.fetch "ledger/balance", expires_in: 1.hour do
+              compute
+            end
+          end
+
+          def stale? = Rails.cache.exist? :ledger_stale
+
+          def forget = Rails.cache.delete [id, "totals"]
+        end
+      RUBY
+
+      expect(calls).to eq([
+                            { type: :fetch, key_pattern: '"ledger/balance"', ttl: '1.hour',
+                              options: { expires_in: '1.hour' } },
+                            { type: :delete, key_pattern: '[id, "totals"]', ttl: nil, options: {} },
+                            { type: :exist, key_pattern: ':ledger_stale', ttl: nil, options: {} }
+                          ])
+    end
+
     it 'keeps a key whose string mentions cache as one fragment call' do
       erb = calls_for('app/views/widgets/show.html.erb', <<~ERB)
         <% cache [@widget, "cache me now"] do %>
@@ -1024,6 +1047,8 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       'near-miss do' => 'cache dox ' * repeats,
       'json.cache without a bang' => 'json.cache ' * repeats,
       'Rails.cache.fetch then blanks' => "Rails.cache.fetch#{' ' * repeats}x",
+      'Rails.cache.read then mixed blanks' => "Rails.cache.read#{" \t" * repeats}=",
+      'Rails.cache.write calls with no argument' => 'Rails.cache.write ' * repeats,
       'cache_key-prefixed words' => 'cache_keyx ' * repeats,
       'cache inside an open string' => 'cache "cache ' * repeats,
       'cache inside closed strings' => 'cache "cache " ' * repeats,
