@@ -55,6 +55,31 @@ RSpec.describe Woods::Extractors::GeneratedJobSite do
     expect(resolver.call(GjsWidget::SyncWorker).line).to eq(4)
   end
 
+  it 'matches a plural argument the generator classifies into a singular worker name' do
+    load write('lib/gjs_async.rb', <<~RUBY)
+      module GjsAsync
+        def async_method(name)
+          klass = Class.new do
+            def perform(id); end
+          end
+          const_set("\#{name.to_s.classify}Worker", klass)
+        end
+      end
+    RUBY
+    model = write('app/models/gjs_widget.rb', <<~RUBY)
+      class GjsWidget
+        extend GjsAsync
+        async_method :send_new_emails
+      end
+    RUBY
+    load model
+
+    site = resolver.call(GjsWidget::SendNewEmailWorker)
+
+    expect(site.to_h).to eq(file_path: model, line: 3, source: "  async_method :send_new_emails\n",
+                            generated_by: 'async_method')
+  end
+
   it 'keeps the lines of a multi-line call up to its arguments, without a block body' do
     load_generator
     model = write('app/models/gjs_ledger.rb', <<~RUBY)

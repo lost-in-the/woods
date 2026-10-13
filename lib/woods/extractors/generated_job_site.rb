@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require 'active_support/core_ext/string/inflections'
 require_relative '../source_file'
 require_relative 'shared_utility_methods'
 
@@ -119,7 +120,8 @@ module Woods
         matches = calls_in(tree).filter_map do |node|
           next unless node.name.to_s == generator && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
 
-          length = literal_arguments(node).filter_map { |text| prefix_length(basename, text) }.max
+          length = literal_arguments(node).flat_map { |text| spellings(text) }
+                                          .filter_map { |text| prefix_length(basename, text) }.max
           [node, length] if length
         end
         matches.min_by { |node, length| [-length, node.location.start_line] }&.first
@@ -129,6 +131,12 @@ module Woods
         Array(node.arguments&.arguments).filter_map do |argument|
           argument.unescaped if argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
         end
+      end
+
+      # The argument as written, and as a generator that classifies it would
+      # spell it: `:send_new_emails` names `SendNewEmailWorker`.
+      def spellings(text)
+        [text, text.to_s.classify].uniq
       end
 
       # @return [Integer, nil] how much of +basename+ the argument spells,
