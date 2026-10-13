@@ -171,6 +171,14 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(analysis(%(host! "example.test"\nvisit "/settings"\n)).exercised).to eq(['GET /:slug'])
     end
 
+    it 'reads an IP host, with or without a port, as a host without a subdomain' do
+      ['127.0.0.1:3000', '10.0.0.12'].each do |ip|
+        expect(Woods::Extractors::TestRequestHost.subdomain(%(host! "#{ip}"))).to eq(''), ip
+        expect(analysis(%(host! "#{ip}"\nvisit "/status"\n)).exercised).to eq(['GET /:slug']), ip
+      end
+      expect(Woods::Extractors::TestRequestHost.subdomain(%(host! "shop.example.test:3000"))).to eq('shop')
+    end
+
     it 'exercises the route each named host decides when the file names several' do
       several = analysis(%(host! "shop.example.test"\nhost! "app.example.test"\nvisit "/pricing"\n))
 

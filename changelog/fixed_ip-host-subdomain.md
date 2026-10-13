@@ -1,0 +1,1 @@
+- A test that sets an IP request host (`host! "127.0.0.1:3000"`) is read as a host without a subdomain, as Rails reads it. The host was split on its dots like a domain name, giving the subdomain `127.0`, which satisfied a wildcard subdomain constraint and could link the test to a subdomain-only route.

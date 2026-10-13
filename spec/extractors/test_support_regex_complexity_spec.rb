@@ -135,6 +135,9 @@ RSpec.describe 'test support and test mapping regex complexity' do
       expect(host.subdomain('with_subdomain ' * 20_000)).to be_nil
       expect(host.subdomain("host! \"#{'a.' * 20_000}example.test\"")).to eq("#{'a.' * 19_999}a")
       expect(host.subdomain("with_subdomain 'shop'\n" * 10_000)).to eq('shop')
+      expect(host::IP_HOST.match?("#{'1' * 50_000}.")).to be(false)
+      expect(host::IP_HOST.match?("1.2.3.4:#{'5' * 50_000}x")).to be(false)
+      expect(host.subdomain("host! \"#{'1.' * 20_000}1\"")).to eq("#{'1.' * 19_998}1")
     end
   end
 
