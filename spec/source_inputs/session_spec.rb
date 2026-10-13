@@ -156,11 +156,38 @@ RSpec.describe Woods::SourceInputs::Session do
       expect(snapshot.fetch('files')).to have_key('lib/ledger_client.rb')
     end
 
-    it 'still refuses source references when the capture stalls past its ceiling' do
+    it 'still refuses source references when the capture stalls past its ceiling, naming the cap that fired' do
       run = slow_capture(5.0)
       expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => 'scan_time_budget')
-      expect { reference_pass(run) }
-        .to raise_error(Woods::ExtractionError, 'Source-reference input was not captured: lib/ledger_client.rb')
+      message = 'Source-reference input was not captured: lib/ledger_client.rb. ' \
+                'The source capture was incomplete: scan_time_budget (120.0-second cap)'
+      expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, /\A#{Regexp.escape(message)}/)
+    end
+
+    {
+      'scan_file_budget' => [{ max_files: 5 }, /scan_file_budget \(5-file cap\)/],
+      'scan_byte_budget' => [{ max_bytes: 100 }, /scan_byte_budget \(100-byte cap\)/]
+    }.each do |reason, (limits, message)|
+      it "names #{reason} and its cap when the capture stops on it" do
+        stub_const('Woods::SourceInputs::Scanner::DEFAULT_LIMITS',
+                   Woods::SourceInputs::Scanner::DEFAULT_LIMITS.merge(limits))
+        run = slow_capture(0.0)
+        expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => reason)
+        expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, message)
+      end
+    end
+
+    it 'names the capture error recorded for an uncaptured path when no cap fired' do
+      write('lib/ledger_client.rb', 'module LedgerClient; end')
+      capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+      capture['files'].delete('lib/ledger_client.rb')
+      capture['scope_paths'].each_value { |paths| paths.delete('lib/ledger_client.rb') }
+      capture.merge!('complete' => false,
+                     'errors' => [{ 'reason' => 'source_changed_during_read', 'path' => 'lib/ledger_client.rb' }])
+      allow(Woods::SourceInputs::Handoff).to receive(:read).and_return(capture)
+      run = described_class.new(root: @root, output_dir: @output, baseline_path: @baseline, operation: 'full')
+      message = 'The source capture was incomplete: source_changed_during_read (lib/ledger_client.rb)'
+      expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, /#{Regexp.escape(message)}/)
     end
   end
 
