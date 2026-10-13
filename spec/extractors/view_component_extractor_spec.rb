@@ -495,6 +495,32 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       end
     end
 
+    context 'with a class_eval heredoc' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~SOURCE
+            class PageComponent < ViewComponent::Base
+              translations <<~YAML
+                en:
+                  intro: "Every Post author sees this."
+              YAML
+
+              class_eval <<~RUBY, __FILE__, __LINE__ + 1
+                def owner = User.first
+              RUBY
+            end
+          SOURCE
+        }
+      end
+
+      it 'reads a model named only inside the evaluated body' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.dependencies.select { |dep| dep[:via] == :data_dependency }.map { |dep| dep[:target] })
+          .to eq(['User'])
+      end
+    end
+
     it 'includes :via key on all dependencies' do
       extractor = described_class.new
       unit = extractor.extract_all.first

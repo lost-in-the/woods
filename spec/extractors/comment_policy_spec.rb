@@ -83,6 +83,34 @@ RSpec.describe 'Comment policy for dependency scans' do
       expect(blanked.lines.last(2).map(&:strip)).to eq(['', 'TEXT'])
     end
 
+    it 'keeps a heredoc body tagged as Ruby' do
+      source = "define(<<~RUBY)\n  Widget.count\nRUBY\nsnippet = <<-'RB'\n  Ledger.first\nRB\n"
+
+      expect(described_class.ruby(source)).to eq(source)
+    end
+
+    it 'keeps a heredoc body passed to an eval method' do
+      source = <<~SOURCE
+        class_eval <<~CODE, __FILE__, __LINE__ + 1
+          def widget = Widget.first
+        CODE
+        Ledger.instance_eval(<<~SRC)
+          Entry.count
+        SRC
+        eval <<~TEXT
+          Shipment.count
+        TEXT
+      SOURCE
+
+      expect(described_class.ruby(source)).to eq(source)
+    end
+
+    it 'still blanks a prose heredoc passed to a method that does not evaluate it' do
+      source = "describe(<<~DOC)\n  Widget notes\nDOC\n"
+
+      expect(described_class.ruby(source).lines.map(&:strip)).to eq(['describe(<<~DOC)', '', 'DOC'])
+    end
+
     it 'keeps a quoted string that is not a heredoc' do
       source = "\"Ledger::Entry\".constantize\nlog('Widget << Ledger')\n"
 
