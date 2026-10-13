@@ -23,6 +23,9 @@ module Woods
       # are unchanged) and never exceeds this ceiling: at the file and byte
       # caps the scaling alone would wait ten minutes on a stuck scan.
       RECHECK_SECONDS_MAX = 120.0
+      # Each budget stop the capture can record, with the limit and unit of the cap behind it.
+      CAPTURE_CAPS = { 'scan_time_budget' => [:max_seconds, 'second'], 'scan_file_budget' => [:max_files, 'file'],
+                       'scan_byte_budget' => [:max_bytes, 'byte'] }.freeze
 
       def initialize(root:, output_dir:, baseline_path:, operation:)
         @root = SourcePathEncoding.expand(root)
@@ -36,7 +39,7 @@ module Woods
         @key = PrivateKey.new(output_dir: @output, create: true)
         handoff = Handoff.read(root: @root, output_dir: @output, operation: @operation, rules: @rules.fingerprint,
                                key_id: @key.identifier)
-        @snapshot = handoff || scan
+        @snapshot = handoff || scan(max_seconds: Scanner::CAPTURE_SECONDS)
         @verified_boot = !handoff.nil?
         @identities = initial_identities
       rescue PrivateKey::Unavailable => e
@@ -64,6 +67,24 @@ module Woods
       # @return [String, nil] captured private HMAC, never a public raw content hash
       def source_identity(path)
         @snapshot.fetch('files')[relative_path(path)]&.dup&.freeze
+      end
+
+      # Why an incomplete capture holds no identity for a path a reader requires.
+      #
+      # @param path [String] root-relative or absolute application source path
+      # @return [String, nil] the budget cap that stopped the capture, else its
+      #   recorded errors (this path's first); nil when the capture completed
+      def capture_gap(path)
+        return nil if @snapshot['complete']
+
+        errors = @snapshot.fetch('errors')
+        budget = errors.find { |error| CAPTURE_CAPS.key?(error['reason']) }
+        return capture_cap(budget['reason']) if budget
+
+        described = path_errors_first(errors, path).first(3).map do |error|
+          error['path'] ? "#{error['reason']} (#{error['path']})" : error['reason']
+        end
+        described.empty? ? nil : described.join('; ')
       end
 
       # A fresh read cannot establish which bytes produced retained runtime facts.
@@ -158,6 +179,19 @@ module Woods
         # hide a later instability reason or its watcher catch-up paths.
         count = @errors.count { |existing| existing['reason'] == error['reason'] }
         @errors << error if count < MAX_ERRORS && !@errors.include?(error)
+      end
+
+      # Both capture sites scan with these limits.
+      def capture_cap(reason)
+        key, unit = CAPTURE_CAPS.fetch(reason)
+        limit = Scanner::DEFAULT_LIMITS.merge(max_seconds: Scanner::CAPTURE_SECONDS).fetch(key)
+        "#{reason} (#{limit}-#{unit} cap)"
+      end
+
+      def path_errors_first(errors, path)
+        relative = relative_path(path)
+        own = errors.select { |error| error['path'] && error['path'] == relative }
+        own.empty? ? errors : own
       end
 
       def unavailable_evidence

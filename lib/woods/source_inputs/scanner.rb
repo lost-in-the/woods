@@ -11,6 +11,11 @@ module Woods
     # against claiming complete source coverage. No Rails application is booted.
     class Scanner # rubocop:disable Metrics/ClassLength -- one bounded traversal owns its counters and read checks
       DEFAULT_LIMITS = { max_files: 50_000, max_bytes: 128 * 1024 * 1024, max_seconds: 10.0 }.freeze
+      # The capture is the only record of what extraction consumed: a file it
+      # misses aborts the run. Machine load must not cut it short, so its
+      # clock only catches a stalled filesystem. The file and byte caps
+      # still bound the work itself.
+      CAPTURE_SECONDS = 120.0
       class BudgetExceeded < StandardError; end
 
       attr_reader :root, :scopes

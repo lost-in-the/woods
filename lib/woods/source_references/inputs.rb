@@ -81,10 +81,19 @@ module Woods
         identity = @session.source_identity(path)
         absolute = File.join(@root, path)
         if identity.nil? && (File.exist?(absolute) || File.symlink?(absolute))
-          raise Woods::ExtractionError, "Source-reference input was not captured: #{path}"
+          raise Woods::ExtractionError, uncaptured_message(path)
         end
 
         identity
+      end
+
+      def uncaptured_message(path)
+        message = "Source-reference input was not captured: #{path}"
+        gap = @session.capture_gap(path) if @session.respond_to?(:capture_gap)
+        return message unless gap
+
+        "#{message}. The source capture was incomplete: #{gap}. Retry the complete extraction; " \
+          'the previous published generation remains active.'
       end
 
       def analysis(path, identity)
