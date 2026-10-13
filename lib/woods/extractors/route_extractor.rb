@@ -299,11 +299,19 @@ module Woods
         verb.present? ? route_verb(route) : 'ANY'
       end
 
+      # An anonymous class has no name, and its `#<Class:0x...>` form
+      # changes every boot, so it is named after its nearest named superclass.
+      #
       # @return [String] the class name of the endpoint, or of the mounted
       #   class itself
       def endpoint_name(app)
-        name = app.is_a?(Module) ? app.name : app.class.name
-        name || app.class.to_s
+        klass = app.is_a?(Module) ? app : app.class
+        return klass.name if klass.name
+        return 'anonymous module' unless klass.is_a?(Class)
+
+        superclass = klass.superclass
+        superclass = superclass.superclass until superclass.name
+        "anonymous subclass of #{superclass.name}"
       end
 
       # Same test EngineExtractor uses to recognise an engine.

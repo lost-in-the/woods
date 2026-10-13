@@ -374,6 +374,28 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(unit.dependencies).to eq([])
     end
 
+    it 'names an anonymous endpoint class the same on every boot, after its nearest named superclass' do
+      boots = Array.new(2) { [Class.new { def call(_env) = [200, {}, []] }, Class.new(ApiFallback)] }
+
+      apps = boots.map do |plain, fallback|
+        extract(endpoint_route(app: plain.new, path: '/ping'),
+                endpoint_route(app: fallback.new, path: '/v1/*rest'),
+                endpoint_route(app: plain, path: '/probe', anchored: false, format: false))
+          .to_h { |unit| [unit.identifier, unit.metadata[:app]] }
+      end
+
+      expect(apps.uniq).to eq([{ 'ANY /ping (rack_endpoint)' => 'anonymous subclass of Object',
+                                 'ANY /v1/*rest (rack_endpoint)' => 'anonymous subclass of ApiFallback',
+                                 'ANY /probe (mount)' => 'anonymous subclass of Object' }])
+    end
+
+    it 'names a mounted anonymous module without its per-boot address' do
+      rack_module = Module.new { def self.call(_env) = [200, {}, []] }
+      unit = extract(endpoint_route(app: rack_module, path: '/health', anchored: false, format: false)).first
+
+      expect(unit.metadata).to include(kind: 'mount', app: 'anonymous module')
+    end
+
     it 'qualifies a constrained root redirect by its constraint before the kind' do
       redirect = ActionDispatch::Routing::PathRedirect.new(301, 'https://www.example.test/')
       unit = extract(endpoint_route(app: redirect, path: '/', verb: 'GET', format: false,
