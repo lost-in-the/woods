@@ -43,7 +43,8 @@ module Woods
         operation, task = task_for_arguments
         key = PrivateKey.new(output_dir: @output, create: true)
         rules = Scopes.new(extra_roots: @extra_roots)
-        snapshot = Scanner.new(root: @root, output_dir: @output, key: key, scopes: rules).call
+        snapshot = Scanner.new(root: @root, output_dir: @output, key: key, scopes: rules,
+                               max_seconds: Scanner::CAPTURE_SECONDS).call
         nonce = SecureRandom.hex(32)
         bytes = capture_bytes(snapshot, nonce, operation, rules)
         return run_without_capture(task) unless bytes

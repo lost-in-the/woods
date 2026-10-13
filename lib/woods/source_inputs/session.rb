@@ -36,7 +36,7 @@ module Woods
         @key = PrivateKey.new(output_dir: @output, create: true)
         handoff = Handoff.read(root: @root, output_dir: @output, operation: @operation, rules: @rules.fingerprint,
                                key_id: @key.identifier)
-        @snapshot = handoff || scan
+        @snapshot = handoff || scan(max_seconds: Scanner::CAPTURE_SECONDS)
         @verified_boot = !handoff.nil?
         @identities = initial_identities
       rescue PrivateKey::Unavailable => e
