@@ -116,45 +116,51 @@ RSpec.describe Woods::SourceInputs::Session do
       expect(recheck_seconds(visited_files: 50_000, bytes: 128 * 1024 * 1024)).to eq(120.0)
     end
 
-    describe 'the initial capture' do
-      # The walk hashes app/ before lib/, so a capture cut short by its clock
-      # loses the lib/ file a reference contributor reads last.
-      def slow_capture(seconds_per_file)
-        40.times { |i| write("app/models/model_#{i}.rb", "class Model#{i}; end") }
-        write('lib/ledger_client.rb', 'module LedgerClient; end')
-        slow_recheck(seconds_per_file)
-        session(verified: false)
-      end
-
-      def reference_pass(run)
-        units = [{ 'type' => 'lib', 'identifier' => 'LedgerClient', 'file_path' => 'lib/ledger_client.rb',
-                   'dependencies' => [] }]
-        Woods::SourceReferences::Pass.new(root: @root, session: run, units: units,
-                                          extractor_keys: { lib: :libs }, full: true).call
-      end
-
-      it 'captures every input of an unchanged tree that load slows past the quick-reader budget' do
-        run = slow_capture(0.5)
-        expect { reference_pass(run) }.not_to raise_error
-        snapshot = run.instance_variable_get(:@snapshot)
-        expect(snapshot).to include('complete' => true, 'errors' => [])
-        expect(snapshot.fetch('files')).to have_key('lib/ledger_client.rb')
-      end
-
-      it 'still refuses source references when the capture stalls past its ceiling' do
-        run = slow_capture(5.0)
-        expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => 'scan_time_budget')
-        expect { reference_pass(run) }
-          .to raise_error(Woods::ExtractionError, 'Source-reference input was not captured: lib/ledger_client.rb')
-      end
-    end
-
     it 'keeps the reader budget wall-clock' do
       1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
       manifest = finish(session)
       slow_recheck(0.02)
       expect(verify(manifest)['state']).to eq('unknown')
       expect(verify(manifest)['reasons']).to include('scan_time_budget')
+    end
+  end
+
+  describe 'the initial capture under machine load' do
+    # The walk hashes app/ before lib/, so a capture cut short by its clock
+    # loses the lib/ file a reference contributor reads last.
+    def slow_capture_clock(seconds_per_file)
+      allow_any_instance_of(Woods::SourceInputs::Scanner).to receive(:monotonic) do |scanner|
+        1_000.0 + (scanner.instance_variable_get(:@visited).to_i * seconds_per_file)
+      end
+    end
+
+    def slow_capture(seconds_per_file)
+      40.times { |i| write("app/models/model_#{i}.rb", "class Model#{i}; end") }
+      write('lib/ledger_client.rb', 'module LedgerClient; end')
+      slow_capture_clock(seconds_per_file)
+      session(verified: false)
+    end
+
+    def reference_pass(run)
+      units = [{ 'type' => 'lib', 'identifier' => 'LedgerClient', 'file_path' => 'lib/ledger_client.rb',
+                 'dependencies' => [] }]
+      Woods::SourceReferences::Pass.new(root: @root, session: run, units: units,
+                                        extractor_keys: { lib: :libs }, full: true).call
+    end
+
+    it 'captures every input of an unchanged tree that load slows past the quick-reader budget' do
+      run = slow_capture(0.5)
+      expect { reference_pass(run) }.not_to raise_error
+      snapshot = run.instance_variable_get(:@snapshot)
+      expect(snapshot).to include('complete' => true, 'errors' => [])
+      expect(snapshot.fetch('files')).to have_key('lib/ledger_client.rb')
+    end
+
+    it 'still refuses source references when the capture stalls past its ceiling' do
+      run = slow_capture(5.0)
+      expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => 'scan_time_budget')
+      expect { reference_pass(run) }
+        .to raise_error(Woods::ExtractionError, 'Source-reference input was not captured: lib/ledger_client.rb')
     end
   end
 
