@@ -130,4 +130,13 @@ RSpec.describe Woods::Extractors::ViewEngines::Jbuilder do
       expect(engine.scan_navigation_candidates(source)).to eq([{ helper: 'api_widget_url', via: :link_to }])
     end
   end
+
+  describe '#scan_method_calls' do
+    let(:names) { Set.new(%w[pretty_date title]) }
+
+    it 'reports catalog names called as values, not json keys of the same name' do
+      source = "json.title widget.name\njson.shipped pretty_date(widget.shipped_at)"
+      expect(engine.scan_method_calls(source, names)).to eq(bare: %w[pretty_date], explicit: [])
+    end
+  end
 end

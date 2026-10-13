@@ -7,6 +7,7 @@ require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
+require_relative 'helper_call_scan'
 
 module Woods
   module Extractors
@@ -88,6 +89,7 @@ module Woods
         renders = resolve_render_targets(component, unit.source_code)
         unit.metadata = extract_metadata(component, unit.source_code).merge(component_resolution_metadata(renders))
         unit.dependencies = extract_dependencies(unit.source_code, renders)
+        HelperCallScan.annotate(self, unit, component)
 
         unit
       rescue StandardError => e

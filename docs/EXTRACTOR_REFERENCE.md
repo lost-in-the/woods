@@ -511,8 +511,70 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 - A relative partial (`render 'show'`) missing from the template's own directory is looked up through the runtime controller's `_prefixes` (its parents' view paths, then `application/`), as Rails does. Templates with no controller, such as layouts, still reach `application/`.
 - The `view_render` edge exists only when the controller the directory names is a runtime `ActionController::Base` or `ActionController::API` subclass. Mailer view directories link to their `ActionMailer::Base` subclass with a `:mailer` edge.
 - Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
+- **Helper call edges** (see [Application helper calls](#application-helper-calls)): a template calling `pretty_date(x)` gets a `:helper_call` edge to the helper module that defines `pretty_date`, and a `:helper_method` edge to the controller that declares a name with `helper_method`. `metadata[:helper_calls]` lists the called names per module.
 
-**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials`), and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
+
+#### Application helper calls
+
+Rails mixes every module under `app/helpers` into every view, so a template
+calls `pretty_date(x)` without ever naming `DateHelper`. Constant references
+cannot see that, and a helper module unit had no incoming edge. Two
+supporting utilities close the gap for view templates, Phlex components, view
+components, mailers and controllers.
+
+`HelperCatalog` (`lib/woods/extractors/helper_catalog.rb`) is the application's
+helper method catalog, built once per extractor instance:
+
+| Source | What it contributes |
+|---|---|
+| Prism over `app/helpers/**/*.rb` | The public instance methods each module body defines (name, module, file, line). `private`, `protected`, `private :name` and `private def` are honored; `self.` methods and nested classes are not helpers. |
+| Runtime `_helpers` ancestry of every app controller and mailer | App modules mixed in with `helper Formatting` from outside `app/helpers`, read from the file that declares them. |
+| Runtime `public_instance_methods(false)` of each catalog module | Methods defined dynamically (`define_method`, `alias_method`) in one of the module's own files. |
+| Runtime `_helpers.instance_methods(false)` of each controller or mailer that owns its own helpers module | Names declared with `helper_method` or in a `helper do` block, attributed to the declaring class. A class sharing its superclass's module declares nothing, so Rails' own `helper_method` names never attach to `ApplicationController`. |
+
+`HelperCallScan` (`lib/woods/extractors/helper_call_scan.rb`) finds the calls.
+One `StringScanner` token pass per source against the catalog's name set, so
+the cost is linear in the source whatever the catalog size. Each engine hands
+over only its Ruby: ERB tag bodies (with `<%# locals: (...) %>` strict locals),
+HAML script lines, attribute lists, interpolations and `:ruby`/`:erb` filter
+bodies, the whole of a jbuilder template. Markup and plain text are never
+read, so a word of copy that matches a helper name is not a call. A name is
+also not a call when it is a symbol, a hash label, a method on another
+receiver, a definition, string or heredoc text, a comment, or a local (an
+assignment target, a block parameter, a `local_assigns`/`defined?` probe).
+
+Resolution is per calling context:
+
+- A template resolves through its owning controller or mailer (the class the
+  view directory names). A layout, a shared partial and a component resolve
+  through `ApplicationController`.
+- When the context's `_helpers` module knows the name, the edge goes to the
+  definition Rails would run (`instance_method(name).owner`). Otherwise every
+  module defining the name is a target; more than one target is recorded in
+  `metadata[:ambiguous_helper_calls]` (`name => [modules]`).
+- A receiverless call inside a class (component, mailer, controller) resolves
+  only when the class includes the catalog module that defines the name and
+  does not define it itself. A `helpers.x` call, `use_helpers :x` or
+  `delegate :x, to: :helpers` resolves through the class's own helpers.
+- Only names in the catalog match. Rails built-ins (`link_to`, `t`, `render`)
+  and partial locals produce no edge.
+
+Output on the calling unit:
+
+| Field | Shape |
+|---|---|
+| dependency `{ type: :poro \| :lib \| :concern, target: 'DateHelper', via: :helper_call }` | One per helper module called; the type is the unit type the module's file is indexed as |
+| dependency `{ type: :controller \| :mailer, target: 'WidgetsController', via: :helper_method }` | One per declaring class whose `helper_method` name is called |
+| `metadata[:helper_calls]` | `{ 'DateHelper' => ['pretty_date', 'short_date'] }`, module-sorted, names sorted |
+| `metadata[:helper_method_calls]` | `{ 'WidgetsController' => ['current_widget'] }` |
+| `metadata[:ambiguous_helper_calls]` | `{ 'label_for' => ['LedgersHelper', 'WidgetsHelper'] }` |
+| `metadata[:helper_methods]` (controllers and mailers) | Names the class itself declares with `helper_method` |
+
+Each key is present only when non-empty, so a unit with no helper calls is
+byte-identical to its pre-2.2 form. Incremental maintenance re-runs the five
+consumers wholesale when a helper source changes; see
+[Incremental extraction](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
 
 ---
 

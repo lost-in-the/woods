@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'strscan'
 require_relative 'base'
 require_relative '../form_action_scan'
+require_relative '../helper_call_scan'
 
 module Woods
   module Extractors
@@ -61,6 +63,14 @@ module Woods
           asset_path
           asset_url
         ].freeze
+
+        ERB_TAG_OPEN = /<%/
+        ERB_TAG_CLOSE = /%>/
+        # The output (`=`, `==`) or trim (`-`) marker that opens a tag body.
+        ERB_TAG_MARKER = /\A(?:==?|-)/
+        # A strict-locals magic comment: `<%# locals: (title:, size: 1) %>`.
+        STRICT_LOCALS = /\A#\s*+locals:\s*+\(/
+        STRICT_LOCAL_NAME = /([a-z_]\w*+):/
 
         # @see Base#name
         def name
@@ -123,6 +133,12 @@ module Woods
           found.to_a.sort
         end
 
+        # @see Base#scan_method_calls
+        def scan_method_calls(source, names)
+          code, locals = ruby_regions(source)
+          HelperCallScan.method_calls(code, names, locals: locals)
+        end
+
         # Given `render 'comments/comment'` from a template at
         # `posts/show.html.erb`, resolves to `comments/_comment.html.erb`.
         #
@@ -151,6 +167,30 @@ module Woods
         end
 
         private
+
+        # The Ruby inside the template's ERB tags, one tag per line, and the
+        # names its strict-locals comment declares. Markup outside the tags
+        # is not Ruby and is dropped. One forward pass.
+        #
+        # @param source [String]
+        # @return [Array(String, Array<String>)] `[code, locals]`
+        def ruby_regions(source)
+          scanner = StringScanner.new(source.valid_encoding? ? source : source.scrub(' '))
+          code = +''
+          locals = []
+          while scanner.skip_until(ERB_TAG_OPEN)
+            next scanner.getch if scanner.peek(1) == '%'
+
+            body = scanner.scan_until(ERB_TAG_CLOSE)&.delete_suffix('%>')
+            body ||= scanner.rest.tap { scanner.terminate }
+            if body.start_with?('#')
+              locals.concat(body.scan(STRICT_LOCAL_NAME).flatten) if body.match?(STRICT_LOCALS)
+            else
+              code << body.sub(ERB_TAG_MARKER, '').delete_suffix('-') << "\n"
+            end
+          end
+          [code, locals]
+        end
 
         # Extension {#resolve_partial_identifier} appends to a partial name.
         #

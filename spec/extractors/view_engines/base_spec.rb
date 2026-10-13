@@ -81,4 +81,10 @@ RSpec.describe Woods::Extractors::ViewEngines::Base do
       expect(subclass.new.parse('src')).to eq(ir: :compiled, from: 'src')
     end
   end
+
+  describe '#scan_method_calls' do
+    it 'reports no calls by default, so an engine without the operation still extracts' do
+      expect(engine.scan_method_calls('src', Set.new(%w[pretty_date]))).to eq(bare: [], explicit: [])
+    end
+  end
 end

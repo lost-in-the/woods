@@ -3474,6 +3474,10 @@ module Woods
     # @return [Set<String>] identifiers written or removed
     def rerun_whole_app_extractors(change_set, affected_types)
       keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      # Helper edges resolve against a catalog that spans files, so a helper
+      # source change re-runs the extractors that carry those edges.
+      helper_keys = Extractors::HelperCatalog.consumer_keys_for(change_set.relative_paths)
+      keys.merge(helper_keys)
       # The dispatch rules are configuration-blind (memoized per-process), so
       # the configuration gate applies here — a knob-off host must not re-run
       # an extractor whose units a full extraction of the same tree would not
@@ -3487,7 +3491,7 @@ module Woods
       # carries the route itself, which no dependency edge connects to the
       # controller. Nothing about that is reachable by a graph walk, so the
       # run drops its flow scope and reassembles every touched controller.
-      @flow_scope = nil if keys.include?(:routes)
+      @flow_scope = nil if keys.include?(:routes) || helper_keys.include?(:controllers)
 
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))

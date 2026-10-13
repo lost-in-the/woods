@@ -5,6 +5,8 @@ require_relative '../source_inputs/consumer_errors'
 
 require 'set'
 require_relative 'route_helper_resolver'
+require_relative 'helper_catalog'
+require_relative 'helper_call_scan'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
 require_relative 'view_engines/haml'
@@ -21,7 +23,8 @@ module Woods
     # and delegates parsing, scanning, and partial-identifier resolution
     # to that engine. The orchestrator itself owns filesystem walking,
     # identifier construction, controller inference, route-helper edge
-    # resolution, and dependency assembly.
+    # resolution, helper-call edge resolution (through {HelperCatalog}),
+    # and dependency assembly.
     #
     # Engines are registered via {ENGINES}. Add a new engine by creating
     # a {ViewEngines::Base} subclass and appending it to that list.
@@ -101,6 +104,7 @@ module Woods
         interpolated, partials = engine.scan_partials(source).partition { |name| name.include?(INTERPOLATION_MARKER) }
         unit.metadata = build_metadata(engine, source, file_path, partials, interpolated)
         unit.dependencies = build_dependencies(engine, source, file_path, identifier, partials)
+        apply_helper_calls(unit, engine, source, namespace)
 
         unit
       rescue StandardError => e
@@ -192,6 +196,31 @@ module Woods
         deps.concat(resolve_navigation_candidates(engine, source))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
+      end
+
+      # Add `helper_call` edges to the helper modules whose methods the
+      # template calls, and `helper_method` edges to the controllers that
+      # declare the names it calls. Names resolve through the template's
+      # owner, so a mailer view sees its mailer's helpers.
+      #
+      # @param unit [ExtractedUnit]
+      # @param engine [ViewEngines::Base]
+      # @param source [String]
+      # @param namespace [String, nil] View directory
+      # @return [void]
+      def apply_helper_calls(unit, engine, source, namespace)
+        return if helper_catalog.names.empty?
+
+        calls = engine.scan_method_calls(source, helper_catalog.names)
+        owner = view_owner(namespace)&.dig(:klass)
+        HelperCallScan.apply(unit, HelperCallScan.resolve(helper_catalog, calls, context: owner))
+      end
+
+      # The application's helper methods, read once per extractor.
+      #
+      # @return [HelperCatalog]
+      def helper_catalog
+        @helper_catalog ||= HelperCatalog.new
       end
 
       # Resolve a rendered partial to the template file that exists on disk
