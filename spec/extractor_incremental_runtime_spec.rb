@@ -35,7 +35,11 @@ RSpec.describe 'incremental runtime inputs' do
       expect(extractor.send(:hybrid_discovery_keys, changes, [])).to include(:controllers)
     end
 
-    %w[app/components/shelf_component.html.erb app/components/shelf_component/shelf_component.html.haml].each do |path|
+    %w[
+      app/components/shelf_component.html.erb
+      app/components/shelf_component/shelf_component.html.haml
+      app/components/shelf_component.html.slim
+    ].each do |path|
       it "refreshes view components after changing the sidecar template #{path}" do
         FileUtils.mkdir_p(@root.join('app/components'))
         File.write(@root.join('app/components/shelf_component.rb'), "class ShelfComponent\nend\n")

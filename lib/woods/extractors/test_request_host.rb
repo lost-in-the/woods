@@ -36,6 +36,9 @@ module Woods
       APP_HOST = %r{\b(?:app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
       CAPYBARA_HOST = %r{\bCapybara\.(app_host|default_host)[ \t]*=[ \t]*["']https?://([^"'/\n:]+)}
       OPTION = /(?:\bsubdomain:|:subdomain[ \t]*=>)[ \t]*#{LITERAL}/
+      # An IPv4 host, with an optional port. Rails reads no subdomain from an
+      # IP host (`ActionDispatch::Http::URL.extract_subdomains`).
+      IP_HOST = /\A\d++(?:\.\d++){3}(?::\d++)?\z/
 
       module_function
 
@@ -160,6 +163,7 @@ module Woods
       # Everything left of the registrable domain: `a.b.example.test` is "a.b".
       def subdomain_of(host)
         return host if host.include?('#{')
+        return '' if host.match?(IP_HOST)
 
         labels = host.split('.')
         labels.size > tld_length + 1 ? labels[0...-(tld_length + 1)].join('.') : ''

@@ -115,6 +115,48 @@ RSpec.describe Woods::Extractors::MigrationExtractor, 'table edges' do
                                                       [:database_table, 'table:widgets'])
   end
 
+  describe 'join table names' do
+    let(:catalog) do
+      catalog_class.new([table('catalog_categories'), table('catalog_products'), table('catalog_categories_products'),
+                         table('catalog_links'), table('widgets'), table('parts'), table('widget_parts')])
+    end
+
+    it 'collapses the prefix the two tables share, as Rails does' do
+      unit = extract('create_join_table :catalog_categories, :catalog_products')
+
+      expect(unit.metadata[:tables_affected]).to eq(['catalog_categories_products'])
+      expect(unit.metadata[:tables_referenced]).to eq(%w[catalog_categories catalog_products])
+      expect(edges(unit, :migrates)).to include([:database_table, 'table:catalog_categories_products'])
+    end
+
+    it 'takes the table_name option over the derived name' do
+      unit = extract(<<~RUBY)
+        create_join_table :catalog_categories, :catalog_products, table_name: :catalog_links do |t|
+          t.index :catalog_category_id
+        end
+        create_join_table("widgets", "parts",
+                          column_options: { null: false },
+                          :table_name => "widget_parts")
+      RUBY
+
+      expect(unit.metadata[:tables_affected]).to contain_exactly('catalog_links', 'widget_parts')
+      expect(unit.metadata[:tables_referenced]).to eq(%w[catalog_categories catalog_products parts widgets])
+      expect(unit.metadata[:tables_unresolved]).to eq([])
+    end
+
+    it 'derives the name Rails derives for every pair' do
+      rails = ->(a, b) { [a, b].sort.join("\0").gsub(/^(.*[_.])(.+)\0\1(.+)/, '\1\2_\3').tr("\0", '_') }
+      pairs = [%w[catalog_categories catalog_products], %w[a_b_x a_b_y], %w[cat_a catalog_b], %w[widgets parts],
+               %w[a_b a_b_c], %w[x_ x_y], %w[a_b_c a_b_d_e], %w[same same], %w[a_x a_x_y], %w[b_x a_x]]
+      extractor = described_class.new(table_catalog: catalog)
+
+      pairs.each do |first, second|
+        expect(extractor.send(:join_table_name, first, second))
+          .to eq(rails.call(first, second)), [first, second].inspect
+      end
+    end
+  end
+
   it 'points at the table in every database that has one of that name' do
     multi = catalog_class.new([table('widgets', model: 'Widget', database: 'primary', qualified: true),
                                table('widgets', database: 'billing', qualified: true)])

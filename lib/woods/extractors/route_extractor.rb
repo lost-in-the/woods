@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../git_source_filter'
 
 require_relative '../source_inputs/consumer_errors'
@@ -149,10 +150,7 @@ module Woods
       end
 
       def build_route_file(relative, path, routes, source_locations)
-        source = File.read(path, encoding: Encoding::UTF_8)
-        raise Woods::ExtractionError, 'Source is not valid UTF-8' unless source.valid_encoding?
-
-        source = ConfigSourceGuard.redact(source)
+        source = ConfigSourceGuard.redact(SourceFile.read(path))
         declarations = route_declarations(source)
         draws = declarations.select { |entry| entry[:method] == 'draw' }.filter_map { |entry| entry[:argument] }.uniq
         unit = ExtractedUnit.new(type: :route_file, identifier: relative, file_path: path)
@@ -301,11 +299,19 @@ module Woods
         verb.present? ? route_verb(route) : 'ANY'
       end
 
+      # An anonymous class has no name, and its `#<Class:0x...>` form
+      # changes every boot, so it is named after its nearest named superclass.
+      #
       # @return [String] the class name of the endpoint, or of the mounted
       #   class itself
       def endpoint_name(app)
-        name = app.is_a?(Module) ? app.name : app.class.name
-        name || app.class.to_s
+        klass = app.is_a?(Module) ? app : app.class
+        return klass.name if klass.name
+        return 'anonymous module' unless klass.is_a?(Class)
+
+        superclass = klass.superclass
+        superclass = superclass.superclass until superclass.name
+        "anonymous subclass of #{superclass.name}"
       end
 
       # Same test EngineExtractor uses to recognise an engine.

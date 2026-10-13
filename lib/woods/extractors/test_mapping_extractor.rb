@@ -57,8 +57,10 @@ module Woods
 
       # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`,
       # `RSpec.feature 'Widget checkout' do`.
-      # The closing quote delimits the subject, so nothing is required after it.
-      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+['"]([^'"]+)['"]/
+      # The quote that opened the subject closes it, so an apostrophe inside a
+      # double-quoted title (`describe "Account's settings"`) stays in the
+      # subject. Nothing is required after the closing quote.
+      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+(?:'(?<subject>[^'\n]++)'|"(?<subject>[^"\n]++)")/
 
       # A subject names a class only when it is a constant path (`Widget`,
       # `'Ledger::Entry'`). Free text (`'Widget checkout'`) is a description:
@@ -283,7 +285,7 @@ module Woods
         return nil unless group
 
         constant = group[RSPEC_CONSTANT_DESCRIBE, 1]
-        return group[RSPEC_STRING_DESCRIBE, 1] unless constant
+        return group[RSPEC_STRING_DESCRIBE, 'subject'] unless constant
 
         qualify_described_constant(constant, source, group)
       end

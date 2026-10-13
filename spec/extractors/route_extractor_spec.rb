@@ -374,6 +374,28 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(unit.dependencies).to eq([])
     end
 
+    it 'names an anonymous endpoint class the same on every boot, after its nearest named superclass' do
+      boots = Array.new(2) { [Class.new { def call(_env) = [200, {}, []] }, Class.new(ApiFallback)] }
+
+      apps = boots.map do |plain, fallback|
+        extract(endpoint_route(app: plain.new, path: '/ping'),
+                endpoint_route(app: fallback.new, path: '/v1/*rest'),
+                endpoint_route(app: plain, path: '/probe', anchored: false, format: false))
+          .to_h { |unit| [unit.identifier, unit.metadata[:app]] }
+      end
+
+      expect(apps.uniq).to eq([{ 'ANY /ping (rack_endpoint)' => 'anonymous subclass of Object',
+                                 'ANY /v1/*rest (rack_endpoint)' => 'anonymous subclass of ApiFallback',
+                                 'ANY /probe (mount)' => 'anonymous subclass of Object' }])
+    end
+
+    it 'names a mounted anonymous module without its per-boot address' do
+      rack_module = Module.new { def self.call(_env) = [200, {}, []] }
+      unit = extract(endpoint_route(app: rack_module, path: '/health', anchored: false, format: false)).first
+
+      expect(unit.metadata).to include(kind: 'mount', app: 'anonymous module')
+    end
+
     it 'qualifies a constrained root redirect by its constraint before the kind' do
       redirect = ActionDispatch::Routing::PathRedirect.new(301, 'https://www.example.test/')
       unit = extract(endpoint_route(app: redirect, path: '/', verb: 'GET', format: false,
@@ -603,6 +625,19 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(routes_of(units).first.file_path).to be_nil
     ensure
       FileUtils.rm_rf(outside)
+    end
+
+    it 'reads a route file with an invalid UTF-8 byte instead of failing the extractor' do
+      path = write_routes('config/routes.rb', '')
+      File.binwrite(path, "# caf\xE9 menu\nget '/widgets', to: 'widgets#index'\n")
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
+      extractor = described_class.new
+
+      file = route_files_of(extractor.extract_all).first
+
+      expect(file.metadata[:declarations]).to eq([{ line: 2, method: 'get', argument: '/widgets' }])
+      expect(file.source_code).to be_valid_encoding
+      expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
     end
 
     it 'emits no route_file unit when the application has no route files' do

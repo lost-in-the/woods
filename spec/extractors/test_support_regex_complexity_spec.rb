@@ -89,6 +89,17 @@ RSpec.describe 'test support and test mapping regex complexity' do
     end
   end
 
+  it 'reads a string describe subject in linear time' do
+    pattern = Woods::Extractors::TestMappingExtractor::RSPEC_STRING_DESCRIBE
+
+    within_budget do
+      expect(pattern.match?("describe \"#{"a'" * 50_000}")).to be(false)
+      expect(pattern.match?("describe '#{'a"' * 50_000}")).to be(false)
+      expect(pattern.match?("describe \"x\n" * 20_000)).to be(false)
+      expect(pattern.match?("describe#{' ' * 50_000}x")).to be(false)
+    end
+  end
+
   it 'scans navigation calls in linear time' do
     stub_route_set(
       [route_double(verb: 'GET', path: '/widgets/:id', controller: 'widgets', action: 'show', name: 'widget'),
@@ -124,6 +135,9 @@ RSpec.describe 'test support and test mapping regex complexity' do
       expect(host.subdomain('with_subdomain ' * 20_000)).to be_nil
       expect(host.subdomain("host! \"#{'a.' * 20_000}example.test\"")).to eq("#{'a.' * 19_999}a")
       expect(host.subdomain("with_subdomain 'shop'\n" * 10_000)).to eq('shop')
+      expect(host::IP_HOST.match?("#{'1' * 50_000}.")).to be(false)
+      expect(host::IP_HOST.match?("1.2.3.4:#{'5' * 50_000}x")).to be(false)
+      expect(host.subdomain("host! \"#{'1.' * 20_000}1\"")).to eq("#{'1.' * 19_998}1")
     end
   end
 

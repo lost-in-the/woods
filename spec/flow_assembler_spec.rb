@@ -829,6 +829,38 @@ RSpec.describe Woods::FlowAssembler do
 
         expect(flow.steps[1][:operations].map { |op| op[:target] }).to eq(['Post'])
       end
+
+      %w[perform_later perform_async perform_in perform_at].each do |enqueue|
+        it "expands a job enqueued with #{enqueue} by the perform it runs" do
+          write_unit('PostsController', source_code: <<~RUBY)
+            class PostsController < ApplicationController
+              def create
+                NotifyJob.#{enqueue}(params)
+              end
+            end
+          RUBY
+
+          write_unit('NotifyJob', type: 'job', source_code: <<~RUBY)
+            class NotifyJob
+              def perform(params)
+                Mailer.deliver(params)
+              end
+
+              def cleanup
+                Cache.clear!
+              end
+            end
+          RUBY
+
+          stub_graph_defaults
+          allow(graph).to receive(:node_exists?).with('NotifyJob').and_return(true)
+
+          flow = described_class.new(graph: graph, extracted_dir: extracted_dir).assemble('PostsController#create')
+
+          expect(flow.steps[0][:operations].first).to include(type: :async, method: enqueue)
+          expect(flow.steps[1][:operations].map { |op| op[:target] }).to eq(['Mailer'])
+        end
+      end
     end
 
     # verified P1: find_node_by_suffix picks the first match in sorted order

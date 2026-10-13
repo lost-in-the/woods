@@ -3073,7 +3073,7 @@ module Woods
     # sidecar when a Ruby file of the same name sits beside it, or names the
     # directory it is in.
     def sidecar_template?(path)
-      return false unless Extractors::TemplateExtensions::SCANNED.any? { |extension| path.end_with?(extension) }
+      return false unless Extractors::TemplateExtensions::DETECTED.any? { |extension| path.end_with?(extension) }
 
       directory = File.dirname(path)
       File.exist?(File.join(directory, "#{File.basename(path)[/\A[^.]+/]}.rb")) || File.exist?("#{directory}.rb")

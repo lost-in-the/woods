@@ -88,7 +88,12 @@ module Woods
       # An explicit foreign key target: `foreign_key: { to_table: :owners }`.
       TO_TABLE_PATTERN = /\bto_table:\s*+#{TABLE_NAME}/
 
-      JOIN_TABLE_PATTERN = /create_join_table\s*+\(?\s*+#{TABLE_NAME}\s*+,\s*+#{TABLE_NAME}/
+      # The two joined tables, then the call's remaining arguments: the rest
+      # of the line, and any line after a trailing comma.
+      JOIN_TABLE_PATTERN = /create_join_table\s*+\(?\s*+#{TABLE_NAME}\s*+,\s*+#{TABLE_NAME}((?:,[ \t]*+\n|[^\n;])*+)/
+
+      # An explicit join table name among those remaining arguments.
+      JOIN_TABLE_NAME_OPTION = /(?:\btable_name:|:table_name\s*+=>)\s*+#{TABLE_NAME}/
 
       # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
       def initialize(table_catalog: nil)
@@ -232,7 +237,11 @@ module Woods
           end
         end
 
-        source.scan(JOIN_TABLE_PATTERN).each { |match| tables << match.compact.sort.join('_') }
+        source.scan(JOIN_TABLE_PATTERN).each do |*sides, options|
+          first, second = sides.compact
+          tables << (options[JOIN_TABLE_NAME_OPTION, 1] || options[JOIN_TABLE_NAME_OPTION, 2] ||
+                     join_table_name(first, second))
+        end
 
         # rename_table has two table arguments
         source.scan(/rename_table\s*+\(?\s*+#{TABLE_NAME}\s*,\s*#{TABLE_NAME}/).each do |_from_symbol, _from_string, symbol, string|
@@ -240,6 +249,24 @@ module Woods
         end
 
         tables.uniq
+      end
+
+      # The table `create_join_table` derives from the two it joins, as
+      # `ActiveRecord::ModelSchema.derive_join_table_name` does: the names
+      # sorted and joined by `_`, with the longest prefix both share up to a
+      # `_` written once, provided each name keeps a character after it.
+      #
+      # @param first [String]
+      # @param second [String]
+      # @return [String] `catalog_categories_products` for `catalog_categories` and `catalog_products`
+      def join_table_name(first, second)
+        first, second = [first, second].sort
+        shared = 0
+        shared += 1 while shared < first.size && first[shared] == second[shared]
+        cut = [shared, first.size - 1, second.size - 1].min
+        separator = cut.positive? ? first.rindex('_', cut - 1) : nil
+        prefix = separator ? first[0..separator] : ''
+        "#{prefix}#{first.delete_prefix(prefix)}_#{second.delete_prefix(prefix)}"
       end
 
       # Tables a migration points at without changing them: reference and
@@ -250,9 +277,10 @@ module Woods
       # @return [Array<String>] sorted, deduplicated table names
       def extract_tables_referenced(source, references)
         tables = references.map { |ref| ref[:reference].pluralize }
-        [SECOND_TABLE_PATTERN, TO_TABLE_PATTERN, JOIN_TABLE_PATTERN].each do |pattern|
+        [SECOND_TABLE_PATTERN, TO_TABLE_PATTERN].each do |pattern|
           source.scan(pattern).each { |match| tables.concat(match.compact) }
         end
+        source.scan(JOIN_TABLE_PATTERN).each { |match| tables.concat(match[0, 4].compact) }
         tables.uniq.sort
       end
 

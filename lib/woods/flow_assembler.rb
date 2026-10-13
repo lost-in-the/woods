@@ -44,6 +44,11 @@ module Woods
     # calls one, so they are never flow callees.
     SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
 
+    # The method an enqueued job runs, whichever enqueue method
+    # (`perform_later`, `perform_async`, `perform_in`, `perform_at`) the
+    # `:async` operation recorded.
+    JOB_ENTRY_METHOD = 'perform'
+
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
     def initialize(graph:, extracted_dir:)
@@ -355,7 +360,8 @@ module Woods
 
         expand(
           resolution, steps, visited,
-          depth: depth + 1, max_depth: max_depth, path: path, method_name: op[:method]
+          depth: depth + 1, max_depth: max_depth, path: path,
+          method_name: op[:type] == :async ? JOB_ENTRY_METHOD : op[:method]
         )
       when :transaction
         (op[:nested] || []).each do |nested_op|

@@ -1,0 +1,1 @@
+- `trace_flow` expands an enqueued job by the `perform` it runs. A step such as `NotifyJob.perform_later(...)` was looked up by `perform_later`, which a job never defines, so the job step reported no operations. `perform_later`, `perform_async`, `perform_in`, and `perform_at` now all expand the job's `perform`.

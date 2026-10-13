@@ -34,8 +34,6 @@ module SourceReadGuard
       'kernel boot id and process stat under /proc: ASCII by definition',
     ['lib/woods/extractors/config_file_extractor.rb', 'read_outline'] =>
       'reports invalid UTF-8 as parse_error metadata (its own contract), never scrubs',
-    ['lib/woods/extractors/route_extractor.rb', 'build_route_file'] =>
-      'refuses invalid UTF-8 with ExtractionError (its own contract), never scrubs',
     ['lib/woods/extractors/test_support_catalog.rb', 'analyze'] =>
       'refuses invalid UTF-8 with ArgumentError (documented contract), never scrubs',
     ['lib/woods/extractors/external_consumer_declarations.rb', 'load_file'] =>

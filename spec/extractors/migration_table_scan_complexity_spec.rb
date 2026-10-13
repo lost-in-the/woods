@@ -53,6 +53,12 @@ RSpec.describe 'Migration table scan complexity' do
     'repeated to_table options with no value' => 'to_table: ' * near_matches,
     'a join table with a long gap before the comma' => "create_join_table :widgets#{' ' * repeats}x",
     'repeated join tables missing the second table' => 'create_join_table :widgets, ' * near_matches,
+    'repeated join tables with options on one line' => 'create_join_table :a, :b, table_name: :ab ' * near_matches,
+    'a join table with a long option run' => "create_join_table :a, :b#{', x: 1' * near_matches}",
+    'a join table with blank-padded continuation commas' =>
+      "create_join_table :a, :b#{",#{' ' * 50}\n" * near_matches}",
+    'a join table option with a long gap before the name' => "create_join_table :a, :b, table_name:#{' ' * repeats}",
+    'a long shared prefix between joined tables' => "create_join_table :#{'a_' * repeats}x, :#{'a_' * repeats}y",
     'a long run of quotes' => "add_column #{'"' * repeats}"
   }.each do |label, source|
     it "stays within #{budget_seconds}s on #{label}" do
