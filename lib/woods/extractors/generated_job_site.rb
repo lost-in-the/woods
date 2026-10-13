@@ -89,16 +89,27 @@ module Woods
         site(path, line, declaration_end(call), file, call.name.to_s)
       end
 
-      # @return [String, nil] name of the innermost method containing +line+
+      # The innermost method containing the `const_set` call that starts on
+      # +line+, compared by byte range: a one-line generator can define a
+      # method of its own on that same line (`Class.new { def perform; end }`).
+      # Without such a call on the line, the innermost method spanning it.
+      #
+      # @return [String, nil] the method's name
       def enclosing_method(tree, line)
+        anchor = calls_in(tree).find { |node| node.name == :const_set && node.location.start_line == line }
         innermost = nil
         walk(tree) do |node|
-          next unless node.is_a?(Prism::DefNode)
-          next unless line.between?(node.location.start_line, node.location.end_line)
+          next unless node.is_a?(Prism::DefNode) && encloses?(node.location, line, anchor&.location)
 
           innermost = node
         end
         innermost&.name&.to_s
+      end
+
+      def encloses?(range, line, anchor)
+        return line.between?(range.start_line, range.end_line) unless anchor
+
+        range.start_offset <= anchor.start_offset && anchor.end_offset <= range.end_offset
       end
 
       # The owner's call of the generator whose argument names the constant.

@@ -80,6 +80,20 @@ RSpec.describe Woods::Extractors::GeneratedJobSite do
                             generated_by: 'async_method')
   end
 
+  it 'names the generator, not a method its one-line body defines on the same line' do
+    load write('lib/gjs_async.rb', <<~RUBY)
+      module GjsAsync
+        def async_method(name) = const_set("\#{name.to_s.capitalize}Worker", Class.new { def perform(id); end })
+      end
+    RUBY
+    model = write('app/models/gjs_widget.rb', "class GjsWidget\n  extend GjsAsync\n  async_method :sync\nend\n")
+    load model
+
+    site = resolver.call(GjsWidget::SyncWorker)
+
+    expect(site.to_h).to eq(file_path: model, line: 3, source: "  async_method :sync\n", generated_by: 'async_method')
+  end
+
   it 'keeps the lines of a multi-line call up to its arguments, without a block body' do
     load_generator
     model = write('app/models/gjs_ledger.rb', <<~RUBY)
