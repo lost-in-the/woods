@@ -21,6 +21,8 @@
 #     config.include_framework_sources = true
 #   end
 #
+require 'digest'
+require 'json'
 require_relative 'woods/version'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
@@ -133,6 +135,16 @@ module Woods
     # See the {#extractors=} YARD note: this knob does not gate extraction.
     DEFAULT_EXTRACTORS = %i[models controllers services components view_components jobs mailers graphql
                             serializers managers policies validators rails_source].freeze
+
+    # Settings that decide which units and edges an extraction publishes, and
+    # that an incremental run cannot reconcile on its own. Each published
+    # generation records a digest of them; incremental extraction refuses to
+    # build on a generation whose digests differ. See {#extraction_fingerprint}.
+    EXTRACTION_KEYS = %i[include_framework_sources extract_navigation_edges component_paths
+                         event_patterns event_paths unclaimed_ruby_paths graphql_document_paths
+                         config_file_paths config_file_values settings_readers
+                         external_table_consumers external_table_consumers_path
+                         test_support_paths test_subdomain_helpers].freeze
 
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
@@ -496,8 +508,8 @@ module Woods
     # constraints, app-local libraries). `app/models` is always scanned.
     # `app/assets`, `app/javascript` and non-`.rb` matches are never swept.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.unclaimed_ruby_paths = ['app/helpers/**/*.rb', 'app/view_models/**/*.rb']
@@ -515,8 +527,8 @@ module Woods
     # for client-side GraphQL operation documents. An empty list turns the
     # family off. Paths under `node_modules` never match.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.graphql_document_paths = ['app/javascript/**/*.graphql', 'client/**/*.{graphql,gql}']
@@ -537,8 +549,8 @@ module Woods
     # (`credentials*`, `secrets*`, `*.enc`, `*.key`, `config/credentials/`) are
     # never opened, whatever the globs say.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.config_file_paths = ['config/*.yml', 'config/settings/**/*.yml']
@@ -568,8 +580,8 @@ module Woods
     # (`Settings.payments.api_host`, `Settings[:payments]`) adds a
     # `reads_config` edge from the reading unit to that file's unit.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
@@ -621,8 +633,8 @@ module Woods
     # and suite configuration. `*_spec.rb` and `*_test.rb` files are never
     # test support, whatever the globs match.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.test_support_paths += ['features/support/**/*.rb']
@@ -681,6 +693,17 @@ module Woods
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(value)
     end
 
+    # One SHA-256 digest per {EXTRACTION_KEYS} entry, over a canonical JSON
+    # form of its value. Per-key digests let a refusal name what changed
+    # without the manifest or a message ever carrying a value.
+    #
+    # @return [Hash{String => String}] key name => hex digest
+    def extraction_fingerprint
+      EXTRACTION_KEYS.to_h do |key|
+        [key.to_s, Digest::SHA256.hexdigest(JSON.generate(fingerprint_form(public_send(key))))]
+      end
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -693,6 +716,17 @@ module Woods
     end
 
     private
+
+    # Hash keys are sorted so a declaration's insertion order never changes
+    # the digest. A Regexp keeps its options: `/x/i` and `/x/` match differently.
+    def fingerprint_form(value)
+      case value
+      when Hash then value.map { |key, item| [key.to_s, fingerprint_form(item)] }.sort_by(&:first)
+      when Array then value.map { |item| fingerprint_form(item) }
+      when Regexp then { 'source' => value.source, 'options' => value.options }
+      else value
+      end
+    end
 
     # @return [Integer, nil] +value+ when it is nil or a positive Integer
     # @raise [ConfigurationError] otherwise

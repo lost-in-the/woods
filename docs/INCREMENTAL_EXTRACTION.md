@@ -63,6 +63,17 @@ dependency metadata retains its extractor-provided values. If an older version
 already lost reverse dependencies on these targets, run a full extraction once
 to restore them; loading the damaged graph cannot recover discarded entries.
 
+The contract assumes the incremental run loads the same extraction-shaping
+configuration as the full run it builds on. Included in Woods 2.2: every
+published manifest records `extraction_config`, one SHA-256 digest per
+`Woods::Configuration::EXTRACTION_KEYS` setting (globs, settings readers,
+declared table consumers, test helpers and the like). Incremental extraction
+and targeted refresh refuse with `Woods::ExtractionError`, naming the changed
+settings but never their values, when a digest differs. Run a full
+`woods:extract` after changing one. A baseline published before the fingerprint
+existed, or before a setting joined it, logs a warning and runs; its next full
+extraction records the digests.
+
 This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.
