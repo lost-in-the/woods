@@ -6,6 +6,7 @@ require 'pathname'
 require 'set'
 require_relative '../atomic_file'
 require_relative '../javascript_paths'
+require_relative '../source_file'
 require_relative 'js_module_facts'
 
 module Woods
@@ -137,7 +138,7 @@ module Woods
           size = File.size(path)
           return [relative, "omitted:#{size}", size, nil] if size > MAX_ANALYZED_BYTES
 
-          source = File.read(path, encoding: Encoding::UTF_8)
+          source = SourceFile.read(path)
           [relative, Digest::SHA256.hexdigest(source), size, source]
         rescue SystemCallError
           nil

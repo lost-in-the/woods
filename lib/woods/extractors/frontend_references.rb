@@ -2,6 +2,7 @@
 
 require 'strscan'
 require_relative 'js_module_registry'
+require_relative '../source_file'
 
 module Woods
   module Extractors
@@ -187,7 +188,7 @@ module Woods
         return nil unless relative.is_a?(String) && defined?(Rails) && Rails.root
 
         path = Rails.root.join(relative)
-        File.read(path, encoding: Encoding::UTF_8) if File.file?(path)
+        SourceFile.read(path) if File.file?(path)
       rescue SystemCallError
         nil
       end
