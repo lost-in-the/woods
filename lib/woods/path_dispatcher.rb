@@ -481,11 +481,8 @@ module Woods
           *test_support_rules,
           *view_template_rules,
           # A module's registered names come from other files, so any module
-          # change re-runs the type. The matcher is authoritative; the
-          # directories and extensions describe it for the hook projection.
-          whole_app_rule(:js_modules, JavascriptPaths.directories, extensions: JavascriptPaths::EXTENSIONS,
-                                                                   exclude: JavascriptPaths.excluded_fragments,
-                                                                   matcher: :js_module_path?),
+          # change re-runs the type.
+          *js_module_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.
@@ -506,6 +503,17 @@ module Woods
                                      Woods::Extractors::PackageExtractor::PACKWERK_CONFIG],
                          exclude: %w[node_modules/ vendor/ tmp/ bin/ script/])
         ]
+      end
+
+      # One rule per configured glob. The matcher is authoritative; each
+      # rule's directory and extensions describe its glob for the hook
+      # projection, which has no Ruby.
+      def js_module_rules
+        JavascriptPaths.shapes.map do |directory, extensions|
+          whole_app_rule(:js_modules, [directory], extensions: extensions,
+                                                   exclude: JavascriptPaths.excluded_fragments,
+                                                   matcher: :js_module_path?)
+        end
       end
 
       # File-based extractors glob `**/*.rb` unless they say otherwise, so

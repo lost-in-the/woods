@@ -214,7 +214,7 @@ RSpec.describe Woods::ReloadPolicy do
 
       it 'ignores a document outside the roots and other client files' do
         expect(policy.classify('docs/widget_list.graphql')).to eq(:ignore)
-        expect(policy.classify('app/javascript/widgets/widget_list.ts')).to eq(:ignore)
+        expect(policy.classify('app/javascript/widgets/widget_list.css')).to eq(:ignore)
         expect(policy.classify('app/javascript/node_modules/pkg/widget_list.graphql')).to eq(:ignore)
       end
 

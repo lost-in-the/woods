@@ -83,6 +83,20 @@ RSpec.describe Woods::JavascriptPaths do
     end
   end
 
+  describe '.shapes' do
+    it 'pairs each glob directory with only the module extensions that glob accepts' do
+      expect(described_class.shapes).to eq(
+        [['app/assets/javascripts', %w[.js]], ['app/javascript', %w[.js .ts .jsx .tsx .mjs]]]
+      )
+    end
+
+    it 'accepts every module extension for a glob that names none, and skips globs that can match no module' do
+      Woods.configuration.javascript_paths = ['frontend/src/**/*', 'legacy/**/*.coffee', '**/*.ts', 'lib/js/*.{ts,css}']
+
+      expect(described_class.shapes).to eq([['frontend/src', %w[.js .ts .jsx .tsx .mjs]], ['lib/js', %w[.ts]]])
+    end
+  end
+
   describe 'configuration' do
     it 'defaults to the two conventional roots, frozen' do
       expect(Woods.configuration.javascript_paths).to eq(described_class::DEFAULT_GLOBS)
