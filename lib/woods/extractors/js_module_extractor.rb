@@ -2,6 +2,7 @@
 
 require_relative '../source_inputs/consumer_errors'
 require_relative '../javascript_paths'
+require_relative '../source_file'
 require_relative 'js_module_registry'
 
 module Woods
@@ -76,7 +77,7 @@ module Woods
       def read_source(path, relative)
         return nil if registry.bytesize(relative).to_i > MAX_SOURCE_BYTES
 
-        File.read(path, encoding: Encoding::UTF_8).scrub('?')
+        SourceFile.read(path)
       end
 
       def build_metadata(relative, source)
