@@ -1026,13 +1026,21 @@ expanded mailer and schedule identities in an existing index.
 
 ### RakeTaskExtractor
 
-**What it captures:** Rake tasks from `lib/tasks/*.rake`. Extracts namespaces, task names, descriptions, prerequisites (`:depends_on`), and the task body.
+**What it captures:** Rake tasks and the Ruby that supports them, from the files named by `config.rake_task_paths` (default `lib/tasks/**/*.rake`, `rake/**/*.rake` and `Rakefile`). Extracts namespaces, task names, descriptions, prerequisites, arguments, the task body, the commands it shells out to, and its support files.
 
 **Key details:**
-- Reads `.rake` files statically, no Rails boot required for parsing
-- Uses `block_opener?` for depth tracking; `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks
-- Supports nested namespaces (`namespace :data do namespace :import do task :users`)
-- A task reopened in more than one `.rake` file is one unit, as Rake sees it: the source carries every definition, `metadata.defined_in` lists the files, and a per-file incremental run yields the same merged unit as a full run
+- Parses with Prism and never runs a rake file. `task`, `multitask`, `file`, `directory` and `rule` are read in every signature form: `task :a`, `task a: :b`, `task :a, [:x] => :b`, `task(:a) { }`, string names, nested namespaces.
+- `metadata.kind` is one of `task`, `multitask`, `file`, `directory`, `rule`, `task_class`, `enhancement`, `rake_support`.
+- A task reopened in more than one file is one unit, as Rake sees it: the source carries every file, `metadata.defined_in` lists the defining files, and a per-file run yields the same merged unit as a full run. The dependency graph maps every defining and enhancing file to the unit (`source_paths`, `file_map`), so a change to any of them reaches it.
+- `Rake::Task["a"].enhance(["b"])` adds a `task_dependency` edge `a` → `b` and lists the file in `metadata.enhanced_in`. A task that is only enhanced (it comes from a gem) still gets a unit, with `kind: "enhancement"`.
+- `Rake::Task["x"].invoke` and `.execute` add a `task_invoke` edge.
+- A task class (`RSpec::Core::RakeTask.new(:docs)`, `RuboCop::RakeTask.new`) becomes a unit with `metadata.task_class`. A definition inside `if`/`unless` records the predicate in `metadata.conditions`. A class called without a name uses its well-known default (`spec`, `rubocop`, `test`, `yard`, `cucumber`, `rdoc`).
+- `task_dependency` edges target the task Rake would resolve from the enclosing namespace; `metadata.task_dependencies` keeps the names as written.
+- `metadata.shell_commands` lists the literal commands a body runs through `sh`, `system`, `exec`, `spawn`, `Open3`, backticks, or a helper method that shells out itself. Credentials are redacted first (`RakeShellRedaction`: the `ConfigSourceGuard` passes, then, reading the line as quote-aware shell arguments, credential-named assignments, flags, headers and query parameters, `Bearer`/`Basic` tokens, `-u user:password`, tool password flags such as `mysql -p`, and credential literals inside a quoted JSON body), then each is cut to 200 characters. Shell commands add no edges.
+- Ruby files under a configured directory (`rake/lib/**/*.rb`) are `rake_task` units with `kind: "rake_support"`, identified by root-relative path, with `metadata.constants` and `metadata.methods`. A task has a `method_call` or `code_reference` edge to each support file it calls or names. A file another extractor owns is skipped.
+- The file is the authority for everything it states literally. The loaded Rake application is consulted only for what a file computes: a task named in a loop (`task "sync_#{name}"`) is indexed, with `metadata.name_source: "runtime"`, when the extracting process loaded that file through Rake. In a process that loaded no tasks, such a definition produces no unit.
+- `source_code` is the rake file (or support file) after `ConfigSourceGuard.redact`: credential literals, URL userinfo and private keys are withheld. Parsing reads the raw text.
+- No per-file dispatch: any change under a configured path re-runs the extractor wholesale.
 
 ---
 

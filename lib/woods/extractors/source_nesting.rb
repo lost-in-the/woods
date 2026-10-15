@@ -209,7 +209,7 @@ module Woods
 
       # Check if a line opens a new block (do...end, def...end, etc.).
       #
-      # Mirrors RakeTaskExtractor#block_opener? — the house pattern:
+      # The house pattern, shared with the chunkers' block accounting:
       # +if+/+unless+ count in statement position (leading the line, or
       # directly after an assignment operator: `value = if x`), not as
       # trailing modifiers (e.g., `return if x`, `value = 1 if x`), and a

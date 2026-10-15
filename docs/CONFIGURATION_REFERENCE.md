@@ -1143,6 +1143,40 @@ recorded in `source_references.json`. Incremental extraction and
 `woods:refresh` stop with a full-extraction diagnostic when the recorded policy
 differs from the configured one, and the previous generation stays active.
 
+### Rake task paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rake_task_paths` | Array&lt;String&gt; | `["lib/tasks/**/*.rake", "rake/**/*.rake", "Rakefile"]` | Files, relative to `Rails.root`, that `RakeTaskExtractor` reads for task definitions. |
+
+Each entry has one of three shapes:
+
+- `dir/**/*.ext`: every matching file under `dir`;
+- `dir/*.ext`: matching files directly inside `dir`;
+- `path/to/File`: one file.
+
+Ruby files under a listed directory are indexed as the tasks' support code
+(`metadata.kind: "rake_support"`), unless another extractor owns them. A
+missing directory or file is skipped.
+
+```ruby
+Woods.configure do |config|
+  config.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/*.rake', 'Rakefile']
+end
+```
+
+The setter rejects a value that is not an Array and any entry outside the three
+shapes (absolute, containing `..`, or using another glob form), raising
+`Woods::ConfigurationError` and keeping the previous value. The narrow grammar
+is what lets the same entries drive incremental dispatch, the watch daemon and
+the plugin's change predicate.
+
+**Changing `rake_task_paths` needs a full extraction.** Incremental runs
+dispatch with the current entries, and tasks indexed under the old ones stay
+until a rake file changes or `woods:extract` runs. The plugin's shell predicate
+is generated from the defaults; a custom directory is still picked up by
+`woods:incremental` and the watch daemon.
+
 ## Console MCP options
 
 These options configure the Console MCP server (live database queries via

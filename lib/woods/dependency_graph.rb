@@ -688,11 +688,8 @@ module Woods
       attrs[:table] = metadata[:table_name] if unit.type == :model && !metadata[:table_name].nil?
       tables = Array(metadata[:foreign_keys]).filter_map { |fk| fk[:to_table] || fk['to_table'] if fk.is_a?(Hash) }
       attrs[:foreign_key_tables] = tables if tables.any?
-      if SourceContributors.multiple?(unit)
-        attrs[:source_paths] = SourceContributors.paths(unit).map do |path|
-          self.class.absolutize(path, self.class.graph_root)
-        end
-      end
+      source_paths = source_paths_of(unit, metadata)
+      attrs[:source_paths] = source_paths if source_paths
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
       attrs[:actions] = metadata[:actions] if unit.type == :controller && metadata[:actions].is_a?(Array)
       gem_actions = metadata[:inherited_gem_actions]
@@ -710,6 +707,25 @@ module Woods
       end
       attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
     end
+
+    # Every physical source of a unit assembled from several files: a library
+    # unit's contributors, or each file that defines or enhances a rake task.
+    #
+    # @param unit [ExtractedUnit]
+    # @param metadata [Hash]
+    # @return [Array<String>, nil] absolute paths, or nil for a unit with one source
+    def source_paths_of(unit, metadata)
+      paths = if SourceContributors.multiple?(unit)
+                SourceContributors.paths(unit)
+              elsif unit.type == :rake_task
+                [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              else
+                []
+              end
+      paths = paths.map { |path| self.class.absolutize(path, self.class.graph_root) }.uniq
+      paths if paths.size > 1
+    end
+    private :source_paths_of
 
     # A registered node that takes part in PageRank: anything but a schema unit.
     def ranked?(identifier)

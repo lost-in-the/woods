@@ -426,7 +426,7 @@ cheap, which is what makes wholesale replacement the right shape.
 
 | Trigger | Re-runs |
 |---|---|
-| `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task), test_mappings |
+| `config.rake_task_paths` (default `lib/tasks/**/*.rake`, `rake/**/*.rake`, `Rakefile`) and `*.rb` under those directories | rake_tasks (all definitions of every task, and their support files), test_mappings |
 | `config/routes.rb`, `config/routes/**` | routes (route units and the `route_file` unit of each draw file), engines, **and** controllers, mailers, components, view components, view templates, test mappings |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
@@ -714,7 +714,7 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, every `config.rake_task_paths` file and the Ruby under its directories (`rake/**` by default), `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, and YAML under `config.config_file_paths` that boot does not capture | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
 | `:reextract` (from configuration) | `.rb` files under `config.test_support_paths` outside `spec/` and `test/`, such as `features/support/**` | Test support is read as bytes. The defaults are already under `spec/` and `test/`. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |

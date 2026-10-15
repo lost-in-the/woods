@@ -874,4 +874,44 @@ RSpec.describe Woods::Configuration do
       expect(config.source_reference_callers.fetch(:mailer)).to eq([])
     end
   end
+
+  describe '#rake_task_paths' do
+    it 'defaults to lib/tasks, a root rake directory and the Rakefile' do
+      expect(described_class.new.rake_task_paths).to eq(['lib/tasks/**/*.rake', 'rake/**/*.rake', 'Rakefile'])
+    end
+
+    it 'accepts file paths and directory globs and freezes the list' do
+      config.rake_task_paths = ['ops/**/*.rake', 'ops/Rakefile']
+
+      expect(config.rake_task_paths).to eq(['ops/**/*.rake', 'ops/Rakefile'])
+      expect(config.rake_task_paths).to be_frozen
+    end
+
+    it 'rejects a value that is not an Array' do
+      expect { config.rake_task_paths = 'Rakefile' }
+        .to raise_error(Woods::ConfigurationError, /rake_task_paths must be an Array/)
+    end
+
+    it 'rejects an entry outside the three supported shapes' do
+      ['', '/srv/tasks/*.rake', 'lib/../*.rake', '**/*.rake', 'lib/*/tasks/*.rake', :rake].each do |entry|
+        expect { config.rake_task_paths = [entry] }
+          .to raise_error(Woods::ConfigurationError, /rake_task_paths\[0\] must be a relative file path/)
+      end
+    end
+
+    it 'keeps the previous value when an entry is invalid' do
+      config.rake_task_paths = ['ops/*.rake']
+
+      expect { config.rake_task_paths = ['Rakefile', '/abs.rake'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.rake_task_paths).to eq(['ops/*.rake'])
+    end
+
+    it 'feeds the rake path predicates' do
+      Woods.configuration = described_class.new
+      Woods.configuration.rake_task_paths = ['ops/*.rake']
+
+      expect(Woods::Extractors::RakeTaskPaths.task_file?('ops/deploy.rake')).to be(true)
+      expect(Woods::Extractors::RakeTaskPaths.task_file?('lib/tasks/export.rake')).to be(false)
+    end
+  end
 end

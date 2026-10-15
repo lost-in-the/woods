@@ -897,4 +897,498 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       described_class.new.extract_rake_file(path)
     end
   end
+
+  # ── Configured roots ────────────────────────────────────────────────
+
+  describe 'rake_task_paths roots' do
+    def unit_named(units, identifier)
+      units.find { |unit| unit.identifier == identifier }
+    end
+
+    it 'extracts tasks from a root rake/ directory and the Rakefile' do
+      create_file('rake/graph.rake', <<~RAKE)
+        namespace :graph do
+          task(:codegen) { exec_in_container "yarn run graph-codegen" }
+        end
+      RAKE
+      create_file('Rakefile', "task :bootstrap do\n  sh 'bin/setup'\nend\n")
+      create_file('lib/tasks/export.rake', "task :export\n")
+
+      units = described_class.new.extract_all
+
+      expect(units.map(&:identifier)).to contain_exactly('graph:codegen', 'bootstrap', 'export')
+      expect(unit_named(units, 'graph:codegen').file_path).to eq(File.join(tmp_dir, 'rake/graph.rake'))
+      expect(unit_named(units, 'bootstrap').metadata).to include(kind: 'task', shell_commands: ['bin/setup'])
+    end
+
+    it 'follows config.rake_task_paths' do
+      create_file('ops/deploy.rake', "task :deploy\n")
+      create_file('lib/tasks/export.rake', "task :export\n")
+      allow(Woods::Extractors::RakeTaskPaths).to receive(:configured).and_return(['ops/*.rake'])
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['deploy'])
+    end
+
+    it 'extracts a Rakefile through the per-file entry point' do
+      path = create_file('Rakefile', "task :bootstrap\n")
+
+      expect(described_class.new.extract_rake_file(path).map(&:identifier)).to eq(['bootstrap'])
+    end
+  end
+
+  # ── Shapes the line parser missed ───────────────────────────────────
+
+  describe 'an ordinary one-off task file' do
+    def identifiers(source)
+      path = create_file('lib/tasks/one_offs/toggle.rake', source)
+      described_class.new.extract_rake_file(path).map(&:identifier)
+    end
+
+    it 'extracts a hash-argument task with block parameters' do
+      expect(identifiers(<<~RAKE)).to eq(['one_offs:toggle_accounts_flag'])
+        namespace :one_offs do
+          desc "x"
+          task toggle_accounts_flag: :environment do |_, args|
+            Widget.find_each { |widget| widget.update!(flag: args[:on]) }
+          end
+        end
+      RAKE
+    end
+
+    it 'extracts a long name with arguments and an array of prerequisites' do
+      name = "backfill_#{'ledger_entry_' * 12}totals"
+
+      source = "namespace :one_offs do\n  task :#{name}, [:arg] => [:environment] do |_, args|\n  end\nend\n"
+
+      expect(identifiers(source)).to eq(["one_offs:#{name}"])
+    end
+
+    it 'extracts string names, parenthesized calls and multi-line signatures' do
+      expect(identifiers(<<~RAKE)).to eq(%w[one_offs:a one_offs:b one_offs:c one_offs:d])
+        namespace :one_offs do
+          task 'a' => :environment do
+          end
+          task(b: :environment) do |_, args|
+          end
+          task c:
+            :environment do
+          end
+          task :d do; end
+        end
+      RAKE
+    end
+
+    it 'extracts a file holding multibyte text when the process encoding is US-ASCII' do
+      previous = Encoding.default_external
+      Encoding.default_external = Encoding::US_ASCII
+
+      expect(identifiers("# Toggle — run once\nnamespace :one_offs do\n  task toggle: :environment do\n  end\nend\n"))
+        .to eq(['one_offs:toggle'])
+    ensure
+      Encoding.default_external = previous
+    end
+
+    it 'lists every defining file when two files define the same task' do
+      create_file('lib/tasks/a.rake', "namespace :one_offs do\n  task toggle: :environment\nend\n")
+      path = create_file('lib/tasks/one_offs/toggle.rake', "namespace :one_offs do\n  task toggle: :environment\nend\n")
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.metadata[:defined_in]).to eq(%w[lib/tasks/a.rake lib/tasks/one_offs/toggle.rake])
+    end
+  end
+
+  # ── enhance, invoke, task classes ───────────────────────────────────
+
+  describe 'enhance' do
+    it 'gives a one-line enhance file a unit with a task_dependency edge' do
+      path = create_file('lib/tasks/i18n.rake', %(Rake::Task["javascript:build"].enhance(["i18n:js:export"])\n))
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('javascript:build')
+      expect(unit.file_path).to eq(path)
+      expect(unit.metadata).to include(kind: 'enhancement', task_name: 'build', task_namespace: 'javascript',
+                                       task_dependencies: ['i18n:js:export'],
+                                       enhanced_in: ['lib/tasks/i18n.rake'])
+      expect(unit.dependencies).to eq([{ type: :rake_task, target: 'i18n:js:export', via: :task_dependency }])
+    end
+
+    it 'merges an enhancement into the task another file defines' do
+      definition = create_file('lib/tasks/assets.rake', "namespace :assets do\n  task :build do\n  end\nend\n")
+      create_file('lib/tasks/z_hooks.rake', <<~RAKE)
+        Rake::Task['assets:build'].enhance(['assets:clean']) do
+          Rake::Task['assets:report'].invoke
+          sh 'bin/notify'
+        end
+      RAKE
+
+      unit = described_class.new.extract_all.find { |candidate| candidate.identifier == 'assets:build' }
+
+      expect(unit.file_path).to eq(definition)
+      expect(unit.metadata).to include(kind: 'task', enhanced_in: ['lib/tasks/z_hooks.rake'],
+                                       task_dependencies: ['assets:clean'], shell_commands: ['bin/notify'])
+      expect(unit.metadata).not_to have_key(:defined_in)
+      expect(unit.dependencies).to include(
+        { type: :rake_task, target: 'assets:report', via: :task_invoke },
+        { type: :rake_task, target: 'assets:clean', via: :task_dependency }
+      )
+      expect(unit.source_code).to include("sh 'bin/notify'").and include('task :build do')
+    end
+
+    it 'resolves an enhance target against the enclosing namespace' do
+      create_file('lib/tasks/assets.rake', <<~RAKE)
+        namespace :assets do
+          task :build
+          Rake::Task[:build].enhance([:clean])
+          task :clean
+        end
+      RAKE
+
+      unit = described_class.new.extract_all.find { |candidate| candidate.identifier == 'assets:build' }
+
+      expect(unit.dependencies).to eq([{ type: :rake_task, target: 'assets:clean', via: :task_dependency }])
+    end
+  end
+
+  describe 'task invocations' do
+    it 'records invoke and execute with the same edge shape' do
+      path = create_file('lib/tasks/nightly.rake', <<~RAKE)
+        task nightly: :environment do
+          Rake::Task['ledger:close'].invoke
+          Rake::Task['ledger:report'].execute
+        end
+      RAKE
+
+      expect(described_class.new.extract_rake_file(path).first.dependencies).to eq(
+        [{ type: :rake_task, target: 'ledger:close', via: :task_invoke },
+         { type: :rake_task, target: 'ledger:report', via: :task_invoke }]
+      )
+    end
+  end
+
+  describe 'prerequisite scope' do
+    it 'points a prerequisite at the task Rake would find from that namespace' do
+      path = create_file('lib/tasks/js.rake', <<~RAKE)
+        task :lint
+        namespace :js do
+          task build: %i[compile lint missing]
+          task :compile
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).find { |candidate| candidate.identifier == 'js:build' }
+
+      expect(unit.metadata[:task_dependencies]).to eq(%w[compile lint missing])
+      expect(unit.dependencies.map { |dependency| dependency[:target] }).to eq(%w[js:compile lint missing])
+    end
+  end
+
+  describe 'task classes' do
+    it 'gives a gem task class inside a conditional a unit' do
+      path = create_file('lib/tasks/docs.rake', <<~RAKE)
+        if defined?(RSpec)
+          RSpec::Core::RakeTask.new(:docs) { |t| t.pattern = 'spec/docs/**/*_spec.rb' }
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('docs')
+      expect(unit.metadata).to include(kind: 'task_class', task_class: 'RSpec::Core::RakeTask',
+                                       conditions: ['defined?(RSpec)'])
+    end
+
+    it 'names a nameless well-known task class by its default' do
+      path = create_file('lib/tasks/lint.rake', "RuboCop::RakeTask.new\n")
+
+      expect(described_class.new.extract_rake_file(path).first.identifier).to eq('rubocop')
+    end
+  end
+
+  describe 'other definition kinds' do
+    it 'extracts multitask, file and rule definitions' do
+      path = create_file('lib/tasks/build.rake', <<~RAKE)
+        namespace :build do
+          multitask all: %i[css js]
+          file 'public/app.css' => ['app/app.scss']
+          rule '.o' => '.c'
+        end
+      RAKE
+
+      units = described_class.new.extract_rake_file(path)
+
+      expect(units.map { |unit| [unit.identifier, unit.metadata[:kind], unit.namespace] }).to eq(
+        [['build:all', 'multitask', 'build'], ['public/app.css', 'file', nil], ['.o', 'rule', nil]]
+      )
+    end
+  end
+
+  # ── Shell commands ──────────────────────────────────────────────────
+
+  describe 'shell commands' do
+    it 'records literal commands, truncated, without adding edges' do
+      path = create_file('lib/tasks/ship.rake', <<~RAKE)
+        task :ship do
+          sh 'bin/build'
+          system('bin/push', '--tags')
+          `git rev-parse HEAD`
+          exec "bin/long \#{'x'} #{'y' * 300}"
+          sh command
+          puts 'not a command'
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.metadata[:shell_commands][0..2])
+        .to eq(['bin/build', 'bin/push --tags', "bin/long \#{'x'} #{'y' * 184}"])
+      expect(unit.metadata[:shell_commands].last).to eq('git rev-parse HEAD')
+      expect(unit.metadata[:shell_commands].map(&:length).max).to eq(200)
+      expect(unit.dependencies).to eq([])
+    end
+
+    it 'redacts credentials in a recorded command' do
+      path = create_file('lib/tasks/backup.rake', <<~RAKE)
+        task :backup do
+          sh "PGPASSWORD=Wd8kq2Lm9x pg_dump widgets"
+          sh "curl -H 'Authorization: Bearer Wd8kq2Lm9xQ7zP3vB6nTr4Ky8' https://deploy:Wd8kq2Lm9x@ledger.example.test"
+        end
+      RAKE
+
+      expect(described_class.new.extract_rake_file(path).first.metadata[:shell_commands]).to eq(
+        ['PGPASSWORD=[REDACTED] pg_dump widgets',
+         "curl -H 'Authorization: Bearer [REDACTED]' https://[REDACTED]@ledger.example.test"]
+      )
+    end
+
+    it 'records commands passed to a helper that shells out' do
+      create_file('rake/lib/container.rb', <<~RUBY)
+        module Container
+          def exec_in_container(command)
+            run_compose("exec app \#{command}")
+          end
+
+          def run_compose(arguments)
+            sh "docker compose \#{arguments}"
+          end
+
+          def banner(text)
+            puts text
+          end
+        end
+      RUBY
+      path = create_file('rake/graph.rake', <<~RAKE)
+        namespace :graph do
+          task(:codegen) do
+            banner 'Generating'
+            exec_in_container "yarn run graph-codegen"
+          end
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.metadata[:shell_commands]).to eq(['yarn run graph-codegen'])
+    end
+  end
+
+  # ── Support files ───────────────────────────────────────────────────
+
+  describe 'support files under a rake root' do
+    before do
+      create_file('rake/lib/container.rb', <<~RUBY)
+        module Container
+          def exec_in_container(command)
+            sh "docker compose exec app \#{command}"
+          end
+        end
+      RUBY
+      create_file('rake/lib/core_ext/string.rb', "class String\n  def paint\n    self\n  end\nend\n")
+      create_file('rake/lib/palette.rb', "module Palette\n  extend Container\n  DEFAULT = 'green'.paint\nend\n")
+      create_file('rake/graph.rake', <<~RAKE)
+        task :codegen do
+          exec_in_container 'yarn run graph-codegen'
+          puts Palette::DEFAULT
+        end
+      RAKE
+    end
+
+    it 'indexes each Ruby file as a rake_support unit' do
+      units = described_class.new.extract_all.select { |unit| unit.metadata[:kind] == 'rake_support' }
+
+      expect(units.map(&:identifier))
+        .to eq(%w[rake/lib/container.rb rake/lib/core_ext/string.rb rake/lib/palette.rb])
+      container = units.first
+      expect(container.type).to eq(:rake_task)
+      expect(container.file_path).to eq(File.join(tmp_dir, 'rake/lib/container.rb'))
+      expect(container.metadata).to include(constants: ['Container'], methods: ['exec_in_container'],
+                                            shell_commands: ["docker compose exec app \#{command}"])
+      expect(container.source_code).to include('module Container')
+    end
+
+    it 'links a task to the support files it calls or names' do
+      unit = described_class.new.extract_all.find { |candidate| candidate.identifier == 'codegen' }
+
+      expect(unit.dependencies).to eq(
+        [{ type: :rake_task, target: 'rake/lib/container.rb', via: :method_call },
+         { type: :rake_task, target: 'rake/lib/palette.rb', via: :code_reference }]
+      )
+    end
+
+    it 'links one support file to another' do
+      palette = described_class.new.extract_all.find { |unit| unit.identifier == 'rake/lib/palette.rb' }
+
+      expect(palette.dependencies).to eq(
+        [{ type: :rake_task, target: 'rake/lib/container.rb', via: :code_reference }]
+      )
+    end
+
+    it 'extracts a support file through the per-file entry point' do
+      units = described_class.new.extract_rake_file(File.join(tmp_dir, 'rake/lib/palette.rb'))
+
+      expect(units.map(&:identifier)).to eq(['rake/lib/palette.rb'])
+    end
+  end
+
+  # ── Loaded Rake application ─────────────────────────────────────────
+
+  describe 'tasks the loaded Rake application resolves' do
+    require 'rake'
+
+    def load_into_runtime(*paths)
+      application = Rake::Application.new
+      Rake.with_application(application) { paths.each { |path| load path } }
+      allow(Woods::Extractors::RakeRuntimeIndex).to receive(:current)
+        .and_return(Woods::Extractors::RakeRuntimeIndex.new(application))
+    end
+
+    let(:source) do
+      <<~RAKE
+        namespace :sync do
+          %w[widgets ledgers].each do |name|
+            desc "Sync \#{name}"
+            task name => [:environment, "prepare_\#{name}"] do
+              puts name
+            end
+          end
+          task :environment
+          task :prepare_widgets
+          task :prepare_ledgers
+        end
+      RAKE
+    end
+
+    it 'names computed tasks and reads their prerequisites from the runtime' do
+      path = create_file('lib/tasks/sync.rake', source)
+      load_into_runtime(path)
+
+      units = described_class.new.extract_rake_file(path)
+      widgets = units.find { |unit| unit.identifier == 'sync:widgets' }
+
+      expect(units.map(&:identifier))
+        .to eq(%w[sync:ledgers sync:widgets sync:environment sync:prepare_widgets sync:prepare_ledgers])
+      expect(widgets.metadata).to include(task_dependencies: %w[environment prepare_widgets],
+                                          name_source: 'runtime', line_number: 4)
+      expect(widgets.dependencies).to include(
+        { type: :rake_task, target: 'sync:prepare_widgets', via: :task_dependency }
+      )
+    end
+
+    it 'emits nothing for a computed task when the file was never loaded' do
+      path = create_file('lib/tasks/sync.rake', source)
+
+      expect(described_class.new.extract_rake_file(path).map(&:identifier))
+        .to eq(%w[sync:environment sync:prepare_widgets sync:prepare_ledgers])
+    end
+
+    it 'keeps what the source states when the loaded application is stale' do
+      path = create_file('lib/tasks/ship.rake', "task ship: :build do\nend\ntask :build\ntask :package\n")
+      load_into_runtime(path)
+      File.write(path, "task ship: :package do\nend\ntask :build\ntask :package\n")
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.metadata[:task_dependencies]).to eq(['package'])
+      expect(unit.metadata).not_to have_key(:name_source)
+    end
+  end
+
+  # ── Determinism ─────────────────────────────────────────────────────
+
+  describe 'repeat runs' do
+    it 'serialize identically' do
+      create_file('rake/lib/container.rb', "module Container\n  def run(c)\n    sh c\n  end\nend\n")
+      create_file('rake/a.rake', "task a: :b do\n  run 'make'\nend\ntask :b\n")
+      create_file('lib/tasks/b.rake', "Rake::Task['a'].enhance(['b'])\n")
+
+      runs = Array.new(2) do
+        described_class.new.extract_all.map { |unit| unit.to_h.except(:extracted_at) }
+      end
+
+      expect(JSON.generate(runs.first)).to eq(JSON.generate(runs.last))
+    end
+  end
+
+  # ── Pathological nesting ────────────────────────────────────────────
+
+  describe 'a file nested too deeply to walk' do
+    it 'is skipped with an error log and leaves other files alone' do
+      create_file('lib/tasks/deep.rake', "task :deep\n")
+      create_file('lib/tasks/fine.rake', "task :fine\n")
+      allow_any_instance_of(described_class).to receive(:parse_tasks).and_wrap_original do |method, source|
+        raise SystemStackError, 'stack level too deep' if source.include?(':deep')
+
+        method.call(source)
+      end
+
+      expect(logger).to receive(:error).with(a_string_including('deep.rake'))
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['fine'])
+    end
+  end
+
+  # ── Published source ────────────────────────────────────────────────
+
+  describe 'published source' do
+    it 'redacts a credential literal in a rake file and keeps the task readable' do
+      path = create_file('rake/ledger.rake', <<~RAKE)
+        LEDGER_API_TOKEN = 'Wd8kq2Lm9xQ7zP3vB6nTr4Ky8'
+
+        namespace :ledger do
+          desc 'Sync the ledger'
+          task sync: :environment do
+            Ledger::Client.new(password: "hunter2", host: 'https://ledger.example.test/api').sync
+          end
+        end
+      RAKE
+
+      unit = described_class.new.extract_rake_file(path).first
+
+      expect(unit.identifier).to eq('ledger:sync')
+      expect(unit.source_code).not_to include('Wd8kq2Lm9xQ7zP3vB6nTr4Ky8', 'hunter2')
+      expect(unit.source_code).to include("LEDGER_API_TOKEN = '[REDACTED]'", 'password: "[REDACTED]"',
+                                          'task sync: :environment do', "host: 'https://ledger.example.test/api'")
+      expect(unit.metadata).to include(description: 'Sync the ledger', task_dependencies: ['environment'])
+    end
+
+    it 'redacts a credential literal in a support file' do
+      create_file('rake/lib/registry.rb', <<~RUBY)
+        module Registry
+          DEPLOY_SECRET = "Wd8kq2Lm9xQ7zP3vB6nTr4Ky8"
+          URL = 'https://deploy:Wd8kq2Lm9x@registry.example.test/v2'
+
+          def push(image)
+            sh "docker push \#{image}"
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_all.find { |candidate| candidate.identifier == 'rake/lib/registry.rb' }
+
+      expect(unit.source_code).not_to include('Wd8kq2Lm9xQ7zP3vB6nTr4Ky8', 'Wd8kq2Lm9x@')
+      expect(unit.source_code).to include('DEPLOY_SECRET = "[REDACTED]"', 'https://[REDACTED]@registry.example.test/v2',
+                                          'def push(image)')
+      expect(unit.metadata).to include(constants: ['Registry'], methods: ['push'])
+    end
+  end
 end

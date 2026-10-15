@@ -31,11 +31,10 @@ module Woods
     end
 
     # Shared line-level Ruby block accounting for the chunkers in this
-    # file (B-083 / #195). Mirrors the proven heuristic in
-    # Woods::Extractors::RakeTaskExtractor#block_opener? — credit to that
-    # implementation for the "modifier keywords only count in statement
-    # position" rule (`return if x` must not open a block). Copied rather
-    # than shared so the extractor and the chunkers stay independent.
+    # file (B-083 / #195). Follows the house rule that modifier keywords
+    # only count in statement position (`return if x` must not open a
+    # block), as Woods::Extractors::SourceNesting#block_opener? does. Copied
+    # rather than shared so the extractors and the chunkers stay independent.
     #
     # Known limitations (deliberate — this is a line classifier, not a
     # parser): heredoc and multi-line string bodies whose lines look like

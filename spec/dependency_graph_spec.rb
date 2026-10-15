@@ -784,6 +784,46 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe 'a rake task reopened in several files' do
+    before { allow(described_class).to receive(:graph_root).and_return('/app') }
+
+    def rake_unit(identifier, metadata)
+      unit = make_unit(type: :rake_task, identifier: identifier, file_path: '/app/lib/tasks/widgets.rake')
+      unit.metadata = metadata
+      unit
+    end
+
+    it 'maps every file that defines the task to its one unit' do
+      graph.register(rake_unit('backfill_widgets',
+                               defined_in: %w[lib/tasks/widgets.rake lib/tasks/one_offs/widgets_again.rake]))
+
+      expect(graph.identifiers_for_path('/app/lib/tasks/one_offs/widgets_again.rake')).to eq(['backfill_widgets'])
+      expect(graph.identifiers_for_path('/app/lib/tasks/widgets.rake')).to eq(['backfill_widgets'])
+      expect(graph.units_for_path('/app/lib/tasks/one_offs/widgets_again.rake'))
+        .to eq([['backfill_widgets', :rake_task]])
+    end
+
+    it 'maps a file that only enhances the task to its unit' do
+      graph.register(rake_unit('widgets:sync', enhanced_in: %w[rake/widgets_hooks.rake]))
+
+      expect(graph.affected_by(['/app/rake/widgets_hooks.rake'])).to eq(['widgets:sync'])
+    end
+
+    it 'forgets every file of the task once it is removed' do
+      graph.register(rake_unit('backfill_widgets',
+                               defined_in: %w[lib/tasks/widgets.rake lib/tasks/one_offs/widgets_again.rake]))
+      graph.remove('backfill_widgets')
+
+      expect(graph.registered_paths).to be_empty
+    end
+
+    it 'keeps a single-file task on its file_path alone' do
+      graph.register(rake_unit('widgets:prune', {}))
+
+      expect(graph.to_h[:nodes]['widgets:prune']).not_to have_key(:source_paths)
+    end
+  end
+
   describe '#remove' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))

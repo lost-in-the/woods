@@ -107,6 +107,8 @@
     "precompute_flows=",
     "pretty_json",
     "pretty_json=",
+    "rake_task_paths",
+    "rake_task_paths=",
     "retrieval_mode",
     "retrieval_mode=",
     "session_exclude_paths",
@@ -1049,7 +1051,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 139,
+    "configuration_attributes": 141,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
