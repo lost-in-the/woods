@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
 require 'json'
+require 'open3'
 require 'woods'
 require 'woods/extracted_unit'
 require 'woods/extractors/doc_extractor'
@@ -154,7 +155,7 @@ RSpec.describe Woods::Extractors::DocExtractor do
 
     it 'publishes redacted source and never a redacted value as a mention' do
       key = "AKIA#{'ABCD1234' * 2}"
-      redacted = unit_for('docs/secrets.md', "# Keys\n\nUse `#{key}` with `Ledger`.\n")
+      redacted = unit_for('docs/keys.md', "# Keys\n\nUse `#{key}` with `Ledger`.\n")
 
       expect(redacted.source_code).to eq("# Keys\n\nUse `[REDACTED]` with `Ledger`.\n")
       expect(redacted.metadata[:redactions]).to eq('aws_access_key_id' => 1)
@@ -216,6 +217,36 @@ RSpec.describe Woods::Extractors::DocExtractor do
       runs = Array.new(2) { JSON.generate(described_class.new.extract_doc_file(path).to_h.except(:extracted_at)) }
 
       expect(runs.first).to eq(runs.last)
+    end
+  end
+
+  describe 'secret-bearing and Git-excluded documentation' do
+    def git(*args)
+      _out, err, status = Open3.capture3(*Woods::GitCommand.argv(tmp_dir, *args))
+      raise err unless status.success?
+    end
+
+    it 'never indexes a secret-named file, directly or through a symlink' do
+      create_file('docs/widget_secrets.md', '# Keys')
+      create_file('docs/api_token.md', '# Token')
+      create_file('docs/plain.md', '# Plain')
+      File.symlink(File.join(tmp_dir, 'docs/widget_secrets.md'), File.join(tmp_dir, 'docs/notes.md'))
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['docs/plain.md'])
+      expect(described_class.doc_path?('docs/widget_secrets.md')).to be(false)
+      expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/notes.md'))).to be_nil
+    end
+
+    it 'skips Git-ignored and untracked documentation in a Git checkout' do
+      create_file('docs/tracked.md', '# Tracked')
+      create_file('docs/ignored.md', '# Ignored')
+      git('init', '--quiet')
+      git('add', 'docs/tracked.md', 'docs/ignored.md')
+      create_file('.gitignore', "docs/ignored.md\n")
+      create_file('docs/draft.md', '# Draft')
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['docs/tracked.md'])
+      expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/draft.md'))).to be_nil
     end
   end
 
