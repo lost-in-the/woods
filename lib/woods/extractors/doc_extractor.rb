@@ -109,11 +109,13 @@ module Woods
       #   documentation file, is over {MAX_DOC_BYTES}, or cannot be read
       def extract_doc_file(file_path)
         relative = file_path.to_s.delete_prefix("#{@root}/")
-        return nil unless self.class.doc_path?(relative) && File.file?(file_path) && documentation_target?(file_path)
-        return nil if (@git_filter ||= GitSourceFilter.new(root: @root)).skip_reason(relative)
-        return skip_oversize(relative) if File.size(file_path) > MAX_DOC_BYTES
+        return nil unless self.class.doc_path?(relative) && File.file?(file_path)
 
-        build_unit(relative, file_path, SourceFile.read(file_path))
+        target = documentation_target(file_path)
+        return nil unless target && readable?(relative, target)
+        return skip_oversize(relative) if File.size(target) > MAX_DOC_BYTES
+
+        build_unit(relative, file_path, SourceFile.read(target))
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract documentation #{file_path}: #{e.message}")
         nil
@@ -121,12 +123,24 @@ module Woods
 
       private
 
-      # A symlink is read only when the file it reaches is itself documentation:
-      # inside the repository and under the configured roots. Otherwise a
-      # `docs/notes.md` link could publish a credential file.
-      def documentation_target?(file_path)
+      # Every gate applies to the file a symlink reaches as well as to the
+      # link, and that resolved file is what gets read. Otherwise a tracked
+      # `docs/notes.md` link could publish a credential file or a Git-ignored
+      # one.
+      #
+      # @return [String, nil] the resolved path, when it is documentation
+      #   inside the repository
+      def documentation_target(file_path)
         real = File.realpath(file_path)
-        real.start_with?("#{@real_root}/") && self.class.doc_path?(real.delete_prefix("#{@real_root}/"))
+        return nil unless real.start_with?("#{@real_root}/")
+
+        real if self.class.doc_path?(real.delete_prefix("#{@real_root}/"))
+      end
+
+      # Git rules, for the link and for its target.
+      def readable?(relative, target)
+        @git_filter ||= GitSourceFilter.new(root: @root)
+        [relative, target.delete_prefix("#{@real_root}/")].uniq.none? { |path| @git_filter.skip_reason(path) }
       end
 
       def skip_oversize(relative)

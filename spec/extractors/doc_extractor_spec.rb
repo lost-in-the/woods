@@ -248,6 +248,17 @@ RSpec.describe Woods::Extractors::DocExtractor do
       expect(described_class.new.extract_all.map(&:identifier)).to eq(['docs/tracked.md'])
       expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/draft.md'))).to be_nil
     end
+
+    it 'applies the Git rules to the file a symlink reaches, not only to the link' do
+      create_file('docs/local.md', '# Local notes')
+      File.symlink('local.md', File.join(tmp_dir, 'docs/notes.md'))
+      create_file('.gitignore', "docs/local.md\n")
+      git('init', '--quiet')
+      git('add', '.gitignore', 'docs/notes.md')
+
+      expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/notes.md'))).to be_nil
+      expect(described_class.new.extract_all).to eq([])
+    end
   end
 
   describe '.doc_path?' do
