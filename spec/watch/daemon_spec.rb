@@ -108,7 +108,7 @@ RSpec.describe Woods::Watch::Daemon do
 
   describe 'classification' do
     it 'does nothing for paths no extractor cares about' do
-      result = build.process(['README.md'])
+      result = build.process(['NOTES.md'])
 
       expect(result[:action]).to eq(:ignore)
       expect(extractor).not_to have_received(:extract_changed)
@@ -402,7 +402,7 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build
       daemon.process(['config/locales/en.yml'])
 
-      expect { daemon.process(['README.md']) }.not_to(change { daemon.generation.current.number })
+      expect { daemon.process(['NOTES.md']) }.not_to(change { daemon.generation.current.number })
     end
 
     it 'reports a running state with the current generation' do
@@ -1084,7 +1084,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'counts only actionable paths towards the storm threshold' do
-      paths = Array.new(6) { |i| touch("docs/note_#{i}.md") } + [touch('app/models/user.rb')]
+      paths = Array.new(6) { |i| touch("notes/note_#{i}.md") } + [touch('app/models/user.rb')]
 
       result = build(full_extraction_threshold: 3).process(paths)
 

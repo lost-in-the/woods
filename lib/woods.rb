@@ -136,6 +136,18 @@ module Woods
     DEFAULT_EXTRACTORS = %i[models controllers services components view_components jobs mailers graphql
                             serializers managers policies validators rails_source].freeze
 
+    # Markdown the documentation extractor indexes as `doc` units, as
+    # root-relative globs. See {#documentation_paths=}.
+    DEFAULT_DOCUMENTATION_PATHS = %w[
+      README.md docs/**/*.md doc/**/*.md CLAUDE.md AGENTS.md
+      .claude/rules/**/*.md .claude/skills/**/*.md .github/**/*.md
+    ].freeze
+
+    # Changelogs, vendored trees and generated API documentation.
+    DEFAULT_DOCUMENTATION_EXCLUDE = %w[
+      **/CHANGELOG*.md **/node_modules/**/* **/vendor/**/* doc/api/**/* docs/api/**/*
+    ].freeze
+
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
                   :vector_store_options, :metadata_store_options, :embedding_options,
@@ -161,7 +173,8 @@ module Woods
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
-                :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths
+                :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
+                :documentation_paths, :documentation_exclude, :retrieve_documentation
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -265,6 +278,10 @@ module Woods
       @source_reference_callers = SourceReferences::CallerPolicy.normalize(nil)
       # Files RakeTaskExtractor reads. See Extractors::RakeTaskPaths.
       @rake_task_paths = Extractors::RakeTaskPaths::DEFAULT_PATHS
+      @documentation_paths = DEFAULT_DOCUMENTATION_PATHS
+      @documentation_exclude = DEFAULT_DOCUMENTATION_EXCLUDE
+      # Whether retrieval returns `doc` units unless a caller filters by type.
+      @retrieve_documentation = true
     end
 
     def embedding_model=(value)
@@ -698,6 +715,43 @@ module Woods
       @rake_task_paths = Extractors::RakeTaskPaths.validate!(value)
     end
 
+    # Root-relative globs {Woods::Extractors::DocExtractor} indexes as `doc`
+    # units. An empty Array disables documentation units. A glob under a
+    # hidden directory other than `.claude/rules`, `.claude/skills` and
+    # `.github` is refused: source capture and the watch daemon never read one.
+    #
+    # The value is not part of any index fingerprint: run a full extraction
+    # after changing it.
+    #
+    # @example
+    #   config.documentation_paths += ['handbook/**/*.md']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def documentation_paths=(value)
+      @documentation_paths = validate_documentation_globs!('documentation_paths', value, visible: true)
+    end
+
+    # Root-relative globs removed from {#documentation_paths}. Run a full
+    # extraction after changing it.
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def documentation_exclude=(value)
+      @documentation_exclude = validate_documentation_globs!('documentation_exclude', value, visible: false)
+    end
+
+    # Whether retrieval includes `doc` units by default. When false they are
+    # excluded like `test_mapping` units, and a caller reaches them with an
+    # explicit `types:` filter.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless +value+ is true or false
+    def retrieve_documentation=(value)
+      validate_boolean!('retrieve_documentation', value)
+      @retrieve_documentation = value
+    end
+
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
     # source indexing is not implemented.
     #
@@ -792,6 +846,22 @@ module Woods
 
       validate_relative_glob!(file, index, 'settings_readers file')
       { constant: constant.delete_prefix('::').freeze, file: file.dup.freeze }.freeze
+    end
+
+    # @return [Array<String>] a frozen copy of +value+
+    # @raise [ConfigurationError] if +value+ or any entry is malformed
+    def validate_documentation_globs!(name, value, visible:)
+      raise ConfigurationError, "#{name} must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      require 'woods/watch/tree_scan'
+      value.each_with_index do |glob, index|
+        validate_relative_glob!(glob, index, name)
+        next unless visible && Watch::TreeScan.hidden?(glob)
+
+        raise ConfigurationError, "#{name}[#{index}] is under a hidden directory Woods does not read, " \
+                                  "got #{glob.inspect}"
+      end
+      value.map { |glob| glob.dup.freeze }.freeze
     end
 
     def validate_boolean!(name, value)

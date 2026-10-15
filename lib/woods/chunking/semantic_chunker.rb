@@ -2,6 +2,7 @@
 
 require_relative 'chunk'
 require_relative 'contributor_chunks'
+require_relative 'markdown_section_chunker'
 
 module Woods
   module Chunking
@@ -301,6 +302,7 @@ module Woods
         case unit.type
         when :model then ModelChunker.new(unit).chunk
         when :controller then ControllerChunker.new(unit).chunk
+        when :doc then MarkdownSectionChunker.new(unit).chunk
         else
           return MethodChunker.new(unit).chunk if METHOD_CHUNKABLE_TYPES.include?(unit.type)
 

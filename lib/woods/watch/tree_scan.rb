@@ -40,6 +40,11 @@ module Woods
       # learn the file changed at all.
       NOT_IGNORED_DOTFILE_PREFIXES = ['.env'].freeze
 
+      # Hidden directories that hold documentation the `doc` extractor reads.
+      # Listed as paths rather than segments: `.claude` also holds worktrees
+      # and session state, which stay unwalked.
+      VISIBLE_DOT_DIRECTORIES = %w[.claude/rules .claude/skills .github].freeze
+
       module_function
 
       # Yield every watched file under a root as an absolute path.
@@ -159,7 +164,19 @@ module Woods
         relative = SourcePathEncoding.utf8(relative)
         return true unless relative
 
-        relative.split(File::SEPARATOR).any? { |segment| hidden_segment?(segment) }
+        beyond_visible_dot_directory(relative).split(File::SEPARATOR).any? { |segment| hidden_segment?(segment) }
+      end
+
+      # @param relative [String] path relative to the watched root
+      # @return [String] the part of the path the dotfile filter still judges:
+      #   nothing for a visible dot directory or one of its ancestors, the
+      #   remainder for a path inside one
+      def beyond_visible_dot_directory(relative)
+        VISIBLE_DOT_DIRECTORIES.each do |directory|
+          return '' if relative == directory || directory.start_with?("#{relative}/")
+          return relative.delete_prefix("#{directory}/") if relative.start_with?("#{directory}/")
+        end
+        relative
       end
 
       # @param segment [String] one path component

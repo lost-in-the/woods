@@ -301,6 +301,56 @@ RSpec.describe Woods::Retriever do
       retriever.retrieve('stripe webhook', types: %w[test_mapping])
     end
 
+    describe 'documentation units' do
+      let(:doc_candidate) do
+        Woods::Retrieval::SearchExecutor::Candidate.new(
+          identifier: 'docs/webhooks.md', score: 0.7, source: :vector, metadata: { type: 'doc' }
+        )
+      end
+
+      around do |example|
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        example.run
+      ensure
+        Woods.configuration = original
+      end
+
+      before { allow(ranker_double).to receive(:rank).and_return(mixed_candidates + [doc_candidate]) }
+
+      def assembled_types(**options)
+        types = nil
+        allow(assembler_double).to receive(:assemble) do |kwargs|
+          types = kwargs[:candidates].map { |c| c.metadata[:type] }
+          assembled_context
+        end
+        retriever.retrieve('stripe webhook', **options)
+        types
+      end
+
+      it 'includes doc candidates by default' do
+        expect(assembled_types).to eq(%w[controller rails_source doc])
+      end
+
+      it 'excludes them when retrieve_documentation is off' do
+        Woods.configuration.retrieve_documentation = false
+
+        expect(assembled_types).to eq(%w[controller rails_source])
+      end
+
+      it 'excludes them when WOODS_RETRIEVE_DOCUMENTATION=0, whatever the configuration says' do
+        stub_const('ENV', ENV.to_h.merge('WOODS_RETRIEVE_DOCUMENTATION' => '0'))
+
+        expect(assembled_types).to eq(%w[controller rails_source])
+      end
+
+      it 'still returns them for an explicit types: filter' do
+        Woods.configuration.retrieve_documentation = false
+
+        expect(assembled_types(types: %w[doc])).to eq(%w[doc])
+      end
+    end
+
     it 'accepts exclude_types: for additional exclusions on top of the default' do
       expect(assembler_double).to receive(:assemble) do |kwargs|
         types = kwargs[:candidates].map { |c| c.metadata[:type] }
