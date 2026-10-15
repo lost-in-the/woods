@@ -220,6 +220,10 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { { [[ "$path" != */node_modules/* ]] && [[ "$path" != */vendor/* ]] && [[ "$path" != */public/* ]] && [[ "$path" != */dist/* ]] && [[ "$path" != */build/* ]] && [[ "$path" != */builds/* ]] && [[ "$path" != */tmp/* ]] && [[ "$path" != */coverage/* ]] && [[ "$path" != *.min.js* ]] && [[ "$path" != *.min.mjs* ]] && [[ "$path" != *.d.ts* ]] && { [[ "$path" == *.js ]] || [[ "$path" == *.ts ]] || [[ "$path" == *.jsx ]] || [[ "$path" == *.tsx ]] || [[ "$path" == *.mjs ]]; } && { [[ "$path" == app/assets/javascripts/* ]] || [[ "$path" == app/javascript/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
