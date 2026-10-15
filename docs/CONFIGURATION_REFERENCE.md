@@ -689,7 +689,7 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 40 extractors always run during a full extraction,
+not implemented**. All 41 extractors always run during a full extraction,
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
