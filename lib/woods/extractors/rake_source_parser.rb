@@ -82,16 +82,24 @@ module Woods
       # @return [Result]
       def parse
         program = Prism.parse(@source).value
-        visit(program, Context.new([], [], []))
+        visit_all(program)
         @result.facts = RakeBodyFacts.collect(program)
         @result
       end
 
       private
 
+      # Pre-order, in source order, on an explicit stack: nested namespaces,
+      # call chains and arguments nest as deep as they are long.
+      def visit_all(program)
+        stack = [[program, Context.new([], [], [])]]
+        stack.concat(visit(*stack.pop).reverse) until stack.empty?
+      end
+
+      # @return [Array<Array(Prism::Node, Context)>] the children still to visit
       def visit(node, context)
         case node
-        when nil then nil
+        when nil then []
         when Prism::CallNode then visit_call(node, context)
         when Prism::IfNode then visit_conditional(node, node.subsequent, false, context)
         when Prism::UnlessNode then visit_conditional(node, node.else_clause, true, context)
@@ -102,13 +110,13 @@ module Woods
       end
 
       def visit_children(node, context)
-        node.compact_child_nodes.each { |child| visit(child, context) }
+        node.compact_child_nodes.map { |child| [child, context] }
       end
 
       def visit_call(node, context)
         return visit_dsl_call(node, context) if node.receiver.nil?
         return record_task_class(node, context) if node.name == :new && task_class?(node.receiver)
-        return if node.name == :enhance && record_enhancement(node, context)
+        return [] if node.name == :enhance && record_enhancement(node, context)
 
         visit_children(node, context)
       end
@@ -118,6 +126,7 @@ module Woods
           visit_namespace(node, context)
         elsif node.name == :desc
           @pending_description = description_of(node)
+          []
         elsif DEFINERS.key?(node.name)
           record_definition(node, DEFINERS.fetch(node.name), context)
         else
@@ -127,14 +136,13 @@ module Woods
 
       def visit_namespace(node, context)
         segment = RakeBodyFacts.literal_text(node.arguments&.arguments&.first)
-        visit(node.block.body, Context.new(context.namespace + [segment], context.conditions, context.modules))
+        [[node.block.body, Context.new(context.namespace + [segment], context.conditions, context.modules)]]
       end
 
       def visit_conditional(node, alternative, negated, context)
         predicate = node.predicate.slice[0, CONDITION_LIMIT]
         holds, fails = negated ? ["!(#{predicate})", predicate] : [predicate, "!(#{predicate})"]
-        visit(node.statements, with_condition(context, holds))
-        visit(alternative, with_condition(context, fails))
+        [[node.statements, with_condition(context, holds)], [alternative, with_condition(context, fails)]]
       end
 
       def with_condition(context, condition)
@@ -144,13 +152,13 @@ module Woods
       def visit_method(node, context)
         @result.method_definitions << { name: node.name.to_s, line: node.location.start_line,
                                         facts: RakeBodyFacts.collect(node.body) }
-        visit(node.body, context)
+        [[node.body, context]]
       end
 
       def visit_constant(node, context)
         modules = context.modules + [node.constant_path.slice.delete_prefix('::')]
         @result.constants << modules.join('::')
-        visit(node.body, Context.new(context.namespace, context.conditions, modules))
+        [[node.body, Context.new(context.namespace, context.conditions, modules)]]
       end
 
       def description_of(node)
@@ -171,6 +179,7 @@ module Woods
           node, context, kind: kind, name: name, task_class: nil,
                          arguments: literal_list(argument_nodes).first, prerequisite_node: prerequisite_node
         )
+        []
       end
 
       def record_task_class(node, context)
@@ -182,6 +191,7 @@ module Woods
           node, context, kind: :task_class, name: name, task_class: task_class,
                          arguments: literal_list(argument_nodes).first, prerequisite_node: prerequisite_node
         )
+        []
       end
 
       def build_definition(node, context, kind:, name:, task_class:, arguments:, prerequisite_node:)

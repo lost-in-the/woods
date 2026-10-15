@@ -56,6 +56,26 @@ RSpec.describe 'rake task extraction on adversarial input' do
     expect(parser.parse("task :a do\n  #{path}\nend\n").definitions.first[:facts][:constants]).to eq([path])
   end
 
+  it 'reads a 10,000-segment path under a lowercase head without recursing' do
+    facts = parser.parse("task :a do\n  a#{'::B' * 10_000}\nend\n").definitions.first[:facts]
+
+    expect(facts[:constants]).to eq([])
+    expect(facts[:calls].map { |call| call[:name] }).to eq(['a'])
+  end
+
+  it 'reads a chain of 10,000 calls without recursing' do
+    result = parser.parse("task :a do\n  widgets#{'.next' * 10_000}\nend\nwidgets#{'.next' * 10_000}\n")
+
+    expect(result.definitions.size).to eq(1)
+    expect(result.facts[:calls].map { |call| call[:name] }.uniq).to eq(%w[task widgets])
+  end
+
+  it 'reads 10,000 nested call arguments without recursing' do
+    nested = "#{'f(' * 10_000}1#{')' * 10_000}"
+
+    expect { parser.parse("task :a do\n  #{nested}\nend\n#{nested}\n") }.not_to raise_error
+  end
+
   it 'groups 50,000 definitions of one task' do
     catalog = catalog_for("task a: :b\n" * 50_000)
 
@@ -88,17 +108,9 @@ RSpec.describe 'rake task extraction on adversarial input' do
     expect(paths.task_file?("#{(['d'] * 49_999).join('/')}/x/y.rake", [deep])).to be(false)
   end
 
-  # Whether this depth fits the stack depends on the platform. Either answer
-  # is fine; a hang is not. The extractor rescues the overflow per file.
-  it 'parses or overflows on 3,000 nested namespaces, without hanging' do
-    source = "#{"namespace :a do\n" * 3_000}task :x\n#{"end\n" * 3_000}"
+  it 'reads 10,000 nested namespaces without recursing' do
+    source = "#{"namespace :a do\n" * 10_000}task :x\n#{"end\n" * 10_000}"
 
-    outcome = begin
-      parser.parse(source).definitions.size
-    rescue SystemStackError
-      :overflow
-    end
-
-    expect([1, :overflow]).to include(outcome)
+    expect(parser.parse(source).definitions.size).to eq(1)
   end
 end

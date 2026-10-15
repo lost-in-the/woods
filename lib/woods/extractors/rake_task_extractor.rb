@@ -122,7 +122,7 @@ module Woods
           source = SourceFile.read(file)
           { source: source, parsed: parse_tasks(source) }
         rescue StandardError, SystemStackError => e
-          # Pathologically nested source overflows the stack inside the walk.
+          # The walks are iterative; a pathological file still costs only itself.
           SourceInputs::ConsumerErrors.log(self, "Failed to scan rake tasks in #{file}: #{e.message}")
           nil
         end

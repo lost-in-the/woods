@@ -54,16 +54,33 @@ module Woods
         end
       end
 
-      def walk(node, facts)
+      # Pre-order, in source order, on an explicit stack: a long call chain or
+      # constant path nests as deep as it is long.
+      def walk(root, facts)
+        stack = [root]
+        stack.concat(record(stack.pop, facts).reverse) until stack.empty?
+      end
+
+      # @return [Array<Prism::Node>] the children still to walk
+      def record(node, facts)
         case node
         when Prism::CallNode then record_call(node, facts)
         when Prism::XStringNode then facts[:commands] << node.unescaped
         when Prism::InterpolatedXStringNode then facts[:commands] << template_text(node)
         when Prism::ConstantReadNode then facts[:constants] << node.name.to_s
-        when Prism::ConstantPathNode
-          return facts[:constants] << node.slice.delete_prefix('::') if constant_path?(node)
+        when Prism::ConstantPathNode then return record_constant_path(node, facts)
         end
-        node.compact_child_nodes.each { |child| walk(child, facts) }
+        node.compact_child_nodes
+      end
+
+      # A whole constant path is one reference. Under any other head
+      # (`widgets::Batch`) only the head is walked: the segments hold nothing.
+      def record_constant_path(node, facts)
+        head = path_head(node)
+        return [head] unless constant_head?(head)
+
+        facts[:constants] << node.slice.delete_prefix('::')
+        []
       end
 
       def record_call(node, facts)
@@ -100,9 +117,17 @@ module Woods
 
       # True when every segment is a constant (`A::B`, not `a::B`).
       def constant_path?(node)
-        parent = node.parent
-        parent.nil? || parent.is_a?(Prism::ConstantReadNode) ||
-          (parent.is_a?(Prism::ConstantPathNode) && constant_path?(parent))
+        constant_head?(path_head(node))
+      end
+
+      # @return [Prism::Node, nil] the first segment that is not itself a path, nil for `::A`
+      def path_head(node)
+        node = node.parent while node.is_a?(Prism::ConstantPathNode)
+        node
+      end
+
+      def constant_head?(head)
+        head.nil? || head.is_a?(Prism::ConstantReadNode)
       end
 
       # The leading string arguments of a call, joined the way a shell would
@@ -125,8 +150,9 @@ module Woods
         node.parts.map { |part| part.is_a?(Prism::StringNode) ? part.unescaped : part.slice }.join
       end
 
-      private_class_method :walk, :record_call, :invocation_target, :task_registry?, :rake_application?,
-                           :constant_path?, :command_text, :string_like?, :template_text
+      private_class_method :walk, :record, :record_constant_path, :record_call, :invocation_target, :task_registry?,
+                           :rake_application?, :constant_path?, :path_head, :constant_head?, :command_text,
+                           :string_like?, :template_text
     end
   end
 end
