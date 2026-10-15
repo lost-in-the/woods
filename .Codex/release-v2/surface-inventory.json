@@ -91,6 +91,8 @@
     "include_framework_sources=",
     "incremental_blast_radius_depth",
     "incremental_blast_radius_depth=",
+    "javascript_paths",
+    "javascript_paths=",
     "max_context_tokens",
     "max_context_tokens=",
     "metadata_store",
@@ -191,6 +193,7 @@
     "graphql_operations",
     "i18n",
     "jobs",
+    "js_modules",
     "libs",
     "mailers",
     "managers",
@@ -1049,12 +1052,12 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 139,
+    "configuration_attributes": 141,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
     "executables": 9,
-    "extractor_registrations": 40,
+    "extractor_registrations": 41,
     "index_mcp_resource_templates": 2,
     "index_mcp_resources": 2,
     "index_mcp_tools": 29,
@@ -1062,14 +1065,14 @@
     "public_woods_methods": 9,
     "rake_tasks": 37,
     "tasks_methods": 7,
-    "unit_types": 45
+    "unit_types": 46
   },
   "documentation_claims": {
     "README.md": [],
     "context7.json": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ],
     "docs/AGENT_GUIDE.md": [],
@@ -1080,7 +1083,7 @@
     "docs/CONFIGURATION_REFERENCE.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ],
     "docs/CONSOLE_MCP_SETUP.md": [],
@@ -1095,41 +1098,41 @@
     "docs/EXTRACTOR_REFERENCE.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "unit_types",
-        "count": 45
+        "count": 46
       },
       {
         "surface": "unit_types",
-        "count": 45
+        "count": 46
       },
       {
         "surface": "unit_types",
-        "count": 45
+        "count": 46
       }
     ],
     "docs/FAQ.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "unit_types",
-        "count": 45
+        "count": 46
       }
     ],
     "docs/GETTING_STARTED.md": [],
@@ -1138,11 +1141,11 @@
     "docs/INTERNALS.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       },
       {
         "surface": "unit_types",
-        "count": 45
+        "count": 46
       },
       {
         "surface": "console_mcp_read_tools",
@@ -1176,7 +1179,7 @@
     "docs/README.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ],
     "docs/RETRIEVAL_GUIDE.md": [],
@@ -1186,7 +1189,7 @@
     "docs/TROUBLESHOOTING.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ],
     "docs/UNBLOCKED_INTEGRATION.md": [],
@@ -1194,13 +1197,13 @@
     "docs/WATCH_DAEMON.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ],
     "docs/WHY_WOODS.md": [
       {
         "surface": "extractor_registrations",
-        "count": 40
+        "count": 41
       }
     ]
   }
