@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../console/credential_scanner'
+require_relative 'config_source_guard'
 
 module Woods
   module Extractors
@@ -8,7 +9,10 @@ module Woods
     #
     # Applies the shape patterns of {Woods::Console::CredentialScanner} line by
     # line, so a published `doc` unit carries `[REDACTED]` where a Console
-    # response would. Three things differ from scanning the document whole:
+    # response would, then the URL-userinfo pass configuration source gets
+    # ({ConfigSourceGuard.redact_url_userinfo}): `https://token@host` keeps
+    # its scheme and host. Three things differ from scanning the document
+    # whole:
     #
     # * PEM private key blocks are found by a line state machine and every line
     #   of the block is replaced, so line numbers survive.
@@ -106,10 +110,14 @@ module Woods
         REDACTED
       end
 
+      # The scanner's shapes, then the URL-userinfo pass configuration
+      # source gets, so `https://token@host` is withheld in both.
       def scan(text)
         scanned, counts = @scanner.scan(text)
         counts.each { |name, count| @counts[name.to_s] += count }
-        scanned
+        return scanned unless scanned.include?('://')
+
+        ConfigSourceGuard.redact_url_userinfo(scanned) { @counts['url_userinfo'] += 1 }
       end
     end
   end

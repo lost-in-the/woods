@@ -81,6 +81,8 @@ RSpec.describe 'Documentation scan complexity' do
     'JWT near-matches as many words' => 'eyJ-eyJ-eyJ.eyJ-eyJ ' * 10_000,
     'JWT near-matches on lines just under the scan cap' => "#{'eyJ-' * 255}\n" * 800,
     'base64-shaped lines just under the scan cap' => "#{'Ab+/' * 255}\n" * 800,
+    'URL userinfo near-matches without an @' => "https://#{'a' * 200} " * 2000,
+    'URL userinfo near-matches on one long line' => "https://#{'a:' * 50_000}",
     'percent escapes on one long line' => '%41' * 50_000,
     'a base64-shaped run' => 'A' * 200_000,
     'connection string near-matches' => 'postgres://user:pass ' * 10_000,

@@ -26,6 +26,28 @@ RSpec.describe Woods::Extractors::DocRedaction do
     expect(counts).to eq('database_url_with_password' => 1)
   end
 
+  it 'redacts URL userinfo the way configuration source is redacted, and leaves plain URLs alone' do
+    source = "# Setup\n\nexport DATABASE_URL=postgres://ledger:hunter2@db.internal/ledger\n" \
+             "git clone https://ghtoken123@git.example.test/widgets/importer.git\n" \
+             "Mirror at ftp://widgets:pw@files.example.test/pub and see https://example.test/docs/setup.\n" \
+             "Clone over SSH with git@git.example.test:widgets/importer.git.\n"
+    text, counts = redact(source)
+
+    expect(text).to eq("# Setup\n\nexport DATABASE_URL=[REDACTED]\n" \
+                       "git clone https://[REDACTED]@git.example.test/widgets/importer.git\n" \
+                       "Mirror at ftp://[REDACTED]@files.example.test/pub and see https://example.test/docs/setup.\n" \
+                       "Clone over SSH with git@git.example.test:widgets/importer.git.\n")
+    expect(text).not_to include('hunter2', 'ghtoken123', 'widgets:pw')
+    expect(counts).to eq('database_url_with_password' => 1, 'url_userinfo' => 2)
+  end
+
+  it 'redacts URL userinfo inside an oversize line, word by word' do
+    text, counts = redact("#{'filler ' * 200}https://ghtoken123@git.example.test/x #{'filler ' * 200}\n")
+
+    expect(text).to include('https://[REDACTED]@git.example.test/x')
+    expect(counts).to eq('url_userinfo' => 1)
+  end
+
   it 'redacts every line of a PEM private key block and keeps the line count' do
     source = "before\n-----BEGIN RSA PRIVATE KEY-----\nMIIEow\nIBAAK\n-----END RSA PRIVATE KEY-----\nafter\n"
     text, counts = redact(source)

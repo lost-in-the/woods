@@ -65,10 +65,22 @@ module Woods
       # @param source [String] file text
       # @return [String] the text with credential-bearing substrings replaced
       def redact(source)
-        text = scanner.scan(source).first
-        text = text.gsub(URL_USERINFO) { "#{Regexp.last_match(1)}#{REDACTED}@" }
+        text = redact_url_userinfo(scanner.scan(source).first)
         text = redact_private_keys(text) if text.include?(PRIVATE_KEY_BEGIN)
         redact_assigned_literals(text)
+      end
+
+      # Replace the userinfo of every URL (`https://token@host`,
+      # `ftp://user:secret@host`) with the marker, keeping scheme and host.
+      #
+      # @param text [String]
+      # @yield once per replacement, when a block is given (to count them)
+      # @return [String]
+      def redact_url_userinfo(text)
+        text.gsub(URL_USERINFO) do
+          yield if block_given?
+          "#{Regexp.last_match(1)}#{REDACTED}@"
+        end
       end
 
       # Private key blocks are handled by {.redact_private_keys}, a line pass,
