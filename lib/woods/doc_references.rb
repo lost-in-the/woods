@@ -141,18 +141,19 @@ module Woods
     module Extraction
       private
 
+      # Runs after the graph rebuild and reads the graph, as the incremental
+      # pass does: a node's paths (a rake task's every defining file, a
+      # library's contributors) are what both modes resolve a path against.
       def enrich_doc_references_full
         docs = Array(@results[:docs])
         return if docs.empty?
 
-        records = @results.values.flatten.map do |unit|
-          doc_reference_record(unit.type, unit.identifier, SourceContributors.paths(unit))
-        end
-        resolver = Resolver.new(Registry.new(records))
+        resolver = Resolver.new(Registry.new(doc_reference_graph_records))
         docs.each do |unit|
           edges, = resolve_doc_candidates(resolver, unit.identifier, unit.metadata, %i[mentions links kind text path
                                                                                        resolved])
           unit.dependencies = edges.map { |target, type, via| { type: type.to_sym, target: target, via: via.to_sym } }
+          @dependency_graph.register(unit)
         end
       end
 
