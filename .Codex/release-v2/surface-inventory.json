@@ -75,6 +75,7 @@
     "external_table_consumers_path=",
     "extract_navigation_edges",
     "extract_navigation_edges=",
+    "extraction_fingerprint",
     "extractors",
     "extractors=",
     "gem_configs",
@@ -1049,7 +1050,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 139,
+    "configuration_attributes": 140,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
