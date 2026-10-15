@@ -391,6 +391,13 @@ RSpec.describe Woods::PathDispatcher do
         described_class.whole_app_rules.find { |rule| rule.extractor_key == :js_modules }
       end
 
+      it 'describes each glob with its own directory and extensions' do
+        shapes = described_class.whole_app_rules.select { |rule| rule.extractor_key == :js_modules }
+                                .map { |rule| [rule.dirs, rule.extensions] }
+
+        expect(shapes).to eq([[%w[app/assets/javascripts], %w[.js]], [%w[app/javascript], %w[.js .ts .jsx .tsx .mjs]]])
+      end
+
       before { Woods.configuration = Woods::Configuration.new }
 
       it 'triggers a js_modules re-run on a module under the default roots' do
@@ -422,7 +429,7 @@ RSpec.describe Woods::PathDispatcher do
 
         expect(JSON.parse(JSON.generate(js_rule.to_h)))
           .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?',
-                      'extensions' => %w[.js .ts .jsx .tsx .mjs])
+                      'extensions' => %w[.ts])
         expect(js_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
       end
     end

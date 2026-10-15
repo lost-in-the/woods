@@ -70,11 +70,39 @@ module Woods
     #
     # @return [Array<String>] sorted, without globs that have no literal prefix
     def directories
+      globs.filter_map { |glob| directory_of(glob) }.uniq.sort
+    end
+
+    # @param glob [String]
+    # @return [String, nil] the segments before the first wildcard
+    def directory_of(glob)
+      segments = glob.split('/')
+      prefix = segments.take_while { |segment| !segment.match?(GLOB_CHARACTERS) }
+      prefix.pop if prefix.size == segments.size
+      prefix.join('/') unless prefix.empty?
+    end
+
+    # @param segment [String] a glob's final path segment
+    # @return [Array<String>] the module extensions it can end in, in {EXTENSIONS} order
+    def glob_extensions(segment)
+      named = segment[/\.\{([^{}]*)\}\z/, 1]&.split(',')&.map { |ext| ".#{ext}" } ||
+              [segment[/\.[A-Za-z0-9]+\z/]].compact
+      named.empty? ? EXTENSIONS : EXTENSIONS & named
+    end
+
+    # Each glob's literal directory with the module extensions its final
+    # segment can match, for consumers that test a directory and a suffix
+    # (the dispatcher rules the generated shell predicate is projected from).
+    # A segment naming no extension (`*`, `**/*`) accepts all of them; one
+    # naming only non-module extensions can match nothing and is dropped.
+    #
+    # @return [Array<Array(String, Array<String>)>] sorted by directory
+    def shapes
       globs.filter_map do |glob|
-        prefix = glob.split('/').take_while { |segment| !segment.match?(GLOB_CHARACTERS) }
-        prefix.pop if prefix.size == glob.split('/').size
-        prefix.join('/') unless prefix.empty?
-      end.uniq.sort
+        directory = directory_of(glob)
+        extensions = glob_extensions(glob.split('/').last)
+        [directory, extensions] if directory && extensions.any?
+      end.uniq.sort_by(&:first)
     end
 
     # @param value [Object] candidate +javascript_paths+ value
