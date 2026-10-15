@@ -1899,6 +1899,16 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(edges(index, 'docs/tasks.md')).to eq([%w[rake_task audit:run documents]])
       expect(differences(index, full_extraction)).to be_empty
     end
+
+    it 'resolves a path to every file that defines a task, in both modes' do
+      index = run_sequence([
+                             -> { write_file('lib/tasks/ledger.rake', rake_source('ledger', %w[close])) },
+                             -> { write_file('lib/tasks/ledger_more.rake', rake_source('ledger', %w[close])) },
+                             -> { write_file('docs/closing.md', guide('Edit `lib/tasks/ledger_more.rake`.')) }
+                           ])
+
+      expect(edges(index, 'docs/closing.md')).to eq([%w[rake_task ledger:close documents]])
+    end
   end
 
   describe 'gap 4 — whole-app unit types' do

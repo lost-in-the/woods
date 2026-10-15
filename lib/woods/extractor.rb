@@ -545,7 +545,6 @@ module Woods
       # registration copies metadata[:package] onto the node (#280).
       profile_phase('package annotation') { annotate_packages }
       profile_phase('source references') { enrich_source_references_full }
-      profile_phase('doc references') { enrich_doc_references_full }
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
       # `#remove`/`#unregister`, so surgical removal is now possible — but a
@@ -556,6 +555,7 @@ module Woods
         @dependency_graph = DependencyGraph.new
         @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
       end
+      profile_phase('doc references') { enrich_doc_references_full }
 
       # Phase 2: Resolve dependents (reverse dependencies)
       Rails.logger.info '[Woods] Resolving dependents...'
