@@ -2,6 +2,8 @@
 
 require_relative '../source_inputs/consumer_errors'
 require_relative '../source_file'
+require_relative '../git_source_filter'
+require_relative 'config_file_extractor'
 require_relative '../markdown/line_scan'
 require_relative '../chunking/markdown_section_chunker'
 require_relative '../watch/tree_scan'
@@ -19,6 +21,11 @@ module Woods
     # may name an indexed unit. Dependencies start empty: whether a mention or
     # a link names a unit depends on the whole index, so
     # {Woods::DocReferences} resolves them after every extractor has run.
+    #
+    # A secret-named file ({ConfigFileExtractor.secret_path?}) is never read,
+    # nor is one a symlink reaches outside the documentation roots. In a Git
+    # checkout, ignored and untracked files are skipped like other
+    # configuration sources.
     #
     # Reads bytes only. No constant is loaded and no Rails API is called.
     #
@@ -55,7 +62,8 @@ module Woods
           return false if Watch::TreeScan.hidden?(relative_path) ||
                           Watch::TreeScan.ignored?(relative_path, Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES)
 
-          matches?(documentation_paths, relative_path) && !matches?(documentation_exclude, relative_path)
+          matches?(documentation_paths, relative_path) && !matches?(documentation_exclude, relative_path) &&
+            !ConfigFileExtractor.secret_path?(relative_path)
         end
 
         # @return [Array<String>] configured root-relative globs
@@ -102,6 +110,7 @@ module Woods
       def extract_doc_file(file_path)
         relative = file_path.to_s.delete_prefix("#{@root}/")
         return nil unless self.class.doc_path?(relative) && File.file?(file_path) && documentation_target?(file_path)
+        return nil if (@git_filter ||= GitSourceFilter.new(root: @root)).skip_reason(relative)
         return skip_oversize(relative) if File.size(file_path) > MAX_DOC_BYTES
 
         build_unit(relative, file_path, SourceFile.read(file_path))
