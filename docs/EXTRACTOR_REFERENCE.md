@@ -299,6 +299,17 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - `perform_params` uses the same syntax-aware signature parsing as service initializers and preserves its `name`, `splat` (`single`/`double`/null), and `has_default` fields. Keyword defaults do not invent additional argument names.
 - Records what triggers this job (reverse lookup via dependency graph after extraction)
 - Supports both ActiveJob and Sidekiq native workers
+- **Generated job classes (included in Woods 2.2).** A class macro can build a job with `Class.new` and bind it with `const_set`, so `Widget::SyncNowWorker` exists at runtime with no declaration in any file. Such a class becomes a job unit when its generator is application code:
+
+  | Field | Value |
+  |---|---|
+  | `file_path` | The file that calls the generator (`app/models/widget.rb`). |
+  | `source_code` | The job banner plus the declaring line(s) only (`async_method :sync_now`), up to the call's arguments. A block body and the generator's body are left out. |
+  | `metadata.generated` | `true` |
+  | `metadata.generated_by` | The generator method's name (`async_method`), or `null` when the binding line names none. |
+  | `job_type`, `queue`, `sidekiq_options`, `perform_params`, `parent_class` | Read from the runtime class. A queue computed by a block is `null`. |
+
+  The declaring line is found in the file of the constant's owner: a call of the generator whose symbol or string argument spells the leading words of the constant's name (`:sync_now` for `SyncNowWorker`). When no call matches (the macro is called through `send`, or from an included module), `file_path` and `source_code` are the generator's own binding line. A constant assignment (`SyncWorker = Class.new(...)`) is its own declaring line. A class a gem's generator binds gets no unit. The owner keeps its own unit and type; enqueue edges to the generated class (`Widget::SyncNowWorker.perform_async`) resolve to the job unit.
 
 **Example output (abbreviated):**
 

@@ -77,7 +77,8 @@ module Woods
       # the application whose ancestry includes ActiveJob::Base or a Sidekiq
       # job module ({JobAncestry.admitted?}). A job defined in a model file,
       # or a leaf that inherits everything from a parent job, is reachable
-      # only this way.
+      # only this way. So is a job class a macro generated with `Class.new`
+      # and `const_set` ({JobAncestry.generated_site}), which no file declares.
       #
       # Shared with the incremental path, which re-extracts a job by class
       # when re-deriving it from its file names a different constant — the
@@ -88,7 +89,10 @@ module Woods
         lookup = SourceReferences::RuntimeLookup.new
         application_jobs = defined?(ApplicationJob) ? ApplicationJob.descendants : []
         app_root = Rails.root.to_s
-        ancestry_jobs = JobAncestry.candidates.select { |klass| JobAncestry.admitted?(klass, app_root: app_root) }
+        @generated_sites = GeneratedJobSite.new(app_root: app_root)
+        ancestry_jobs = JobAncestry.candidates.select do |klass|
+          JobAncestry.admitted?(klass, app_root: app_root) || generated_site(klass)
+        end
         (application_jobs + ancestry_jobs).uniq.select do |klass|
           klass.name && lookup.call("::#{klass.name}", allow_private: true)[:value].equal?(klass)
         end
@@ -128,6 +132,9 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit
       def extract_job_class(job_class)
         return nil if job_class.name.nil?
+
+        site = generated_site(job_class)
+        return extract_generated_job(job_class, site) if site
 
         file_path = source_file_for(job_class)
         source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
@@ -174,6 +181,68 @@ module Woods
           source.match?(/def perform/)
       end
 
+      # @param job_class [Class]
+      # @return [GeneratedJobSite::Site, nil] see {JobAncestry.generated_site}
+      def generated_site(job_class)
+        @generated_sites ||= GeneratedJobSite.new(app_root: Rails.root.to_s)
+        JobAncestry.generated_site(job_class, app_root: Rails.root.to_s, resolver: @generated_sites)
+      end
+
+      # A job class no file declares. Its unit holds the declaring line(s)
+      # only: the body belongs to the generator, which every class it builds
+      # shares. Configuration and the perform signature therefore come from
+      # the runtime class, not from source.
+      #
+      # @param job_class [Class]
+      # @param site [GeneratedJobSite::Site]
+      # @return [ExtractedUnit]
+      def extract_generated_job(job_class, site)
+        unit = ExtractedUnit.new(type: :job, identifier: job_class.name, file_path: site.file_path)
+        metadata = generated_metadata(job_class, site)
+
+        unit.namespace = extract_namespace(job_class.name)
+        unit.source_code = annotation_banner(job_class.name, metadata[:job_type], metadata[:queue]) + site.source
+        unit.metadata = metadata
+        unit.dependencies = extract_dependencies(site.source, job_class.name)
+        unit
+      end
+
+      def generated_metadata(job_class, site)
+        metadata = extract_metadata_from_source('', job_class.name)
+        options = job_class.sidekiq_options_hash if job_class.respond_to?(:sidekiq_options_hash)
+        parent = job_class.superclass&.name
+        metadata.merge(
+          job_type: runtime_job_type(job_class) || :unknown,
+          parent_class: parent == 'Object' ? nil : parent,
+          queue: runtime_queue(job_class, options),
+          sidekiq_options: options || {},
+          perform_params: runtime_perform_params(job_class),
+          loc: count_loc(site.source),
+          generated: true,
+          generated_by: site.generated_by
+        )
+      end
+
+      # A queue the class states as a plain name. A queue computed by a block
+      # has no stable spelling and is left out.
+      def runtime_queue(job_class, sidekiq_options)
+        queue = sidekiq_options.is_a?(Hash) && (sidekiq_options['queue'] || sidekiq_options[:queue])
+        queue ||= job_class.queue_name if job_class.respond_to?(:queue_name)
+        queue.to_s if queue.is_a?(String) || queue.is_a?(Symbol)
+      end
+
+      # The shape {#extract_perform_params} reads from source, from the method.
+      def runtime_perform_params(job_class)
+        return [] unless job_class.method_defined?(:perform)
+
+        job_class.instance_method(:perform).parameters.filter_map do |kind, name|
+          next if name.nil? || kind == :block
+
+          splat = { rest: :single, keyrest: :double }[kind]
+          { name: name.to_s, splat: splat, has_default: %i[opt key].include?(kind) }
+        end
+      end
+
       # Runtime ancestry, for a class whose source carries no job marker.
       #
       # @param job_class [Class]
@@ -214,9 +283,10 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def annotate_source(source, class_name)
-        job_type = detect_job_type(source)
-        queue = extract_queue(source)
+        "#{annotation_banner(class_name, detect_job_type(source), extract_queue(source))}#{source}\n"
+      end
 
+      def annotation_banner(class_name, job_type, queue)
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
           # ║ Job: #{class_name.ljust(62)}║
@@ -224,7 +294,6 @@ module Woods
           # ║ Queue: #{(queue || 'default').ljust(60)}║
           # ╚═══════════════════════════════════════════════════════════════════════╝
 
-          #{source}
         ANNOTATION
       end
 

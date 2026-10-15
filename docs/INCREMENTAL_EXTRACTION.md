@@ -30,9 +30,24 @@ Two differences are tolerated, and nothing else:
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
 rewrites the unit in both compact and pretty JSON output. On supporting
-Woods 2.1 writers, an already registered unit whose complete serialized bytes
-match also stays out of the touched set, Git enrichment and dependents updates.
+Woods 2.1 writers, an already registered unit that re-extracts to the same
+result also stays out of the touched set, Git enrichment and dependents updates.
 Derived metadata or dependency differences still use normal registration.
+
+"The same result" compares what the extractor produced. The published unit
+also carries what the second pass adds after registration: `dependents`, Git
+facts, and the edges the source-reference pass resolved. A fresh unit has none
+of them yet, so they are left out of the comparison (included in Woods 2.2;
+earlier writers compared them, and a unit with one dependent never matched).
+Controller flow annotations are compared, so a re-extracted controller with
+precomputed flows is always registered and its flows reassembled.
+
+| Retained unit | What still happens |
+|---|---|
+| Gains or loses a caller | Its `dependents` are rewritten by the second pass. |
+| Its source file is in the change set | Git facts are rechecked; a moved history rewrites the unit and counts it as touched. |
+| Targeted refresh (no change set) | Git facts are rechecked for every retained unit. |
+| Holds source-reference edges | Edge ownership carries into the next `source_references.json`. |
 
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
@@ -543,10 +558,18 @@ serializer nested in a controller retains its own identity; the controller does
 not become a serializer unit. Runtime objects left behind by a reload cannot
 claim a name now owned by another constant.
 
-All members of those two families count as refreshed and participate in graph,
-source-reference and metadata maintenance, even when only one file changed.
-Unit-file writes retain the existing byte-equality check; this does not promise
-a single-file write cost or an unchanged manifest for such a batch.
+Generated job classes (included in Woods 2.2; see the
+[JobExtractor reference](EXTRACTOR_REFERENCE.md#jobextractor)) follow the same
+path. Adding or removing the line that calls the generator is a Ruby change, so
+the job family is re-run against the reloaded runtime: a new constant gains a
+unit, and a constant the reload removed loses it.
+
+All members of those two families are re-extracted, even when only one file
+changed. Included in Woods 2.2: a member that re-extracts to the same result is
+retained, so it is neither rewritten nor counted as touched. A Ruby change that
+alters no unit (a byte-identical rewrite, or a file no extractor claims) ends
+as a no-op and publishes no generation. A comment or whitespace edit inside an
+indexed file is not such a change: the unit's `source_code` holds the file.
 
 Discovery-based removal requires a complete eager load. Failed or reported-partial discovery
 refuses publication, preserving the previous generation; incomplete eager

@@ -428,11 +428,27 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       Woods.configuration.output_dir = previous_output
     end
 
+    # An incremental run or refresh that alters no unit publishes nothing, and
+    # spec/dummy is never edited here. Making the published unit stale gives
+    # the run real work, so it has to publish. The file is replaced, not
+    # rewritten in place: payload files are hardlinked across generations.
+    def stale_published_unit(dir, type_dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      path = Dir[payload.join(type_dir, '*.json').to_s].find do |file|
+        JSON.parse(File.read(file))['identifier'] == identifier
+      end
+      data = JSON.parse(File.read(path))
+      data['source_code'] = "# stale\n#{data['source_code']}"
+      File.write("#{path}.stale", JSON.generate(data))
+      File.rename("#{path}.stale", path)
+    end
+
     %i[extract! extract_changed!].each do |operation|
       it "raises from #{operation} and retains the prior published generation" do
         dir = Woods.configuration.output_dir.to_s
         marker = File.join(dir, 'generation.json')
         before_bytes = File.binread(marker)
+        stale_published_unit(dir, 'models', 'Post') if operation == :extract_changed!
         allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |method, path, content|
           raise Errno::EACCES, 'publication blocked' if path.to_s == marker
 
@@ -454,6 +470,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         generation = Woods::Generation.new(output_dir: dir)
         before_token = generation.current.token
         before_manifest = File.binread(generation.payload_dir.join('manifest.json'))
+        stale_published_unit(dir, 'controllers', 'PostsController') unless mode == :full
         failed = Woods::Extractors::RouteExtractor
         allow_any_instance_of(failed).to receive(:extract_all)
           .and_raise(Woods::ExtractionError, 'route table unavailable')

@@ -13,6 +13,7 @@ require_relative 'version'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
+require_relative 'extracted_form'
 require_relative 'dependency_graph'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
@@ -645,6 +646,7 @@ module Woods
               'run woods:extract after applying schema/configuration changes'
       end
       prepare_incremental_run(operation: 'incremental')
+      @changed_source_paths = change_set.absolute_paths.to_set
       affected_types = Set.new
 
       # Blast radius from the pre-change graph, bounded by
@@ -707,7 +709,7 @@ module Woods
 
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
-      finalize_incremental_unit_json(affected_types)
+      touched.merge(finalize_incremental_unit_json(affected_types).to_a)
 
       # Regenerate type indexes for affected types
       profile_phase('type index') do
@@ -774,7 +776,7 @@ module Woods
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
-      finalize_incremental_unit_json(affected_types)
+      touched.merge(finalize_incremental_unit_json(affected_types).to_a)
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
@@ -906,6 +908,10 @@ module Woods
 
       @dependents_dirty = Set.new
       @incremental_written = {}
+      @retained_units = Set.new
+      @git_recheck = Set.new
+      @changed_source_paths = nil
+      @reference_additions = nil
       @library_replacement_touched = nil
       @identity_claims = {}
       # nil = no scope was computed for this run, so every re-extracted
@@ -3889,15 +3895,60 @@ module Woods
       end
     end
 
-    # Only exact serialized equality (apart from the extraction timestamp)
-    # permits skipping graph and enrichment work. Derived metadata or changed
-    # edges keep the ordinary registration path; identity checks already ran.
+    # Only an identical extraction permits skipping graph and enrichment work:
+    # the published unit and the fresh one agree in {ExtractedForm}, which
+    # leaves out what the second pass adds after registration (`dependents`,
+    # Git facts, source-reference edges). A fresh unit carries none of those,
+    # so compared whole it never matched a published unit that had even one
+    # dependent. Changed source, metadata or extractor edges keep the ordinary
+    # registration path; identity checks already ran.
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      identical_on_disk?(type_dir.join(collision_safe_filename(unit.identifier)), json_serialize(normalized.to_h))
+      fresh = ExtractedForm.of(JSON.parse(JSON.generate(normalized.to_h)))
+      path = type_dir.join(collision_safe_filename(unit.identifier))
+      return false unless fresh == published_extracted_form(path, unit)
+
+      retain_unit(unit)
+      true
+    end
+
+    # @return [String, nil] the published unit's {ExtractedForm}; nil when the
+    #   file is missing, unreadable, or disagrees with its reference ownership
+    def published_extracted_form(path, unit)
+      return nil unless File.exist?(path)
+
+      key = [unit.type.to_s, unit.identifier]
+      ExtractedForm.of(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+    rescue StandardError
+      nil
+    end
+
+    # Edges the previous source-reference pass added, by typed identity.
+    #
+    # @return [Hash{Array(String, String) => Array<Hash>}]
+    def reference_additions
+      @reference_additions ||= Array(@source_reference_baseline&.fetch('owners', nil)).to_h do |owner|
+        [owner.values_at('type', 'identifier'), owner['added'] || []]
+      end
+    end
+
+    # A unit re-extracted to the same extracted form keeps its published
+    # JSON. Its Git facts can still have moved when its own source is part of
+    # this change (a commit that edits the file without altering the unit), so
+    # those are rechecked in the second pass. A targeted refresh has no change
+    # set and rechecks every retained unit.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [void]
+    def retain_unit(unit)
+      (@retained_units ||= Set.new).add([unit.type.to_s, unit.identifier])
+      changed = @changed_source_paths
+      return unless changed.nil? || SourceContributors.paths(unit).any? { |path| changed.include?(path.to_s) }
+
+      (@git_recheck ||= Set.new).add(unit.identifier)
     end
 
     # GraphQL kinds share a payload filename. Validate retained source ownership
@@ -3998,18 +4049,25 @@ module Woods
     # and `metadata.git` frozen at whatever the last full run wrote —
     # divergence that compounds run over run in an incremental CI chain.
     #
+    # Retained units ({#retain_unit}) join the Git half only. One whose Git
+    # facts moved is reported back, because nothing else marks it touched.
+    #
     # @param affected_types [Set<Symbol>]
-    # @return [void]
+    # @return [Set<String>] retained identifiers whose Git facts were rewritten
     def finalize_incremental_unit_json(affected_types)
       dependents_dirty = @dependents_dirty || Set.new
-      git_dirty = @incremental_written || {}
-      git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.keys) }
+      rechecked = (@git_recheck || Set.new) - (@incremental_written || {}).keys
+      git_dirty = (@incremental_written || {}).keys.to_set | rechecked
+      git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.to_a) }
 
       profile_phase('unit finalization') do
-        (dependents_dirty | git_dirty.keys).each do |identifier|
-          rewrite_unit_json(identifier, affected_types,
-                            refresh_dependents: dependents_dirty.include?(identifier),
-                            git_data: git_dirty.key?(identifier) ? git_data : nil)
+        (dependents_dirty | git_dirty).each_with_object(Set.new) do |identifier, moved|
+          if rechecked.include?(identifier) && !dependents_dirty.include?(identifier)
+            moved.add(identifier) if refresh_retained_git(identifier, affected_types, git_data).positive?
+          else
+            rewrite_unit_json(identifier, affected_types, refresh_dependents: dependents_dirty.include?(identifier),
+                                                          git_data: git_dirty.include?(identifier) ? git_data : nil)
+          end
         end
       end
     end
@@ -4031,6 +4089,18 @@ module Woods
       end
     end
 
+    # The Git half of {#rewrite_unit_json} for a retained unit ({#retain_unit}).
+    #
+    # @param identifier [String]
+    # @param affected_types [Set<Symbol>]
+    # @param git_data [Hash{String => Hash}]
+    # @return [Integer] how many of the identifier's unit files were rewritten
+    def refresh_retained_git(identifier, affected_types, git_data)
+      @dependency_graph.node_types(identifier).count do |type|
+        rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents: false, git_data: git_data)
+      end
+    end
+
     # One (identifier, type) pair's JSON. The `dependents` list is a property
     # of the identifier, not of the type, so every file the identifier owns
     # gets the same refreshed list — which is what a full extraction writes.
@@ -4049,13 +4119,13 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
     # @param git_data [Hash{String => Hash}, nil]
-    # @return [void]
+    # @return [Boolean] whether the unit file was rewritten
     def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git_data:)
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
-      return unless extractor_key
+      return false unless extractor_key
 
       path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
-      return unless File.exist?(path)
+      return false unless File.exist?(path)
 
       data = JSON.parse(AtomicFile.read(path))
       # Serialized comparison, not `data.dup`: the git patch mutates the
@@ -4076,12 +4146,14 @@ module Woods
         annotate_node_from_git(identifier, type, git)
       end
 
-      return if JSON.generate(data) == before
+      return false if JSON.generate(data) == before
 
       AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
       affected_types&.add(extractor_key)
+      true
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
+      false
     end
 
     # This (identifier, type) pair's own git data, looked up by its own
