@@ -580,6 +580,12 @@ RSpec.describe Woods::Configuration do
       expect(config.event_paths).to eq(%w[app lib/events])
     end
 
+    it 'normalizes ./, repeated slashes and . segments so full and incremental runs agree on a root' do
+      config.event_paths = ['./lib', 'lib//events', 'app/./services', '.', './']
+
+      expect(config.event_paths).to eq(%w[lib lib/events app/services . .])
+    end
+
     it 'rejects a value that is not a non-empty Array' do
       expect { config.event_paths = 'lib' }
         .to raise_error(Woods::ConfigurationError, /event_paths must be a non-empty Array/)

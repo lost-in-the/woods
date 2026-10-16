@@ -479,8 +479,9 @@ module Woods
 
     # Directories {Woods::Extractors::EventExtractor} scans for publish and
     # subscribe sites, relative to Rails.root. Defaults to +%w[app]+; a host
-    # app whose event wrapper lives in +lib/+ adds it. A trailing slash is
-    # dropped. Changing it needs a full extraction.
+    # app whose event wrapper lives in +lib/+ adds it. Each entry is normalized
+    # (+./lib/+ and +lib//+ name +lib+; +.+ is the root itself), so full and
+    # incremental runs agree on it. Changing it needs a full extraction.
     #
     # @example
     #   config.event_paths = %w[app lib]
@@ -754,7 +755,7 @@ module Woods
             "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
     end
 
-    # @return [String] +entry+ without a trailing slash, frozen
+    # @return [String] +entry+ without empty or +.+ segments (+.+ for the root itself), frozen
     # @raise [ConfigurationError] unless +entry+ is a relative path inside Rails.root
     def validate_event_path!(entry, index)
       label = "event_paths[#{index}]"
@@ -765,7 +766,8 @@ module Woods
         raise ConfigurationError, "#{label} must be relative to Rails.root, got #{entry.inspect}"
       end
 
-      entry.chomp('/').freeze
+      segments = entry.split('/').reject { |segment| segment.empty? || segment == '.' }
+      (segments.empty? ? '.' : segments.join('/')).freeze
     end
 
     # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
