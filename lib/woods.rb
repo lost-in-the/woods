@@ -775,9 +775,13 @@ module Woods
       (segments.empty? ? '.' : segments.join('/')).freeze
     end
 
+    # Brace delimiters count as segment boundaries, so +{../shared,app}+ is
+    # refused like +../shared+.
+    #
     # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
     def validate_relative_glob!(glob, index, name = 'unclaimed_ruby_paths')
-      return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') && !glob.split('/').include?('..')
+      return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') &&
+                !glob.tr('{},', '///').split('/').include?('..')
 
       raise ConfigurationError, "#{name}[#{index}] must be a relative glob, got #{glob.inspect}"
     end

@@ -828,6 +828,20 @@ RSpec.describe Woods::Configuration do
       end
     end
 
+    it 'rejects a parent traversal hidden inside a brace alternation' do
+      ['{../shared,app}/**/*.rb', 'app/{lib,..}/*.rb', 'app{/..,}/*.rb'].each do |glob|
+        expect { config.unclaimed_ruby_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/), glob
+      end
+    end
+
+    it 'still accepts brace alternations and dotted names that stay inside the root' do
+      config.unclaimed_ruby_paths = ['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb']
+
+      expect(config.unclaimed_ruby_paths)
+        .to eq(['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb'])
+    end
+
     it 'keeps the previous value when an entry is invalid' do
       config.unclaimed_ruby_paths = ['app/helpers/**/*.rb']
 
