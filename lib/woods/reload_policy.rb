@@ -253,9 +253,14 @@ module Woods
 
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
-        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
-        ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path) ||
-        Extractors::RakeTaskPaths.covers?(path) || JavascriptPaths.source?(path)
+        REEXTRACT_BASENAMES.include?(File.basename(path)) || configured_bytes_input?(path)
+    end
+
+    # Inputs whose location comes from configuration, read as bytes.
+    def configured_bytes_input?(path)
+      GraphQLDocumentPaths.match?(path) || ConfiguredInputs.bytes_input?(path) ||
+        ConfiguredInputs.test_support?(path) || Extractors::RakeTaskPaths.covers?(path) ||
+        JavascriptPaths.source?(path)
     end
 
     def under?(path, directories)
