@@ -16,6 +16,8 @@ require 'woods/extractors/config_source_guard'
 # which hides most polynomial patterns; the Ruby 3.0/3.1 rows catch a
 # regression through the Timeout fallback.
 RSpec.describe 'Config source scan complexity' do
+  include WallClockBudget
+
   include_context 'extractor setup'
 
   budget_seconds = 1.0
@@ -42,18 +44,6 @@ RSpec.describe 'Config source scan complexity' do
     else
       Timeout.timeout(budget_seconds * 5) { example.run }
     end
-  end
-
-  # Coverage instrumentation slows the Ruby around each scan, so under
-  # COVERAGE the elapsed-time budget measures the instrumentation; the
-  # Regexp.timeout (or Timeout) guard above still fails a backtracking
-  # pattern in every lane. WOODS_RUN_PERF_SPECS restores the budget there.
-  def within_budget(budget)
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
-    return if ENV['COVERAGE'] && !ENV['WOODS_RUN_PERF_SPECS']
-
-    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < budget
   end
 
   {

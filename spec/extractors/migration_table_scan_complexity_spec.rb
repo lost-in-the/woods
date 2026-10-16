@@ -10,6 +10,8 @@ require 'woods/extractors/migration_extractor'
 # hides most polynomial patterns; the Ruby 3.0/3.1 rows catch a regression
 # through the Timeout fallback.
 RSpec.describe 'Migration table scan complexity' do
+  include WallClockBudget
+
   include_context 'extractor setup'
 
   budget_seconds = 1.0
@@ -32,12 +34,6 @@ RSpec.describe 'Migration table scan complexity' do
 
   let(:extractor) do
     Woods::Extractors::MigrationExtractor.new(table_catalog: Woods::Extractors::TableCatalog.new([]))
-  end
-
-  def within_budget(budget)
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
-    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < budget
   end
 
   {

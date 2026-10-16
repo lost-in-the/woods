@@ -10,6 +10,8 @@ require 'rbconfig'
 # Regexp.timeout = 1), so the bound guards its own passes over what the
 # graphql gem's parser returns.
 RSpec.describe 'GraphQL operation extraction complexity' do
+  include WallClockBudget
+
   before(:all) do
     script = File.expand_path('../fixtures/graphql_operations/extract.rb', __dir__)
     output, error, status = Open3.capture3({ 'MODE' => 'adversarial' }, RbConfig.ruby, '-Ilib', script)
@@ -22,7 +24,7 @@ RSpec.describe 'GraphQL operation extraction complexity' do
   let(:counts) { result.fetch('units').to_h { |unit| [unit['identifier'], unit['counts']] } }
 
   it 'extracts every oversized document within the time bound' do
-    expect(result.fetch('elapsed')).to be < 5
+    expect_elapsed_within(result.fetch('elapsed'), 5)
   end
 
   it 'collapses 50k repeated selections into their distinct fields' do

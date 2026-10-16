@@ -14,6 +14,8 @@ require 'woods/extractors/view_engines/jbuilder'
 # the Ruby 3.0/3.1 rows are the ones that catch a regression, through the
 # Timeout fallback.
 RSpec.describe 'Helper call scan complexity' do
+  include WallClockBudget
+
   budget_seconds = 1.0
   spaces = ' ' * 50_000
   names = Set.new(%w[pretty_date widget_badge title staff?])
@@ -94,10 +96,7 @@ RSpec.describe 'Helper call scan complexity' do
   scans.each do |scan_name, scan|
     adversarial_sources.each do |label, source|
       it "#{scan_name} stays within #{budget_seconds}s on #{label}" do
-        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        scan.call(source)
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-        expect(elapsed).to be < budget_seconds
+        within_budget(budget_seconds) { scan.call(source) }
       end
     end
   end
