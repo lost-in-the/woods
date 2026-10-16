@@ -766,7 +766,12 @@ module Woods
         raise ConfigurationError, "#{label} must be relative to Rails.root, got #{entry.inspect}"
       end
 
-      segments = entry.split('/').reject { |segment| segment.empty? || segment == '.' }
+      normalized_relative_dir(entry)
+    end
+
+    # @return [String] +path+ without empty or +.+ segments, +.+ when none remain, frozen
+    def normalized_relative_dir(path)
+      segments = path.split('/').reject { |segment| segment.empty? || segment == '.' }
       (segments.empty? ? '.' : segments.join('/')).freeze
     end
 
