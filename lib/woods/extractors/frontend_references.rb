@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'set'
 require 'strscan'
 require_relative 'js_module_registry'
 require_relative '../source_file'
@@ -39,6 +40,14 @@ module Woods
         ELEMENT_SYMBOL = /\s*+\(?\s*+:([a-z][a-z0-9_]*+)/
         ALPINE_NAME = /\A\s*+([A-Za-z_$][\w$]*+)\s*+(?:\(|\z)/
         STIMULUS_NAME = /\A[A-Za-z0-9_-]++\z/
+
+        # Literals and keywords that make `x-data` an anonymous scope
+        # (`x-data="true"`, Phlex `"x-data": true`), never a component name.
+        ALPINE_NON_NAMES = %w[
+          true false null undefined this NaN Infinity new typeof void delete in instanceof
+          function class async await yield return if else for while do switch case default
+          break continue try catch finally throw var let const import export super with
+        ].to_set.freeze
 
         # A source with none of these has no reference; most have none.
         CANDIDATE = /x[-_]data|controller|register_element|[<%][a-z][a-z0-9]*+-/
@@ -102,7 +111,7 @@ module Woods
 
         def scan_alpine(trigger)
           name = attribute_value(trigger)&.match(ALPINE_NAME)
-          @found['alpine_data'] << name[1] if name
+          @found['alpine_data'] << name[1] if name && !ALPINE_NON_NAMES.include?(name[1])
         end
 
         def scan_stimulus(value)

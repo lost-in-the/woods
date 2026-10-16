@@ -28,6 +28,25 @@ RSpec.describe Woods::Extractors::FrontendReferences do
       expect(scan(source)['alpine_data']).to eq(%w[dropdown productSelector toggle])
     end
 
+    it 'records no name for an anonymous Alpine scope' do
+      source = <<~TEXT
+        <div x-data="true"></div>
+        <div x-data='false'></div>
+        <div x-data="null"></div>
+        <div x-data="this"></div>
+        <div x-data="undefined"></div>
+        <div x-data></div>
+        <div x-data="{ open: false }"></div>
+        div("x-data": true, class: "panel")
+        div("x-data": "true")
+        div(x_data: "new Widget()")
+        %div{ "x-data" => "  true  " }
+        <div x-data="picker"></div>
+      TEXT
+
+      expect(scan(source)['alpine_data']).to eq(%w[picker])
+    end
+
     it 'reads x-data from Ruby hash and keyword forms, but not from an assignment' do
       source = <<~RUBY
         div("x-data": "dropdown")
