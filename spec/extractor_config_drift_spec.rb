@@ -98,7 +98,8 @@ RSpec.describe 'Incremental extraction configuration drift' do
         Woods.configuration.settings_readers = synthetic_readers
 
         expect { extractor.send(:prepare_incremental_run, operation: operation) }
-          .to raise_error(Woods::ExtractionError) { |error|
+          .to raise_error(Woods::ExtractionConfigChanged) { |error|
+            expect(error).to be_a(Woods::ExtractionError)
             expect(error.message).to match(/settings_readers.*woods:extract/m)
             expect(error.message).not_to include('LanternSettings', 'lantern.yml')
           }
