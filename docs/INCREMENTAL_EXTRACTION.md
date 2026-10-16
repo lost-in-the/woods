@@ -913,6 +913,18 @@ edit does not establish that a day of commits is below the crossover.
   partial that a template already renders, under another engine's extension
   or a parent controller's directory, does not retarget the existing edge.
   Editing the rendering template, or a full extraction, picks up both.
+- **Git status changes alone do not re-extract a configuration source.**
+  Configuration sources (configuration files, `config/routes.rb` and its
+  `config/routes/*.rb` draw files, boot and root Ruby, generators) that Git
+  ignores or does not track are skipped and reported. The check runs when a
+  changed path is dispatched, so a transition that changes only Git status,
+  and not the file, never reaches it:
+  - `git add` of an untracked configuration file leaves its unit missing.
+  - `git rm --cached` plus a `.gitignore` entry leaves the old unit published.
+  - An untracked `config/routes/*.rb` draw file stays unindexed after it is
+    added to Git.
+
+  A full extraction picks up all three.
 - **Lexically resolved targets are fixed when the referencing unit is extracted.**
   A GraphQL unit's relative constant path, and a model's polymorphic interface
   name, are resolved against the constants loaded at that moment. Deleting or
