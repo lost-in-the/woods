@@ -1175,7 +1175,7 @@ module Woods
     #
     # @param manifest [Hash, nil] the published manifest
     # @return [Hash, nil] digests to carry into this run's manifest
-    # @raise [Woods::ExtractionError] when a recorded key changed
+    # @raise [Woods::ExtractionConfigChanged] when a recorded key changed
     def baseline_extraction_config(manifest)
       return nil unless manifest
 
@@ -1190,7 +1190,7 @@ module Woods
       current = Woods.configuration.extraction_fingerprint
       changed = current.keys.select { |key| recorded.key?(key) && recorded[key] != current[key] }
       unless changed.empty?
-        raise Woods::ExtractionError,
+        raise Woods::ExtractionConfigChanged,
               "Extraction configuration differs from the baseline index (#{changed.join(', ')}). An incremental " \
               'run would publish an index missing the units and edges those settings produce. Run a full ' \
               'woods:extract; the previous published generation remains active.'

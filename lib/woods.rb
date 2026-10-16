@@ -38,6 +38,9 @@ module Woods
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class ExtractionError < Error; end
+  # An incremental run refused because the extraction-shaping configuration
+  # differs from the baseline's. Only a full extraction resolves it.
+  class ExtractionConfigChanged < ExtractionError; end
   class SessionTracerError < Error; end
 
   CONFIG_MUTEX = Mutex.new
