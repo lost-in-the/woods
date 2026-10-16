@@ -181,6 +181,43 @@ RSpec.describe Woods::Extractors::FrontendReferences do
       end
     end
 
+    describe 'comments' do
+      def unit_at(path)
+        Woods::ExtractedUnit.new(type: :view_template, identifier: path, file_path: "/app/#{path}").tap do |u|
+          u.metadata = {}
+          u.dependencies = []
+        end
+      end
+
+      def edge_vias(unit)
+        unit.dependencies.map { |dep| [dep[:target], dep[:via]] }
+      end
+
+      it 'ignores references inside ERB and HAML comments' do
+        erb = unit_at('app/views/widgets/show.html.erb')
+        host.apply_frontend_references(erb, %(<%# <div data-controller="clipboard"> %>\n<p></p>))
+        haml = unit_at('app/views/widgets/show.html.haml')
+        host.apply_frontend_references(haml, %(-# %div{ "x-data" => "dropdown" }\n%p))
+
+        expect(erb.dependencies + haml.dependencies).to eq([])
+        expect(erb.metadata).to eq({})
+      end
+
+      it 'ignores references in Ruby comments but keeps heredoc markup in a component' do
+        component = unit_at('app/components/widget_component.rb')
+        host.apply_frontend_references(component, <<~RUBY)
+          class WidgetComponent < ViewComponent::Base
+            # div(data_controller: "clipboard")
+            erb_template <<~ERB
+              <div x-data="dropdown"></div>
+            ERB
+          end
+        RUBY
+
+        expect(edge_vias(component)).to eq([['app/javascript/alpine.js', :alpine_data]])
+      end
+    end
+
     it 'does not duplicate an edge the unit already carries' do
       2.times { host.apply_frontend_references(unit, '<div x-data="dropdown"></div>') }
 

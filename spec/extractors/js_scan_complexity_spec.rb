@@ -113,6 +113,12 @@ RSpec.describe 'JavaScript scan complexity' do
     end
   end
 
+  it "blanks #{repeats} Ruby comments before the frontend scan within #{budget_seconds}s" do
+    host = Object.new.extend(Woods::Extractors::FrontendReferences)
+    source = "# x-data=\"a\"\n" * repeats
+    within_budget(budget_seconds) { host.send(:frontend_scannable, source, 'widget_component.rb') }
+  end
+
   # A path is bounded by the filesystem (PATH_MAX), unlike file contents.
   it "JavascriptPaths.source? stays within #{budget_seconds}s on a path of maximum length" do
     path = "app/javascript/#{'a/' * 2_048}x.js"

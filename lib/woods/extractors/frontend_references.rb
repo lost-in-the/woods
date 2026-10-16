@@ -2,6 +2,8 @@
 
 require 'set'
 require 'strscan'
+require 'prism'
+require_relative 'comment_blanking'
 require_relative 'js_module_registry'
 require_relative '../source_file'
 
@@ -172,7 +174,7 @@ module Woods
       # @param source [String] the source to scan
       # @return [ExtractedUnit]
       def apply_frontend_references(unit, source)
-        references = Scanner.scan(source)
+        references = Scanner.scan(frontend_scannable(source, unit.file_path))
         sidecar = sidecar_template_source(unit)
         references = references.merge(Scanner.scan(sidecar)) { |_kind, a, b| (a + b).uniq.sort } if sidecar
         return unit if references.each_value.all?(&:empty?)
@@ -191,15 +193,38 @@ module Woods
         @frontend_registry ||= JsModuleRegistry.current
       end
 
-      # @return [String, nil] the sidecar template's contents, when the unit names one that exists
+      # @return [String, nil] the sidecar template's contents, comments blanked,
+      #   when the unit names one that exists
       def sidecar_template_source(unit)
         relative = unit.metadata.is_a?(Hash) && unit.metadata[:sidecar_template]
         return nil unless relative.is_a?(String) && defined?(Rails) && Rails.root
 
         path = Rails.root.join(relative)
-        SourceFile.read(path) if File.file?(path)
+        CommentBlanking.blank(SourceFile.read(path), relative) if File.file?(path)
       rescue SystemCallError
         nil
+      end
+
+      # The source with its comments blanked, so a commented-out reference
+      # produces no edge. Ruby keeps its heredoc text, unlike
+      # {CommentBlanking.ruby}: a component's inline template is a heredoc,
+      # and its markup is exactly what this scan reads.
+      #
+      # @param source [String]
+      # @param file_path [String, nil] decides the comment syntax
+      # @return [String]
+      def frontend_scannable(source, file_path)
+        return CommentBlanking.blank(source, file_path) unless File.extname(file_path.to_s) == '.rb'
+
+        blanked = String.new(encoding: Encoding::BINARY)
+        position = 0
+        Prism.parse_comments(source).each do |comment|
+          start = comment.location.start_offset
+          finish = comment.location.end_offset
+          blanked << source.byteslice(position, start - position).b << source.byteslice(start...finish).b.tr("^\n", ' ')
+          position = finish
+        end
+        (blanked << source.byteslice(position, source.bytesize - position).b).force_encoding(source.encoding)
       end
 
       def resolve_frontend_references(references)
