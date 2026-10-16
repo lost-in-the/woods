@@ -509,9 +509,9 @@ module Woods
       # rule's directory and extensions describe its glob for the hook
       # projection, which has no Ruby.
       def js_module_rules
-        JavascriptPaths.shapes.map do |directory, extensions|
-          whole_app_rule(:js_modules, [directory], extensions: extensions,
-                                                   exclude: JavascriptPaths.excluded_fragments,
+        JavascriptPaths.shapes.map do |directory, extensions, tests|
+          exclude = JavascriptPaths.excluded_fragments + (tests ? [] : JavascriptPaths.test_fragments)
+          whole_app_rule(:js_modules, [directory], extensions: extensions, exclude: exclude,
                                                    matcher: :js_module_path?)
         end
       end

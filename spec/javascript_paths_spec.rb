@@ -6,6 +6,11 @@ require 'fileutils'
 require 'woods'
 require 'woods/javascript_paths'
 
+module JavascriptPathsSpecGlobs
+  WITH_TESTS = [*Woods::JavascriptPaths::DEFAULT_GLOBS, 'app/javascript/**/*.test.ts',
+                'app/javascript/**/__tests__/**/*.js', 'app/javascript/spec/**/*.js'].freeze
+end
+
 RSpec.describe Woods::JavascriptPaths do
   around do |example|
     original = Woods.configuration
@@ -50,6 +55,37 @@ RSpec.describe Woods::JavascriptPaths do
       ].each { |path| expect(described_class.source?(path)).to be(false), path }
     end
 
+    it 'rejects JavaScript test files under the default roots' do
+      %w[
+        app/javascript/widgets/picker.test.ts
+        app/javascript/widgets/picker.spec.js
+        app/javascript/widgets/__tests__/picker.js
+        app/javascript/widgets/__mocks__/api.ts
+        app/javascript/spec/helpers/setup.js
+        app/javascript/test/fixtures/ledger.js
+        app/assets/javascripts/spec/support.js
+      ].each { |path| expect(described_class.source?(path)).to be(false), path }
+    end
+
+    it 'keeps modules whose names merely contain test or spec' do
+      %w[
+        app/javascript/widgets/test_runner.js
+        app/javascript/specs_panel/index.js
+        app/javascript/widgets/contest.js
+        app/javascript/widgets/inspector.ts
+      ].each { |path| expect(described_class.source?(path)).to be(true), path }
+    end
+
+    it 'indexes test files only through a glob that names them' do
+      Woods.configuration.javascript_paths = JavascriptPathsSpecGlobs::WITH_TESTS
+
+      expect(described_class.source?('app/javascript/widgets/picker.test.ts')).to be(true)
+      expect(described_class.source?('app/javascript/widgets/__tests__/picker.js')).to be(true)
+      expect(described_class.source?('app/javascript/spec/helpers/setup.js')).to be(true)
+      expect(described_class.source?('app/javascript/widgets/__mocks__/api.ts')).to be(false)
+      expect(described_class.source?('app/javascript/widgets/picker.ts')).to be(true)
+    end
+
     it 'follows configured globs' do
       Woods.configuration.javascript_paths = ['frontend/**/*.{ts,tsx}']
 
@@ -86,14 +122,21 @@ RSpec.describe Woods::JavascriptPaths do
   describe '.shapes' do
     it 'pairs each glob directory with only the module extensions that glob accepts' do
       expect(described_class.shapes).to eq(
-        [['app/assets/javascripts', %w[.js]], ['app/javascript', %w[.js .ts .jsx .tsx .mjs]]]
+        [['app/assets/javascripts', %w[.js], false], ['app/javascript', %w[.js .ts .jsx .tsx .mjs], false]]
       )
+    end
+
+    it 'marks the globs that name test files' do
+      Woods.configuration.javascript_paths = ['app/javascript/**/*.js', 'app/javascript/spec/**/*.js']
+
+      expect(described_class.shapes).to eq([['app/javascript', %w[.js], false], ['app/javascript/spec', %w[.js], true]])
     end
 
     it 'accepts every module extension for a glob that names none, and skips globs that can match no module' do
       Woods.configuration.javascript_paths = ['frontend/src/**/*', 'legacy/**/*.coffee', '**/*.ts', 'lib/js/*.{ts,css}']
 
-      expect(described_class.shapes).to eq([['frontend/src', %w[.js .ts .jsx .tsx .mjs]], ['lib/js', %w[.ts]]])
+      expect(described_class.shapes)
+        .to eq([['frontend/src', %w[.js .ts .jsx .tsx .mjs], false], ['lib/js', %w[.ts], false]])
     end
   end
 

@@ -1206,7 +1206,14 @@ Each matching `.js`, `.ts`, `.jsx`, `.tsx` or `.mjs` file becomes one unit
 identified by its root-relative path. Whatever a glob reaches, files under a
 `node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/` or
 `coverage/` directory, minified bundles (`*.min.js`) and TypeScript declaration
-files (`*.d.ts`) are never indexed. The literal prefix of each glob (its
+files (`*.d.ts`) are never indexed.
+
+JavaScript tests are skipped too, unless a glob names them: a file whose name
+contains `.test.` or `.spec.`, and anything under a `__tests__/`,
+`__mocks__/`, `spec/` or `test/` directory. A glob that itself contains one of
+those markers reaches them, so
+`config.javascript_paths += ['app/javascript/**/*.test.ts']` indexes the
+TypeScript tests and nothing else from that set. The literal prefix of each glob (its
 directories before the first wildcard) is also where bare import specifiers
 such as `controllers/clipboard_controller` and `@/shared/format` resolve.
 

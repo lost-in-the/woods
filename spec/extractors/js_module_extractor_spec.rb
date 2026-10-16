@@ -185,6 +185,14 @@ RSpec.describe Woods::Extractors::JsModuleExtractor do
     end
   end
 
+  it 'skips JavaScript tests and mocks under the default roots' do
+    create_file('app/javascript/widgets/picker.js', 'export default 1')
+    create_file('app/javascript/widgets/picker.test.js', 'import picker from "./picker"')
+    create_file('app/javascript/widgets/__mocks__/api.js', 'export default {}')
+
+    expect(described_class.new.extract_all.map(&:identifier)).to eq(['app/javascript/widgets/picker.js'])
+  end
+
   it 'follows configured globs' do
     Woods.configuration.javascript_paths = ['frontend/**/*.ts']
     create_file('frontend/widgets/picker.ts', 'export const picker = 1')

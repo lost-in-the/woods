@@ -25,6 +25,12 @@ module Woods
     # Minified bundles and TypeScript declaration files.
     EXCLUDED_SUFFIXES = %w[.min.js .min.mjs .d.ts].freeze
 
+    # Directory names that hold JavaScript tests, mocks and test helpers.
+    TEST_DIRECTORIES = %w[__tests__ __mocks__ spec test].freeze
+
+    # File-name infixes of JavaScript test files (`picker.test.ts`).
+    TEST_INFIXES = %w[.test. .spec.].freeze
+
     # `**/` spans directories, `{a,b}` alternation works.
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
@@ -38,14 +44,39 @@ module Woods
       configured || DEFAULT_GLOBS
     end
 
+    # A test file (see {test_path?}) counts only through a glob that names
+    # tests itself ({test_glob?}), so the default roots skip jest specs,
+    # mocks and spec helpers while `app/javascript/**/*.test.ts` reaches them.
+    #
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean] whether the path is an indexed module source
     def source?(relative_path)
       path = relative_path.to_s
+      return false unless module_file?(path)
+
+      test = test_path?(path)
+      globs.any? { |glob| File.fnmatch?(glob, path, GLOB_FLAGS) && (!test || test_glob?(glob)) }
+    end
+
+    # @param path [String] root-relative path
+    # @return [Boolean] a module extension, not minified, declaration-only, vendored or generated
+    def module_file?(path)
       EXTENSIONS.any? { |ext| path.end_with?(ext) } &&
         EXCLUDED_SUFFIXES.none? { |suffix| path.end_with?(suffix) } &&
-        (File.dirname(path).split('/') & EXCLUDED_DIRECTORIES).empty? &&
-        globs.any? { |glob| File.fnmatch?(glob, path, GLOB_FLAGS) }
+        (File.dirname(path).split('/') & EXCLUDED_DIRECTORIES).empty?
+    end
+
+    # @param path [String] root-relative path
+    # @return [Boolean] a JavaScript test, mock or test helper by name or directory
+    def test_path?(path)
+      TEST_INFIXES.any? { |infix| path.include?(infix) } ||
+        (File.dirname(path).split('/') & TEST_DIRECTORIES).any?
+    end
+
+    # @param glob [String]
+    # @return [Boolean] whether the glob itself names test files
+    def test_glob?(glob)
+      TEST_INFIXES.any? { |infix| glob.include?(infix) } || (glob.split('/') & TEST_DIRECTORIES).any?
     end
 
     # @param root [String, Pathname] application root
@@ -63,6 +94,14 @@ module Woods
     # @return [Array<String>]
     def excluded_fragments
       EXCLUDED_DIRECTORIES.map { |directory| "/#{directory}/" } + EXCLUDED_SUFFIXES
+    end
+
+    # Substrings that mark a test file, for the same consumers. A glob that
+    # names tests ({test_glob?}) does not exclude them.
+    #
+    # @return [Array<String>]
+    def test_fragments
+      TEST_DIRECTORIES.map { |directory| "/#{directory}/" } + TEST_INFIXES
     end
 
     # The literal directory each glob starts from. Bare specifiers such as
@@ -96,13 +135,16 @@ module Woods
     # A segment naming no extension (`*`, `**/*`) accepts all of them; one
     # naming only non-module extensions can match nothing and is dropped.
     #
-    # @return [Array<Array(String, Array<String>)>] sorted by directory
+    # The third element says whether the glob names test files.
+    #
+    # @return [Array<Array(String, Array<String>, Boolean)>] sorted by directory
     def shapes
-      globs.filter_map do |glob|
+      shapes = globs.filter_map do |glob|
         directory = directory_of(glob)
         extensions = glob_extensions(glob.split('/').last)
-        [directory, extensions] if directory && extensions.any?
-      end.uniq.sort_by(&:first)
+        [directory, extensions, test_glob?(glob)] if directory && extensions.any?
+      end
+      shapes.uniq.sort_by { |directory, _extensions, tests| [directory, tests ? 1 : 0] }
     end
 
     # @param value [Object] candidate +javascript_paths+ value
