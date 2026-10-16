@@ -44,9 +44,15 @@ RSpec.describe 'Config source scan complexity' do
     end
   end
 
+  # Coverage instrumentation slows the Ruby around each scan, so under
+  # COVERAGE the elapsed-time budget measures the instrumentation; the
+  # Regexp.timeout (or Timeout) guard above still fails a backtracking
+  # pattern in every lane. WOODS_RUN_PERF_SPECS restores the budget there.
   def within_budget(budget)
     started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     yield
+    return if ENV['COVERAGE'] && !ENV['WOODS_RUN_PERF_SPECS']
+
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < budget
   end
 
