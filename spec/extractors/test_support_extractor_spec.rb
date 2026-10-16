@@ -233,6 +233,21 @@ RSpec.describe Woods::Extractors::TestSupportExtractor do
       expect(unit_for('spec/support/commented.rb').metadata).to include(kind: 'script', names: [])
     end
 
+    it 'ignores declarations in a =begin block and still publishes them as source' do
+      source = <<~RUBY
+        =begin
+        RSpec.shared_examples 'a ghost' do
+        RSpec::Matchers.define :have_ghost do
+        =end
+        Capybara.javascript_driver = :headless
+      RUBY
+      create_file('spec/support/commented.rb', source)
+
+      unit = unit_for('spec/support/commented.rb')
+      expect(unit.metadata).to include(kind: 'script', names: [])
+      expect(unit.source_code).to eq(source)
+    end
+
     it 'marks Minitest support by its root' do
       create_file('test/support/sign_in.rb', "module SignIn\nend\n")
 
@@ -300,6 +315,35 @@ RSpec.describe Woods::Extractors::TestSupportExtractor do
         [{ type: :test_support, target: 'spec/support/billing_stubs.rb', via: :includes_context },
          { type: :test_support, target: 'spec/support/matchers.rb', via: :uses_matcher }]
       )
+    end
+
+    it 'links nothing used only in a trailing comment or a =begin block' do
+      create_file('spec/support/billing_stubs.rb', "RSpec.shared_context 'with billing stubs' do\nend\n")
+      create_file('spec/support/matchers.rb', "RSpec::Matchers.define :have_combobox do |label|\nend\n")
+      create_file('spec/support/pages.rb', <<~RUBY)
+        RSpec.shared_examples 'a billing page' do
+          it { is_expected.to be_present } # have_combobox('Plan')
+        =begin
+          include_context 'with billing stubs'
+        =end
+        end
+      RUBY
+
+      expect(unit_for('spec/support/pages.rb').dependencies).to eq([])
+    end
+
+    it 'links a matcher interpolated on a heredoc line that starts with #' do
+      create_file('spec/support/matchers.rb', "RSpec::Matchers.define :have_combobox do |label|\nend\n")
+      create_file('spec/support/pages.rb', <<~'RUBY')
+        RSpec.shared_examples 'a billing page' do
+          note = <<~TEXT
+            # #{have_combobox('Plan')}
+          TEXT
+        end
+      RUBY
+
+      expect(unit_for('spec/support/pages.rb').dependencies)
+        .to eq([{ type: :test_support, target: 'spec/support/matchers.rb', via: :uses_matcher }])
     end
 
     it 'never links a file to itself or to a module no support file defines' do

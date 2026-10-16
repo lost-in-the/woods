@@ -440,10 +440,11 @@ cheap, which is what makes wholesale replacement the right shape.
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`; never a path under `node_modules/`, root-level included), `app/graphql/**/*.rb` | graphql_operations |
 | `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers |
 | the file named by `external_table_consumers_path` | external_consumers |
+| `app/views/**` templates, `app/controllers/**/*.rb`, `app/mailers/**/*.rb` | view_templates |
 | any `package.yml`, `packwerk.yml` | packages |
 | `app/helpers/**/*.rb`, the file of any module mixed in with `helper`, and (view-side consumers only) any file in `ApplicationController`'s ancestry | view_templates, components, view_components, controllers, mailers: the `helper_call` / `helper_method` consumers. Decided by `HelperCatalog.consumer_keys_for`, not a dispatcher rule. |
 
-Eight of these deserve a note:
+Nine of these deserve a note:
 
 - **Rake tasks merge definitions across files.** Any changed or deleted `.rake`
   file reruns the task extractor over all task files. Removing the primary
@@ -505,6 +506,12 @@ Eight of these deserve a note:
   templates, so the cost lands on the rare side. A controller re-run also drops
   the flow scope, as a routes re-run does, so every controller's flow document
   is reassembled against its new edges.
+- **View templates re-run on any template, controller, or mailer change.** A
+  relative partial resolves through the controllers that reach its template
+  (see [ViewTemplateExtractor](EXTRACTOR_REFERENCE.md#viewtemplateextractor)),
+  so adding a page, a partial, or a controller can move a render edge of a
+  template nobody edited, and no graph edge leads from the change to it. The
+  per-file rule still runs first; only units whose output changed are rewritten.
 - **Packages don't yet claim their members.** `PackageExtractor` (#280) only
   produces `package` units from `package.yml`; it does not annotate which
   package every other unit belongs to. A pack-resident file-based unit is not

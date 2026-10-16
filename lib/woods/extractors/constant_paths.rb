@@ -2,7 +2,7 @@
 
 require 'prism'
 require 'strscan'
-require_relative 'line_neutralizer'
+require_relative 'comment_blanking'
 require_relative '../source_references/runtime_lookup'
 
 module Woods
@@ -203,9 +203,9 @@ module Woods
       end
 
       # Unparseable source has no syntax tree and so no nesting: one linear
-      # pass over the comment-stripped text keeps the whole written paths.
+      # pass over the comment-blanked text keeps the whole written paths.
       def token_references(source)
-        text = LineNeutralizer.strip_comments(source)
+        text = CommentBlanking.ruby(source)
         scanner = StringScanner.new(text)
         found = []
         while scanner.scan_until(CHAIN)

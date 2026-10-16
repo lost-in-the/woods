@@ -122,6 +122,27 @@ RSpec.describe Woods::Extractors::ConfigReadScanner do
     expect(targets(source)).to eq([])
   end
 
+  it 'ignores reads inside a =begin block' do
+    source = <<~RUBY
+      =begin
+      Rails.application.config_for(:rates)
+      =end
+      class Ledger; end
+    RUBY
+
+    expect(targets(source)).to eq([])
+  end
+
+  it 'keeps a read interpolated on a heredoc line that starts with #' do
+    source = <<~'RUBY'
+      HEADER = <<~TEXT
+        # #{Rails.application.config_for(:rates).fetch(:label)}
+      TEXT
+    RUBY
+
+    expect(targets(source)).to eq(['config/rates.yml'])
+  end
+
   it 'returns each target once, sorted' do
     source = <<~RUBY
       Rails.application.config_for(:storage)

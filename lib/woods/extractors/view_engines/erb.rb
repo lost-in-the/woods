@@ -90,6 +90,15 @@ module Woods
         # key as a partial.
         RESERVED_RENDER_OPTIONS = %w[partial template layout].freeze
 
+        # `render template: 'path'`, `render(template: 'path')`, and the
+        # hash-rocket form. Possessive, so the scan stays linear.
+        TEMPLATE_RENDER = /\brender\b\s*+(?:\(\s*+)?(?:\btemplate:|:template\s*+=>)\s*+['"]([^'"]+)['"]/
+
+        # @see Base#scan_templates
+        def scan_templates(source)
+          source.scan(TEMPLATE_RENDER).flatten.uniq
+        end
+
         # Matches:
         # - `render partial: 'foo/bar'`
         # - `render :partial => 'foo/bar'` (hash-rocket form)

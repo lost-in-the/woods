@@ -103,6 +103,27 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
     expect(exercised(source)).to eq([])
   end
 
+  it 'ignores a call in a trailing comment or a =begin block' do
+    source = <<~RUBY
+      expect(page).to have_content("Widgets") # visit new_widget_path
+      =begin
+      post widgets_path
+      =end
+    RUBY
+
+    expect(exercised(source)).to eq([])
+  end
+
+  it 'keeps a call interpolated on a heredoc line that starts with #' do
+    source = <<~'RUBY'
+      note = <<~TEXT
+        # #{visit new_widget_path}
+      TEXT
+    RUBY
+
+    expect(exercised(source)).to eq(['GET /widgets/new'])
+  end
+
   it 'skips a literal whose interpolation holds a quote' do
     source = <<~'RUBY'
       visit "/widgets/#{params["id"]}"
@@ -165,6 +186,13 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
       expect(analysis(%(host! "api2.example.test"\nvisit "/status"\n)).exercised)
         .to eq(['GET /status [subdomain=\\Aapi\\d*\\z]'])
       expect(analysis(%(host! "app.example.test"\nvisit "/status"\n)).exercised).to eq(['GET /:slug'])
+    end
+
+    it 'reads no host from a comment' do
+      result = analysis(%(visit "/pricing" # host! "shop.example.test"\n=begin\nhost! "app.example.test"\n=end\n))
+
+      expect(result.exercised).to eq([])
+      expect(result.ambiguous.size).to eq(1)
     end
 
     it 'treats a host without a subdomain as known, matching only unconstrained routes' do

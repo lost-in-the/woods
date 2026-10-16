@@ -245,22 +245,11 @@ module Woods
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
         deps.concat(scan_config_dependencies(source))
-        # Navigation edges — resolve `_path`/`_url` helpers to real
-        # controllers via RouteHelperResolver (wired through the include +
-        # build_route_helper_map call in #initialize). This adds resolved
-        # {type: :controller, via: :link_to} edges on top of the raw
-        # helper scan below.
+        # Navigation edges: a `_path`/`_url` helper naming a live route
+        # targets the controller that route dispatches to. A name with no
+        # live route records no edge.
         deps.concat(scan_navigation_dependencies(source))
         deps.concat(scan_form_dependencies(source))
-
-        # Raw-helper fallback — emits {type: :route, target: 'confirmation'}
-        # for every `_path`/`_url` helper referenced, regardless of whether
-        # RouteHelperResolver could resolve it. Kept so mailers that link to
-        # engine-mounted routes (not in the main routes table) still produce
-        # a dependency edge.
-        source.scan(/(\w+)_(?:url|path)/).flatten.uniq.each do |route|
-          deps << { type: :route, target: route, via: :url_helper }
-        end
 
         consolidate_dependencies(deps)
       end

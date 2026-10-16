@@ -579,6 +579,20 @@ RSpec.describe Woods::Extractors::JobExtractor do
                       end
                     RUBY
 
+    it 'records no edge for a library named only in a comment' do
+      path = create_file('app/jobs/widget_sync_job.rb', <<~RUBY)
+        class WidgetSyncJob < ApplicationJob
+          # Was Faraday.post, cached in Redis.current
+          def perform
+            true
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_job_file(path)
+      expect(unit.dependencies).to eq([])
+    end
+
     it 'detects HTTP dependencies' do
       path = create_file('app/jobs/webhook_job.rb', <<~RUBY)
         class WebhookJob < ApplicationJob

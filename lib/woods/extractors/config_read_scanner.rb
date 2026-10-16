@@ -2,7 +2,7 @@
 
 require 'strscan'
 
-require_relative 'line_neutralizer'
+require_relative 'comment_blanking'
 require_relative 'config_file_extractor'
 
 module Woods
@@ -46,7 +46,7 @@ module Woods
         def call(source)
           return [] unless candidate?(source)
 
-          scannable = LineNeutralizer.strip_comments(source)
+          scannable = CommentBlanking.ruby(source)
           paths = config_for_paths(scannable) + load_file_paths(scannable) + settings_reader_paths(scannable)
           paths.uniq.sort.filter_map do |path|
             next unless ConfigFileExtractor.config_file_path?(path)

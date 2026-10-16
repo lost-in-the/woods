@@ -371,6 +371,10 @@ module Woods
       # declaration. Neither has a per-file entry point.
       database_tables: :database_table,
       external_consumers: :external_consumer,
+      # A view template's render edges depend on which pages reach it
+      # (Extractors::CallerPrefixPartials), a function of the whole view tree
+      # and of the controllers and mailers that own its directories.
+      view_templates: :view_template,
       # Framework/gem sources are a function of the installed dependency set,
       # so `Gemfile.lock` is their trigger path (#169). Before this the only
       # incremental writer was `woods:extract_framework`, which hand-wrote

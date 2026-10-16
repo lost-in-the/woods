@@ -420,6 +420,15 @@ module Woods
          whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
       end
 
+      # A relative partial resolves through the controllers that reach its
+      # template, so any template, controller, or mailer change can move an
+      # edge of a template nobody edited.
+      def view_template_rules
+        views = Woods::Extractors::ViewTemplateExtractor
+        [whole_app_rule(:view_templates, views::VIEW_DIRECTORIES, extensions: view_template_extensions),
+         whole_app_rule(:view_templates, views::OWNER_DIRECTORIES, extensions: %w[.rb])]
+      end
+
       # Families read from model and schema directories by their own globs.
       def model_adjacent_rules
         [whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
@@ -460,6 +469,7 @@ module Woods
           *graphql_operation_rules,
           *schema_unit_rules,
           *test_support_rules,
+          *view_template_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.

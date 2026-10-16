@@ -99,6 +99,11 @@ module Woods
           partials.to_a
         end
 
+        # @see Base#scan_templates
+        def scan_templates(source)
+          super(scannable_source(source))
+        end
+
         # @see Base#scan_helpers
         def scan_helpers(source)
           super(scannable_source(source))

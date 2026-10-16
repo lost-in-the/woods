@@ -506,6 +506,26 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'render template:' do
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it 'records a render edge to the template it names' do
+      create_file('app/views/layouts/storefront.html.haml', "= render template: 'layouts/chrome'\n")
+      create_file('app/views/layouts/chrome.html.haml', "= yield\n")
+
+      expect(render_targets('layouts/storefront.html.haml')).to eq(['layouts/chrome.html.haml'])
+    end
+
+    it 'records no edge when no file holds the template' do
+      create_file('app/views/layouts/storefront.html.haml', "= render template: 'layouts/missing'\n")
+
+      expect(render_targets('layouts/storefront.html.haml')).to eq([])
+    end
+  end
+
   describe 'relative partials through controller view prefixes' do
     before do
       stub_const('ActionController::Base', Class.new)
@@ -552,8 +572,11 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(render_targets('profile/password/show.html.haml')).to eq(['cards/_show.html.haml'])
     end
 
-    it "keeps the engine's own identifier when no prefix holds the partial" do
-      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    it 'records no edge, and the name as unresolved, when no prefix holds the partial' do
+      unit = described_class.new.extract_all.find { |u| u.identifier == 'profile/password/edit.html.haml' }
+
+      expect(unit.dependencies.select { |d| d[:via] == :render }).to eq([])
+      expect(unit.metadata[:unresolved_partials]).to eq([{ kind: 'caller_prefix', name: 'show', candidates: [] }])
     end
   end
 

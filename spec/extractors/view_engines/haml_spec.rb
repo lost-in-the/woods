@@ -36,6 +36,16 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
     end
   end
 
+  describe '#scan_templates' do
+    it 'extracts = render template: "path"' do
+      expect(engine.scan_templates('= render template: "layouts/chrome"')).to eq(['layouts/chrome'])
+    end
+
+    it 'skips a render template: inside a silent comment' do
+      expect(engine.scan_templates("-#\n  = render template: 'layouts/chrome'\n%p")).to eq([])
+    end
+  end
+
   describe '#scan_partials' do
     it 'extracts = render "path"' do
       expect(engine.scan_partials("= render 'widgets/header'")).to eq(['widgets/header'])

@@ -82,6 +82,16 @@ module Woods
           raise NotImplementedError, "#{self.class.name} must implement #scan_partials"
         end
 
+        # Template names rendered with `render template:` in the given
+        # source, e.g. `'layouts/chrome'` for a layout that renders another
+        # layout. Optional; the default finds none.
+        #
+        # @param source [String] Template source code
+        # @return [Array<String>]
+        def scan_templates(_source)
+          []
+        end
+
         # Partial references whose path is only known at runtime, such as a
         # host helper that builds the path or an object whose partial path
         # Rails derives. Each entry is shaped `{ kind: 'helper' | 'object',

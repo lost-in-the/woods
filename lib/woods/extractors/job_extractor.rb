@@ -442,6 +442,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(source, current_class_name = nil)
+        source = CommentBlanking.ruby(source)
         # Scan standard dep types individually (not scan_common_dependencies) so we can
         # handle job deps with the richer :job_enqueue via and self-reference exclusion.
         deps = scan_model_dependencies(source)

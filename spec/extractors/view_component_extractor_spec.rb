@@ -433,6 +433,94 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       expect(helper_deps).to include(a_hash_including(target: 'ApplicationHelper', via: :include))
     end
 
+    context 'with route helpers' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~RUBY
+            class PageComponent < ViewComponent::Base
+              def call
+                link_to 'Billing', billing_url(token: 'abc')
+                link_to 'Preview', widget_preview_path
+                Shortener.new(base_url: request.host).call
+              end
+            end
+          RUBY
+        }
+      end
+
+      before do
+        Woods.configure unless Woods.configuration
+        allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+      end
+
+      it 'targets the controller a live route dispatches to and records nothing for other helper names' do
+        extractor = described_class.new
+        extractor.instance_variable_set(
+          :@route_helper_map,
+          { 'billing' => { controller: 'BillingController', action: 'show', path: '/billing', verb: 'GET' },
+            'base' => { controller: 'BaseController', action: 'show', path: '/base', verb: 'GET' } }
+        )
+        unit = extractor.extract_all.first
+
+        expect(unit.dependencies).to eq([{ type: :controller, target: 'BillingController', via: :link_to }])
+      end
+    end
+
+    context 'with a translations heredoc' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~'RUBY'
+            class PageComponent < ViewComponent::Base
+              translations <<~YAML
+                en:
+                  intro: |
+                    # User guide
+                    Every User sees this.
+                  count: "#{Post.model_name.human} total"
+              YAML
+
+              def call
+                tag.p(t('.intro'))
+              end
+            end
+          RUBY
+        }
+      end
+
+      it 'reads a model only from the interpolation, never from the prose' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.dependencies.select { |dep| dep[:via] == :data_dependency }.map { |dep| dep[:target] })
+          .to eq(['Post'])
+      end
+    end
+
+    context 'with a class_eval heredoc' do
+      let(:file_system) do
+        {
+          '/rails/app/components/page_component.rb' => <<~SOURCE
+            class PageComponent < ViewComponent::Base
+              translations <<~YAML
+                en:
+                  intro: "Every Post author sees this."
+              YAML
+
+              class_eval <<~RUBY, __FILE__, __LINE__ + 1
+                def owner = User.first
+              RUBY
+            end
+          SOURCE
+        }
+      end
+
+      it 'reads a model named only inside the evaluated body' do
+        unit = described_class.new.extract_all.first
+
+        expect(unit.dependencies.select { |dep| dep[:via] == :data_dependency }.map { |dep| dep[:target] })
+          .to eq(['User'])
+      end
+    end
+
     it 'includes :via key on all dependencies' do
       extractor = described_class.new
       unit = extractor.extract_all.first

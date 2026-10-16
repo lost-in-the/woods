@@ -40,14 +40,6 @@ RSpec.describe Woods::Extractors::LineNeutralizer do
     end
   end
 
-  describe '.strip_comments' do
-    it 'strips comments from every line, preserving line count' do
-      source = "a = 1 # one\n# whole line\nb = 2\n"
-
-      expect(described_class.strip_comments(source)).to eq("a = 1 \n\nb = 2\n")
-    end
-  end
-
   describe '.neutralize_lines' do
     it 'returns one neutralized line per input line' do
       source = "a = 1\nb = 2\n"
