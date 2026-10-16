@@ -931,7 +931,8 @@ end
 ```
 
 The setter requires a non-empty `Array` of non-empty `String`s, each relative
-to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+to `Rails.root` without `..` segments. It drops empty and `.` segments, so
+`./lib/` and `lib//` both name `lib` and `.` names the root itself. Anything
 else raises `Woods::ConfigurationError` and keeps the previous value. A root
 that does not exist is skipped.
 
