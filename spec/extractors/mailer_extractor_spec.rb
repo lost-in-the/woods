@@ -269,6 +269,43 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
   # ── Callbacks ─────────────────────────────────────────────────────────
 
+  describe 'per-action facts (W-7)' do
+    before do
+      create_file('app/mailers/facts_digest_mailer.rb', <<~RUBY)
+        class FactsDigestMailer < ActionMailer::Base
+          def new_post(user, post)
+            @user = user
+            @post = post
+            mail(to: user.email, subject: post.title)
+          end
+
+          private
+
+          def set_footer
+            @footer = 'weekly'
+          end
+        end
+      RUBY
+      load File.join(tmp_dir, 'app/mailers/facts_digest_mailer.rb')
+      callbacks = [build_callback(kind: :before, filter: :set_footer)]
+      FactsDigestMailer.define_singleton_method(:name) { 'FactsDigestMailer' }
+      FactsDigestMailer.define_singleton_method(:action_methods) { Set.new(%w[new_post]) }
+      FactsDigestMailer.define_singleton_method(:default) { {} }
+      FactsDigestMailer.define_singleton_method(:delivery_method) { :smtp }
+      FactsDigestMailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+    end
+
+    after { Object.send(:remove_const, :FactsDigestMailer) if defined?(FactsDigestMailer) }
+
+    it 'publishes the assigns of the action and its filters and the template mail renders' do
+      facts = described_class.new.extract_mailer(FactsDigestMailer).metadata[:action_facts]['new_post']
+      expect(facts[:assigns].map { |a| [a[:ivar], a[:method]] })
+        .to eq([%w[@footer set_footer], %w[@user new_post], %w[@post new_post]])
+      expect(facts[:renders]).to eq([{ template: 'facts_digest_mailer/new_post', line: 5, mail: true,
+                                       method: 'new_post', file: 'app/mailers/facts_digest_mailer.rb' }])
+    end
+  end
+
   describe 'callback extraction' do
     it 'extracts before_action callbacks' do
       cb = build_callback(kind: :before, filter: :set_user)

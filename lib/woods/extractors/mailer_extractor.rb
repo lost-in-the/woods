@@ -10,6 +10,7 @@ require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'template_extensions'
+require_relative 'action_fact_resolution'
 
 module Woods
   module Extractors
@@ -28,6 +29,7 @@ module Woods
     class MailerExtractor
       include AstSourceExtraction
       include SharedUtilityMethods
+      include ActionFactResolution
       include SharedDependencyScanner
       include RouteHelperResolver
 
@@ -160,6 +162,9 @@ module Woods
 
           # Templates (if discoverable)
           templates: discover_templates(mailer, actions),
+
+          # What each action body and its applicable callbacks say (W-7)
+          action_facts: resolve_action_facts(mailer, actions, view_prefix: mailer.name.underscore, mailer: true),
 
           # Metrics
           action_count: actions.size,
