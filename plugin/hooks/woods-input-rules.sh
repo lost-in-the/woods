@@ -115,6 +115,10 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { [[ "$path" == README.md ]] || [[ "$path" == CLAUDE.md ]] || [[ "$path" == AGENTS.md ]] || { { [[ "$path" == *.md ]]; } && { [[ "$path" == docs/* ]] || [[ "$path" == doc/* ]] || [[ "$path" == .claude/rules/* ]] || [[ "$path" == .claude/skills/* ]] || [[ "$path" == .github/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/controllers/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

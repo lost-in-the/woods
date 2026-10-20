@@ -823,7 +823,8 @@ module Woods
 
             effective_limit = limit || 20
             result = {
-              total_nodes: scores.size,
+              # Documentation units score 0.0 without being ranked.
+              total_nodes: reader.dependency_graph.structural_node_count,
               results: ranked.first(effective_limit)
             }
             respond.call(renderer.render(:pagerank, result))
@@ -974,6 +975,8 @@ module Woods
                          'By default excludes test_mapping (~33% of a typical index) and test_support units so ' \
                          'spec and helper filenames do not dominate semantic rank; pass ' \
                          'types: ["test_mapping", "test_support"] to opt back in. ' \
+                         'Documentation units (type doc, chunked by heading section) are included unless ' \
+                         'retrieve_documentation is off; pass types: ["doc"] to ask for them alone. ' \
                          'Parameter: use `budget` for the token budget (not `limit` — that means result count ' \
                          'on sibling tools, and mapping it here would silently produce a near-empty response).',
             input_schema: {

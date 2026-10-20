@@ -376,6 +376,12 @@ module Woods
     # override by passing +types:+ (include-only) or an explicit +exclude_types:+.
     DEFAULT_EXCLUDE_TYPES = %w[test_mapping test_support].freeze
 
+    # Unit types excluded as well when documentation retrieval is switched
+    # off (+config.retrieve_documentation = false+, or
+    # +WOODS_RETRIEVE_DOCUMENTATION=0+ for a server started without the host
+    # initializer). They are included by default.
+    DOCUMENTATION_TYPES = %w[doc].freeze
+
     # Suffix the Indexer appends when a single unit is split into multiple
     # embedding vectors — see {Embedding::Indexer#collect_embed_items}. The
     # metadata store is keyed by the base identifier only, so the fallback
@@ -465,7 +471,7 @@ module Woods
       return unless Retrieval::Scope.requested?(packages: packages, source_paths: source_paths)
 
       options = { packages: packages, source_paths: source_paths, types: types,
-                  exclude_types: DEFAULT_EXCLUDE_TYPES + Array(excluded).map(&:to_s) }
+                  exclude_types: default_exclude_types + Array(excluded).map(&:to_s) }
       corpus = pipeline.scope_corpus&.current
       return Retrieval::Scope.new(corpus: corpus, **options) if corpus
 
@@ -505,7 +511,7 @@ module Woods
     end
 
     def retrieve_lexical(pipeline, query, classification, budget, types, exclude_types, start_time, **evidence_options)
-      excluded = DEFAULT_EXCLUDE_TYPES + Array(exclude_types).map(&:to_s)
+      excluded = default_exclude_types + Array(exclude_types).map(&:to_s)
       execution = pipeline.executor.execute(query: query, type_filter: types, exclude_types: excluded)
       assembled = pipeline.assembler.assemble(candidates: execution.candidates, budget: budget, **evidence_options)
       result = build_result(assembled: assembled, assembler: pipeline.assembler, classification: classification,
@@ -548,8 +554,22 @@ module Woods
 
       # DEFAULT_EXCLUDE_TYPES is always non-empty, so `excluded` here can
       # never be empty — no early-return-candidates-unchanged branch exists.
-      excluded = (normalize_type_list(exclude_types) || Set.new) | DEFAULT_EXCLUDE_TYPES.to_set
+      excluded = (normalize_type_list(exclude_types) || Set.new) | default_exclude_types.to_set
       candidates.reject { |c| excluded.include?(candidate_type(pipeline, c)) }
+    end
+
+    # @return [Array<String>] types dropped unless a caller names them in +types:+
+    def default_exclude_types
+      retrieve_documentation? ? DEFAULT_EXCLUDE_TYPES : DEFAULT_EXCLUDE_TYPES + DOCUMENTATION_TYPES
+    end
+
+    def retrieve_documentation?
+      override = ENV['WOODS_RETRIEVE_DOCUMENTATION'].to_s.strip.downcase
+      return !%w[0 false no off].include?(override) unless override.empty?
+
+      # Retrieval also runs without the host configuration loaded.
+      config = Woods.configuration if Woods.respond_to?(:configuration)
+      config.nil? || config.retrieve_documentation != false
     end
 
     def normalize_type_list(list)

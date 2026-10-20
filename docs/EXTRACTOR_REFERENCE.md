@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **41 extractor classes** producing **46 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **42 extractor classes** producing **47 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 41 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 46 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 42 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 47 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **41 extractor classes** producing **46 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 41 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 42 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -1369,9 +1369,43 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ---
 
+### DocExtractor
+
+**What it captures:** Project documentation as `doc` units, one per Markdown file, so a document is retrievable and a code unit lists the documents that mention it.
+
+**Key details:**
+- Roots come from `config.documentation_paths` (default `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md`), minus `config.documentation_exclude` (changelogs, `node_modules`, `vendor`, `doc/api`, `docs/api`). See the [configuration reference](CONFIGURATION_REFERENCE.md#documentation-paths).
+- The identifier is the root-relative path (`docs/setup.md`). A file over 1 MiB is skipped with a logged warning.
+- A secret-named file (the same names `ConfigFileExtractor` refuses: `secret`, `token`, `password`, `credential` and so on in the file name) is never read, nor is a symlink whose target is not itself documentation inside the repository. In a Git checkout, ignored and untracked files are skipped.
+- A symlink that reaches another indexed document is an alias, not a unit of its own: the target's unit lists it in `metadata.aliases`, and the graph maps the alias path to that unit, so editing through either path re-extracts it. `CLAUDE.md` and `.github/copilot-instructions.md` linked to `AGENTS.md` make one unit, `AGENTS.md`. A relative link to an alias is a `doc_link` to the target, and deleting an alias keeps the target.
+- Reads bytes only: one line-based pass finds front matter, ATX and setext headings, fenced and inline code, and link targets. It is not a CommonMark parser; indented code blocks and HTML are read as prose.
+- Metadata: `title` (first heading, else the file name), `headings` (level, text, line), `front_matter` (top-level scalar keys), `word_count`, `line_count`, `links`, `mentions`, `mentions_truncated`, `redactions`.
+- **Chunks:** one per heading section, with `heading`, `level`, `heading_path`, `anchor`, `start_line` and `end_line` in the chunk metadata. Text before the first heading is its own section. A section over 6,000 characters is split on line boundaries into `section_N_part_M` chunks. A document with a single section stays whole.
+
+**Edges to code.** Inline code spans and fence lines are scanned for four kinds of mention:
+
+| Kind | Example | Resolves to |
+|---|---|---|
+| `constant` | `Widget::Importer`, `Widget::Importer::LIMIT` | every unit with that identifier, else the longest indexed prefix |
+| `path` | `app/models/widget.rb`, `lib/tasks/widgets.rake:12` | every unit defined in that file |
+| `rake_task` | `rake widgets:sync`, `bin/rails widgets:sync[1]` | the `rake_task` unit of that name |
+| `route` | `GET /widgets` | the `route` unit, or its constrained and numbered variants |
+
+A mention that names an indexed unit becomes a `documents` edge from the document to that unit and is recorded with `resolved: true`. A mention that names nothing stays in `metadata.mentions` with `resolved: false` and produces no edge, so the graph never holds a dangling documentation target. Prose outside code is not scanned. At most 500 distinct mentions are kept per document; `mentions_truncated` says when the cap dropped some.
+
+A relative link to another indexed document becomes a `doc_link` edge. A relative link to a source file becomes a `documents` edge to the units in that file. `metadata.links` records every target with its `kind` (`relative`, `external`, `anchor`), the root-relative `path` it resolves to, and whether it resolved.
+
+Resolution needs the whole index, so it runs as a post-pass after every extractor, in full and incremental runs alike. An unchanged document gains an edge when its target is first indexed and loses it when the target is deleted.
+
+**Graph.** `doc` is listed in `DependencyGraph::DOCUMENTATION_UNIT_TYPES`. Documentation edges are published (`dependents` on a model lists the documents that mention it), but documents take no part in PageRank (they score `0.0`, pass no rank, and are left out of the `pagerank` tool's node count), in the incremental blast radius, or in `graph_analysis.json` (orphans, dead ends, hubs, cycles, bridges).
+
+**Redaction.** Published source passes through the credential shapes of the Console scanner (`Woods::Console::CredentialScanner`): API keys, tokens, connection strings with a password, PEM private key blocks. The userinfo of any URL (`https://token@host`, `ftp://user:secret@host`) is then replaced the same way configuration source is redacted, keeping the scheme and host; a URL without userinfo is untouched. A front matter key that names a credential (`password`, `token`, `secret`, `api_key`, ...) has its value replaced whatever its shape. Headings, mentions, front matter and chunks are read from the redacted text. `metadata.redactions` counts what was replaced. This is best effort: it recognizes shapes, so a credential in a form the scanner does not know is published as written. Keep secrets out of documentation.
+
+---
+
 ## How do I enable or disable extractors?
 
-You can't, today. All 41 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -1388,7 +1422,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 46 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support`, `:js_module` |
+| `type` | Symbol | Unit category, one of the 47 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support`, `:js_module`, `:doc` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

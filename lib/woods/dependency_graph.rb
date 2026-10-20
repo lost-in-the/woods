@@ -52,6 +52,12 @@ module Woods
     # and stay out of {GraphAnalyzer}'s hub, orphan and dead-end lists.
     SCHEMA_UNIT_TYPES = %i[database_table external_consumer].freeze
 
+    # Unit types that describe the code instead of being part of it. Their
+    # edges are published, so a unit lists the documents that mention it, but
+    # they take no part in PageRank, the blast radius or structural analysis:
+    # see {#structural_graph}.
+    DOCUMENTATION_UNIT_TYPES = %i[doc].freeze
+
     # Optional edge keys beyond target and via. `through` is the through
     # association name; `through_db` is the through model's resolved
     # database, emitted only when present; `disable_joins` is emitted only
@@ -370,14 +376,31 @@ module Woods
         dependents = @reverse[current] || []
 
         dependents.each do |dep|
-          unless affected.include?(dep)
-            affected.add(dep)
-            queue.push([dep, depth + 1])
-          end
+          # A document's content never depends on the code it mentions.
+          next if affected.include?(dep) || documentation_only?(dep)
+
+          affected.add(dep)
+          queue.push([dep, depth + 1])
         end
       end
 
       affected.to_a
+    end
+
+    # The graph without {DOCUMENTATION_UNIT_TYPES}: what PageRank and
+    # {GraphAnalyzer} measure. A document that mentions thirty units would
+    # otherwise raise each one's rank and dependent count, and every document
+    # nothing links to would read as dead code.
+    #
+    # Node and reverse-edge order are preserved, so scores over the view equal
+    # scores over a graph the documents were never registered in.
+    #
+    # @return [DependencyGraph] self when no documentation is registered
+    def structural_graph
+      return self if DOCUMENTATION_UNIT_TYPES.none? { |type| @type_index[type]&.any? }
+
+      excluded = @nodes.keys.select { |identifier| documentation_only?(identifier) }.to_set
+      self.class.new.tap { |graph| graph.adopt_structure(*structural_state(excluded)) }
     end
 
     # Fetch a node's metadata without materializing the whole graph.
@@ -616,6 +639,13 @@ module Woods
     # @param iterations [Integer] Number of iterations (default: 20)
     # @return [Hash<String, Float>] Identifier => PageRank score
     def pagerank(damping: 0.85, iterations: 20)
+      structural = structural_graph
+      unless structural.equal?(self)
+        documentation = @nodes.keys.reject { |identifier| structural.node_exists?(identifier) }
+        return structural.pagerank(damping: damping, iterations: iterations)
+                         .merge(documentation.to_h { |identifier| [identifier, 0.0] })
+      end
+
       return {} if @nodes.empty?
 
       node_ids, unranked = @nodes.keys.partition { |id| ranked?(id) }
@@ -631,6 +661,13 @@ module Woods
       scores
     end
 
+    # How many identifiers PageRank ranks: every one except documentation.
+    #
+    # @return [Integer]
+    def structural_node_count
+      @nodes.count { |identifier, _| !documentation_only?(identifier) }
+    end
+
     # Whether an identifier is a schema unit under every type it is
     # registered as. See {SCHEMA_UNIT_TYPES}.
     #
@@ -641,7 +678,44 @@ module Woods
       !types.nil? && types.each_key.all? { |type| SCHEMA_UNIT_TYPES.include?(type) }
     end
 
+    protected
+
+    # @see #structural_graph
+    def adopt_structure(nodes, edges, reverse, reverse_via, file_map, type_index)
+      @nodes = nodes
+      @edges = edges
+      @reverse = reverse
+      @reverse_via = reverse_via
+      @file_map = file_map
+      @type_index = type_index
+    end
+
     private
+
+    # @param identifier [String]
+    # @return [Boolean] whether every type registered under it is documentation
+    def documentation_only?(identifier)
+      types = @nodes[identifier]
+      !types.nil? && !types.empty? && types.each_key.all? { |type| DOCUMENTATION_UNIT_TYPES.include?(type) }
+    end
+
+    # @param excluded [Set<String>] documentation-only identifiers
+    # @return [Array<Hash>] the six indexes without them, in {#adopt_structure} order
+    def structural_state(excluded)
+      typed = ->(by_type) { by_type.except(*DOCUMENTATION_UNIT_TYPES) }
+      sources = lambda do |index|
+        index.each_with_object({}) do |(key, identifiers), kept|
+          remaining = identifiers - excluded
+          kept[key] = remaining unless remaining.empty?
+        end
+      end
+      [@nodes.except(*excluded).transform_values(&typed),
+       @edges.except(*excluded).transform_values(&typed),
+       sources.call(@reverse.except(*excluded)),
+       sources.call(@reverse_via.reject { |(target, _via), _| excluded.include?(target) }),
+       sources.call(@file_map),
+       @type_index.except(*DOCUMENTATION_UNIT_TYPES)]
+    end
 
     # short name => every full identifier sharing it, for
     # {#find_node_by_suffix} and {#find_all_by_suffix}.
@@ -719,6 +793,8 @@ module Woods
                 SourceContributors.paths(unit)
               elsif unit.type == :rake_task
                 [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              elsif unit.type == :doc
+                document_paths(unit, metadata)
               else
                 []
               end
@@ -726,6 +802,17 @@ module Woods
       paths if paths.size > 1
     end
     private :source_paths_of
+
+    # A document and the root-relative paths that alias it through a symlink,
+    # anchored where the document's own path is.
+    #
+    # @return [Array<String>]
+    def document_paths(unit, metadata)
+      aliases = Array(metadata[:aliases] || metadata['aliases'])
+      base = unit.file_path.to_s.delete_suffix(unit.identifier.to_s)
+      [unit.file_path, *aliases.map { |path| "#{base}#{path}" }].compact
+    end
+    private :document_paths
 
     # A registered node that takes part in PageRank: anything but a schema unit.
     def ranked?(identifier)

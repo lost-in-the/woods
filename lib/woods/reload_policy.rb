@@ -67,9 +67,10 @@ module Woods
   module ConfiguredInputs
     module_function
 
-    # YAML under `config_file_paths`, and the declared external consumers file.
+    # YAML under `config_file_paths`, Markdown under `documentation_paths`,
+    # and the declared external consumers file.
     def bytes_input?(path)
-      Extractors::ConfigFileExtractor.config_file_path?(path) ||
+      Extractors::ConfigFileExtractor.config_file_path?(path) || Extractors::DocExtractor.doc_path?(path) ||
         (Woods.respond_to?(:configuration) && path == Woods.configuration&.external_table_consumers_path)
     end
 
