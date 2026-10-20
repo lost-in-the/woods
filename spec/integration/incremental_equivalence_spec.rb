@@ -1129,6 +1129,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'configuration drift from the baseline' do
+    def consumer_units(index_dir)
+      Dir[File.join(Woods::Generation.new(output_dir: index_dir).payload_dir, 'external_consumers', '*.json')]
+        .reject { |path| path.end_with?('_index.json') }
+    end
+
+    it 'refuses an incremental that leaves out declared consumers and stays equivalent once they match again' do
+      Woods.configuration.external_table_consumers = { 'lantern-shop' => %w[posts] }
+      index_dir = full_extraction
+      generation = Woods::Generation.new(output_dir: index_dir)
+      published = generation.current.number
+      expect(consumer_units(index_dir)).not_to be_empty
+
+      Woods.configuration.external_table_consumers = {}
+      expect { Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb']) }
+        .to raise_error(Woods::ExtractionError, /external_table_consumers.*woods:extract/m)
+      expect(generation.current.number).to eq(published)
+      expect(consumer_units(index_dir)).not_to be_empty
+
+      Woods.configuration.external_table_consumers = { 'lantern-shop' => %w[posts] }
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb'])
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.external_table_consumers = {}
+    end
+  end
+
   describe 'configured event roots' do
     around do |example|
       Woods.configuration.event_paths = %w[app lib]

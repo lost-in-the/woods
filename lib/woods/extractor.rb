@@ -897,7 +897,8 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run(operation: 'incremental')
-      ensure_supported_incremental_writer!
+      baseline_manifest = ensure_supported_incremental_writer!
+      @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
       profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
@@ -1146,6 +1147,8 @@ module Woods
     # Readers retain legacy compatibility, but partial writers cannot migrate
     # retained v1 units. A missing version in a generation manifest is allowed:
     # early v2 prereleases published generations before recording provenance.
+    #
+    # @return [Hash, nil] the published manifest, nil when there is none
     def ensure_supported_incremental_writer!
       generation = Generation.new(output_dir: @output_dir)
       directory = generation.payload_dir
@@ -1159,13 +1162,50 @@ module Woods
 
       manifest = JSON.parse(AtomicFile.read(manifest_path))
       writer = manifest.fetch('woods_version', nil)
-      return if writer.nil? || Gem::Version.new(writer).segments.first >= 2
+      return manifest if writer.nil? || Gem::Version.new(writer).segments.first >= 2
 
       raise Woods::ExtractionError,
             "Cannot incrementally update an index written by Woods #{writer}; run a full woods:extract first"
     rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
       raise Woods::ExtractionError,
             "Cannot verify the baseline manifest writer (#{e.class}); run a full woods:extract first"
+    end
+
+    # The baseline's extraction fingerprint, once this run's configuration is
+    # known to match it. Only a key both sides record with different digests
+    # refuses: a key one Woods version adds or retires must not force a full
+    # run on upgrade. A baseline without a fingerprint, or missing a key,
+    # warns and runs; its next full extraction records the current one.
+    #
+    # @param manifest [Hash, nil] the published manifest
+    # @return [Hash, nil] digests to carry into this run's manifest
+    # @raise [Woods::ExtractionConfigChanged] when a recorded key changed
+    def baseline_extraction_config(manifest)
+      return nil unless manifest
+
+      recorded = manifest['extraction_config']
+      unless recorded.is_a?(Hash)
+        Rails.logger.warn '[Woods] The baseline index records no configuration fingerprint, so this run cannot ' \
+                          'verify it uses the configuration of the full extraction it builds on. The next full ' \
+                          'woods:extract records one.'
+        return nil
+      end
+
+      current = Woods.configuration.extraction_fingerprint
+      changed = current.keys.select { |key| recorded.key?(key) && recorded[key] != current[key] }
+      unless changed.empty?
+        raise Woods::ExtractionConfigChanged,
+              "Extraction configuration differs from the baseline index (#{changed.join(', ')}). An incremental " \
+              'run would publish an index missing the units and edges those settings produce. Run a full ' \
+              'woods:extract; the previous published generation remains active.'
+      end
+
+      unrecorded = current.keys - recorded.keys
+      unless unrecorded.empty?
+        Rails.logger.warn "[Woods] The baseline index predates fingerprinting #{unrecorded.join(', ')}; this run " \
+                          'cannot verify them. The next full woods:extract records them.'
+      end
+      recorded
     end
 
     # Refuse an incremental run that has no baseline to be incremental
@@ -2659,6 +2699,11 @@ module Woods
         gemfile_lock_sha: gemfile_lock_sha,
         schema_sha: schema_sha
       }
+
+      # An incremental run carries the baseline's digests: it never certifies
+      # a configuration no full extraction ran with.
+      extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
+      manifest[:extraction_config] = extraction_config if extraction_config
 
       manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
 
