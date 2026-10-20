@@ -7,6 +7,7 @@ require_relative 'git_source_filter'
 # resident process (the watch daemon, a rake task) loads this file without them.
 require_relative 'extractors/config_file_extractor'
 require_relative 'extractors/configuration_extractor'
+require_relative 'javascript_paths'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -243,6 +244,15 @@ module Woods
         Woods::Extractors::TestSupportCatalog.support_path?(relative_path)
       end
 
+      # Is this a JavaScript/TypeScript module the js_module extractor indexes?
+      # Reads the configured globs at call time.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def js_module_path?(relative_path)
+        JavascriptPaths.source?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -264,7 +274,7 @@ module Woods
       #
       # @return [Array<Rule>]
       def whole_app_rules
-        roots = [event_roots, Woods::Extractors::RakeTaskPaths.configured]
+        roots = [event_roots, Woods::Extractors::RakeTaskPaths.configured, JavascriptPaths.globs]
         @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
         @whole_app_rules_event_roots = roots
         require_rule_extractors
@@ -470,6 +480,9 @@ module Woods
           *schema_unit_rules,
           *test_support_rules,
           *view_template_rules,
+          # A module's registered names come from other files, so any module
+          # change re-runs the type.
+          *js_module_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.
@@ -490,6 +503,17 @@ module Woods
                                      Woods::Extractors::PackageExtractor::PACKWERK_CONFIG],
                          exclude: %w[node_modules/ vendor/ tmp/ bin/ script/])
         ]
+      end
+
+      # One rule per configured glob. The matcher is authoritative; each
+      # rule's directory and extensions describe its glob for the hook
+      # projection, which has no Ruby.
+      def js_module_rules
+        JavascriptPaths.shapes.map do |directory, extensions, tests|
+          exclude = JavascriptPaths.excluded_fragments + (tests ? [] : JavascriptPaths.test_fragments)
+          whole_app_rule(:js_modules, [directory], extensions: extensions, exclude: exclude,
+                                                   matcher: :js_module_path?)
+        end
       end
 
       # File-based extractors glob `**/*.rb` unless they say otherwise, so

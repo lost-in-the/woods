@@ -145,6 +145,14 @@ RSpec.describe 'Incremental extraction configuration drift' do
       .to raise_error(Woods::ExtractionConfigChanged, /rake_task_paths.*woods:extract/m)
   end
 
+  it 'refuses an incremental after the JavaScript module globs change' do
+    baseline
+    Woods.configuration.javascript_paths = ['app/javascript/**/*.{js,ts}', 'frontend/lantern/**/*.ts']
+
+    expect { extractor.send(:prepare_incremental_run) }
+      .to raise_error(Woods::ExtractionConfigChanged, /javascript_paths.*woods:extract/m)
+  end
+
   describe 'the published manifest' do
     it 'records the current fingerprint on a full run' do
       allow(Time).to receive(:current).and_return(Time.now)
