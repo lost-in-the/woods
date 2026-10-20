@@ -150,7 +150,7 @@ module Woods
                          event_patterns event_paths unclaimed_ruby_paths graphql_document_paths
                          config_file_paths config_file_values settings_readers
                          external_table_consumers external_table_consumers_path
-                         test_support_paths test_subdomain_helpers rake_task_paths].freeze
+                         test_support_paths test_subdomain_helpers rake_task_paths javascript_paths].freeze
 
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
@@ -735,7 +735,10 @@ module Woods
     # Root-relative globs {Woods::Extractors::JsModuleExtractor} scans for
     # JavaScript and TypeScript modules. Vendored, generated, minified and
     # declaration files are never indexed; see {Woods::JavascriptPaths}. An
-    # empty list disables the unit type. Changing it needs a full extraction.
+    # empty list disables the unit type.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.javascript_paths = ['app/javascript/**/*.{js,ts}', 'frontend/src/**/*.{ts,tsx}']

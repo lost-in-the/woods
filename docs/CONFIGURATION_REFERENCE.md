@@ -1230,9 +1230,9 @@ raising `Woods::ConfigurationError` and keeping the previous value.
 The same predicate (`Woods::JavascriptPaths.source?`) decides which changed
 paths re-run the extractor incrementally and which the watch daemon classifies
 as `:reextract`. **Changing `javascript_paths` itself needs a full
-extraction**: the value is not part of any incremental fingerprint, so modules
-under a newly added root are indexed only when one of them changes or
-`woods:extract` runs.
+extraction**: the value is part of the generation's configuration fingerprint,
+so incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
 
 ## Console MCP options
 
