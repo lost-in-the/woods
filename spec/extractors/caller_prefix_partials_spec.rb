@@ -66,7 +66,7 @@ RSpec.describe Woods::Extractors::CallerPrefixPartials do
       path = File.join(tmp_dir, 'app/views/shared/_navigation.html.erb')
       single = Woods::Extractors::ViewTemplateExtractor.new.extract_view_template_file(path)
 
-      expect(single.to_h).to eq(unit('shared/_navigation.html.erb').to_h)
+      expect(single.to_h.except(:extracted_at)).to eq(unit('shared/_navigation.html.erb').to_h.except(:extracted_at))
     end
   end
 
@@ -93,7 +93,7 @@ RSpec.describe Woods::Extractors::CallerPrefixPartials do
       path = File.join(tmp_dir, 'app/views/shared/_navigation.html.erb')
       single = Woods::Extractors::ViewTemplateExtractor.new.extract_view_template_file(path)
 
-      expect(single.to_h).to eq(unit('shared/_navigation.html.erb').to_h)
+      expect(single.to_h.except(:extracted_at)).to eq(unit('shared/_navigation.html.erb').to_h.except(:extracted_at))
     end
   end
 
