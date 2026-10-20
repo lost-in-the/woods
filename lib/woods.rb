@@ -150,7 +150,8 @@ module Woods
                          event_patterns event_paths unclaimed_ruby_paths graphql_document_paths
                          config_file_paths config_file_values settings_readers
                          external_table_consumers external_table_consumers_path
-                         test_support_paths test_subdomain_helpers rake_task_paths javascript_paths].freeze
+                         test_support_paths test_subdomain_helpers rake_task_paths javascript_paths
+                         documentation_paths documentation_exclude].freeze
 
     # Markdown the documentation extractor indexes as `doc` units, as
     # root-relative globs. See {#documentation_paths=}.
@@ -770,8 +771,8 @@ module Woods
     # hidden directory other than `.claude/rules`, `.claude/skills` and
     # `.github` is refused: source capture and the watch daemon never read one.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.documentation_paths += ['handbook/**/*.md']
@@ -782,8 +783,10 @@ module Woods
       @documentation_paths = validate_documentation_globs!('documentation_paths', value, visible: true)
     end
 
-    # Root-relative globs removed from {#documentation_paths}. Run a full
-    # extraction after changing it.
+    # Root-relative globs removed from {#documentation_paths}.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @param value [Array<String>] relative glob patterns
     # @raise [ConfigurationError] if any entry is malformed; the previous value is kept

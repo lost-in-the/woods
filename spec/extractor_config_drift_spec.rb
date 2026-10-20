@@ -153,6 +153,28 @@ RSpec.describe 'Incremental extraction configuration drift' do
       .to raise_error(Woods::ExtractionConfigChanged, /javascript_paths.*woods:extract/m)
   end
 
+  it 'refuses an incremental after the documentation paths or excludes change' do
+    baseline
+    Woods.configuration.documentation_paths += ['handbook/**/*.md']
+
+    expect { extractor.send(:prepare_incremental_run) }
+      .to raise_error(Woods::ExtractionConfigChanged, /documentation_paths.*woods:extract/m)
+
+    Woods.configuration.documentation_paths = Woods::Configuration::DEFAULT_DOCUMENTATION_PATHS
+    Woods.configuration.documentation_exclude += ['docs/archive/**/*']
+
+    expect { extractor.send(:prepare_incremental_run) }
+      .to raise_error(Woods::ExtractionConfigChanged, /documentation_exclude.*woods:extract/m)
+  end
+
+  it 'leaves retrieve_documentation out of the fingerprint: it shapes retrieval, not extraction' do
+    baseline
+    Woods.configuration.retrieve_documentation = false
+
+    expect(Woods.configuration.extraction_fingerprint.keys).not_to include('retrieve_documentation')
+    expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+  end
+
   describe 'the published manifest' do
     it 'records the current fingerprint on a full run' do
       allow(Time).to receive(:current).and_return(Time.now)

@@ -1268,9 +1268,13 @@ same switch from `WOODS_RETRIEVE_DOCUMENTATION=0`, which wins over the
 configuration value.
 
 **Changing `documentation_paths` or `documentation_exclude` needs a full
-extraction.** Neither is part of any incremental fingerprint. The plugin's
-change hook and a process that has not loaded Woods' extractors recognize the
-default roots only; the watch daemon and the rake tasks use the configured ones.
+extraction**: both are part of the generation's configuration fingerprint, so
+incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
+`retrieve_documentation` is not: it changes what retrieval returns, not what is
+extracted. The plugin's change hook and a process that has not loaded Woods'
+extractors recognize the default roots only; the watch daemon and the rake
+tasks use the configured ones.
 
 ## Console MCP options
 
