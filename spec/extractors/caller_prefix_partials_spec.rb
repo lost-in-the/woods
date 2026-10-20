@@ -239,8 +239,8 @@ RSpec.describe Woods::Extractors::CallerPrefixPartials do
     create_file('app/views/widgets/_account_head.html.erb', '<p>widgets</p>')
     create_file('app/views/ledgers/_account_head.html.erb', '<p>ledgers</p>')
 
-    first = units.sort_by(&:identifier).map(&:to_h)
-    second = units.sort_by(&:identifier).map(&:to_h)
+    first = units.sort_by(&:identifier).map { |unit| unit.to_h.except(:extracted_at) }
+    second = units.sort_by(&:identifier).map { |unit| unit.to_h.except(:extracted_at) }
 
     expect(second).to eq(first)
   end
