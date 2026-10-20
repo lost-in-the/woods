@@ -661,6 +661,13 @@ module Woods
       scores
     end
 
+    # How many identifiers PageRank ranks: every one except documentation.
+    #
+    # @return [Integer]
+    def structural_node_count
+      @nodes.count { |identifier, _| !documentation_only?(identifier) }
+    end
+
     # Whether an identifier is a schema unit under every type it is
     # registered as. See {SCHEMA_UNIT_TYPES}.
     #

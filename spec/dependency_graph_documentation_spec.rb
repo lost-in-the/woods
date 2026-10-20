@@ -79,6 +79,11 @@ RSpec.describe 'Documentation units in the dependency graph' do
     expect(graph.dependents_of('Widget', via: :documents)).to eq(['docs/widgets.md'])
   end
 
+  it 'counts only the ranked nodes' do
+    expect(graph.structural_node_count).to eq(code_graph.pagerank.size)
+    expect(code_graph.structural_node_count).to eq(4)
+  end
+
   describe '#structural_graph' do
     it 'is the graph itself when it holds no documentation' do
       expect(code_graph.structural_graph).to equal(code_graph)

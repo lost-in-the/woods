@@ -823,7 +823,8 @@ module Woods
 
             effective_limit = limit || 20
             result = {
-              total_nodes: scores.size,
+              # Documentation units score 0.0 without being ranked.
+              total_nodes: reader.dependency_graph.structural_node_count,
               results: ranked.first(effective_limit)
             }
             respond.call(renderer.render(:pagerank, result))
