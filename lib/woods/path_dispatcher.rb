@@ -97,7 +97,7 @@ module Woods
 
       def under_a_directory?(relative_path)
         dirs.to_a.any? do |dir|
-          next false unless relative_path.start_with?("#{dir}/")
+          next false unless dir == '.' || relative_path.start_with?("#{dir}/")
 
           recursive == false ? File.dirname(relative_path) == dir : true
         end

@@ -931,7 +931,8 @@ end
 ```
 
 The setter requires a non-empty `Array` of non-empty `String`s, each relative
-to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+to `Rails.root` without `..` segments. It drops empty and `.` segments, so
+`./lib/` and `lib//` both name `lib` and `.` names the root itself. Anything
 else raises `Woods::ConfigurationError` and keeps the previous value. A root
 that does not exist is skipped.
 
@@ -939,6 +940,16 @@ that does not exist is skipped.
 re-runs `EventExtractor` wholesale when any `.rb` file under an `event_paths`
 root changes, so with `%w[app lib]` a publisher added to or removed from a
 `lib/` file is picked up without a full extraction.
+
+**The plugin hook and the watch daemon see `app/` and `lib/` roots only.**
+The hook predicate,
+`plugin/hooks/woods-input-rules.sh`, is generated from the default rules, not
+from your configuration, so it treats a `.rb` edit under another `event_paths`
+root (`engines/ledger`, say) as ignorable. Declare such a root with
+`woods-extract --source-root PATH`: the hook reads declared roots from the
+published manifest and treats a Ruby edit under one as incremental input. The
+watch daemon reloads only `app/`, `lib/` and declared roots, so it needs the
+same declaration. A direct `woods:incremental` run does not.
 
 **Changing the `event_paths` value itself needs one full extraction.** Events
 already indexed were scanned under the old roots and stay as they are until an

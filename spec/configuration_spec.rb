@@ -580,6 +580,12 @@ RSpec.describe Woods::Configuration do
       expect(config.event_paths).to eq(%w[app lib/events])
     end
 
+    it 'normalizes ./, repeated slashes and . segments so full and incremental runs agree on a root' do
+      config.event_paths = ['./lib', 'lib//events', 'app/./services', '.', './']
+
+      expect(config.event_paths).to eq(%w[lib lib/events app/services . .])
+    end
+
     it 'rejects a value that is not a non-empty Array' do
       expect { config.event_paths = 'lib' }
         .to raise_error(Woods::ConfigurationError, /event_paths must be a non-empty Array/)
@@ -820,6 +826,20 @@ RSpec.describe Woods::Configuration do
         expect { config.unclaimed_ruby_paths = [glob] }
           .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/)
       end
+    end
+
+    it 'rejects a parent traversal hidden inside a brace alternation' do
+      ['{../shared,app}/**/*.rb', 'app/{lib,..}/*.rb', 'app{/..,}/*.rb'].each do |glob|
+        expect { config.unclaimed_ruby_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/), glob
+      end
+    end
+
+    it 'still accepts brace alternations and dotted names that stay inside the root' do
+      config.unclaimed_ruby_paths = ['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb']
+
+      expect(config.unclaimed_ruby_paths)
+        .to eq(['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb'])
     end
 
     it 'keeps the previous value when an entry is invalid' do

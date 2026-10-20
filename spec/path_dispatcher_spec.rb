@@ -366,6 +366,21 @@ RSpec.describe Woods::PathDispatcher do
         expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
       end
 
+      it 'matches a root spelled ./lib or lib//ledger the same way the full run scans it' do
+        Woods.configuration.event_paths = ['./lib', 'vendor//ledger']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('vendor/ledger/bus.rb')).to include(:events)
+      end
+
+      it 'treats . as every Ruby file under the root' do
+        Woods.configuration.event_paths = ['.']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
+      end
+
       it 'returns to the default when the configuration object is replaced' do
         Woods.configuration.event_paths = %w[app lib]
         described_class.whole_app_rules
