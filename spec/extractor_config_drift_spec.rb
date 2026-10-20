@@ -137,6 +137,14 @@ RSpec.describe 'Incremental extraction configuration drift' do
     expect { extractor.refresh(:models) }.to raise_error(Woods::ExtractionError, /test_support_paths/)
   end
 
+  it 'refuses an incremental after the rake task roots change' do
+    baseline
+    Woods.configuration.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/lantern/*.rake', 'Rakefile']
+
+    expect { extractor.send(:prepare_incremental_run) }
+      .to raise_error(Woods::ExtractionConfigChanged, /rake_task_paths.*woods:extract/m)
+  end
+
   describe 'the published manifest' do
     it 'records the current fingerprint on a full run' do
       allow(Time).to receive(:current).and_return(Time.now)

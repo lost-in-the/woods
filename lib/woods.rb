@@ -149,7 +149,7 @@ module Woods
                          event_patterns event_paths unclaimed_ruby_paths graphql_document_paths
                          config_file_paths config_file_values settings_readers
                          external_table_consumers external_table_consumers_path
-                         test_support_paths test_subdomain_helpers].freeze
+                         test_support_paths test_subdomain_helpers rake_task_paths].freeze
 
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
@@ -702,7 +702,10 @@ module Woods
 
     # Files {Woods::Extractors::RakeTaskExtractor} reads for task definitions,
     # relative to Rails.root. Ruby files under a listed directory are indexed
-    # as the tasks' support code. Changing it needs a full extraction.
+    # as the tasks' support code.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/*.rake', 'Rakefile']
