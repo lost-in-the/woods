@@ -122,7 +122,11 @@ module Woods
       # @return [Array(Array, String)] the link's targets and the edge label they take
       def link_targets(path)
         documents = typed(path, TYPE.to_s)
-        documents.empty? ? [@registry.units_at(path), MENTION_VIA] : [documents, LINK_VIA]
+        return [documents, LINK_VIA] unless documents.empty?
+
+        # A path that aliases a document maps to that document only.
+        units = @registry.units_at(path)
+        units.any? && units.all? { |_, type| type == TYPE.to_s } ? [units, LINK_VIA] : [units, MENTION_VIA]
       end
 
       # @return [Array] the targets added: every one but the document itself
@@ -195,6 +199,21 @@ module Woods
       end
 
       # @return [String, nil] the identifier when the published unit was rewritten
+      # A vanished alias of a document whose own file remains does not take the
+      # document with it: the document is re-extracted, dropping the alias.
+      #
+      # @param touched [Set<String>] gains the identifier when it is rewritten
+      # @return [Boolean] whether the unit was kept
+      def aliased_document_retained?(identifier, type, vanished, touched, affected_types)
+        return false unless DependencyGraph::DOCUMENTATION_UNIT_TYPES.include?(type)
+
+        primary = @dependency_graph.node(identifier, type: type)&.dig(:file_path)
+        return false if primary.nil? || primary == vanished || !File.exist?(primary)
+
+        touched.add(identifier) if re_extract_unit_of_type(identifier, type, affected_types)
+        true
+      end
+
       def refresh_doc_references(resolver, identifier, affected_types)
         key = self.class::TYPE_TO_EXTRACTOR_KEY.fetch(TYPE)
         path = payload_dir.join(key.to_s, collision_safe_filename(identifier))

@@ -1900,6 +1900,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index, full_extraction)).to be_empty
     end
 
+    it 'keeps one unit for a symlinked document through target edits, alias edits and a deleted alias' do
+      index = run_sequence([
+                             -> { write_file('AGENTS.md', guide('`Post` rules.')) },
+                             lambda {
+                               File.symlink('AGENTS.md', app_path('CLAUDE.md'))
+                               'CLAUDE.md'
+                             },
+                             lambda {
+                               FileUtils.mkdir_p(app_path('.github'))
+                               File.symlink('../AGENTS.md', app_path('.github/copilot-instructions.md'))
+                               '.github/copilot-instructions.md'
+                             },
+                             -> { write_file('AGENTS.md', guide('`Comment` rules.')) },
+                             lambda {
+                               File.write(app_path('CLAUDE.md'), guide('`Post` and `Comment` rules.'))
+                               'CLAUDE.md'
+                             },
+                             -> { delete_file('CLAUDE.md') }
+                           ])
+
+      expect(doc_unit(index, 'AGENTS.md').dig('metadata', 'aliases')).to eq(['.github/copilot-instructions.md'])
+      expect(edges(index, 'AGENTS.md')).to eq([%w[model Comment documents], %w[model Post documents]])
+      expect(doc_unit(index, 'CLAUDE.md')).to be_nil
+    end
+
+    it 'keeps a symlinked document when an alias is deleted without being named' do
+      write_file('AGENTS.md', guide('`Post` rules.'))
+      File.symlink('AGENTS.md', app_path('CLAUDE.md'))
+
+      index = run_sequence([
+                             lambda {
+                               delete_file('CLAUDE.md')
+                               write_file('app/services/other_service.rb', service_source('OtherService'))
+                             }
+                           ])
+
+      expect(doc_unit(index, 'AGENTS.md').dig('metadata', 'aliases')).to eq([])
+    end
+
     it 'resolves a path to every file that defines a task, in both modes' do
       index = run_sequence([
                              -> { write_file('lib/tasks/ledger.rake', rake_source('ledger', %w[close])) },

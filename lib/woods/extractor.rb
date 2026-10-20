@@ -3852,6 +3852,7 @@ module Woods
 
         @dependency_graph.units_for_path(path).each do |identifier, type|
           next if !class_based && convention_path_unit?(type)
+          next if aliased_document_retained?(identifier, type, path, removed, affected_types)
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end

@@ -793,6 +793,8 @@ module Woods
                 SourceContributors.paths(unit)
               elsif unit.type == :rake_task
                 [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              elsif unit.type == :doc
+                document_paths(unit, metadata)
               else
                 []
               end
@@ -800,6 +802,17 @@ module Woods
       paths if paths.size > 1
     end
     private :source_paths_of
+
+    # A document and the root-relative paths that alias it through a symlink,
+    # anchored where the document's own path is.
+    #
+    # @return [Array<String>]
+    def document_paths(unit, metadata)
+      aliases = Array(metadata[:aliases] || metadata['aliases'])
+      base = unit.file_path.to_s.delete_suffix(unit.identifier.to_s)
+      [unit.file_path, *aliases.map { |path| "#{base}#{path}" }].compact
+    end
+    private :document_paths
 
     # A registered node that takes part in PageRank: anything but a schema unit.
     def ranked?(identifier)

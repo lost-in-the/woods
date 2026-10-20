@@ -79,6 +79,17 @@ RSpec.describe 'Documentation units in the dependency graph' do
     expect(graph.dependents_of('Widget', via: :documents)).to eq(['docs/widgets.md'])
   end
 
+  it 'maps the paths that alias a document to its unit' do
+    doc = unit(:doc, 'AGENTS.md', '/app/AGENTS.md')
+    doc.metadata = { aliases: %w[CLAUDE.md .github/copilot-instructions.md] }
+    graph = graph_of(code_units + [doc])
+
+    expect(graph.units_for_path('/app/CLAUDE.md')).to eq([['AGENTS.md', :doc]])
+    expect(graph.affected_by(['/app/.github/copilot-instructions.md'])).to eq(['AGENTS.md'])
+    expect(graph.node('AGENTS.md', type: :doc)[:source_paths])
+      .to eq(%w[/app/.github/copilot-instructions.md /app/AGENTS.md /app/CLAUDE.md])
+  end
+
   it 'counts only the ranked nodes' do
     expect(graph.structural_node_count).to eq(code_graph.pagerank.size)
     expect(code_graph.structural_node_count).to eq(4)

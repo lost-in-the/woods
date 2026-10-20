@@ -96,32 +96,66 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] `doc` units, sorted by identifier
       def extract_all
-        self.class.documentation_paths
-            .flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }
-            .uniq.sort
-            .filter_map { |relative| extract_doc_file(File.join(@root, relative)) }
+        paths = candidate_paths
+        index = alias_index(paths)
+        aliased = index.values.flatten.to_set
+        paths.reject { |relative| aliased.include?(relative) }
+             .filter_map { |relative| extract_doc_file(File.join(@root, relative), aliases: index) }
       end
 
       # Extract one documentation file.
       #
+      # A path that reaches another indexed document through a symlink is an
+      # alias: it yields that document's unit, which lists every alias in
+      # `metadata[:aliases]`. One text is one unit, whichever path names it.
+      #
       # @param file_path [String] absolute path to a Markdown file
+      # @param aliases [Hash, nil] a precomputed {#alias_index}
       # @return [ExtractedUnit, nil] the unit, or nil when the path is not a
       #   documentation file, is over {MAX_DOC_BYTES}, or cannot be read
-      def extract_doc_file(file_path)
+      def extract_doc_file(file_path, aliases: nil)
         relative = file_path.to_s.delete_prefix("#{@root}/")
         return nil unless self.class.doc_path?(relative) && File.file?(file_path)
 
         target = documentation_target(file_path)
         return nil unless target && readable?(relative, target)
+
+        identity = target.delete_prefix("#{@real_root}/")
+        return extract_doc_file(File.join(@root, identity), aliases: aliases) unless identity == relative
         return skip_oversize(relative) if File.size(target) > MAX_DOC_BYTES
 
-        build_unit(relative, file_path, SourceFile.read(target))
+        alias_paths = Array((aliases || alias_index(candidate_paths))[target])
+                      .select { |path| readable?(path, target) }
+        build_unit(relative, file_path, SourceFile.read(target), alias_paths)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract documentation #{file_path}: #{e.message}")
         nil
       end
 
       private
+
+      # @return [Array<String>] sorted root-relative paths the configured globs match
+      def candidate_paths
+        self.class.documentation_paths
+            .flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }
+            .uniq.sort
+      end
+
+      # @param paths [Array<String>] root-relative candidate paths
+      # @return [Hash{String => Array<String>}] resolved document path => the
+      #   sorted candidate paths that reach it through a symlink
+      def alias_index(paths)
+        paths.each_with_object({}) do |relative, index|
+          next unless self.class.doc_path?(relative)
+
+          target = documentation_target(File.join(@root, relative))
+          next if target.nil? || target.delete_prefix("#{@real_root}/") == relative
+
+          (index[target] ||= []) << relative
+        rescue SystemCallError
+          next
+        end
+      end
 
       # Every gate applies to the file a symlink reaches as well as to the
       # link, and that resolved file is what gets read. Otherwise a tracked
@@ -148,7 +182,7 @@ module Woods
         nil
       end
 
-      def build_unit(relative, file_path, source)
+      def build_unit(relative, file_path, source, alias_paths)
         raw = Markdown::LineScan.call(source)
         redacted, redactions = @redaction.call(source, front_matter: raw.front_matter,
                                                        front_matter_lines: raw.front_matter_lines)
@@ -159,7 +193,7 @@ module Woods
         unit = ExtractedUnit.new(type: :doc, identifier: relative, file_path: file_path)
         unit.namespace = nil
         unit.source_code = redacted
-        unit.metadata = metadata_for(relative, scan, redactions)
+        unit.metadata = metadata_for(relative, scan, redactions).merge(aliases: alias_paths)
         unit.dependencies = []
         unit.chunks = section_chunks(unit)
         unit

@@ -70,6 +70,15 @@ RSpec.describe Woods::DocReferences do
     expect(result.links).to eq([true, true, false, false])
   end
 
+  it 'links a relative link through a path that aliases a document as doc_link' do
+    aliased = described_class::Registry.new(records + [{ type: 'doc', identifier: 'AGENTS.md',
+                                                         paths: %w[AGENTS.md CLAUDE.md] }])
+    result = described_class::Resolver.new(aliased).call(identifier: 'docs/widgets.md', mentions: [],
+                                                         links: ['CLAUDE.md'])
+
+    expect(result.edges).to eq([%w[AGENTS.md doc doc_link]])
+  end
+
   it 'never links a document to itself' do
     result = resolve(mentions: [%w[path docs/widgets.md]], links: ['docs/widgets.md'])
 

@@ -198,11 +198,47 @@ RSpec.describe Woods::Extractors::DocExtractor do
       create_file('docs/real.md', '# Real')
       File.symlink(File.join(tmp_dir, 'docs/real.md'), File.join(tmp_dir, 'docs/alias.md'))
 
-      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[docs/alias.md docs/real.md])
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[docs/real.md])
       expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/outside.md'))).to be_nil
       expect(described_class.new.extract_doc_file(File.join(tmp_dir, 'docs/key.md'))).to be_nil
     ensure
       FileUtils.rm_rf(outside) if outside
+    end
+
+    describe 'symlinked documentation' do
+      before do
+        create_file('AGENTS.md', "# Agent guide\n\n`Ledger` posts entries.\n")
+        File.symlink('AGENTS.md', File.join(tmp_dir, 'CLAUDE.md'))
+        FileUtils.mkdir_p(File.join(tmp_dir, '.github'))
+        File.symlink('../AGENTS.md', File.join(tmp_dir, '.github/copilot-instructions.md'))
+        create_file('docs/plain.md', '# Plain')
+      end
+
+      it 'indexes one unit per document and records the paths that alias it' do
+        units = described_class.new.extract_all
+
+        expect(units.map(&:identifier)).to eq(%w[AGENTS.md docs/plain.md])
+        expect(units.first.metadata[:aliases]).to eq(%w[.github/copilot-instructions.md CLAUDE.md])
+        expect(units.last.metadata[:aliases]).to eq([])
+      end
+
+      it 'extracts the target unit, aliases included, from the target or either alias' do
+        units = %w[AGENTS.md CLAUDE.md .github/copilot-instructions.md].map do |path|
+          described_class.new.extract_doc_file(File.join(tmp_dir, path))
+        end
+
+        expect(units.map(&:identifier).uniq).to eq(['AGENTS.md'])
+        expect(units.map(&:file_path).uniq).to eq([File.join(tmp_dir, 'AGENTS.md')])
+        expect(units.map { |unit| JSON.generate(unit.to_h.except(:extracted_at)) }.uniq.size).to eq(1)
+      end
+
+      it 'drops an alias that no longer reaches the document' do
+        File.unlink(File.join(tmp_dir, 'CLAUDE.md'))
+
+        unit = described_class.new.extract_doc_file(File.join(tmp_dir, 'AGENTS.md'))
+
+        expect(unit.metadata[:aliases]).to eq(['.github/copilot-instructions.md'])
+      end
     end
 
     it 'reads invalid UTF-8 without raising' do
