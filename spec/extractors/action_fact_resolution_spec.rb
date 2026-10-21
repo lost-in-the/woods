@@ -242,6 +242,48 @@ RSpec.describe Woods::Extractors::ActionFactResolution do
     expect(result).to eq({})
   end
 
+  it 'does not borrow a definition on the message line of a multiline attribute declaration' do
+    load write('app/controllers/facts_fixtures/multiline_attribute_controller.rb', <<~RUBY)
+      class FactsFixtures::MultilineAttributeController < FactsFixtures::BaseController
+        self.
+          attr_reader :show; class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::MultilineAttributeController, %w[show],
+                                       view_prefix: 'multiline_attribute')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow a definition beside a literal reflective attribute declaration' do
+    load write('app/controllers/facts_fixtures/reflective_attribute_controller.rb', <<~RUBY)
+      class FactsFixtures::ReflectiveAttributeController < FactsFixtures::BaseController
+        self.
+          public_send('attr_reader', :show); class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::ReflectiveAttributeController, %w[show],
+                                       view_prefix: 'reflective_attribute')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow a definition beside a parenthesized literal reflective declaration' do
+    load write('app/controllers/facts_fixtures/parenthesized_attribute_controller.rb', <<~RUBY)
+      class FactsFixtures::ParenthesizedAttributeController < FactsFixtures::BaseController
+        self.
+          public_send(((:attr_reader)), :show); class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::ParenthesizedAttributeController, %w[show],
+                                       view_prefix: 'parenthesized_attribute')
+
+    expect(result).to eq({})
+  end
+
   it 'does not borrow definitions at a Proc source site when another file installs the method' do
     load write('app/controllers/facts_fixtures/proc_body.rb',
                'module FactsFixtures; BODY = proc { @generated = true }; ' \

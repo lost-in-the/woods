@@ -147,6 +147,43 @@ RSpec.describe Woods::Extractors::ActionFacts do
     expect(described_class.definition(definitions, 'show', nil)).to be_nil
   end
 
+  it 'marks both the receiver and message lines of a generated declaration' do
+    source = <<~RUBY
+      class One
+        self.
+          attr_reader :show; class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(definitions).to have_key([nil, 2])
+    expect(definitions).to have_key([nil, 3])
+    expect(described_class.definition(definitions, 'show', 3)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  %w[send public_send __send__].each do |dispatch|
+    it "recognizes a literal core generated declaration invoked through #{dispatch}" do
+      source = "class One; #{dispatch}(:attr_reader, :show); " \
+               'class Other; def show; @wrong = true; end; end; end'
+      definitions = described_class.definitions(Prism.parse(source).value)
+
+      expect(described_class.definition(definitions, 'show', 1)).to be_nil
+      expect(described_class.definition(definitions, 'show', nil)).to be_nil
+    end
+  end
+
+  it 'recognizes parenthesized literal core names in reflective declarations' do
+    %w[send public_send __send__].product(['(:attr_reader)', '(("attr_reader"))']).each do |dispatch, target|
+      source = "class One; #{dispatch}(#{target}, :show); " \
+               'class Other; def show; @wrong = true; end; end; end'
+      definitions = described_class.definitions(Prism.parse(source).value)
+
+      expect(described_class.definition(definitions, 'show', 1)).to be_nil
+      expect(described_class.definition(definitions, 'show', nil)).to be_nil
+    end
+  end
+
   it 'keeps runtime and source-only lookup unresolved on a dynamic generation source line' do
     source = 'class One; define_method(action_name) {}; end; class Two; def show; @wrong = true; end; end'
     definitions = described_class.definitions(Prism.parse(source).value)

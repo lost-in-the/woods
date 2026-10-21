@@ -3,3 +3,5 @@
   Method objects. Compact definitions sharing a line with another definition,
   a block opening or a generated-method declaration are conservatively omitted;
   action names and ordinary definitions on separate lines remain available.
+- Match generated declarations at their method-token source line, including
+  multiline receivers and literal reflective calls with parenthesized targets.

@@ -51,14 +51,35 @@ module Woods
             definitions[[node.name.to_s, line]] << node if node.receiver.nil?
           elsif node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
             definitions[[nil, node.opening_loc.start_line]] << nil
-          elsif node.is_a?(Prism::CallNode) && GENERATED_DEFINITIONS.include?(node.name)
-            definitions[[nil, node.location.start_line]] << nil
+          elsif node.is_a?(Prism::CallNode) && generated_definition?(node)
+            # Ruby attributes generated methods to the called method token,
+            # which can follow a receiver on a different line.
+            [node.location.start_line, node.message_loc&.start_line].compact.uniq.each do |line|
+              definitions[[nil, line]] << nil
+            end
           end
           stack.concat(node.compact_child_nodes)
         end
         definition_counts.each { |line, count| definitions[[nil, line]] << nil if count > 1 }
         definitions
       end
+
+      def self.generated_definition?(node)
+        return true if GENERATED_DEFINITIONS.include?(node.name)
+        return false unless %i[send public_send __send__].include?(node.name)
+
+        target = node.arguments&.arguments&.first
+        while target.is_a?(Prism::ParenthesesNode)
+          expressions = target.body&.body
+          return false unless expressions&.one?
+
+          target = expressions.first
+        end
+        return false unless target.is_a?(Prism::SymbolNode) || target.is_a?(Prism::StringNode)
+
+        GENERATED_DEFINITIONS.any? { |name| name.to_s == target.unescaped }
+      end
+      private_class_method :generated_definition?
 
       # A runtime source site must match exactly. Source-only callers without
       # a line can select a name only when it identifies one definition.
