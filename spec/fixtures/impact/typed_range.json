@@ -1,0 +1,17 @@
+{
+  "before": [
+    {"identifier":"Shared","type":"model","source_code":"class Shared; end\n","metadata":{"columns":[{"name":"label","type":"string"}]},"dependencies":[]},
+    {"identifier":"Shared","type":"service","source_code":"class Shared; end\n","metadata":{},"dependencies":[]},
+    {"identifier":"clock:example","type":"scheduled_job","source_code":null,"metadata":{},"dependencies":[]}
+  ],
+  "after": [
+    {"identifier":"Shared","type":"model","source_code":"class Shared; end\n","metadata":{"columns":[{"name":"label","type":"text"}]},"dependencies":[{"target":"Other","type":"model","via":"belongs_to"}]},
+    {"identifier":"Shared","type":"service","source_code":"class Shared; end\n","metadata":{},"dependencies":[]},
+    {"identifier":"example/show.html.erb","type":"view_template","source_code":"<p>Example</p>\n","metadata":{},"dependencies":[]}
+  ],
+  "expected": [
+    {"identifier":"Shared","type":"model","status":"modified","facets":["metadata","dependencies"],"categories":["edges","schema"]},
+    {"identifier":"clock:example","type":"scheduled_job","status":"removed","facets":["source","metadata","dependencies"],"categories":[]},
+    {"identifier":"example/show.html.erb","type":"view_template","status":"added","facets":["source","metadata","dependencies"],"categories":["template"]}
+  ]
+}
