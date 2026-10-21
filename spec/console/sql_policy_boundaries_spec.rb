@@ -214,6 +214,33 @@ RSpec.describe 'Console SQL policy boundaries' do
         expect(request(sql)['ok']).to be(true)
       end
 
+      it 'keeps column projections available across an unaliased join' do
+        sql = 'SELECT p.id FROM preferences p JOIN users ON users.id = p.id ORDER BY p.id'
+        expect(request(sql)).to include('ok' => true)
+        expect(connection).to have_received(:select_all).with(sql)
+      end
+
+      it 'keeps column projections available with an unaliased USING join' do
+        sql = 'SELECT p.id FROM preferences p JOIN users USING (id)'
+        expect(request(sql)).to include('ok' => true)
+        expect(connection).to have_received(:select_all).with(sql)
+      end
+
+      it 'still refuses an unaliased joined relation used as a whole-row value' do
+        result = request('SELECT users FROM preferences p JOIN users ON users.id = p.id')
+        expect(result).to include('ok' => false, 'error_type' => 'validation')
+        expect(result['error']).to include('whole-row')
+        expect(connection).not_to have_received(:select_all)
+      end
+
+      it 'still refuses a quoted keyword alias used as a whole-row value' do
+        quote = adapter == 'Mysql2' ? '`' : '"'
+        result = request("SELECT #{quote}ON#{quote} FROM users AS #{quote}ON#{quote}")
+        expect(result).to include('ok' => false, 'error_type' => 'validation')
+        expect(result['error']).to include('whole-row')
+        expect(connection).not_to have_received(:select_all)
+      end
+
       it 'keeps non-EAV wildcard joins available with an EAV policy configured' do
         expect(request('SELECT u.* FROM users u JOIN users v ON v.id = u.id')['ok']).to be(true)
       end

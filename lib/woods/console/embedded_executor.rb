@@ -38,6 +38,11 @@ module Woods
 
       DEFAULT_EVAL_TIMEOUT = 10
 
+      SQL_RELATION_BOUNDARIES = %w[
+        ON USING WHERE JOIN INNER LEFT RIGHT FULL CROSS NATURAL STRAIGHT_JOIN
+        GROUP ORDER HAVING LIMIT OFFSET UNION INTERSECT EXCEPT WINDOW FOR
+      ].freeze
+
       # @param model_validator [ModelValidator] Validates model/column names
       # @param safe_context [SafeContext] Wraps execution in rolled-back transaction
       # @param connection [Object, nil] Database connection for adapter detection
@@ -1728,9 +1733,10 @@ module Woods
         identifier = /(?:[A-Za-z_\u0080-\u{10ffff}][A-Za-z0-9_$\u0080-\u{10ffff}]*|"(?:""|[^"])+"|`(?:``|[^`])+`)/u
         list = /#{identifier}\s*\(\s*#{identifier}(?:\s*,\s*#{identifier})*\s*\)/
         cte = /#{list}\s*AS\s*(?:(?:NOT\s+)?MATERIALIZED\s*)?\(/i
-        relation = /\A\s*(?:AS\s+)?#{list}/i
+        relation = /\A\s*(AS\s+)?(#{identifier})\s*\(\s*#{identifier}(?:\s*,\s*#{identifier})*\s*\)/i
         renamed = stripped.match?(cte) || SqlTableScanner.relation_factors(stripped).any? do |factor|
-          sql_relation_alias_tail(factor).match?(relation)
+          match = relation.match(sql_relation_alias_tail(factor))
+          match && sql_relation_alias?(match[2], explicit: match[1])
         end
         return unless renamed
 
@@ -1921,10 +1927,16 @@ module Woods
         match = source.match(factor)
         names = match ? [match[2] || match[1]] : []
         rest = match ? factor[match.end(0)..].sub(/\A\s*\*/, '') : factor
-        aliases = /(?:\A|\))\s*(?:AS\s+)?(#{identifier})/i
-        names.concat(rest.scan(aliases).flatten)
+        aliases = /(?:\A|\))\s*(AS\s+)?(#{identifier})/i
+        rest.scan(aliases).each do |explicit, name|
+          names << name if sql_relation_alias?(name, explicit: explicit)
+        end
 
         names.map { |name| sql_unquote(name) }
+      end
+
+      def sql_relation_alias?(name, explicit:)
+        explicit || !SQL_RELATION_BOUNDARIES.include?(name.upcase)
       end
 
       def unsafe_protected_sql_column(referenced, expressions, selected, tail, stripped)
