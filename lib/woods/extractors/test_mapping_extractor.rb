@@ -1,9 +1,16 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
+require_relative '../source_references/runtime_lookup'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'line_neutralizer'
+require_relative 'rake_task_extractor'
+require_relative 'source_nesting'
+require_relative 'test_route_resolver'
+require_relative 'test_support_catalog'
 
 module Woods
   module Extractors
@@ -14,7 +21,17 @@ module Woods
     # test count, shared example usage, and test framework type.
     #
     # Units are linked to the code under test via :test_coverage dependencies,
-    # inferred from the subject class name and file directory structure.
+    # inferred from the subject class name and file directory structure, and
+    # to the test support files they draw on: shared examples
+    # (:behaves_like), shared contexts (:includes_context), helper modules
+    # (:includes_helper) and custom matchers (:uses_matcher). Those names are
+    # resolved through {TestSupportCatalog}, so a unit depends on the support
+    # files as well as its own: a support change re-runs this extractor
+    # wholesale.
+    #
+    # Feature, system and request tests are also linked to the routes they
+    # navigate (:exercises_route), see {TestRouteResolver}. That makes this
+    # extractor a route consumer: a routes change re-runs it too.
     #
     # @example
     #   extractor = TestMappingExtractor.new
@@ -26,6 +43,7 @@ module Woods
     class TestMappingExtractor
       include SharedUtilityMethods
       include SharedDependencyScanner
+      include SourceNesting
 
       RSPEC_GLOB = 'spec/**/*_spec.rb'
       MINITEST_GLOB = 'test/**/*_test.rb'
@@ -35,12 +53,14 @@ module Woods
       # followed by whitespace OR a comma — the rspec-rails generator default is
       # `RSpec.describe User, type: :model do` (B-082 / #194). Capybara's
       # `feature` / `RSpec.feature` is an example group in the same position.
-      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+([A-Z][\w:]*)(?=[\s,]|$)/
+      RSPEC_CONSTANT_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+((?:::)?[A-Z][\w:]*)(?=[\s,]|$)/
 
       # String-form describe: `describe 'User' do`, `RSpec.describe 'GET /users', type: :request do`,
       # `RSpec.feature 'Widget checkout' do`.
-      # The closing quote delimits the subject, so nothing is required after it.
-      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+['"]([^'"]+)['"]/
+      # The quote that opened the subject closes it, so an apostrophe inside a
+      # double-quoted title (`describe "Account's settings"`) stays in the
+      # subject. Nothing is required after the closing quote.
+      RSPEC_STRING_DESCRIBE = /^\s*(?:RSpec\.)?(?:describe|feature)\s+(?:'(?<subject>[^'\n]++)'|"(?<subject>[^"\n]++)")/
 
       # A subject names a class only when it is a constant path (`Widget`,
       # `'Ledger::Entry'`). Free text (`'Widget checkout'`) is a description:
@@ -48,17 +68,25 @@ module Woods
       CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
 
       # Rake tasks are identified by name, so a task-shaped string describe in
-      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a unit.
+      # a task spec directory (`describe 'ledger:rebuild_balances'`) names a
+      # unit when a task of that name exists. A describe that names a
+      # NAMESPACE (`describe 'ledger'`) covers every `ledger:*` task instead.
+      # Task names come from the rake files, so a `.rake` change re-runs this
+      # extractor wholesale.
       RAKE_TASK_SPEC_DIR = %r{/spec/(?:lib/)?tasks/|/test/lib/tasks/}
       RAKE_TASK_NAME = /\A[\w-]+(?::[\w-]+)*\z/
 
       # Outside a typed directory, the first example group's `type:` metadata
       # or a Capybara `feature` block decides the test type.
-      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system)\b/
+      RSPEC_DECLARED_TYPE = /\btype:\s*:(feature|system|request)\b/
       RSPEC_FEATURE_GROUP = /^\s*(?:RSpec\.)?feature\s/
+
+      # Test types that drive the app through its routes.
+      NAVIGATING_TEST_TYPES = %i[feature system request].freeze
 
       def initialize
         @rails_root = Rails.root
+        @support_catalog = TestSupportCatalog.new
       end
 
       # Extract all test mapping units from spec/ and test/ directories.
@@ -73,7 +101,7 @@ module Woods
       # @param file_path [String] Absolute path to the spec or test file
       # @return [ExtractedUnit, nil] The extracted unit or nil on error
       def extract_test_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         framework = detect_framework(file_path)
         relative_path = file_path.sub("#{@rails_root}/", '')
 
@@ -83,9 +111,14 @@ module Woods
           file_path: file_path
         )
 
+        support = @support_catalog.references(source)
         unit.source_code = source
-        unit.metadata = extract_metadata(source, file_path, framework)
-        unit.dependencies = extract_dependencies(unit.metadata[:subject_class], unit.metadata[:test_type])
+        unit.metadata = extract_metadata(source, file_path, framework).merge(support_metadata(support))
+        unit.metadata.merge!(route_metadata(source, unit.metadata[:test_type]))
+        unit.dependencies = consolidate_dependencies(
+          coverage_dependencies(unit.metadata, file_path), support.dependencies,
+          unit.metadata[:routes_exercised].map { |route| { type: :route, target: route, via: :exercises_route } }
+        )
 
         unit
       rescue StandardError => e
@@ -128,11 +161,41 @@ module Woods
           test_count: count_tests(source, framework),
           test_type: test_type,
           test_framework: framework,
-          shared_examples: extract_shared_examples_defined(source),
-          shared_examples_used: extract_shared_examples_used(source)
+          shared_examples: extract_shared_examples_defined(source)
         }
         metadata[:description] = subject if subject && !subject_class
+        metadata[:rake_namespace] = subject if subject && !subject_class && rake_namespace?(subject, file_path)
         metadata
+      end
+
+      # Routes a navigating test exercises, asserts about, or could be
+      # exercising; other test types are not scanned.
+      #
+      # @param source [String] File source code
+      # @param test_type [Symbol]
+      # @return [Hash] routes_exercised, routes_asserted, routes_ambiguous
+      def route_metadata(source, test_type)
+        unless NAVIGATING_TEST_TYPES.include?(test_type)
+          return { routes_exercised: [], routes_asserted: [], routes_ambiguous: [] }
+        end
+
+        analysis = (@route_resolver ||= TestRouteResolver.new(support_catalog: @support_catalog)).analyze(source)
+        { routes_exercised: analysis.exercised, routes_asserted: analysis.asserted,
+          routes_ambiguous: analysis.ambiguous }
+      end
+
+      # Names of the test support this file refers to, as written. A name is
+      # listed whether or not a support file defines it.
+      #
+      # @param support [TestSupportCatalog::Usage]
+      # @return [Hash]
+      def support_metadata(support)
+        {
+          shared_examples_used: support.shared_examples,
+          shared_contexts_used: support.shared_contexts,
+          helpers_included: support.helper_modules,
+          matchers_used: support.matchers
+        }
       end
 
       # Decide whether a subject names a unit rather than describing behavior.
@@ -149,7 +212,48 @@ module Woods
         return false if group&.match?(RSPEC_FEATURE_GROUP)
         return true if subject.match?(CONSTANT_PATH)
 
+        rake_subject?(subject, file_path) && rake_task_names.include?(subject)
+      end
+
+      # @return [Boolean] whether a task spec describes this task-shaped string
+      def rake_subject?(subject, file_path)
         file_path.match?(RAKE_TASK_SPEC_DIR) && subject.match?(RAKE_TASK_NAME)
+      end
+
+      # @return [Boolean] whether a task spec describes a namespace that holds tasks
+      def rake_namespace?(subject, file_path)
+        rake_subject?(subject, file_path) && namespace_tasks(subject).any?
+      end
+
+      # @param namespace [String] e.g. "ledger"
+      # @return [Array<String>] sorted names of every task under the namespace
+      def namespace_tasks(namespace)
+        rake_task_names.select { |name| name.start_with?("#{namespace}:") }
+      end
+
+      # Names of the application's rake tasks, as the rake task units carry them.
+      #
+      # @return [Array<String>] sorted task names
+      def rake_task_names
+        @rake_task_names ||= RakeTaskExtractor.new.extract_all.map(&:identifier).sort
+      rescue StandardError
+        @rake_task_names = []
+      end
+
+      # Link the test to what it covers: the tasks of a described rake
+      # namespace, a described rake task, or the subject class.
+      #
+      # @param metadata [Hash] the unit's metadata
+      # @param file_path [String] Absolute path to the test file
+      # @return [Array<Hash>]
+      def coverage_dependencies(metadata, file_path)
+        subject = metadata[:subject_class]
+        tasks = if metadata[:rake_namespace] then namespace_tasks(metadata[:rake_namespace])
+                elsif subject && rake_subject?(subject, file_path) && rake_task_names.include?(subject) then [subject]
+                end
+        return extract_dependencies(subject, metadata[:test_type]) unless tasks
+
+        tasks.map { |task| { type: :rake_task, target: task, via: :test_coverage } }
       end
 
       # Extract the primary subject under test, as written.
@@ -180,7 +284,54 @@ module Woods
         group = first_example_group(source)
         return nil unless group
 
-        (group.match(RSPEC_CONSTANT_DESCRIBE) || group.match(RSPEC_STRING_DESCRIBE))[1]
+        constant = group[RSPEC_CONSTANT_DESCRIBE, 1]
+        return group[RSPEC_STRING_DESCRIBE, 'subject'] unless constant
+
+        qualify_described_constant(constant, source, group)
+      end
+
+      # A constant described inside a `module` block is resolved as Ruby
+      # resolves it: through the file's lexical nesting, innermost scope
+      # first, against the loaded constants. `module Spree; describe
+      # Spree::Order` names `Spree::Order`, and `module SpecHelpers; describe
+      # Widget` names a top-level `Widget`. When nothing is loaded, the
+      # nesting is prefixed: `module Nested; describe AssignPositions` names
+      # `Nested::AssignPositions`. A rooted constant (`::Widget`) and a
+      # describe after the module closed stay as written.
+      #
+      # @param constant [String] constant as written on the describe line
+      # @param source [String] RSpec file source code
+      # @param group [String] the line opening the first example group
+      # @return [String]
+      def qualify_described_constant(constant, source, group)
+        return constant.delete_prefix('::') if constant.start_with?('::')
+
+        nesting = enclosing_modules(source, group)
+        return constant if nesting.empty?
+
+        resolved = SourceReferences::RuntimeLookup.new.call(constant, nesting: nesting.reverse)
+        resolved[:target] || "#{nesting.join('::')}::#{constant}"
+      end
+
+      # Module declarations still open on the line that opens the example
+      # group, outermost first.
+      #
+      # @return [Array<String>]
+      def enclosing_modules(source, group)
+        stack = []
+        source.each_line do |line|
+          return stack.compact if line == group
+
+          stripped = LineNeutralizer.neutralize_line(line).strip
+          if (declaration = SourceNesting::DECLARATION_PATTERN.match(stripped))
+            stack << declaration[2] if block_opener?(stripped)
+          elsif stripped.match?(SourceNesting::END_LINE)
+            stack.pop
+          elsif block_opener?(stripped)
+            stack << nil
+          end
+        end
+        []
       end
 
       # Find the line that opens the file's first describe or feature block.
@@ -208,7 +359,9 @@ module Woods
 
       # Count test examples in the file.
       #
-      # For RSpec: counts it/specify/example blocks.
+      # For RSpec: counts it/specify/example/scenario blocks. The patterns
+      # match indentation with `[ \t]`, never `\s`: `^\s*` also spans
+      # newlines, which makes a run of blank lines quadratic to scan.
       # For Minitest: counts test "..." strings and def test_ methods.
       #
       # @param source [String] File source code
@@ -216,10 +369,10 @@ module Woods
       # @return [Integer]
       def count_tests(source, framework)
         if framework == :rspec
-          source.scan(/^\s*(?:it|specify|example)\s+['"]/).size
+          source.scan(/^[ \t]*(?:it|specify|example|scenario)[ \t]+['"]/).size
         else
-          source.scan(/^\s*test\s+['"]/).size +
-            source.scan(/^\s*def\s+test_\w/).size
+          source.scan(/^[ \t]*test[ \t]+['"]/).size +
+            source.scan(/^[ \t]*def[ \t]+test_\w/).size
         end
       end
 
@@ -228,15 +381,7 @@ module Woods
       # @param source [String] File source code
       # @return [Array<String>]
       def extract_shared_examples_defined(source)
-        source.scan(/^\s*shared_examples(?:_for)?\s+['"]([^'"]+)['"]/).flatten
-      end
-
-      # Extract names of shared examples used (included) in the file.
-      #
-      # @param source [String] File source code
-      # @return [Array<String>]
-      def extract_shared_examples_used(source)
-        source.scan(/^\s*(?:include_examples|it_behaves_like)\s+['"]([^'"]+)['"]/).flatten
+        source.scan(/^[ \t]*shared_examples(?:_for)?[ \t]+['"]([^'"\n]+)['"]/).flatten
       end
 
       # Infer test type from the directory structure of the file path, then
@@ -259,7 +404,7 @@ module Woods
       # Read the test type the first example group declares.
       #
       # @param source [String] File source code
-      # @return [Symbol] :feature, :system, or :unit when nothing is declared
+      # @return [Symbol] :feature, :system, :request, or :unit when nothing is declared
       def declared_test_type(source)
         group = first_example_group(source)
         return :unit unless group

@@ -36,6 +36,16 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
     end
   end
 
+  describe '#scan_templates' do
+    it 'extracts = render template: "path"' do
+      expect(engine.scan_templates('= render template: "layouts/chrome"')).to eq(['layouts/chrome'])
+    end
+
+    it 'skips a render template: inside a silent comment' do
+      expect(engine.scan_templates("-#\n  = render template: 'layouts/chrome'\n%p")).to eq([])
+    end
+  end
+
   describe '#scan_partials' do
     it 'extracts = render "path"' do
       expect(engine.scan_partials("= render 'widgets/header'")).to eq(['widgets/header'])
@@ -274,6 +284,65 @@ RSpec.describe Woods::Extractors::ViewEngines::Haml do
 
     it 'returns an empty array for source with no route helpers' do
       expect(engine.scan_navigation_candidates('%h1 static')).to eq([])
+    end
+  end
+
+  describe '#scan_method_calls' do
+    let(:names) { Set.new(%w[pretty_date widget_badge title widget_link]) }
+
+    def bare(source)
+      engine.scan_method_calls(source, names)[:bare]
+    end
+
+    it 'reports catalog names in script lines' do
+      source = "= pretty_date(@widget.shipped_at)\n- label = widget_badge(@widget)\n!= title\n~ widget_link(w)"
+      expect(bare(source)).to eq(%w[pretty_date title widget_badge widget_link])
+    end
+
+    it 'reports names in a script that follows a tag' do
+      source = "%h1= title\n.row#main= pretty_date(x)\n%td>= widget_badge(w)"
+      expect(bare(source)).to eq(%w[pretty_date title widget_badge])
+    end
+
+    it 'ignores plain text and tag text' do
+      expect(bare("pretty_date\n%p title\n.note widget_badge\n\\= title")).to eq([])
+    end
+
+    it 'reads interpolations in plain and tag text' do
+      expect(bare("Shipped \#{pretty_date(x)}\n%p Hello \#{title}\n%p== On \#{widget_badge(w)}"))
+        .to eq(%w[pretty_date title widget_badge])
+    end
+
+    it 'reads attribute hashes, including keys that share a helper name' do
+      expect(bare("%a{href: widget_link(w), title: 'x'} text")).to eq(%w[widget_link])
+    end
+
+    it 'reads HTML-style attribute values but not attribute names' do
+      expect(bare('%a(href=widget_link(w) title="x") text')).to eq(%w[widget_link])
+      expect(bare("%a(title=pretty_date(x))\n= title")).to eq(%w[pretty_date title])
+    end
+
+    it 'reads an attribute hash that continues on following lines' do
+      source = "%a{href: widget_link(w),\n  data: { label: pretty_date(x) }}= title\n%p widget_badge"
+      expect(bare(source)).to eq(%w[pretty_date title widget_link])
+    end
+
+    it 'reads a script continued after a trailing comma' do
+      expect(bare("= render 'row',\n  label: pretty_date(x)\n%p title")).to eq(%w[pretty_date])
+    end
+
+    it 'skips silent comments and reads only interpolations in text filters' do
+      source = "-# pretty_date(x)\n  title\n:javascript\n  title(\#{widget_badge(w)})\n= widget_link(w)"
+      expect(bare(source)).to eq(%w[widget_badge widget_link])
+    end
+
+    it 'reads a :ruby filter body as Ruby and an :erb filter body as ERB' do
+      source = ":ruby\n  label = pretty_date(x)\n:erb\n  title <%= widget_badge(w) %>"
+      expect(bare(source)).to eq(%w[pretty_date widget_badge])
+    end
+
+    it 'does not read an interpolation at the start of a line as a tag' do
+      expect(bare("\#{title} suffix")).to eq(%w[title])
     end
   end
 end

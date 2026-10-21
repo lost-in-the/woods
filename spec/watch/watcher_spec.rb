@@ -51,6 +51,11 @@ RSpec.describe Woods::Watch::Watcher do
   end
 
   describe '.build' do
+    before do
+      stub_env('WOODS_WATCH_POLL', nil)
+      stub_container_markers
+    end
+
     it 'prefers the listen backend when the listen gem loads' do
       listen_available
       listen_instance = listen_watcher_class.new

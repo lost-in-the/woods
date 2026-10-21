@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'set'
+require_relative '../storage_identity'
+
 module Woods
   module Retrieval
     # Expansion remains inside caller eligibility. Graphs retain their existing

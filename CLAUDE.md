@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (35 extractors plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -160,7 +160,7 @@ lib/
 │   ├── atomic_file.rb                   # Crash-safe temp+fsync+rename file writes (shared)
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
-│   ├── extractors/                      # 35 extractors plus supporting utilities (e.g. shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting, declared_parent)
+│   ├── extractors/                      # One class per *_extractor.rb (count: surface inventory) plus supporting utilities (e.g. shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting, declared_parent)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
 │   ├── flow_analysis/                   # Execution flow tracing
@@ -315,7 +315,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   7. Reconcile class-based types **again** (pruning can un-know a class the first pass skipped).
   8. Refresh `dependents`, `metadata.git`, PageRank, `graph_analysis.json`.
 - The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`). Run it before and after touching the incremental path.
-- `Extractor::WHOLE_APP_EXTRACTORS` (route, middleware, engine, scheduled_job, state_machine, factory, event, database_view, rake_task, rails_source, packages) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
+- `Extractor::WHOLE_APP_EXTRACTORS` (libs, rake_tasks, routes, middleware, engines, scheduled_jobs, state_machines, factories, test_support, test_mappings, events, database_views, database_tables, external_consumers, view_templates, rails_source, packages, graphql_operations; the constant in `lib/woods/extractor.rb` is the source of truth) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
 - Wholesale replacement prunes by `(identifier, type)`, never by bare identifier (#225). Two units sharing an identifier across types are distinct graph nodes.
 - `Extractor#refresh(*keys)` (`woods:refresh`) is the by-name counterpart to the by-trigger path. Both must call `prepare_incremental_run` first or they inherit `@dependents_dirty`/`@incremental_written`.
 - Every Woods-written JSON artifact is read through `AtomicFile.read`. A bare `File.read` tags content with the process default external encoding (US-ASCII under `LANG=C`) and raises on multibyte bytes.

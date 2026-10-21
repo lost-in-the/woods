@@ -41,7 +41,7 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 3
+      VERSION = 4
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -111,13 +111,24 @@ module Woods
         end
 
         def validate!(data)
-          shape!(data, %w[version files owners])
-          require!(data['version'].instance_of?(Integer) && data['version'] == VERSION, 'unsupported version')
+          require!(data.is_a?(Hash) && data['version'].instance_of?(Integer) && data['version'] == VERSION,
+                   'unsupported version')
+          shape!(data, %w[version callers files owners])
+          callers!(data['callers'])
           files = data['files']
           require!(files.is_a?(Hash) && files.size <= MAX_FILES, 'invalid files or file limit')
           records = 0
           files.each { |path, record| records = bounded_count(records + file!(path, record)) }
           owners!(data['owners'], files, records)
+        end
+
+        # Canonical form only: the pass compares this map for equality.
+        def callers!(callers)
+          valid = callers.is_a?(Hash) && callers.all? do |caller, targets|
+            TYPES.include?(caller) && targets.is_a?(Array) && !targets.empty? &&
+              (targets - TYPES).empty? && targets == targets.uniq.sort
+          end
+          require!(valid, 'invalid caller policy')
         end
 
         def file!(path, record)

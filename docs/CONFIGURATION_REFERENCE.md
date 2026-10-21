@@ -37,6 +37,7 @@ end
 - [Extractors](#extractors)
   - [Component directories](#component-directories)
   - [Event patterns](#event-patterns)
+  - [Source-reference callers](#source-reference-callers)
 - [Console MCP options](#console-mcp-options)
 - [Environment variables](#environment-variables)
   - [Index server (`woods-mcp` / `woods-mcp-http` / `woods-mcp-start`)](#index-server-woods-mcp--woods-mcp-http--woods-mcp-start)
@@ -513,6 +514,7 @@ end
 | `volatile_dependency_limit_per_target` | Integer or `nil` | `nil` | Optional maximum report edges per dependency (type and identifier), applied after ranking and before the global top 20. Positive integers only; `nil` leaves the default report unchanged. Distinct relationships consume separate slots. |
 | `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
+| `method_effects_limit` | Integer or `nil` | `50` | How many public methods one unit records in `metadata.method_effects`. Past the cap the first methods in source order are kept and `method_effects_truncated` is set; the `through` annotation on edges is not capped. Set to `nil` to record every method. The generation fingerprints this value; changing it requires a full extraction before incremental extraction or refresh. |
 
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
@@ -688,7 +690,7 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 35 extractors always run during a full extraction,
+not implemented**. All 42 extractors always run during a full extraction,
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
@@ -733,12 +735,19 @@ Leave it at its default. The full list of what always runs:
 | `:events` | EventExtractor | Event publish/subscribe patterns |
 | `:decorators` | DecoratorExtractor | Decorators, presenters, form objects |
 | `:database_views` | DatabaseViewExtractor | SQL views (Scenic) |
+| `:database_tables` | DatabaseTableExtractor | Tables in the live schema, including tables no model owns |
+| `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
+| `:js_modules` | JsModuleExtractor | JavaScript/TypeScript modules (shallow; Stimulus, Alpine, Stencil names) |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
-| `:test_mappings` | TestMappingExtractor | Test file → subject class mapping |
+| `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
+| `:test_support` | TestSupportExtractor | Helper modules, shared examples/contexts, matchers, suite configuration |
 | `:rails_source` | RailsSourceExtractor | Rails/gem framework source (toggle via `include_framework_sources`) |
-| `:poros` | PoroExtractor | Plain Ruby objects in app/models |
+| `:poros` | PoroExtractor | Plain Ruby objects in app/models, plus unclaimed Ruby under app/ (`unclaimed_ruby_paths`) |
+| `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
+| `:config_files` | ConfigFileExtractor | YAML configuration and data files (key structure only) |
+| `:docs` | DocExtractor | Markdown documentation (`documentation_paths`) |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
@@ -789,6 +798,47 @@ path implies is the one Zeitwerk manages. A directory that is not autoloaded is
 walked and skipped; one `Rails.logger.debug` line per extraction says how many
 files that was, so the misconfiguration is visible instead of looking like an
 app with no components.
+
+### External table consumers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `external_table_consumers` | Hash&lt;String, Array&lt;String&gt; or Hash&gt; | `{}` | Other applications that read or write this database, as consumer name => table names read, or `{ reads: [...], writes: [...] }`. Each becomes an `external_consumer` unit with `reads_table` and `writes_table` edges to the table units. |
+| `external_table_consumers_path` | String, nil | `nil` | A YAML file of the same shape, relative to `Rails.root`, merged with the setting above. |
+
+```ruby
+Woods.configure do |config|
+  config.external_table_consumers = {
+    "storefront" => %w[products orders],                          # reads only
+    "public-site" => { reads: %w[products], writes: %w[carts] }
+  }
+  config.external_table_consumers_path = "config/woods/external_consumers.yml"
+end
+```
+
+```yaml
+# config/woods/external_consumers.yml
+storefront:
+  - products
+  - orders
+public-site:
+  reads:
+    - products
+  writes:
+    - carts
+```
+
+An Array is shorthand for `reads`. A table both read and written gets one
+edge per role.
+
+Both settings are validated at assignment and raise
+`Woods::ConfigurationError` on anything but plain data. Procs are refused.
+A consumer named in both places reads the union of its tables.
+
+**Prefer the file when the list changes.** An incremental run re-runs the
+consumers when the declared file changes. A change to
+`external_table_consumers` itself is an initializer change, which needs a
+full extraction.
 
 ### Event patterns
 
@@ -884,7 +934,8 @@ end
 ```
 
 The setter requires a non-empty `Array` of non-empty `String`s, each relative
-to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+to `Rails.root` without `..` segments. It drops empty and `.` segments, so
+`./lib/` and `lib//` both name `lib` and `.` names the root itself. Anything
 else raises `Woods::ConfigurationError` and keeps the previous value. A root
 that does not exist is skipped.
 
@@ -892,6 +943,16 @@ that does not exist is skipped.
 re-runs `EventExtractor` wholesale when any `.rb` file under an `event_paths`
 root changes, so with `%w[app lib]` a publisher added to or removed from a
 `lib/` file is picked up without a full extraction.
+
+**The plugin hook and the watch daemon see `app/` and `lib/` roots only.**
+The hook predicate,
+`plugin/hooks/woods-input-rules.sh`, is generated from the default rules, not
+from your configuration, so it treats a `.rb` edit under another `event_paths`
+root (`engines/ledger`, say) as ignorable. Declare such a root with
+`woods-extract --source-root PATH`: the hook reads declared roots from the
+published manifest and treats a Ruby edit under one as incremental input. The
+watch daemon reloads only `app/`, `lib/` and declared roots, so it needs the
+same declaration. A direct `woods:incremental` run does not.
 
 **Changing the `event_paths` value itself needs one full extraction.** Events
 already indexed were scanned under the old roots and stay as they are until an
@@ -937,10 +998,284 @@ Use `[]` to keep the PORO extractor on `app/models` only. The setter rejects a
 value that is not an Array and any entry that is not a non-empty, relative glob
 without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
 
+A glob can also name template files (`config/**/*.erb`). Templates are never
+swept as Ruby. Each ERB, HAML, Jbuilder, or Slim file a glob matches that no
+unit covers is listed in `skipped_files.json`: `non_view_template` outside the
+view directories (a crontab template), `unsupported_template_engine` or
+`rejected_by:view_templates` inside them. A template beside the Ruby file of a
+unit, such as a component sidecar, counts as covered.
+
 **Changing `unclaimed_ruby_paths` needs a full extraction.** The value is not
 part of any incremental fingerprint. Incremental runs dispatch with the current
 globs, so a file outside the changed set keeps its old classification until
 `woods:extract` runs.
+
+### GraphQL document paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `graphql_document_paths` | Array&lt;String&gt; | `["app/javascript/**/*.{graphql,gql}", "app/frontend/**/*.{graphql,gql}"]` | Globs, relative to `Rails.root`, that `GraphQLOperationExtractor` scans for client operation documents. |
+
+```ruby
+Woods.configure do |config|
+  config.graphql_document_paths = ['app/javascript/**/*.graphql', 'client/**/*.{graphql,gql}']
+end
+```
+
+Use `[]` to turn the family off. A path under `node_modules` never matches. The
+setter rejects a value that is not an Array and any entry that is not a
+non-empty, relative glob without `..`, raising `Woods::ConfigurationError` and
+keeping the previous value.
+
+The same globs decide what an incremental run and the watch daemon treat as a
+document change. The generated plugin hook predicate has no Ruby and uses the
+default roots.
+
+**Changing `graphql_document_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint.
+
+### Configuration files
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `config_file_paths` | Array&lt;String&gt; | `["config/*.yml", "config/**/*.yml", "app/data/**/*.yml"]` | Globs, relative to `Rails.root`, that `ConfigFileExtractor` indexes as `config_file` units. |
+| `config_file_values` | Boolean | `false` | Store leaf values next to key paths. Credential-named keys, credential-shaped values and ERB stay redacted. |
+| `settings_readers` | Array&lt;Hash&gt; | `[]` | Settings constants built from a YAML file. A read through one adds a `reads_config` edge to that file. |
+
+```ruby
+Woods.configure do |config|
+  config.config_file_paths = %w[config/*.yml config/settings/**/*.yml app/data/**/*.yml]
+  config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+end
+```
+
+Only `.yml` and `.yaml` matches are read, and `config/locales` stays with the
+i18n extractor. Secret-bearing files are never opened, whatever the globs say:
+a basename containing `credential`, `secret`, `password`, `passwd`, `token`,
+`private_key`, `api_key`, `apikey` or `keystore`, a `.enc` or `.key` file, and
+anything under `config/credentials/`. See
+[ConfigFileExtractor](EXTRACTOR_REFERENCE.md#configfileextractor) for what a
+unit holds.
+
+A `settings_readers` entry names a `constant` (`"Settings"`,
+`"Billing::Limits"`) and a root-relative `file`. `Settings.payments.api_host`
+and `Settings[:payments]` then link the reading unit to the file. A namespaced
+constant that only ends in the name (`Widget::Settings`) does not match.
+
+Each setter validates its value, raises `Woods::ConfigurationError` on a
+malformed one and keeps the previous value.
+
+**Changing any of the three needs a full extraction.** The values are not part
+of any incremental fingerprint.
+
+### Test support paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `test_support_paths` | Array&lt;String&gt; | `["spec/support/**/*.rb", "spec/*_helper.rb", "spec/lib/**/*.rb", "test/support/**/*.rb", "test/*_helper.rb", "test/lib/**/*.rb"]` | Globs, relative to `Rails.root`, whose Ruby files `TestSupportExtractor` indexes as `test_support` units. |
+
+Files the test mapping extractor claims (`spec/**/*_spec.rb`, `test/**/*_test.rb`)
+are never test support, whatever the globs match. Glob syntax is the same as
+`unclaimed_ruby_paths`.
+
+```ruby
+Woods.configure do |config|
+  config.test_support_paths += ['features/support/**/*.rb']
+end
+```
+
+The setter rejects a value that is not an Array and any entry that is not a
+non-empty, relative glob without `..`, raising `Woods::ConfigurationError` and
+keeping the previous value.
+
+**Changing `test_support_paths` needs a full extraction.** The value is not
+part of any incremental fingerprint. The hook predicate knows only the default
+locations, so an edit under an added root outside `spec/` and `test/` is picked
+up by `woods:incremental` and the watch daemon, not by the editor hook.
+
+### Test subdomain helpers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `test_subdomain_helpers` | Array&lt;String&gt; | `["with_subdomain", "use_subdomain", "using_subdomain", "set_subdomain", "switch_to_subdomain", "on_subdomain"]` | Test helper methods whose literal argument names the subdomain a test's requests use. |
+
+A literal path in a feature, system or request test is matched against
+subdomain-constrained routes using the one subdomain its file names, read from
+`host!`, `Capybara.app_host`, a `subdomain:` option, or a call to one of these
+helpers: `with_subdomain("shop") { visit "/settings" }`.
+
+```ruby
+Woods.configure do |config|
+  config.test_subdomain_helpers += ['on_storefront']
+end
+```
+
+Each entry must be a method name; anything else raises
+`Woods::ConfigurationError` and keeps the previous value.
+
+### Source-reference callers
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `source_reference_callers` | Hash | every constant-owned type, see below | Which unit types publish verified `code_reference` edges from the [constant-reference pass](EXTRACTOR_REFERENCE.md#constant-source-references), and which target types each may reference. |
+
+The Hash names only the caller types to change. Every other type keeps its
+default. A value is one of:
+
+- `:all`: the caller may reference every constant-owned unit type.
+- an Array of target types: the caller may reference only those.
+- `false` (or `[]`): the type is not a caller. Its references are still parsed
+  and cached, and it stays a valid target.
+
+Defaults:
+
+| Caller types | Target types |
+|--------------|--------------|
+| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
+| `component`, `view_component` | all except `component` and `view_component` |
+| `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query` | all except the four GraphQL types |
+
+Components and GraphQL units skip their own family because `render`, `slot`,
+`type_reference` and `field_resolver` edges already state those relationships.
+A design-system component rendered from most views would otherwise add one
+duplicate edge per view.
+
+```ruby
+Woods.configure do |config|
+  config.source_reference_callers = {
+    component: %i[model service poro job mailer], # narrow component callers
+    serializer: false,                             # serializers publish no reference edges
+    graphql_type: :all                             # include GraphQL-to-GraphQL references
+  }
+end
+```
+
+The policy filters edges that were already verified against the loaded
+application. It cannot add an unverified edge. The setter raises
+`Woods::ConfigurationError` for an unknown type and keeps the previous value.
+
+**Edge growth.** Each caller type adds one edge per distinct verified target it
+names. On the test application scaled to 1,200 components with 9
+non-component references each, component callers added 10,799 edges (2,414 to
+13,213 in total). Larger dependency sets can widen the incremental blast radius.
+
+**Changing `source_reference_callers` needs a full extraction.** The policy is
+recorded in `source_references.json`. Incremental extraction and
+`woods:refresh` stop with a full-extraction diagnostic when the recorded policy
+differs from the configured one, and the previous generation stays active.
+
+### Rake task paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rake_task_paths` | Array&lt;String&gt; | `["lib/tasks/**/*.rake", "rake/**/*.rake", "Rakefile"]` | Files, relative to `Rails.root`, that `RakeTaskExtractor` reads for task definitions. |
+
+Each entry has one of three shapes:
+
+- `dir/**/*.ext`: every matching file under `dir`;
+- `dir/*.ext`: matching files directly inside `dir`;
+- `path/to/File`: one file.
+
+Ruby files under a listed directory are indexed as the tasks' support code
+(`metadata.kind: "rake_support"`), unless another extractor owns them. A
+missing directory or file is skipped.
+
+```ruby
+Woods.configure do |config|
+  config.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/*.rake', 'Rakefile']
+end
+```
+
+The setter rejects a value that is not an Array and any entry outside the three
+shapes (absolute, containing `..`, or using another glob form), raising
+`Woods::ConfigurationError` and keeping the previous value. The narrow grammar
+is what lets the same entries drive incremental dispatch, the watch daemon and
+the plugin's change predicate.
+
+**Changing `rake_task_paths` needs a full extraction.** Incremental runs
+dispatch with the current entries, and tasks indexed under the old ones stay
+until a rake file changes or `woods:extract` runs. The plugin's shell predicate
+is generated from the defaults; a custom directory is still picked up by
+`woods:incremental` and the watch daemon.
+
+### JavaScript paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `javascript_paths` | Array&lt;String&gt; | `["app/javascript/**/*.{js,ts,jsx,tsx,mjs}", "app/assets/javascripts/**/*.js"]` | Globs, relative to `Rails.root`, that `JsModuleExtractor` scans for `js_module` units. |
+
+Each matching `.js`, `.ts`, `.jsx`, `.tsx` or `.mjs` file becomes one unit
+identified by its root-relative path. Whatever a glob reaches, files under a
+`node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/` or
+`coverage/` directory, minified bundles (`*.min.js`) and TypeScript declaration
+files (`*.d.ts`) are never indexed.
+
+JavaScript tests are skipped too, unless a glob names them: a file whose name
+contains `.test.` or `.spec.`, and anything under a `__tests__/`,
+`__mocks__/`, `spec/` or `test/` directory. A glob that itself contains one of
+those markers reaches them, so
+`config.javascript_paths += ['app/javascript/**/*.test.ts']` indexes the
+TypeScript tests and nothing else from that set. The literal prefix of each glob (its
+directories before the first wildcard) is also where bare import specifiers
+such as `controllers/clipboard_controller` and `@/shared/format` resolve.
+
+```ruby
+Woods.configure do |config|
+  config.javascript_paths = %w[app/javascript/**/*.{js,ts} frontend/src/**/*.{ts,tsx}]
+end
+```
+
+Use `[]` to disable the unit type. The setter rejects a value that is not an
+Array and any entry that is not a non-empty, relative glob without `..`,
+raising `Woods::ConfigurationError` and keeping the previous value.
+
+The same predicate (`Woods::JavascriptPaths.source?`) decides which changed
+paths re-run the extractor incrementally and which the watch daemon classifies
+as `:reextract`. **Changing `javascript_paths` itself needs a full
+extraction**: the value is part of the generation's configuration fingerprint,
+so incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
+
+### Documentation paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `documentation_paths` | Array&lt;String&gt; | `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md` | Globs, relative to `Rails.root`, that `DocExtractor` indexes as `doc` units. |
+| `documentation_exclude` | Array&lt;String&gt; | `**/CHANGELOG*.md`, `**/node_modules/**/*`, `**/vendor/**/*`, `doc/api/**/*`, `docs/api/**/*` | Globs removed from `documentation_paths`. |
+| `retrieve_documentation` | Boolean | `true` | Whether retrieval returns `doc` units when the caller gives no `types:` filter. |
+
+```ruby
+Woods.configure do |config|
+  config.documentation_paths += ['handbook/**/*.md']
+  config.documentation_exclude += ['docs/archive/**/*']
+  config.retrieve_documentation = false
+end
+```
+
+Use `documentation_paths = []` to index no documentation. Both setters reject a
+value that is not an Array and any entry that is not a non-empty, relative glob
+without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
+
+Hidden directories are not read, with three exceptions: `.claude/rules`,
+`.claude/skills` and `.github`. Source capture and the watch daemon walk those
+three and no other dot directory, so `documentation_paths` refuses a glob under
+any other one. Directories the watcher ignores (`node_modules`, `tmp`, `log`,
+`coverage`, `vendor/bundle`) are never indexed either.
+
+With `retrieve_documentation = false`, `doc` units are excluded from retrieval
+by default, like `test_mapping` units, and a caller reaches them with
+`types: ["doc"]`. An MCP server started without the host initializer takes the
+same switch from `WOODS_RETRIEVE_DOCUMENTATION=0`, which wins over the
+configuration value.
+
+**Changing `documentation_paths` or `documentation_exclude` needs a full
+extraction**: both are part of the generation's configuration fingerprint, so
+incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
+`retrieve_documentation` is not: it changes what retrieval returns, not what is
+extracted. The plugin's change hook and a process that has not loaded Woods'
+extractors recognize the default roots only; the watch daemon and the rake
+tasks use the configured ones.
 
 ## Console MCP options
 

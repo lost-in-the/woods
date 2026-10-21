@@ -134,6 +134,34 @@ module Woods
         validate_dependency_graph(payload, errors)
         validate_source_inputs(payload, errors, warnings)
         warn_unresolvable_routes(payload, warnings)
+        warn_missing_declared_tables(payload, warnings)
+      end
+
+      # Tables a declared external consumer names that the live schema did
+      # not have at extraction time, as the consumer units recorded them.
+      # Advisory: a stale declaration does not make the index invalid.
+      #
+      # @param payload [String]
+      # @param warnings [Array<String>]
+      def warn_missing_declared_tables(payload, warnings)
+        files = Dir[File.join(payload, 'external_consumers', '*.json')].reject { |f| f.end_with?('_index.json') }
+        files.sort.each do |file|
+          consumer, missing = declared_tables_missing(file)
+          missing.each do |table|
+            warnings << "External consumer #{consumer} declares table #{table}, which the live schema does not have"
+          end
+        end
+      end
+
+      # @return [Array(String, Array<String>)] consumer name and its missing tables; empty on a malformed file
+      def declared_tables_missing(file)
+        data = JSON.parse(Woods::AtomicFile.read(file))
+        return [nil, []] unless data.is_a?(Hash)
+
+        metadata = data['metadata'].is_a?(Hash) ? data['metadata'] : {}
+        [metadata['consumer'] || data['identifier'], Array(metadata['tables_missing'])]
+      rescue JSON::ParserError
+        [nil, []]
       end
 
       # Routes whose controller or action does not resolve, as the graph

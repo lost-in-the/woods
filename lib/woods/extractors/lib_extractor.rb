@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../git_source_filter'
+
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -22,7 +24,12 @@ module Woods
     #
     # Excludes:
     # - lib/tasks/ — handled by RakeTaskExtractor
-    # - lib/generators/ — Rails generator scaffolding, not application code
+    # - generator templates (`generators/**/templates/**`) — ERB with a Ruby
+    #   extension, not parseable Ruby; {Woods::SkippedFiles} reports them
+    #
+    # A class under lib/generators/ that inherits from `Rails::Generators::Base`
+    # or `Rails::Generators::NamedBase` is a lib unit with `metadata[:kind]`
+    # set to `"generator"`.
     #
     # Handles:
     # - Plain Ruby classes (with or without inheritance)
@@ -46,13 +53,30 @@ module Woods
       LIB_DIRECTORY = 'lib'
 
       # Subdirectories to exclude from extraction
-      EXCLUDED_SEGMENTS = %w[/tasks/ /generators/].freeze
+      EXCLUDED_SEGMENTS = %w[/tasks/].freeze
+
+      # Root-relative glob of generator templates.
+      TEMPLATE_GLOB = 'lib/**/generators/**/templates/**/*.rb'
+
+      GENERATOR_SEGMENT = '/generators/'
+      TEMPLATE_SEGMENT = '/templates/'
+      GENERATOR_PARENTS = %w[Rails::Generators::Base Rails::Generators::NamedBase].freeze
+
+      # Whether a path is a generator template: a `templates/` directory below
+      # a `generators/` directory. A pure function of the path.
+      #
+      # @param path [String] absolute or root-relative path
+      # @return [Boolean]
+      def self.generator_template?(path)
+        generators = "/#{path}".index(GENERATOR_SEGMENT)
+        !generators.nil? && !"/#{path}".index(TEMPLATE_SEGMENT, generators).nil?
+      end
 
       def initialize
         @lib_dir = Rails.root.join(LIB_DIRECTORY)
       end
 
-      # Extract all lib units from lib/**/*.rb (excluding tasks and generators).
+      # Extract all lib units from lib/**/*.rb (excluding tasks and generator templates).
       #
       # @return [Array<ExtractedUnit>] List of lib units
       def extract_all
@@ -85,6 +109,9 @@ module Woods
             path = @lib_dir.join(relative).to_s
             next if excluded_path?(path)
 
+            next if "/#{relative}".include?(GENERATOR_SEGMENT) &&
+                    (@git_filter ||= GitSourceFilter.new(root: Rails.root)).skip_reason(path)
+
             build_file(path)
           end
           if SourceInputs::ConsumerErrors.failed?(self)
@@ -113,6 +140,7 @@ module Woods
         unit.namespace    = extract_namespace(class_name)
         unit.source_code  = annotate_source(source, class_name, parent_class)
         unit.metadata     = extract_metadata(source, parent_class)
+        unit.metadata[:kind] = 'generator' if generator?(parent_class)
         unit.dependencies = extract_dependencies(source)
 
         { unit: unit, source: source, analysis: SourceReferences::Collector.new.call(source) }
@@ -215,7 +243,14 @@ module Woods
       # @param file_path [String] Absolute path to the file
       # @return [Boolean]
       def excluded_path?(file_path)
-        EXCLUDED_SEGMENTS.any? { |seg| file_path.include?(seg) }
+        EXCLUDED_SEGMENTS.any? { |seg| file_path.include?(seg) } ||
+          self.class.generator_template?(file_path.delete_prefix("#{Rails.root}/"))
+      end
+
+      # @param parent_class [String, nil] the declared parent
+      # @return [Boolean] whether the declaration is a Rails generator
+      def generator?(parent_class)
+        GENERATOR_PARENTS.include?(parent_class.to_s.delete_prefix('::'))
       end
 
       # ──────────────────────────────────────────────────────────────────────

@@ -335,6 +335,18 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
 
   describe 'controller dependency extraction' do
     it 'detects Phlex/ViewComponent render dependencies' do
+      # The edge targets a component the application defines, so there has
+      # to be one: a loaded constant with a file under the app root.
+      stub_const('ApplicationComponent', Class.new)
+      component = Class.new(ApplicationComponent)
+      stub_const('PageComponent', component)
+      component_path = create_file('app/views/page_component.rb', "class PageComponent < ApplicationComponent\nend\n")
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('PageComponent').and_return([component_path, 1])
+      roots = double('Config', autoload_paths: [], eager_load_paths: [], autoload_once_paths: [])
+      extractor # stubs Rails
+      allow(Rails.application).to receive(:config).and_return(roots)
+
       source_path = create_file('app/controllers/pages_controller.rb', <<~RUBY)
         class PagesController < ApplicationController
           def show
@@ -355,6 +367,90 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'fixture specs' do
 
       component_deps = unit.dependencies.select { |d| d[:type] == :component }
       expect(component_deps.map { |d| d[:target] }).to include('PageComponent')
+    end
+  end
+
+  # ── Multibyte source under a POSIX locale ─────────────────────────────
+
+  describe 'multibyte source under a US-ASCII default external encoding' do
+    it 'locates filter declarations in a multibyte file' do
+      path = create_file('app/controllers/shipments_controller.rb',
+                         "# Shipments — dispatch\nclass ShipmentsController < ApplicationController\n  " \
+                         "before_action :load_ledger # ledger — current\nend\n")
+
+      sites = with_posix_default_external { extractor.send(:filter_declarations, path) }
+
+      expect(sites).to eq([:before, 'load_ledger'] => 3)
+    end
+
+    let(:source_path) do
+      create_file('app/controllers/ledgers_controller.rb', <<~RUBY)
+        # Ledgers — reconciliation screens
+        class LedgersController < ApplicationController
+          def index
+            @note = "open — pending"
+            LedgerMailer.notice.deliver_later
+            respond_to { |format| format.json { render json: @note } }
+          end
+
+          private
+
+          def ledger_params
+            params.require(:ledger).permit(:name)
+          end
+        end
+      RUBY
+    end
+
+    let(:controller) do
+      build_controller('LedgersController', parent: app_controller, actions: %w[index], callbacks: [],
+                                            source_file: source_path)
+    end
+
+    it 'extracts the controller' do
+      unit = with_posix_default_external { extractor.send(:extract_controller, controller) }
+
+      expect(unit).not_to be_nil
+      expect(unit.source_code).to be_valid_encoding
+      expect(unit.source_code).to include('Ledgers — reconciliation')
+    end
+
+    it 'extracts an action body' do
+      body = with_posix_default_external { extractor.send(:extract_action_source, controller, 'index') }
+
+      expect(body).to include('open — pending')
+    end
+
+    it 'reads the declaration line of an action with no def body' do
+      line = with_posix_default_external { extractor.send(:declaration_line_text, source_path, 1) }
+
+      expect(line).to eq('# Ledgers — reconciliation screens')
+    end
+
+    it 'builds the composite source when it reads the controller source itself' do
+      source, = with_posix_default_external { extractor.send(:build_controller_source_with_concerns, controller) }
+
+      expect(source).to include('Ledgers — reconciliation')
+    end
+
+    it 'detects response formats when it reads the controller source itself' do
+      formats = with_posix_default_external { extractor.send(:extract_respond_formats, controller) }
+
+      expect(formats).to include(:json)
+    end
+
+    it 'extracts permitted params when it reads the controller source itself' do
+      params = with_posix_default_external { extractor.send(:extract_permitted_params, controller) }
+
+      expect(params).to have_key('ledger_params')
+    end
+
+    it 'scans dependencies when it reads the controller source itself' do
+      deps = with_posix_default_external do
+        extractor.send(:extract_dependencies, controller, nil, action_sources: {})
+      end
+
+      expect(deps.map { |dep| dep[:target] }).to include('LedgerMailer')
     end
   end
 end

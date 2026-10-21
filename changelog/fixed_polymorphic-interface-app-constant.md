@@ -1,0 +1,1 @@
+- Require an application-defined constant for a polymorphic interface edge. `belongs_to :addressable, polymorphic: true` recorded a `polymorphic_interface` edge when a gem defined a constant named `Addressable`. The edge now needs a class or module the application itself defines; a gem-owned name produces no edge. The interface name stays in `metadata[:polymorphic_interfaces]`.

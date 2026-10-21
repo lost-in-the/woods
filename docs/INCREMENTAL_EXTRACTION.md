@@ -30,9 +30,24 @@ Two differences are tolerated, and nothing else:
 The unit-file write skip ignores only Woods' top-level `extracted_at` stamp.
 A nested metadata field with the same name is application data: changing it
 rewrites the unit in both compact and pretty JSON output. On supporting
-Woods 2.1 writers, an already registered unit whose complete serialized bytes
-match also stays out of the touched set, Git enrichment and dependents updates.
+Woods 2.1 writers, an already registered unit that re-extracts to the same
+result also stays out of the touched set, Git enrichment and dependents updates.
 Derived metadata or dependency differences still use normal registration.
+
+"The same result" compares what the extractor produced. The published unit
+also carries what the second pass adds after registration: `dependents`, Git
+facts, and the edges the source-reference pass resolved. A fresh unit has none
+of them yet, so they are left out of the comparison (included in Woods 2.2;
+earlier writers compared them, and a unit with one dependent never matched).
+Controller flow annotations are compared, so a re-extracted controller with
+precomputed flows is always registered and its flows reassembled.
+
+| Retained unit | What still happens |
+|---|---|
+| Gains or loses a caller | Its `dependents` are rewritten by the second pass. |
+| Its source file is in the change set | Git facts are rechecked; a moved history rewrites the unit and counts it as touched. |
+| Targeted refresh (no change set) | Git facts are rechecked for every retained unit. |
+| Holds source-reference edges | Edge ownership carries into the next `source_references.json`. |
 
 `graph_analysis.json` used to be a fourth row, tolerating list ordering. It no
 longer is: the analyzer is order-independent and the oracle compares the file
@@ -47,6 +62,17 @@ contributions from units sharing an identifier under different types. Unit
 dependency metadata retains its extractor-provided values. If an older version
 already lost reverse dependencies on these targets, run a full extraction once
 to restore them; loading the damaged graph cannot recover discarded entries.
+
+The contract assumes the incremental run loads the same extraction-shaping
+configuration as the full run it builds on. Included in Woods 2.2: every
+published manifest records `extraction_config`, one SHA-256 digest per
+`Woods::Configuration::EXTRACTION_KEYS` setting (globs, settings readers,
+declared table consumers, test helpers and the like). Incremental extraction
+and targeted refresh refuse with `Woods::ExtractionError`, naming the changed
+settings but never their values, when a digest differs. Run a full
+`woods:extract` after changing one. A baseline published before the fingerprint
+existed, or before a setting joined it, logs a warning and runs; its next full
+extraction records the digests.
 
 This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
@@ -277,6 +303,24 @@ step before it.
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 
+   Components and view components re-run with them on a Ruby edit. A `render`
+   edge names the component the running app would reach, resolved against the
+   loaded constant tables (lexical scope, included Phlex Kits, top level), so
+   creating `Billing::V2::TierGrid` retargets an unchanged
+   `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
+   edge leads there. Controllers resolve their render edges the same way but
+   re-run only when a Ruby file under a component directory
+   (`component_paths`) changes, since every controller re-running on every
+   Ruby edit would cost more than the bounded blast radius saves. A component
+   defined outside those directories, or an alias defined elsewhere, retargets
+   a controller's edge when the controller file changes or on a full
+   extraction. Only units whose output changed are rewritten. The same
+   reload requirement applies: a constant the process has not loaded, or has not
+   unloaded, resolves as that process sees it. View components also re-run when
+   a sidecar template changes (a template with a Ruby file of the same name
+   beside it, or named for the directory it is in), because their render edges
+   are read from those templates and the graph records only the Ruby file.
+
 5. **Re-run whole-app extractors** whose trigger paths changed, replacing that
    unit type wholesale.
 6. **Prune vanished units**, so anything steps 2–5 resurrected against a
@@ -308,6 +352,19 @@ step before it.
    relationships. Unresolved candidates allow an unchanged caller to gain an edge
    when its target becomes indexed. Parsing is reused only when the captured
    source identity still matches.
+
+9. **Reconcile documentation references.** Every published `doc` unit's
+   mentions and links are resolved again against the complete typed unit
+   registry, the same resolver a full extraction uses. A document whose edges
+   or `resolved` flags changed is rewritten and its targets' reverse
+   relationships refreshed; one that did not is left untouched, so a run that
+   changes nothing a document names publishes nothing. Like step 8, the
+   rewrite is not an extraction and keeps the unit's timestamp and Git facts.
+   See [DocExtractor](EXTRACTOR_REFERENCE.md#docextractor).
+
+Documentation units are outside the blast radius: a code change never
+re-extracts the documents that mention it, because a document's own content
+does not depend on that code. Step 9 is what keeps their edges current.
 
 Git enrichment uses the same eligibility checks in full and incremental runs:
 existing app-owned files under `Rails.root`, excluding `vendor/`, `node_modules/`,
@@ -374,10 +431,12 @@ automatically.
 | `app/views/**/*.erb` | view_templates, caching |
 | `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates, caching |
 | `config/locales/**/*.yml` | i18n |
-| `config/initializers`, `config/environments` | configurations |
+| `config/initializers`, `config/environments`, `config/deploy`, `db/seeds`, and `Gemfile`, `Rakefile`, `config/boot.rb`, `config/environment.rb`, `config/importmap.rb`, `config/deploy.rb`, `db/seeds.rb` | configurations |
+| YAML under `config.config_file_paths` (default `config/**/*.yml`, `app/data/**/*.yml`; never `config/locales` or a secret-bearing file) | config_files |
 | `db/migrate/*.rb` (top level only) | migrations |
-| `lib/**/*.rb` (outside `tasks/`, `generators/`) | libs |
-| `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings |
+| `lib/**/*.rb` (outside `tasks/` and generator templates) | libs |
+| `spec/**/*_spec.rb`, `test/**/*_test.rb` | test_mappings (that file's unit; see the wholesale triggers below) |
+| `config.documentation_paths` (default `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md`) | docs |
 
 A path can match several rules, `app/policies` is claimed by both
 `PolicyExtractor` and `PunditExtractor`, `app/decorators` by both the
@@ -392,18 +451,26 @@ cheap, which is what makes wholesale replacement the right shape.
 
 | Trigger | Re-runs |
 |---|---|
-| `lib/tasks/**/*.rake` | rake_tasks (all definitions of every task) |
-| `config/routes.rb`, `config/routes/**` | routes, engines, **and** controllers, mailers, components, view components, view templates |
+| `config.rake_task_paths` (default `lib/tasks/**/*.rake`, `rake/**/*.rake`, `Rakefile`) and `*.rb` under those directories | rake_tasks (all definitions of every task, and their support files), test_mappings |
+| `config/routes.rb`, `config/routes/**` | routes (route units and the `route_file` unit of each draw file), engines, **and** controllers, mailers, components, view components, view templates, test mappings |
 | `Gemfile.lock` | engines, middleware, rails_source (gated by `include_framework_sources`) |
 | `config/application.rb`, `config/initializers/**`, `config/environments/**` | middleware; `.rb` files also re-run scheduled_jobs |
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
+| `app/jobs/**/*.rb`, `app/workers/**/*.rb`, `app/sidekiq/**/*.rb` | scheduled_jobs (a schedule entry's `job_class_resolved` follows whether its class is loaded) |
 | `app/models/**/*.rb` | state_machines |
 | `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
-| `spec/factories/**`, `test/factories/**` | factories |
+| `spec/factories/**`, `test/factories/**` | factories, test_support |
+| files under `config.test_support_paths` (default `spec/support/**`, `spec/*_helper.rb`, `spec/lib/**`, and the same under `test/`; never the test files `test_mappings` claims) | test_support, test_mappings |
 | `db/views/**/*.sql` | database_views |
+| `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`; never a path under `node_modules/`, root-level included), `app/graphql/**/*.rb` | graphql_operations |
+| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers |
+| the file named by `external_table_consumers_path` | external_consumers |
+| `app/views/**` templates, `app/controllers/**/*.rb`, `app/mailers/**/*.rb` | view_templates |
+| any `config.javascript_paths` module (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}`, `app/assets/javascripts/**/*.js`) | js_modules; **and** components, view components, view templates when the name map moved |
 | any `package.yml`, `packwerk.yml` | packages |
+| `app/helpers/**/*.rb`, the file of any module mixed in with `helper`, and (view-side consumers only) any file in `ApplicationController`'s ancestry | view_templates, components, view_components, controllers, mailers: the `helper_call` / `helper_method` consumers. Decided by `HelperCatalog.consumer_keys_for`, not a dispatcher rule. |
 
-Four of these deserve a note:
+Nine of these deserve a note:
 
 - **Rake tasks merge definitions across files.** Any changed or deleted `.rake`
   file reruns the task extractor over all task files. Removing the primary
@@ -417,9 +484,70 @@ Four of these deserve a note:
   against it. The graph cannot express this, because a route unit depends *on*
   its controller, not the other way round, so walking dependents from
   `config/routes.rb` never reaches them.
+- **GraphQL operation documents are wholesale, not per file.** A unit's edges
+  come from resolving its selections against the booted schema, and a spread can
+  name a fragment in another document. So a document change and a server-side
+  change under `app/graphql` both re-run the whole family. The document trigger
+  is a named matcher over `config.graphql_document_paths`, read at call time.
+- **Test mappings resolve names that live in other files.** A spec's
+  `it_behaves_like 'an accessible page'`, `include_context`, custom matcher
+  call, `include HelperModule`, or `describe 'ledger'` over a rake namespace
+  points at a unit some *other* file defines, and a helper's `included_for`
+  reads every support file. Two designs keep that equivalent to a full run: a
+  post-pass that re-resolves cached references against the unit registry, or a
+  wholesale re-run whenever a lookup input changes. Woods takes the wholesale
+  re-run. `TestMappingExtractor` reads the names from source itself (through
+  `TestSupportCatalog` and the rake files), never from another extractor's
+  published units, so the only thing to get right is the trigger set: a test
+  support file, a `.rake` file, or the route table. A changed test file alone
+  still dispatches per file, which is what keeps a watch cycle on one spec
+  edit to one unit. The cost is a re-read of every test file when support
+  changes; unit files whose bytes do not change are not rewritten.
+- **JavaScript modules cascade conditionally.** A module's `registered_names`
+  come from whichever file registers it, so every module change re-runs
+  `js_modules` wholesale. Components and templates reference modules by name
+  (`x-data`, `data-controller`, custom element tags), and the graph cannot
+  reach them from the module: the edge points the other way. Before any unit
+  is rewritten the run reads the name-to-module map the published `js_module`
+  units carry; after the re-run it compares that map with the fresh one and
+  re-runs `JS_NAME_CONSUMER_EXTRACTORS` only when a name appeared, vanished or
+  moved. A body edit inside a module re-runs no consumer. The oracle holds
+  both branches to full-extraction equivalence.
 - **Database views are wholesale, not per file.** Scenic keeps only the highest
   `_vNN` of each view, so pointing the per-file method at
   `db/views/foo_v01.sql` would index a version a full extraction drops.
+- **Tables cascade, and follow the database, not the files.** Table units are
+  read from the live schema and from which models claim each table.
+  `TABLE_CONSUMER_EXTRACTORS` (migrations, database views, external consumers)
+  resolve table names through the same catalog, so they re-run with the
+  tables: a model added for a table gives that table's unchanged migration a
+  model edge. The trigger paths are a proxy. **A schema change applied
+  with no file change is not seen; run a full extraction.** Schema dumps are
+  restart inputs, so `woods:incremental` already selects a full extraction for
+  them, and the direct `extract_changed` API refuses them. Models are not
+  re-run wholesale with the tables: after the tables re-run, only a model
+  whose `table` edge disagrees with the live schema (its table was created,
+  dropped, or moved to a qualified identifier) is re-extracted
+  (`Extractor#reconcile_model_table_edges`), which also refreshes its columns
+  and schema header.
+- **Helper edges are a catalog, not a post-pass.** A `helper_call` edge
+  depends on which module defines the called name, a fact spread across every
+  helper file. The alternative to re-running the consumers, a resolve-later
+  pass like source references, needs a candidate cache artifact and its own
+  baseline rules. Wholesale re-runs need none: a helper file change re-runs the
+  five consumers, an `ApplicationController` ancestry change re-runs the three
+  with no owning controller (owned views already follow their controller
+  through the blast radius), and a template or component edit rebuilds its
+  own edges from a fresh catalog. Helper files change rarely compared with
+  templates, so the cost lands on the rare side. A controller re-run also drops
+  the flow scope, as a routes re-run does, so every controller's flow document
+  is reassembled against its new edges.
+- **View templates re-run on any template, controller, or mailer change.** A
+  relative partial resolves through the controllers that reach its template
+  (see [ViewTemplateExtractor](EXTRACTOR_REFERENCE.md#viewtemplateextractor)),
+  so adding a page, a partial, or a controller can move a render edge of a
+  template nobody edited, and no graph edge leads from the change to it. The
+  per-file rule still runs first; only units whose output changed are rewritten.
 - **Packages don't yet claim their members.** `PackageExtractor` (#280) only
   produces `package` units from `package.yml`; it does not annotate which
   package every other unit belongs to. A pack-resident file-based unit is not
@@ -473,10 +601,18 @@ serializer nested in a controller retains its own identity; the controller does
 not become a serializer unit. Runtime objects left behind by a reload cannot
 claim a name now owned by another constant.
 
-All members of those two families count as refreshed and participate in graph,
-source-reference and metadata maintenance, even when only one file changed.
-Unit-file writes retain the existing byte-equality check; this does not promise
-a single-file write cost or an unchanged manifest for such a batch.
+Generated job classes (included in Woods 2.2; see the
+[JobExtractor reference](EXTRACTOR_REFERENCE.md#jobextractor)) follow the same
+path. Adding or removing the line that calls the generator is a Ruby change, so
+the job family is re-run against the reloaded runtime: a new constant gains a
+unit, and a constant the reload removed loses it.
+
+All members of those two families are re-extracted, even when only one file
+changed. Included in Woods 2.2: a member that re-extracts to the same result is
+retained, so it is neither rewritten nor counted as touched. A Ruby change that
+alters no unit (a byte-identical rewrite, or a file no extractor claims) ends
+as a no-op and publishes no generation. A comment or whitespace edit inside an
+indexed file is not such a change: the unit's `source_code` holds the file.
 
 Discovery-based removal requires a complete eager load. Failed or reported-partial discovery
 refuses publication, preserving the previous generation; incomplete eager
@@ -621,12 +757,18 @@ same question as "what has to happen before re-reading it is worth anything".
 
 | Action | Path classes | Why |
 |---|---|---|
-| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `lib/tasks/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml` | Woods reads bytes. No constant involved. |
+| `:reextract` | `config/locales/**`, `db/migrate/**`, `db/views/**`, `db/seeds.rb`, `db/seeds/**`, `config/deploy.rb`, `config/deploy/**`, `config/importmap.rb`, `lib/tasks/**`, every `config.rake_task_paths` file and the Ruby under its directories (`rake/**` by default), `lib/generators/**`, `spec/**`, `test/**`, `app/views/**` (non-Ruby), schedule files, `package.yml`, `packwerk.yml`, GraphQL operation documents under `config.graphql_document_paths`, YAML under `config.config_file_paths` that boot does not capture, JavaScript modules under `config.javascript_paths`, and Markdown under `config.documentation_paths` | Woods reads bytes. No constant involved. |
 | `:reload` | `app/**/*.rb`, `lib/**/*.rb` (outside `tasks/`, `generators/`), `config/routes.rb`, `config/routes/**` | An autoloaded constant changed; introspecting the old class would be a lie. |
+| `:reextract` (from configuration) | `.rb` files under `config.test_support_paths` outside `spec/` and `test/`, such as `features/support/**` | Test support is read as bytes. The defaults are already under `spec/` and `test/`. |
 | `:reload` (daemon, from the index) | `<declared root>/**/*.rb` for every `--source-root` the published manifest records | The classifier is root-blind so it runs without an index; the daemon, launcher, hook task and plugin predicate read the declared roots from the manifest (F15). |
 | `:restart` | `Gemfile`, `Gemfile.lock`, `.ruby-version`, `Rakefile`, `config.ru`, root gemspecs, `.env*`, application/boot/environment files, initializers/environments/credentials, database/schema files, `config/settings*.yml`, and boot-captured service YAML | Captured at boot. Rails' reloader re-runs none of it. See the exact list below. |
 | `:restart` (daemon, from its own boot) | Ruby under `config/` the watch daemon's process loaded at boot | Only the booted process knows which helpers it required; the classifier ignores generic `config/*.rb` so a fresh-process hook does not restart over files nothing loads (F3). |
 | `:ignore` | everything else | Not extraction input. |
+
+Documentation Markdown is the one class whose paths are configurable. A process
+that has loaded the extractors (the watch daemon, the rake tasks) classifies it
+from `config.documentation_paths`; a process that has not classifies the
+default roots.
 
 The watch daemon applies two escalations on top of this table: a `:reload`
 path becomes `:restart` when the app cannot reload (`config.enable_reloading =
@@ -812,6 +954,25 @@ edit does not establish that a day of commits is below the crossover.
   partial that a template already renders, under another engine's extension
   or a parent controller's directory, does not retarget the existing edge.
   Editing the rendering template, or a full extraction, picks up both.
+- **Git status changes alone do not re-extract a configuration source.**
+  Configuration sources (configuration files, `config/routes.rb` and its
+  `config/routes/*.rb` draw files, boot and root Ruby, generators) that Git
+  ignores or does not track are skipped and reported. The check runs when a
+  changed path is dispatched, so a transition that changes only Git status,
+  and not the file, never reaches it:
+  - `git add` of an untracked configuration file leaves its unit missing.
+  - `git rm --cached` plus a `.gitignore` entry leaves the old unit published.
+  - An untracked `config/routes/*.rb` draw file stays unindexed after it is
+    added to Git.
+
+  A full extraction picks up all three.
+- **Lexically resolved targets are fixed when the referencing unit is extracted.**
+  A GraphQL unit's relative constant path, and a model's polymorphic interface
+  name, are resolved against the constants loaded at that moment. Deleting or
+  changing a resolved target re-extracts its dependents. Creating a constant
+  that an existing relative reference or interface name would newly resolve to
+  does not re-extract the referencing unit. Editing that unit, or a full
+  extraction, picks it up.
 - **Snapshots stay full-extraction-only.** They hash the full unit set, and an
   incremental run only holds changed units in memory.
 - **A divergence floor is still worth keeping.** Incremental correctness is a
@@ -838,6 +999,12 @@ diagnostic. Reconstruct it by running a full extraction; do not manufacture a
 cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
+
+The cache is format 4. It records the
+[caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
+produced its edges. A format 3 cache, or one written under a different
+`source_reference_callers` value, is an incompatible baseline: run one full
+extraction after upgrading and after changing that option.
 
 This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
 source changed outside the selected batch, the writer refuses to combine its old

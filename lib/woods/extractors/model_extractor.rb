@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
@@ -7,6 +8,9 @@ require_relative '../ast/parser'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
+require_relative 'constant_paths'
+require_relative 'table_catalog'
+require_relative 'method_effects'
 
 module Woods
   module Extractors
@@ -47,9 +51,11 @@ module Woods
       # Warnings collected during extraction (skipped associations, failed models)
       attr_reader :warnings
 
-      def initialize
+      # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
+      def initialize(table_catalog: nil)
         @concern_cache = {}
         @warnings = []
+        @table_catalog = table_catalog
       end
 
       # Extract all ActiveRecord models in the application
@@ -86,7 +92,7 @@ module Woods
         )
 
         source_path = unit.file_path
-        source = source_path && File.exist?(source_path) ? File.read(source_path) : nil
+        source = source_path && File.exist?(source_path) ? SourceFile.read(source_path) : nil
 
         unit.namespace = model.module_parent.name unless model.module_parent == Object
         inlined_source, inlined_concerns = build_model_source_with_concerns(model, source)
@@ -99,6 +105,7 @@ module Woods
         # comments concern bodies out, which Prism cannot see.
         analysis_source, segments = build_analysis_source(model, source, source_path)
         enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments)
+        MethodEffects.apply(unit, source, column_names: unit.metadata[:column_names])
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
         unit.chunks = build_chunks(unit)
@@ -239,7 +246,7 @@ module Woods
           source_path = source_file_for(model)
           return ['', []] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         concern_sources = resolved_concern_sources(model)
@@ -388,7 +395,7 @@ module Woods
         path = concern_path_for(mod)
         return nil unless path && File.exist?(path)
 
-        @concern_cache[mod.name] = [mod.name, File.read(path), path]
+        @concern_cache[mod.name] = [mod.name, SourceFile.read(path), path]
       end
 
       # Find the file path for a concern
@@ -428,6 +435,7 @@ module Woods
 
           # Relationships and behaviors
           associations: extract_associations(model),
+          polymorphic_interfaces: extract_polymorphic_interfaces(model),
           validations: extract_validations(model),
           callbacks: callbacks,
           scopes: extract_scopes(model, source),
@@ -587,7 +595,7 @@ module Woods
           {
             name: assoc.name,
             type: assoc.macro, # :belongs_to, :has_many, :has_one, :has_and_belongs_to_many
-            target: assoc.class_name,
+            target: association_target(model, assoc),
             options: extract_association_options(assoc),
             through: assoc.options[:through],
             through_db: through_association_database(assoc),
@@ -663,7 +671,7 @@ module Woods
           source_path = source_file_for(model)
           return [] unless source_path && File.exist?(source_path)
 
-          source = File.read(source_path)
+          source = SourceFile.read(source_path)
         end
 
         lines = source.lines
@@ -735,18 +743,22 @@ module Woods
       # association name ("Commentable") without constantizing it, so the
       # NameError rescue never fires and the edge pointed at a nonexistent
       # node, or worse, at an unrelated real constant (an app's Commentable
-      # concern) mislabeled as a +:belongs_to+ model edge (#199). Those
-      # edges now carry +via: :polymorphic_interface+ instead of the macro:
-      # the interface name stays visible in the graph but is distinguishable
-      # from a resolvable model reference.
+      # concern) mislabeled as a +:belongs_to+ model edge (#199). The
+      # interface name lives in +metadata[:polymorphic_interfaces]+; an edge
+      # is emitted only when the application defines a constant of that name, and carries
+      # +via: :polymorphic_interface+ instead of the macro so it stays
+      # distinguishable from a resolvable model reference.
       def extract_dependencies(model, source = nil)
         # Associations point to other models. `through`, `through_db`, and
         # `disable_joins` ride on the edge so the graph can report a
         # has_many :through that crosses databases without disable_joins,
         # or whose join model itself sits on a third database (#280).
         deps = model.reflect_on_all_associations.filter_map do |assoc|
-          via = polymorphic_reflection?(assoc) ? :polymorphic_interface : assoc.macro
-          dep = { type: :model, target: assoc.class_name, via: via }
+          polymorphic = polymorphic_reflection?(assoc)
+          target = association_target(model, assoc)
+          next if polymorphic && !application_constant?(target)
+
+          dep = { type: :model, target: target, via: polymorphic ? :polymorphic_interface : assoc.macro }
           if assoc.options[:through]
             dep[:through] = assoc.options[:through].to_s
             through_db = through_association_database(assoc)
@@ -759,26 +771,33 @@ module Woods
           nil
         end
 
+        # The table unit this model reads, when the live schema has it.
+        table = (@table_catalog ||= TableCatalog.from_runtime).for_model(model)
+        deps << { type: :database_table, target: table.identifier, via: :table } if table
+
         # Included concerns add instance-level behavior
         extract_included_modules(model).each do |mod|
           deps << { type: :concern, target: mod.name, via: :include }
         end
 
         # Extended modules add class-level behavior (not inlined into source)
+        # A `ClassMethods` module is part of the mixin that declares it; the
+        # edge names that mixin, which is the unit that holds its source.
         extract_extended_modules(model).each do |mod|
-          deps << { type: :concern, target: mod.name, via: :extend }
+          deps << { type: :concern, target: ConstantPaths.mixin_owner(mod.name), via: :extend }
         end
 
         # Parse source for service/mailer/job references
         if source.nil?
           source_path = source_file_for(model)
-          source = File.read(source_path) if source_path && File.exist?(source_path)
+          source = SourceFile.read(source_path) if source_path && File.exist?(source_path)
         end
 
         if source
           deps.concat(scan_service_dependencies(source))
           deps.concat(scan_mailer_dependencies(source))
           deps.concat(scan_job_dependencies(source))
+          deps.concat(scan_config_dependencies(source))
 
           # Other models (direct references in code, not already captured via association)
           scan_model_dependencies(source).each do |dep|
@@ -791,6 +810,61 @@ module Woods
         consolidate_dependencies(deps)
       end
 
+      # The class an association points at, as a unit identifier.
+      #
+      # +class_name+ is the written string: Rails resolves `"PlanLink"` on
+      # `Pricing::Model` to +Pricing::PlanLink+, and only the resolved name is
+      # a unit. The reflection's own class is the runtime truth; a lexical
+      # lookup from the owner's namespace stands in when it cannot be
+      # computed, and the written name when nothing resolves. A polymorphic
+      # name is an interface and stays as written.
+      #
+      # @param model [Class]
+      # @param assoc [ActiveRecord::Reflection::AbstractReflection]
+      # @return [String]
+      def association_target(model, assoc)
+        written = assoc.class_name
+        return ConstantPaths.normalize(written) if polymorphic_reflection?(assoc)
+
+        reflected_class_name(assoc) || ConstantPaths.resolve(written, owner_nesting(model)).target
+      end
+
+      # @return [String, nil] the name of the class the reflection computes
+      def reflected_class_name(assoc)
+        klass = assoc.klass if assoc.respond_to?(:klass)
+        name = klass.name if klass.respond_to?(:name)
+        name unless name.to_s.empty?
+      rescue StandardError, LoadError
+        nil
+      end
+
+      # @return [Array<String>] the model and its namespaces, innermost first
+      def owner_nesting(model)
+        parts = model.name.to_s.split('::')
+        parts.size.downto(1).map { |length| parts.first(length).join('::') }
+      end
+
+      # Interface names the model takes part in: each polymorphic
+      # +belongs_to+, and each +as:+ a +has_one+ or +has_many+ declares.
+      #
+      # @param model [Class]
+      # @return [Array<String>] sorted, unique
+      def extract_polymorphic_interfaces(model)
+        model.reflect_on_all_associations.flat_map do |assoc|
+          [(assoc.name if polymorphic_reflection?(assoc)), assoc.options[:as]]
+        end.compact.map(&:to_s).uniq.sort
+      end
+
+      # Whether the application itself defines a class or module of this name.
+      # A gem that happens to define the interface name is not a unit.
+      #
+      # @param name [String]
+      # @return [Boolean]
+      def application_constant?(name)
+        resolution = ConstantPaths.resolve("::#{name}")
+        resolution.status == :resolved && app_source?(resolution.source_file, Rails.root.to_s)
+      end
+
       # Whether an association reflection declares a polymorphic interface.
       #
       # Guarded with +respond_to?+ because not every reflection type across
@@ -800,7 +874,26 @@ module Woods
       # @param assoc [ActiveRecord::Reflection::AbstractReflection]
       # @return [Boolean]
       def polymorphic_reflection?(assoc)
-        assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
+        return true if assoc.respond_to?(:polymorphic?) && assoc.polymorphic?
+
+        assoc.respond_to?(:source_reflection) && polymorphic_source?(assoc)
+      end
+
+      # A `through` association whose source association is polymorphic has
+      # no single target class either: `has_one :referrer, through:
+      # :account_referral, source: :referrer` over a polymorphic `belongs_to
+      # :referrer` names an interface. A `source_type:` option picks one
+      # concrete class out of that interface, so the association is ordinary.
+      #
+      # @param assoc [ActiveRecord::Reflection::ThroughReflection]
+      # @return [Boolean]
+      def polymorphic_source?(assoc)
+        return false if assoc.options[:source_type]
+
+        source = assoc.source_reflection
+        !source.nil? && !source.equal?(assoc) && polymorphic_reflection?(source)
+      rescue StandardError
+        false
       end
 
       # The database a class resolves to, by runtime reflection.
@@ -1253,7 +1346,7 @@ module Woods
           path = source_file_for(model)
           return 0 unless path && File.exist?(path)
 
-          File.readlines(path).count { |l| l.strip.present? && !l.strip.start_with?('#') }
+          SourceFile.readlines(path).count { |l| l.strip.present? && !l.strip.start_with?('#') }
         end
       end
     end

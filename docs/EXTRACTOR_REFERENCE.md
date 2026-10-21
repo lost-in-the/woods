@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **35 extractor classes** producing **39 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **42 extractor classes** producing **47 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 35 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 39 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), and `RailsSourceExtractor` produces both `rails_source` and `gem_source`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 42 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 47 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **35 extractor classes** producing **39 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 35 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 42 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -47,8 +47,16 @@ record the loaded gem path and exact revision; the development version alone
 does not establish that this change is installed.
 
 After discovery and deduplication, extraction adds `code_reference` relationships
-from models, controllers, services, POROs, library units and concerns to verified,
-indexed class/module targets. It parses original Ruby source and attributes reads
+from every constant-owned unit type to verified, indexed class/module targets.
+The callers are models, controllers, services, POROs, library units, concerns,
+jobs, mailers, components, view components, GraphQL types, mutations, resolvers
+and queries, serializers, decorators, validators, policies, managers and
+channels. Which target types a caller may reference is set by
+[`source_reference_callers`](CONFIGURATION_REFERENCE.md#source-reference-callers);
+by default a component adds no edge to another component and a GraphQL unit adds
+none to another GraphQL unit. A caller whose class is not loaded when the pass
+runs, such as a GraphQL file in an application without graphql-ruby, publishes
+no edge. It parses original Ruby source and attributes reads
 to their declaring owner. Ordinary method bodies, singleton methods and callback
 blocks participate. Comments, plain strings and declaration names do not establish
 references. Rails relationships derived through runtime reflection stay intact.
@@ -96,6 +104,32 @@ their source-reference edges.
 
 Once-loader ownership (#579) is included in Woods 2.1; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
+### Method side effects
+
+Model, service, job, PORO, manager, mailer and controller units record what each **public method** of the unit's class does, read from the unit's own file:
+
+```json
+"method_effects": {
+  "refund!": {
+    "jobs_enqueued": ["RefundJob"],
+    "mail_sent": [],
+    "services_called": [],
+    "columns_written": ["status"],
+    "events_published": ["ledger.refunded"],
+    "external_calls": ["Faraday"],
+    "via_method": { "notify": { "mail_sent": ["ReceiptMailer"] } }
+  }
+}
+```
+
+- **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
+- **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
+- **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
+- **Cap.** `method_effects_limit` (default 50) bounds the map per unit; past it the first methods are kept and `method_effects_truncated: true` is set.
+- **Edges.** The unit's existing `job_enqueue`, mailer and service edges gain `through`: the public methods that reach the target, sorted and joined with `, ` (`"through": "capture!, refund!"`). Controller actions are named here too. No edge is added or removed, so `dependents` answers are the same for a caller that ignores `through`.
+- **Limits.** The reading is static and heuristic, like callback side effects. Calls made through metaprogramming, through another object, from an included concern, or from a block in the class body are not attributed. Nested method definitions and blocks that change `self` to another object do not contribute same-class method effects. Same-line definitions are read from their own source ranges.
+
 ### Eager loading
 
 The orchestrator calls `Rails.application.eager_load!` once before extraction begins. If that fails with a `NameError` (common when `app/graphql/` references an uninstalled gem), it falls back to per-directory loading via `EXTRACTION_DIRECTORIES`. This fallback covers the directories that matter for extraction.
@@ -116,6 +150,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
 - Named, source-defined app model mixins (for example `Card::Pinnable` in `app/models/card/pinnable.rb`) resolve through runtime source locations, with conventional concern paths as fallbacks. Included mixins also receive `:concern` units, so their actual files map to the includer through dependency edges. Gem-owned modules stay outside this discovery. Conventional concern files retain their existing identity even when nested helpers share the same file. Outside those directories, each included runtime mixin receives its own concern identity even when several share a source file; editing that file refreshes every includer.
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concern names are recorded in `metadata[:inlined_concerns]`
+- Association targets are recorded without a leading `::`. A polymorphic `belongs_to`, or a `through` association whose source is polymorphic, names an interface, not a constant: its name, and every `as:` name, is listed in `metadata[:polymorphic_interfaces]`, and a `polymorphic_interface` edge is emitted only when the application defines a constant of that name. An `extend` edge to a `ClassMethods` module targets the module that owns it. A module whose `ClassMethods` a live model extends receives a `concern` unit wherever the application declares it, including a file under `config/initializers/`. A module with behavior that a `config/initializers/` file canonically declares receives a `concern` unit whichever class mixes it in. A class defined in an initializer is not indexed; only modules are. Association targets name the class the reflection resolves to (`class_name: "PlanLink"` on `Pricing::Model` targets `Pricing::PlanLink`).
 - Reads Rails' per-event callback chains (`_save_callbacks`, `_create_callbacks`, and the other lifecycle events), preserving each chain's order and each entry's `kind`, filter and conditions. The public `type` combines kind and event, such as `before_save` or `after_create`; Rails' separate `before_commit` event is reported as `before_commit`, not `before_before_commit`. `callback_count` equals the emitted callback list's length. The list includes framework-registered callbacks; it is runtime metadata, not an application-only filter or a cross-event execution trace. Regenerate the index after upgrading to pick up corrected callback metadata.
 - Proc/lambda filters, including Rails-generated association callbacks, use stable source-site labels in both metadata and callback chunks: `#<Proc app/models/post.rb:12>` (or `lambda`). App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Rails 6's numeric filter identity is resolved through `raw_filter`. These labels describe location and callable kind, not captured closure state; callbacks are never executed. Model condition labels retain their existing format.
 - Default callback-object representations omit process addresses: an instance becomes `#<CleanupCallback>`, an anonymous class becomes `#<Class>`, and its instance becomes `#<#<Class>>`. Anonymous namespace prefixes are normalized too (for example, `#<Module>::CleanupCallback`). Named classes and custom `to_s` labels retain their text. These labels do not distinguish arbitrary object state; separate registered callbacks remain separate entries even when their descriptive labels match. Controller object-filter formatting is unchanged.
@@ -217,6 +252,9 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its declared `only`/`except` names the action; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
+- Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
+- `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
 - Inline callbacks use stable source-site labels in filter metadata, controller annotations and action chunks: `#<Proc app/controllers/posts_controller.rb:12>` (or `lambda`). The controller filter metadata and annotations use the same labels for `if`/`unless` procs. App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Labels describe the callable location and kind, not captured closure state, and never execute callbacks.
@@ -289,6 +327,17 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - `perform_params` uses the same syntax-aware signature parsing as service initializers and preserves its `name`, `splat` (`single`/`double`/null), and `has_default` fields. Keyword defaults do not invent additional argument names.
 - Records what triggers this job (reverse lookup via dependency graph after extraction)
 - Supports both ActiveJob and Sidekiq native workers
+- **Generated job classes (included in Woods 2.2).** A class macro can build a job with `Class.new` and bind it with `const_set`, so `Widget::SyncNowWorker` exists at runtime with no declaration in any file. Such a class becomes a job unit when its generator is application code:
+
+  | Field | Value |
+  |---|---|
+  | `file_path` | The file that calls the generator (`app/models/widget.rb`). |
+  | `source_code` | The job banner plus the declaring line(s) only (`async_method :sync_now`), up to the call's arguments. A block body and the generator's body are left out. |
+  | `metadata.generated` | `true` |
+  | `metadata.generated_by` | The generator method's name (`async_method`), or `null` when the binding line names none. |
+  | `job_type`, `queue`, `sidekiq_options`, `perform_params`, `parent_class` | Read from the runtime class. A queue computed by a block is `null`. |
+
+  The declaring line is found in the file of the constant's owner: a call of the generator whose symbol or string argument spells the leading words of the constant's name (`:sync_now` for `SyncNowWorker`). When no call matches (the macro is called through `send`, or from an included module), `file_path` and `source_code` are the generator's own binding line. A constant assignment (`SyncWorker = Class.new(...)`) is its own declaring line. A class a gem's generator binds gets no unit. The owner keeps its own unit and type; enqueue edges to the generated class (`Widget::SyncNowWorker.perform_async`) resolve to the job unit.
 
 **Example output (abbreviated):**
 
@@ -316,21 +365,85 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata. Discovery checks `<action>.html` and `<action>.text` in every engine of `Woods::Extractors::TemplateExtensions::DETECTED` (`.erb`, `.haml`, `.jbuilder`, `.slim`).
 - Extracts `default from:`, `layout`, and per-action subject patterns
+- `action_facts` (W-7) records each action's assigns (with those of its before and around callbacks), params, redirects and the template `mail` renders (`{ template, mail: true }`, honouring `template_name:` and `template_path:`), in the controller shape above. An action without `mail` receives no implicit mail-template fact; explicit `render` calls are still recorded
+- App-owned parent mailers add an `:inheritance` edge so incremental extraction refreshes child facts when inherited callbacks or their concerns change. Framework parents add no edge. Run a full extraction once to populate this relationship in retained indexes.
 - Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
 - Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
 - Object callback filters use descriptive labels with addresses removed only from Ruby's default representation, including anonymous classes and namespaces. Custom labels and literal hexadecimal text are preserved. Labels do not serialize callback object state, and extraction never invokes callbacks.
+- A `_path`/`_url` helper that names a live route records an edge to the controller that route dispatches to (`via: :link_to`), as every navigation edge does. A name with no live route, a keyword label (`base_url: host`), and a method the mailer defines (`def tracking_url`) record no edge. A shorthand keyword with no value (`widgets_path:` followed by `,`, `)`, or `}`) is a call to the helper and records the edge.
 - After upgrading, run a full extraction to refresh retained mailer units. Stabilized headers and callable labels can cause a one-time source-hash change; stored index schemas are unchanged.
 
 ---
 
 ### ConfigurationExtractor
 
-**What it captures:** Rails initializers (`config/initializers/**/*.rb`) and environment files (`config/environments/*.rb`). Also extracts a behavioral profile from the resolved `Rails.application.config` values at runtime.
+**What it captures:** Rails initializers (`config/initializers/**/*.rb`), environment files (`config/environments/*.rb`), and the Ruby an application boots, seeds and builds from. Also extracts a behavioral profile from the resolved `Rails.application.config` values at runtime.
 
 **Key details:**
 - `BehavioralProfile` introspects live config using `respond_to?`/`defined?` guards, a missing config section produces `nil`, not an error
 - Captures: asset pipeline config, middleware additions, cache store, logger config, and custom initializer logic
 - One unit per config file, plus one special `:behavioral_profile` unit per environment
+- `metadata.config_type` names the kind of file:
+
+  | File | `config_type` | Identifier |
+  |---|---|---|
+  | `config/initializers/**/*.rb` | `initializer` | `initializers/<name>.rb` |
+  | `config/environments/*.rb`, `config/environment.rb` | `environment` | `environments/<name>.rb`, `environment.rb` |
+  | `config/boot.rb` | `boot` | `boot.rb` |
+  | `config/importmap.rb` | `importmap` | `importmap.rb` |
+  | `config/deploy.rb`, `config/deploy/**/*.rb` | `deploy` | `deploy.rb`, `deploy/<name>.rb` |
+  | `db/seeds.rb`, `db/seeds/**/*.rb` | `seeds` | `db/seeds.rb`, `db/seeds/<name>.rb` |
+  | `Gemfile` | `gemfile` | `Gemfile` |
+  | `Rakefile` | `rakefile` | `Rakefile` |
+
+- A `Gemfile` unit lists literal `gem` declarations in `metadata.gems`, parsed with Prism without executing the file: `{ name, requirement, groups, source }`. Requirements are strings (multiple constraints joined with `, `) or `null`; groups include enclosing `group` blocks and inline `group`/`groups` options, defaulting to `["default"]`. The source kind is `"path"`, `"git"`, or `null`, including block and per-gem options. Declarations inside `source` blocks are included. Dynamic gem names are omitted and dynamic requirements are `null`. `metadata.gem_references` retains the declared names; gem names produce no dependency edges
+- Boot, seed, deploy and root files get the common dependency scan (models, services, jobs, mailers). Initializers and environments keep their service-only scan. Constant targets must resolve to application-owned source; lowercase identifiers and gem-owned constants produce no edge. Every kind gets [`reads_config` edges](#configfileextractor)
+- `config/routes.rb` belongs to `RouteExtractor` and `config/application.rb` is the nominal path of the behavioral profile. Other Ruby directly under `config/` (`puma.rb`, for example) is not indexed: `ReloadPolicy` leaves it unclassified so the watch daemon can restart for the helpers its process loaded at boot
+- Published source is redacted first: known credential shapes, URL userinfo, private key blocks, a string literal assigned to a credential-named key on the same line, and a generated-looking literal (a long run mixing letters and digits) assigned to a sensitive-named key (`pepper`, `*_salt`, `*_webhook`, `encryption.primary_key`) are replaced by `[REDACTED]`. The same guard covers every unit published from configuration source: `route_file` units, `redirect(...)` targets, `scheduled_job` units built from a schedule file or initializer, and `concern` units declared in an initializer. Redaction is best-effort; a credential with no recognizable shape under a name that says nothing is not detected
+- Boot, seed, deploy and root files must resolve under `Rails.root`; a symlink that leaves it is not read
+
+---
+
+Configuration source discovery (`configuration`, `config_file`, `route_file`, and Ruby under
+`lib/**/generators/`) excludes Git-ignored and untracked files, rooted at the
+application directory. Incremental dispatch and reload classification apply the
+same filter. `skipped_files.json` lists exclusions as `git_ignored` or `untracked`.
+When Git cannot run or the application has no `.git`, discovery includes all
+otherwise eligible files and the manifest records `metadata.git_filter: "unavailable"`.
+
+### ConfigFileExtractor
+
+**What it captures:** YAML configuration and application data files. Each file under `config.config_file_paths` becomes one `config_file` unit identified by its root-relative path (`"config/settings.yml"`).
+
+**Key details:**
+- Default globs: `config/*.yml`, `config/**/*.yml`, `app/data/**/*.yml`. `config/locales/` stays with `I18nExtractor`. Only `.yml` and `.yaml` files are read
+- **The file's text is never published.** `source_code` is an outline of key paths, so comments and values cannot reach the index
+- `metadata` holds `top_level_keys`, `environments` (top-level keys among `development`, `test`, `staging`, `production`), `environment_keys` (the keys of each environment section, merge keys resolved), `key_paths` (dotted, `[]` for a sequence of mappings), `root_type`, `entry_count`, `erb`, `env_vars` (the names ERB reads from `ENV`), `documents`, `loc`, `values_stored`, `parse_error`, `oversized` and `key_paths_truncated`
+- **Secret-bearing files are never opened**, whatever the globs say: a basename containing `credential`, `secret`, `password`, `passwd`, `token`, `private_key`, `api_key`, `apikey` or `keystore`, a `.enc` or `.key` file, and anything under `config/credentials/`. The check also runs on the path a symlink resolves to, and a file that resolves outside `Rails.root` is refused
+- `config.config_file_values = true` stores leaf values in `source_code` (`payments.api_host = ledger.example`). A value under a credential-named key, a credential-shaped value (the Console scanner patterns, URL userinfo, a long mixed letter-and-digit run) and ERB source are still replaced by a marker
+- A key that is itself shaped like a credential, or that reads as a generated token, is redacted in either mode, so a mapping keyed by secrets lists `[REDACTED]` in `key_paths`
+- ERB is never evaluated: output tags become a placeholder and other tags are dropped before parsing. YAML is read as a syntax tree, so no object is built from file content. Aliases and merge keys are followed under a visit budget and a 2,000-path budget
+- A file that does not parse still yields a unit, with `parse_error: true` and its top-level keys from a line scan. A file over 1 MB yields a unit with `oversized: true` and is not read
+- **`reads_config` edges.** A unit whose source reads a configuration file links to it with `{ type: :config_file, target: "<path>", via: :reads_config }`, so `dependents` on a `config_file` unit lists its readers. Three reads are recognized: `config_for(:name)` (`config/<name>.yml`), `YAML.load_file` / `safe_load_file` / `unsafe_load_file` (also on `Psych`) with a literal path, a `Rails.root.join` of literals, or a literal prefixed by `#{Rails.root}/`, and a read through a constant listed in `config.settings_readers`. The target comes from the reader's own source and configuration: no file is opened, and a path that is not an indexable configuration file yields no edge
+- Per-file in incremental runs. `config/settings*.yml`, `config/database.yml` and the service YAML Rails reads at boot are restart-sensitive, so an incremental run that names one asks for a full extraction in a fresh process
+
+**Example output (abbreviated):**
+
+```json
+{
+  "type": "config_file",
+  "identifier": "config/settings.yml",
+  "source_code": "# Config file: config/settings.yml (key paths only, values omitted)\n# Environments: production\nproduction\nproduction.payments\nproduction.payments.api_host",
+  "metadata": {
+    "top_level_keys": ["default", "production"],
+    "environments": ["production"],
+    "environment_keys": { "production": ["payments"] },
+    "erb": true,
+    "env_vars": ["LEDGER_HOST"],
+    "values_stored": false
+  }
+}
+```
 
 ---
 
@@ -351,6 +464,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Kinds are read from the live endpoint behind `route.app` (unwrapping `ActionDispatch::Routing::Mapper::Constraints`), never from the routes file. A blank verb (`mount`, `via: :all`) renders as `ANY`: `"ANY /cable (mount)"`, `"GET /settings (redirect)"`, `"GET / [subdomain=www] (redirect)"`
 - These units emit no `route_dispatch` edge. The one route still skipped is a controller route whose action is a dynamic path segment (`get ':action', controller: ...`): it names no single action
 - Since routes don't map to individual files, incremental re-extraction re-runs `RouteExtractor` wholesale whenever `config/routes.rb` or a file under `config/routes/` (a `draw` file) changes, it isn't skipped, just not diffed per file
+- **Source locations.** Where the runtime exposes `route.source_location` (Rails 7.1+ with `ActionDispatch::Routing::Mapper.route_source_locations` on, the development default), a route drawn in `config/routes.rb` or under `config/routes/` carries that file as its `file_path`, `metadata.line_number`, a `# Source:` line in its source, and a `{ type: :route_file, via: :drawn_in }` edge. A location in a gem, outside the route files, or pointing at a missing file is ignored. Older runtimes, and environments with the flag off, leave `file_path` empty
+- **`route_file` units.** `config/routes.rb` and every Ruby file under `config/routes/` is also a `route_file` unit identified by its path, whether or not locations are available. It holds the file's source (redacted like configuration source), `metadata.declarations` (the routing DSL calls the file makes, as `{ line, method, argument }`), `metadata.draws` with a `{ type: :route_file, via: :draw }` edge per `draw`, `metadata.source_locations`, and `metadata.routes` / `route_count` for the routes located in it. Declarations are a static reading of the file, not the routes the runtime expands them into
 
 **Example output (abbreviated):**
 
@@ -386,11 +501,20 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 
 **Included in Woods 2.1:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
 
-**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
+**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, frontend module references (see [Frontend references](#frontend-references)), and route helper usage.
 
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
 - Slots and sub-component composition are extracted from the `view_template` method
+- A `render` edge targets the component unit the running app reaches, not the name as written. The source is parsed, and each call is resolved against the loaded constant tables without autoloading:
+  - `render TierGrid.new` inside `Billing::V2::ManagePage` follows Ruby constant lookup: the lexical scope of the call site, the ancestors of the class (an included Phlex Kit supplies its components this way), then the top level. `render TierGrid` and `render TierGrid.with_collection(rows)` resolve the same way
+  - `Header(title: "x")` is a method call, so the lexical scope does not apply. It resolves through the Kits among the class's ancestors: modules that `extend Phlex::Kit`, or that define a method of that name. `Ui::Header(...)` resolves the named module
+  - `menu.NavItem("a")` on a block argument resolves through the class's Kits, then through the Kits of the components the same file renders, when those agree on one answer
+  - a lowercase call (`form_with`, `t`, `render partial("x")`) is never a render target, and a capitalized call the runtime shows to be an ordinary method (`Integer("3")`) is ignored
+  - an aliased constant (`Card = Ui::Card`) is followed to the component it names
+- `metadata.unresolved_renders` lists each capitalized render that names no component class, sorted, as `{ name:, reason: }`. No edge is emitted for it. Reasons: `constant_missing`, `not_a_component`, `no_kit_constant`, `autoload_pending`, `non_module_constant`, `private_constant`, `anonymous_constant`
+- `metadata.external_renders` lists each rendered or slotted component class that no application file defines (a gem's component), sorted, as `{ name:, gem: }`. `gem` is the loaded gem that contains the definition, or null. No edge is emitted, because no unit represents the class
+- `via: :slot` edges resolve the same way. `renders_one :header, HeaderComponent`, a string class name (looked up from the component class alone, as the framework does), the component a lambda slot builds, and each entry of a `types:` hash target the unit. `metadata.unresolved_slots` lists the rest as `{ name:, reason: }`. When a component both renders and slots the same target, one edge is kept, the `render` one
 - `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
 
 ---
@@ -404,8 +528,11 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 **Key details:**
 - Template path is inferred from the component file name (e.g., `ButtonComponent` → `button_component.html.erb`), next to the component or inside its sidecar directory (`button_component/button_component.html.haml`), for every engine in `Woods::Extractors::TemplateExtensions::DETECTED`
 - `metadata.public_methods` is sorted, and units are emitted in component-name order, so repeated extractions produce identical output
+- `render` edges and `metadata.unresolved_renders` follow the same rules as [PhlexExtractor](#phlexextractor): `render SummaryComponent.new` inside `Ledger::PageComponent` targets `Ledger::SummaryComponent`. Slot edges, `metadata.unresolved_slots` and `metadata.external_renders` follow them too
+- Sidecar templates are read for renders and Kit calls: every ERB and HAML template beside the component file (`button_component.html.erb`) or in its sidecar directory (`button_component/button_component.html.haml`), for the engines registered in `ViewTemplateExtractor::ENGINES`. The edges belong to the component unit. A template is evaluated in the component class, so a constant in it is looked up from that class and its ancestors, not from the modules the class file nests it in: inside `Ledger::PageComponent`'s template, `render SummaryComponent.new` is unresolved and `render Ledger::SummaryComponent.new` is an edge
 - **Included in Woods 2.1:** `metadata.sidecar_template` uses an application-relative path, such as `app/components/button_component.html.erb`. Detection still checks the actual file under `Rails.root`; extracting from another checkout does not change this metadata. Re-extract existing component units to update their stored paths.
 - Preview class associations are extracted when `<ComponentName>Preview` is found in `spec/components/previews/` or `test/components/previews/`
+- A `_path`/`_url` helper that names a live route records an edge to the controller that route dispatches to (`via: :link_to`), as every navigation edge does. A name with no live route records no edge
 
 **Edge cases:**
 - Phlex and ViewComponent both scan `app/components`, the orchestrator uses separate extractors for each. A Phlex component won't be extracted by ViewComponentExtractor and vice versa (the filtering is by superclass, not file name)
@@ -423,12 +550,108 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Extracts navigation dependencies: `link_to` and `form_with`/`form_for` calls using `_path`/`_url` route helpers are resolved to controller targets via `RouteHelperResolver`
 - Navigation edges use `:link_to` and `:form_action` via types in the dependency array
 - Gated by `extract_navigation_edges` config (default: true)
-- A rendered partial resolves to the file that exists under any registered engine, so an ERB layout rendering a HAML partial gets an edge to the `.html.haml` unit. The renderer's format wins when several exist; with no file on disk the engine's own extension is used.
-- A relative partial (`render 'show'`) missing from the template's own directory is looked up through the runtime controller's `_prefixes` (its parents' view paths, then `application/`), as Rails does. Templates with no controller, such as layouts, still reach `application/`.
+- A rendered partial resolves to the file that exists under any registered engine, so an ERB layout rendering a HAML partial gets an edge to the `.html.haml` unit. The renderer's format wins when several exist. A path-qualified partial (`render 'shipments/row'`) with no file on disk keeps an edge to the engine's own extension.
+- A relative partial (`render 'show'`) missing from the template's own directory is looked up through the runtime controller's `_prefixes` (its parents' view paths, then `application/`), as Rails does. A template in a directory no controller or mailer owns (`shared/`, `layouts/`) is rendered through its callers' prefixes: `shared/_navigation` rendering `"account_head"` finds `widgets/_account_head` on a widgets page. Its callers are the owners of the view directories that reach it through render edges, and the owners whose layout it is (or whose layout renders it with `render template: "layouts/<name>"`) (the layout a class names, or the first `layouts/<prefix>` that exists along its prefixes). Each caller resolves the name through its own prefixes, in order. When they agree on one file, the `render` edge targets it. A template nothing reaches falls back to `application/`.
+- `render template: "dir/name"` records a `render` edge to the template file it names, so a layout that renders another layout passes its callers on. A bare template name, or a path no file holds, records no edge.
+- A relative partial that no caller resolves, or that callers resolve to different files, records no edge. It is listed in `metadata[:unresolved_partials]` as `{ kind: "caller_prefix", name:, candidates: }`, with every file a caller resolved it to.
+- A render or route helper inside a template comment produces no edge and no `partials_rendered` entry: ERB `<%# ... %>` and `<% # ... %>`, HAML `-#` blocks and `- # ...` lines, Ruby comments in jbuilder.
 - The `view_render` edge exists only when the controller the directory names is a runtime `ActionController::Base` or `ActionController::API` subclass. Mailer view directories link to their `ActionMailer::Base` subclass with a `:mailer` edge.
 - Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
+- **Helper call edges** (see [Application helper calls](#application-helper-calls)): a template calling `pretty_date(x)` gets a `:helper_call` edge to the helper module that defines `pretty_date`, and a `:helper_method` edge to the controller that declares a name with `helper_method`. `metadata[:helper_calls]` lists the called names per module.
+- Frontend module references (`x-data`, `data-controller`, custom element tags) become `js_module` edges; see [Frontend references](#frontend-references)
 
-**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials`), and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Frontend module references are read from every parsed engine; see [Frontend references](#frontend-references). The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
+
+#### Application helper calls
+
+Rails mixes every module under `app/helpers` into every view, so a template
+calls `pretty_date(x)` without ever naming `DateHelper`. Constant references
+cannot see that, and a helper module unit had no incoming edge. Two
+supporting utilities close the gap for view templates, Phlex components, view
+components, mailers and controllers.
+
+`HelperCatalog` (`lib/woods/extractors/helper_catalog.rb`) is the application's
+helper method catalog, built once per extractor instance:
+
+| Source | What it contributes |
+|---|---|
+| Prism over `app/helpers/**/*.rb` | The public instance methods each module body defines (name, module, file, line). `private`, `protected`, `private :name` and `private def` are honored; `self.` methods and nested classes are not helpers. |
+| Runtime `_helpers` ancestry of every app controller and mailer | App modules mixed in with `helper Formatting` from outside `app/helpers`, read from the file that declares them. |
+| Runtime `public_instance_methods(false)` of each catalog module | Methods defined dynamically (`define_method`, `alias_method`) in one of the module's own files. |
+| Runtime `_helpers.instance_methods(false)` of each controller or mailer that owns its own helpers module | Names declared with `helper_method` or in a `helper do` block, attributed to the declaring class. A class sharing its superclass's module declares nothing, so Rails' own `helper_method` names never attach to `ApplicationController`. |
+
+`HelperCallScan` (`lib/woods/extractors/helper_call_scan.rb`) finds the calls.
+One `StringScanner` token pass per source against the catalog's name set, so
+the cost is linear in the source whatever the catalog size. Each engine hands
+over only its Ruby: ERB tag bodies (with `<%# locals: (...) %>` strict locals),
+HAML script lines, attribute lists, interpolations and `:ruby`/`:erb` filter
+bodies, the whole of a jbuilder template. Markup and plain text are never
+read, so a word of copy that matches a helper name is not a call. A name is
+also not a call when it is a symbol, a hash label, a method on another
+receiver, a definition, string or heredoc text, a comment, or a local (an
+assignment target, a block parameter, a `local_assigns`/`defined?` probe).
+
+Resolution is per calling context:
+
+- A template resolves through its owning controller or mailer (the class the
+  view directory names). A layout, a shared partial and a component resolve
+  through `ApplicationController`.
+- When the context's `_helpers` module knows the name, the edge goes to the
+  definition Rails would run (`instance_method(name).owner`). Otherwise every
+  module defining the name is a target; more than one target is recorded in
+  `metadata[:ambiguous_helper_calls]` (`name => [modules]`).
+- A receiverless call inside a class (component, mailer, controller) resolves
+  only when the class includes the catalog module that defines the name and
+  does not define it itself. A `helpers.x` call, `use_helpers :x` or
+  `delegate :x, to: :helpers` resolves through the class's own helpers.
+- Only names in the catalog match. Rails built-ins (`link_to`, `t`, `render`)
+  and partial locals produce no edge.
+
+Output on the calling unit:
+
+| Field | Shape |
+|---|---|
+| dependency `{ type: :poro \| :lib \| :concern, target: 'DateHelper', via: :helper_call }` | One per helper module called; the type is the unit type the module's file is indexed as |
+| dependency `{ type: :controller \| :mailer, target: 'WidgetsController', via: :helper_method }` | One per declaring class whose `helper_method` name is called |
+| `metadata[:helper_calls]` | `{ 'DateHelper' => ['pretty_date', 'short_date'] }`, module-sorted, names sorted |
+| `metadata[:helper_method_calls]` | `{ 'WidgetsController' => ['current_widget'] }` |
+| `metadata[:ambiguous_helper_calls]` | `{ 'label_for' => ['LedgersHelper', 'WidgetsHelper'] }` |
+| `metadata[:helper_methods]` (controllers and mailers) | Names the class itself declares with `helper_method` |
+
+Each key is present only when non-empty, so a unit with no helper calls is
+byte-identical to its pre-2.2 form. Incremental maintenance re-runs the five
+consumers wholesale when a helper source changes; see
+[Incremental extraction](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
+
+---
+
+### JsModuleExtractor
+
+**What it captures:** one shallow `js_module` unit per JavaScript or TypeScript file under `config.javascript_paths` (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}` and `app/assets/javascripts/**/*.js`; see [JavaScript paths](CONFIGURATION_REFERENCE.md#javascript-paths)). The identifier is the root-relative path.
+
+**Key details:**
+- Shallow by design. No JavaScript toolchain and no AST: a linear `StringScanner` token pass (`Woods::Extractors::JsTokenizer`) skips comments, strings, template literals and regular-expression literals, and `JsModuleFacts` reads the rest. Dynamic registration (a name built at runtime, a loop over a manifest) is not seen.
+- `metadata.kind` is one of `stimulus_controller`, `alpine_data`, `stencil_component`, `custom_element`, `module`. `language` is `javascript` or `typescript`.
+- `metadata.default_export` (name or `null`), `has_default_export`, `named_exports` (sorted), and `imports`: one entry per specifier with `names`, `kind` (`static`, `dynamic`, `require`, `reexport`) and `resolved`, the module path when the specifier names a local file (relative, `@/` and `~/` aliases, bare paths under a configured root, index files, extension swaps). A package import resolves to `null`.
+- `metadata.registered_names` lists the names other code uses for this module, each `{ kind:, name:, source: }`, with `source` one of `registration`, `filename`, `global`, `stencil`, `define`. `metadata.registers` lists names this file registers for another module. `metadata.stimulus_loaders` records `eagerLoadControllersFrom` / `lazyLoadControllersFrom` calls.
+- **Name resolution** (`Woods::Extractors::JsModuleRegistry`), per run. Stimulus: `application.register("clipboard", ClipboardController)` beats the `controllers/**/*_controller.{js,ts}` filename convention (`controllers/ledgers/line_item_controller.js` registers `ledgers--line-item`; loader directories count as `controllers/` too). Alpine: `Alpine.data("dropdown", ...)` beats `window.dropdown = function`. Custom elements: Stencil `@Component({ tag: "x-card" })` and `customElements.define("x-card", Card)`. `Alpine.store` names are recorded but no template edge targets them. A registration whose value is imported lands on the defining module, following barrel re-exports; an inline value lands on the registering module. Two modules claiming one name at the same precedence resolve to nothing.
+- Edges: `via: :import` to each resolved local import. Package imports produce no edge.
+- **Size cap:** a file over 200 KB (`JsModuleExtractor::MAX_SOURCE_BYTES`) keeps its metadata but stores an empty `source_code`, with `metadata.source_omitted: true`; `source_bytes` is always recorded. A file over 2 MB is listed but not tokenized (`analysis_omitted: true`).
+- Excluded wherever a glob reaches them: `node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/`, `coverage/` directories, `*.min.js`, `*.d.ts`.
+- JavaScript tests (`*.test.*`, `*.spec.*`, `__tests__/`, `__mocks__/`, `spec/` and `test/` directories) are skipped unless a configured glob names them; see [JavaScript paths](CONFIGURATION_REFERENCE.md#javascript-paths).
+- Incremental re-extraction re-runs `JsModuleExtractor` wholesale on any module change: a module's registered names come from whichever file registers them. When that re-run moves the name-to-module map, the components, view components and view templates are re-run too (`Extractor::JS_NAME_CONSUMER_EXTRACTORS`); a body edit that moves no name re-runs none of them. `woods:refresh[js_modules]` cascades the same way. Changing `javascript_paths` itself needs one full extraction; incremental runs refuse until then (`Woods::ExtractionConfigChanged`).
+
+### Frontend references
+
+`PhlexExtractor`, `ViewComponentExtractor` and `ViewTemplateExtractor` scan their source for the names server-rendered markup uses to reach JavaScript (`Woods::Extractors::FrontendReferences`):
+
+| Reference | Forms read | Edge |
+|---|---|---|
+| Alpine data | `x-data="dropdown"`, `x-data="picker({ ... })"`, `"x-data": "..."`, `x_data: "..."`, `"x-data" => "..."` | `{ type: :js_module, via: :alpine_data }` |
+| Stimulus controller | `data-controller="a b"` (one edge per name), `data_controller: "..."`, `data: { controller: "..." }` | `{ type: :js_module, via: :stimulus_controller }` |
+| Custom element | `<x-shipment-card>`, HAML `%x-shipment-card`, Phlex `register_element :x_shipment_card` | `{ type: :js_module, via: :custom_element }` |
+
+A ViewComponent's sidecar template (`metadata.sidecar_template`) is scanned with its Ruby source. Comments never produce a reference: ERB comment tags, HAML `-#` comments and Ruby comments are blanked first. A component's heredoc markup (`erb_template <<~ERB`) is still read. An anonymous scope (`x-data`, `x-data="true"`, Phlex `"x-data": true`, or any other JavaScript literal or keyword), an inline object (`x-data="{ open: false }"`), a `$store` reference, an interpolated value, and a routing `controller:` option outside a `data:` hash produce nothing. A name no module registers produces no edge and is listed in `metadata[:unresolved_frontend_references]` as `{ kind:, name: }`; `turbo-frame` and other framework elements land there unless the app defines them. The earlier dangling `:stimulus_controller` edges (`via: :html_attribute`) are gone: a Stimulus reference is now either a `js_module` edge or an unresolved entry.
 
 ---
 
@@ -477,6 +700,15 @@ incremental extraction alike. When a class later joins or leaves a
 class-discovered family through another file (a parent gains
 `include Sidekiq::Job`), incremental extraction drops or restores its PORO unit
 to match a full run.
+
+A file a GraphQL extractor owns also contributes its nested classes through the
+same fallback, never its primary class: `Types::CartType::DiscountWithCart`, a
+nested `Error < StandardError`, or a `Line = Struct.new(...)` inside a type file
+becomes a `poro` unit at that path. A nested class is a unit when it has a method
+of its own, is a `Struct.new` / `Data.define` subclass, or has an `Error` /
+`Exception` superclass; a bare class is a namespace. The same rule applies to
+classes nested in a namespace file. Incremental extraction redoes a type file's
+nested units when its GraphQL unit is written, and prunes them with the file.
 
 A file with no class or module body can still own top-level constants
 (`EmailPattern = /.../`, `Gateway::Billing::Countries = %w[...]`). Each assignment
@@ -574,10 +806,12 @@ reference cache; updating only the reader does not add them.
 
 ### ValidatorExtractor
 
-**What it captures:** Custom `ActiveModel::Validator` subclasses with their validation rules.
+**What it captures:** Every class a file under `app/validators/` is named for, with its validation rules. `ActiveModel::Validator` and `ActiveModel::EachValidator` subclasses are one shape; a plain validator object (an arg-less `validate`, `valid?`, or delegated `errors`) is another.
 
 **Key details:**
-- File-based scanning; extracts `validate` method logic and the attribute being validated
+- File-based scanning; extracts `validate`/`validate_each` logic and the attribute being validated
+- `metadata[:validator_type]` records the shape: `:each_validator`, `:validator`, or `:plain` when no ActiveModel shape is recognized
+- A model that constructs a plain validator gains a `validator` edge to it
 
 ---
 
@@ -610,6 +844,7 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 - File discovery also retains ordinary Ruby subclasses of the loaded `Resolvers::Base` class, including application inheritance chains. These helpers keep their historical `graphql_type` identity even when mutations call them with `new(...).call` rather than registering them as graphql-ruby resolvers. Woods verifies actual ancestry; placing an unrelated class in a `resolvers/` directory does not qualify it.
 - When graphql-ruby or a declaration is unavailable, file discovery retains its limited recognized-source-form fallback; it cannot establish arbitrary application superclass ancestry. Woods does not trigger pending declaration autoloads itself.
 - Extracts field metadata (types, descriptions, complexity, arguments), authorization patterns (Pundit, CanCan, `authorized?`), and dependencies on models/services
+- Dependency targets are whole constant paths, read as written and resolved lexically against loaded constants (innermost nesting outward, then the top level). A path nothing loaded answers to is kept as written, never shortened to one segment. graphql-ruby's own `GraphQL::` constants, core and gem classes other than ActiveRecord models, value constants, and comments produce no edge. `resolver:` and `mutation:` field options emit a `field_resolver` edge to the wired class.
 - Incremental extraction handles changed files and runtime inventory additions, and reclassifies an unchanged type when its query-root role changes. Runtime inventory absence alone does not delete units: unattached file-defined resolvers remain valid, and runtime-only removals still require a full extraction or `woods:refresh[graphql]` after the application reloads.
 - A failed schema inventory logs the schema name and stops full, incremental, or refresh publication; the prior generation remains active. Fix the introspection error and retry the complete extraction batch.
 - If application eager loading is incomplete, incremental extraction and refresh refuse a change to an existing GraphQL unit's kind rather than demoting a query root whose schema might not have loaded. Retry after a complete application boot.
@@ -633,6 +868,48 @@ ancestry; unknown delegation mechanisms remain `unknown`.
 ```
 
 ---
+
+### GraphQLOperationExtractor
+
+**What it captures:** client-side GraphQL operation documents: the queries, mutations, subscriptions and fragments the application's own clients send. One `graphql_operation` unit per named operation and per fragment.
+
+**Key details:**
+- Scans `.graphql` / `.gql` files matching `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}` and `app/frontend/**/*.{graphql,gql}`; see [GraphQL document paths](CONFIGURATION_REFERENCE.md#graphql-document-paths)). Paths under `node_modules` never match.
+- Parses with graphql-ruby's own parser. The gem is optional: when it is not loaded the family is skipped and one `info` line says so. A document that does not parse, or that holds schema definitions (an SDL dump such as `schema.graphql`), is skipped, logged, and listed in `skipped_files.json` with reason `parse_error` or `schema_definitions`; with the gem absent every document is listed as `graphql_unavailable` (see [Index layout](INDEX_LAYOUT.md)).
+- Identifier: `gql:<OperationName>`. An anonymous operation is `gql:<document path>`. A later definition of a name another document already uses is `gql:<Name>@<document path>` (documents are read in path order).
+- Selections resolve against the booted schema by reading field metadata only; no field, resolver or `resolve_type` body runs. With several schemas, each definition uses the schema that leaves the fewest selections unresolved (ties go to the first by name), recorded in `metadata.schema`.
+- Edges (`via`):
+  - `root_field`: each top-level field to the unit it resolves through, the resolver or mutation class, else the type that defines the field.
+  - `type_reference`: every object, interface or union type the definition selects on.
+  - `fragment_spread`: the fragment unit a spread names. The fragment in the same document wins; otherwise every fragment of that name is linked.
+- An edge is emitted only when `GraphQLExtractor` publishes a unit for the target. Schema drift is metadata, never a dangling edge: `unknown_fields` (`Type.field`), `unknown_types` (type conditions) and `unknown_fragments` (spreads with no definition).
+- Metadata: `kind` (`query`, `mutation`, `subscription`, `fragment`), `operation_name`, `document_path`, `line`, `variables` (name, type, printed default), `type_condition`, `top_level_fields`, `field_selections`, `fragment_spreads`, `schema`.
+- No single-file extraction method. Incremental extraction re-runs the extractor wholesale on any document change under the configured roots and on any `.rb` change under `app/graphql`. A schema defined outside `app/graphql` needs a full extraction to refresh the documents that select it.
+
+**Example:**
+```json
+{
+  "type": "graphql_operation",
+  "identifier": "gql:WidgetList",
+  "file_path": "app/javascript/widgets/widget_list.graphql",
+  "metadata": {
+    "kind": "query",
+    "operation_name": "WidgetList",
+    "line": 1,
+    "variables": [{ "name": "first", "type": "Int", "default": "10" }],
+    "top_level_fields": ["widgets"],
+    "field_selections": ["Query.widgets", "Widget.id"],
+    "fragment_spreads": ["WidgetFields"],
+    "schema": "LedgerSchema",
+    "unknown_fields": ["Widget.legacyCode"]
+  },
+  "dependencies": [
+    { "type": "graphql_resolver", "target": "Resolvers::WidgetsResolver", "via": "root_field" },
+    { "type": "graphql_type", "target": "Types::WidgetType", "via": "type_reference" },
+    { "type": "graphql_operation", "target": "gql:WidgetFields", "via": "fragment_spread" }
+  ]
+}
+```
 
 ### PunditExtractor
 
@@ -815,13 +1092,21 @@ expanded mailer and schedule identities in an existing index.
 
 ### RakeTaskExtractor
 
-**What it captures:** Rake tasks from `lib/tasks/*.rake`. Extracts namespaces, task names, descriptions, prerequisites (`:depends_on`), and the task body.
+**What it captures:** Rake tasks and the Ruby that supports them, from the files named by `config.rake_task_paths` (default `lib/tasks/**/*.rake`, `rake/**/*.rake` and `Rakefile`). Extracts namespaces, task names, descriptions, prerequisites, arguments, the task body, the commands it shells out to, and its support files.
 
 **Key details:**
-- Reads `.rake` files statically, no Rails boot required for parsing
-- Uses `block_opener?` for depth tracking; `if`/`unless` only match at line start to avoid counting trailing modifiers as blocks
-- Supports nested namespaces (`namespace :data do namespace :import do task :users`)
-- A task reopened in more than one `.rake` file is one unit, as Rake sees it: the source carries every definition, `metadata.defined_in` lists the files, and a per-file incremental run yields the same merged unit as a full run
+- Parses with Prism and never runs a rake file. `task`, `multitask`, `file`, `directory` and `rule` are read in every signature form: `task :a`, `task a: :b`, `task :a, [:x] => :b`, `task(:a) { }`, string names, nested namespaces.
+- `metadata.kind` is one of `task`, `multitask`, `file`, `directory`, `rule`, `task_class`, `enhancement`, `rake_support`.
+- A task reopened in more than one file is one unit, as Rake sees it: the source carries every file, `metadata.defined_in` lists the defining files, and a per-file run yields the same merged unit as a full run. The dependency graph maps every defining and enhancing file to the unit (`source_paths`, `file_map`), so a change to any of them reaches it.
+- `Rake::Task["a"].enhance(["b"])` adds a `task_dependency` edge `a` → `b` and lists the file in `metadata.enhanced_in`. A task that is only enhanced (it comes from a gem) still gets a unit, with `kind: "enhancement"`.
+- `Rake::Task["x"].invoke` and `.execute` add a `task_invoke` edge.
+- A task class (`RSpec::Core::RakeTask.new(:docs)`, `RuboCop::RakeTask.new`) becomes a unit with `metadata.task_class`. A definition inside `if`/`unless` records the predicate in `metadata.conditions`. A class called without a name uses its well-known default (`spec`, `rubocop`, `test`, `yard`, `cucumber`, `rdoc`).
+- `task_dependency` edges target the task Rake would resolve from the enclosing namespace; `metadata.task_dependencies` keeps the names as written.
+- `metadata.shell_commands` lists the literal commands a body runs through `sh`, `system`, `exec`, `spawn`, `Open3`, backticks, or a helper method that shells out itself. Credentials are redacted first (`RakeShellRedaction`: the `ConfigSourceGuard` passes, then, reading the line as quote-aware shell arguments, credential-named assignments, flags, headers and query parameters, `Bearer`/`Basic` tokens, `-u user:password`, tool password flags such as `mysql -p`, and credential literals inside a quoted JSON body), then each is cut to 200 characters. Shell commands add no edges.
+- Ruby files under a configured directory (`rake/lib/**/*.rb`) are `rake_task` units with `kind: "rake_support"`, identified by root-relative path, with `metadata.constants` and `metadata.methods`. A task has a `method_call` or `code_reference` edge to each support file it calls or names. A file another extractor owns is skipped.
+- The file is the authority for everything it states literally. The loaded Rake application is consulted only for what a file computes: a task named in a loop (`task "sync_#{name}"`) is indexed, with `metadata.name_source: "runtime"`, when the extracting process loaded that file through Rake. In a process that loaded no tasks, such a definition produces no unit.
+- `source_code` is the rake file (or support file) after `ConfigSourceGuard.redact`: credential literals, URL userinfo and private keys are withheld. Parsing reads the raw text.
+- No per-file dispatch: any change under a configured path re-runs the extractor wholesale.
 
 ---
 
@@ -833,7 +1118,11 @@ expanded mailer and schedule identities in an existing index.
 - Scans `db/migrate/*.rb`
 - Extracts: tables created/dropped/modified, columns added/removed, indexes, references
 - Risk indicators: data migrations (manual SQL or bulk updates), irreversible operations (`remove_column` without type), `execute` calls with raw SQL
-- Rails internal tables (`schema_migrations`, `active_storage_blobs`, etc.) are excluded from model dependency links
+- **Table edges resolve against the live schema.** Every table a migration creates, alters, drops or references gets a `via: :migrates` edge to that table's `database_table` unit. A model edge (`via: :table_name` for a changed table, `via: :reference` for a referenced one) is kept only when a model owns the table today, and it names that owner. No class name is derived from a table name, so a migration for a renamed or removed model no longer carries a dangling model edge.
+- A named table the live schema does not have (dropped or renamed since) gets no edge and is listed in `metadata[:tables_unresolved]`. Reference and foreign key targets are in `metadata[:tables_referenced]`.
+- Table names are read as symbols or strings, with or without parentheses. `create_join_table`, the second table of `add_foreign_key`, and `to_table:` options are read too.
+- With more than one database, a name resolves to the table of that name in every database that has it.
+- `schema_migrations` and `ar_internal_metadata` are never linked.
 
 **Included in Woods 2.1:** migration identity comes from the actual Ruby
 declaration, with the filename's conventional class name selecting among eligible
@@ -886,7 +1175,38 @@ namespace.
 - Only extracts the **latest version** of each view (highest `_vNN` suffix)
 - Older versions are skipped
 - Records whether the view is materialized and which tables it references
+- Each source table gets a `via: :view_source` edge to its `database_table` unit, resolved against the live schema. A `via: :table_name` model edge is kept only when a model owns that table today. A source that is not a live table (another view, a dropped table) gets no edge
 - Incremental re-extraction re-runs `DatabaseViewExtractor` wholesale on any `.sql` change under `db/views`, a per-file dispatch could index a version a full extraction drops
+
+---
+
+### DatabaseTableExtractor
+
+**What it captures:** one `database_table` unit per table in the live schema, for every connected database. The connection is asked directly; `db/schema.rb` is never parsed.
+
+**Key details:**
+- Identifier: `table:<name>`. With more than one connected database it is `table:<database>.<name>`
+- `metadata`: `columns` (name, type, SQL type, null, `has_default`; default values are not recorded), `indexes`, `foreign_keys`, `primary_key`, `database`, `model`, `models`, `model_less`
+- `model` is the Active Record class that owns the table, or nil. Inheritance roots own a table; subclasses share it. `model_less: true` marks a table no model owns: a legacy table, another application's table, a join or backup table
+- `schema_migrations` and `ar_internal_metadata` are skipped. Views are not tables and get no unit here
+- Edges: table → table for each foreign key (`via: :foreign_key`). Inbound: model → table (`via: :table`), migration → table (`via: :migrates`), view → table (`via: :view_source`), external consumer → table (`via: :reads_table`, `via: :writes_table`)
+- The unit has no `file_path`. The live schema is its source
+- Table units score zero in PageRank and are left out of the hub, orphan, dead-end and cross-database lists. `graph_analysis.json` lists tables no model reads under `unmodelled_tables`
+- Incremental runs re-run the extractor wholesale, together with migrations, database views and external consumers, when a schema dump, a file under `db/migrate`, or a file under `app/models` changes. A model whose `table` edge then disagrees with the live schema is re-extracted; other models are left alone. **A schema change applied with no file change needs a full extraction**
+- On Rails 6.0 there is no `connection_db_config`; the database name comes from the pool's connection specification matched against the configured databases. That path is untested in CI
+
+---
+
+### ExternalConsumerExtractor
+
+**What it captures:** other applications that read or write this application's tables, as declared in `config.external_table_consumers` and the optional YAML file named by `config.external_table_consumers_path`.
+
+**Key details:**
+- One `external_consumer` unit per declared application, identifier `external:<name>`, with a `via: :reads_table` edge to each table it reads and a `via: :writes_table` edge to each table it writes (`metadata[:tables_read]`, `metadata[:tables_written]`). `dependents` of a table therefore lists the other application
+- `metadata[:declared]` is always true: these edges are declared, never observed. `declared_in` names the source, `tables_missing` lists declared tables the live schema does not have, and `woods:validate` warns once per such table
+- Emits nothing when nothing is declared
+- A malformed declared file emits no units and is reported as an extractor failure. An incremental run then keeps the previously published consumers
+- Incremental runs re-run the extractor when the declared file changes, and whenever the table extractor re-runs. A change to the in-process setting needs a full extraction
 
 ---
 
@@ -925,8 +1245,8 @@ namespace.
 - Scans controllers, models, and `.erb`, `.haml`, and `.jbuilder` view files (`Woods::Extractors::TemplateExtensions::SCANNED`, derived from `ViewTemplateExtractor::ENGINES`, so a newly registered engine is scanned too). Slim views are not scanned.
 - Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
 - Records calls on cache stores a Ruby file obtains itself (`Woods::Extractors::CacheStoreCalls`). A store expression is `X.cache_store(...)` (X not `config`), `ActiveSupport::Cache.lookup_store(...)`, `ActiveSupport::Cache::*Store.new(...)`, or an `||`/`or` with a store on either side. A receiver is a store when it is a local, instance or class variable, or constant assigned from one; a method that returns one, assigns one, or reads a bound variable; an `attr_reader`/`attr_accessor` of a bound instance variable; a forwarder or alias of such a method; or a store expression chained directly. Their `read`, `write`, `fetch`, `delete`, and `exist?` calls are recorded like `Rails.cache` calls, plus `store` (the receiver at the call site) and `store_origin` (the store expression it was first bound from, up to 120 characters), and count as low-level caching. Binding is per file and by name, not by scope.
-- Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependencies are still scanned from the full source, as in every other extractor.
-- Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
+- Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependency scans skip comments too, as in every other extractor.
+- Extracts: fragment `cache` blocks, `caches_action`, `Rails.cache` `fetch`/`read`/`write`/`delete`/`exist?` calls, TTLs, and cache keys. Expiry calls (`expire_fragment`, `expire_action`) are not read.
 - Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
   - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
   - `ttl`: the `expires_in:` expression, literal or not.
@@ -945,6 +1265,9 @@ namespace.
 **Key details:**
 - Scans `spec/factories` and `test/factories`
 - Produces one unit per factory definition (including trait sub-factories)
+- `metadata[:model_class]` and the `:factory_for` edge name the modeled class: an explicit `class:` (a leading `::` is dropped), else the class of the `parent:` factory or of the factory whose block encloses it, else the classified factory name. Parents and `aliases:` resolve across files in a full run
+- A nested factory records its enclosing factory as `parent_factory`, with a `:factory_parent` edge
+- A file in a factory directory that declares no factory (`FactoryBot.define { after(:build) { ... } }`) is indexed by `TestSupportExtractor` instead
 - Useful for understanding test data structure and available factory combinations
 - No per-file mapping, so incremental re-extraction re-runs `FactoryExtractor` wholesale on any `.rb` change under the factory directories
 
@@ -957,10 +1280,65 @@ namespace.
 **Key details:**
 - Scans `spec/` and `test/` directories
 - Maps each spec file to its subject class by convention (e.g., `spec/models/user_spec.rb` → `User`)
-- The first `describe` or `feature` block names the subject. Only a constant path (`Widget`, `'Ledger::Entry'`) becomes `subject_class` and a `:test_coverage` edge; free text (`'Widget checkout'`) is stored as `metadata[:description]` with no edge. Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-name string (`'ledger:rebuild_balances'`) also names its subject. A quoted `feature` title is always a description
-- `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`type: :system` on the first group decides, else `:unit`
-- Records test count and whether RSpec or Minitest is detected
+- The first `describe` or `feature` block names the subject. Only a constant path (`Widget`, `'Ledger::Entry'`) becomes `subject_class` and a `:test_coverage` edge; free text (`'Widget checkout'`) is stored as `metadata[:description]` with no edge. A quoted `feature` title is always a description
+- Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-shaped string is checked against the application's rake tasks. A task name (`'ledger:rebuild_balances'`) becomes `subject_class` with a `:test_coverage` edge to that `rake_task` unit. A namespace (`'ledger'`) is recorded as `metadata[:rake_namespace]` with one edge per `ledger:*` task. Anything else is a description with no edge
+- `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`:system`/`:request` on the first group decides, else `:unit`
+- Records test count (`it`, `specify`, `example`, `scenario`; `test "..."` and `def test_` for Minitest) and whether RSpec or Minitest is detected
 - These directories are outside `app/` so no eager loading is needed
+
+**Test support edges.** References to test support resolve by name to the `test_support` unit that defines them. A name no support file defines yields no edge; the names as written stay in metadata.
+
+| Reference in the test | Edge `via` | Metadata |
+|---|---|---|
+| `it_behaves_like`, `include_examples`, `it_should_behave_like` | `:behaves_like` | `shared_examples_used` |
+| `include_context` | `:includes_context` | `shared_contexts_used` |
+| `include HelperModule` (also `extend`, `prepend`) | `:includes_helper` | `helpers_included` |
+| A call to a custom matcher (`have_combobox`) | `:uses_matcher` | `matchers_used` |
+
+A target carries one edge: when a test refers to one support file several ways, the first row above that applies wins.
+
+**Route coverage.** In `:feature`, `:system` and `:request` tests, `visit`, `get`, `post`, `put`, `patch`, `delete` and `head` become `:exercises_route` edges to route units, listed in `metadata[:routes_exercised]`:
+
+- A route helper (`visit new_widget_path`, `post widgets_url`) resolves through the live named-route map to the route with that path and the call's verb
+- A literal path (`get "/widgets/42"`) is matched the way Rails routes it: the first route, in route order, whose shape fits and whose constraints the request satisfies. An interpolation (`"/widgets/#{widget.id}"`) stands for one segment value; the query string, fragment, format and a trailing slash are ignored
+- A subdomain constraint is checked against the subdomains the file names: `host!("shop.example.test")`, a `subdomain:` option, a call to a helper in `config.test_subdomain_helpers` with a literal argument, or any host-shaped string literal in a file that calls `host!`. A file naming several hosts exercises every route one of them decides. A feature or system spec with no host of its own takes the literal `Capybara.app_host` or `default_host` from test support; a request spec never does. A `host!` with a non-literal argument makes the host unknown. Named hosts are file-scoped: a request that sets its own `HTTP_HOST` header is matched against every host the file names
+- With the subdomain unknown, a single fully static route (`/settings`) wins over `/:param` and `*glob` routes. A callable `constraints` block is never assumed to pass. A request still undecided is recorded in `metadata[:routes_ambiguous]` as `{ request:, candidates: }` with no edge
+- A path inside `redirect_to`, `have_current_path`, `assert_redirected_to` or `assert_current_path` is a claim about a response: recorded in `metadata[:routes_asserted]`, never as exercised
+- Unknown helpers, unrouted paths and verbs a path does not accept yield no edge
+- Not modeled: segment constraints, the second and later verbs of a multi-verb `match` route, and routes drawn inside mounted engines
+
+**Incremental behavior.** A changed test file dispatches per file. The names and routes a test refers to live in other files, so `TestMappingExtractor` also re-runs wholesale when a test support file, a `.rake` file, or the route table changes. See [INCREMENTAL_EXTRACTION.md](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
+
+---
+
+### TestSupportExtractor
+
+**What it captures:** The files a test suite is built from that are not tests: helper modules, shared examples and contexts, custom matchers, suite configuration, support classes and scripts.
+
+**Key details:**
+- One `test_support` unit per file, identified by its root-relative path (`spec/support/analytics_helpers.rb`)
+- Scans `config.test_support_paths`: by default `spec/support/**/*.rb`, `spec/*_helper.rb`, `spec/lib/**/*.rb` and the same three under `test/`. The files `TestMappingExtractor` claims (`spec/**/*_spec.rb`, `test/**/*_test.rb`) are never test support; a `spec/lib/.../x_test.rb` fixture is
+- Also indexes a factory-directory file that declares no factory
+- A symlink that resolves outside the application root is not read
+- Pure source analysis: nothing is loaded or evaluated
+
+**Metadata:**
+
+| Key | Meaning |
+|---|---|
+| `kind` | The most specific of `shared_examples`, `shared_context`, `matcher`, `helper_module`, `class`, `configuration`, `script` (in that order). A module that only namespaces the file's classes does not count as a helper module |
+| `kinds` | Every kind the file has, in the same order |
+| `names` | Every name the file defines |
+| `shared_examples`, `shared_contexts`, `matchers` | Names as declared (`RSpec.shared_examples`, `shared_examples_for`, `RSpec.shared_context`, `RSpec::Matchers.define`, `define_negated_matcher`, `alias_matcher`) |
+| `helper_modules`, `classes` | Qualified constant names declared in the file |
+| `methods` | Method names defined in the file |
+| `includes` | `config.include`/`extend`/`prepend` lines: `{ module, scope, types }` |
+| `included_for` | Test types the file's helper modules are included for by any support file; `["all"]` when an include is untyped |
+| `test_framework` | `"minitest"` under `test/`, else `"rspec"` |
+
+**Edges:** a support file links to the support it uses itself, with the same `via` values as test mappings (a configuration file's `config.include AnalyticsHelpers` is an `:includes_helper` edge).
+
+**Incremental behavior.** `included_for` reads every support file, so any change under the configured globs or the factory directories re-runs the extractor wholesale.
 
 ---
 
@@ -969,7 +1347,8 @@ namespace.
 **What it captures:** Ruby files from `lib/`, utility modules, standalone libraries, and infrastructure code.
 
 **Key details:**
-- Excludes `lib/tasks/` (covered by RakeTaskExtractor) and `lib/generators/`
+- Excludes `lib/tasks/` (covered by RakeTaskExtractor) and generator templates (`generators/**/templates/**/*.rb`), which are ERB with a Ruby extension. Templates appear in `skipped_files.json` with the reason `template`
+- A class under `lib/generators/` that inherits from `Rails::Generators::Base` or `Rails::Generators::NamedBase` is a lib unit with `metadata.kind: "generator"`. Other Ruby there is an ordinary lib unit
 - File-based scanning; no assumption about class hierarchy
 - `parent_class` and the generated Parent annotation describe the selected unit declaration only. Nested or sibling classes cannot supply its parent. An implicit `Object` parent, a dynamic superclass expression, or unparseable source produces `nil`; explicit constant-path parents retain their source names.
 
@@ -1020,9 +1399,43 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ---
 
+### DocExtractor
+
+**What it captures:** Project documentation as `doc` units, one per Markdown file, so a document is retrievable and a code unit lists the documents that mention it.
+
+**Key details:**
+- Roots come from `config.documentation_paths` (default `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md`), minus `config.documentation_exclude` (changelogs, `node_modules`, `vendor`, `doc/api`, `docs/api`). See the [configuration reference](CONFIGURATION_REFERENCE.md#documentation-paths).
+- The identifier is the root-relative path (`docs/setup.md`). A file over 1 MiB is skipped with a logged warning.
+- A secret-named file (the same names `ConfigFileExtractor` refuses: `secret`, `token`, `password`, `credential` and so on in the file name) is never read, nor is a symlink whose target is not itself documentation inside the repository. In a Git checkout, ignored and untracked files are skipped.
+- A symlink that reaches another indexed document is an alias, not a unit of its own: the target's unit lists it in `metadata.aliases`, and the graph maps the alias path to that unit, so editing through either path re-extracts it. `CLAUDE.md` and `.github/copilot-instructions.md` linked to `AGENTS.md` make one unit, `AGENTS.md`. A relative link to an alias is a `doc_link` to the target, and deleting an alias keeps the target.
+- Reads bytes only: one line-based pass finds front matter, ATX and setext headings, fenced and inline code, and link targets. It is not a CommonMark parser; indented code blocks and HTML are read as prose.
+- Metadata: `title` (first heading, else the file name), `headings` (level, text, line), `front_matter` (top-level scalar keys), `word_count`, `line_count`, `links`, `mentions`, `mentions_truncated`, `redactions`.
+- **Chunks:** one per heading section, with `heading`, `level`, `heading_path`, `anchor`, `start_line` and `end_line` in the chunk metadata. Text before the first heading is its own section. A section over 6,000 characters is split on line boundaries into `section_N_part_M` chunks. A document with a single section stays whole.
+
+**Edges to code.** Inline code spans and fence lines are scanned for four kinds of mention:
+
+| Kind | Example | Resolves to |
+|---|---|---|
+| `constant` | `Widget::Importer`, `Widget::Importer::LIMIT` | every unit with that identifier, else the longest indexed prefix |
+| `path` | `app/models/widget.rb`, `lib/tasks/widgets.rake:12` | every unit defined in that file |
+| `rake_task` | `rake widgets:sync`, `bin/rails widgets:sync[1]` | the `rake_task` unit of that name |
+| `route` | `GET /widgets` | the `route` unit, or its constrained and numbered variants |
+
+A mention that names an indexed unit becomes a `documents` edge from the document to that unit and is recorded with `resolved: true`. A mention that names nothing stays in `metadata.mentions` with `resolved: false` and produces no edge, so the graph never holds a dangling documentation target. Prose outside code is not scanned. At most 500 distinct mentions are kept per document; `mentions_truncated` says when the cap dropped some.
+
+A relative link to another indexed document becomes a `doc_link` edge. A relative link to a source file becomes a `documents` edge to the units in that file. `metadata.links` records every target with its `kind` (`relative`, `external`, `anchor`), the root-relative `path` it resolves to, and whether it resolved.
+
+Resolution needs the whole index, so it runs as a post-pass after every extractor, in full and incremental runs alike. An unchanged document gains an edge when its target is first indexed and loses it when the target is deleted.
+
+**Graph.** `doc` is listed in `DependencyGraph::DOCUMENTATION_UNIT_TYPES`. Documentation edges are published (`dependents` on a model lists the documents that mention it), but documents take no part in PageRank (they score `0.0`, pass no rank, and are left out of the `pagerank` tool's node count), in the incremental blast radius, or in `graph_analysis.json` (orphans, dead ends, hubs, cycles, bridges).
+
+**Redaction.** Published source passes through the credential shapes of the Console scanner (`Woods::Console::CredentialScanner`): API keys, tokens, connection strings with a password, PEM private key blocks. The userinfo of any URL (`https://token@host`, `ftp://user:secret@host`) is then replaced the same way configuration source is redacted, keeping the scheme and host; a URL without userinfo is untouched. A front matter key that names a credential (`password`, `token`, `secret`, `api_key`, ...) has its value replaced whatever its shape. Headings, mentions, front matter and chunks are read from the redacted text. `metadata.redactions` counts what was replaced. This is best effort: it recognizes shapes, so a credential in a form the scanner does not know is published as written. Keep secrets out of documentation.
+
+---
+
 ## How do I enable or disable extractors?
 
-You can't, today. All 35 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -1039,7 +1452,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 39 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package` |
+| `type` | Symbol | Unit category, one of the 47 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support`, `:js_module`, `:doc` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |

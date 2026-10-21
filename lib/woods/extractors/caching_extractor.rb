@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require 'strscan'
 
 require_relative '../source_inputs/consumer_errors'
@@ -43,13 +44,18 @@ module Woods
         *TemplateExtensions::SCANNED.map { |ext| [:view, "app/views/**/*#{ext}"] }
       ].freeze
 
+      # What follows a `Rails.cache` method name in a call: a parenthesis or
+      # a bracketed key, or, without parentheses, a first argument on the
+      # same line (`Rails.cache.fetch "k" do`).
+      STORE_CALL_ARGUMENTS = /(?:\s*+[(\[]|[ \t]++(?=[\w"':@\[]))/
+
       # Patterns that indicate cache usage, grouped by type
       CACHE_PATTERNS = {
-        fetch: /Rails\.cache\.fetch\s*[(\[]/,
-        read: /Rails\.cache\.read\s*[(\[]/,
-        write: /Rails\.cache\.write\s*[(\[]/,
-        delete: /Rails\.cache\.delete\s*[(\[]/,
-        exist: /Rails\.cache\.exist\?\s*[(\[]/,
+        fetch: /Rails\.cache\.fetch#{STORE_CALL_ARGUMENTS}/,
+        read: /Rails\.cache\.read#{STORE_CALL_ARGUMENTS}/,
+        write: /Rails\.cache\.write#{STORE_CALL_ARGUMENTS}/,
+        delete: /Rails\.cache\.delete#{STORE_CALL_ARGUMENTS}/,
+        exist: /Rails\.cache\.exist\?#{STORE_CALL_ARGUMENTS}/,
         caches_action: /\bcaches_action\b/,
         # The scan for `do` reads tokens: a backslash pair, a quoted string,
         # or one other character, stopping at a `cache` token outside a
@@ -107,9 +113,7 @@ module Woods
       # @param file_type [Symbol] :controller, :model, or :view
       # @return [ExtractedUnit, nil] The unit or nil if no cache usage
       def extract_caching_file(file_path, file_type = nil)
-        # UTF-8 whatever the process locale: under a POSIX locale a bare read
-        # tags the source US-ASCII and the byte-offset scans then fail.
-        source = File.read(file_path, encoding: Encoding::UTF_8)
+        source = SourceFile.read(file_path)
         # Cache calls are read from the code only: commented-out calls never run.
         code = CommentBlanking.blank(source, file_path)
         store_calls = File.extname(file_path.to_s) == '.rb' ? CacheStoreCalls.find(code) : []

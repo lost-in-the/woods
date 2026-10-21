@@ -149,6 +149,37 @@ RSpec.describe 'Booted multi-database extraction', :booted_app do
     expect(crossings).not_to include(a_hash_including('via' => 'foreign_key'))
   end
 
+  def unit_of(type, identifier)
+    unit_snapshot(@output_dir).values.find { |unit| unit['type'] == type && unit['identifier'] == identifier }
+  end
+
+  def edge_targets(unit, via)
+    unit.fetch('dependencies').select { |dep| dep['via'] == via }.map { |dep| dep['target'] }
+  end
+
+  it 'publishes one table unit per database table, qualified by database, with owners resolved per database' do
+    tables = unit_snapshot(@output_dir).values.select { |unit| unit['type'] == 'database_table' }
+
+    expect(tables.map { |unit| unit['identifier'] }).to contain_exactly(
+      'table:billing.accounts', 'table:billing.invoices', 'table:primary.accounts', 'table:primary.comments',
+      'table:primary.posts', 'table:reporting.subscriptions'
+    )
+    expect(unit_of('database_table', 'table:primary.accounts')['metadata'])
+      .to include('database' => 'primary', 'model' => 'MultiAccount', 'model_less' => false)
+    expect(unit_of('database_table', 'table:billing.accounts')['metadata'])
+      .to include('database' => 'billing', 'model' => 'MultiReplicaAccount')
+    expect(unit_of('database_table', 'table:primary.posts')['metadata']).to include('model' => 'Post')
+  end
+
+  it 'links each model to the table in its own database, and a foreign key within its database' do
+    expect(edge_targets(model_unit('MultiAccount'), 'table')).to eq(['table:primary.accounts'])
+    expect(edge_targets(model_unit('MultiReplicaAccount'), 'table')).to eq(['table:billing.accounts'])
+    expect(edge_targets(model_unit('Post'), 'table')).to eq(['table:primary.posts'])
+    expect(edge_targets(unit_of('database_table', 'table:billing.invoices'), 'foreign_key'))
+      .to eq(['table:billing.accounts'])
+    expect(crossings).not_to include(a_hash_including('from' => a_string_starting_with('table:')))
+  end
+
   def expect_valid_graph(index)
     require 'woods/resilience/index_validator'
     report = Woods::Resilience::IndexValidator.new(index_dir: index).validate

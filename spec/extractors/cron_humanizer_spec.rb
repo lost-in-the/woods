@@ -89,6 +89,35 @@ RSpec.describe Woods::Extractors::CronHumanizer do
     end
   end
 
+  describe 'weekday lists that repeat a day' do
+    {
+      '0 0 * * 0,7' => 'weekly on Sunday at 00:00',
+      '0 0 * * 7,0' => 'weekly on Sunday at 00:00',
+      '0 8 * * 1,1' => 'weekly on Monday at 08:00',
+      '0 8 * * 5-7,0' => 'weekly on Sunday and Friday through Saturday at 08:00'
+    }.each do |cron, text|
+      it "names each day of #{cron.inspect} once" do
+        expect(humanize(cron)).to eq(text)
+      end
+    end
+  end
+
+  describe 'hour steps that do not divide the day' do
+    {
+      '0 */15 * * *' => 'daily at 00:00 and 15:00',
+      '30 */5 * * *' => 'daily at 00:30, 05:30, 10:30, 15:30 and 20:30',
+      '0 */7 * * 1-5' => 'weekdays at 00:00, 07:00, 14:00 and 21:00'
+    }.each do |cron, text|
+      it "lists the hours #{cron.inspect} fires at instead of an even interval" do
+        expect(humanize(cron)).to eq(text)
+      end
+    end
+
+    it 'does not describe an uneven step with more firings than it lists' do
+      expect(humanize('0,30 */5 * * *')).to be_nil
+    end
+  end
+
   describe 'extensions fugit accepts' do
     {
       '@hourly' => 'every hour',

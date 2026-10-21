@@ -44,7 +44,19 @@ module Woods
     # These extractors describe a whole source file rather than one constant.
     # Other types remain unclassified: a path-like identifier is not evidence
     # that a unit is a profile, and an unmarked unit need not name a constant.
-    FILE_PROFILE_TYPES = %i[caching configuration test_mapping rails_source gem_source].freeze
+    FILE_PROFILE_TYPES = %i[caching configuration test_mapping test_support rails_source gem_source].freeze
+
+    # Unit types that describe the database rather than application code.
+    # Every migration and model points at a table, so ranking these would
+    # reorder the code the rankings describe. They score zero in {#pagerank}
+    # and stay out of {GraphAnalyzer}'s hub, orphan and dead-end lists.
+    SCHEMA_UNIT_TYPES = %i[database_table external_consumer].freeze
+
+    # Unit types that describe the code instead of being part of it. Their
+    # edges are published, so a unit lists the documents that mention it, but
+    # they take no part in PageRank, the blast radius or structural analysis:
+    # see {#structural_graph}.
+    DOCUMENTATION_UNIT_TYPES = %i[doc].freeze
 
     # Optional edge keys beyond target and via. `through` is the through
     # association name; `through_db` is the through model's resolved
@@ -364,14 +376,31 @@ module Woods
         dependents = @reverse[current] || []
 
         dependents.each do |dep|
-          unless affected.include?(dep)
-            affected.add(dep)
-            queue.push([dep, depth + 1])
-          end
+          # A document's content never depends on the code it mentions.
+          next if affected.include?(dep) || documentation_only?(dep)
+
+          affected.add(dep)
+          queue.push([dep, depth + 1])
         end
       end
 
       affected.to_a
+    end
+
+    # The graph without {DOCUMENTATION_UNIT_TYPES}: what PageRank and
+    # {GraphAnalyzer} measure. A document that mentions thirty units would
+    # otherwise raise each one's rank and dependent count, and every document
+    # nothing links to would read as dead code.
+    #
+    # Node and reverse-edge order are preserved, so scores over the view equal
+    # scores over a graph the documents were never registered in.
+    #
+    # @return [DependencyGraph] self when no documentation is registered
+    def structural_graph
+      return self if DOCUMENTATION_UNIT_TYPES.none? { |type| @type_index[type]&.any? }
+
+      excluded = @nodes.keys.select { |identifier| documentation_only?(identifier) }.to_set
+      self.class.new.tap { |graph| graph.adopt_structure(*structural_state(excluded)) }
     end
 
     # Fetch a node's metadata without materializing the whole graph.
@@ -610,22 +639,83 @@ module Woods
     # @param iterations [Integer] Number of iterations (default: 20)
     # @return [Hash<String, Float>] Identifier => PageRank score
     def pagerank(damping: 0.85, iterations: 20)
-      n = @nodes.size
-      return {} if n.zero?
+      structural = structural_graph
+      unless structural.equal?(self)
+        documentation = @nodes.keys.reject { |identifier| structural.node_exists?(identifier) }
+        return structural.pagerank(damping: damping, iterations: iterations)
+                         .merge(documentation.to_h { |identifier| [identifier, 0.0] })
+      end
 
-      node_ids = @nodes.keys
+      return {} if @nodes.empty?
+
+      node_ids, unranked = @nodes.keys.partition { |id| ranked?(id) }
       weights = resolvable_edge_weights
-      base_score = 1.0 / n
+      base_score = node_ids.empty? ? 0.0 : 1.0 / node_ids.size
       scores = node_ids.to_h { |id| [id, base_score] }
 
       iterations.times do
         scores = pagerank_step(node_ids, scores, weights, damping)
       end
 
+      unranked.each { |id| scores[id] = 0.0 }
       scores
     end
 
+    # How many identifiers PageRank ranks: every one except documentation.
+    #
+    # @return [Integer]
+    def structural_node_count
+      @nodes.count { |identifier, _| !documentation_only?(identifier) }
+    end
+
+    # Whether an identifier is a schema unit under every type it is
+    # registered as. See {SCHEMA_UNIT_TYPES}.
+    #
+    # @param identifier [String]
+    # @return [Boolean]
+    def schema_unit?(identifier)
+      types = @nodes[identifier]
+      !types.nil? && types.each_key.all? { |type| SCHEMA_UNIT_TYPES.include?(type) }
+    end
+
+    protected
+
+    # @see #structural_graph
+    def adopt_structure(nodes, edges, reverse, reverse_via, file_map, type_index)
+      @nodes = nodes
+      @edges = edges
+      @reverse = reverse
+      @reverse_via = reverse_via
+      @file_map = file_map
+      @type_index = type_index
+    end
+
     private
+
+    # @param identifier [String]
+    # @return [Boolean] whether every type registered under it is documentation
+    def documentation_only?(identifier)
+      types = @nodes[identifier]
+      !types.nil? && !types.empty? && types.each_key.all? { |type| DOCUMENTATION_UNIT_TYPES.include?(type) }
+    end
+
+    # @param excluded [Set<String>] documentation-only identifiers
+    # @return [Array<Hash>] the six indexes without them, in {#adopt_structure} order
+    def structural_state(excluded)
+      typed = ->(by_type) { by_type.except(*DOCUMENTATION_UNIT_TYPES) }
+      sources = lambda do |index|
+        index.each_with_object({}) do |(key, identifiers), kept|
+          remaining = identifiers - excluded
+          kept[key] = remaining unless remaining.empty?
+        end
+      end
+      [@nodes.except(*excluded).transform_values(&typed),
+       @edges.except(*excluded).transform_values(&typed),
+       sources.call(@reverse.except(*excluded)),
+       sources.call(@reverse_via.reject { |(target, _via), _| excluded.include?(target) }),
+       sources.call(@file_map),
+       @type_index.except(*DOCUMENTATION_UNIT_TYPES)]
+    end
 
     # short name => every full identifier sharing it, for
     # {#find_node_by_suffix} and {#find_all_by_suffix}.
@@ -672,11 +762,8 @@ module Woods
       attrs[:table] = metadata[:table_name] if unit.type == :model && !metadata[:table_name].nil?
       tables = Array(metadata[:foreign_keys]).filter_map { |fk| fk[:to_table] || fk['to_table'] if fk.is_a?(Hash) }
       attrs[:foreign_key_tables] = tables if tables.any?
-      if SourceContributors.multiple?(unit)
-        attrs[:source_paths] = SourceContributors.paths(unit).map do |path|
-          self.class.absolutize(path, self.class.graph_root)
-        end
-      end
+      source_paths = source_paths_of(unit, metadata)
+      attrs[:source_paths] = source_paths if source_paths
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
       attrs[:actions] = metadata[:actions] if unit.type == :controller && metadata[:actions].is_a?(Array)
       gem_actions = metadata[:inherited_gem_actions]
@@ -693,6 +780,43 @@ module Woods
         attrs[:change_frequency] = git[:change_frequency] unless git[:change_frequency].nil?
       end
       attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
+    end
+
+    # Every physical source of a unit assembled from several files: a library
+    # unit's contributors, or each file that defines or enhances a rake task.
+    #
+    # @param unit [ExtractedUnit]
+    # @param metadata [Hash]
+    # @return [Array<String>, nil] absolute paths, or nil for a unit with one source
+    def source_paths_of(unit, metadata)
+      paths = if SourceContributors.multiple?(unit)
+                SourceContributors.paths(unit)
+              elsif unit.type == :rake_task
+                [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              elsif unit.type == :doc
+                document_paths(unit, metadata)
+              else
+                []
+              end
+      paths = paths.map { |path| self.class.absolutize(path, self.class.graph_root) }.uniq
+      paths if paths.size > 1
+    end
+    private :source_paths_of
+
+    # A document and the root-relative paths that alias it through a symlink,
+    # anchored where the document's own path is.
+    #
+    # @return [Array<String>]
+    def document_paths(unit, metadata)
+      aliases = Array(metadata[:aliases] || metadata['aliases'])
+      base = unit.file_path.to_s.delete_suffix(unit.identifier.to_s)
+      [unit.file_path, *aliases.map { |path| "#{base}#{path}" }].compact
+    end
+    private :document_paths
+
+    # A registered node that takes part in PageRank: anything but a schema unit.
+    def ranked?(identifier)
+      @nodes.key?(identifier) && !schema_unit?(identifier)
     end
 
     # One PageRank power iteration over precomputed resolvable-edge weights.
@@ -739,10 +863,12 @@ module Woods
     # @return [Hash{String => Array(Hash{String => Integer}, Integer)}]
     def resolvable_edge_weights
       @edges.each_with_object({}) do |(src, by_type), weights|
+        next unless ranked?(src)
+
         counts = nil
         by_type.each_value do |edges|
           edges.each do |edge|
-            next unless @nodes.key?(edge[:target])
+            next unless ranked?(edge[:target])
 
             (counts ||= Hash.new(0))[edge[:target]] += 1
           end
@@ -1230,6 +1356,11 @@ module Woods
     # serialized before the `{target, via}` migration still load without
     # explicit data conversion.
     #
+    # A (target, via) pair with the same relationship attributes is one relationship however many times a unit
+    # emits it (an extractor's guessed edge beside the verified reference
+    # pass's edge, say). The first occurrence keeps its attributes, so the
+    # reverse index and `dependents` never count a pair twice.
+    #
     # @param edges [Array] Edge entries — either strings or hashes
     # @param strict [Boolean] require hashes for fresh units; legacy loads stay tolerant
     # @return [Array<Hash>] Normalized edges with :target and :via keys
@@ -1238,7 +1369,7 @@ module Woods
 
       return [] unless edges.is_a?(Array)
 
-      edges.map do |edge|
+      normalized = edges.map do |edge|
         raise ArgumentError, 'Fresh graph dependencies must be hashes' if strict && !edge.is_a?(Hash)
 
         if edge.is_a?(String)
@@ -1250,6 +1381,10 @@ module Woods
           { target: edge.to_s, via: nil }
         end
       end
+      # `type` describes the target, not the relationship, so a guessed and a
+      # verified edge to one target collapse; two associations that differ in
+      # `through` (or any other relationship attribute) stay separate.
+      normalized.uniq { |edge| edge.except(:type) }
     end
   end
 end

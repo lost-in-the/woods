@@ -1009,6 +1009,9 @@ Git/path installations, the revision and loaded gem path.
   aliases, CTEs without column lists and allowed scalar functions remain subject
   to the normal SQL policy. Use explicit, unaliased protected columns or a
   structured Console tool.
+- **Relation aliases:** whole-row and column-list refusals also apply to legal
+  PostgreSQL aliases such as `straight_join`. MySQL treats `STRAIGHT_JOIN` as
+  JOIN syntax; allowed column projections retain the normal redaction checks.
 - **Conservative typed masking:** EAV type lookup matches the final source-table
   name case-insensitively and includes every matching registered model, even
   across schemas. Any matching type can cause masking. This deliberately may

@@ -1,14 +1,17 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
 require_relative 'assigned_value_discovery'
 require_relative '../source_references/runtime_lookup'
+require_relative '../source_references/value_class'
 require_relative 'class_families'
 require_relative 'constant_assignments'
 require_relative '../path_dispatcher'
@@ -61,6 +64,9 @@ module Woods
 
       # Value-class factories AssignedValueDiscovery can promote to a unit.
       VALUE_CLASS_CONSTRUCTOR = /\b(?:Struct\.new|Data\.define)\b/
+
+      # The written superclass of an exception class.
+      EXCEPTION_SUPERCLASS = /(?:Error|Exception)\z/
 
       # The `app/<directory>/` prefix of a root-relative path.
       APP_DIRECTORY_PREFIX = %r{\Aapp/[^/]++/}
@@ -153,6 +159,24 @@ module Woods
         extract_units(file_path, ar_names, fallback: true)
       end
 
+      # Nested classes of a file whose primary class another unit owns (a
+      # GraphQL type file). The owner itself is never emitted; units carry
+      # {FALLBACK_MARKER}.
+      #
+      # @param file_path [String] original Ruby file
+      # @param ar_names [Set<String>] Active Record identities to exclude
+      # @param owners [Array<String>] identifiers of the file's owning units
+      # @return [Array<ExtractedUnit>]
+      def extract_nested_units(file_path, ar_names: Set.new, owners: [])
+        source = SourceFile.read(file_path)
+        analysis = collector.call(source)
+        @module_discovery ||= StandaloneModuleDiscovery.new
+        mark(nested_class_units(file_path, source, ar_names, analysis, owners: owners.to_set), FALLBACK_MARKER)
+      rescue StandardError => e
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract nested PORO units #{file_path}: #{e.message}")
+        []
+      end
+
       # Recompute unclaimed module identities for includer-only reconciliation.
       # The root pipeline owns cross-family migration and source-consumption.
       #
@@ -161,7 +185,7 @@ module Woods
         @module_discovery = StandaloneModuleDiscovery.new
         swept_files.each_with_object({}) do |file, result|
           # Without the keyword the file declares no module; skip the parse.
-          next unless File.read(file).match?(/\bmodule\s/)
+          next unless SourceFile.read(file).match?(/\bmodule\s/)
 
           units = extract_standalone_module_file(file)
           result[file] = units unless units.empty?
@@ -225,14 +249,14 @@ module Woods
       end
 
       def skip_inputs(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         analysis = collector.call(source)
         declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
         [source, analysis, declarations]
       end
 
       def extract_units(file_path, ar_names, fallback:)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         return [] if family_owned_file?(file_path, source)
 
         analysis = collector.call(source)
@@ -270,7 +294,7 @@ module Woods
       end
 
       def extract_standalone_module_file(file)
-        source = File.read(file)
+        source = SourceFile.read(file)
         analysis = collector.call(source)
         units = @module_discovery.call(file, analysis: analysis).map { |record| module_unit(file, source, record) }
         swept_path?(file) ? mark(units, SWEEP_MARKER) : units
@@ -297,23 +321,22 @@ module Woods
         unit.source_code = annotate_source(source, class_name, parent_class)
         unit.metadata = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
-        unit
+        MethodEffects.apply(unit, source)
       end
 
       # A namespace file's governed constant is a module, so no class is
-      # primary. Classes nested only in modules, with a method of their own
-      # and canonically declared here, are units; bodiless helpers
-      # (`class Error < StandardError; end`) are not.
-      def nested_class_units(file_path, source, ar_names, analysis)
+      # primary. Classes nested in modules, or in a class another unit owns,
+      # canonically declared here and {#unit_worthy?}, are units.
+      def nested_class_units(file_path, source, ar_names, analysis, owners: Set.new)
         declarations = analysis.fetch('declarations')
         modules = declarations.select { |declaration| declaration['kind'] == 'module' }.to_set { |d| d['owner'] }
         lines = source.lines
         candidates = declarations.select do |declaration|
           declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero? &&
-            !declaration['constructor'] && !modules.include?(declaration['owner']) &&
+            !modules.include?(declaration['owner']) && !owners.include?(declaration['owner']) &&
             !ar_names.include?(declaration['owner']) &&
-            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) } &&
-            lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
+            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) || owners.include?(name) } &&
+            unit_worthy?(declaration, source, lines, file_path)
         end
         @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
           next if runtime_family(identifier)
@@ -321,6 +344,20 @@ module Woods
           declaration = candidates.find { |candidate| candidate['owner'] == identifier }
           nested_class_unit(file_path, source, identifier, lines[(declaration['line'] - 1)...declaration['end_line']].join)
         end
+      end
+
+      # A nested class is a unit when it has behavior or data of its own: a
+      # method, a Struct/Data body, or an exception superclass. A bare class
+      # is a namespace. An assigned value class counts only when the factory
+      # it names is the core one, never a shadowing constant.
+      def unit_worthy?(declaration, source, lines, file_path)
+        if declaration['constructor']
+          return SourceReferences::ValueClass.new.call(declaration, file_path: file_path) == declaration['owner']
+        end
+        return true if lines[declaration['line'] - 1].match?(VALUE_CLASS_CONSTRUCTOR)
+        return true if lines[(declaration['line'] - 1)...declaration['end_line']].join.match?(OWN_METHOD_DEFINITION)
+
+        extract_parent_class(source, declaration['owner']).to_s.match?(EXCEPTION_SUPERCLASS)
       end
 
       # @return [Symbol, nil] the class-discovered extractor owning a loaded class
@@ -380,7 +417,7 @@ module Woods
         unit.source_code = annotate_source(body, identifier, parent_class)
         unit.metadata = extract_metadata(body, parent_class)
         unit.dependencies = extract_dependencies(body)
-        unit
+        MethodEffects.apply(unit, body)
       end
 
       def module_unit(file_path, source, record)

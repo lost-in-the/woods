@@ -1,11 +1,27 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'rbconfig'
+require 'tmpdir'
 require 'woods/extractor'
 require 'woods/reload_policy'
 
 RSpec.describe Woods::ReloadPolicy do
   subject(:policy) { described_class.new }
+
+  # The watch daemon and the rake tasks load the policy without the extractor
+  # set; the Git filter must not reach for a constant only the orchestrator loads.
+  it 'classifies a configuration source in a process that loaded only the policy' do
+    Dir.mktmpdir('woods_policy_only') do |root|
+      script = "require 'woods/reload_policy'; " \
+               "print Woods::ReloadPolicy.new(root: #{root.inspect}).classify('config/initializers/widgets.rb')"
+      out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), '-e', script)
+
+      expect(status.success?).to be(true), err
+      expect(out).to eq('restart')
+    end
+  end
 
   describe '#classify' do
     context 'with boot-captured state' do
@@ -62,12 +78,87 @@ RSpec.describe Woods::ReloadPolicy do
         expect(policy.classify('lib/tasks/export.rb')).to eq(:reextract)
       end
 
+      it 'only needs re-extraction for a root rake directory and its support Ruby' do
+        expect(policy.classify('rake/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('rake/lib/container.rb')).to eq(:reextract)
+        expect(policy.classify('rake/notes.md')).to eq(:ignore)
+      end
+
+      it 'follows configured rake_task_paths' do
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.rake_task_paths = ['ops/*.rake', 'lib/ops/**/*.rake']
+
+        expect(policy.classify('ops/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('lib/ops/deploy.rake')).to eq(:reextract)
+        expect(policy.classify('lib/ops/helper.rb')).to eq(:reload)
+        expect(policy.classify('rake/deploy.rake')).to eq(:ignore)
+      end
+
       it 'only needs re-extraction for locales, migrations, views and tests' do
         expect(policy.classify('config/locales/en.yml')).to eq(:reextract)
         expect(policy.classify('db/migrate/20240101000000_create_posts.rb')).to eq(:reextract)
         expect(policy.classify('db/views/reports_v01.sql')).to eq(:reextract)
         expect(policy.classify('spec/models/post_spec.rb')).to eq(:reextract)
         expect(policy.classify('test/models/post_test.rb')).to eq(:reextract)
+      end
+
+      it 'only needs re-extraction for generators, which LibExtractor reads as files' do
+        expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:reextract)
+        expect(policy.classify('lib/generators/thing/templates/thing.rb')).to eq(:reextract)
+      end
+
+      it 'only needs re-extraction for seed, deploy and importmap files' do
+        %w[db/seeds.rb db/seeds/widgets.rb config/deploy.rb config/deploy/production.rb
+           config/importmap.rb].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'only needs re-extraction for YAML config files boot does not capture' do
+        %w[config/namespaces.yml config/blocked_words.yml config/settings/extra/rates.yml
+           app/data/surveys/nps.yml].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'still demands a restart for boot-captured YAML and never reads a secret file as bytes' do
+        %w[config/settings.yml config/settings/production.yml config/cable.yml config/storage.yml
+           config/database.yml config/credentials.yml.enc].each do |path|
+          expect(policy.classify(path)).to eq(:restart), path
+        end
+        expect(policy.classify('config/secrets.yml')).to eq(:ignore)
+      end
+
+      it 'follows config.config_file_paths' do
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.config_file_paths = ['data/**/*.yaml']
+
+        expect(policy.classify('data/ledgers/rates.yaml')).to eq(:reextract)
+        expect(policy.classify('config/namespaces.yml')).to eq(:ignore)
+      ensure
+        Woods.configuration = original
+      end
+
+      it 'only needs re-extraction for test support and factory files' do
+        %w[spec/support/analytics_helpers.rb spec/rails_helper.rb spec/lib/ledger_fixtures.rb
+           test/support/sign_in.rb test/test_helper.rb spec/factories/widgets.rb].each do |path|
+          expect(policy.classify(path)).to eq(:reextract), path
+        end
+      end
+
+      it 'only needs re-extraction for test support under a configured root outside spec/ and test/' do
+        original = Woods.configuration.test_support_paths
+        expect(policy.classify('features/support/env.rb')).to eq(:ignore)
+
+        Woods.configuration.test_support_paths = ['features/support/**/*.rb', 'lib/test_kit/**/*.rb']
+
+        expect(policy.classify('features/support/env.rb')).to eq(:reextract)
+        expect(policy.classify('features/support/env.yml')).to eq(:ignore)
+        expect(policy.classify('features/support/env_spec.rb')).to eq(:ignore)
+        expect(policy.classify('lib/test_kit/helpers.rb')).to eq(:reload)
+      ensure
+        Woods.configuration.test_support_paths = original
       end
 
       it 'only needs re-extraction for templates, which are not constants' do
@@ -83,13 +174,60 @@ RSpec.describe Woods::ReloadPolicy do
       end
     end
 
+    it 'only needs re-extraction for JavaScript modules, which are read as bytes' do
+      expect(policy.classify('app/javascript/controllers/clipboard_controller.js')).to eq(:reextract)
+      expect(policy.classify('app/javascript/widgets/picker.tsx')).to eq(:reextract)
+      expect(policy.classify('app/assets/javascripts/legacy.js')).to eq(:reextract)
+    end
+
+    it 'ignores JavaScript that is not module source' do
+      expect(policy.classify('app/javascript/vendor/chart.js')).to eq(:ignore)
+      expect(policy.classify('app/javascript/site.css')).to eq(:ignore)
+      expect(policy.classify('node_modules/pkg/index.js')).to eq(:ignore)
+    end
+
+    it 'follows configured javascript_paths' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+      expect(policy.classify('frontend/widgets/picker.ts')).to eq(:reextract)
+      expect(policy.classify('app/javascript/entry.js')).to eq(:ignore)
+    ensure
+      Woods.configuration = original
+    end
+
     it 'ignores paths that are not extraction input' do
-      expect(policy.classify('README.md')).to eq(:ignore)
+      expect(policy.classify('NOTES.md')).to eq(:ignore)
       expect(policy.classify('.github/workflows/ci.yml')).to eq(:ignore)
       expect(policy.classify('app/assets/stylesheets/application.css')).to eq(:ignore)
       expect(policy.classify('public/favicon.ico')).to eq(:ignore)
-      # LibExtractor skips generators, so nothing downstream reads them.
-      expect(policy.classify('lib/generators/thing/thing_generator.rb')).to eq(:ignore)
+      expect(policy.classify('config/puma.rb')).to eq(:ignore)
+      expect(policy.classify('deploy/chart/values.yml')).to eq(:ignore)
+    end
+
+    context 'with GraphQL operation documents' do
+      it 're-extracts a document under a configured root' do
+        expect(policy.classify('app/javascript/widgets/widget_list.graphql')).to eq(:reextract)
+        expect(policy.classify('app/frontend/widgets/create_widget.gql')).to eq(:reextract)
+      end
+
+      it 'ignores a document outside the roots and other client files' do
+        expect(policy.classify('docs/widget_list.graphql')).to eq(:ignore)
+        expect(policy.classify('app/javascript/widgets/widget_list.css')).to eq(:ignore)
+        expect(policy.classify('app/javascript/node_modules/pkg/widget_list.graphql')).to eq(:ignore)
+      end
+
+      it 'follows config.graphql_document_paths' do
+        original = Woods.configuration
+        Woods.configuration = Woods::Configuration.new
+        Woods.configuration.graphql_document_paths = ['client/**/*.graphql']
+
+        expect(policy.classify('client/widgets/widget_list.graphql')).to eq(:reextract)
+        expect(policy.classify('app/javascript/widgets/widget_list.graphql')).to eq(:ignore)
+      ensure
+        Woods.configuration = original
+      end
     end
 
     context 'with Packwerk package files (#280)' do
@@ -103,14 +241,14 @@ RSpec.describe Woods::ReloadPolicy do
 
   describe '#classify_all' do
     it 'returns the strongest action any path demands' do
-      expect(policy.classify_all(%w[README.md app/models/user.rb])).to eq(:reload)
+      expect(policy.classify_all(%w[NOTES.md app/models/user.rb])).to eq(:reload)
       expect(policy.classify_all(%w[app/models/user.rb config/initializers/redis.rb])).to eq(:restart)
-      expect(policy.classify_all(%w[config/locales/en.yml README.md])).to eq(:reextract)
+      expect(policy.classify_all(%w[config/locales/en.yml NOTES.md])).to eq(:reextract)
     end
 
     it 'returns :ignore for an empty or irrelevant set' do
       expect(policy.classify_all([])).to eq(:ignore)
-      expect(policy.classify_all(%w[README.md CHANGELOG.md])).to eq(:ignore)
+      expect(policy.classify_all(%w[NOTES.md CHANGELOG.md])).to eq(:ignore)
     end
   end
 
@@ -120,13 +258,13 @@ RSpec.describe Woods::ReloadPolicy do
         app/models/user.rb
         config/initializers/redis.rb
         config/locales/en.yml
-        README.md
+        NOTES.md
       ]
 
       expect(policy.paths_requiring(paths, :restart)).to eq(['config/initializers/redis.rb'])
       expect(policy.paths_requiring(paths, :reload)).to eq(['app/models/user.rb'])
       expect(policy.paths_requiring(paths, :reextract)).to eq(['config/locales/en.yml'])
-      expect(policy.paths_requiring(paths, :ignore)).to eq(['README.md'])
+      expect(policy.paths_requiring(paths, :ignore)).to eq(['NOTES.md'])
     end
   end
 

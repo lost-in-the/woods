@@ -43,7 +43,7 @@ RSpec.describe Woods::SourceInputs::Scanner do
   it 'captures shared input scopes without booting a Rails application' do
     write('app/services/pay.rb', 'class Pay; end')
     write('config/locales/en.yml', 'en: {}')
-    write('docs/README.md', 'unrelated')
+    write('notes/README.md', 'unrelated')
     result = scan
     expect(result['complete']).to be(true)
     expect(result['files'].keys).to eq(%w[app/services/pay.rb config/locales/en.yml])

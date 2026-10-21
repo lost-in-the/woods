@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'yaml'
@@ -46,7 +47,7 @@ module Woods
       # @param file_path [String] Path to the YAML locale file
       # @return [ExtractedUnit, nil] The extracted unit or nil on failure
       def extract_i18n_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         # aliases: true — locale files commonly share defaults via anchors
         # (`<<: *defaults`); without it Psych 4+ raises AliasesNotEnabled and
         # the whole file is silently dropped (#203). Alias expansion only

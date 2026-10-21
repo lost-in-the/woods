@@ -19,7 +19,7 @@ module Woods
       # @param root [String, Pathname] application root
       def initialize(units:, sources:, root:)
         @root = File.expand_path(root.to_s)
-        @lookup = RuntimeLookup.new
+        @lookup = RuntimeLookup.new(memoize: true)
         @sources = sources.to_h { |path, result| [absolute(path), result] }
         @all_types = units.group_by { |unit| field(unit, :identifier) }
         @entries = units.flat_map { |unit| SourceContributors.paths(unit).filter_map { |path| entry(unit, path) } }

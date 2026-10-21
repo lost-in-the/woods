@@ -10,6 +10,8 @@ require 'woods/extractors/scheduled_job_extractor'
 # patterns; the Ruby 3.0/3.1 rows catch a regression through the Timeout
 # fallback.
 RSpec.describe 'Scheduled job scan complexity' do
+  include WallClockBudget
+
   include_context 'extractor setup'
 
   budget_seconds = 1.0
@@ -28,12 +30,6 @@ RSpec.describe 'Scheduled job scan complexity' do
     else
       Timeout.timeout(budget_seconds * 5) { example.run }
     end
-  end
-
-  def within_budget(budget)
-    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-    yield
-    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < budget
   end
 
   {

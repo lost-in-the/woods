@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative '../source_references/runtime_lookup'
+require_relative 'constant_paths'
 
 module Woods
   module Extractors
@@ -88,7 +90,7 @@ module Woods
       # @param file_path [String] Path to the serializer file
       # @return [ExtractedUnit, nil] The extracted unit, or nil if not a serializer
       def extract_serializer_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = admitted_class_name(file_path, source)
         return nil unless class_name
 
@@ -132,7 +134,7 @@ module Woods
         return nil unless base_class_name
 
         file_path = source_file_for(klass)
-        source = file_path && File.exist?(file_path) ? File.read(file_path) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit = ExtractedUnit.new(
           type: :serializer,
@@ -190,7 +192,7 @@ module Woods
             end
           else
             find_files_in_directories(directories).filter_map do |file|
-              admitted_class_name(file, File.read(file))
+              admitted_class_name(file, SourceFile.read(file))
             rescue StandardError
               nil
             end
@@ -414,10 +416,11 @@ module Woods
 
         # Other serializers referenced (e.g., `serializer: CommentSerializer`)
         source.scan(/(?:serializer|blueprint):\s*([\w:]+)/).flatten.uniq.each do |serializer|
-          deps << { type: :serializer, target: serializer, via: :serialization }
+          deps << { type: :serializer, target: ConstantPaths.normalize(serializer), via: :serialization }
         end
 
         deps.concat(scan_service_dependencies(source))
+        deps.concat(scan_config_dependencies(source))
 
         consolidate_dependencies(deps)
       end

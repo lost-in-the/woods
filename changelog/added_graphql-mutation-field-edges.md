@@ -1,0 +1,1 @@
+- Record the mutation a GraphQL field is wired to. `field :ship_widget, mutation: Mutations::ShipWidget` now yields a `field_resolver` edge to the `graphql_mutation` unit, as `resolver:` already does for resolvers.

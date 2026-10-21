@@ -10,6 +10,18 @@ require 'woods/extractors/service_extractor'
 RSpec.describe Woods::Extractors::ServiceExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/services/ledger_service.rb',
+                  source: <<~SOURCE,
+                    # Ledger — posts entries
+                    class LedgerService
+                      def call
+                        'ok'
+                      end
+                    end
+                  SOURCE
+                  identifier: 'LedgerService'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -631,8 +643,22 @@ RSpec.describe Woods::Extractors::ServiceExtractor do
       RUBY
 
       unit = described_class.new.extract_service_file(path)
-      http_deps = unit.dependencies.select { |d| d[:target] == :http_api }
-      expect(http_deps).not_to be_empty
+      expect(unit.dependencies).to include({ type: :external, target: :http_api, via: :external_call })
+    end
+
+    it 'records no edge for a library, client, or interactor named only in a comment' do
+      path = create_file('app/services/widget_sync_service.rb', <<~RUBY)
+        class WidgetSyncService
+          # Was Faraday.post via LedgerClient.new, cached in Redis.current,
+          # then handed to ShipmentInteractor.call
+          def call
+            true
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_service_file(path)
+      expect(unit.dependencies).to eq([])
     end
 
     it 'detects Redis dependencies' do

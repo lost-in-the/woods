@@ -72,6 +72,21 @@ RSpec.describe Woods::SourceInputs::Launcher do
     expect(File.exist?(record.fetch('descriptor').fetch('path'))).to be(false)
   end
 
+  it 'hands off a complete capture of an unchanged tree that load slows past the quick-reader budget' do
+    FileUtils.mkdir_p(File.join(@app, 'app/models'))
+    FileUtils.mkdir_p(File.join(@app, 'lib'))
+    40.times { |i| File.write(File.join(@app, "app/models/model_#{i}.rb"), "class Model#{i}; end") }
+    File.write(File.join(@app, 'lib/ledger_client.rb'), 'module LedgerClient; end')
+    allow_any_instance_of(Woods::SourceInputs::Scanner).to receive(:monotonic) do |scanner|
+      1_000.0 + (scanner.instance_variable_get(:@visited).to_i * 0.5)
+    end
+
+    expect(run_launcher('full')).to eq(0)
+    snapshot = child.fetch('capture').fetch('snapshot')
+    expect(snapshot).to include('complete' => true, 'errors' => [])
+    expect(snapshot.fetch('files')).to have_key('lib/ledger_client.rb')
+  end
+
   it 'binds the capture to the physical root when --root is a symlink alias (F4)' do
     alias_root = File.join(Dir.mktmpdir('woods-launcher-alias'), 'alias')
     File.symlink(@app, alias_root)

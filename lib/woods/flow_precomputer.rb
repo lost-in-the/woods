@@ -2,6 +2,7 @@
 
 require 'json'
 require 'fileutils'
+require 'woods'
 require_relative 'filename_utils'
 require_relative 'flow_assembler'
 require_relative 'atomic_file'

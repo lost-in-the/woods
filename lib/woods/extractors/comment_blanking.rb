@@ -6,13 +6,22 @@ require_relative 'view_engines/haml'
 
 module Woods
   module Extractors
-    # Blanks the comments of a Ruby or template source so a scan for calls
-    # never reads commented-out code. Every comment byte except a newline
-    # becomes a space, so line structure is kept and the result can be
-    # scanned exactly like the original.
+    # Blanks the comments of a Ruby or template source so a scan never reads
+    # a comment: a reference that appears only in a comment is prose, and
+    # prose never produces a dependency edge. Every dependency scan reads its
+    # source through this module. Every comment byte except a newline becomes
+    # a space, so line structure and byte offsets are kept and the result can
+    # be scanned exactly like the original.
+    #
+    # Heredoc text is prose too: a heredoc body holds YAML, SQL, markdown, or
+    # other text that is not Ruby, so its literal text is blanked as well.
+    # The Ruby inside it, `#{...}` interpolation, is kept. A body that is
+    # Ruby is kept whole: one tagged `RUBY` or `RB`, and one passed to
+    # `class_eval`, `module_eval`, `instance_eval`, or `eval`.
     #
     # Comment forms, chosen by file extension:
-    # - `.rb`, `.jbuilder`: Ruby `#` comments and `=begin`/`=end`, via Prism
+    # - `.rb`, `.jbuilder`: Ruby `#` comments, `=begin`/`=end`, and heredoc
+    #   text, via Prism
     # - `.erb`: `<%# ... %>` tags, and a Ruby comment opening a code tag
     #   (`<% # ... %>`) up to the tag end or line end
     # - `.haml`: `-#` silent comments with their indented block, and
@@ -26,6 +35,12 @@ module Woods
       # `<%` then blanks then `#` (to the tag end or line end).
       ERB_COMMENT = /<%-?([ \t]*)#/
 
+      # Heredoc tags whose body is Ruby.
+      RUBY_HEREDOC_TAGS = %w[RUBY RB].freeze
+
+      # Methods that evaluate a string argument as Ruby.
+      EVAL_METHODS = %i[class_eval module_eval instance_eval eval].freeze
+
       # A HAML Ruby line whose code is only a comment.
       HAML_RUBY_COMMENT = /\A[ \t]*-[ \t]+#/
 
@@ -34,7 +49,7 @@ module Woods
       # @return [String] The source with its comments blanked
       def blank(source, file_path)
         ranges = case File.extname(file_path.to_s)
-                 when '.rb', '.jbuilder' then ruby_comments(source)
+                 when '.rb', '.jbuilder' then ruby_prose(source)
                  when '.erb' then erb_comments(source)
                  when '.haml' then haml_comments(source)
                  else []
@@ -42,11 +57,69 @@ module Woods
         ranges.empty? ? source : splice(source, ranges)
       end
 
-      # @return [Array<Range>] Byte ranges
-      def ruby_comments(source)
-        Prism.parse_comments(source).map do |comment|
-          comment.location.start_offset...comment.location.end_offset
+      # Blanks `#` comments, `=begin`/`=end` blocks, and the text of every
+      # heredoc body that is not Ruby. A `#` in a quoted string or an
+      # interpolation is not a comment and is kept, as is the interpolation
+      # inside a heredoc.
+      #
+      # @param source [String] Ruby source, a whole file or an excerpt
+      # @return [String] The source with its comments and heredoc text
+      #   blanked: the same object when it holds neither
+      def ruby(source)
+        return source unless source.include?('#') || source.include?('=begin') || source.include?('<<')
+
+        ranges = ruby_prose(source)
+        ranges.empty? ? source : splice(source, ranges)
+      end
+
+      # @return [Array<Range>] Byte ranges, sorted
+      def ruby_prose(source)
+        result = Prism.parse(source)
+        comments = result.comments.map { |comment| comment.location.start_offset...comment.location.end_offset }
+        (comments + heredoc_text(result.value)).sort_by(&:begin)
+      end
+
+      # The byte range of each literal text segment of a non-Ruby heredoc
+      # body. The walk keeps its own stack, so deeply nested source cannot
+      # overflow the Ruby stack. A call is visited before its arguments, so
+      # an eval call marks its heredoc arguments as Ruby before they are
+      # reached. The text segments of an interpolated heredoc are string
+      # parts with no opening of their own, so none is counted twice.
+      #
+      # @param root [Prism::Node]
+      # @return [Array<Range>] Byte ranges, unsorted
+      def heredoc_text(root)
+        ranges = []
+        evaluated = {}.compare_by_identity
+        stack = [root]
+        until stack.empty?
+          node = stack.pop
+          case node
+          when Prism::CallNode
+            node.arguments&.arguments&.each { |arg| evaluated[arg] = true } if EVAL_METHODS.include?(node.name)
+          when Prism::StringNode, Prism::XStringNode
+            ranges << byte_range(node.content_loc) if prose_heredoc?(node, evaluated)
+          when Prism::InterpolatedStringNode, Prism::InterpolatedXStringNode
+            if prose_heredoc?(node, evaluated)
+              node.parts.each { |part| ranges << byte_range(part.content_loc) if part.is_a?(Prism::StringNode) }
+            end
+          end
+          stack.concat(node.compact_child_nodes)
         end
+        ranges.reject { |range| range.begin == range.end }
+      end
+
+      # A heredoc whose body is not Ruby: not tagged as Ruby and not the
+      # argument of an eval method.
+      def prose_heredoc?(node, evaluated)
+        opening = node.opening_loc&.slice
+        return false unless opening&.start_with?('<<')
+
+        !evaluated.key?(node) && !RUBY_HEREDOC_TAGS.include?(opening.delete("-<~'\"`"))
+      end
+
+      def byte_range(location)
+        location.start_offset...location.end_offset
       end
 
       # @return [Array<Range>] Byte ranges
@@ -100,7 +173,7 @@ module Woods
         end
         blanked << source.byteslice(position, source.bytesize - position)
       end
-      private_class_method :ruby_comments, :erb_comments, :haml_comments, :splice
+      private_class_method :ruby_prose, :heredoc_text, :prose_heredoc?, :byte_range, :erb_comments, :haml_comments, :splice
     end
   end
 end

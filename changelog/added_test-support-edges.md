@@ -1,0 +1,2 @@
+- Link test files to the test support they use: `it_behaves_like`, `include_examples` and `it_should_behave_like` (`behaves_like`), `include_context` (`includes_context`), `include HelperModule` (`includes_helper`) and custom matcher calls (`uses_matcher`) become edges to the defining `test_support` unit.
+  Test mapping metadata gains `shared_contexts_used`, `helpers_included` and `matchers_used`.

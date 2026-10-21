@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'render_target_resolver'
+
 module Woods
   module Extractors
     # Finds component classes the eager load never reached.
@@ -33,6 +35,7 @@ module Woods
       #
       # @return [void]
       def load_component_files
+        @component_files_loaded = true
         unowned = 0
         undefined = 0
         component_directories.each do |directory|
@@ -64,9 +67,83 @@ module Woods
         end
       end
 
+      # Name the components a component's source renders.
+      #
+      # A target is resolved against the loaded constant tables, so every
+      # component file is asked for first: the same load state a full
+      # extraction resolves in, whichever entry point reached this component.
+      #
+      # @param component [Class] the rendering component
+      # @param source [String] the source of the file that defines it
+      # @param fragments [Array<String>] Ruby from the component's templates
+      # @param kinds [Array<Symbol>, nil] see {RenderTargetResolver#call}
+      # @return [RenderTargetResolver::Result]
+      def resolve_render_targets(component, source, fragments: [], kinds: nil)
+        load_component_files unless @component_files_loaded
+        @render_target_resolver ||= RenderTargetResolver.new(ownership: method(:render_target_owner))
+        @render_target_resolver.call(component, source, fragments: fragments, kinds: kinds)
+      end
+
+      # @param result [RenderTargetResolver::Result]
+      # @return [Array<Hash>] `:render` edges, then `:slot` edges
+      def component_dependencies(result)
+        result.targets.map { |target| { type: :component, target: target, via: :render } } +
+          result.slot_targets.map { |target| { type: :component, target: target, via: :slot } }
+      end
+
+      # @param result [RenderTargetResolver::Result]
+      # @return [Hash] the renders and slots that produced no edge, and why
+      def component_resolution_metadata(result)
+        { unresolved_renders: result.unresolved, unresolved_slots: result.unresolved_slots,
+          external_renders: result.external }
+      end
+
+      # Who defines a rendered component class.
+      #
+      # The test is the one both component families apply to their own units:
+      # an application file defines it. Anything else has no unit to point at.
+      #
+      # @param component [Class]
+      # @return [Symbol, String, nil] +:app+, the owning gem's name, or nil
+      #   when no loaded gem contains the definition
+      def render_target_owner(component)
+        path = source_file_for(component)
+        return :app if app_source_file?(path)
+        return nil unless path
+
+        absolute = File.expand_path(path)
+        gem_roots.find { |root, _name| absolute.start_with?(root) }&.last
+      end
+
+      # Whether a class still owns its name.
+      #
+      # A Rails reload leaves the previous class object in `descendants` until
+      # it is collected, under the name its replacement now holds, so one
+      # component would be extracted twice and the survivor picked by order.
+      # A name that resolves to nothing loaded is left to the caller's other
+      # checks.
+      #
+      # @param component [Class]
+      # @return [Boolean] false when the name resolves to a different object
+      def current_constant?(component)
+        @constant_lookup ||= SourceReferences::RuntimeLookup.new
+        current = @constant_lookup.call("::#{component.name}", allow_private: true)[:value]
+        current.nil? || current.equal?(component)
+      end
+
       # @return [Array<String>] absolute directories to walk, nested entries
       #   collapsed into their ancestor so no file is handed over twice
       def component_directories
+        ComponentDiscovery.component_directories
+      end
+
+      # @return [Array<String>] directories to scan, relative to Rails.root
+      def component_paths
+        ComponentDiscovery.component_paths
+      end
+
+      # @see #component_directories
+      def self.component_directories
         present = component_paths
                   .map { |relative| File.join(Rails.root.to_s, relative) }
                   .uniq
@@ -81,9 +158,19 @@ module Woods
       # nothing", which is how an app opts out of the walk entirely.
       #
       # @return [Array<String>] directories to scan, relative to Rails.root
-      def component_paths
+      def self.component_paths
         configured = Woods.configuration&.component_paths
         configured.nil? ? DEFAULT_COMPONENT_PATHS : Array(configured)
+      end
+
+      # Whether a changed path can define or rename a component: a Ruby file
+      # under one of the component directories.
+      #
+      # @param path [String] absolute path
+      # @return [Boolean]
+      def self.component_source_path?(path)
+        path.end_with?('.rb') &&
+          component_directories.any? { |directory| path.start_with?("#{directory}#{File::SEPARATOR}") }
       end
 
       private
@@ -146,6 +233,17 @@ module Woods
           return name if name
         end
         nil
+      end
+
+      # @return [Array<Array(String, String)>] loaded gem roots with their
+      #   names, longest root first so a nested gem wins over its container
+      def gem_roots
+        @gem_roots ||= begin
+          roots = Gem.loaded_specs.values.map do |spec|
+            ["#{File.expand_path(spec.full_gem_path)}#{File::SEPARATOR}", spec.name]
+          end
+          roots.sort_by { |root, name| [-root.length, name] }
+        end
       end
 
       # Every directory Zeitwerk resolves constants against, longest first so a

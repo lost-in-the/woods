@@ -11,6 +11,35 @@ require 'woods/extractors/scheduled_job_extractor'
 RSpec.describe Woods::Extractors::ScheduledJobExtractor do
   include_context 'extractor setup'
 
+  describe 'multibyte schedule sources' do
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/recurring.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  class: LedgerJob\n  schedule: every day at 2am\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/sidekiq_cron.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  cron: \"0 2 * * *\"\n  class: LedgerJob\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/schedule.yml',
+                    source: "# Ledger — nightly\nledger_sweep:\n  cron: \"0 2 * * *\"\n  class: LedgerJob\n",
+                    identifier: 'scheduled:ledger_sweep'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/schedule.rb',
+                    source: "# Ledger — nightly\nevery 1.day do\n  runner \"LedgerJob.perform_later\"\nend\n",
+                    identifier: 'scheduled:whenever_ledger_job_0'
+
+    it_behaves_like 'extracts multibyte source under a POSIX locale',
+                    path: 'config/initializers/sidekiq_cron.rb',
+                    source: "# Ledger — nightly\nSidekiq::Cron::Job.create(name: \"ledger sweep\", " \
+                            'cron: "0 2 * * *", ' \
+                            "class: \"LedgerJob\")\n",
+                    identifier: 'scheduled:ledger sweep'
+  end
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -676,6 +705,22 @@ RSpec.describe Woods::Extractors::ScheduledJobExtractor do
 
     def periodic_units
       described_class.new.extract_all.select { |u| u.metadata[:schedule_format] == :sidekiq_periodic }
+    end
+
+    it 'publishes the initializer with credential-shaped text redacted' do
+      create_file('config/initializers/sidekiq.rb', <<~RUBY)
+        Sidekiq.configure_server do |config|
+          config.redis = { url: "redis://:plaintext-marker@redis.internal:6379/0" }
+          config.periodic do |mgr|
+            mgr.register('0 7 * * *', 'Ledger::PurgeWorker')
+          end
+        end
+      RUBY
+
+      source = periodic_units.first.source_code
+
+      expect(source).not_to include('plaintext-marker')
+      expect(source).to include('redis://[REDACTED]@redis.internal:6379/0', "mgr.register('0 7 * * *'")
     end
 
     it 'emits one unit per registration with its cron and job class' do

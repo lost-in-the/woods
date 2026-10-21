@@ -21,6 +21,7 @@ woods_input_action() {
   if [[ "$path" =~ ^config/settings\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/settings/[^/]+\.ya?ml$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^config/(cable|storage|sidekiq|puma|cache|queue)\.ya?ml$ ]]; then printf full; return; fi
+  if [[ "$path" =~ ^db/[^/]+_(schema\.rb|structure\.sql)$ ]]; then printf full; return; fi
   if [[ "$path" =~ ^\.env(\..+)?$ ]]; then printf full; return; fi
   local -a declared_roots=()
   IFS=: read -r -a declared_roots <<< "${WOODS_DECLARED_ROOTS:-}"
@@ -66,7 +67,11 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]]; }; }; }; then
+  if { [[ "$path" == Gemfile ]] || [[ "$path" == Rakefile ]] || [[ "$path" == config/boot.rb ]] || [[ "$path" == config/deploy.rb ]] || [[ "$path" == config/environment.rb ]] || [[ "$path" == config/importmap.rb ]] || [[ "$path" == db/seeds.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]] || [[ "$path" == config/deploy/* ]] || [[ "$path" == db/seeds/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != *config/locales/* ]] && [[ "$path" != *config/credentials/* ]] && [[ "$path" != *credential* ]] && [[ "$path" != *secret* ]] && [[ "$path" != *password* ]] && [[ "$path" != *passwd* ]] && [[ "$path" != *token* ]] && [[ "$path" != *private_key* ]] && [[ "$path" != *api_key* ]] && [[ "$path" != *apikey* ]] && [[ "$path" != *keystore* ]] && { [[ "$path" == *.yml ]]; } && { [[ "$path" == config/* ]] || [[ "$path" == app/data/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -98,7 +103,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { [[ "$path" != */tasks/* ]] && [[ "$path" != */generators/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
+  if { { [[ "$path" != */tasks/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -107,6 +112,10 @@ woods_input_action() {
     return
   fi
   if { { { [[ "$path" == *_test.rb ]]; } && { [[ "$path" == test/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == README.md ]] || [[ "$path" == CLAUDE.md ]] || [[ "$path" == AGENTS.md ]] || { { [[ "$path" == *.md ]]; } && { [[ "$path" == docs/* ]] || [[ "$path" == doc/* ]] || [[ "$path" == .claude/rules/* ]] || [[ "$path" == .claude/skills/* ]] || [[ "$path" == .github/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -130,11 +139,19 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { [[ "$path" != */tasks/* ]] && [[ "$path" != */generators/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
+  if { { [[ "$path" != */tasks/* ]] && { [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { { { [[ "$path" == *.rake ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == rake/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == Rakefile ]] || { false; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -150,7 +167,7 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
-  if { [[ "$path" == config/recurring.yml ]] || [[ "$path" == config/sidekiq_cron.yml ]] || [[ "$path" == config/schedule.rb ]] || [[ "$path" == config/schedule.yml ]] || [[ "$path" == config/sidekiq.yml ]] || [[ "$path" == config/application.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]]; }; }; }; then
+  if { [[ "$path" == config/recurring.yml ]] || [[ "$path" == config/sidekiq_cron.yml ]] || [[ "$path" == config/schedule.rb ]] || [[ "$path" == config/schedule.yml ]] || [[ "$path" == config/sidekiq.yml ]] || [[ "$path" == config/application.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == config/initializers/* ]] || [[ "$path" == config/environments/* ]] || [[ "$path" == app/jobs/* ]] || [[ "$path" == app/workers/* ]] || [[ "$path" == app/sidekiq/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
@@ -163,6 +180,55 @@ woods_input_action() {
     return
   fi
   if { { { [[ "$path" == *.sql ]]; } && { [[ "$path" == db/views/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/graphql/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && { [[ "$path" == *.graphql ]] || [[ "$path" == *.gql ]]; } && { [[ "$path" == app/javascript/* ]] || [[ "$path" == app/frontend/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == db/schema.rb ]] || [[ "$path" == db/structure.sql ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == db/migrate/* ]] || [[ "$path" == app/models/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  # external_consumers: the declared file is configuration; the Ruby rules handle it
+  if { [[ "$path" == spec/spec_helper.rb ]] || [[ "$path" == spec/rails_helper.rb ]] || [[ "$path" == test/test_helper.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == spec/support/* ]] || [[ "$path" == spec/lib/* ]] || [[ "$path" == test/support/* ]] || [[ "$path" == test/lib/* ]] || [[ "$path" == spec/factories/* ]] || [[ "$path" == test/factories/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == spec/spec_helper.rb ]] || [[ "$path" == spec/rails_helper.rb ]] || [[ "$path" == test/test_helper.rb ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == spec/support/* ]] || [[ "$path" == spec/lib/* ]] || [[ "$path" == test/support/* ]] || [[ "$path" == test/lib/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == lib/tasks/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rake ]] || [[ "$path" == *.rb ]]; } && { [[ "$path" == rake/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { [[ "$path" == Rakefile ]] || { false; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.html.erb ]] || [[ "$path" == *.erb ]] || [[ "$path" == *.html.haml ]] || [[ "$path" == *.haml ]] || [[ "$path" == *.json.jbuilder ]] || [[ "$path" == *.jbuilder ]]; } && { [[ "$path" == app/views/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/controllers/* ]] || [[ "$path" == app/mailers/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && [[ "$path" != */vendor/* ]] && [[ "$path" != */public/* ]] && [[ "$path" != */dist/* ]] && [[ "$path" != */build/* ]] && [[ "$path" != */builds/* ]] && [[ "$path" != */tmp/* ]] && [[ "$path" != */coverage/* ]] && [[ "$path" != *.min.js* ]] && [[ "$path" != *.min.mjs* ]] && [[ "$path" != *.d.ts* ]] && [[ "$path" != */__tests__/* ]] && [[ "$path" != */__mocks__/* ]] && [[ "$path" != */spec/* ]] && [[ "$path" != */test/* ]] && [[ "$path" != *.test.* ]] && [[ "$path" != *.spec.* ]] && { [[ "$path" == *.js ]]; } && { [[ "$path" == app/assets/javascripts/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && [[ "$path" != */vendor/* ]] && [[ "$path" != */public/* ]] && [[ "$path" != */dist/* ]] && [[ "$path" != */build/* ]] && [[ "$path" != */builds/* ]] && [[ "$path" != */tmp/* ]] && [[ "$path" != */coverage/* ]] && [[ "$path" != *.min.js* ]] && [[ "$path" != *.min.mjs* ]] && [[ "$path" != *.d.ts* ]] && [[ "$path" != */__tests__/* ]] && [[ "$path" != */__mocks__/* ]] && [[ "$path" != */spec/* ]] && [[ "$path" != */test/* ]] && [[ "$path" != *.test.* ]] && [[ "$path" != *.spec.* ]] && { [[ "$path" == *.js ]] || [[ "$path" == *.ts ]] || [[ "$path" == *.jsx ]] || [[ "$path" == *.tsx ]] || [[ "$path" == *.mjs ]]; } && { [[ "$path" == app/javascript/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

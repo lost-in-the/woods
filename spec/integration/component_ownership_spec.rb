@@ -9,13 +9,21 @@ RSpec.describe 'Application-owned optional extraction', :booted_app do
     stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', 'spec/fixtures/component_ownership/boot.rb')
     expect(status).to be_success, "#{stdout}\n#{stderr}"
     expected = [
+      'autoload-only Phlex and ViewComponent callers publish verified service references',
       'legacy fixture contains external definitions',
       'inflected components under an autoload-only views root are discovered',
+      'Kit calls and sibling renders target qualified component units',
       'authoritative reconciliation removes only dependency-owned definitions',
       'all application mailer inheritance branches are indexed without execution',
       'ownership full/incremental equivalence',
       'component and mailer edits full/incremental equivalence',
       'component and mailer refresh equivalence',
+      'a sidecar template edit retargets its component',
+      'sidecar template edit full/incremental equivalence',
+      'a component that drops its reference withdraws the edge from a held reader',
+      'component reference removal full/incremental equivalence',
+      'a refresh restores the component reference',
+      'component reference refresh equivalence',
       'conflicting schedules retain jobs and qualified identities',
       'schedule collision addition equivalence',
       'schedule refresh equivalence',

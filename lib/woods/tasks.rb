@@ -4,6 +4,7 @@ require_relative 'builder'
 require_relative 'embedding/indexer'
 require_relative 'embedding/text_preparer'
 require_relative 'resolved_config'
+require_relative 'atomic_file'
 
 module Woods
   # Small helpers invoked from `lib/tasks/woods.rake`.
@@ -141,6 +142,39 @@ module Woods
       puts "  Processed: #{stats[:processed]}"
       puts "  Skipped:   #{stats[:skipped]}"
       puts "  Errors:    #{stats[:errors]}"
+    end
+
+    # Verified `code_reference` edges in the published graph, grouped by the
+    # unit type that holds them. Variant records (a second type sharing an
+    # identifier) carry their own edges and count under their own type.
+    #
+    # @param payload_dir [String, Pathname] published payload directory
+    # @return [Hash{String => Integer}] caller unit type to edge count, sorted by type
+    def code_reference_counts(payload_dir)
+      path = File.join(payload_dir.to_s, 'dependency_graph.json')
+      return {} unless File.file?(path)
+
+      caller_edge_records(JSON.parse(AtomicFile.read(path))).each_with_object(Hash.new(0)) do |(type, edges), counts|
+        count = Array(edges).count { |edge| edge['via'] == 'code_reference' }
+        counts[type.to_s] += count if count.positive?
+      end.sort.to_h
+    end
+
+    # @return [Array<Array(String, Array<Hash>)>] unit type and edges, primary nodes then variants
+    def caller_edge_records(graph)
+      primary = graph.fetch('nodes', {}).map { |identifier, node| [node['type'], graph.dig('edges', identifier)] }
+      primary + graph.fetch('variants', []).map { |variant| [variant['type'], variant['edges']] }
+    end
+
+    # Print {code_reference_counts} in the `woods:stats` table style.
+    #
+    # @param counts [Hash{String => Integer}]
+    def print_code_reference_counts(counts)
+      return if counts.empty?
+
+      puts '  code_reference edges by caller type'
+      counts.each { |type, count| puts "    #{type.ljust(15)}: #{count.to_s.rjust(4)}" }
+      puts "    #{'Total'.ljust(15)}: #{counts.values.sum.to_s.rjust(4)}"
     end
   end
 end

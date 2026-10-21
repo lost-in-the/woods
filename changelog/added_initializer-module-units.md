@@ -1,0 +1,1 @@
+- Index modules declared in an initializer. A module with behavior whose canonical declaration is a file under `config/initializers/` now becomes a `concern` unit at that path, whichever class includes, extends or prepends it, so edges to it land. A reopening of a module declared elsewhere, and a namespace wrapper with no methods of its own, produce no unit.

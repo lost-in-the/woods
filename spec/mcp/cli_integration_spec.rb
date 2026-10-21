@@ -34,13 +34,17 @@ RSpec.describe 'MCP CLI integration' do
               'WOODS_REQUIRE_INDEX' => nil, 'OPENAI_API_KEY' => nil,
               'OLLAMA_BASE_URL' => 'http://127.0.0.1:0' }
       Open3.popen3(env, 'bundle', 'exec', 'ruby', ruby_bin, index_dir) do |stdin, stdout, stderr, wait|
+        output = Thread.new { stdout.read }
+        errors = Thread.new { stderr.read }
         stdin.puts(JSON.generate(request))
         stdin.close
         raise 'MCP initialization did not finish within 30 seconds' unless wait.join(30)
 
-        [stdout.read, stderr.read, wait.value]
+        [output.value, errors.value, wait.value]
       ensure
         stop_guidance_process(wait)
+        output&.join(5)
+        errors&.join(5)
       end
     end
 

@@ -108,7 +108,7 @@ RSpec.describe Woods::Watch::Daemon do
 
   describe 'classification' do
     it 'does nothing for paths no extractor cares about' do
-      result = build.process(['README.md'])
+      result = build.process(['NOTES.md'])
 
       expect(result[:action]).to eq(:ignore)
       expect(extractor).not_to have_received(:extract_changed)
@@ -354,6 +354,48 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  describe 'configuration drift from the baseline' do
+    let(:logger) { instance_spy(Logger) }
+    let(:drift) { Woods::ExtractionConfigChanged.new('Extraction configuration differs (settings_readers)') }
+
+    before { touch('config/locales/en.yml') }
+
+    it 'escalates a refused incremental to one full extraction and logs why' do
+      allow(extractor).to receive(:extract_changed).and_raise(drift)
+
+      result = build(logger: logger).process(['config/locales/en.yml'])
+
+      expect(result).to include(action: :full, state: :running)
+      expect(extractor).to have_received(:extract_all).once
+      expect(logger).to have_received(:warn).with(/configuration changed.*full extraction/i)
+    end
+
+    it 'leaves any other refused incremental degraded without a full extraction' do
+      allow(extractor).to receive(:extract_changed).and_raise(Woods::ExtractionError, 'unrelated refusal')
+
+      result = build.process(['config/locales/en.yml'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(extractor).not_to have_received(:extract_all)
+    end
+
+    it 'keeps the full obligation once, without looping, when the escalated run fails' do
+      allow(extractor).to receive(:extract_changed).and_raise(drift)
+      allow(extractor).to receive(:extract_all).and_raise(StandardError, 'full boom')
+      daemon = build
+
+      expect(daemon.process(['config/locales/en.yml'])[:state]).to eq(:degraded)
+      expect(extractor).to have_received(:extract_all).once
+
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      daemon.send(:drain)
+
+      expect(extractor).to have_received(:extract_changed).once
+      expect(extractor).to have_received(:extract_all).twice
+      expect(status['state']).to eq('running')
+    end
+  end
+
   describe 'storm handling' do
     it 'falls back to a full extraction above the threshold' do
       paths = Array.new(6) { |i| touch("app/services/svc_#{i}.rb") }
@@ -402,7 +444,7 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build
       daemon.process(['config/locales/en.yml'])
 
-      expect { daemon.process(['README.md']) }.not_to(change { daemon.generation.current.number })
+      expect { daemon.process(['NOTES.md']) }.not_to(change { daemon.generation.current.number })
     end
 
     it 'reports a running state with the current generation' do
@@ -1084,7 +1126,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'counts only actionable paths towards the storm threshold' do
-      paths = Array.new(6) { |i| touch("docs/note_#{i}.md") } + [touch('app/models/user.rb')]
+      paths = Array.new(6) { |i| touch("notes/note_#{i}.md") } + [touch('app/models/user.rb')]
 
       result = build(full_extraction_threshold: 3).process(paths)
 
@@ -1349,6 +1391,16 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reason).not_to eq(:already_running)
     end
 
+    it 'reads a claim with a multibyte host under a US-ASCII default external encoding' do
+      FileUtils.mkdir_p(output_dir)
+      claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+      File.write(claim_path, JSON.generate(pid: Process.pid, host: 'ledger-café'))
+
+      reason = with_posix_default_external { Timeout.timeout(10) { build_racer.run } }
+
+      expect(reason).not_to eq(:already_running)
+    end
+
     # A pid is only meaningful inside the namespace that issued it — the same
     # reasoning {Status#alive?} already applies to the status file. Without
     # mirroring it here, a dead container daemon's claim (container pid 47)
@@ -1431,7 +1483,7 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build
       raced = false
       winner_content = JSON.generate(pid: Process.pid, host: Woods::Watch::Status.host_identity)
-      allow(File).to receive(:read).and_wrap_original do |original, path, *args|
+      allow(File).to receive(:binread).and_wrap_original do |original, path, *args|
         result = original.call(path, *args)
         if path == claim_path && !raced
           raced = true

@@ -10,6 +10,18 @@ require 'woods/extractors/decorator_extractor'
 RSpec.describe Woods::Extractors::DecoratorExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/decorators/widget_decorator.rb',
+                  source: <<~'SOURCE',
+                    # Widget — display helpers
+                    class WidgetDecorator
+                      def display_name
+                        "#{object.name} — widget"
+                      end
+                    end
+                  SOURCE
+                  identifier: 'WidgetDecorator'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do

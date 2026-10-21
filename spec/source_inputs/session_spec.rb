@@ -75,6 +75,122 @@ RSpec.describe Woods::SourceInputs::Session do
     Woods::SourceInputs::Verifier.new(manifest: manifest, output_dir: @output).call
   end
 
+  describe 'the publication recheck under machine load' do
+    # Every visited file costs this much wall clock on the recheck, as if the
+    # machine were heavily loaded. The capture itself runs unstubbed.
+    def slow_recheck(seconds_per_file)
+      allow_any_instance_of(Woods::SourceInputs::Scanner).to receive(:monotonic) do |scanner|
+        1_000.0 + (scanner.instance_variable_get(:@visited).to_i * seconds_per_file)
+      end
+    end
+
+    it 'allows an unchanged tree the time its captured work needs instead of refusing' do
+      1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      run = session
+      slow_recheck(0.02)
+      manifest = finish(run)
+      expect(manifest.data.fetch('errors')).not_to include(include('reason' => 'scan_time_budget'))
+      expect(manifest.data.fetch('errors')).to be_empty
+    end
+
+    it 'still refuses a recheck that outruns the work-scaled budget' do
+      3.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      run = session
+      slow_recheck(5.0)
+      expect(finish(run).data.fetch('errors')).to include('reason' => 'scan_time_budget')
+    end
+
+    def recheck_seconds(visited_files:, bytes:)
+      capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+      capture['metrics'] = capture.fetch('metrics').merge('visited_files' => visited_files, 'bytes' => bytes)
+      allow(Woods::SourceInputs::Handoff).to receive(:read).and_return(capture)
+      described_class.new(root: @root, output_dir: @output, baseline_path: @baseline, operation: 'full')
+                     .send(:recheck_seconds)
+    end
+
+    it 'scales the recheck budget between a ten-second floor and a two-minute ceiling' do
+      write('app/services/svc.rb', 'class Svc; end')
+      expect(recheck_seconds(visited_files: 1, bytes: 14)).to eq(10.0)
+      expect(recheck_seconds(visited_files: 1_000, bytes: 4 * 1024 * 1024)).to eq(51.0)
+      expect(recheck_seconds(visited_files: 11_192, bytes: 20_500_000)).to eq(120.0)
+      expect(recheck_seconds(visited_files: 50_000, bytes: 128 * 1024 * 1024)).to eq(120.0)
+    end
+
+    it 'keeps the reader budget wall-clock' do
+      1_000.times { |i| write("app/services/svc_#{i}.rb", "class Svc#{i}; end") }
+      manifest = finish(session)
+      slow_recheck(0.02)
+      expect(verify(manifest)['state']).to eq('unknown')
+      expect(verify(manifest)['reasons']).to include('scan_time_budget')
+    end
+  end
+
+  describe 'the initial capture under machine load' do
+    # The walk hashes app/ before lib/, so a capture cut short by its clock
+    # loses the lib/ file a reference contributor reads last.
+    def slow_capture_clock(seconds_per_file)
+      allow_any_instance_of(Woods::SourceInputs::Scanner).to receive(:monotonic) do |scanner|
+        1_000.0 + (scanner.instance_variable_get(:@visited).to_i * seconds_per_file)
+      end
+    end
+
+    def slow_capture(seconds_per_file)
+      40.times { |i| write("app/models/model_#{i}.rb", "class Model#{i}; end") }
+      write('lib/ledger_client.rb', 'module LedgerClient; end')
+      slow_capture_clock(seconds_per_file)
+      session(verified: false)
+    end
+
+    def reference_pass(run)
+      units = [{ 'type' => 'lib', 'identifier' => 'LedgerClient', 'file_path' => 'lib/ledger_client.rb',
+                 'dependencies' => [] }]
+      Woods::SourceReferences::Pass.new(root: @root, session: run, units: units,
+                                        extractor_keys: { lib: :libs }, full: true).call
+    end
+
+    it 'captures every input of an unchanged tree that load slows past the quick-reader budget' do
+      run = slow_capture(0.5)
+      expect { reference_pass(run) }.not_to raise_error
+      snapshot = run.instance_variable_get(:@snapshot)
+      expect(snapshot).to include('complete' => true, 'errors' => [])
+      expect(snapshot.fetch('files')).to have_key('lib/ledger_client.rb')
+    end
+
+    it 'still refuses source references when the capture stalls past its ceiling, naming the cap that fired' do
+      run = slow_capture(5.0)
+      expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => 'scan_time_budget')
+      message = 'Source-reference input was not captured: lib/ledger_client.rb. ' \
+                'The source capture was incomplete: scan_time_budget (120.0-second cap)'
+      expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, /\A#{Regexp.escape(message)}/)
+    end
+
+    {
+      'scan_file_budget' => [{ max_files: 5 }, /scan_file_budget \(5-file cap\)/],
+      'scan_byte_budget' => [{ max_bytes: 100 }, /scan_byte_budget \(100-byte cap\)/]
+    }.each do |reason, (limits, message)|
+      it "names #{reason} and its cap when the capture stops on it" do
+        stub_const('Woods::SourceInputs::Scanner::DEFAULT_LIMITS',
+                   Woods::SourceInputs::Scanner::DEFAULT_LIMITS.merge(limits))
+        run = slow_capture(0.0)
+        expect(run.instance_variable_get(:@snapshot).fetch('errors')).to include('reason' => reason)
+        expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, message)
+      end
+    end
+
+    it 'names the capture error recorded for an uncaptured path when no cap fired' do
+      write('lib/ledger_client.rb', 'module LedgerClient; end')
+      capture = Woods::SourceInputs::Scanner.new(root: @root, output_dir: @output, key: @key).call
+      capture['files'].delete('lib/ledger_client.rb')
+      capture['scope_paths'].each_value { |paths| paths.delete('lib/ledger_client.rb') }
+      capture.merge!('complete' => false,
+                     'errors' => [{ 'reason' => 'source_changed_during_read', 'path' => 'lib/ledger_client.rb' }])
+      allow(Woods::SourceInputs::Handoff).to receive(:read).and_return(capture)
+      run = described_class.new(root: @root, output_dir: @output, baseline_path: @baseline, operation: 'full')
+      message = 'The source capture was incomplete: source_changed_during_read (lib/ledger_client.rb)'
+      expect { reference_pass(run) }.to raise_error(Woods::ExtractionError, /#{Regexp.escape(message)}/)
+    end
+  end
+
   describe 'source read capability' do
     it 'keeps an undecodable consumer path unverified with JSON-safe diagnostics' do
       path = 'app/services/bad_'.b + "\xFF.rb".b

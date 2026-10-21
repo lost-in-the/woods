@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative 'shared_utility_methods'
+require_relative 'generated_job_site'
 
 module Woods
   module Extractors
@@ -53,7 +55,8 @@ module Woods
         # definition site, and a definition file that declares the class.
         # A class built with `Class.new` and `const_set` reports the
         # generator's call site, whose source is not the job's, so it is
-        # refused. Gem- and engine-defined jobs are refused by the site.
+        # refused here; {.generated_site} answers for it instead. Gem- and
+        # engine-defined jobs are refused by the site.
         #
         # @param klass [Object]
         # @param app_root [String]
@@ -64,12 +67,27 @@ module Woods
           name = klass.name
           path = name && Object.const_source_location(name)&.first
           return false unless app_source?(path, app_root)
-          return true if declares_class?(File.read(path), name)
+          return true if declares_class?(SourceFile.read(path), name)
 
-          Rails.logger.debug "[Woods] Skipping job #{name}: #{path} does not declare it (generated class)"
+          Rails.logger.debug "[Woods] #{path} does not declare job #{name} (generated class)"
           false
         rescue NameError, SystemCallError
           false
+        end
+
+        # Where a job class no file declares was generated: the application
+        # line that called its generator. Nil for a declared class, and for a
+        # class a generator outside the application bound.
+        #
+        # @param klass [Object]
+        # @param app_root [String]
+        # @param resolver [GeneratedJobSite] reused across classes to parse
+        #   each file once
+        # @return [GeneratedJobSite::Site, nil]
+        def generated_site(klass, app_root:, resolver: GeneratedJobSite.new(app_root: app_root))
+          return nil unless job_class?(klass)
+
+          resolver.call(klass)
         end
 
         # @return [Array<Module>] the loaded Sidekiq job modules

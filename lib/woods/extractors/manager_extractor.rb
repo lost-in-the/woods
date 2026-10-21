@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'declaration_ancestry'
 
 module Woods
@@ -53,7 +55,7 @@ module Woods
       # @param file_path [String] Path to the manager file
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a manager
       def extract_manager_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = extract_class_name(file_path, source, 'managers')
 
         return nil unless class_name
@@ -71,6 +73,7 @@ module Woods
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata(source, class_name, ancestry)
         unit.dependencies = extract_dependencies(source, class_name)
+        MethodEffects.apply(unit, source)
 
         unit
       rescue StandardError => e

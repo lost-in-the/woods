@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require 'set'
 require_relative '../source_references/runtime_lookup'
 require_relative 'concern_extractor'
@@ -205,7 +206,7 @@ module Woods
       def declared_here?(name, path, declarations)
         lines = declarations.map { |declaration| declaration['line'] }
         @def_sites ||= {}
-        @def_sites[[path, lines]] ||= ModuleDefSites.new(File.read(path)).call(lines)
+        @def_sites[[path, lines]] ||= ModuleDefSites.new(SourceFile.read(path)).call(lines)
         @def_sites[[path, lines]].include?(name.to_s)
       end
 

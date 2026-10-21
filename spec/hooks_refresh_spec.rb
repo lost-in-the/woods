@@ -64,7 +64,7 @@ RSpec.describe Woods::Hooks::Refresh do
   end
 
   it 'acknowledges a supported but now irrelevant input without publishing' do
-    expect { refresh([{ path: 'docs/readme.md', operation: 'update' }]).call }.not_to output.to_stderr
+    expect { refresh([{ path: 'notes/readme.md', operation: 'update' }]).call }.not_to output.to_stderr
     expect(extractor).not_to have_received(:extract_changed)
   end
 

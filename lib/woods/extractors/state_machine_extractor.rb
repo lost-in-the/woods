@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -52,7 +53,7 @@ module Woods
       # @param file_path [String] Path to the model file
       # @return [Array<ExtractedUnit>] List of state machine units (empty if none detected)
       def extract_model_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         class_name = detect_class_name(source, file_path)
 
         units = []

@@ -23,10 +23,12 @@ module Woods
       # @return [Ast::Node] Root node of the normalized tree
       # @raise [Woods::ExtractionError] if parsing fails
       def parse(source)
-        if prism_available?
-          parse_with_prism(source)
-        else
-          parse_with_parser_gem(source)
+        with_source_lines(source) do
+          if prism_available?
+            parse_with_prism(source)
+          else
+            parse_with_parser_gem(source)
+          end
         end
       rescue StandardError => e
         raise Woods::ExtractionError, "Failed to parse source: #{e.message}"
@@ -209,7 +211,8 @@ module Woods
           Node.new(type: :dstr, children: [], line: line_for_prism(prism_node))
         when Prism::SingletonClassNode
           children = prism_node.body ? [convert_prism_node(prism_node.body, source)] : []
-          Node.new(type: :sclass, children: children, line: line_for_prism(prism_node))
+          Node.new(type: :sclass, children: children, line: line_for_prism(prism_node),
+                   receiver: extract_prism_receiver_text(prism_node.expression, source))
         when Prism::ConstantWriteNode
           value = prism_node.value ? convert_prism_node(prism_node.value, source) : nil
           Node.new(
@@ -495,14 +498,16 @@ module Woods
       end
 
       def extract_const_path_text(node)
-        case node
-        when Prism::ConstantReadNode
-          node.name.to_s
-        when Prism::ConstantPathNode
-          parent = node.parent ? extract_const_path_text(node.parent) : ''
-          const_name = node.respond_to?(:name) ? node.name.to_s : node.child.name.to_s
-          [parent, const_name].compact.join('::')
+        # Constant paths can be thousands of segments deep without needing
+        # a Ruby stack frame or a copied prefix for every segment.
+        names = []
+        while node.is_a?(Prism::ConstantPathNode)
+          names << (node.respond_to?(:name) ? node.name.to_s : node.child.name.to_s)
+          node = node.parent
         end
+        names << node.name.to_s if node.is_a?(Prism::ConstantReadNode)
+        names << '' if node.nil?
+        names.reverse.join('::') unless names.empty?
       end
 
       def extract_const_name(node)
@@ -544,6 +549,11 @@ module Woods
             end_line: parser_node.loc.expression.last_line,
             method_name: extract_parser_const_name(parser_node.children[0])
           )
+        when :sclass
+          expression = parser_node.children[0]
+          children = parser_node.children.filter_map { |child| convert_parser_node(child, source) }
+          Node.new(type: :sclass, children: children, line: parser_node.loc.line,
+                   receiver: extract_parser_receiver_text(expression, source))
         when :def
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
           body_children = parser_body_children(body)
@@ -653,8 +663,8 @@ module Woods
       # columns still identify the original source, but absolute positions do
       # not. Map through original lines to preserve both CRLF and Unicode bytes.
       def original_byte_offset(source, line, column)
-        lines = source.lines
-        lines.take(line - 1).sum(&:bytesize) + lines.fetch(line - 1)[0, column].bytesize
+        table = source_line_table(source)
+        table.byte_start(line - 1) + table.byte_column(line - 1, column)
       end
 
       def parser_body_children(body_node)

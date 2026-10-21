@@ -90,6 +90,13 @@ module Woods
           end
         end
 
+        # A jbuilder template is Ruby throughout.
+        #
+        # @see Base#scan_method_calls
+        def scan_method_calls(source, names)
+          HelperCallScan.method_calls(source, names)
+        end
+
         private
 
         # @see Erb#partial_extension

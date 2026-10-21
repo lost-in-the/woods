@@ -1,13 +1,17 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'route_helper_resolver'
+require_relative 'helper_call_scan'
 require_relative 'template_extensions'
+require_relative 'action_fact_resolution'
 
 module Woods
   module Extractors
@@ -26,6 +30,7 @@ module Woods
     class MailerExtractor
       include AstSourceExtraction
       include SharedUtilityMethods
+      include ActionFactResolution
       include SharedDependencyScanner
       include RouteHelperResolver
 
@@ -68,12 +73,14 @@ module Woods
           file_path: file_path
         )
 
-        source = file_path && File.exist?(file_path) ? File.read(file_path, encoding: Encoding::UTF_8) : ''
+        source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
 
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)
         unit.metadata = extract_metadata(mailer, source)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, mailer: mailer)
+        HelperCallScan.annotate(self, unit, mailer)
+        MethodEffects.apply(unit, source)
 
         # Create chunks for each mail action
         unit.chunks = build_action_chunks(mailer, source)
@@ -158,6 +165,9 @@ module Woods
           # Templates (if discoverable)
           templates: discover_templates(mailer, actions),
 
+          # What each action body and its applicable callbacks say (W-7)
+          action_facts: resolve_action_facts(mailer, actions, view_prefix: mailer.name.underscore, mailer: true),
+
           # Metrics
           action_count: actions.size,
           loc: source.lines.count { |l| l.strip.present? && !l.strip.start_with?('#') }
@@ -237,28 +247,34 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(source)
+      def extract_dependencies(source, mailer: nil)
         deps = []
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
-        # Navigation edges — resolve `_path`/`_url` helpers to real
-        # controllers via RouteHelperResolver (wired through the include +
-        # build_route_helper_map call in #initialize). This adds resolved
-        # {type: :controller, via: :link_to} edges on top of the raw
-        # helper scan below.
+        deps.concat(scan_config_dependencies(source))
+        # Navigation edges: a `_path`/`_url` helper naming a live route
+        # targets the controller that route dispatches to. A name with no
+        # live route records no edge.
         deps.concat(scan_navigation_dependencies(source))
         deps.concat(scan_form_dependencies(source))
 
-        # Raw-helper fallback — emits {type: :route, target: 'confirmation'}
-        # for every `_path`/`_url` helper referenced, regardless of whether
-        # RouteHelperResolver could resolve it. Kept so mailers that link to
-        # engine-mounted routes (not in the main routes table) still produce
-        # a dependency edge.
-        source.scan(/(\w+)_(?:url|path)/).flatten.uniq.each do |route|
-          deps << { type: :route, target: route, via: :url_helper }
+        structural = mailer && superclass_dependency(mailer)
+        (consolidate_dependencies(deps) + [structural].compact).uniq do |dependency|
+          dependency.values_at(:type, :target, :via)
         end
+      end
 
-        consolidate_dependencies(deps)
+      # Parent actions and private callbacks can supply a child's action
+      # facts. Keep the child in the parent's incremental blast radius even
+      # when its own source never calls a method on that parent.
+      #
+      # @param mailer [Class]
+      # @return [Hash, nil] an app-owned parent mailer, never a framework class
+      def superclass_dependency(mailer)
+        parent = mailer.superclass
+        return nil unless parent.is_a?(Class) && app_defined_mailer?(parent)
+
+        { type: :mailer, target: parent.name, via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────

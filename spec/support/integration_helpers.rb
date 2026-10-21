@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'woods/atomic_file'
 require 'woods/extracted_unit'
 
 module IntegrationHelpers
@@ -10,7 +11,7 @@ module IntegrationHelpers
   #
   # @return [Array<Hash>] raw unit hashes with string keys
   def load_fixture_units
-    JSON.parse(File.read(FIXTURE_PATH))
+    JSON.parse(Woods::AtomicFile.read(FIXTURE_PATH))
   end
 
   # Convert a raw hash (string keys) into an ExtractedUnit instance.

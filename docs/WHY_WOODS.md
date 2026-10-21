@@ -116,7 +116,7 @@ foreign keys pulled live from the database. No more confusing `string` vs `text`
 **Route-to-controller binding.** Controller source gets a route block prepended showing
 exactly which HTTP verbs and paths map to which actions. URL → code is always explicit.
 
-**Dependency graph.** 35 extractors build a bidirectional graph: what each unit depends on,
+**Dependency graph.** 42 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
 **Two MCP servers.** The Index Server defines 29 schemas and registers 14 in the normal
@@ -150,7 +150,7 @@ hierarchies are exactly where static tools fail and Woods shines.
 **Anyone who wants structured codebase context.** The extraction output is plain JSON, useful beyond AI tools for documentation, impact analysis, and onboarding.
 
 Woods works with any database (MySQL, PostgreSQL, SQLite), any background job
-system (Sidekiq, Solid Queue, GoodJob), and any view layer (ERB, Phlex, ViewComponent).
+system (Sidekiq, Solid Queue, GoodJob), and any view layer (ERB, HAML, jbuilder, Phlex, ViewComponent).
 See [docs/BACKEND_MATRIX.md](BACKEND_MATRIX.md) for the full compatibility matrix.
 
 ---

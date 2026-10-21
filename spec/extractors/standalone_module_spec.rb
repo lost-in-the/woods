@@ -6,6 +6,8 @@ require 'tmpdir'
 require 'fileutils'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
+require 'woods'
+require 'woods/extractor'
 require 'woods/extractors/poro_extractor'
 require 'woods/extractors/concern_extractor'
 
@@ -25,6 +27,51 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
 
   def units
     described_class.new.extract_all
+  end
+
+  describe 'multibyte module source under a US-ASCII default external encoding' do
+    let(:source) { "# Ledger codec — encodes entries\nmodule StandaloneFixture::LedgerCodec\n  def self.encode(value) = value\nend\n" }
+
+    it 'extracts the module' do
+      path = load_source('ledger_codec', source)
+
+      values = with_posix_default_external { described_class.new.extract_poro_units(path) }
+
+      expect(values.map(&:identifier)).to eq(['StandaloneFixture::LedgerCodec'])
+    end
+
+    it 'recomputes the module for includer reconciliation' do
+      path = load_source('ledger_codec', source)
+
+      modules = with_posix_default_external { described_class.new.standalone_modules }
+
+      expect(modules.fetch(path).map(&:identifier)).to eq(['StandaloneFixture::LedgerCodec'])
+    end
+
+    it 'keeps a singleton method its own file declares but another file redefines' do
+      load_source('rewrapping', <<~RUBY, directory: 'lib')
+        module StandaloneFixture::Rewrapping
+          def self.wrap(mod, name)
+            original = mod.method(name)
+            mod.singleton_class.send(:define_method, name) { |*a| original.call(*a) }
+          end
+        end
+      RUBY
+      load_source('ledger_lookup', <<~RUBY)
+        # Ledger lookup — by id
+        module StandaloneFixture::LedgerLookup
+          class << self
+            def call(id) = id
+          end
+          StandaloneFixture::Rewrapping.wrap(self, :call)
+        end
+      RUBY
+
+      values = with_posix_default_external { units }
+
+      lookup = values.find { |unit| unit.identifier == 'StandaloneFixture::LedgerLookup' }
+      expect(lookup.metadata).to include(ruby_kind: 'module', class_methods: ['call'])
+    end
   end
 
   it 'discovers an ordinary module singleton method without invoking it' do
@@ -147,7 +194,7 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
     expect(Woods::Extractors::ConcernExtractor.new.runtime_model_mixins[path]).to include(StandaloneFixture::Included)
   end
 
-  it 'never emits a second class-shaped unit for a path-governed module containing a helper class' do
+  it 'keeps a path-governed module a module unit beside its nested exception class' do
     path = load_source('standalone_fixture/with_helper', <<~RUBY)
       module StandaloneFixture::WithHelper
         class Error < StandardError; end
@@ -155,8 +202,10 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
       end
     RUBY
     values = described_class.new.extract_poro_units(path)
-    expect(values.map(&:identifier)).to eq(['StandaloneFixture::WithHelper'])
-    expect(values.first.metadata).to include(ruby_kind: 'module', parent_class: nil)
+    expect(values.map(&:identifier))
+      .to contain_exactly('StandaloneFixture::WithHelper', 'StandaloneFixture::WithHelper::Error')
+    helper = values.find { |unit| unit.identifier == 'StandaloneFixture::WithHelper' }
+    expect(helper.metadata).to include(ruby_kind: 'module', parent_class: nil)
   end
 
   it 'recomputes module ownership after an includer changes without editing the module' do
@@ -368,15 +417,18 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
       expect(units).to eq([])
     end
 
-    it 'still leaves a bodiless nested exception class out of a namespace file' do
+    it 'makes a bodiless nested exception class in a namespace file a unit, but not a bare class' do
       path = load_source('standalone_fixture/errors', <<~RUBY)
         module StandaloneFixture
           module Errors
             class Missing < StandardError; end
+            class Marker; end
           end
         end
       RUBY
-      expect(described_class.new.extract_poro_units(path)).to eq([])
+      units = described_class.new.extract_poro_units(path)
+      expect(units.map(&:identifier)).to eq(['StandaloneFixture::Errors::Missing'])
+      expect(units.first.metadata).to include(parent_class: 'StandardError')
     end
   end
 end

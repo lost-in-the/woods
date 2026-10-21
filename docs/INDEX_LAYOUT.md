@@ -75,8 +75,8 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `source_references.json` | Internal, versioned candidate and edge-ownership cache for this generation. Included in Woods 2.1. Older indexes remain readable without it; supporting incremental writers may require a [full baseline rebuild](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades). Preserve it when copying payloads. Not a public query schema. |
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
-| `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. |
-| `skipped_files.json` | Swept Ruby files that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only` and `not_owned`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
+| `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. `unmodelled_tables` lists the `database_table` units no model reads. |
+| `skipped_files.json` | Swept Ruby files and GraphQL operation documents (`config.graphql_document_paths`) that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Ruby reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only`, `not_owned` and `template` (a generator template under `lib/`); document reasons are `graphql_unavailable`, `schema_definitions` and `parse_error`. A template file named by a sweep glob is listed with `non_view_template`, `unsupported_template_engine` or `rejected_by:view_templates`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
 
@@ -91,7 +91,8 @@ The graph's `nodes`, typed variants, forward/reverse relationships and relations
 metadata belong to the graph format; preserve them when transporting the index.
 Extractor directories can contain multiple unit types: `graphql/` contains
 `graphql_type`, `graphql_mutation`, `graphql_resolver`, and `graphql_query`, while
-`rails_source/` contains `rails_source` and `gem_source`. Validate and retain the
+`rails_source/` contains `rails_source` and `gem_source`, and `routes/` contains
+`route` and `route_file`. Validate and retain the
 artifact's actual type instead of deriving it by singularizing the directory.
 
 Do not flatten typed variants into a single node per textual identifier. The
@@ -127,7 +128,10 @@ and [semantic error recovery](TROUBLESHOOTING.md#semantic-graph-validation-error
 ### File profiles and file membership
 
 `file_map[path]` lists units associated with a source file, including whole-file
-profiles. It does not promise that every identifier names a Ruby constant. New
+profiles. It does not promise that every identifier names a Ruby constant. A
+node with `source_paths` (a library unit assembled from several files, or a rake
+task defined or enhanced in several files) is mapped from every listed path
+instead of its `file_path`, and validation expects exactly those paths. New
 writers mark graph nodes of types `caching`, `configuration`, `test_mapping`,
 `rails_source`, and `gem_source` with `"kind": "file_profile"`. The same field
 appears on non-primary typed variants.
@@ -163,7 +167,11 @@ The existing `reverse` arrays retain their bare identifiers. `reverse_via` inclu
 edges from primary nodes and typed variants; several records can share a source
 and target while differing in type, relationship, or association attributes.
 Optional `through`, `through_db`, and `disable_joins` values match the forward
-edge. A `null` relationship means unknown legacy evidence. Target type remains
+edge. On an association edge `through` is the through association; on a
+`job_enqueue`, mailer or service edge it is the sorted, comma-joined list of
+the public methods that reach the target (see "Method side effects" in
+[EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md)). A `null` relationship means
+unknown legacy evidence. Target type remains
 unresolved when the target identifier belongs to multiple types; the source type
 does not resolve that ambiguity.
 

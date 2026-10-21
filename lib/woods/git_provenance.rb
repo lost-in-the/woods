@@ -67,6 +67,15 @@ module Woods
       { git_branch: branch, git_sha: sha }
     end
 
+    # Whether Git can filter source files in this application's working tree.
+    # Does not require HEAD or complete history (a freshly initialized tree works).
+    # @return [Boolean]
+    def source_filter_available?
+      return @source_filter_available if defined?(@source_filter_available)
+
+      @source_filter_available = git_working_tree? && git_available? && rev_parse('--is-inside-work-tree') == 'true'
+    end
+
     private
 
     def present?(value)

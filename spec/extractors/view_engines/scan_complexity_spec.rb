@@ -12,6 +12,8 @@ require 'woods/extractors/view_engines/jbuilder'
 # most polynomial patterns; the Ruby 3.0/3.1 rows are the ones that catch a
 # regression, through the Timeout fallback.
 RSpec.describe 'View engine scan complexity' do
+  include WallClockBudget
+
   budget_seconds = 1.0
   spaces = ' ' * 50_000
 
@@ -34,12 +36,14 @@ RSpec.describe 'View engine scan complexity' do
     'ERB form_with then underscored words' => "<%= form_with #{'a_' * 25_000}",
     'ERB repeated form_with calls' => '<%= form_with ' * 10_000,
     'ERB render then spaces' => "<%= render#{spaces}",
-    'ERB repeated render calls' => '<%= render ' * 10_000
+    'ERB repeated render calls' => '<%= render ' * 10_000,
+    'render template: then spaces' => "= render template:#{spaces}",
+    'repeated render template: calls' => '= render(template: ' * 10_000
   }
 
   engines = [Woods::Extractors::ViewEngines::Erb.new, Woods::Extractors::ViewEngines::Haml.new,
              Woods::Extractors::ViewEngines::Jbuilder.new]
-  scans = %i[scan_partials scan_unresolved_partials scan_helpers scan_navigation_candidates]
+  scans = %i[scan_partials scan_templates scan_unresolved_partials scan_helpers scan_navigation_candidates]
 
   around do |example|
     if Regexp.respond_to?(:timeout=)
@@ -58,10 +62,7 @@ RSpec.describe 'View engine scan complexity' do
   engines.each do |engine|
     adversarial_sources.each do |label, source|
       it "#{engine.name} scans stay within #{budget_seconds}s on #{label}" do
-        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        scans.each { |scan| engine.public_send(scan, source) }
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-        expect(elapsed).to be < budget_seconds
+        within_budget(budget_seconds) { scans.each { |scan| engine.public_send(scan, source) } }
       end
     end
   end

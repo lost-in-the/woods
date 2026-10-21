@@ -62,7 +62,7 @@ Dir.mktmpdir('woods-library-identity') do |root|
   runner.raise_on_publication_failure!
   reader = Woods::MCP::IndexReader.new(output)
   payload = Woods::Generation.new(output_dir: output).payload_dir
-  libraries = JSON.parse(File.read(File.join(payload, 'libs/_index.json')))
+  libraries = JSON.parse(Woods::AtomicFile.read(File.join(payload, 'libs/_index.json')))
   error = reader.find_unit('Acme::Error', type: 'lib')
   controller = reader.find_unit('ErrorsController', type: 'controller')
   puts JSON.generate(identifiers: libraries.map { |unit| unit.fetch('identifier') },

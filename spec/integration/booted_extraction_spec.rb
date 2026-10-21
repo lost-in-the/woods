@@ -153,6 +153,21 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(metadata.fetch('callback_count')).to eq(metadata.fetch('callbacks').length)
   end
 
+  it 'attributes side effects to a public model method without touching its callback entry' do
+    metadata = find_unit(:models, 'Post').fetch('metadata')
+
+    expect(metadata.fetch('method_effects')).to eq(
+      'normalize_title' => {
+        'jobs_enqueued' => [], 'mail_sent' => [], 'services_called' => [], 'columns_written' => ['title'],
+        'events_published' => [], 'external_calls' => []
+      }
+    )
+    expect(metadata).not_to have_key('method_effects_truncated')
+    callback = metadata.fetch('callbacks').find { |entry| entry['filter'] == 'normalize_title' }
+    expect(callback.fetch('side_effects').keys)
+      .to eq(%w[columns_written jobs_enqueued services_called mailers_triggered database_reads operations])
+  end
+
   it 'reflects real Rails callback kinds and the separate before_commit event' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
@@ -320,8 +335,12 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     end
     allow(Rails.application).to receive(:routes).and_return(routes)
 
-    units = Woods::Extractors::RouteExtractor.new.extract_all.to_h { |unit| [unit.identifier, unit] }
+    extracted = Woods::Extractors::RouteExtractor.new.extract_all
+    units = extracted.select { |unit| unit.type == :route }.to_h { |unit| [unit.identifier, unit] }
 
+    # The dummy app's own route file is a unit of its own beside the routes.
+    expect(extracted.reject { |unit| unit.type == :route }.map { |unit| [unit.type, unit.identifier] })
+      .to eq([[:route_file, 'config/routes.rb']])
     expect(units.keys).to contain_exactly(
       'ANY /cable (mount)', 'GET /settings (redirect)', 'GET /start (redirect)', 'GET /old (redirect)',
       'ANY /v1/*unmatched_route (rack_endpoint)', 'GET / [subdomain=www] (redirect)', 'GET /posts'
@@ -424,11 +443,27 @@ RSpec.describe 'Booted-app extraction', :booted_app do
       Woods.configuration.output_dir = previous_output
     end
 
+    # An incremental run or refresh that alters no unit publishes nothing, and
+    # spec/dummy is never edited here. Making the published unit stale gives
+    # the run real work, so it has to publish. The file is replaced, not
+    # rewritten in place: payload files are hardlinked across generations.
+    def stale_published_unit(dir, type_dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      path = Dir[payload.join(type_dir, '*.json').to_s].find do |file|
+        JSON.parse(File.read(file))['identifier'] == identifier
+      end
+      data = JSON.parse(File.read(path))
+      data['source_code'] = "# stale\n#{data['source_code']}"
+      File.write("#{path}.stale", JSON.generate(data))
+      File.rename("#{path}.stale", path)
+    end
+
     %i[extract! extract_changed!].each do |operation|
       it "raises from #{operation} and retains the prior published generation" do
         dir = Woods.configuration.output_dir.to_s
         marker = File.join(dir, 'generation.json')
         before_bytes = File.binread(marker)
+        stale_published_unit(dir, 'models', 'Post') if operation == :extract_changed!
         allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |method, path, content|
           raise Errno::EACCES, 'publication blocked' if path.to_s == marker
 
@@ -450,6 +485,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
         generation = Woods::Generation.new(output_dir: dir)
         before_token = generation.current.token
         before_manifest = File.binread(generation.payload_dir.join('manifest.json'))
+        stale_published_unit(dir, 'controllers', 'PostsController') unless mode == :full
         failed = Woods::Extractors::RouteExtractor
         allow_any_instance_of(failed).to receive(:extract_all)
           .and_raise(Woods::ExtractionError, 'route table unavailable')
@@ -683,7 +719,10 @@ RSpec.describe 'Optional GraphQL extraction', :booted_app do
                                               'root demotion full/incremental equivalence',
                                               'GraphQL refresh full equivalence',
                                               'plain Ruby resolver helper retains historical identity and source',
-                                              'helper edit full/incremental equivalence')
+                                              'helper edit full/incremental equivalence',
+                                              'unchanged GraphQL type targets a constant created later',
+                                              'later GraphQL reference target full/incremental equivalence',
+                                              'unchanged GraphQL type withdraws the edge with its target')
   end
 end
 

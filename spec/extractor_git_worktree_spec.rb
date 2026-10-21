@@ -69,10 +69,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     run!('git', 'init', '--quiet', '--initial-branch', 'main', '.', chdir: main_repo)
     run!('git', 'config', 'user.email', 'specs@example.test', chdir: main_repo)
     run!('git', 'config', 'user.name', 'Specs', chdir: main_repo)
-    # A background gc keeps writing into .git after `git commit` returns, and
-    # the tmpdir cleanup then races it into Errno::ENOTEMPTY.
-    run!('git', 'config', 'gc.autoDetach', 'false', chdir: main_repo)
-    run!('git', 'config', 'gc.auto', '0', chdir: main_repo)
+    QuietGit.configure(main_repo, env: hermetic_git_env)
     File.write(File.join(main_repo, 'app', 'models', 'post.rb'), "class Post\nend\n")
     run!('git', 'add', '.', chdir: main_repo)
     run!('git', 'commit', '--quiet', '-m', 'add post', chdir: main_repo)
@@ -167,7 +164,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
     before do
       # The worktree ID is metadata, not the branch name ('wt' vs 'feature').
       @mounted_gitdir = File.join(mounted_common, 'worktrees', File.basename(private_gitdir))
-      FileUtils.cp_r(File.join(main_repo, '.git'), mounted_common)
+      QuietGit.copy_tree(File.join(main_repo, '.git'), mounted_common)
     end
 
     it 'wins over an unreachable commondir and restores the git keys' do

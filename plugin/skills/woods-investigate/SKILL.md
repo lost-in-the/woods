@@ -66,9 +66,12 @@ evidence, not observed execution; the coverage warning remains applicable.
 
 The same Woods 2.1 expansion discovers callable standalone `app/models` modules
 as `poro` units with `metadata.ruby_kind: "module"`. Runtime model mixins retain
-`concern` ownership. Verify the installed writer and run a full extraction before
-expecting those units; namespace-only wrappers and uncertain source ownership
-remain outside discovery.
+`concern` ownership. Later writers also sweep Ruby under `app/` that no extractor
+claims (helpers, view models, constraints, an app-local `app/lib`) into `poro`
+units marked `metadata.discovered_via: "unclaimed_sweep"` or `"owner_fallback"`.
+Verify the installed writer and run a full extraction before expecting those
+units; namespace-only wrappers and uncertain source ownership remain outside
+discovery.
 
 The response `graph_coverage` notice, `total_is_exact` field, and human label
 `witness types unambiguous` (#470/#471) are included in Woods `2.0.0`.

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
@@ -130,7 +131,7 @@ module Woods
       def read_source(file_path)
         return '' unless file_path && File.exist?(file_path)
 
-        File.read(file_path)
+        SourceFile.read(file_path)
       rescue StandardError
         ''
       end

@@ -609,6 +609,29 @@ RSpec.describe Woods::Extractors::CachingExtractor do
                              options: { expires_in: '1.hour' } }])
     end
 
+    it 'reads a store call written without parentheses' do
+      calls = calls_for('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def balance
+            Rails.cache.fetch "ledger/balance", expires_in: 1.hour do
+              compute
+            end
+          end
+
+          def stale? = Rails.cache.exist? :ledger_stale
+
+          def forget = Rails.cache.delete [id, "totals"]
+        end
+      RUBY
+
+      expect(calls).to eq([
+                            { type: :fetch, key_pattern: '"ledger/balance"', ttl: '1.hour',
+                              options: { expires_in: '1.hour' } },
+                            { type: :delete, key_pattern: '[id, "totals"]', ttl: nil, options: {} },
+                            { type: :exist, key_pattern: ':ledger_stale', ttl: nil, options: {} }
+                          ])
+    end
+
     it 'keeps a key whose string mentions cache as one fragment call' do
       erb = calls_for('app/views/widgets/show.html.erb', <<~ERB)
         <% cache [@widget, "cache me now"] do %>
@@ -664,6 +687,17 @@ RSpec.describe Woods::Extractors::CachingExtractor do
   # Under a POSIX locale a bare File.read tags source as US-ASCII, and a
   # multibyte template then fails the byte-offset scan.
   describe 'source encoding' do
+    it 'scrubs bytes that are not valid UTF-8 and still extracts the cache calls' do
+      path = create_file('app/views/widgets/index.html.haml',
+                         "-# caf\xE9 note\n- cache [@widget] do\n  %p= Rails.cache.read(\"widget/key\")\n".b)
+
+      unit = with_posix_default_external { described_class.new.extract_caching_file(path) }
+
+      expect(unit).not_to be_nil
+      expect(unit.metadata[:cache_calls].map { |c| c[:key_pattern] }).to eq(['"widget/key"', '[@widget]'])
+      expect(unit.source_code).to include("caf\uFFFD")
+    end
+
     it 'reads a multibyte source the same under a POSIX default external encoding' do
       path = create_file('app/views/widgets/show.html.haml', <<~HAML)
         -# Ünïcødé ☃ comment
@@ -1013,6 +1047,8 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       'near-miss do' => 'cache dox ' * repeats,
       'json.cache without a bang' => 'json.cache ' * repeats,
       'Rails.cache.fetch then blanks' => "Rails.cache.fetch#{' ' * repeats}x",
+      'Rails.cache.read then mixed blanks' => "Rails.cache.read#{" \t" * repeats}=",
+      'Rails.cache.write calls with no argument' => 'Rails.cache.write ' * repeats,
       'cache_key-prefixed words' => 'cache_keyx ' * repeats,
       'cache inside an open string' => 'cache "cache ' * repeats,
       'cache inside closed strings' => 'cache "cache " ' * repeats,

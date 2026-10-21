@@ -1,0 +1,1 @@
+- Type a GraphQL edge to a loaded plain class by what it is. With graphql-ruby loaded, a reference from a GraphQL file to a class under `Types::` that graphql-ruby does not own (a nested error or value class) is recorded as a `code_reference` edge typed `poro` (or `model` for an Active Record class) instead of a `type_reference` to a `graphql_type`.

@@ -1,0 +1,1 @@
+- An incremental run re-extracts view components when a Slim sidecar template changes. Sidecar detection already recorded a `.slim` template in `sidecar_template`, but the incremental trigger recognised only the engines Woods scans, so adding, moving, or deleting a Slim sidecar left that field stale until the next full extraction.

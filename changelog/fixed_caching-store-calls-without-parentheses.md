@@ -1,0 +1,1 @@
+- The caching extractor detects a `Rails.cache` call written without parentheses. `Rails.cache.fetch "k" do`, `Rails.cache.exist? :k`, and the other store methods matched only when a `(` or `[` followed the method name, so a command-style call was never recorded. A first argument on the same line now counts too.

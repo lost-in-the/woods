@@ -1,11 +1,14 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'route_helper_resolver'
+require_relative 'helper_call_scan'
+require_relative 'frontend_references'
 
 module Woods
   module Extractors
@@ -29,6 +32,7 @@ module Woods
       include SharedUtilityMethods
       include SharedDependencyScanner
       include RouteHelperResolver
+      include FrontendReferences
 
       # Common Phlex base classes to look for
       PHLEX_BASES = %w[
@@ -84,10 +88,12 @@ module Woods
 
         unit.namespace = extract_namespace(component)
         unit.source_code = read_source(unit.file_path)
-        unit.metadata = extract_metadata(component, unit.source_code)
-        unit.dependencies = extract_dependencies(component, unit.source_code)
+        renders = resolve_render_targets(component, unit.source_code)
+        unit.metadata = extract_metadata(component, unit.source_code).merge(component_resolution_metadata(renders))
+        unit.dependencies = extract_dependencies(unit.source_code, renders)
+        HelperCallScan.annotate(self, unit, component)
 
-        unit
+        apply_frontend_references(unit, unit.source_code)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract component #{component.name}: #{e.message}")
         nil
@@ -96,7 +102,8 @@ module Woods
       private
 
       def app_component?(component)
-        @component_base && component.name && component < @component_base && app_source_file?(source_file_for(component))
+        @component_base && component.name && component < @component_base &&
+          current_constant?(component) && app_source_file?(source_file_for(component))
       end
 
       # Find the base component class used in the application.
@@ -146,7 +153,7 @@ module Woods
       def read_source(file_path)
         return '' unless file_path && File.exist?(file_path)
 
-        File.read(file_path, encoding: Encoding::UTF_8)
+        SourceFile.read(file_path)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -232,26 +239,14 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(component, source)
-        deps = []
-
-        # Other components rendered
-        # Phlex style: render ComponentName.new(...)
-        source.scan(/render\s+(\w+(?:::\w+)*)(?:\.new|\()/).flatten.uniq.each do |comp|
-          next if comp == component.name # Skip self-references
-
-          deps << { type: :component, target: comp, via: :render }
-        end
-
-        # ViewComponent style: render(ComponentName.new(...))
-        source.scan(/render\((\w+(?:::\w+)*)\.new/).flatten.uniq.each do |comp|
-          next if comp == component.name
-
-          deps << { type: :component, target: comp, via: :render }
-        end
+      # @param source [String]
+      # @param renders [RenderTargetResolver::Result] from {#resolve_render_targets}
+      def extract_dependencies(source, renders)
+        deps = component_dependencies(renders)
 
         # Model references (often passed as props)
         deps.concat(scan_model_dependencies(source, via: :data_dependency))
+        deps.concat(scan_config_dependencies(source))
 
         # Helper modules
         source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|
@@ -260,11 +255,6 @@ module Woods
 
         source.scan(/helpers\.(\w+)/).flatten.uniq.each do |method|
           deps << { type: :helper_method, target: method, via: :call }
-        end
-
-        # Stimulus controllers (from data-controller attributes)
-        source.scan(/data[_-]controller[=:]\s*["']([^"']+)["']/).flatten.uniq.each do |controller|
-          deps << { type: :stimulus_controller, target: controller, via: :html_attribute }
         end
 
         # Navigation edges — resolve _path / _url helpers to real controllers

@@ -10,6 +10,16 @@ require 'woods/extractors/serializer_extractor'
 RSpec.describe Woods::Extractors::SerializerExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/serializers/widget_serializer.rb',
+                  source: <<~SOURCE,
+                    # Widget — public fields
+                    class WidgetSerializer < ActiveModel::Serializer
+                      attributes :id, :name
+                    end
+                  SOURCE
+                  identifier: 'WidgetSerializer'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -240,6 +250,18 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
       expect(serializer_deps).to all(include(via: :serialization))
     end
 
+    it 'strips a leading :: from a referenced serializer' do
+      path = create_file('app/serializers/crate_serializer.rb', <<~RUBY)
+        class CrateSerializer < ActiveModel::Serializer
+          has_many :labels, serializer: ::Depot::LabelSerializer
+        end
+      RUBY
+
+      unit = described_class.new.extract_serializer_file(path)
+
+      expect(unit.dependencies).to include({ type: :serializer, target: 'Depot::LabelSerializer', via: :serialization })
+    end
+
     it 'detects service dependencies' do
       path = create_file('app/serializers/order_serializer.rb', <<~RUBY)
         class OrderSerializer < ActiveModel::Serializer
@@ -441,6 +463,29 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
       unit = units_by_id.fetch('LedgerFixture::CardChargeView')
       expect(unit).to have_attributes(type: :serializer, file_path: path)
       expect(unit.metadata[:parent_class]).to eq('BaseChargeSerializer')
+    end
+
+    it 'discovers a markerless descendant from multibyte files under a US-ASCII default external encoding' do
+      declare('application_serializer.rb', <<~RUBY)
+        # Application serializer — shared base
+        class ApplicationSerializer
+          def self.attributes(*names) = (@attributes = names)
+        end
+      RUBY
+      path = declare('card_charge_view.rb', <<~RUBY)
+        # Card charge — view
+        class CardChargeView < ApplicationSerializer
+          def processor = "card"
+        end
+      RUBY
+
+      classes, units = with_posix_default_external do
+        [described_class.new.discoverable_classes, units_by_id]
+      end
+
+      expect(classes).to include(LedgerFixture::CardChargeView)
+      expect(units.fetch('LedgerFixture::CardChargeView')).to have_attributes(file_path: path)
+      expect(units.fetch('LedgerFixture::CardChargeView').source_code).to include('Card charge — view')
     end
 
     it 'admits a standalone serializer class with no superclass' do

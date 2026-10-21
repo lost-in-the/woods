@@ -1,6 +1,14 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative 'graphql_document_paths'
+require_relative 'git_source_filter'
+# The Git filter asks the configuration extractors which paths they own, and a
+# resident process (the watch daemon, a rake task) loads this file without them.
+require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/configuration_extractor'
+require_relative 'javascript_paths'
+require_relative 'extractors/doc_extractor'
 
 module Woods
   # Resolves a changed file path to the extraction work it implies.
@@ -91,7 +99,7 @@ module Woods
 
       def under_a_directory?(relative_path)
         dirs.to_a.any? do |dir|
-          next false unless relative_path.start_with?("#{dir}/")
+          next false unless dir == '.' || relative_path.start_with?("#{dir}/")
 
           recursive == false ? File.dirname(relative_path) == dir : true
         end
@@ -110,7 +118,29 @@ module Woods
     # Fixed glob flags: `**/` spans directories, `{a,b}` alternation works.
     GLOB_FLAGS = File::FNM_PATHNAME | File::FNM_EXTGLOB
 
+    # Extractors whose directory constants the rules name. Loaded when the
+    # rules are built, not at require time, so a process that loads only
+    # the dispatcher (one extractor's specs, a resident daemon) still builds
+    # them.
+    RULE_EXTRACTORS = %w[
+      caching_extractor config_file_extractor configuration_extractor database_table_extractor
+      decorator_extractor event_extractor external_consumer_extractor factory_extractor graphql_extractor
+      i18n_extractor job_extractor lib_extractor manager_extractor package_extractor policy_extractor
+      pundit_extractor rake_task_extractor scheduled_job_extractor serializer_extractor service_extractor
+      state_machine_extractor test_support_catalog validator_extractor view_template_extractor
+    ].freeze
+
     class << self
+      # Paths introduced by configuration-source discovery, including generators.
+      # @param path [String] root-relative path
+      # @return [Boolean]
+      def configuration_source_path?(path)
+        Extractors::ConfigFileExtractor.config_file_path?(path) ||
+          Extractors::ConfigurationExtractor.configuration_path?(path) ||
+          path.match?(%r{\Aconfig/routes(?:\.rb|/.*\.rb)\z}) ||
+          (path.start_with?('lib/') && path.include?('/generators/') && path.end_with?('.rb'))
+      end
+
       # The extractor whose file rule owns +relative_path+, ignoring scans in
       # {NON_CLAIMING_RULES}. Static: it never consults extraction output.
       #
@@ -160,6 +190,80 @@ module Woods
         model_path || unclaimed?(relative_path)
       end
 
+      # Is this a client GraphQL operation document under the configured roots?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def graphql_document_path?(relative_path)
+        GraphQLDocumentPaths.match?(relative_path)
+      end
+
+      # Is this a YAML file ConfigFileExtractor indexes, under the configured globs?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def config_file_path?(relative_path)
+        Woods::Extractors::ConfigFileExtractor.config_file_path?(relative_path)
+      end
+
+      # Can this path change the table set or a table's owning model?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def database_schema_path?(relative_path)
+        Woods::Extractors::DatabaseTableExtractor.trigger_path?(relative_path)
+      end
+
+      # Is this the declared external consumers file?
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def external_consumers_path?(relative_path)
+        Woods::Extractors::ExternalConsumerExtractor.trigger_path?(relative_path)
+      end
+
+      # A file the test support extractor indexes: under the configured
+      # globs, or in a factory directory (a factory file that declares no
+      # factory is test support).
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def test_support_source?(relative_path)
+        test_support_definitions?(relative_path) ||
+          (relative_path.end_with?('.rb') &&
+            Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES.any? do |dir|
+              relative_path.start_with?("#{dir}/")
+            end)
+      end
+
+      # A file whose names test mappings resolve references against. Factory
+      # directories are excluded: nothing refers to them by name.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def test_support_definitions?(relative_path)
+        Woods::Extractors::TestSupportCatalog.support_path?(relative_path)
+      end
+
+      # Is this a JavaScript/TypeScript module the js_module extractor indexes?
+      # Reads the configured globs at call time.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def js_module_path?(relative_path)
+        JavascriptPaths.source?(relative_path)
+      end
+
+      # Documentation is matched by the configured globs at call time. The
+      # rule's own fields stay fixed: they describe the default roots to the
+      # generated hook predicate and keep the rule fingerprint config-free.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def doc_path?(relative_path)
+        Woods::Extractors::DocExtractor.doc_path?(relative_path)
+      end
+
       # Runtime-discovered classes have no per-file extractor method.
       def runtime_rules
         @runtime_rules ||= [Rule.new(dirs: %w[app], extensions: %w[.rb])].freeze
@@ -174,15 +278,17 @@ module Woods
 
       # Rules for extractors that must be re-run wholesale.
       #
-      # Memoized per configured +event_paths+: the events rule's +dirs+ come
-      # from configuration, which can change or be replaced after the first
-      # call. Keying on the value keeps every rule plain serializable data.
+      # Memoized per configured +event_paths+ and +rake_task_paths+: those
+      # rules' +dirs+ come from configuration, which can change or be replaced
+      # after the first call. Keying on the value keeps every rule plain
+      # serializable data.
       #
       # @return [Array<Rule>]
       def whole_app_rules
-        roots = event_roots
+        roots = [event_roots, Woods::Extractors::RakeTaskPaths.configured, JavascriptPaths.globs]
         @whole_app_rules = nil unless @whole_app_rules_event_roots == roots
         @whole_app_rules_event_roots = roots
+        require_rule_extractors
         @whole_app_rules ||= build_whole_app_rules.freeze
       end
 
@@ -212,7 +318,31 @@ module Woods
       end
 
       def build_file_rules
-        plain_ruby_rules + specialized_rules + caching_rules
+        require_rule_extractors
+        plain_ruby_rules + configuration_rules + specialized_rules + caching_rules
+      end
+
+      def require_rule_extractors
+        RULE_EXTRACTORS.each { |name| require_relative "extractors/#{name}" }
+      end
+
+      # Ruby and YAML configuration sources.
+      def configuration_rules
+        ex = Woods::Extractors
+
+        [
+          # Initializers and environments, plus the boot, seed, deploy and root
+          # files ConfigurationExtractor names exactly.
+          file_rule(:configurations, :extract_configuration_file,
+                    ex::ConfigurationExtractor::DIRECTORY_TYPES.keys,
+                    exact_paths: ex::ConfigurationExtractor::SOURCE_FILES),
+          # YAML under the configured globs. The matcher reads them at call
+          # time; the static attributes describe the defaults, for projections
+          # that cannot call it.
+          file_rule(:config_files, :extract_config_file, ex::ConfigFileExtractor::DEFAULT_ROOTS,
+                    extensions: ex::ConfigFileExtractor::DEFAULT_EXTENSIONS,
+                    exclude: ex::ConfigFileExtractor::PROJECTED_EXCLUSIONS, matcher: :config_file_path?)
+        ]
       end
 
       # Extractors that glob `**/*.rb` under directories they own.
@@ -227,8 +357,7 @@ module Woods
           [:policies, :extract_policy_file, ex::PolicyExtractor::POLICY_DIRECTORIES],
           [:validators, :extract_validator_file, ex::ValidatorExtractor::VALIDATOR_DIRECTORIES],
           [:pundit_policies, :extract_pundit_file, ex::PunditExtractor::PUNDIT_DIRECTORIES],
-          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES],
-          [:configurations, :extract_configuration_file, ex::ConfigurationExtractor::CONFIG_DIRECTORIES]
+          [:decorators, :extract_decorator_file, ex::DecoratorExtractor::DECORATOR_DIRECTORIES]
         ].map { |key, method_name, dirs| file_rule(key, method_name, dirs) }
       end
 
@@ -258,7 +387,9 @@ module Woods
           file_rule(:poros, :extract_poro_units, %w[app], matcher: :poro_path?),
           file_rule(:libs, :extract_lib_file, %w[lib], exclude: ex::LibExtractor::EXCLUDED_SEGMENTS),
           file_rule(:test_mappings, :extract_test_file, %w[spec], extensions: %w[_spec.rb]),
-          file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb])
+          file_rule(:test_mappings, :extract_test_file, %w[test], extensions: %w[_test.rb]),
+          file_rule(:docs, :extract_doc_file, ex::DocExtractor::DEFAULT_ROOT_DIRECTORIES,
+                    exact_paths: ex::DocExtractor::DEFAULT_ROOT_FILES, extensions: %w[.md], matcher: :doc_path?)
         ]
       end
 
@@ -276,16 +407,75 @@ module Woods
 
       def aggregate_source_rules
         [whole_app_rule(:libs, %w[lib], extensions: %w[.rb], exclude: Woods::Extractors::LibExtractor::EXCLUDED_SEGMENTS),
-         whole_app_rule(:rake_tasks, Woods::Extractors::RakeTaskExtractor::RAKE_DIRECTORIES, extensions: %w[.rake])]
+         *Woods::Extractors::RakeTaskPaths.rule_attributes.map { |rule| whole_app_rule(:rake_tasks, **rule) }]
       end
 
-      # Schedule files by name, plus any Ruby config source that can register
-      # Sidekiq periodic jobs.
+      # Schedule files by name, any Ruby config source that can register
+      # Sidekiq periodic jobs, and the job directories: whether a scheduled
+      # entry's class is loaded (`job_class_resolved`) changes with them.
       def scheduled_job_rule
         schedules = Woods::Extractors::ScheduledJobExtractor
         exact_paths = schedules::SCHEDULE_FILES.keys + schedules::PERIODIC_SOURCE_FILES
-        whole_app_rule(:scheduled_jobs, schedules::PERIODIC_SOURCE_DIRECTORIES,
-                       extensions: %w[.rb], exact_paths: exact_paths)
+        directories = schedules::PERIODIC_SOURCE_DIRECTORIES + Woods::Extractors::JobExtractor::JOB_DIRECTORIES
+        whole_app_rule(:scheduled_jobs, directories, extensions: %w[.rb], exact_paths: exact_paths)
+      end
+
+      # Operation documents resolve their selections against the booted
+      # schema, so a server-side change re-runs them as well. The document rule
+      # names its matcher: the roots are configuration, read at call time. Its
+      # dirs and extensions are the defaults, for the generated hook predicate.
+      def graphql_operation_rules
+        [whole_app_rule(:graphql_operations, [Woods::Extractors::GraphQLExtractor::GRAPHQL_DIRECTORY],
+                        extensions: %w[.rb]),
+         whole_app_rule(:graphql_operations, %w[app/javascript app/frontend],
+                        extensions: %w[.graphql .gql], exclude: [GraphQLDocumentPaths::EXCLUDED_SEGMENT],
+                        matcher: :graphql_document_path?)]
+      end
+
+      # Named predicates, read at call time: the schema-dump globs live with
+      # the table extractor, and the consumers file is configuration. The
+      # directories and exact paths restate the table predicate for the shell
+      # hook projection, which cannot call it.
+      def schema_unit_rules
+        [whole_app_rule(:database_tables, %w[db/migrate app/models],
+                        extensions: %w[.rb], exact_paths: %w[db/schema.rb db/structure.sql],
+                        matcher: :database_schema_path?),
+         whole_app_rule(:external_consumers, [], matcher: :external_consumers_path?)]
+      end
+
+      # A relative partial resolves through the controllers that reach its
+      # template, so any template, controller, or mailer change can move an
+      # edge of a template nobody edited.
+      def view_template_rules
+        views = Woods::Extractors::ViewTemplateExtractor
+        [whole_app_rule(:view_templates, views::VIEW_DIRECTORIES, extensions: view_template_extensions),
+         whole_app_rule(:view_templates, views::OWNER_DIRECTORIES, extensions: %w[.rb])]
+      end
+
+      # Families read from model and schema directories by their own globs.
+      def model_adjacent_rules
+        [whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
+                        extensions: %w[.rb]),
+         whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql])]
+      end
+
+      # Test support is resolved by name across files, so a support change
+      # re-runs the support units and the test mappings that refer to them;
+      # a rake change re-runs the test mappings that describe tasks. The
+      # matchers read the configured globs at call time. The directories and
+      # exact paths are the default locations: a static projection for the
+      # hook predicate, which cannot call a matcher.
+      def test_support_rules
+        helpers = %w[spec/spec_helper.rb spec/rails_helper.rb test/test_helper.rb]
+        dirs = %w[spec/support spec/lib test/support test/lib]
+        factories = Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES
+        [whole_app_rule(:test_support, dirs + factories, extensions: %w[.rb], exact_paths: helpers,
+                                                         matcher: :test_support_source?),
+         whole_app_rule(:test_mappings, dirs, extensions: %w[.rb], exact_paths: helpers,
+                                              matcher: :test_support_definitions?),
+         *Woods::Extractors::RakeTaskPaths.rule_attributes.map { |rule| whole_app_rule(:test_mappings, **rule) }]
       end
 
       def build_whole_app_rules
@@ -298,11 +488,14 @@ module Woods
           whole_app_rule(:middleware, %w[config/initializers config/environments],
                          exact_paths: %w[config/application.rb Gemfile.lock]),
           scheduled_job_rule,
-          whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
-                         extensions: %w[.rb]),
-          whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql]),
+          *model_adjacent_rules,
+          *graphql_operation_rules,
+          *schema_unit_rules,
+          *test_support_rules,
+          *view_template_rules,
+          # A module's registered names come from other files, so any module
+          # change re-runs the type.
+          *js_module_rules,
           # EventExtractor is a two-pass scan over its configured roots
           # (`event_paths`, default app/): any Ruby change under one can add
           # or remove a publish/subscribe site.
@@ -325,6 +518,17 @@ module Woods
         ]
       end
 
+      # One rule per configured glob. The matcher is authoritative; each
+      # rule's directory and extensions describe its glob for the hook
+      # projection, which has no Ruby.
+      def js_module_rules
+        JavascriptPaths.shapes.map do |directory, extensions, tests|
+          exclude = JavascriptPaths.excluded_fragments + (tests ? [] : JavascriptPaths.test_fragments)
+          whole_app_rule(:js_modules, [directory], extensions: extensions, exclude: exclude,
+                                                   matcher: :js_module_path?)
+        end
+      end
+
       # File-based extractors glob `**/*.rb` unless they say otherwise, so
       # that is the default extension filter here too.
       def file_rule(key, method_name, dirs, **opts)
@@ -332,9 +536,21 @@ module Woods
         Rule.new(extractor_key: key, method_name: method_name, dirs: Array(dirs), **opts)
       end
 
-      def whole_app_rule(key, dirs, **opts)
-        Rule.new(extractor_key: key, method_name: nil, dirs: Array(dirs), **opts)
+      def whole_app_rule(key, dirs = [], **opts)
+        Rule.new(extractor_key: key, method_name: nil, dirs: Array(opts.delete(:dirs) || dirs), **opts)
       end
+    end
+
+    # @param root [String, Pathname, nil] application root (Rails.root by default)
+    def initialize(root: nil)
+      root ||= Rails.root if defined?(Rails) && Rails.respond_to?(:root)
+      @git_filter = GitSourceFilter.new(root: root)
+    end
+
+    # @param path [String] root-relative path
+    # @return [Boolean] whether a configuration source is excluded by Git
+    def git_excluded?(path)
+      self.class.configuration_source_path?(path) && !@git_filter.skip_reason(path).nil?
     end
 
     # File-based rules matching a path.
@@ -342,6 +558,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Rule>]
     def file_rules_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.file_rules.select { |rule| rule.matches?(relative_path) }
     end
 
@@ -350,6 +568,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Array<Symbol>]
     def whole_app_keys_for(relative_path)
+      return [] if git_excluded?(relative_path)
+
       self.class.whole_app_rules
           .select { |rule| rule.matches?(relative_path) }
           .map(&:extractor_key).uniq
@@ -369,6 +589,8 @@ module Woods
     # @param relative_path [String] Rails.root-relative path
     # @return [Boolean]
     def relevant?(relative_path)
+      return false if git_excluded?(relative_path)
+
       return true if self.class.runtime_rules.any? { |rule| rule.matches?(relative_path) }
 
       file_rules_for(relative_path).any? || whole_app_keys_for(relative_path).any?

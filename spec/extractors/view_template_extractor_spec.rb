@@ -11,6 +11,14 @@ require 'woods/extractors/view_template_extractor'
 RSpec.describe Woods::Extractors::ViewTemplateExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'app/views/widgets/index.html.erb',
+                  source: <<~SOURCE,
+                    <h1>Widgets — all</h1>
+                    <%= render 'list' %>
+                  SOURCE
+                  identifier: 'widgets/index.html.erb'
+
   # Stub engine implementing the ViewEngines::Base contract. Reused by
   # the supported_template_engines aggregation tests and the engine
   # dispatch tests below.
@@ -305,7 +313,8 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       it 'skips the file and returns empty array' do
         allow(File).to receive(:read).and_call_original
         allow(File).to receive(:read).with(
-          a_string_matching(%r{app/views/broken/index\.html\.erb})
+          a_string_matching(%r{app/views/broken/index\.html\.erb}),
+          encoding: Encoding::UTF_8
         ).and_raise(Errno::EACCES)
 
         units = described_class.new.extract_all
@@ -497,6 +506,26 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'render template:' do
+    def render_targets(identifier)
+      unit = described_class.new.extract_all.find { |u| u.identifier == identifier }
+      unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] }
+    end
+
+    it 'records a render edge to the template it names' do
+      create_file('app/views/layouts/storefront.html.haml', "= render template: 'layouts/chrome'\n")
+      create_file('app/views/layouts/chrome.html.haml', "= yield\n")
+
+      expect(render_targets('layouts/storefront.html.haml')).to eq(['layouts/chrome.html.haml'])
+    end
+
+    it 'records no edge when no file holds the template' do
+      create_file('app/views/layouts/storefront.html.haml', "= render template: 'layouts/missing'\n")
+
+      expect(render_targets('layouts/storefront.html.haml')).to eq([])
+    end
+  end
+
   describe 'relative partials through controller view prefixes' do
     before do
       stub_const('ActionController::Base', Class.new)
@@ -543,8 +572,11 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(render_targets('profile/password/show.html.haml')).to eq(['cards/_show.html.haml'])
     end
 
-    it "keeps the engine's own identifier when no prefix holds the partial" do
-      expect(render_targets('profile/password/edit.html.haml')).to eq(['profile/password/_show.html.haml'])
+    it 'records no edge, and the name as unresolved, when no prefix holds the partial' do
+      unit = described_class.new.extract_all.find { |u| u.identifier == 'profile/password/edit.html.haml' }
+
+      expect(unit.dependencies.select { |d| d[:via] == :render }).to eq([])
+      expect(unit.metadata[:unresolved_partials]).to eq([{ kind: 'caller_prefix', name: 'show', candidates: [] }])
     end
   end
 
@@ -790,6 +822,53 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     it 'returns nil for files no registered engine handles' do
       unit = described_class.new.extract_view_template_file('/fake/app/views/users/edit.html.slim')
       expect(unit).to be_nil
+    end
+  end
+
+  describe 'frontend references' do
+    before do
+      create_file('app/javascript/controllers/clipboard_controller.js', '')
+      create_file('app/javascript/alpine/index.js', 'Alpine.data("dropdown", () => ({ open: false }))')
+      create_file('app/javascript/components/shipment-card.tsx',
+                  '@Component({ tag: "x-shipment-card" }) export class ShipmentCard {}')
+    end
+
+    it 'links ERB x-data, data-controller and custom element references to their modules' do
+      path = create_file('app/views/widgets/show.html.erb', <<~ERB)
+        <div x-data="dropdown" data-controller="clipboard gone">
+          <x-shipment-card sku="<%= @sku %>"></x-shipment-card>
+        </div>
+      ERB
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies).to include(
+        { type: :js_module, target: 'app/javascript/alpine/index.js', via: :alpine_data },
+        { type: :js_module, target: 'app/javascript/controllers/clipboard_controller.js', via: :stimulus_controller },
+        { type: :js_module, target: 'app/javascript/components/shipment-card.tsx', via: :custom_element }
+      )
+      expect(unit.metadata[:unresolved_frontend_references]).to eq([{ kind: 'stimulus_controller', name: 'gone' }])
+    end
+
+    it 'links HAML attribute hashes and element tags' do
+      path = create_file('app/views/widgets/index.html.haml', <<~HAML)
+        %div{ "x-data" => "dropdown()", data: { controller: "clipboard" } }
+          %x-shipment-card{ sku: 1 }
+      HAML
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies.select { |d| d[:type] == :js_module }.map { |d| d[:via] })
+        .to eq(%i[alpine_data stimulus_controller custom_element])
+    end
+
+    it 'leaves a template without frontend references unchanged' do
+      path = create_file('app/views/widgets/plain.html.erb', '<p>plain</p>')
+
+      unit = described_class.new.extract_view_template_file(path)
+
+      expect(unit.dependencies.map { |d| d[:type] }).not_to include(:js_module)
+      expect(unit.metadata).not_to include(:unresolved_frontend_references)
     end
   end
 

@@ -450,6 +450,28 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#method_effects_limit' do
+    it 'defaults to 50 methods per unit' do
+      expect(described_class.new.method_effects_limit).to eq(50)
+    end
+
+    it 'accepts a positive Integer, or nil to remove the cap' do
+      config = described_class.new
+      config.method_effects_limit = 10
+      expect(config.method_effects_limit).to eq(10)
+
+      config.method_effects_limit = nil
+      expect(config.method_effects_limit).to be_nil
+    end
+
+    it 'rejects zero and non-Integers' do
+      config = described_class.new
+
+      expect { config.method_effects_limit = 0 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.method_effects_limit = '5' }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+    end
+  end
+
   describe '#durable_payload_writes' do
     it 'defaults to false: the payload is made durable in one flush at publish time' do
       expect(described_class.new.durable_payload_writes).to be(false)
@@ -580,6 +602,12 @@ RSpec.describe Woods::Configuration do
       expect(config.event_paths).to eq(%w[app lib/events])
     end
 
+    it 'normalizes ./, repeated slashes and . segments so full and incremental runs agree on a root' do
+      config.event_paths = ['./lib', 'lib//events', 'app/./services', '.', './']
+
+      expect(config.event_paths).to eq(%w[lib lib/events app/services . .])
+    end
+
     it 'rejects a value that is not a non-empty Array' do
       expect { config.event_paths = 'lib' }
         .to raise_error(Woods::ConfigurationError, /event_paths must be a non-empty Array/)
@@ -606,6 +634,189 @@ RSpec.describe Woods::Configuration do
 
       expect { config.event_paths = ['app', '/srv'] }.to raise_error(Woods::ConfigurationError)
       expect(config.event_paths).to eq(%w[app lib])
+    end
+  end
+
+  describe '#graphql_document_paths' do
+    it 'defaults to operation documents under app/javascript and app/frontend' do
+      expect(described_class.new.graphql_document_paths)
+        .to eq(['app/javascript/**/*.{graphql,gql}', 'app/frontend/**/*.{graphql,gql}'])
+    end
+
+    it 'accepts relative globs and freezes them' do
+      config.graphql_document_paths = ['client/**/*.graphql']
+
+      expect(config.graphql_document_paths).to eq(['client/**/*.graphql'])
+      expect(config.graphql_document_paths).to be_frozen
+    end
+
+    it 'accepts an empty list, which turns the family off' do
+      config.graphql_document_paths = []
+
+      expect(config.graphql_document_paths).to eq([])
+    end
+
+    it 'rejects a non-Array, an absolute glob and a parent traversal, keeping the previous value' do
+      config.graphql_document_paths = ['client/**/*.graphql']
+
+      ['client/**/*.graphql', ['/srv/**/*.graphql'], ['app/../../x/*.gql'], [''], [:app]].each do |value|
+        expect { config.graphql_document_paths = value }
+          .to raise_error(Woods::ConfigurationError, /graphql_document_paths/)
+      end
+      expect(config.graphql_document_paths).to eq(['client/**/*.graphql'])
+    end
+  end
+
+  describe '#config_file_paths' do
+    it 'defaults to the globs the config file extractor names' do
+      require 'woods/extractors/config_file_extractor'
+
+      expect(described_class.new.config_file_paths).to eq(%w[config/*.yml config/**/*.yml app/data/**/*.yml])
+      expect(described_class.new.config_file_paths).to eq(Woods::Extractors::ConfigFileExtractor::DEFAULT_PATHS)
+    end
+
+    it 'accepts relative globs and freezes them' do
+      config = described_class.new
+      config.config_file_paths = ['config/settings/**/*.yml']
+
+      expect(config.config_file_paths).to eq(['config/settings/**/*.yml'])
+      expect(config.config_file_paths).to be_frozen
+    end
+
+    it 'rejects a non-Array, an absolute glob and a parent traversal, keeping the previous value' do
+      config = described_class.new
+      config.config_file_paths = ['config/*.yml']
+
+      expect { config.config_file_paths = 'config/*.yml' }
+        .to raise_error(Woods::ConfigurationError, /config_file_paths must be an Array/)
+      ['/etc/*.yml', '../shared/*.yml', '', nil].each do |glob|
+        expect { config.config_file_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /config_file_paths\[0\] must be a relative glob/)
+      end
+      expect(config.config_file_paths).to eq(['config/*.yml'])
+    end
+  end
+
+  describe '#config_file_values' do
+    it 'defaults to false and accepts only a boolean' do
+      config = described_class.new
+
+      expect(config.config_file_values).to be(false)
+      config.config_file_values = true
+      expect(config.config_file_values).to be(true)
+      expect { config.config_file_values = 'yes' }
+        .to raise_error(Woods::ConfigurationError, /config_file_values must be true or false/)
+      expect(config.config_file_values).to be(true)
+    end
+  end
+
+  describe '#settings_readers' do
+    it 'defaults to none' do
+      expect(described_class.new.settings_readers).to eq([])
+    end
+
+    it 'normalizes string and symbol keys and freezes the result' do
+      config = described_class.new
+      config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' },
+                                 { 'constant' => '::Billing::Limits', 'file' => 'config/limits.yml' }]
+
+      expect(config.settings_readers).to eq(
+        [{ constant: 'Settings', file: 'config/settings.yml' },
+         { constant: 'Billing::Limits', file: 'config/limits.yml' }]
+      )
+      expect(config.settings_readers).to be_frozen
+      expect(config.settings_readers.first).to be_frozen
+    end
+
+    it 'rejects malformed entries and keeps the previous value' do
+      config = described_class.new
+      config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+
+      [
+        'Settings',
+        ['Settings'],
+        [{ constant: 'settings', file: 'config/settings.yml' }],
+        [{ constant: 'Settings.x', file: 'config/settings.yml' }],
+        [{ constant: 'Settings' }],
+        [{ constant: 'Settings', file: '/etc/settings.yml' }],
+        [{ constant: 'Settings', file: 'config/../settings.yml' }],
+        [{ constant: 'Settings', file: '' }]
+      ].each do |value|
+        expect { config.settings_readers = value }.to raise_error(Woods::ConfigurationError, /settings_readers/)
+      end
+      expect(config.settings_readers).to eq([{ constant: 'Settings', file: 'config/settings.yml' }])
+    end
+  end
+
+  describe '#test_support_paths' do
+    it 'defaults to the conventional RSpec and Minitest support locations' do
+      expect(described_class.new.test_support_paths).to eq(
+        %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
+           test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb]
+      )
+    end
+
+    it 'accepts and freezes a list of relative globs' do
+      config = described_class.new
+      config.test_support_paths = ['spec/support/**/*.rb', 'features/support/**/*.rb']
+
+      expect(config.test_support_paths).to eq(['spec/support/**/*.rb', 'features/support/**/*.rb'])
+      expect(config.test_support_paths).to be_frozen
+    end
+
+    it 'accepts an empty list, which indexes no test support files' do
+      config = described_class.new
+      config.test_support_paths = []
+
+      expect(config.test_support_paths).to eq([])
+    end
+
+    it 'rejects a non-array' do
+      expect { described_class.new.test_support_paths = 'spec/support/**/*.rb' }
+        .to raise_error(Woods::ConfigurationError, /test_support_paths must be an Array/)
+    end
+
+    ['/abs/**/*.rb', '../outside/*.rb', 'spec/../../x.rb', '', nil, :sym].each do |glob|
+      it "rejects #{glob.inspect}" do
+        expect { described_class.new.test_support_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /test_support_paths\[0\] must be a relative glob/)
+      end
+    end
+
+    it 'keeps the previous value when validation fails' do
+      config = described_class.new
+      config.test_support_paths = ['spec/support/**/*.rb']
+
+      expect { config.test_support_paths = ['spec/lib/**/*.rb', '/abs.rb'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.test_support_paths).to eq(['spec/support/**/*.rb'])
+    end
+  end
+
+  describe '#test_subdomain_helpers' do
+    it 'defaults to common subdomain-switching helper names' do
+      expect(described_class.new.test_subdomain_helpers)
+        .to eq(%w[with_subdomain use_subdomain using_subdomain set_subdomain switch_to_subdomain on_subdomain])
+    end
+
+    it 'accepts and freezes a list of method names' do
+      config = described_class.new
+      config.test_subdomain_helpers = %w[on_storefront visit_shop!]
+
+      expect(config.test_subdomain_helpers).to eq(%w[on_storefront visit_shop!])
+      expect(config.test_subdomain_helpers).to be_frozen
+    end
+
+    it 'rejects a non-array and anything that is not a method name, keeping the previous value' do
+      config = described_class.new
+      config.test_subdomain_helpers = ['on_storefront']
+
+      expect { config.test_subdomain_helpers = 'with_subdomain' }
+        .to raise_error(Woods::ConfigurationError, /test_subdomain_helpers must be an Array/)
+      ['', 'With', 'a b', 'x.y', '(a|b)', nil, :sym].each do |name|
+        expect { config.test_subdomain_helpers = [name] }
+          .to raise_error(Woods::ConfigurationError, /test_subdomain_helpers\[0\] must be a method name/)
+      end
+      expect(config.test_subdomain_helpers).to eq(['on_storefront'])
     end
   end
 
@@ -639,11 +850,110 @@ RSpec.describe Woods::Configuration do
       end
     end
 
+    it 'rejects a parent traversal hidden inside a brace alternation' do
+      ['{../shared,app}/**/*.rb', 'app/{lib,..}/*.rb', 'app{/..,}/*.rb'].each do |glob|
+        expect { config.unclaimed_ruby_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/), glob
+      end
+    end
+
+    it 'still accepts brace alternations and dotted names that stay inside the root' do
+      config.unclaimed_ruby_paths = ['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb']
+
+      expect(config.unclaimed_ruby_paths)
+        .to eq(['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb'])
+    end
+
     it 'keeps the previous value when an entry is invalid' do
       config.unclaimed_ruby_paths = ['app/helpers/**/*.rb']
 
       expect { config.unclaimed_ruby_paths = ['app/lib/**/*.rb', '/abs.rb'] }.to raise_error(Woods::ConfigurationError)
       expect(config.unclaimed_ruby_paths).to eq(['app/helpers/**/*.rb'])
+    end
+  end
+
+  describe '#source_reference_callers' do
+    let(:types) { Woods::SourceReferences::Registry::TYPES }
+
+    it 'defaults to every constant-owned type, with components and GraphQL units kept out of their own family' do
+      callers = described_class.new.source_reference_callers
+      expect(callers.keys).to match_array(types)
+      expect(callers.fetch(:model)).to match_array(types)
+      expect(callers.fetch(:component)).to match_array(types - %i[component view_component])
+      expect(callers.fetch(:graphql_type))
+        .to match_array(types - %i[graphql_type graphql_mutation graphql_resolver graphql_query])
+    end
+
+    it 'applies the named caller types over the defaults and freezes the result' do
+      config.source_reference_callers = { component: %w[model service], 'mailer' => false, graphql_type: :all }
+
+      expect(config.source_reference_callers.fetch(:component)).to eq(%i[model service])
+      expect(config.source_reference_callers.fetch(:mailer)).to eq([])
+      expect(config.source_reference_callers.fetch(:graphql_type)).to match_array(types)
+      expect(config.source_reference_callers.fetch(:model)).to match_array(types)
+      expect(config.source_reference_callers).to be_frozen
+    end
+
+    it 'starts again from the defaults on each assignment' do
+      config.source_reference_callers = { mailer: false }
+      config.source_reference_callers = { component: :all }
+
+      expect(config.source_reference_callers.fetch(:mailer)).to match_array(types)
+    end
+
+    it 'rejects a value that is not a Hash' do
+      expect { config.source_reference_callers = %i[component] }
+        .to raise_error(Woods::ConfigurationError, /source_reference_callers must be a Hash/)
+    end
+
+    it 'rejects an unknown type and keeps the previous value' do
+      config.source_reference_callers = { mailer: false }
+
+      expect { config.source_reference_callers = { component: %i[widget] } }
+        .to raise_error(Woods::ConfigurationError, /unknown target type :widget for component/)
+      expect { config.source_reference_callers = { widget: :all } }
+        .to raise_error(Woods::ConfigurationError, /unknown caller type :widget/)
+      expect(config.source_reference_callers.fetch(:mailer)).to eq([])
+    end
+  end
+
+  describe '#rake_task_paths' do
+    it 'defaults to lib/tasks, a root rake directory and the Rakefile' do
+      expect(described_class.new.rake_task_paths).to eq(['lib/tasks/**/*.rake', 'rake/**/*.rake', 'Rakefile'])
+    end
+
+    it 'accepts file paths and directory globs and freezes the list' do
+      config.rake_task_paths = ['ops/**/*.rake', 'ops/Rakefile']
+
+      expect(config.rake_task_paths).to eq(['ops/**/*.rake', 'ops/Rakefile'])
+      expect(config.rake_task_paths).to be_frozen
+    end
+
+    it 'rejects a value that is not an Array' do
+      expect { config.rake_task_paths = 'Rakefile' }
+        .to raise_error(Woods::ConfigurationError, /rake_task_paths must be an Array/)
+    end
+
+    it 'rejects an entry outside the three supported shapes' do
+      ['', '/srv/tasks/*.rake', 'lib/../*.rake', '**/*.rake', 'lib/*/tasks/*.rake', :rake].each do |entry|
+        expect { config.rake_task_paths = [entry] }
+          .to raise_error(Woods::ConfigurationError, /rake_task_paths\[0\] must be a relative file path/)
+      end
+    end
+
+    it 'keeps the previous value when an entry is invalid' do
+      config.rake_task_paths = ['ops/*.rake']
+
+      expect { config.rake_task_paths = ['Rakefile', '/abs.rake'] }.to raise_error(Woods::ConfigurationError)
+      expect(config.rake_task_paths).to eq(['ops/*.rake'])
+    end
+
+    it 'feeds the rake path predicates' do
+      Woods.configuration = described_class.new
+      Woods.configuration.rake_task_paths = ['ops/*.rake']
+
+      expect(Woods::Extractors::RakeTaskPaths.task_file?('ops/deploy.rake')).to be(true)
+      expect(Woods::Extractors::RakeTaskPaths.task_file?('lib/tasks/export.rake')).to be(false)
     end
   end
 end

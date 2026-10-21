@@ -4,6 +4,7 @@ require_relative '../source_contributors'
 
 require 'digest'
 require 'json'
+require 'strscan'
 require_relative '../ast/parser'
 require_relative 'lexical_index'
 
@@ -131,12 +132,16 @@ module Woods
         metadata = field(:metadata) || {}
         Array(metadata['inlined_concerns'] || metadata[:inlined_concerns]).filter_map do |name|
           escaped = Regexp.escape(name.to_s)
-          pattern = /^# │ Included from: #{escaped}[^\S\r\n]*│\r?\n.*?^# ─+ End #{escaped} ─+\r?$/m
-          match = pattern.match(@source)
-          next unless match
+          # Two forward scans, header then nearest footer, on byte positions.
+          # The first header decides: with no footer after it, none follows
+          # any later header either.
+          scanner = StringScanner.new(@source)
+          next unless scanner.scan_until(/^# │ Included from: #{escaped}[^\S\r\n]*+│\r?\n/)
 
-          start_byte = @source[0...match.begin(0)].bytesize
-          end_byte = @source[0...match.end(0)].bytesize
+          start_byte = scanner.pos - scanner.matched_size
+          next unless scanner.scan_until(/^# ─++ End #{escaped} ─++\r?$/)
+
+          end_byte = scanner.pos
           Span.new(kind: 'inlined_concern_display', name: name, lexical_owner: name,
                    start_byte: start_byte, end_byte: end_byte,
                    start_line: @source.byteslice(0, start_byte).count("\n") + 1,

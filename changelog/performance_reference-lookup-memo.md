@@ -1,0 +1,1 @@
+- Resolve each lexical scope once per source-reference pass. The pass reuses a scope's ancestor chain and repeated constant lookups for the length of one run. With 1,200 component callers this takes the full-extraction pass from 1.8s to 1.0s. Extractors that load classes as they go keep unmemoized lookups.

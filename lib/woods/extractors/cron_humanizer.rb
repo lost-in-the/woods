@@ -118,6 +118,8 @@ module Woods
         minute, hour, day, month, weekday = fields.each_with_index.map { |field, index| parse(field, FIELDS[index]) }
         return nil if [minute, hour, day, month, weekday].any?(&:nil?)
 
+        hour = uneven_hour_step(hour)
+
         months = month_phrase(day, month, weekday)
         return nil if months == :unsupported
 
@@ -201,6 +203,14 @@ module Woods
         "every #{step} hours at #{past_the_hour(minutes)}"
       end
 
+      # `*/15` fires at 00 and 15, gaps of 15 and 9 hours, so a step that does
+      # not divide the day becomes the set of hours it fires at.
+      def uneven_hour_step(hour)
+        return hour unless hour.is_a?(Array) && hour.first == :step && (24 % hour.last).nonzero?
+
+        [:set, (0..23).step(hour.last).map { |h| [h, h] }]
+      end
+
       # One hour range: the window runs from the first to the last firing.
       def hour_range(minute, ranges)
         return nil unless ranges.one? && ranges.first.first < ranges.first.last
@@ -261,6 +271,9 @@ module Woods
         return [:weekdays] if expanded == [1, 2, 3, 4, 5]
         return [:weekends] if expanded == [0, 6]
 
+        # Items that repeat a day (`0,7`) are named from the days they cover.
+        ranges = expanded.slice_when { |a, b| b != a + 1 }.map { |run| [run.first, run.last] } if
+          expanded.size < ranges.sum { |from, to| to - from + 1 }
         names = ranges.map { |from, to| from == to ? DAYS[from % 7] : "#{DAYS[from % 7]} through #{DAYS[to % 7]}" }
         [:weekly, sentence(names)]
       end
@@ -315,7 +328,7 @@ module Woods
       end
 
       private_class_method :duration_parts, :describe_with_seconds, :describe, :parse, :parse_item, :value, :singles,
-                           :clock_times, :recurring_phrase, :stepped_hours, :hour_range, :minutes_within_hour,
+                           :clock_times, :recurring_phrase, :stepped_hours, :uneven_hour_step, :hour_range, :minutes_within_hour,
                            :past_the_hour, :clock, :month_phrase, :day_phrase,
                            :weekday_phrase, :month_day_phrase, :yearly_phrase, :clock_sentence,
                            :recurring_suffix, :quantity, :sentence

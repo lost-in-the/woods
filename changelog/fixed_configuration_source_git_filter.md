@@ -1,0 +1,1 @@
+- Exclude Git-ignored and untracked configuration, route, YAML and generator sources from full and incremental indexing; report skipped paths and mark the manifest when Git filtering is unavailable.

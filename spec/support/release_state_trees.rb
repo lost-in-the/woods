@@ -5,6 +5,7 @@ require 'tmpdir'
 
 require 'woods/release/preparer'
 
+require_relative 'quiet_git'
 require_relative 'release_repository'
 
 # Generates the three states a checked-in tree is ever in (the alpha
@@ -51,7 +52,7 @@ module ReleaseStateTrees
 
     def snapshot(workspace, name, work)
       target = File.join(workspace, name)
-      FileUtils.cp_r(work, target)
+      QuietGit.copy_tree(work, target)
       target
     end
   end

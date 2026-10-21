@@ -1,0 +1,1 @@
+- Label the symbolic HTTP edge `external_call`. Services and jobs that call HTTParty, Faraday, RestClient or Net::HTTP record an edge to the symbolic `http_api` target; its `via` was `code_reference`, which made it count as an unresolved constant reference. It is now `via: external_call`. The target and the reverse index are unchanged.

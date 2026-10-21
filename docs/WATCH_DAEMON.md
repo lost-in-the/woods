@@ -335,6 +335,7 @@ partial write:
 | Payload directory can't be opened, over a payload-born index | Degraded status; generation not advanced. An incremental run only writes the units it touched, so there is no complete flat index it could fall back to publishing, see [Payload publishing](#payload-publishing) |
 | Index written but the generation bump failed | Degraded status; paths carried forward. The extractor deliberately does not fail an otherwise-good extraction over an unwritable marker, but the marker *is* what readers refresh on, so the daemon cross-checks that the number moved rather than reporting `running` over an index nothing can see |
 | Boot-captured config changed | Degraded status; daemon exits `75` |
+| Incremental refused for extraction configuration drift (`Woods::ExtractionConfigChanged`) | One full extraction in the same cycle, logged as a warning. If it fails, the full obligation stays and the cycle degrades; the next event retries the full run, not the incremental |
 | Watcher dies | Degraded status; daemon exits |
 
 `tmp/woods/watch_status.json` carries the state:
@@ -635,7 +636,7 @@ framework sources are the minority.
 The numbers above are fixture-app numbers. Below are the same measurements on a
 **1,940-unit app**: `apps/rails-8.0-large` in
 [woods-testbed](https://github.com/lost-in-the/woods-testbed), a hand-written
-kernel covering all 35 extractors plus a deterministically generated tree, run by
+kernel covering all 42 extractors plus a deterministically generated tree, run by
 `scripts/woods_bench.rb` in woods-testbed (Ruby 3.3.1 / Rails 8.0.5, in-container, 5 reps per
 scenario). See [woods-testbed#2](https://github.com/lost-in-the/woods-testbed/issues/2).
 

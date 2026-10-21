@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'open3'
+require 'rbconfig'
+require 'tmpdir'
 require 'woods/extractor'
 
 RSpec.describe Woods::PathDispatcher do
@@ -8,6 +11,20 @@ RSpec.describe Woods::PathDispatcher do
 
   def keys_for(path)
     dispatcher.file_rules_for(path).map(&:extractor_key)
+  end
+
+  # The rules name constants of most extractors; one extractor's specs and a
+  # resident daemon load the dispatcher without them.
+  it 'builds its rules in a process that loaded only the dispatcher' do
+    Dir.mktmpdir('woods_dispatcher_only') do |root|
+      script = "require 'woods/path_dispatcher'; " \
+               "print Woods::PathDispatcher.claiming_key_for('app/services/checkout.rb'); print ' '; " \
+               "print Woods::PathDispatcher.new(root: #{root.inspect}).whole_app_keys_for('config/routes.rb').first"
+      out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.expand_path('../lib', __dir__), '-e', script)
+
+      expect(status.success?).to be(true), err
+      expect(out).to eq('services routes')
+    end
   end
 
   describe '#file_rules_for' do
@@ -52,10 +69,50 @@ RSpec.describe Woods::PathDispatcher do
       expect(keys_for('lib/tasks/export.rb')).not_to include(:rake_tasks)
     end
 
-    it 'excludes lib/tasks and lib/generators from the lib extractor' do
+    it 'excludes lib/tasks from the lib extractor and routes generators to it' do
       expect(keys_for('lib/reporting/csv.rb')).to include(:libs)
       expect(keys_for('lib/tasks/export.rb')).not_to include(:libs)
-      expect(keys_for('lib/generators/thing/thing_generator.rb')).not_to include(:libs)
+      expect(keys_for('lib/generators/thing/thing_generator.rb')).to include(:libs)
+      expect(dispatcher.whole_app_keys_for('lib/generators/thing/thing_generator.rb')).to include(:libs)
+    end
+
+    it 'routes boot, seed, deploy and root files to the configuration extractor' do
+      %w[config/initializers/redis.rb config/environments/test.rb config/boot.rb config/environment.rb
+         config/importmap.rb config/deploy.rb config/deploy/production.rb db/seeds.rb db/seeds/widgets.rb
+         Gemfile Rakefile].each do |path|
+        expect(keys_for(path)).to include(:configurations), path
+      end
+      %w[config/routes.rb config/application.rb config/puma.rb config/routes/admin.rb Gemfile.lock
+         db/schema.rb].each do |path|
+        expect(keys_for(path)).not_to include(:configurations), path
+      end
+    end
+
+    it 'routes configured YAML to the config file extractor, and never a secret or locale file' do
+      %w[config/settings.yml config/settings/production.yml config/sidekiq.yml
+         app/data/surveys/nps.yml].each do |path|
+        expect(keys_for(path)).to include(:config_files), path
+      end
+      %w[config/locales/en.yml config/secrets.yml config/credentials/production.yml config/master.key
+         .github/workflows/ci.yml spec/fixtures/widgets.yml config/settings.rb].each do |path|
+        expect(keys_for(path)).not_to include(:config_files), path
+      end
+    end
+
+    it 'follows config.config_file_paths at call time' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.config_file_paths = ['data/**/*.yaml']
+
+      expect(keys_for('data/ledgers/rates.yaml')).to include(:config_files)
+      expect(keys_for('config/settings.yml')).not_to include(:config_files)
+    ensure
+      Woods.configuration = original
+    end
+
+    it 're-runs routes wholesale for a draw file, which carries its route_file unit' do
+      expect(dispatcher.whole_app_keys_for('config/routes/admin.rb')).to include(:routes)
+      expect(Woods::Extractor::EXTRACTOR_KEY_TO_TYPES.fetch(:routes)).to eq(%i[route route_file])
     end
 
     it 'matches migrations only at the top level of db/migrate' do
@@ -82,7 +139,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'returns nothing for a path no extractor claims' do
-      expect(keys_for('README.md')).to be_empty
+      expect(keys_for('NOTES.md')).to be_empty
       expect(keys_for('config/routes.rb')).to be_empty
     end
 
@@ -278,6 +335,13 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('config/initializers/inflections.yml')).not_to include(:scheduled_jobs)
     end
 
+    it 'triggers a scheduled-job re-run on a job file, whose presence decides job_class_resolved' do
+      %w[app/jobs/nightly_report_job.rb app/workers/sweep_worker.rb app/sidekiq/ledger/purge_worker.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:scheduled_jobs), path
+      end
+      expect(dispatcher.whole_app_keys_for('app/jobs/README.md')).not_to include(:scheduled_jobs)
+    end
+
     it 'triggers state-machine and event re-runs on a model change' do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).to include(:state_machines, :events)
     end
@@ -302,6 +366,21 @@ RSpec.describe Woods::PathDispatcher do
         expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
       end
 
+      it 'matches a root spelled ./lib or lib//ledger the same way the full run scans it' do
+        Woods.configuration.event_paths = ['./lib', 'vendor//ledger']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('vendor/ledger/bus.rb')).to include(:events)
+      end
+
+      it 'treats . as every Ruby file under the root' do
+        Woods.configuration.event_paths = ['.']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
+      end
+
       it 'returns to the default when the configuration object is replaced' do
         Woods.configuration.event_paths = %w[app lib]
         described_class.whole_app_rules
@@ -322,6 +401,104 @@ RSpec.describe Woods::PathDispatcher do
       end
     end
 
+    context 'with rake task paths' do
+      before { Woods.configuration = Woods::Configuration.new }
+
+      def rake_rules
+        described_class.whole_app_rules.select { |rule| rule.extractor_key == :rake_tasks }
+      end
+
+      it 'triggers a rake_tasks re-run for every default root and its support Ruby' do
+        %w[lib/tasks/export.rake lib/tasks/support/format.rb rake/deploy.rake rake/lib/container.rb
+           Rakefile].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).to include(:rake_tasks), path
+        end
+      end
+
+      it 'leaves other paths alone' do
+        %w[lib/export.rake rake/notes.md engines/billing/Rakefile app/models/widget.rb].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).not_to include(:rake_tasks), path
+        end
+      end
+
+      it 're-runs test_mappings on a root rake file, whose task names task specs resolve against' do
+        expect(dispatcher.whole_app_keys_for('rake/deploy.rake')).to include(:rake_tasks, :test_mappings)
+        expect(dispatcher.whole_app_keys_for('Rakefile')).to include(:rake_tasks, :test_mappings)
+      end
+
+      it 'makes the new roots relevant to an incremental run' do
+        expect(dispatcher).to be_relevant('rake/deploy.rake')
+        expect(dispatcher).to be_relevant('rake/lib/container.rb')
+      end
+
+      it 'follows configured rake_task_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.rake_task_paths = ['ops/*.rake']
+
+        expect(dispatcher.whole_app_keys_for('ops/deploy.rake')).to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('ops/nested/deploy.rake')).not_to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('ops/nested/helper.rb')).to include(:rake_tasks)
+        expect(dispatcher.whole_app_keys_for('lib/tasks/export.rake')).not_to include(:rake_tasks)
+      end
+
+      it 'serializes as plain data naming the configured roots' do
+        serialized = JSON.parse(JSON.generate(rake_rules.map(&:to_h)))
+
+        expect(serialized.map { |rule| rule.values_at('dirs', 'extensions', 'exact_paths') }).to eq(
+          [[['lib/tasks'], %w[.rake .rb], nil], [['rake'], %w[.rake .rb], nil], [[], nil, ['Rakefile']]]
+        )
+        expect(rake_rules.map(&:matcher)).to all(be_nil)
+      end
+    end
+
+    describe 'the js_modules rule' do
+      def js_rule
+        described_class.whole_app_rules.find { |rule| rule.extractor_key == :js_modules }
+      end
+
+      it 'describes each glob with its own directory and extensions' do
+        shapes = described_class.whole_app_rules.select { |rule| rule.extractor_key == :js_modules }
+                                .map { |rule| [rule.dirs, rule.extensions] }
+
+        expect(shapes).to eq([[%w[app/assets/javascripts], %w[.js]], [%w[app/javascript], %w[.js .ts .jsx .tsx .mjs]]])
+      end
+
+      before { Woods.configuration = Woods::Configuration.new }
+
+      it 'triggers a js_modules re-run on a module under the default roots' do
+        %w[app/javascript/controllers/clipboard_controller.js app/javascript/widgets/picker.tsx
+           app/assets/javascripts/legacy.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).to eq([:js_modules]), path
+          expect(dispatcher).to be_relevant(path)
+        end
+      end
+
+      it 'does not trigger on vendored, generated, minified or non-module files' do
+        %w[app/javascript/vendor/chart.js app/assets/javascripts/builds/application.js
+           app/javascript/widgets/picker.min.js app/javascript/types.d.ts app/javascript/site.css
+           node_modules/pkg/index.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).not_to include(:js_modules), path
+        end
+      end
+
+      it 'follows configured javascript_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(dispatcher.whole_app_keys_for('frontend/widgets/picker.ts')).to include(:js_modules)
+        expect(dispatcher.whole_app_keys_for('app/javascript/entry.js')).not_to include(:js_modules)
+      end
+
+      it 'serializes as plain data naming the configured roots, with a named matcher and no Proc' do
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(JSON.parse(JSON.generate(js_rule.to_h)))
+          .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?',
+                      'extensions' => %w[.ts])
+        expect(js_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
+      end
+    end
+
     it 'triggers a factory re-run on a factory file' do
       expect(dispatcher.whole_app_keys_for('spec/factories/posts.rb')).to include(:factories)
     end
@@ -338,6 +515,61 @@ RSpec.describe Woods::PathDispatcher do
     it 'does not trigger rails_source for app files or the Gemfile itself' do
       expect(dispatcher.whole_app_keys_for('Gemfile')).not_to include(:rails_source)
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).not_to include(:rails_source)
+    end
+
+    # Test support is referenced by name from other files, so both the
+    # support units and the test mappings that resolve those names re-run
+    # wholesale when a support file changes.
+    it 'triggers test_support and test_mappings re-runs on a test support file' do
+      %w[spec/support/analytics_helpers.rb spec/support/shared/pages.rb spec/rails_helper.rb
+         spec/lib/ledger_fixtures.rb test/support/sign_in.rb test/test_helper.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:test_support, :test_mappings), path
+      end
+    end
+
+    it 'follows config.test_support_paths' do
+      original = Woods.configuration.test_support_paths
+      Woods.configuration.test_support_paths = ['features/support/**/*.rb']
+
+      expect(dispatcher.whole_app_keys_for('features/support/env.rb')).to include(:test_support, :test_mappings)
+      expect(dispatcher.whole_app_keys_for('spec/support/analytics_helpers.rb')).not_to include(:test_support)
+      expect(dispatcher).to be_relevant('features/support/env.rb')
+    ensure
+      Woods.configuration.test_support_paths = original
+    end
+
+    it 're-runs test_support, not test_mappings, on a factory file' do
+      keys = dispatcher.whole_app_keys_for('spec/factories/widgets.rb')
+
+      expect(keys).to include(:factories, :test_support)
+      expect(keys).not_to include(:test_mappings)
+    end
+
+    it 're-runs test_mappings on a rake file, whose task names task specs resolve against' do
+      expect(dispatcher.whole_app_keys_for('lib/tasks/ledger.rake')).to include(:rake_tasks, :test_mappings)
+    end
+
+    it 'treats a _test.rb fixture under spec/ as test support, since only test/ holds Minitest tests' do
+      expect(dispatcher.whole_app_keys_for('spec/lib/translators/spec_test.rb')).to include(:test_support)
+      expect(dispatcher.file_rules_for('spec/lib/translators/spec_test.rb')).to be_empty
+      expect(dispatcher.whole_app_keys_for('test/lib/ledger_test.rb')).not_to include(:test_support)
+    end
+
+    it 'dispatches a changed test file per file, with no wholesale re-run' do
+      %w[spec/models/widget_spec.rb spec/support/widget_helper_spec.rb test/models/widget_test.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to be_empty, path
+        expect(dispatcher.file_rules_for(path).map(&:extractor_key)).to eq([:test_mappings]), path
+      end
+    end
+
+    it 'serializes the whole-app rules without process-specific values' do
+      rules = -> { JSON.generate(described_class.whole_app_rules.map(&:to_h)) }
+      before_rules = rules.call
+
+      described_class.reset!
+
+      expect(rules.call).to eq(before_rules)
+      expect(before_rules).not_to include('Proc', 'lambda')
     end
 
     it 'triggers nothing for an unrelated path' do
@@ -381,7 +613,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'rejects paths no extractor cares about' do
-      expect(dispatcher).not_to be_relevant('README.md')
+      expect(dispatcher).not_to be_relevant('NOTES.md')
       expect(dispatcher).not_to be_relevant('app/assets/stylesheets/application.css')
       expect(dispatcher).not_to be_relevant('.github/workflows/ci.yml')
     end
@@ -402,6 +634,56 @@ RSpec.describe Woods::PathDispatcher do
     it 'treats a package.yml as relevant to incremental extraction' do
       expect(dispatcher.relevant?('packs/billing/package.yml')).to be(true)
       expect(dispatcher.file_rules_for('packs/billing/package.yml')).to be_empty
+    end
+  end
+
+  describe '#whole_app_keys_for GraphQL operation documents' do
+    it 're-runs the operation family for a document under a configured root' do
+      expect(dispatcher.whole_app_keys_for('app/javascript/widgets/widget_list.graphql')).to eq([:graphql_operations])
+      expect(dispatcher.whole_app_keys_for('app/frontend/widgets/create_widget.gql')).to eq([:graphql_operations])
+      expect(dispatcher.relevant?('app/javascript/widgets/widget_list.graphql')).to be(true)
+    end
+
+    it 're-runs the operation family when the server schema changes' do
+      expect(dispatcher.whole_app_keys_for('app/graphql/types/widget_type.rb')).to include(:graphql_operations)
+    end
+
+    it 'ignores other client files, documents outside the roots and installed packages' do
+      %w[app/javascript/widgets/widget_list.ts docs/widget_list.graphql
+         app/javascript/node_modules/pkg/widget_list.graphql app/graphql/schema.graphql].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).not_to include(:graphql_operations), path
+      end
+    end
+
+    it 'ignores a root-level node_modules whatever the configured globs' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.graphql_document_paths = ['**/*.graphql']
+
+      expect(dispatcher.whole_app_keys_for('node_modules/pkg/widget_list.graphql')).to eq([])
+      expect(Woods::GraphQLDocumentPaths.match?('node_modules/pkg/widget_list.graphql')).to be(false)
+      expect(dispatcher.whole_app_keys_for('client/widgets/widget_list.graphql')).to eq([:graphql_operations])
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'follows config.graphql_document_paths' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.graphql_document_paths = ['client/**/*.graphql']
+
+      expect(dispatcher.whole_app_keys_for('client/widgets/widget_list.graphql')).to eq([:graphql_operations])
+      expect(dispatcher.whole_app_keys_for('app/javascript/widgets/widget_list.graphql')).to eq([])
+    ensure
+      Woods.configuration = original
+    end
+
+    it 'serializes its rules without a Proc' do
+      rules = described_class.whole_app_rules.select { |rule| rule.extractor_key == :graphql_operations }
+
+      expect(rules.size).to eq(2)
+      expect(rules.flat_map { |rule| rule.to_h.values }.grep(Proc)).to eq([])
+      expect(JSON.generate(rules.map(&:to_h))).to include('graphql_document_path?')
     end
   end
 end

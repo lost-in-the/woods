@@ -82,6 +82,21 @@ RSpec.describe Woods::DependencyGraph do
   end
 
   describe '#register' do
+    it 'records a (target, via) pair once however many times a unit emits it' do
+      graph = described_class.new
+      unit = Woods::ExtractedUnit.new(type: :graphql_type, identifier: 'Types::ShipmentType',
+                                      file_path: 'app/graphql/types/shipment_type.rb')
+      unit.dependencies = [{ type: :model, target: 'Shipment', via: :code_reference },
+                           { type: :service, target: 'Shipment', via: :code_reference },
+                           { type: :model, target: 'Shipment', via: :belongs_to }]
+      graph.register(unit)
+      edges = graph.edge_records('Types::ShipmentType')
+      expect(edges.map { |edge| [edge[:target], edge[:via]] })
+        .to eq([['Shipment', :code_reference], ['Shipment', :belongs_to]])
+      expect(graph.dependents_of('Shipment')).to eq(['Types::ShipmentType'])
+      expect(graph.to_h[:edges]['Types::ShipmentType'].size).to eq(2)
+    end
+
     it 'adds a node to the graph' do
       graph.register(make_unit(type: :model, identifier: 'User'))
 
@@ -769,6 +784,46 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe 'a rake task reopened in several files' do
+    before { allow(described_class).to receive(:graph_root).and_return('/app') }
+
+    def rake_unit(identifier, metadata)
+      unit = make_unit(type: :rake_task, identifier: identifier, file_path: '/app/lib/tasks/widgets.rake')
+      unit.metadata = metadata
+      unit
+    end
+
+    it 'maps every file that defines the task to its one unit' do
+      graph.register(rake_unit('backfill_widgets',
+                               defined_in: %w[lib/tasks/widgets.rake lib/tasks/one_offs/widgets_again.rake]))
+
+      expect(graph.identifiers_for_path('/app/lib/tasks/one_offs/widgets_again.rake')).to eq(['backfill_widgets'])
+      expect(graph.identifiers_for_path('/app/lib/tasks/widgets.rake')).to eq(['backfill_widgets'])
+      expect(graph.units_for_path('/app/lib/tasks/one_offs/widgets_again.rake'))
+        .to eq([['backfill_widgets', :rake_task]])
+    end
+
+    it 'maps a file that only enhances the task to its unit' do
+      graph.register(rake_unit('widgets:sync', enhanced_in: %w[rake/widgets_hooks.rake]))
+
+      expect(graph.affected_by(['/app/rake/widgets_hooks.rake'])).to eq(['widgets:sync'])
+    end
+
+    it 'forgets every file of the task once it is removed' do
+      graph.register(rake_unit('backfill_widgets',
+                               defined_in: %w[lib/tasks/widgets.rake lib/tasks/one_offs/widgets_again.rake]))
+      graph.remove('backfill_widgets')
+
+      expect(graph.registered_paths).to be_empty
+    end
+
+    it 'keeps a single-file task on its file_path alone' do
+      graph.register(rake_unit('widgets:prune', {}))
+
+      expect(graph.to_h[:nodes]['widgets:prune']).not_to have_key(:source_paths)
+    end
+  end
+
   describe '#remove' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))
@@ -1241,6 +1296,48 @@ RSpec.describe Woods::DependencyGraph do
                                                      { target: 'Invoice', via: :has_many, through: 'subscriptions',
                                                        disable_joins: true }
                                                    ])
+    end
+
+    context 'when an enqueue edge names the methods it is reached through' do
+      def enqueuing_graph(through)
+        attributes = through ? { through: through } : {}
+        described_class.new.tap do |built|
+          built.register(make_unit(type: :job, identifier: 'RefundJob'))
+          built.register(make_unit(type: :model, identifier: 'Ledger', dependencies: [
+                                     { type: :job, target: 'RefundJob', via: :code_reference },
+                                     { type: :job, target: 'RefundJob', via: :job_enqueue }.merge(attributes)
+                                   ]))
+        end
+      end
+
+      let(:plain) { enqueuing_graph(nil) }
+      let(:annotated) { enqueuing_graph('capture!, refund!') }
+
+      it 'answers dependents and dependencies exactly as without it' do
+        expect(annotated.dependents_of('RefundJob')).to eq(plain.dependents_of('RefundJob'))
+        expect(annotated.dependents_of('RefundJob', via: :job_enqueue))
+          .to eq(plain.dependents_of('RefundJob', via: :job_enqueue))
+        expect(annotated.dependents_detail('RefundJob')).to eq(plain.dependents_detail('RefundJob'))
+        expect(annotated.dependencies_of('Ledger')).to eq(plain.dependencies_of('Ledger'))
+        expect(annotated.to_h[:reverse]).to eq(plain.to_h[:reverse])
+        expect(annotated.pagerank).to eq(plain.pagerank)
+      end
+
+      it 'keeps the edge count and carries the methods on the edge record' do
+        expect(annotated.edge_records('Ledger')).to eq([
+                                                         { target: 'RefundJob', via: :code_reference },
+                                                         { target: 'RefundJob', via: :job_enqueue,
+                                                           through: 'capture!, refund!' }
+                                                       ])
+        expect(plain.edge_records('Ledger').size).to eq(2)
+      end
+
+      it 'round-trips the methods through JSON' do
+        restored = described_class.from_h(JSON.parse(JSON.generate(annotated.to_h)))
+
+        expect(restored.edge_records('Ledger')).to eq(annotated.edge_records('Ledger'))
+        expect(restored.dependents_of('RefundJob', via: :job_enqueue)).to eq(['Ledger'])
+      end
     end
 
     it 'keeps through_db on the edge record' do

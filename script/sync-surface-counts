@@ -1,0 +1,16 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Rewrites the extractor, unit-type and MCP tool counts quoted in the public
+# docs from code. `--check` only reports drift (exit 1 when any).
+
+require 'bundler/setup'
+require_relative '../lib/woods/release_v2/surface_counts'
+
+if ARGV.include?('--check')
+  drift = Woods::ReleaseV2::SurfaceCounts.drift
+  drift.each { |path| warn "#{path}: documented surface counts drift from code" }
+  exit(drift.empty? ? 0 : 1)
+end
+
+Woods::ReleaseV2::SurfaceCounts.write!.each { |path| puts "rewrote #{path}" }

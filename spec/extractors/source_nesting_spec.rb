@@ -16,6 +16,25 @@ RSpec.describe Woods::Extractors::SourceNesting do
 
   subject(:scanner) { test_class.new }
 
+  describe '.lexical_scopes' do
+    it 'walks a long constant path without exhausting the Ruby stack' do
+      source = <<~RUBY
+        module Billing
+          class Ledger
+            def post
+              #{'A::JobA' * 7_000} Job.perform_later
+            end
+          end
+          class Sibling; end
+        end
+      RUBY
+
+      expect(described_class.lexical_scopes(source).map(&:last)).to eq(
+        %w[Billing Billing::Ledger Billing::Sibling]
+      )
+    end
+  end
+
   # ── #qualified_first_class_name ──────────────────────────────────────
 
   describe '#qualified_first_class_name' do

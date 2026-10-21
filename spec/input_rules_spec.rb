@@ -27,7 +27,7 @@ RSpec.describe Woods::InputRules do
        config/routes.rb db/views/posts_v01.sql].each do |path|
       expect(rules.action(path)).to eq(:incremental), path
     end
-    %w[README.md docs/guide.md tmp/output.json spec/README.md vendor/package.yml].each do |path|
+    %w[NOTES.md notes/guide.md tmp/output.json spec/README.md vendor/package.yml].each do |path|
       expect(rules.action(path)).to eq(:ignore), path
     end
   end
@@ -80,6 +80,13 @@ RSpec.describe Woods::InputRules do
   it 'keeps the portable plugin rules identical to their generated projection' do
     generated = File.expand_path('../plugin/hooks/woods-input-rules.sh', __dir__)
     expect(File.read(generated)).to eq(Woods::Hooks::RuleProjection.new.render)
+  end
+
+  it 'projects no rule that has no path surface, and names the one it leaves to the daemon' do
+    rendered = Woods::Hooks::RuleProjection.new.render
+
+    expect(rendered).not_to include('if { { false; }; }; then')
+    expect(rendered).to include('# external_consumers: the declared file is configuration')
   end
 
   it 'agrees with the portable predicate for every authoritative rule and near misses' do

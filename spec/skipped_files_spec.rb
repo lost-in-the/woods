@@ -51,6 +51,18 @@ RSpec.describe Woods::SkippedFiles do
     expect(reason_for('app/models/skip_fixture/patterns.rb')).to eq('not_owned')
   end
 
+  it 'reports a generator template as a template, whatever it parses as' do
+    create_file('lib/generators/widget/templates/widget.rb', "class <%= class_name %> < ApplicationRecord\nend\n")
+    create_file('lib/generators/widget/templates/plain.rb', "class Plain; end\n")
+    create_file('lib/generators/widget/widget_generator.rb', "class WidgetGenerator; end\n")
+    create_file('lib/reports/templates/summary.rb', "class Summary; end\n")
+
+    expect(report.fetch('files').map { |entry| entry['path'] }).to eq(
+      %w[lib/generators/widget/templates/plain.rb lib/generators/widget/templates/widget.rb]
+    )
+    expect(report.fetch('counts')).to eq('template' => 2)
+  end
+
   it 'reports a parse error' do
     create_file('app/lib/broken.rb', "class SkipFixture::Broken\n  def call(\nend\n")
     expect(reason_for('app/lib/broken.rb')).to eq('parse_error')
@@ -100,6 +112,94 @@ RSpec.describe Woods::SkippedFiles do
     create_file('app/helpers/notes.txt', 'text')
     create_file('lib/billing.rb', "module Billing; end\n")
     expect(report.fetch('files')).to eq([])
+  end
+
+  context 'with GraphQL operation documents' do
+    before { hide_const('GraphQL') if defined?(GraphQL) }
+
+    it 'reports an uncovered document as graphql_unavailable when the gem is not loaded' do
+      create_file('app/javascript/widgets/widget_list.graphql', 'query WidgetList { widgets { id } }')
+      expect(reason_for('app/javascript/widgets/widget_list.graphql')).to eq('graphql_unavailable')
+    end
+
+    it 'never lists a document a unit covers, one under node_modules, or one outside the roots' do
+      create_file('app/javascript/widgets/covered.graphql', 'query Covered { widgets { id } }')
+      create_file('app/javascript/node_modules/pkg/vendored.graphql', 'query Vendored { widgets { id } }')
+      create_file('docs/outside.graphql', 'query Outside { widgets { id } }')
+      report = described_class.new(root: rails_root.to_s)
+                              .build([File.join(rails_root.to_s, 'app/javascript/widgets/covered.graphql')])
+      expect(report.fetch('files')).to eq([])
+    end
+
+    it 'sorts documents and Ruby files together by path' do
+      create_file('app/models/zed.rb', "module Zed; end\n")
+      create_file('app/javascript/a.graphql', 'query A { widgets { id } }')
+      expect(report.fetch('files').map { |entry| entry['path'] }).to eq(%w[app/javascript/a.graphql app/models/zed.rb])
+    end
+  end
+
+  describe 'template files' do
+    before { Woods.configuration.unclaimed_ruby_paths = ['app/**/*.rb', 'config/**/*.erb', 'app/**/*.{erb,slim}'] }
+
+    it 'reports a template outside the view directories as non_view_template' do
+      create_file('config/schedule.cron.erb', "0 * * * * <%= command %>\n")
+      expect(reason_for('config/schedule.cron.erb')).to eq('non_view_template')
+    end
+
+    it 'does not report a template no sweep glob names' do
+      Woods.configuration.unclaimed_ruby_paths = ['app/**/*.rb']
+      create_file('config/schedule.cron.erb', "0 * * * * <%= command %>\n")
+      expect(report.fetch('files')).to eq([])
+    end
+
+    context 'with a view template that has a unit' do
+      let(:unit_paths) { ['app/views/widgets/index.html.erb'] }
+
+      it 'does not report it' do
+        create_file('app/views/widgets/index.html.erb', '<p>widgets</p>')
+        expect(report.fetch('files')).to eq([])
+      end
+    end
+
+    it 'reports a view template its extractor produced no unit for' do
+      create_file('app/views/widgets/index.html.erb', '<p>widgets</p>')
+      expect(reason_for('app/views/widgets/index.html.erb')).to eq('rejected_by:view_templates')
+    end
+
+    it 'reports a view template no engine reads as unsupported_template_engine' do
+      create_file('app/views/widgets/index.html.slim', 'p widgets')
+      expect(reason_for('app/views/widgets/index.html.slim')).to eq('unsupported_template_engine')
+    end
+
+    context 'with a template beside the Ruby file of a unit' do
+      let(:unit_paths) { ['app/components/widget/card.rb', 'app/components/ledger_component.rb'] }
+
+      it 'counts it as covered by that unit' do
+        create_file('app/components/widget/card.rb', "class Widget::Card; end\n")
+        create_file('app/components/widget/card.html.erb', '<p>card</p>')
+        create_file('app/components/ledger_component.rb', "class LedgerComponent; end\n")
+        create_file('app/components/ledger_component/ledger_component.html.erb', '<p>ledger</p>')
+        expect(report.fetch('files')).to eq([])
+      end
+    end
+
+    it 'reports a template beside a Ruby file that has no unit' do
+      create_file('app/components/widget/card.html.erb', '<p>card</p>')
+      expect(reason_for('app/components/widget/card.html.erb')).to eq('non_view_template')
+    end
+
+    it 'keeps the report sorted by path across Ruby and template files' do
+      create_file('config/schedule.cron.erb', "0 * * * *\n")
+      create_file('app/lib/c.rb', "puts 1\n")
+      create_file('app/zeta/notice.erb', 'notice')
+      expect(report.fetch('files').map { |entry| entry['path'] })
+        .to eq(%w[app/lib/c.rb app/zeta/notice.erb config/schedule.cron.erb])
+    end
+
+    it 'never hands a template to the Ruby sweep' do
+      create_file('config/schedule.cron.erb', "0 * * * *\n")
+      expect(Woods::PathDispatcher.poro_path?('config/schedule.cron.erb')).to be(false)
+    end
   end
 
   it 'summarises counts by reason, sorted by path' do

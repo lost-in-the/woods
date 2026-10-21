@@ -188,7 +188,7 @@ RSpec.describe 'plugin hooks (#280)' do
         rake, log, = recorder(dir)
         env = base_env.merge('WOODS_HOOK_RAKE' => rake)
 
-        run_hook(post_edit, edit_payload(dir, 'docs/example.md'), env)
+        run_hook(post_edit, edit_payload(dir, 'notes/example.md'), env)
         run_hook(post_edit, edit_payload(dir, 'app/models/user.rb'),
                  env.merge('WOODS_HOOKS_DISABLED' => '1'))
         FileUtils.rm_f(File.join(dir, 'tmp/woods/generation.json'))

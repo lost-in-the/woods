@@ -72,6 +72,47 @@ RSpec.describe Woods::Resilience::IndexValidator do
       end
     end
 
+    context 'with declared external consumers' do
+      before { write_json('manifest.json', { 'counts' => {} }) }
+
+      # Consumer units plus the graph nodes and index entries the structural
+      # checks expect for them.
+      def write_consumers(tables_missing_by_name)
+        names = tables_missing_by_name.keys.sort
+        write_json('dependency_graph.json',
+                   'nodes' => names.to_h { |n| ["external:#{n}", { 'type' => 'external_consumer' }] },
+                   'edges' => names.to_h { |n| ["external:#{n}", []] }, 'reverse' => {}, 'file_map' => {},
+                   'type_index' => { 'external_consumer' => names.map { |n| "external:#{n}" } })
+        write_json('external_consumers/_index.json', names.map { |n| { 'identifier' => "external:#{n}" } })
+        tables_missing_by_name.each do |name, tables_missing|
+          source = "External consumer: #{name}\n"
+          write_json("external_consumers/external_#{name}.json",
+                     { 'identifier' => "external:#{name}", 'type' => 'external_consumer', 'file_path' => nil,
+                       'source_code' => source, 'source_hash' => Digest::SHA256.hexdigest(source),
+                       'metadata' => { 'consumer' => name, 'declared' => true, 'tables_missing' => tables_missing } })
+        end
+      end
+
+      it 'warns once per declared table the live schema does not have, and stays valid' do
+        write_consumers('storefront' => %w[retired_things widgets_backup], 'reporting' => [])
+
+        report = described_class.new(index_dir: tmp_dir).validate
+
+        expect(report).to be_valid
+        expect(report.warnings).to eq([
+                                        'External consumer storefront declares table retired_things, ' \
+                                        'which the live schema does not have',
+                                        'External consumer storefront declares table widgets_backup, ' \
+                                        'which the live schema does not have'
+                                      ])
+      end
+
+      it 'adds no warning when no consumer is declared' do
+        write_consumers({})
+        expect(described_class.new(index_dir: tmp_dir).validate.warnings).to be_empty
+      end
+    end
+
     context 'with manifest writer-version provenance (#323)' do
       before do
         write_json('dependency_graph.json', %w[nodes edges reverse file_map type_index].to_h { |key| [key, {}] })

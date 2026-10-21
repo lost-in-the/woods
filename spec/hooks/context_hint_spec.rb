@@ -100,7 +100,7 @@ RSpec.describe Woods::Hooks::ContextHint do
   end
 
   it 'ignores unrelated edits and rejects traversal or external symlink paths' do
-    expect(hint(event.merge('tool_input' => { 'file_path' => 'README.md' }))).to be_nil
+    expect(hint(event.merge('tool_input' => { 'file_path' => 'NOTES.md' }))).to be_nil
     expect(hint(event.merge('tool_input' => { 'file_path' => '../outside.rb' }))).to be_nil
     File.symlink('/etc/passwd', File.join(root, 'app/models/external.rb'))
     expect(hint(event.merge('tool_input' => { 'file_path' => 'app/models/external.rb' }))).to be_nil

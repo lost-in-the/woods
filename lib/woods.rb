@@ -21,16 +21,29 @@
 #     config.include_framework_sources = true
 #   end
 #
+require 'digest'
+require 'json'
 require_relative 'woods/version'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
+require_relative 'woods/graphql_document_paths'
+# Configuration validates declared external table consumers at assignment.
+require_relative 'woods/extractors/external_consumer_declarations'
+# Configuration validates `rake_task_paths` at assignment.
+require_relative 'woods/extractors/rake_task_paths'
 # Configuration defaults the cycle caps to the analyzer's own constants.
 require_relative 'woods/graph_analyzer'
+# Configuration's `source_reference_callers` default lives with the pass it feeds.
+require_relative 'woods/source_references/caller_policy'
+require_relative 'woods/javascript_paths'
 
 module Woods
   class Error < StandardError; end
   class ConfigurationError < Error; end
   class ExtractionError < Error; end
+  # An incremental run refused because the extraction-shaping configuration
+  # differs from the baseline's. Only a full extraction resolves it.
+  class ExtractionConfigChanged < ExtractionError; end
   class SessionTracerError < Error; end
 
   CONFIG_MUTEX = Mutex.new
@@ -129,6 +142,29 @@ module Woods
     DEFAULT_EXTRACTORS = %i[models controllers services components view_components jobs mailers graphql
                             serializers managers policies validators rails_source].freeze
 
+    # Settings that decide which units and edges an extraction publishes, and
+    # that an incremental run cannot reconcile on its own. Each published
+    # generation records a digest of them; incremental extraction refuses to
+    # build on a generation whose digests differ. See {#extraction_fingerprint}.
+    EXTRACTION_KEYS = %i[include_framework_sources extract_navigation_edges component_paths
+                         event_patterns event_paths unclaimed_ruby_paths graphql_document_paths
+                         config_file_paths config_file_values settings_readers
+                         external_table_consumers external_table_consumers_path
+                         test_support_paths test_subdomain_helpers rake_task_paths javascript_paths
+                         documentation_paths documentation_exclude method_effects_limit].freeze
+
+    # Markdown the documentation extractor indexes as `doc` units, as
+    # root-relative globs. See {#documentation_paths=}.
+    DEFAULT_DOCUMENTATION_PATHS = %w[
+      README.md docs/**/*.md doc/**/*.md CLAUDE.md AGENTS.md
+      .claude/rules/**/*.md .claude/skills/**/*.md .github/**/*.md
+    ].freeze
+
+    # Changelogs, vendored trees and generated API documentation.
+    DEFAULT_DOCUMENTATION_EXCLUDE = %w[
+      **/CHANGELOG*.md **/node_modules/**/* **/vendor/**/* doc/api/**/* docs/api/**/*
+    ].freeze
+
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
                   :vector_store_options, :metadata_store_options, :embedding_options,
@@ -150,9 +186,12 @@ module Woods
     attr_reader :retrieval_mode, :embedding_model, :max_context_tokens, :similarity_threshold, :extractors,
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
-                :graph_cycle_limit, :graph_cycle_max_length,
+                :graph_cycle_limit, :graph_cycle_max_length, :method_effects_limit,
                 :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
-                :unclaimed_ruby_paths
+                :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
+                :settings_readers, :external_table_consumers, :external_table_consumers_path,
+                :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
+                :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -218,6 +257,7 @@ module Woods
       @volatile_dependency_limit_per_target = nil
       @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
       @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
+      @method_effects_limit = 50
       # nil = the unbounded transitive closure. See the setter for why the
       # default is not a small number.
       @incremental_blast_radius_depth = nil
@@ -235,6 +275,33 @@ module Woods
       @event_paths = %w[app].freeze
       # Globs PoroExtractor sweeps for Ruby no other extractor claims.
       @unclaimed_ruby_paths = ['app/**/*.rb'].freeze
+      # Globs GraphQLOperationExtractor scans for client operation documents.
+      @graphql_document_paths = GraphQLDocumentPaths::DEFAULT
+      # Globs ConfigFileExtractor indexes as config_file units. See the setter.
+      @config_file_paths = %w[config/*.yml config/**/*.yml app/data/**/*.yml].freeze
+      @config_file_values = false
+      # Settings constants whose reads link to a config_file unit. See the setter.
+      @settings_readers = [].freeze
+      # Other applications that read this database's tables. See the setters.
+      @external_table_consumers = {}.freeze
+      @external_table_consumers_path = nil
+      # Globs TestSupportExtractor indexes as test_support units.
+      @test_support_paths = %w[spec/support/**/*.rb spec/*_helper.rb spec/lib/**/*.rb
+                               test/support/**/*.rb test/*_helper.rb test/lib/**/*.rb].freeze
+      # Test helpers whose literal argument names the subdomain a test runs on.
+      @test_subdomain_helpers = %w[with_subdomain use_subdomain using_subdomain set_subdomain
+                                   switch_to_subdomain on_subdomain].freeze
+      # Which unit types publish verified code_reference edges, and to which
+      # target types. See the setter.
+      @source_reference_callers = SourceReferences::CallerPolicy.normalize(nil)
+      # Files RakeTaskExtractor reads. See Extractors::RakeTaskPaths.
+      @rake_task_paths = Extractors::RakeTaskPaths::DEFAULT_PATHS
+      # Globs JsModuleExtractor scans for JavaScript/TypeScript modules.
+      @javascript_paths = JavascriptPaths::DEFAULT_GLOBS
+      @documentation_paths = DEFAULT_DOCUMENTATION_PATHS
+      @documentation_exclude = DEFAULT_DOCUMENTATION_EXCLUDE
+      # Whether retrieval returns `doc` units unless a caller filters by type.
+      @retrieve_documentation = true
     end
 
     def embedding_model=(value)
@@ -403,6 +470,16 @@ module Woods
       @graph_cycle_max_length = validate_optional_positive_integer!(:graph_cycle_max_length, value)
     end
 
+    # How many public methods one unit records in `metadata.method_effects`
+    # before the map is cut off and `method_effects_truncated` is set. `nil`
+    # removes the cap.
+    #
+    # @param value [Integer, nil] must be a positive Integer, or nil
+    # @raise [ConfigurationError] otherwise
+    def method_effects_limit=(value)
+      @method_effects_limit = validate_optional_positive_integer!(:method_effects_limit, value)
+    end
+
     # How many reverse hops an incremental run walks from a changed file
     # before it stops re-extracting dependents. `nil` (the default) keeps the
     # unbounded transitive closure.
@@ -449,8 +526,9 @@ module Woods
 
     # Directories {Woods::Extractors::EventExtractor} scans for publish and
     # subscribe sites, relative to Rails.root. Defaults to +%w[app]+; a host
-    # app whose event wrapper lives in +lib/+ adds it. A trailing slash is
-    # dropped. Changing it needs a full extraction.
+    # app whose event wrapper lives in +lib/+ adds it. Each entry is normalized
+    # (+./lib/+ and +lib//+ name +lib+; +.+ is the root itself), so full and
+    # incremental runs agree on it. Changing it needs a full extraction.
     #
     # @example
     #   config.event_paths = %w[app lib]
@@ -470,8 +548,8 @@ module Woods
     # constraints, app-local libraries). `app/models` is always scanned.
     # `app/assets`, `app/javascript` and non-`.rb` matches are never swept.
     #
-    # The value is not part of any index fingerprint: run a full extraction
-    # after changing it.
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
     #
     # @example
     #   config.unclaimed_ruby_paths = ['app/helpers/**/*.rb', 'app/view_models/**/*.rb']
@@ -483,6 +561,259 @@ module Woods
 
       value.each_with_index { |glob, index| validate_relative_glob!(glob, index) }
       @unclaimed_ruby_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Root-relative globs {Woods::Extractors::GraphQLOperationExtractor} scans
+    # for client-side GraphQL operation documents. An empty list turns the
+    # family off. Paths under `node_modules` never match.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.graphql_document_paths = ['app/javascript/**/*.graphql', 'client/**/*.{graphql,gql}']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def graphql_document_paths=(value)
+      unless value.is_a?(Array) && value.all? { |glob| GraphQLDocumentPaths.valid_glob?(glob) }
+        raise ConfigurationError, "graphql_document_paths must be an Array of relative globs, got #{value.inspect}"
+      end
+
+      @graphql_document_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Root-relative globs {Woods::Extractors::ConfigFileExtractor} indexes as
+    # `config_file` units. Only `.yml` and `.yaml` matches are read.
+    # `config/locales` belongs to the i18n extractor, and secret-bearing files
+    # (`credentials*`, `secrets*`, `*.enc`, `*.key`, `config/credentials/`) are
+    # never opened, whatever the globs say.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.config_file_paths = ['config/*.yml', 'config/settings/**/*.yml']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def config_file_paths=(value)
+      raise ConfigurationError, "config_file_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index, 'config_file_paths') }
+      @config_file_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Whether `config_file` units store leaf values next to their key paths.
+    # Off by default: only key paths are published. When on, a value under a
+    # credential-named key, a credential-shaped value and ERB source are still
+    # replaced by a marker.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless +value+ is true or false
+    def config_file_values=(value)
+      validate_boolean!('config_file_values', value)
+      @config_file_values = value
+    end
+
+    # Settings constants built from a YAML file. A read through one
+    # (`Settings.payments.api_host`, `Settings[:payments]`) adds a
+    # `reads_config` edge from the reading unit to that file's unit.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.settings_readers = [{ constant: 'Settings', file: 'config/settings.yml' }]
+    #
+    # @param value [Array<Hash>] entries with a `constant` name and a root-relative `file`
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def settings_readers=(value)
+      raise ConfigurationError, "settings_readers must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      @settings_readers = value.each_with_index.map { |entry, index| settings_reader(entry, index) }.freeze
+    end
+
+    # Other applications that read or write tables in this application's
+    # database, declared so `dependents` of a table shows them. Each entry
+    # becomes an `external_consumer` unit with `reads_table` and
+    # `writes_table` edges to the table units. Plain data only: consumer
+    # name => table names read, or `{ reads: [...], writes: [...] }`.
+    #
+    # @example
+    #   config.external_table_consumers = {
+    #     "storefront" => %w[products orders],
+    #     "public-site" => { reads: %w[products], writes: %w[carts] }
+    #   }
+    #
+    # @param value [Hash{String, Symbol => Array<String, Symbol>, Hash}]
+    # @raise [ConfigurationError] if the declaration is malformed; the previous value is kept
+    def external_table_consumers=(value)
+      @external_table_consumers =
+        Extractors::ExternalConsumerDeclarations.normalize!(value, label: 'external_table_consumers')
+    end
+
+    # A YAML file of the same shape as {#external_table_consumers=}, relative
+    # to Rails.root, merged with it. A change to the file re-runs the
+    # consumers on an incremental extraction, which a change to the
+    # in-process setting cannot do.
+    #
+    # @example
+    #   config.external_table_consumers_path = 'config/woods/external_consumers.yml'
+    #
+    # @param value [String, nil] relative path, or nil for no file
+    # @raise [ConfigurationError] unless nil or a relative path without `..`; the previous value is kept
+    def external_table_consumers_path=(value)
+      @external_table_consumers_path =
+        Extractors::ExternalConsumerDeclarations.normalize_path!(value, label: 'external_table_consumers_path')
+    end
+
+    # Globs, relative to Rails.root, whose Ruby files become `test_support`
+    # units: helper modules, shared examples and contexts, custom matchers,
+    # and suite configuration. `*_spec.rb` and `*_test.rb` files are never
+    # test support, whatever the globs match.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.test_support_paths += ['features/support/**/*.rb']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def test_support_paths=(value)
+      raise ConfigurationError, "test_support_paths must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      value.each_with_index { |glob, index| validate_relative_glob!(glob, index, 'test_support_paths') }
+      @test_support_paths = value.map { |glob| glob.dup.freeze }.freeze
+    end
+
+    # Names of test helper methods that switch the subdomain a test's requests
+    # use, called with a literal: `with_subdomain("shop") { ... }`. A literal
+    # path in a test is matched against subdomain-constrained routes using
+    # the one subdomain its file names.
+    #
+    # @example
+    #   config.test_subdomain_helpers += ['on_storefront']
+    #
+    # @param value [Array<String>] method names
+    # @raise [ConfigurationError] if any entry is not a method name; the previous value is kept
+    def test_subdomain_helpers=(value)
+      unless value.is_a?(Array)
+        raise ConfigurationError, "test_subdomain_helpers must be an Array, got #{value.inspect}"
+      end
+
+      value.each_with_index do |name, index|
+        next if name.is_a?(String) && name.match?(/\A[a-z_]\w*[?!]?\z/)
+
+        raise ConfigurationError, "test_subdomain_helpers[#{index}] must be a method name, got #{name.inspect}"
+      end
+      @test_subdomain_helpers = value.map { |name| name.dup.freeze }.freeze
+    end
+
+    # Which unit types publish verified +code_reference+ edges from the
+    # source-reference pass, and which target types each may reference.
+    #
+    # The Hash names only the caller types to change; every other type keeps
+    # its default ({Woods::SourceReferences::CallerPolicy::DEFAULTS}). A value
+    # is +:all+, an Array of target types, or +false+ to stop that type being
+    # a caller. By default every constant-owned type is a caller of every
+    # type, except that components add no edge to components and GraphQL
+    # units add none to GraphQL units.
+    #
+    # The policy is recorded in the source-reference cache: after changing
+    # it, incremental extraction refuses to run until one full extraction.
+    #
+    # @example
+    #   config.source_reference_callers = { component: %i[model service], mailer: false }
+    #
+    # @param value [Hash{Symbol, String => Symbol, Array, false}] caller type to targets
+    # @raise [ConfigurationError] for an unknown type or malformed entry; the previous value is kept
+    def source_reference_callers=(value)
+      @source_reference_callers = SourceReferences::CallerPolicy.normalize(value)
+    end
+
+    # Files {Woods::Extractors::RakeTaskExtractor} reads for task definitions,
+    # relative to Rails.root. Ruby files under a listed directory are indexed
+    # as the tasks' support code.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.rake_task_paths = ['lib/tasks/**/*.rake', 'ops/*.rake', 'Rakefile']
+    #
+    # @param value [Array<String>] file paths, +dir/**/*.ext+ or +dir/*.ext+ globs
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def rake_task_paths=(value)
+      @rake_task_paths = Extractors::RakeTaskPaths.validate!(value)
+    end
+
+    # One SHA-256 digest per {EXTRACTION_KEYS} entry, over a canonical JSON
+    # form of its value. Per-key digests let a refusal name what changed
+    # without the manifest or a message ever carrying a value.
+    #
+    # @return [Hash{String => String}] key name => hex digest
+    def extraction_fingerprint
+      EXTRACTION_KEYS.to_h do |key|
+        [key.to_s, Digest::SHA256.hexdigest(JSON.generate(fingerprint_form(public_send(key))))]
+      end
+    end
+
+    # Root-relative globs {Woods::Extractors::JsModuleExtractor} scans for
+    # JavaScript and TypeScript modules. Vendored, generated, minified and
+    # declaration files are never indexed; see {Woods::JavascriptPaths}. An
+    # empty list disables the unit type.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.javascript_paths = ['app/javascript/**/*.{js,ts}', 'frontend/src/**/*.{ts,tsx}']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def javascript_paths=(value)
+      @javascript_paths = JavascriptPaths.validate!(value)
+    end
+
+    # Root-relative globs {Woods::Extractors::DocExtractor} indexes as `doc`
+    # units. An empty Array disables documentation units. A glob under a
+    # hidden directory other than `.claude/rules`, `.claude/skills` and
+    # `.github` is refused: source capture and the watch daemon never read one.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @example
+    #   config.documentation_paths += ['handbook/**/*.md']
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def documentation_paths=(value)
+      @documentation_paths = validate_documentation_globs!('documentation_paths', value, visible: true)
+    end
+
+    # Root-relative globs removed from {#documentation_paths}.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @param value [Array<String>] relative glob patterns
+    # @raise [ConfigurationError] if any entry is malformed; the previous value is kept
+    def documentation_exclude=(value)
+      @documentation_exclude = validate_documentation_globs!('documentation_exclude', value, visible: false)
+    end
+
+    # Whether retrieval includes `doc` units by default. When false they are
+    # excluded like `test_mapping` units, and a caller reaches them with an
+    # explicit `types:` filter.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless +value+ is true or false
+    def retrieve_documentation=(value)
+      validate_boolean!('retrieve_documentation', value)
+      @retrieve_documentation = value
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem
@@ -497,6 +828,17 @@ module Woods
     end
 
     private
+
+    # Hash keys are sorted so a declaration's insertion order never changes
+    # the digest. A Regexp keeps its options: `/x/i` and `/x/` match differently.
+    def fingerprint_form(value)
+      case value
+      when Hash then value.map { |key, item| [key.to_s, fingerprint_form(item)] }.sort_by(&:first)
+      when Array then value.map { |item| fingerprint_form(item) }
+      when Regexp then { 'source' => value.source, 'options' => value.options }
+      else value
+      end
+    end
 
     # @return [Integer, nil] +value+ when it is nil or a positive Integer
     # @raise [ConfigurationError] otherwise
@@ -541,7 +883,7 @@ module Woods
             "#{label} pattern must have a capture group for the event name, got #{pattern.inspect}"
     end
 
-    # @return [String] +entry+ without a trailing slash, frozen
+    # @return [String] +entry+ without empty or +.+ segments (+.+ for the root itself), frozen
     # @raise [ConfigurationError] unless +entry+ is a relative path inside Rails.root
     def validate_event_path!(entry, index)
       label = "event_paths[#{index}]"
@@ -552,14 +894,59 @@ module Woods
         raise ConfigurationError, "#{label} must be relative to Rails.root, got #{entry.inspect}"
       end
 
-      entry.chomp('/').freeze
+      normalized_relative_dir(entry)
     end
 
-    # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
-    def validate_relative_glob!(glob, index)
-      return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') && !glob.split('/').include?('..')
+    # @return [String] +path+ without empty or +.+ segments, +.+ when none remain, frozen
+    def normalized_relative_dir(path)
+      segments = path.split('/').reject { |segment| segment.empty? || segment == '.' }
+      (segments.empty? ? '.' : segments.join('/')).freeze
+    end
 
-      raise ConfigurationError, "unclaimed_ruby_paths[#{index}] must be a relative glob, got #{glob.inspect}"
+    # Brace delimiters count as segment boundaries, so +{../shared,app}+ is
+    # refused like +../shared+.
+    #
+    # @raise [ConfigurationError] unless +glob+ is a non-empty, relative path glob without `..`
+    def validate_relative_glob!(glob, index, name = 'unclaimed_ruby_paths')
+      return if glob.is_a?(String) && !glob.empty? && !glob.start_with?('/') &&
+                !glob.tr('{},', '///').split('/').include?('..')
+
+      raise ConfigurationError, "#{name}[#{index}] must be a relative glob, got #{glob.inspect}"
+    end
+
+    SETTINGS_CONSTANT = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
+    private_constant :SETTINGS_CONSTANT
+
+    # @return [Hash] a frozen `{ constant:, file: }` entry
+    # @raise [ConfigurationError] unless the entry names a constant and a root-relative file
+    def settings_reader(entry, index)
+      label = "settings_readers[#{index}]"
+      raise ConfigurationError, "#{label} must be a Hash, got #{entry.inspect}" unless entry.is_a?(Hash)
+
+      constant = entry[:constant] || entry['constant']
+      file = entry[:file] || entry['file']
+      unless constant.is_a?(String) && SETTINGS_CONSTANT.match?(constant)
+        raise ConfigurationError, "#{label} constant must be a constant name, got #{constant.inspect}"
+      end
+
+      validate_relative_glob!(file, index, 'settings_readers file')
+      { constant: constant.delete_prefix('::').freeze, file: file.dup.freeze }.freeze
+    end
+
+    # @return [Array<String>] a frozen copy of +value+
+    # @raise [ConfigurationError] if +value+ or any entry is malformed
+    def validate_documentation_globs!(name, value, visible:)
+      raise ConfigurationError, "#{name} must be an Array, got #{value.inspect}" unless value.is_a?(Array)
+
+      require 'woods/watch/tree_scan'
+      value.each_with_index do |glob, index|
+        validate_relative_glob!(glob, index, name)
+        next unless visible && Watch::TreeScan.hidden?(glob)
+
+        raise ConfigurationError, "#{name}[#{index}] is under a hidden directory Woods does not read, " \
+                                  "got #{glob.inspect}"
+      end
+      value.map { |glob| glob.dup.freeze }.freeze
     end
 
     def validate_boolean!(name, value)

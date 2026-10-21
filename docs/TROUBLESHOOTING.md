@@ -225,7 +225,7 @@ does not guarantee a speedup. See the [incremental contract](INCREMENTAL_EXTRACT
 
 **Symptom:** You expect state machines, events, decorators, or other unit types but they don't appear in the output directory.
 
-**Cause:** All 35 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
+**Cause:** All 42 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
 
 - The expected directory doesn't exist (e.g., no `app/decorators/` for decorators)
 - The required gem isn't installed (e.g., `aasm` or `state_machines` for state machine extraction)
@@ -249,19 +249,25 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 **Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Nine unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, and `rails_source`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
+**Cause:** Fourteen unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `database_table`, `external_consumer`, `test_support`, `graphql_operation`, `rails_source`, and `js_module`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
 | Type | Trigger path |
 |------|--------------|
-| `route` | `config/routes.rb` |
-| `engine` | `config/routes.rb`, `Gemfile.lock` |
+| `route` | `config/routes.rb`, any file under `config/routes/` |
+| `engine` | `config/routes.rb`, any file under `config/routes/`, `Gemfile.lock` |
 | `middleware` | `config/application.rb`, `Gemfile.lock`, any file under `config/initializers`/`config/environments` |
 | `scheduled_job` | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml`, `config/application.rb`, any `.rb` under `config/initializers`/`config/environments` |
 | `state_machine` | any `.rb` change under the scanned model directories |
 | `factory` | any `.rb` change under `spec/factories`/`test/factories` |
-| `event` | any `.rb` change under `app/` |
+| `test_support` | any `.rb` change under `config.test_support_paths` or the factory directories |
+| `test_mapping` (wholesale, on top of per-file dispatch) | a test support file, any `.rake` under `lib/tasks`, `config/routes.rb` |
+| `event` | any `.rb` change under a configured event root (`config.event_paths`, default `app/`) |
 | `database_view` | any `.sql` change under `db/views` |
+| `graphql_operation` | any document matching `config.graphql_document_paths`, any `.rb` change under `app/graphql` |
+| `database_table` | a schema dump, or any file under `db/migrate` or `app/models`. A schema change with no file change needs a full extraction |
+| `external_consumer` | the file named by `external_table_consumers_path`, or any `database_table` trigger |
 | `rails_source` | `Gemfile.lock` (only when `include_framework_sources` is enabled) |
+| `js_module` | any module under `config.javascript_paths`; components and templates follow when a registered name moved |
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 

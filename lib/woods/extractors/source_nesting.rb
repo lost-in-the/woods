@@ -93,19 +93,25 @@ module Woods
         scopes
       end
 
+      # Keep source order without recursing through arbitrarily deep
+      # expression trees, including long constant paths in method bodies.
       # @return [void]
       def self.collect_scopes(node, namespace, scopes)
-        return unless node
+        pending = [[node, namespace]]
+        while (entry = pending.pop)
+          current, enclosing = entry
+          next unless current
 
-        if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
-          declaration = DECLARATION_PATTERN.match(node.location.slice)
-          return unless declaration
+          if current.is_a?(Prism::ClassNode) || current.is_a?(Prism::ModuleNode)
+            declaration = DECLARATION_PATTERN.match(current.location.slice)
+            next unless declaration
 
-          nesting = [*namespace, declaration[2]]
-          scopes << [node.location.start_offset, node.location.end_offset, nesting.join('::')]
-          collect_scopes(node.body, nesting, scopes)
-        else
-          node.compact_child_nodes.each { |child| collect_scopes(child, namespace, scopes) }
+            nesting = [*enclosing, declaration[2]]
+            scopes << [current.location.start_offset, current.location.end_offset, nesting.join('::')]
+            pending << [current.body, nesting]
+          else
+            current.compact_child_nodes.reverse_each { |child| pending << [child, enclosing] }
+          end
         end
       end
       private_class_method :collect_scopes
@@ -209,7 +215,7 @@ module Woods
 
       # Check if a line opens a new block (do...end, def...end, etc.).
       #
-      # Mirrors RakeTaskExtractor#block_opener? — the house pattern:
+      # The house pattern, shared with the chunkers' block accounting:
       # +if+/+unless+ count in statement position (leading the line, or
       # directly after an assignment operator: `value = if x`), not as
       # trailing modifiers (e.g., `return if x`, `value = 1 if x`), and a

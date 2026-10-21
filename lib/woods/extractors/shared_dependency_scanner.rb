@@ -2,10 +2,11 @@
 
 require 'set'
 require_relative '../model_name_cache'
-require_relative 'line_neutralizer'
+require_relative 'comment_blanking'
 require_relative 'reference_patterns'
 require_relative 'form_action_scan'
 require_relative 'route_helper_resolver'
+require_relative 'config_read_scanner'
 
 module Woods
   module Extractors
@@ -31,6 +32,8 @@ module Woods
     #   end
     #
     module SharedDependencyScanner
+      include ConfigReadScanner
+
       # Scan for ActiveRecord model references using the precomputed regex.
       #
       # Three passes:
@@ -48,17 +51,12 @@ module Woods
       # @param via [Symbol] Relationship label (default: :code_reference)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_model_dependencies(source, via: :code_reference)
-        # Strip `#` line comments before scanning so references inside
-        # YARD docstrings / TODO comments don't generate ghost edges.
-        # Applied to ALL passes — a commented `Library::Book` should not
-        # produce an edge through the full-name pass. Stripping is
-        # string-literal-aware: a `#` inside a `"..."`/`'...'` literal is
-        # NOT a comment, so a line like `link_to "Tag #ruby", Article.recent`
-        # keeps its `Article` reference (a plain `#...` regex would have
-        # eaten the rest of the line and dropped the edge). String
-        # interpolation (`"Book: #{Library::Book.new}"`) is preserved for the
-        # same reason — the `#{...}` lives inside the literal.
-        scannable = strip_ruby_line_comments(source)
+        # Comments and heredoc text are blanked before every pass, so a model
+        # named only in a YARD docstring, a TODO, a `=begin` block, or the
+        # prose of a heredoc produces no edge. A `#` in a quoted string or
+        # an interpolation is code: `link_to "Tag #ruby", Article.recent`
+        # keeps its `Article` reference.
+        scannable = CommentBlanking.ruby(source)
 
         targets = Set.new
         scannable.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
@@ -78,38 +76,10 @@ module Woods
         targets.map { |model_name| { type: :model, target: model_name, via: via } }
       end
 
-      # Remove `#` line comments from Ruby source without touching `#`
-      # characters that sit inside single- or double-quoted string literals.
-      #
-      # A naive `gsub(/#.*/, '')` truncates lines like
-      # `redirect "/posts#comments"; Post.touch` at the in-string `#`,
-      # silently dropping the `Post` reference. {LineNeutralizer} walks each
-      # line tracking quote state so only a genuine (unquoted) `#` starts a
-      # comment. Escapes (`\"`, `\'`) inside literals are honored. Heredocs,
-      # `%`-literals, and character literals whose char is a quote (`?'`,
-      # `?"`) are not modeled — these are rare in the constant-bearing code
-      # this scans, and mis-reading one only risks a spurious edge (a comment
-      # left unstripped) or a missed edge, never a crash or a dropped-but-real
-      # reference outside those constructs.
-      #
-      # @param source [String] Ruby source code
-      # @return [String] source with unquoted `#` comments removed
-      def strip_ruby_line_comments(source)
-        LineNeutralizer.strip_comments(source)
-      end
-
-      # Strip a trailing `#` comment from a single line, ignoring `#` inside
-      # string literals. Preserves the line's trailing newline.
-      #
-      # @param line [String]
-      # @return [String]
-      def strip_line_comment(line)
-        LineNeutralizer.strip_line_comment(line)
-      end
-
       # Extract string-literal arguments passed to `.constantize` or
       # `const_get(...)`. Matches both `"Library::Book".constantize`
       # and `Object.const_get("Library::Book")` / `const_get("...")`.
+      # A leading `::` names the same constant and is not part of the target.
       # Only returns names actually present in {ModelNameCache.model_names}
       # so non-model uses (e.g. `"String".constantize` in infra code) do
       # not produce ghost edges.
@@ -123,10 +93,10 @@ module Woods
         return [] if known.empty?
 
         targets = []
-        source.scan(/(["'])([A-Z][\w:]*)\1\s*\.\s*constantize\b/) do |_quote, name|
+        source.scan(/(["'])(?:::)?([A-Z][\w:]*+)\1\s*\.\s*constantize\b/) do |_quote, name|
           targets << name if known.include?(name)
         end
-        source.scan(/const_get\s*\(\s*(["'])([A-Z][\w:]*)\1/) do |_quote, name|
+        source.scan(/const_get\s*\(\s*(["'])(?:::)?([A-Z][\w:]*+)\1/) do |_quote, name|
           targets << name if known.include?(name)
         end
         targets
@@ -176,9 +146,9 @@ module Woods
 
       # Scan for all common dependency types and return a deduplicated array.
       #
-      # Combines model, service, job, and mailer scans. Use this when an
-      # extractor needs all four standard dependency types with the default
-      # +:code_reference+ via label.
+      # Combines model, service, job, and mailer scans, plus configuration file
+      # reads ({ConfigReadScanner}). Use this when an extractor needs the
+      # standard dependency types with their default via labels.
       #
       # @param source [String] Ruby source code to scan
       # @return [Array<Hash>] Deduplicated dependency hashes
@@ -187,7 +157,8 @@ module Woods
           scan_model_dependencies(source),
           scan_service_dependencies(source),
           scan_job_dependencies(source),
-          scan_mailer_dependencies(source)
+          scan_mailer_dependencies(source),
+          scan_config_dependencies(source)
         )
       end
 
@@ -217,6 +188,16 @@ module Woods
       # and call build_route_helper_map in its initializer.
       ROUTE_HELPER_PATTERN = /\b(\w+)_(path|url)\b/
 
+      # {ROUTE_HELPER_PATTERN}, except a keyword label (`base_url: host`):
+      # a label names an argument, not a helper. `posts_path::X` is no label.
+      # A shorthand keyword with no value (`t('.x', posts_path:)`, ended by
+      # `,`, `)`, or `}`) passes the helper's result, so it is a call.
+      ROUTE_HELPER_CALL = /\b(\w+)_(path|url)\b(?!:(?!:|\s*+[,)}]))/
+
+      # A method the source defines under a helper-shaped name
+      # (`def tracking_url`). Its calls are calls to that method.
+      ROUTE_HELPER_SHAPED_DEF = /\bdef[ \t]++(?:self\.)?(\w+_(?:path|url))\b/
+
       # Where a form_with/form_for call's arguments end: the first `do`, `%>`,
       # or `end`, so an unrelated _path/_url helper after the form is not
       # taken as its action. A `%` alone cannot bound plain-Ruby sources
@@ -230,16 +211,17 @@ module Woods
       # Gated by +Woods.configuration.extract_navigation_edges+.
       # Requires {RouteHelperResolver} to be included and initialized.
       #
-      # @param source [String] Ruby/ERB/HAML source code to scan
+      # @param source [String] Ruby source code to scan; its comments are not read
       # @param via_type [Symbol] Relationship label (default: :link_to)
       # @return [Array<Hash>] Dependency hashes with :type, :target, :via
       def scan_navigation_dependencies(source, via_type: :link_to)
         return [] unless Woods.configuration&.extract_navigation_edges
 
-        seen_helpers = Set.new
+        source = CommentBlanking.ruby(source)
+        seen_helpers = source.scan(ROUTE_HELPER_SHAPED_DEF).flatten.to_set
         seen_targets = Set.new
         deps = []
-        source.scan(ROUTE_HELPER_PATTERN).each do |route_name, suffix|
+        source.scan(ROUTE_HELPER_CALL).each do |route_name, suffix|
           helper = "#{route_name}_#{suffix}"
           next if seen_helpers.include?(helper)
 
@@ -261,14 +243,14 @@ module Woods
       # Gated by +Woods.configuration.extract_navigation_edges+.
       # Requires {RouteHelperResolver} to be included and initialized.
       #
-      # @param source [String] Template/Ruby source code
+      # @param source [String] Ruby source code; its comments are not read
       # @return [Array<Hash>] Dependency hashes with via: :form_action
       def scan_form_dependencies(source)
         return [] unless Woods.configuration&.extract_navigation_edges
 
         seen = Set.new
         deps = []
-        FormActionScan.route_helpers(source, stop: FORM_SPAN_STOP).each do |route_name, suffix|
+        FormActionScan.route_helpers(CommentBlanking.ruby(source), stop: FORM_SPAN_STOP).each do |route_name, suffix|
           resolved = resolve_route_helper("#{route_name}_#{suffix}")
           next unless resolved
 

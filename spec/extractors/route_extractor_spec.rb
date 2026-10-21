@@ -54,6 +54,13 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(ids).to eq(['GET /users', 'GET /users [subdomain=api]'])
     end
 
+    it 'skips a route whose action is a dynamic path segment, which Rails defaults to index' do
+      stub_routes([build_route(verb: 'GET', path: '/pages/:action', controller: 'pages', action: 'index'),
+                   build_route(verb: 'GET', path: '/pages', controller: 'pages', action: 'index')])
+
+      expect(described_class.new.extract_all.map(&:identifier)).to eq(['GET /pages'])
+    end
+
     it 'does not qualify a route by a path-segment requirement' do
       stub_routes([build_route(verb: 'GET', path: '/users/:id', controller: 'users', action: 'show',
                                constraints: { id: /\d+/ })])
@@ -338,6 +345,15 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(unit.source_code).to include("get '/settings', to: redirect('/account/settings')")
     end
 
+    it 'redacts the userinfo of a redirect target in the metadata and the source' do
+      redirect = ActionDispatch::Routing::PathRedirect.new(301, 'https://deploy:plaintext-marker@docs.example/')
+      unit = extract(endpoint_route(app: redirect, path: '/docs', verb: 'GET')).first
+
+      expect(unit.metadata).to include(redirect_target: 'https://[REDACTED]@docs.example/')
+      expect(unit.source_code).to include("redirect('https://[REDACTED]@docs.example/')")
+      expect(unit.to_h.to_s).not_to include('plaintext-marker')
+    end
+
     it 'renders an options redirect target as sorted key=value pairs' do
       redirect = ActionDispatch::Routing::OptionRedirect.new(302, { subdomain: 'app', path: '/home' })
       unit = extract(endpoint_route(app: redirect, path: '/start', verb: 'GET')).first
@@ -356,6 +372,28 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       expect(unit.identifier).to eq('ANY /v1/*unmatched_route (rack_endpoint)')
       expect(unit.metadata).to include(kind: 'rack_endpoint', app: 'ApiFallback', path_params: [])
       expect(unit.dependencies).to eq([])
+    end
+
+    it 'names an anonymous endpoint class the same on every boot, after its nearest named superclass' do
+      boots = Array.new(2) { [Class.new { def call(_env) = [200, {}, []] }, Class.new(ApiFallback)] }
+
+      apps = boots.map do |plain, fallback|
+        extract(endpoint_route(app: plain.new, path: '/ping'),
+                endpoint_route(app: fallback.new, path: '/v1/*rest'),
+                endpoint_route(app: plain, path: '/probe', anchored: false, format: false))
+          .to_h { |unit| [unit.identifier, unit.metadata[:app]] }
+      end
+
+      expect(apps.uniq).to eq([{ 'ANY /ping (rack_endpoint)' => 'anonymous subclass of Object',
+                                 'ANY /v1/*rest (rack_endpoint)' => 'anonymous subclass of ApiFallback',
+                                 'ANY /probe (mount)' => 'anonymous subclass of Object' }])
+    end
+
+    it 'names a mounted anonymous module without its per-boot address' do
+      rack_module = Module.new { def self.call(_env) = [200, {}, []] }
+      unit = extract(endpoint_route(app: rack_module, path: '/health', anchored: false, format: false)).first
+
+      expect(unit.metadata).to include(kind: 'mount', app: 'anonymous module')
     end
 
     it 'qualifies a constrained root redirect by its constraint before the kind' do
@@ -438,6 +476,174 @@ RSpec.describe Woods::Extractors::RouteExtractor do
       units = described_class.new.extract_all
       expect(units.size).to eq(1)
       expect(units.first.metadata[:http_method]).to eq('GET')
+    end
+  end
+
+  describe 'route source locations' do
+    let(:root) { Dir.mktmpdir }
+
+    after { FileUtils.rm_rf(root) }
+
+    def write_routes(relative, source)
+      path = File.join(root, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, source)
+      path
+    end
+
+    def located_route(location, **attributes)
+      route = build_route(**attributes)
+      allow(route).to receive(:source_location).and_return(location)
+      route
+    end
+
+    def stub_rooted_routes(routes)
+      application = double('Application', routes: double('RoutesCollection', routes: routes))
+      stub_const('Rails', double('Rails', application: application, logger: logger, root: Pathname.new(root)))
+    end
+
+    def routes_of(units)
+      units.select { |unit| unit.type == :route }
+    end
+
+    def route_files_of(units)
+      units.select { |unit| unit.type == :route_file }
+    end
+
+    it 'records the draw file and line a route was drawn at' do
+      path = write_routes('config/routes/admin.rb', "resources :widgets\n")
+      write_routes('config/routes.rb', "Rails.application.routes.draw do\n  draw(:admin)\nend\n")
+      stub_rooted_routes([located_route('config/routes/admin.rb:1', verb: 'GET', path: '/widgets',
+                                                                    controller: 'widgets', action: 'index')])
+
+      route = routes_of(described_class.new.extract_all).first
+
+      expect(route.file_path).to eq(path)
+      expect(route.metadata[:line_number]).to eq(1)
+      expect(route.source_code).to include('# Source: config/routes/admin.rb:1')
+      expect(route.dependencies).to include(type: :route_file, target: 'config/routes/admin.rb', via: :drawn_in)
+    end
+
+    it 'accepts an absolute location under the application root' do
+      path = write_routes('config/routes.rb', "get '/widgets', to: 'widgets#index'\n")
+      stub_rooted_routes([located_route("#{path}:1", verb: 'GET', path: '/widgets',
+                                                     controller: 'widgets', action: 'index')])
+
+      expect(routes_of(described_class.new.extract_all).first.file_path).to eq(path)
+    end
+
+    it 'leaves the path empty when the runtime exposes no location' do
+      write_routes('config/routes.rb', "get '/widgets', to: 'widgets#index'\n")
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index'),
+                          located_route(nil, verb: 'GET', path: '/ledgers', controller: 'ledgers', action: 'index')])
+
+      routes = routes_of(described_class.new.extract_all)
+
+      expect(routes.map(&:file_path)).to eq([nil, nil])
+      expect(routes.map { |route| route.metadata[:line_number] }).to eq([nil, nil])
+      expect(routes.flat_map(&:dependencies).map { |edge| edge[:via] }).to eq(%i[route_dispatch route_dispatch])
+    end
+
+    it 'ignores a location outside the route files, in a gem, or without a line' do
+      write_routes('config/routes.rb', "get '/widgets', to: 'widgets#index'\n")
+      write_routes('lib/extra_routes.rb', "get '/extra', to: 'extra#index'\n")
+      locations = ['lib/extra_routes.rb:1', 'shipment (1.2.0) lib/shipment/routes.rb:4', 'config/routes.rb',
+                   'config/routes/missing.rb:3', '/elsewhere/config/routes.rb:1']
+      stub_rooted_routes(locations.each_with_index.map do |location, index|
+        located_route(location, verb: 'GET', path: "/w#{index}", controller: 'widgets', action: 'index')
+      end)
+
+      expect(routes_of(described_class.new.extract_all).map(&:file_path)).to all(be_nil)
+    end
+
+    it 'emits one route_file unit per draw file, with the routes it draws' do
+      main = write_routes('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          # get '/commented', to: 'widgets#commented'
+          root 'widgets#index'
+          draw(:admin)
+          draw "api/v1"
+          mount Ledger::Engine => '/ledger'
+        end
+      RUBY
+      write_routes('config/routes/admin.rb', "namespace :admin do\n  resources :widgets\nend\n")
+      write_routes('config/routes/api/v1.rb', "get '/ping', to: 'pings#show'\n")
+      stub_rooted_routes([
+                           located_route('config/routes/admin.rb:2', verb: 'GET', path: '/admin/widgets',
+                                                                     controller: 'admin/widgets', action: 'index'),
+                           located_route('config/routes.rb:3', verb: 'GET', path: '/',
+                                                               controller: 'widgets', action: 'index'),
+                           located_route('config/routes/admin.rb:2', verb: 'POST', path: '/admin/widgets',
+                                                                     controller: 'admin/widgets', action: 'create')
+                         ])
+
+      files = route_files_of(described_class.new.extract_all)
+
+      expect(files.map(&:identifier)).to eq(%w[config/routes.rb config/routes/admin.rb config/routes/api/v1.rb])
+      root_file, admin, api = files
+      expect(root_file.file_path).to eq(main)
+      expect(root_file.source_code).to include("root 'widgets#index'")
+      expect(root_file.metadata).to include(draws: %w[admin api/v1], source_locations: true, routes: ['GET /'])
+      expect(root_file.metadata[:declarations]).to eq(
+        [{ line: 3, method: 'root', argument: 'widgets#index' }, { line: 4, method: 'draw', argument: 'admin' },
+         { line: 5, method: 'draw', argument: 'api/v1' }, { line: 6, method: 'mount', argument: nil }]
+      )
+      expect(root_file.dependencies).to eq(
+        [{ type: :route_file, target: 'config/routes/admin.rb', via: :draw },
+         { type: :route_file, target: 'config/routes/api/v1.rb', via: :draw }]
+      )
+      expect(admin.metadata[:routes]).to eq(['GET /admin/widgets', 'POST /admin/widgets'])
+      expect(admin.metadata[:declarations].map { |entry| entry[:method] }).to eq(%w[namespace resources])
+      expect(api.metadata).to include(routes: [], route_count: 0)
+    end
+
+    it 'still lists declared routes when the runtime exposes no locations' do
+      write_routes('config/routes.rb', "get '/widgets', to: 'widgets#index'\nresources :ledgers\n")
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
+
+      file = route_files_of(described_class.new.extract_all).first
+
+      expect(file.metadata).to include(source_locations: false, routes: [], route_count: 0)
+      expect(file.metadata[:declarations]).to eq(
+        [{ line: 1, method: 'get', argument: '/widgets' }, { line: 2, method: 'resources', argument: 'ledgers' }]
+      )
+    end
+
+    it 'redacts credential-shaped text in a route file and refuses one outside the root' do
+      write_routes('config/routes.rb', "mount Ledger::Web => '/ledger', auth: 'https://ledger:plaintext-marker@x.example'\n")
+      outside = Dir.mktmpdir
+      File.write(File.join(outside, 'admin.rb'), "PLAINTEXT_MARKER = 1\n")
+      FileUtils.mkdir_p(File.join(root, 'config/routes'))
+      File.symlink(File.join(outside, 'admin.rb'), File.join(root, 'config/routes/admin.rb'))
+      stub_rooted_routes([located_route('config/routes/admin.rb:1', verb: 'GET', path: '/widgets',
+                                                                    controller: 'widgets', action: 'index')])
+
+      units = described_class.new.extract_all
+
+      expect(route_files_of(units).map(&:identifier)).to eq(%w[config/routes.rb])
+      expect(route_files_of(units).first.source_code).not_to include('plaintext-marker')
+      expect(routes_of(units).first.file_path).to be_nil
+    ensure
+      FileUtils.rm_rf(outside)
+    end
+
+    it 'reads a route file with an invalid UTF-8 byte instead of failing the extractor' do
+      path = write_routes('config/routes.rb', '')
+      File.binwrite(path, "# caf\xE9 menu\nget '/widgets', to: 'widgets#index'\n")
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
+      extractor = described_class.new
+
+      file = route_files_of(extractor.extract_all).first
+
+      expect(file.metadata[:declarations]).to eq([{ line: 2, method: 'get', argument: '/widgets' }])
+      expect(file.source_code).to be_valid_encoding
+      expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(false)
+    end
+
+    it 'emits no route_file unit when the application has no route files' do
+      stub_rooted_routes([build_route(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index')])
+
+      expect(route_files_of(described_class.new.extract_all)).to be_empty
     end
   end
 end

@@ -1,0 +1,1 @@
+- Resolve constant references by one rule. Reference scanning (`LexicalConstant`) and GraphQL, model and concern edge targets (`ConstantPaths`) now share one lexical lookup that never triggers an autoload: a pending autoload is named by its registration instead of being loaded during extraction.

@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
+require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'source_nesting'
 
 module Woods
@@ -58,7 +60,7 @@ module Woods
       # @param file_path [String] Path to the service file
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a service
       def extract_service_file(file_path)
-        source = File.read(file_path)
+        source = SourceFile.read(file_path)
         # Zeitwerk-governed naming first (G-1): a file under a managed
         # autoload path is named for the constant its path spells, so
         # `module Domain; class Container; class Parser` names the file's
@@ -82,6 +84,7 @@ module Woods
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata(source, class_name, file_path)
         unit.dependencies = extract_dependencies(source)
+        MethodEffects.apply(unit, source)
 
         unit
       rescue StandardError => e
@@ -198,6 +201,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_dependencies(source)
+        source = CommentBlanking.ruby(source)
         deps = scan_common_dependencies(source)
 
         # Interactors
@@ -212,7 +216,7 @@ module Woods
 
         # HTTP calls
         if source.match?(/HTTParty|Faraday|RestClient|Net::HTTP/)
-          deps << { type: :external, target: :http_api, via: :code_reference }
+          deps << { type: :external, target: :http_api, via: :external_call }
         end
 
         # Redis

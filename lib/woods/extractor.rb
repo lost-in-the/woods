@@ -8,10 +8,12 @@ require 'pathname'
 require 'set'
 
 require_relative 'atomic_file'
+require_relative 'source_file'
 require_relative 'version'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
+require_relative 'extracted_form'
 require_relative 'dependency_graph'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
@@ -46,9 +48,16 @@ require_relative 'extractors/state_machine_extractor'
 require_relative 'extractors/event_extractor'
 require_relative 'extractors/decorator_extractor'
 require_relative 'extractors/database_view_extractor'
+require_relative 'extractors/graphql_operation_extractor'
+require_relative 'extractors/config_file_extractor'
+require_relative 'extractors/database_table_extractor'
+require_relative 'extractors/external_consumer_extractor'
+require_relative 'extractors/js_module_extractor'
+require_relative 'extractors/doc_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
 require_relative 'extractors/test_mapping_extractor'
+require_relative 'extractors/test_support_extractor'
 require_relative 'extractors/poro_extractor'
 require_relative 'extractors/lib_extractor'
 require_relative 'extractors/package_extractor'
@@ -65,6 +74,7 @@ require_relative 'module_reconciliation'
 require_relative 'poro_reconciliation'
 require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
+require_relative 'doc_references'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -85,6 +95,7 @@ module Woods
     include FilenameUtils
     include Extractors::SourceNesting
     include SourceReferences::Extraction
+    include DocReferences::Extraction
     include ModuleReconciliation
     include PoroReconciliation
 
@@ -142,13 +153,20 @@ module Woods
       events: Extractors::EventExtractor,
       decorators: Extractors::DecoratorExtractor,
       database_views: Extractors::DatabaseViewExtractor,
+      database_tables: Extractors::DatabaseTableExtractor,
+      external_consumers: Extractors::ExternalConsumerExtractor,
       caching: Extractors::CachingExtractor,
       factories: Extractors::FactoryExtractor,
       test_mappings: Extractors::TestMappingExtractor,
+      test_support: Extractors::TestSupportExtractor,
       rails_source: Extractors::RailsSourceExtractor,
       poros: Extractors::PoroExtractor,
       libs: Extractors::LibExtractor,
-      packages: Extractors::PackageExtractor
+      packages: Extractors::PackageExtractor,
+      graphql_operations: Extractors::GraphQLOperationExtractor,
+      config_files: Extractors::ConfigFileExtractor,
+      js_modules: Extractors::JsModuleExtractor,
+      docs: Extractors::DocExtractor
     }.freeze
 
     # Maps singular unit types (as stored in ExtractedUnit/graph nodes)
@@ -187,9 +205,12 @@ module Woods
       event: :events,
       decorator: :decorators,
       database_view: :database_views,
+      database_table: :database_tables,
+      external_consumer: :external_consumers,
       caching: :caching,
       factory: :factories,
       test_mapping: :test_mappings,
+      test_support: :test_support,
       rails_source: :rails_source,
       # RailsSourceExtractor emits BOTH :rails_source and :gem_source units
       # into the rails_source/ output directory. Without this entry the
@@ -201,7 +222,13 @@ module Woods
       gem_source: :rails_source,
       poro: :poros,
       lib: :libs,
-      package: :packages
+      package: :packages,
+      graphql_operation: :graphql_operations,
+      config_file: :config_files,
+      # RouteExtractor emits a route_file unit per draw file beside its routes.
+      route_file: :routes,
+      js_module: :js_modules,
+      doc: :docs
     }.freeze
 
     # Maps unit types to class-based extractor methods (constantize + call).
@@ -227,7 +254,9 @@ module Woods
       caching: :extract_caching_file,
       test_mapping: :extract_test_file,
       poro: :extract_poro_units,
-      lib: :extract_lib_file
+      lib: :extract_lib_file,
+      config_file: :extract_config_file,
+      doc: :extract_doc_file
     }.freeze
 
     # GraphQL types all use the same extractor method.
@@ -243,6 +272,12 @@ module Woods
     # their union can authorize removals; a per-file pass cannot see nested
     # classes, while a descendant-only pass cannot see source-only units.
     HYBRID_DISCOVERY_EXTRACTORS = %i[jobs serializers].freeze
+
+    # Families whose edges are resolved against the loaded constant tables: a
+    # render target can move when any Ruby file adds or removes a constant,
+    # with no graph edge to walk. They re-run with the hybrid families on a
+    # Ruby edit; an unchanged unit is not rewritten.
+    RUNTIME_RESOLVED_EXTRACTORS = %i[components view_components].freeze
 
     # Unit types each extractor owns — the inverse of {TYPE_TO_EXTRACTOR_KEY}.
     #
@@ -326,12 +361,29 @@ module Woods
       scheduled_jobs: :scheduled_job,
       state_machines: :state_machine,
       factories: :factory,
+      # Shared examples, shared contexts, matchers and helper modules are
+      # referenced by name across files, and a helper's `included_for` reads
+      # every support file's `config.include` lines: the support units, and
+      # the test mappings that resolve those names (and rake task names), are
+      # functions of the whole support set. A changed test file alone still
+      # dispatches per file.
+      test_support: :test_support,
+      test_mappings: :test_mapping,
       events: :event,
       # DatabaseViewExtractor keeps only the highest `_vNN` of each Scenic
       # view, so its unit set is a function of the whole directory rather
       # than of each file independently: dispatching db/views/foo_v01.sql to
       # the per-file method would index a version a full extraction drops.
       database_views: :database_view,
+      # Table units are a function of the live schema and of which models
+      # claim each table; declared consumers are a function of the
+      # declaration. Neither has a per-file entry point.
+      database_tables: :database_table,
+      external_consumers: :external_consumer,
+      # A view template's render edges depend on which pages reach it
+      # (Extractors::CallerPrefixPartials), a function of the whole view tree
+      # and of the controllers and mailers that own its directories.
+      view_templates: :view_template,
       # Framework/gem sources are a function of the installed dependency set,
       # so `Gemfile.lock` is their trigger path (#169). Before this the only
       # incremental writer was `woods:extract_framework`, which hand-wrote
@@ -347,8 +399,23 @@ module Woods
       # and the undeclared-edge report reads the whole declared set, so any
       # package.yml change re-runs the extractor wholesale (#280). Task 8
       # re-annotates unit membership in the same run.
-      packages: :package
+      packages: :package,
+      # Operation documents resolve selections against the booted schema and
+      # fragments across documents, so their units are a function of every
+      # document plus app/graphql, not of each file.
+      graphql_operations: :graphql_operation,
+      # A module's kind and registered names come from other files (an index
+      # that registers it), so the type is a function of the whole tree.
+      js_modules: :js_module
     }.freeze
+
+    # Extractors whose units reference JavaScript modules by name (x-data,
+    # data-controller, custom element tags). Their edges are a function of
+    # their own source and the name-to-module map, so they re-run wholesale
+    # when a module change moves that map, and only then.
+    #
+    # @return [Array<Symbol>] extractor keys
+    JS_NAME_CONSUMER_EXTRACTORS = %i[components view_components view_templates].freeze
 
     # Extractors whose output embeds the route table, and which therefore go
     # stale when routes change even though none of their own files did.
@@ -369,7 +436,15 @@ module Woods
       components
       view_components
       view_templates
+      test_mappings
     ].freeze
+
+    # Extractors that resolve table names through the live table catalog, and
+    # so go stale when the table set or a table's owning model changes even
+    # though none of their own files did. Re-run wholesale with the tables.
+    #
+    # @return [Array<Symbol>] extractor keys
+    TABLE_CONSUMER_EXTRACTORS = %i[migrations database_views external_consumers].freeze
 
     # Payload artifacts that live at the top of a payload directory rather
     # than inside a per-type directory. Used when seeding a payload from a
@@ -480,6 +555,7 @@ module Woods
         @dependency_graph = DependencyGraph.new
         @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
       end
+      profile_phase('doc references') { enrich_doc_references_full }
 
       # Phase 2: Resolve dependents (reverse dependencies)
       Rails.logger.info '[Woods] Resolving dependents...'
@@ -595,7 +671,10 @@ module Woods
               'run woods:extract after applying schema/configuration changes'
       end
       prepare_incremental_run(operation: 'incremental')
+      @changed_source_paths = change_set.absolute_paths.to_set
       affected_types = Set.new
+      # Read before any unit is rewritten: the map the published units resolved against.
+      @published_js_names = Extractors::JsModuleRegistry.published_names_for(payload_dir, change_set.relative_paths)
 
       # Blast radius from the pre-change graph, bounded by
       # `incremental_blast_radius_depth` (nil = the unbounded closure).
@@ -657,7 +736,8 @@ module Woods
 
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
-      finalize_incremental_unit_json(affected_types)
+      touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
+      touched.merge(finalize_incremental_unit_json(affected_types).to_a)
 
       # Regenerate type indexes for affected types
       profile_phase('type index') do
@@ -711,6 +791,8 @@ module Woods
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
 
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
+      known += TABLE_CONSUMER_EXTRACTORS if known.include?(:database_tables)
+      known += JS_NAME_CONSUMER_EXTRACTORS if known.include?(:js_modules)
       known.uniq!
 
       prepare_incremental_run(operation: 'refresh')
@@ -719,10 +801,12 @@ module Woods
         acc.merge(replace_type_wholesale(key, affected_types))
       end
 
+      touched.merge(reconcile_model_table_edges(affected_types)) if known.include?(:database_tables)
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
-      finalize_incremental_unit_json(affected_types)
+      touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
+      touched.merge(finalize_incremental_unit_json(affected_types).to_a)
       profile_phase('type index') { affected_types.each { |type_key| regenerate_type_index(type_key) } }
       finalize_incremental_run(touched, reason: "refresh:#{known.sort.join(',')}")
 
@@ -839,7 +923,8 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run(operation: 'incremental')
-      ensure_supported_incremental_writer!
+      baseline_manifest = ensure_supported_incremental_writer!
+      @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
       profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
@@ -854,6 +939,10 @@ module Woods
 
       @dependents_dirty = Set.new
       @incremental_written = {}
+      @retained_units = Set.new
+      @git_recheck = Set.new
+      @changed_source_paths = nil
+      @reference_additions = nil
       @library_replacement_touched = nil
       @identity_claims = {}
       # nil = no scope was computed for this run, so every re-extracted
@@ -1084,6 +1173,8 @@ module Woods
     # Readers retain legacy compatibility, but partial writers cannot migrate
     # retained v1 units. A missing version in a generation manifest is allowed:
     # early v2 prereleases published generations before recording provenance.
+    #
+    # @return [Hash, nil] the published manifest, nil when there is none
     def ensure_supported_incremental_writer!
       generation = Generation.new(output_dir: @output_dir)
       directory = generation.payload_dir
@@ -1097,13 +1188,50 @@ module Woods
 
       manifest = JSON.parse(AtomicFile.read(manifest_path))
       writer = manifest.fetch('woods_version', nil)
-      return if writer.nil? || Gem::Version.new(writer).segments.first >= 2
+      return manifest if writer.nil? || Gem::Version.new(writer).segments.first >= 2
 
       raise Woods::ExtractionError,
             "Cannot incrementally update an index written by Woods #{writer}; run a full woods:extract first"
     rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
       raise Woods::ExtractionError,
             "Cannot verify the baseline manifest writer (#{e.class}); run a full woods:extract first"
+    end
+
+    # The baseline's extraction fingerprint, once this run's configuration is
+    # known to match it. Only a key both sides record with different digests
+    # refuses: a key one Woods version adds or retires must not force a full
+    # run on upgrade. A baseline without a fingerprint, or missing a key,
+    # warns and runs; its next full extraction records the current one.
+    #
+    # @param manifest [Hash, nil] the published manifest
+    # @return [Hash, nil] digests to carry into this run's manifest
+    # @raise [Woods::ExtractionConfigChanged] when a recorded key changed
+    def baseline_extraction_config(manifest)
+      return nil unless manifest
+
+      recorded = manifest['extraction_config']
+      unless recorded.is_a?(Hash)
+        Rails.logger.warn '[Woods] The baseline index records no configuration fingerprint, so this run cannot ' \
+                          'verify it uses the configuration of the full extraction it builds on. The next full ' \
+                          'woods:extract records one.'
+        return nil
+      end
+
+      current = Woods.configuration.extraction_fingerprint
+      changed = current.keys.select { |key| recorded.key?(key) && recorded[key] != current[key] }
+      unless changed.empty?
+        raise Woods::ExtractionConfigChanged,
+              "Extraction configuration differs from the baseline index (#{changed.join(', ')}). An incremental " \
+              'run would publish an index missing the units and edges those settings produce. Run a full ' \
+              'woods:extract; the previous published generation remains active.'
+      end
+
+      unrecorded = current.keys - recorded.keys
+      unless unrecorded.empty?
+        Rails.logger.warn "[Woods] The baseline index predates fingerprinting #{unrecorded.join(', ')}; this run " \
+                          'cannot verify them. The next full woods:extract records them.'
+      end
+      recorded
     end
 
     # Refuse an incremental run that has no baseline to be incremental
@@ -1486,10 +1614,12 @@ module Woods
         units.each { |u| map[u.identifier] << u }
       end
 
-      # Resolve dependents using the complete map.
+      # Resolve dependents using the complete map. Edges collapse as
+      # DependencyGraph.normalize_edges collapses them: `type` describes the
+      # target, so one target reached under two types counts once.
       @results.each_value do |units|
         units.each do |unit|
-          unit.dependencies.each do |dep|
+          unit.dependencies.uniq { |dep| dep.except(:type) }.each do |dep|
             unit_map[dep[:target]].each do |target_unit|
               target_unit.dependents ||= []
               target_unit.dependents << {
@@ -2596,6 +2726,13 @@ module Woods
         schema_sha: schema_sha
       }
 
+      # An incremental run carries the baseline's digests: it never certifies
+      # a configuration no full extraction ran with.
+      extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
+      manifest[:extraction_config] = extraction_config if extraction_config
+
+      manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
+
       AtomicFile.write(
         payload_dir.join('manifest.json'),
         json_serialize(manifest),
@@ -2993,11 +3130,34 @@ module Woods
     # therefore refreshes both complete hybrid inventories after Rails reload.
     # Non-Ruby batches retain the narrower pre-change graph selection.
     def hybrid_discovery_keys(change_set, affected_ids)
-      return HYBRID_DISCOVERY_EXTRACTORS.to_set if change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
+      paths = change_set.absolute_paths
+      keys = if paths.any? { |path| path.end_with?('.rb') }
+               (HYBRID_DISCOVERY_EXTRACTORS + RUNTIME_RESOLVED_EXTRACTORS).to_set
+             else
+               affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
+                           .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
+                           .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
+             end
+      keys.add(:view_components) if paths.any? { |path| sidecar_template?(path) }
+      # A controller's render edges are resolved the same way, but every
+      # controller re-running on every Ruby edit would cost more than the
+      # bounded blast radius saves. Controllers re-run when a file that can
+      # define a component changes; a component defined outside the component
+      # directories, or an alias defined elsewhere, retargets a controller's
+      # edge when the controller file changes or on a full extraction.
+      keys.add(:controllers) if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) }
+      keys
+    end
 
-      affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
-                  .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
-                  .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
+    # A view component's render edges are read from its sidecar templates too,
+    # and the graph records only the component's Ruby file. A template is a
+    # sidecar when a Ruby file of the same name sits beside it, or names the
+    # directory it is in.
+    def sidecar_template?(path)
+      return false unless Extractors::TemplateExtensions::DETECTED.any? { |extension| path.end_with?(extension) }
+
+      directory = File.dirname(path)
+      File.exist?(File.join(directory, "#{File.basename(path)[/\A[^.]+/]}.rb")) || File.exist?("#{directory}.rb")
     end
 
     # Re-extract every file-based unit defined by the changed paths that still
@@ -3264,7 +3424,7 @@ module Woods
         path = path.to_s
         next unless path.end_with?('.rb')
 
-        governed_class_name(path, File.read(path))
+        governed_class_name(path, SourceFile.read(path))
       end.compact.to_set
     end
 
@@ -3395,6 +3555,10 @@ module Woods
     # @return [Set<String>] identifiers written or removed
     def rerun_whole_app_extractors(change_set, affected_types)
       keys = PathDispatcher.new.whole_app_keys_for_all(change_set.relative_paths)
+      # Helper edges resolve against a catalog that spans files, so a helper
+      # source change re-runs the extractors that carry those edges.
+      helper_keys = Extractors::HelperCatalog.consumer_keys_for(change_set.relative_paths)
+      keys.merge(helper_keys)
       # The dispatch rules are configuration-blind (memoized per-process), so
       # the configuration gate applies here — a knob-off host must not re-run
       # an extractor whose units a full extraction of the same tree would not
@@ -3403,15 +3567,51 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
+      keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
+      if keys.include?(:js_modules) && Extractors::JsModuleRegistry.names_changed?(@published_js_names)
+        keys += JS_NAME_CONSUMER_EXTRACTORS
+      end
       # A routes re-run replaces every controller, and a flow document
       # carries the route itself, which no dependency edge connects to the
       # controller. Nothing about that is reachable by a graph walk, so the
       # run drops its flow scope and reassembles every touched controller.
-      @flow_scope = nil if keys.include?(:routes)
+      @flow_scope = nil if keys.include?(:routes) || helper_keys.include?(:controllers)
 
-      keys.each_with_object(Set.new) do |key, touched|
-        touched.merge(replace_type_wholesale(key, affected_types))
+      touched = keys.each_with_object(Set.new) do |key, acc|
+        acc.merge(replace_type_wholesale(key, affected_types))
       end
+      touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
+      touched
+    end
+
+    # Re-extract the models whose table edge no longer matches the live
+    # schema: a loaded model whose table was just created, dropped or moved
+    # to a qualified identifier. A model's columns and schema header move
+    # with the same event, so the whole unit is re-derived.
+    #
+    # Only models whose edge disagrees are touched. Re-running every model
+    # with the tables would make each `app/models` edit cost a full model
+    # extraction.
+    #
+    # @param affected_types [Set<Symbol>]
+    # @return [Set<String>] identifiers re-extracted
+    def reconcile_model_table_edges(affected_types)
+      extractor = extractor_for(:models)
+      return Set.new unless extractor.respond_to?(:discoverable_classes)
+
+      catalog = Extractors::TableCatalog.from_runtime
+      classes = extractor.discoverable_classes.to_h { |klass| [klass.name, klass] }
+      touched = @dependency_graph.units_of_type(:model).sort.each_with_object(Set.new) do |identifier, moved|
+        klass = classes[identifier]
+        next unless klass
+
+        current = @dependency_graph.dependencies_of(identifier, via: :table, type: :model).sort
+        next if current == Array(catalog.for_model(klass)&.identifier)
+
+        moved.add(identifier) if re_extract_unit_of_type(identifier, :model, affected_types)
+      end
+      Rails.logger.info "[Woods] Model table edges reconciled: #{touched.size} model(s) re-extracted"
+      touched
     end
 
     # Replace every unit an extractor owns with a fresh extraction.
@@ -3652,6 +3852,7 @@ module Woods
 
         @dependency_graph.units_for_path(path).each do |identifier, type|
           next if !class_based && convention_path_unit?(type)
+          next if aliased_document_retained?(identifier, type, path, removed, affected_types)
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
@@ -3773,15 +3974,60 @@ module Woods
       end
     end
 
-    # Only exact serialized equality (apart from the extraction timestamp)
-    # permits skipping graph and enrichment work. Derived metadata or changed
-    # edges keep the ordinary registration path; identity checks already ran.
+    # Only an identical extraction permits skipping graph and enrichment work:
+    # the published unit and the fresh one agree in {ExtractedForm}, which
+    # leaves out what the second pass adds after registration (`dependents`,
+    # Git facts, source-reference edges). A fresh unit carries none of those,
+    # so compared whole it never matched a published unit that had even one
+    # dependent. Changed source, metadata or extractor edges keep the ordinary
+    # registration path; identity checks already ran.
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      identical_on_disk?(type_dir.join(collision_safe_filename(unit.identifier)), json_serialize(normalized.to_h))
+      fresh = ExtractedForm.of(JSON.parse(JSON.generate(normalized.to_h)))
+      path = type_dir.join(collision_safe_filename(unit.identifier))
+      return false unless fresh == published_extracted_form(path, unit)
+
+      retain_unit(unit)
+      true
+    end
+
+    # @return [String, nil] the published unit's {ExtractedForm}; nil when the
+    #   file is missing, unreadable, or disagrees with its reference ownership
+    def published_extracted_form(path, unit)
+      return nil unless File.exist?(path)
+
+      key = [unit.type.to_s, unit.identifier]
+      ExtractedForm.of(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+    rescue StandardError
+      nil
+    end
+
+    # Edges the previous source-reference pass added, by typed identity.
+    #
+    # @return [Hash{Array(String, String) => Array<Hash>}]
+    def reference_additions
+      @reference_additions ||= Array(@source_reference_baseline&.fetch('owners', nil)).to_h do |owner|
+        [owner.values_at('type', 'identifier'), owner['added'] || []]
+      end
+    end
+
+    # A unit re-extracted to the same extracted form keeps its published
+    # JSON. Its Git facts can still have moved when its own source is part of
+    # this change (a commit that edits the file without altering the unit), so
+    # those are rechecked in the second pass. A targeted refresh has no change
+    # set and rechecks every retained unit.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [void]
+    def retain_unit(unit)
+      (@retained_units ||= Set.new).add([unit.type.to_s, unit.identifier])
+      changed = @changed_source_paths
+      return unless changed.nil? || SourceContributors.paths(unit).any? { |path| changed.include?(path.to_s) }
+
+      (@git_recheck ||= Set.new).add(unit.identifier)
     end
 
     # GraphQL kinds share a payload filename. Validate retained source ownership
@@ -3882,18 +4128,25 @@ module Woods
     # and `metadata.git` frozen at whatever the last full run wrote —
     # divergence that compounds run over run in an incremental CI chain.
     #
+    # Retained units ({#retain_unit}) join the Git half only. One whose Git
+    # facts moved is reported back, because nothing else marks it touched.
+    #
     # @param affected_types [Set<Symbol>]
-    # @return [void]
+    # @return [Set<String>] retained identifiers whose Git facts were rewritten
     def finalize_incremental_unit_json(affected_types)
       dependents_dirty = @dependents_dirty || Set.new
-      git_dirty = @incremental_written || {}
-      git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.keys) }
+      rechecked = (@git_recheck || Set.new) - (@incremental_written || {}).keys
+      git_dirty = (@incremental_written || {}).keys.to_set | rechecked
+      git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.to_a) }
 
       profile_phase('unit finalization') do
-        (dependents_dirty | git_dirty.keys).each do |identifier|
-          rewrite_unit_json(identifier, affected_types,
-                            refresh_dependents: dependents_dirty.include?(identifier),
-                            git_data: git_dirty.key?(identifier) ? git_data : nil)
+        (dependents_dirty | git_dirty).each_with_object(Set.new) do |identifier, moved|
+          if rechecked.include?(identifier) && !dependents_dirty.include?(identifier)
+            moved.add(identifier) if refresh_retained_git(identifier, affected_types, git_data).positive?
+          else
+            rewrite_unit_json(identifier, affected_types, refresh_dependents: dependents_dirty.include?(identifier),
+                                                          git_data: git_dirty.include?(identifier) ? git_data : nil)
+          end
         end
       end
     end
@@ -3915,6 +4168,18 @@ module Woods
       end
     end
 
+    # The Git half of {#rewrite_unit_json} for a retained unit ({#retain_unit}).
+    #
+    # @param identifier [String]
+    # @param affected_types [Set<Symbol>]
+    # @param git_data [Hash{String => Hash}]
+    # @return [Integer] how many of the identifier's unit files were rewritten
+    def refresh_retained_git(identifier, affected_types, git_data)
+      @dependency_graph.node_types(identifier).count do |type|
+        rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents: false, git_data: git_data)
+      end
+    end
+
     # One (identifier, type) pair's JSON. The `dependents` list is a property
     # of the identifier, not of the type, so every file the identifier owns
     # gets the same refreshed list — which is what a full extraction writes.
@@ -3933,13 +4198,13 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
     # @param git_data [Hash{String => Hash}, nil]
-    # @return [void]
+    # @return [Boolean] whether the unit file was rewritten
     def rewrite_unit_json_of_type(identifier, type, affected_types, refresh_dependents:, git_data:)
       extractor_key = TYPE_TO_EXTRACTOR_KEY[type]
-      return unless extractor_key
+      return false unless extractor_key
 
       path = payload_dir.join(extractor_key.to_s, collision_safe_filename(identifier))
-      return unless File.exist?(path)
+      return false unless File.exist?(path)
 
       data = JSON.parse(AtomicFile.read(path))
       # Serialized comparison, not `data.dup`: the git patch mutates the
@@ -3960,12 +4225,14 @@ module Woods
         annotate_node_from_git(identifier, type, git)
       end
 
-      return if JSON.generate(data) == before
+      return false if JSON.generate(data) == before
 
       AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
       affected_types&.add(extractor_key)
+      true
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
+      false
     end
 
     # This (identifier, type) pair's own git data, looked up by its own

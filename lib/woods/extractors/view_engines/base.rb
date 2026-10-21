@@ -82,6 +82,16 @@ module Woods
           raise NotImplementedError, "#{self.class.name} must implement #scan_partials"
         end
 
+        # Template names rendered with `render template:` in the given
+        # source, e.g. `'layouts/chrome'` for a layout that renders another
+        # layout. Optional; the default finds none.
+        #
+        # @param source [String] Template source code
+        # @return [Array<String>]
+        def scan_templates(_source)
+          []
+        end
+
         # Partial references whose path is only known at runtime, such as a
         # host helper that builds the path or an object whose partial path
         # Rails derives. Each entry is shaped `{ kind: 'helper' | 'object',
@@ -92,6 +102,25 @@ module Woods
         # @return [Array<Hash>]
         def scan_unresolved_partials(_source)
           []
+        end
+
+        # Application helper methods the template calls. The orchestrator
+        # passes the catalog's method names; the engine finds the Ruby in
+        # its own syntax and reports which of those names are called.
+        # Names called without a receiver are `:bare`; names called on the
+        # `helpers` proxy are `:explicit`. Both lists are sorted. A name the
+        # template uses as a local (a block parameter, an assignment) is not
+        # a call. Optional; the default finds none.
+        #
+        # Engines hand their Ruby regions to {HelperCallScan.method_calls},
+        # which reads each token once: one pass per template, whatever the
+        # catalog size.
+        #
+        # @param source [String] Template source code
+        # @param names [Set<String>] Catalog method names to look for
+        # @return [Hash{Symbol => Array<String>}] `{ bare:, explicit: }`
+        def scan_method_calls(_source, _names)
+          { bare: [], explicit: [] }
         end
 
         # Instance-variable names referenced in the template source,

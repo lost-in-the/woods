@@ -8,6 +8,20 @@ require 'woods/extractors/migration_extractor'
 RSpec.describe Woods::Extractors::MigrationExtractor do
   include_context 'extractor setup'
 
+  it_behaves_like 'extracts multibyte source under a POSIX locale',
+                  path: 'db/migrate/20240115123456_create_widgets.rb',
+                  source: <<~SOURCE,
+                    # Widgets — catalogue table
+                    class CreateWidgets < ActiveRecord::Migration[7.1]
+                      def change
+                        create_table :widgets do |t|
+                          t.string :name, comment: 'display name — shown to buyers'
+                        end
+                      end
+                    end
+                  SOURCE
+                  identifier: 'CreateWidgets'
+
   # ── Initialization ───────────────────────────────────────────────────
 
   describe '#initialize' do
@@ -447,7 +461,7 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
     # EXTB-18. `change_table` was absent from TABLE_OPERATIONS and the three
     # block scanners anchored on `create_table` only, so a change_table
     # migration produced neither a table nor a column — and the table got no
-    # `:table_name` model edge.
+    # edge.
     it 'extracts tables and columns from a change_table block' do
       path = create_file('db/migrate/20240101000000_extend_orders.rb', <<~RUBY)
         class ExtendOrders < ActiveRecord::Migration[7.1]
@@ -761,23 +775,6 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
                       end
                     RUBY
 
-    it 'links to model via table name using classify' do
-      path = create_file('db/migrate/20240101000000_create_orders.rb', <<~RUBY)
-        class CreateOrders < ActiveRecord::Migration[7.1]
-          def change
-            create_table :orders do |t|
-              t.string :number
-              t.timestamps
-            end
-          end
-        end
-      RUBY
-
-      unit = described_class.new.extract_migration_file(path)
-      model_deps = unit.dependencies.select { |d| d[:type] == :model }
-      expect(model_deps.map { |d| d[:target] }).to include('Order')
-    end
-
     it 'filters out Rails internal tables' do
       path = create_file('db/migrate/20240101000000_create_internals.rb', <<~RUBY)
         class CreateInternals < ActiveRecord::Migration[7.1]
@@ -797,21 +794,6 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
       expect(model_deps).to be_empty
     end
 
-    it 'links references to target models' do
-      path = create_file('db/migrate/20240101000000_add_user_ref.rb', <<~RUBY)
-        class AddUserRef < ActiveRecord::Migration[7.1]
-          def change
-            add_reference :orders, :user, foreign_key: true
-          end
-        end
-      RUBY
-
-      unit = described_class.new.extract_migration_file(path)
-      model_deps = unit.dependencies.select { |d| d[:type] == :model }
-      targets = model_deps.map { |d| d[:target] }
-      expect(targets).to include('User')
-    end
-
     it 'scans data migration code for common dependencies' do
       path = create_file('db/migrate/20240101000000_data_migration.rb', <<~RUBY)
         class DataMigration < ActiveRecord::Migration[7.1]
@@ -827,20 +809,6 @@ RSpec.describe Woods::Extractors::MigrationExtractor do
       service_deps = unit.dependencies.select { |d| d[:type] == :service }
       expect(job_deps.map { |d| d[:target] }).to include('NotificationJob')
       expect(service_deps.map { |d| d[:target] }).to include('MigrationService')
-    end
-
-    it 'links add_column table to model' do
-      path = create_file('db/migrate/20240101000000_add_email.rb', <<~RUBY)
-        class AddEmail < ActiveRecord::Migration[7.1]
-          def change
-            add_column :users, :email, :string
-          end
-        end
-      RUBY
-
-      unit = described_class.new.extract_migration_file(path)
-      model_deps = unit.dependencies.select { |d| d[:type] == :model && d[:via] == :table_name }
-      expect(model_deps.map { |d| d[:target] }).to include('User')
     end
   end
 

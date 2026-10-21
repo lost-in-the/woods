@@ -12,23 +12,24 @@ module Woods
         [method, Module.instance_method(method)]
       end.freeze
 
+      # Memoize only where no constant can be defined between two lookups, such
+      # as one reference pass. An extractor that loads classes as it goes needs
+      # every lookup to read the constant tables again.
+      #
+      # @param memoize [Boolean] reuse lexical scopes and results for this instance
+      def initialize(memoize: false)
+        @memoize = memoize
+        @scopes = {}
+        @results = {}
+      end
+
       # @param name [String] a literal constant path
       # @param nesting [Array<String>] lexical scopes, innermost first
       # @return [Hash] lookup status and canonical target or unresolved reason
       def call(name, nesting: [], allow_private: false)
-        return unknown('invalid_constant') unless valid_name?(name)
+        return lookup(name, nesting, allow_private) unless @memoize
 
-        parts = name.delete_prefix('::').split('::')
-        scopes = name.start_with?('::') ? { scopes: [Object] } : lexical_scopes(nesting)
-        return scopes unless scopes[:scopes]
-
-        result = first_constant(scopes[:scopes], parts.shift, public_only: name.start_with?('::') && !allow_private)
-        parts.each do |part|
-          return result.except(:pending_target, :autoload_path) unless module_object?(result[:value])
-
-          result = first_constant(qualified_scopes(result[:value]), part, public_only: !allow_private)
-        end
-        result
+        @results[[name, nesting, allow_private]] ||= lookup(name, nesting, allow_private).freeze
       end
 
       # @param scope [Module] runtime module to inspect
@@ -50,6 +51,22 @@ module Woods
 
       private
 
+      def lookup(name, nesting, allow_private)
+        return unknown('invalid_constant') unless valid_name?(name)
+
+        parts = name.delete_prefix('::').split('::')
+        scopes = name.start_with?('::') ? { scopes: [Object] } : lexical_scopes(nesting)
+        return scopes unless scopes[:scopes]
+
+        result = first_constant(scopes[:scopes], parts.shift, public_only: name.start_with?('::') && !allow_private)
+        parts.each do |part|
+          return result.except(:pending_target, :autoload_path) unless module_object?(result[:value])
+
+          result = first_constant(qualified_scopes(result[:value]), part, public_only: !allow_private)
+        end
+        result
+      end
+
       def valid_name?(name)
         name.is_a?(String) && CONSTANT.match?(name)
       end
@@ -67,7 +84,12 @@ module Woods
 
       def lexical_scopes(nesting)
         return { scopes: [Object] } if nesting.empty?
+        return resolve_lexical_scopes(nesting) unless @memoize
 
+        @scopes[nesting] ||= resolve_lexical_scopes(nesting)
+      end
+
+      def resolve_lexical_scopes(nesting)
         modules = nesting.map do |name|
           result = call("::#{name}", allow_private: true)
           return unknown('unloaded_scope') unless module_object?(result[:value])

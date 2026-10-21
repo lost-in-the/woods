@@ -4,6 +4,7 @@ require 'digest'
 require 'json'
 require 'set'
 require_relative 'ast/parser'
+require_relative 'atomic_file'
 require_relative 'flow_analysis/operation_extractor'
 require_relative 'flow_document'
 require_relative 'source_line_map'
@@ -42,6 +43,11 @@ module Woods
     # Unit types that exist only for the test suite. Application code never
     # calls one, so they are never flow callees.
     SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
+
+    # The method an enqueued job runs, whichever enqueue method
+    # (`perform_later`, `perform_async`, `perform_in`, `perform_at`) the
+    # `:async` operation recorded.
+    JOB_ENTRY_METHOD = 'perform'
 
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
@@ -354,7 +360,8 @@ module Woods
 
         expand(
           resolution, steps, visited,
-          depth: depth + 1, max_depth: max_depth, path: path, method_name: op[:method]
+          depth: depth + 1, max_depth: max_depth, path: path,
+          method_name: op[:type] == :async ? JOB_ENTRY_METHOD : op[:method]
         )
       when :transaction
         (op[:nested] || []).each do |nested_op|
@@ -460,11 +467,7 @@ module Woods
           path = File.join(@extracted_dir, directory, filename)
           next unless File.file?(path)
 
-          # Force UTF-8: the extractor writes the routes-comment header in
-          # source_code using Unicode box-drawing characters; reading under
-          # the platform default (US-ASCII on some CIs) raises
-          # InvalidByteSequenceError before JSON parsing.
-          return JSON.parse(File.read(path, encoding: 'UTF-8'), symbolize_names: true)
+          return JSON.parse(AtomicFile.read(path), symbolize_names: true)
         rescue JSON::ParserError
           next
         end

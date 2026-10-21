@@ -1,0 +1,1 @@
+- A fixture class under `spec/lib/` whose file name ends in `_test.rb` is indexed as a `test_support` unit of kind `class`; only `spec/**/*_spec.rb` and `test/**/*_test.rb` are test files.

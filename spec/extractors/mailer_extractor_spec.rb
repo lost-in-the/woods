@@ -187,6 +187,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       create_file('app/mailers/user_mailer.rb', source)
     end
 
+    it 'records the side effects of a mailer method and names it on the edge' do
+      create_file('app/mailers/user_mailer.rb', source.sub("@user = params[:user]\n", "AuditService.call(self)\n"))
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:method_effects].keys).to eq(['welcome_email'])
+      expect(unit.metadata[:method_effects]['welcome_email'][:services_called]).to eq(['AuditService'])
+      expect(unit.dependencies)
+        .to include({ type: :service, target: 'AuditService', via: :code_reference, through: 'welcome_email' })
+    end
+
     it 'produces an ExtractedUnit with correct type and identifier' do
       unit = described_class.new.extract_mailer(mailer)
 
@@ -269,6 +280,55 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
   # ── Callbacks ─────────────────────────────────────────────────────────
 
+  describe 'per-action facts (W-7)' do
+    before do
+      create_file('app/mailers/facts_digest_mailer.rb', <<~RUBY)
+        class FactsDigestMailer < ActionMailer::Base
+          def new_post(user, post)
+            @user = user
+            @post = post
+            mail(to: user.email, subject: post.title)
+            AuditService.call(self)
+          end
+
+          private
+
+          def set_footer
+            @footer = 'weekly'
+          end
+        end
+      RUBY
+      load File.join(tmp_dir, 'app/mailers/facts_digest_mailer.rb')
+      callbacks = [build_callback(kind: :before, filter: :set_footer)]
+      FactsDigestMailer.define_singleton_method(:name) { 'FactsDigestMailer' }
+      FactsDigestMailer.define_singleton_method(:action_methods) { Set.new(%w[new_post]) }
+      FactsDigestMailer.define_singleton_method(:default) { {} }
+      FactsDigestMailer.define_singleton_method(:delivery_method) { :smtp }
+      FactsDigestMailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+    end
+
+    after { Object.send(:remove_const, :FactsDigestMailer) if defined?(FactsDigestMailer) }
+
+    it 'publishes the assigns of the action and its filters and the template mail renders' do
+      facts = described_class.new.extract_mailer(FactsDigestMailer).metadata[:action_facts]['new_post']
+      expect(facts[:assigns].map { |a| [a[:ivar], a[:method]] })
+        .to eq([%w[@footer set_footer], %w[@user new_post], %w[@post new_post]])
+      expect(facts[:renders]).to eq([{ template: 'facts_digest_mailer/new_post', line: 5, mail: true,
+                                       method: 'new_post', file: 'app/mailers/facts_digest_mailer.rb' }])
+    end
+
+    it 'keeps per-action facts beside method effects and annotated service edges' do
+      unit = described_class.new.extract_mailer(FactsDigestMailer)
+
+      expect(unit.metadata[:actions]).to eq(['new_post'])
+      expect(unit.metadata.dig(:action_facts, 'new_post', :assigns))
+        .to include(hash_including(ivar: '@post', method: 'new_post'))
+      expect(unit.metadata.dig(:method_effects, 'new_post', :services_called)).to eq(['AuditService'])
+      expect(unit.dependencies)
+        .to include(type: :service, target: 'AuditService', via: :code_reference, through: 'new_post')
+    end
+  end
+
   describe 'callback extraction' do
     it 'extracts before_action callbacks' do
       cb = build_callback(kind: :before, filter: :set_user)
@@ -314,6 +374,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Template Discovery ────────────────────────────────────────────────
 
   describe 'source encoding' do
+    it 'scrubs bytes that are not valid UTF-8 and still extracts the mailer' do
+      mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
+      create_file('app/mailers/shipment_mailer.rb',
+                  "class ShipmentMailer < ApplicationMailer\n  # caf\xE9\n  " \
+                  "def dispatched = mail(subject: \"sent\")\nend\n".b)
+
+      unit = with_posix_default_external { described_class.new.extract_mailer(mailer) }
+
+      expect(unit&.source_code).to include("# caf\uFFFD")
+    end
+
     it 'reads a multibyte mailer source the same under a POSIX default external encoding' do
       mailer = build_mailer(name: 'ShipmentMailer', actions: %w[dispatched])
       create_file('app/mailers/shipment_mailer.rb', <<~RUBY)
@@ -432,6 +503,53 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Dependencies ──────────────────────────────────────────────────────
 
   describe 'dependency extraction' do
+    it 'tracks an app-owned parent whose private callbacks supply child action facts' do
+      parent_path = create_file('app/mailers/fresh_base_mailer.rb', <<~RUBY)
+        class FreshBaseMailer < ActionMailer::Base
+          private
+
+          def set_viewer
+            @viewer = 1
+          end
+        end
+      RUBY
+      child_path = create_file('app/mailers/fresh_child_mailer.rb', <<~RUBY)
+        class FreshChildMailer < FreshBaseMailer
+          def digest
+            mail to: 'reader@example.test'
+          end
+        end
+      RUBY
+      load parent_path
+      load child_path
+      FreshBaseMailer.define_singleton_method(:name) { 'FreshBaseMailer' }
+      FreshChildMailer.define_singleton_method(:name) { 'FreshChildMailer' }
+      callbacks = [build_callback(kind: :before, filter: :set_viewer)]
+      [FreshBaseMailer, FreshChildMailer].each do |mailer|
+        mailer.define_singleton_method(:default) { {} }
+        mailer.define_singleton_method(:delivery_method) { :smtp }
+        mailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+      end
+      FreshBaseMailer.define_singleton_method(:action_methods) { Set.new }
+      FreshChildMailer.define_singleton_method(:action_methods) { Set['digest'] }
+      extractor = described_class.new
+      parent = extractor.extract_mailer(FreshBaseMailer)
+      child = extractor.extract_mailer(FreshChildMailer)
+
+      expect(child.metadata.dig(:action_facts, 'digest', :assigns))
+        .to include(hash_including(ivar: '@viewer', file: 'app/mailers/fresh_base_mailer.rb'))
+      expect(child.dependencies).to include(type: :mailer, target: 'FreshBaseMailer', via: :inheritance)
+      expect(parent.dependencies).not_to include(hash_including(type: :mailer, target: 'ActionMailer::Base'))
+
+      graph = Woods::DependencyGraph.new
+      [parent, child].each { |unit| graph.register(unit) }
+      expect(graph.affected_by([parent_path])).to include('FreshChildMailer')
+    ensure
+      %i[FreshChildMailer FreshBaseMailer].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'detects service dependencies' do
       source = <<~RUBY
         class OrderMailer < ApplicationMailer
@@ -452,26 +570,86 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(service_deps.map { |d| d[:target] }).to include('PricingService')
     end
 
-    it 'detects URL helper route dependencies' do
-      source = <<~RUBY
-        class UserMailer < ApplicationMailer
-          def welcome_email
-            @url = confirmation_url(token: 'abc')
-            @profile = edit_user_path(@user)
-            mail(to: 'user@example.com')
+    describe 'route helpers' do
+      let(:route_map) do
+        {
+          'billing' => { controller: 'BillingController', action: 'show', path: '/billing', verb: 'GET' },
+          'base' => { controller: 'BaseController', action: 'show', path: '/base', verb: 'GET' },
+          'generate_utm' => { controller: 'UtmController', action: 'create', path: '/utm', verb: 'POST' }
+        }
+      end
+
+      def route_dependencies(source)
+        mailer = build_mailer(name: 'LedgerMailer', actions: %w[statement])
+        create_file('app/mailers/ledger_mailer.rb', source)
+        extractor = described_class.new
+        extractor.instance_variable_set(:@route_helper_map, route_map)
+
+        extractor.extract_mailer(mailer).dependencies.reject { |dep| %i[model service].include?(dep[:type]) }
+      end
+
+      before do
+        Woods.configure unless Woods.configuration
+        allow(Woods.configuration).to receive(:extract_navigation_edges).and_return(true)
+      end
+
+      it 'targets the controller a live named route dispatches to' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @url = billing_url(token: 'abc')
+              mail(to: 'reader@example.com')
+            end
           end
-        end
-      RUBY
+        RUBY
 
-      mailer = build_mailer(name: 'UserMailer', actions: %w[welcome_email])
-      create_file('app/mailers/user_mailer.rb', source)
+        expect(deps).to eq([{ type: :controller, target: 'BillingController', via: :link_to }])
+      end
 
-      unit = described_class.new.extract_mailer(mailer)
+      it 'records no edge for a helper name with no live route' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @url = confirmation_url(token: 'abc')
+              mail(to: 'reader@example.com')
+            end
+          end
+        RUBY
 
-      route_deps = unit.dependencies.select { |d| d[:type] == :route }
-      targets = route_deps.map { |d| d[:target] }
-      expect(targets).to include('confirmation')
-      expect(targets).to include('edit_user')
+        expect(deps).to be_empty
+      end
+
+      it 'does not read a keyword argument ending in _url as a route helper' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @link = Shortener.new(base_url: params[:host], asset_path: 'x').call
+              mail(to: 'reader@example.com')
+            end
+          end
+        RUBY
+
+        expect(deps).to be_empty
+      end
+
+      it 'does not read a method the mailer defines as a route helper' do
+        deps = route_dependencies(<<~RUBY)
+          class LedgerMailer < ApplicationMailer
+            def statement
+              @link = generate_utm_url('statement')
+              mail(to: 'reader@example.com')
+            end
+
+            private
+
+            def generate_utm_url(campaign)
+              "https://example.com/?utm_campaign=\#{campaign}"
+            end
+          end
+        RUBY
+
+        expect(deps).to be_empty
+      end
     end
   end
 

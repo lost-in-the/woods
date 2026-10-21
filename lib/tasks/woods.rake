@@ -430,6 +430,8 @@ namespace :woods do
       puts '-' * 50
       puts "  Nodes: #{stats['node_count'] || 'unknown'}"
       puts "  Edges: #{stats['edge_count'] || 'unknown'}"
+      require 'woods/tasks'
+      Woods::Tasks.print_code_reference_counts(Woods::Tasks.code_reference_counts(payload_dir))
     end
   end
 
@@ -510,6 +512,7 @@ namespace :woods do
     require 'woods/dependency_graph'
     require 'woods/graph_analyzer'
     require 'woods/ruby_analyzer/mermaid_renderer'
+    require 'woods/atomic_file'
 
     gem_root = File.expand_path('../..', __dir__)
     json_dir = File.join(gem_root, 'tmp', 'woods_self')
@@ -518,11 +521,11 @@ namespace :woods do
 
     # 1. Check staleness via source_checksum
     lib_files = Dir.glob(File.join(gem_root, 'lib', '**', '*.rb'))
-    source_content = lib_files.map { |f| File.read(f) }.join
+    source_content = lib_files.map { |f| File.binread(f) }.join
     source_checksum = Digest::SHA256.hexdigest(source_content)
 
     if File.exist?(manifest_path)
-      existing = JSON.parse(File.read(manifest_path))
+      existing = JSON.parse(Woods::AtomicFile.read(manifest_path))
       if existing['source_checksum'] == source_checksum
         puts 'Source unchanged — skipping self-analysis.'
         next
