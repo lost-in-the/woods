@@ -42,6 +42,7 @@ module Woods
       @output_dir = output_dir
       @max_depth = max_depth
       @flows_dir = File.join(output_dir, 'flows')
+      @by_unit = {}
     end
 
     # Pre-compute flow documents for all controller actions.
@@ -57,6 +58,7 @@ module Woods
     # @raise [Woods::ExtractionError] when any action fails to assemble
     def precompute
       FileUtils.mkdir_p(@flows_dir)
+      @by_unit = {}
 
       assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
       flow_map = {}
@@ -103,6 +105,11 @@ module Woods
     def recompute_delta(touched_units:, removed_identifiers: [], carried_identifiers: [])
       FileUtils.mkdir_p(@flows_dir)
 
+      previous = previous_flow_index
+      replaced = touched_units.map(&:identifier) + Array(removed_identifiers)
+      carried = previous.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
+      @by_unit = carried_inverse(carried)
+
       assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
       delta = {}
       annotations = {}
@@ -117,13 +124,9 @@ module Woods
         delta.merge!(entries)
       end
 
-      previous = previous_flow_index
       Array(carried_identifiers).each do |identifier|
         annotations[identifier] = carried_annotation(previous, identifier)
       end
-
-      replaced = touched_units.map(&:identifier) + Array(removed_identifiers)
-      carried = previous.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
 
       write_flow_index(carried.merge(delta))
 
@@ -221,10 +224,12 @@ module Woods
     # @raise [Woods::ExtractionError] when assembly or the write fails
     def assemble_and_write(assembler, entry_point, controller_id, action)
       flow = assembler.assemble(entry_point, max_depth: @max_depth)
+      data = flow.to_h
+      index_flow_steps(data, entry_point)
 
       filename = Woods::FilenameUtils.flow_filename(controller_id, action)
 
-      Woods::AtomicFile.write(File.join(@flows_dir, filename), canonical_json(flow.to_h), durable: durable_writes?)
+      Woods::AtomicFile.write(File.join(@flows_dir, filename), canonical_json(data), durable: durable_writes?)
 
       # Relative — this value is persisted (flow_index.json and the unit's
       # metadata[:flow_paths]), so it must not carry this machine's root.
@@ -239,6 +244,75 @@ module Woods
     def write_flow_index(flow_map)
       index_path = File.join(@flows_dir, 'flow_index.json')
       Woods::AtomicFile.write(index_path, canonical_json(flow_map), durable: durable_writes?)
+      @by_unit.each_value { |types| types.transform_values! { |entries| entries.uniq.sort } }
+      Woods::AtomicFile.write(File.join(@flows_dir, 'by_unit.json'), canonical_json(@by_unit), durable: durable_writes?)
+    end
+
+    # Retain memberships only for entries the delta carries. An older generation
+    # may have no inverse; reconstruct those entries from its published documents
+    # once, without assembling flows against a different generation's source.
+    #
+    # @param carried [Hash{String => String}] retained entry points and paths
+    # @return [Hash{String => Hash{String => Array<String>}}]
+    def carried_inverse(carried)
+      path = File.join(@flows_dir, 'by_unit.json')
+      unless File.exist?(path)
+        @by_unit = {}
+        carried.each do |entry_point, relative|
+          document = JSON.parse(Woods::AtomicFile.read(File.join(@output_dir, relative)))
+          index_flow_steps(document, entry_point)
+        end
+        return @by_unit
+      end
+
+      inverse = JSON.parse(Woods::AtomicFile.read(path))
+      validate_inverse!(inverse)
+      inverse.each_with_object({}) do |(identifier, types), result|
+        retained = types.transform_values { |entries| entries.select { |entry| carried.key?(entry) } }
+                        .reject { |_type, entries| entries.empty? }
+        result[identifier] = retained unless retained.empty?
+      end
+    rescue JSON::ParserError, SystemCallError => e
+      raise Woods::ExtractionError, "previous flow inverse cannot be read (by_unit.json): #{e.message}"
+    end
+
+    # Reject a present but malformed inverse rather than losing memberships.
+    def validate_inverse!(inverse)
+      valid = inverse.is_a?(Hash) && inverse.all? do |identifier, types|
+        identifier.is_a?(String) && !identifier.empty? && types.is_a?(Hash) && types.all? do |type, entries|
+          type.is_a?(String) && !type.empty? && entries.is_a?(Array) &&
+            entries.all? { |entry| entry.is_a?(String) && !entry.empty? }
+        end
+      end
+      raise Woods::ExtractionError, 'previous by_unit.json has an invalid typed membership map' unless valid
+    end
+
+    # Only expanded steps are evidence of membership. Operation targets may be
+    # unresolved or beyond max_depth, and cycle markers do not carry a unit type.
+    # An action suffix belongs to the entry point, not to the unit identity.
+    def index_flow_steps(document, entry_point)
+      unless document.is_a?(Hash) && (document[:entry_point] || document['entry_point']) == entry_point
+        raise Woods::ExtractionError, 'flow document entry_point does not match flow index for inverse'
+      end
+
+      steps = document.is_a?(Hash) && (document[:steps] || document['steps'])
+      raise Woods::ExtractionError, 'flow document has invalid steps for inverse' unless steps.is_a?(Array)
+
+      steps.each do |step|
+        raise Woods::ExtractionError, 'flow document has invalid step for inverse' unless step.is_a?(Hash)
+
+        type = step[:type] || step['type']
+        next if type.to_s == 'cycle'
+
+        unit = step[:unit] || step['unit']
+        identifier = unit.split('#', 2).first if unit.is_a?(String)
+        unless identifier && !identifier.empty? && (type.is_a?(String) || type.is_a?(Symbol)) && !type.to_s.empty?
+          raise Woods::ExtractionError, 'flow step has no typed identity for inverse'
+        end
+
+        types = (@by_unit[identifier] ||= {})
+        (types[type.to_s] ||= []) << entry_point
+      end
     end
 
     # Whether a flow document pays for its own fsync as it is written.
