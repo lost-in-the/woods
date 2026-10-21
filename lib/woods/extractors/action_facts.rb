@@ -26,7 +26,7 @@ module Woods
       BODY_FORMATS = %i[json xml plain html body js inline].freeze
       REDIRECTS = %i[redirect_to redirect_back redirect_back_or_to].freeze
       RECEIVER_CHANGING_METHODS = %i[instance_eval instance_exec class_eval class_exec module_eval module_exec].freeze
-      GENERATED_DEFINITIONS = %i[attr_reader attr_writer attr_accessor define_method].freeze
+      GENERATED_DEFINITIONS = %i[attr attr_reader attr_writer attr_accessor define_method].freeze
       IVAR_WRITES = [Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
                      Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode,
                      Prism::InstanceVariableTargetNode].freeze
@@ -35,44 +35,30 @@ module Woods
       # same-name, same-line definitions remain separate candidates.
       #
       # @param program [Prism::ProgramNode] a parsed file
-      # A nil candidate marks a generated declaration: Ruby supplies only a
-      # source line, so a def on that same line cannot disambiguate its owner.
-      # A nil name marks a generated declaration whose name is dynamic.
+      # Nil-name entries mark ambiguous source lines. Blocks, generated
+      # declarations and multiple defs can supply a renamed Proc-backed
+      # method's source site, even when another file installs that method.
       # @return [Hash{Array(String, nil, Integer) => Array<Prism::DefNode, nil>}]
       def self.definitions(program)
         definitions = Hash.new { |hash, key| hash[key] = [] }
+        definition_counts = Hash.new(0)
         stack = [program]
         until stack.empty?
           node = stack.pop
-          if node.is_a?(Prism::DefNode) && node.receiver.nil?
-            definitions[[node.name.to_s, node.location.start_line]] << node
+          if node.is_a?(Prism::DefNode)
+            line = node.location.start_line
+            definition_counts[line] += 1
+            definitions[[node.name.to_s, line]] << node if node.receiver.nil?
+          elsif node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+            definitions[[nil, node.opening_loc.start_line]] << nil
           elsif node.is_a?(Prism::CallNode) && GENERATED_DEFINITIONS.include?(node.name)
-            generated_names(node).each do |name|
-              lines = [node.location.start_line]
-              lines << node.block.location.start_line if node.block.is_a?(Prism::BlockNode)
-              lines.uniq.each { |line| definitions[[name, line]] << nil }
-            end
+            definitions[[nil, node.location.start_line]] << nil
           end
           stack.concat(node.compact_child_nodes)
         end
+        definition_counts.each { |line, count| definitions[[nil, line]] << nil if count > 1 }
         definitions
       end
-
-      def self.generated_names(node)
-        arguments = Array(node.arguments&.arguments)
-        arguments = arguments.first(1) if node.name == :define_method
-        arguments.flat_map do |argument|
-          next [nil] unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
-
-          name = argument.unescaped
-          case node.name
-          when :attr_writer then ["#{name}="]
-          when :attr_accessor then [name, "#{name}="]
-          else [name]
-          end
-        end
-      end
-      private_class_method :generated_names
 
       # A runtime source site must match exactly. Source-only callers without
       # a line can select a name only when it identifies one definition.

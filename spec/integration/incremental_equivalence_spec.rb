@@ -1620,6 +1620,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   describe 'mailer callback fact freshness' do
     %i[parent concern].each do |owner_kind|
       it "refreshes child action facts when only the #{owner_kind} callback body changes" do
+        created_directories = %w[app/mailers app/mailers/concerns].reject do |relative|
+          File.directory?(app_path(relative))
+        end
         prefix = "#{owner_kind.to_s.camelize}FactFresh"
         base_name = "#{prefix}BaseMailer"
         child_name = "#{prefix}Mailer"
@@ -1668,12 +1671,15 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         expect(mailer.dig('metadata', 'action_facts', 'digest', 'assigns').map { |fact| fact['ivar'] })
           .to eq(%w[@viewer @audit])
       ensure
-        # These runtime constants survive the example; retain their source for later full extractions.
-        [owner, base, child].compact.uniq.each do |relative|
-          next unless File.exist?(app_path(relative))
-
-          FileUtils.mkdir_p(File.dirname(File.join(@pristine_root, relative)))
-          FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+        # Fixture mailers and concerns must not join later examples' complete inventories.
+        [child_name, base_name, concern_name].compact.each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+        [owner, base, child].compact.uniq.each { |relative| FileUtils.rm_f(app_path(relative)) }
+        # An empty root created after Rails boot is not managed by Zeitwerk.
+        Array(created_directories).reverse_each do |relative|
+          directory = app_path(relative)
+          Dir.rmdir(directory) if File.directory?(directory) && Dir.empty?(directory)
         end
       end
     end

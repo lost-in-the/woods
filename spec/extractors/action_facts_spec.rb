@@ -123,12 +123,66 @@ RSpec.describe Woods::Extractors::ActionFacts do
     expect(described_class.definition(Prism.parse(source).value, 'show', 1)).to be_nil
   end
 
+  it 'leaves different method definitions sharing a possible Method to_proc source line unresolved' do
+    source = 'class One; def preview; @original = true; end; end; class Two; def show; @wrong = true; end; end'
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'counts singleton definitions when identifying shared method source lines' do
+    source = 'class One; def self.preview; @original = true; end; end; class Two; def show; @wrong = true; end; end'
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'leaves all names unresolved on an attribute declaration source line' do
+    source = 'class One; attr :preview; end; class Two; def show; @wrong = true; end; end'
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
   it 'keeps runtime and source-only lookup unresolved on a dynamic generation source line' do
     source = 'class One; define_method(action_name) {}; end; class Two; def show; @wrong = true; end; end'
     definitions = described_class.definitions(Prism.parse(source).value)
 
     expect(described_class.definition(definitions, 'show', 1)).to be_nil
     expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'leaves block source sites ambiguous even without a local define_method declaration' do
+    source = 'module One; BODY = capture { @generated = true }; class Other; def show; @wrong = true; end; end; end'
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'uses a multiline lambda opening line as its possible method source site' do
+    source = <<~RUBY
+      module One
+        BODY = ->(
+          item
+        ) { @generated = true }; class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 4)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'keeps a multiline real definition whose blocks start on later lines' do
+    source = "def show\n  items.each { @actual = true }\nend"
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_a(Prism::DefNode)
+    expect(described_class.definition(definitions, 'show', nil)).to be_a(Prism::DefNode)
   end
 
   it 'ignores splatted expect keys while recording literal keys beside them' do

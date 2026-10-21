@@ -201,16 +201,31 @@ RSpec.describe Woods::Extractors::ActionFactResolution do
     expect(result).to eq({})
   end
 
-  it 'keeps an unambiguous same-line definition and alias beside an accessor' do
+  it 'omits a compact definition and alias sharing an accessor source line' do
     load write('app/controllers/facts_fixtures/same_line_alias_controller.rb',
                'module FactsFixtures; class SameLineAliasController < BaseController; ' \
                'attr_reader :show; def preview; @preview = true; end; alias_method :show, :preview; end; end')
 
     result = host.resolve_action_facts(FactsFixtures::SameLineAliasController, %w[show], view_prefix: 'same_line_alias')
 
+    expect(result).to eq({})
+  end
+
+  it 'keeps a definition and alias on separate lines from an accessor' do
+    load write('app/controllers/facts_fixtures/separate_line_alias_controller.rb', <<~RUBY)
+      class FactsFixtures::SeparateLineAliasController < FactsFixtures::BaseController
+        attr_reader :show
+        def preview; @preview = true; end
+        alias_method :show, :preview
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::SeparateLineAliasController, %w[show],
+                                       view_prefix: 'separate_line')
+
     expect(result.fetch('show')[:assigns]).to include(hash_including(ivar: '@preview', method: 'show'))
     expect(result.fetch('show')[:renders])
-      .to eq([{ template: 'same_line_alias/show', implicit: true, method: 'show' }])
+      .to eq([{ template: 'separate_line/show', implicit: true, method: 'show' }])
   end
 
   it 'leaves dynamic generated methods unresolved beside unrelated definitions on the same line' do
@@ -223,6 +238,100 @@ RSpec.describe Woods::Extractors::ActionFactResolution do
 
     result = host.resolve_action_facts(FactsFixtures::DynamicSameLineController, %w[show create],
                                        view_prefix: 'dynamic_same_line')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow definitions at a Proc source site when another file installs the method' do
+    load write('app/controllers/facts_fixtures/proc_body.rb',
+               'module FactsFixtures; BODY = proc { @generated = true }; ' \
+               'class OtherProcController; def show; @wrong = true; end; end; end')
+    load write('app/controllers/facts_fixtures/proc_body_controller.rb', <<~RUBY)
+      class FactsFixtures::ProcBodyController < FactsFixtures::BaseController
+        define_method(:show, FactsFixtures::BODY)
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::ProcBodyController, %w[show], view_prefix: 'proc_body')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow definitions at the source site of a multiline inline lambda argument' do
+    load write('app/controllers/facts_fixtures/lambda_body_controller.rb', <<~RUBY)
+      class FactsFixtures::LambdaBodyController < FactsFixtures::BaseController
+        define_method(:show,
+          ->(
+            value
+          ) { @generated = value }); class Other; def show; @wrong = true; end; end
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::LambdaBodyController, %w[show], view_prefix: 'lambda_body')
+
+    expect(result).to eq({})
+  end
+
+  it 'keeps a known original definition when define_method copies an UnboundMethod body' do
+    load write('app/controllers/facts_fixtures/copied_method_controller.rb', <<~RUBY)
+      class FactsFixtures::CopiedMethodController < FactsFixtures::BaseController
+        def preview; @preview = true; end
+        define_method(:show, instance_method(:preview))
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::CopiedMethodController, %w[show], view_prefix: 'copied_method')
+
+    expect(result.fetch('show')[:assigns]).to include(hash_including(ivar: '@preview', method: 'show'))
+    expect(result.fetch('show')[:renders])
+      .to eq([{ template: 'copied_method/show', implicit: true, method: 'show' }])
+  end
+
+  it 'does not borrow definitions at the source site of an instance Method converted to Proc' do
+    load write('app/controllers/facts_fixtures/method_proc_body.rb',
+               'module FactsFixtures; class OriginalMethod; def preview; @original = true; end; end; ' \
+               'class OtherMethod; def show; @wrong = true; end; end; ' \
+               'METHOD_BODY = OriginalMethod.instance_method(:preview).bind(OriginalMethod.allocate).to_proc; end')
+    load write('app/controllers/facts_fixtures/method_proc_controller.rb', <<~RUBY)
+      class FactsFixtures::MethodProcController < FactsFixtures::BaseController
+        define_method(:show, FactsFixtures::METHOD_BODY)
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::MethodProcController, %w[show], view_prefix: 'method_proc')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow definitions at the source site of a singleton Method converted to Proc' do
+    load write('app/controllers/facts_fixtures/singleton_proc_body.rb',
+               'module FactsFixtures; class OriginalSingleton; def self.preview; @original = true; end; end; ' \
+               'class OtherSingleton; def show; @wrong = true; end; end; ' \
+               'SINGLETON_BODY = OriginalSingleton.method(:preview).to_proc; end')
+    load write('app/controllers/facts_fixtures/singleton_proc_controller.rb', <<~RUBY)
+      class FactsFixtures::SingletonProcController < FactsFixtures::BaseController
+        define_method(:show, FactsFixtures::SINGLETON_BODY)
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::SingletonProcController, %w[show], view_prefix: 'singleton_proc')
+
+    expect(result).to eq({})
+  end
+
+  it 'does not borrow definitions when an attribute reader Method is renamed through a Proc' do
+    load write('app/controllers/facts_fixtures/attribute_proc_body.rb',
+               'module FactsFixtures; class OriginalAttribute; attr_reader :preview; end; ' \
+               'class OtherAttribute; def show; @wrong = true; end; end; ' \
+               'ATTRIBUTE_BODY = OriginalAttribute.instance_method(:preview)' \
+               '.bind(OriginalAttribute.allocate).to_proc; end')
+    load write('app/controllers/facts_fixtures/attribute_proc_controller.rb', <<~RUBY)
+      class FactsFixtures::AttributeProcController < FactsFixtures::BaseController
+        define_method(:show, FactsFixtures::ATTRIBUTE_BODY)
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::AttributeProcController, %w[show], view_prefix: 'attribute_proc')
 
     expect(result).to eq({})
   end
