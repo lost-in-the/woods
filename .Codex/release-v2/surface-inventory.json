@@ -377,6 +377,15 @@
       ]
     },
     {
+      "name": "woods:pin",
+      "arguments": [
+        "generation"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
       "name": "woods:refresh",
       "arguments": [
         "extractor"
@@ -451,6 +460,15 @@
     {
       "name": "woods:unblocked_sync",
       "arguments": [],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
+      "name": "woods:unpin",
+      "arguments": [
+        "generation"
+      ],
       "prerequisites": [
         "environment"
       ]
@@ -1073,7 +1091,7 @@
     "index_mcp_tools": 29,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 37,
+    "rake_tasks": 39,
     "tasks_methods": 7,
     "unit_types": 47
   },

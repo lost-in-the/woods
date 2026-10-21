@@ -248,6 +248,12 @@ Resolve the pointer once and pin the manifest during a complete read/copy; never
 select the highest payload directory or treat a missing root graph as no index.
 Confirm the installed release and filesystem support retention locks before
 using the pinning examples; flat layouts need writers stopped for a consistent copy.
+Current source also adds persistent `woods:pin[N]` / `woods:unpin[N]` tasks for
+retained generation numbers, with pins listed by `woods:stats`. Check installed
+task availability first (`bin/rails -T woods`); do not assume the installed gem
+contains this unreleased addition. See the [current retention contract](https://github.com/lost-in-the/woods/blob/main/docs/INDEX_LAYOUT.md#persistent-retention-pins).
+Persistent pins protect payload retention only; they do not protect temporal
+snapshots or `woods:clean`. Coordinate ownership before releasing a shared pin.
 
 A host reader can report a container daemon dead because foreign-host records
 are rejected by default. Foreign heartbeat trust (#321) is available in Woods `2.0.0.beta3`: first
