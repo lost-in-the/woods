@@ -104,6 +104,8 @@
     "metadata_store=",
     "metadata_store_options",
     "metadata_store_options=",
+    "method_effects_limit",
+    "method_effects_limit=",
     "notion_api_token",
     "notion_api_token=",
     "notion_database_ids",
@@ -1062,7 +1064,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 150,
+    "configuration_attributes": 152,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

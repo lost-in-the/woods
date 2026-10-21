@@ -450,6 +450,28 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#method_effects_limit' do
+    it 'defaults to 50 methods per unit' do
+      expect(described_class.new.method_effects_limit).to eq(50)
+    end
+
+    it 'accepts a positive Integer, or nil to remove the cap' do
+      config = described_class.new
+      config.method_effects_limit = 10
+      expect(config.method_effects_limit).to eq(10)
+
+      config.method_effects_limit = nil
+      expect(config.method_effects_limit).to be_nil
+    end
+
+    it 'rejects zero and non-Integers' do
+      config = described_class.new
+
+      expect { config.method_effects_limit = 0 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.method_effects_limit = '5' }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+    end
+  end
+
   describe '#durable_payload_writes' do
     it 'defaults to false: the payload is made durable in one flush at publish time' do
       expect(described_class.new.durable_payload_writes).to be(false)

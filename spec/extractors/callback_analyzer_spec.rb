@@ -561,4 +561,110 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(ops).not_to be_empty
     end
   end
+
+  describe 'column writers written with spacing or left unclosed' do
+    def columns_written(body)
+      source = "class User\n  def touch_up\n#{body}\n  end\nend\n"
+      build_analyzer(source).analyze(make_callback(filter: 'touch_up'))[:side_effects][:columns_written]
+    end
+
+    it 'reads a single-column writer with or without parentheses and spaces' do
+      expect(columns_written('    update_column :status, 1')).to eq(['status'])
+      expect(columns_written('    update_column( :status, 1)')).to eq(['status'])
+      expect(columns_written('    write_attribute  :name, value')).to eq(['name'])
+    end
+
+    it 'reads a closed multi-column writer and ignores the text after the last closing paren' do
+      body = "    update_columns(status: 1, name: 'x')\n    words = %w[assign_attributes( role: ]\n"
+
+      expect(columns_written(body)).to eq(%w[name status])
+    end
+
+    it 'reads a multi-column writer whose arguments span lines' do
+      expect(columns_written("    update_columns(\n      status: 1,\n      role: 2\n    )")).to eq(%w[role status])
+    end
+
+    it 'reads compound self assignments and rejects comparisons' do
+      expect(columns_written("    self.status ||= 1\n    self.name += 'x'\n    self.role == 2\n    self.email =~ /x/"))
+        .to eq(%w[name status])
+    end
+  end
+
+  # ── Per-node analysis ──────────────────────────────────────────
+
+  describe '#method_effects' do
+    it 'uses byte boundaries when two methods share a line' do
+      analyzer = build_analyzer('class Ledger; def quiet; 1; end; def post; PostJob.perform_later; end; end')
+      quiet, post = analyzer.parsed_root.find_all(:def)
+
+      expect(analyzer.method_effects(quiet)[:jobs_enqueued]).to eq([])
+      expect(analyzer.method_effects(post)[:jobs_enqueued]).to eq(['PostJob'])
+    end
+
+    it 'blanks nested definition bytes without damaging surrounding UTF-8 source' do
+      source = <<~RUBY
+        class Ledger
+          def install
+            def café
+              NestedJob.perform_later
+            end
+            InstalledJob.perform_later
+            def résumé
+              OtherNestedJob.perform_later
+            end
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      install = analyzer.parsed_root.find_all(:def).first
+
+      expect(analyzer.method_effects(install)[:jobs_enqueued]).to eq(['InstalledJob'])
+    end
+
+    let(:source) do
+      <<~RUBY
+        module Billing
+          class Ledger
+            def self.post
+              RebuildJob.perform_later
+            end
+
+            def post
+              TallyService.call(self)
+              ReceiptMailer.posted(self).deliver_later
+              PostJob.perform_later(id)
+              self.status = 'posted'
+            end
+          end
+        end
+      RUBY
+    end
+
+    before do
+      stub_const('Billing', Module.new)
+      stub_const('Billing::Ledger', Class.new)
+      stub_const('Billing::TallyService', Class.new)
+      stub_const('Billing::ReceiptMailer', Class.new)
+      stub_const('Billing::PostJob', Class.new)
+    end
+
+    it 'analyzes the node it is given, not the first method of that name' do
+      analyzer = build_analyzer(source)
+      instance_method = analyzer.parsed_root.find_all(:def).first
+
+      expect(analyzer.method_effects(instance_method)).to include(
+        columns_written: ['status'],
+        jobs_enqueued: ['Billing::PostJob'],
+        services_called: ['Billing::TallyService'],
+        mailers_triggered: ['Billing::ReceiptMailer']
+      )
+    end
+
+    it 'leaves callback analysis naming services and mailers as written' do
+      effects = build_analyzer(source).analyze(make_callback(filter: 'post'))[:side_effects]
+
+      expect(effects[:services_called]).to eq(['TallyService'])
+      expect(effects[:mailers_triggered]).to eq(['ReceiptMailer'])
+    end
+  end
 end

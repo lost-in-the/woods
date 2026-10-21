@@ -1522,6 +1522,169 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'method effects (#680)' do
+    def unit_document(dir, type, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit.is_a?(Hash) && unit['identifier'] == identifier }
+    end
+
+    def enqueue_edge(document)
+      document.fetch('dependencies').find { |dep| dep['target'] == 'PublishPostJob' && dep['via'] == 'job_enqueue' }
+    end
+
+    def edge_identities(document)
+      document.fetch('dependencies').map { |dep| dep.values_at('type', 'target', 'via') }
+    end
+
+    def ledger_service(methods)
+      bodies = methods.map { |name, body| "  def #{name}(post)\n    #{body}\n  end\n" }.join("\n")
+      "class LedgerService\n#{bodies}end\n"
+    end
+
+    let(:post_model) do
+      <<~RUBY
+        class Post < ApplicationRecord
+          has_many :comments, dependent: :destroy
+
+          validates :title, presence: true
+
+          scope :recent, -> { order(created_at: :desc) }
+
+          before_save :normalize_title
+
+          def normalize_title
+            self.title = title.to_s.strip
+          end
+
+          def publish!
+            PublishPostJob.perform_later(self)
+          end
+        end
+      RUBY
+    end
+
+    it 'follows a method gaining, moving and losing an enqueue, in a service and a model' do
+      service = 'app/services/ledger_service.rb'
+      enqueue = 'PublishPostJob.perform_later(post)'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => enqueue)) },
+          lambda {
+            write_file(service, ledger_service('post_all' => 'retry_all(post)', 'retry_all' => enqueue,
+                                               'sign' => 'SignatureService.new.call(post)'))
+          },
+          -> { write_file('app/models/post.rb', post_model) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(edge_identities(document)).to eq(edge_identities(document).uniq)
+      expect(document.fetch('dependencies'))
+        .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')
+      expect(document.dig('metadata', 'method_effects', 'post_all', 'via_method'))
+        .to eq('retry_all' => { 'jobs_enqueued' => ['PublishPostJob'] })
+      expect(enqueue_edge(document)).to include('through' => 'post_all, retry_all')
+
+      model = unit_document(index, 'models', 'Post')
+      expect(model.dig('metadata', 'method_effects').keys).to eq(%w[normalize_title publish!])
+      expect(enqueue_edge(model)).to include('through' => 'publish!')
+      expect(edge_identities(model)).to eq(edge_identities(model).uniq)
+    end
+
+    it 'drops the map and the edge annotation when the last effect goes' do
+      service = 'app/services/ledger_service.rb'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => 'PublishPostJob.perform_later(post)')) },
+          -> { write_file(service, ledger_service('post_all' => 'post.touch')) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.fetch('metadata')).not_to have_key('method_effects')
+      expect(enqueue_edge(document)).to be_nil
+    end
+
+    it 'writes byte-identical unit documents on a repeat full extraction' do
+      write_file('app/services/ledger_service.rb', ledger_service('post_all' => 'PublishPostJob.perform_later(post)'))
+      write_file('app/models/post.rb', post_model)
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
+  describe 'mailer callback fact freshness' do
+    %i[parent concern].each do |owner_kind|
+      it "refreshes child action facts when only the #{owner_kind} callback body changes" do
+        created_directories = %w[app/mailers app/mailers/concerns].reject do |relative|
+          File.directory?(app_path(relative))
+        end
+        prefix = "#{owner_kind.to_s.camelize}FactFresh"
+        base_name = "#{prefix}BaseMailer"
+        child_name = "#{prefix}Mailer"
+        concern_name = "#{prefix}Callbacks"
+        base = "app/mailers/#{base_name.underscore}.rb"
+        child = "app/mailers/#{child_name.underscore}.rb"
+        owner = owner_kind == :parent ? base : "app/mailers/concerns/#{concern_name.underscore}.rb"
+        owner_source = lambda do |body|
+          declaration = owner_kind == :parent ? "class #{base_name} < ActionMailer::Base" : "module #{concern_name}"
+          "#{declaration}\n  private\n  def set_viewer\n#{body}  end\nend\n"
+        end
+        write_owner = lambda do |body|
+          write_file(owner, owner_source.call(body))
+          load app_path(owner)
+        end
+
+        index = run_sequence([
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n")
+                                 if owner_kind == :concern
+                                   write_file(base, <<~RUBY)
+                                     class #{base_name} < ActionMailer::Base
+                                       include #{concern_name}
+                                     end
+                                   RUBY
+                                   load app_path(base)
+                                 end
+                                 write_file(child, <<~RUBY)
+                                   class #{child_name} < #{base_name}
+                                     before_action :set_viewer
+                                     def digest
+                                       mail to: 'reader@example.test'
+                                     end
+                                   end
+                                 RUBY
+                                 load app_path(child)
+                                 [owner, base, child].uniq
+                               end,
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n    @audit = 2\n")
+                                 owner
+                               end
+                             ])
+
+        mailer = unit_snapshot(index).values.find { |unit| unit['identifier'] == child_name }
+        expect(mailer.dig('metadata', 'action_facts', 'digest', 'assigns').map { |fact| fact['ivar'] })
+          .to eq(%w[@viewer @audit])
+      ensure
+        # Fixture mailers and concerns must not join later examples' complete inventories.
+        [child_name, base_name, concern_name].compact.each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+        [owner, base, child].compact.uniq.each { |relative| FileUtils.rm_f(app_path(relative)) }
+        # An empty root created after Rails boot is not managed by Zeitwerk.
+        Array(created_directories).reverse_each do |relative|
+          directory = app_path(relative)
+          Dir.rmdir(directory) if File.directory?(directory) && Dir.empty?(directory)
+        end
+      end
+    end
+  end
+
   describe 'gap 2 — deleted files' do
     it 'prunes a service that was deleted' do
       write_file('app/services/temp_service.rb', service_source('TempService'))
@@ -2939,6 +3102,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(units.map { |unit| unit['identifier'] }).to include(source.fetch('defined_in'))
     ensure
       Object.send(:remove_const, :Sweep) if Object.const_defined?(:Sweep, false)
+    end
+
+    # W-7 (woods#757): an action's facts include the assigns of the filters
+    # that run before it, read from the file that defines each filter. Editing
+    # only the parent's file must refresh the child's facts.
+    it 'refreshes per-action facts when only a parent filter body changes' do
+      base = 'app/controllers/sweep_facts_base_controller.rb'
+      child = 'app/controllers/sweep_facts_controller.rb'
+      parent_source = lambda do |body|
+        "class SweepFactsBaseController < ApplicationController\n  private\n\n  def set_viewer\n#{body}  end\nend\n"
+      end
+      index = run_sequence([
+                             lambda do
+                               write_and_load(base, parent_source.call("    @viewer = 1\n"))
+                               write_and_load(child, <<~RUBY)
+                                 class SweepFactsController < SweepFactsBaseController
+                                   before_action :set_viewer, only: :show
+
+                                   def show
+                                     @post = Post.first
+                                   end
+                                 end
+                               RUBY
+                               [base, child]
+                             end,
+                             -> { write_and_load(base, parent_source.call("    @viewer = 1\n    @audit = 2\n")) }
+                           ])
+
+      controller = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepFactsController' }
+      facts = controller.dig('metadata', 'action_facts', 'show')
+      expect(facts['assigns'].map { |a| [a['ivar'], a['method']] })
+        .to eq([%w[@viewer set_viewer], %w[@audit set_viewer], %w[@post show]])
+    ensure
+      # The classes stay loaded for the rest of the process, so their files join the pristine tree.
+      [base, child].each do |relative|
+        next unless relative && File.exist?(app_path(relative))
+
+        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+      end
     end
 
     it 'publishes skip-reason changes that touch no unit, and only those' do

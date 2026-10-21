@@ -300,6 +300,28 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     extractor.extract_controller(ActionFixtures.const_get(name))
   end
 
+  describe 'action-fact extraction failures' do
+    it 'keeps the controller when an action expects params through a keyword splat' do
+      load_app('app/controllers/action_fixtures/expect_splat_controller.rb', <<~RUBY)
+        class ActionFixtures::ExpectSplatController < ActionFixtures::BaseController
+          def create
+            @record = params.expect(**schema, record: [:title])
+            render :new
+          end
+        end
+      RUBY
+
+      unit = unit_for('ExpectSplatController')
+
+      expect(unit).not_to be_nil
+      expect(unit.metadata[:actions]).to eq(['create'])
+      expect(unit.metadata.dig(:action_facts, 'create', :params))
+        .to include(hash_including(key: 'record', method: 'create'))
+      expect(unit.metadata.dig(:action_facts, 'create', :renders))
+        .to include(hash_including(template: 'action_fixtures/expect_splat/new'))
+    end
+  end
+
   describe 'an action from an included app concern' do
     subject(:unit) { unit_for('SsoGoogleController') }
 
@@ -417,6 +439,22 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     end
   end
 
+  describe 'per-action facts (W-7)' do
+    it 'publishes what each admitted action body says, and nothing for a method that is not an action' do
+      facts = unit_for('WidgetsController').metadata[:action_facts]
+      expect(facts.keys).to eq(['index'])
+      expect(facts['index']).to include(
+        file: 'app/controllers/action_fixtures/widgets_controller.rb', line: 5, assigns: [],
+        renders: [{ template: 'action_fixtures/widgets/index', implicit: true, method: 'index' }]
+      )
+    end
+
+    it 'reads an action an included concern defines from the concern file' do
+      facts = unit_for('SsoGoogleController').metadata[:action_facts]
+      expect(facts['create']).to include(file: 'app/controllers/concerns/action_fixtures/sso_behavior.rb', line: 4)
+    end
+  end
+
   describe 'Metal controllers defined in app source' do
     it 'are discovered alongside Base and API controllers' do
       expect(extractor.discoverable_classes).to include(ActionFixtures::HealthController, ActionFixtures::PingController)
@@ -507,6 +545,54 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
           .to eq([{ route: 'DELETE /members/sessions', controller: controller, action: 'reset',
                     reason: 'missing_action' }])
       end
+    end
+  end
+
+  describe 'method effects' do
+    # Every public instance method in a controller's own file is an action,
+    # so the methods recorded are its class methods; an action still names
+    # itself on the edges it reaches.
+    subject(:unit) { unit_for('LedgerSyncController') }
+
+    before do
+      load_app('app/controllers/action_fixtures/ledger_sync_controller.rb', <<~RUBY)
+        class ActionFixtures::LedgerSyncController < ActionFixtures::BaseController
+          def self.warm_cache
+            WarmLedgerJob.perform_later
+          end
+
+          def index
+            SyncLedgerJob.perform_later(params[:id])
+          end
+        end
+      RUBY
+    end
+
+    it 'records the non-action public methods and leaves the actions to flows' do
+      expect(unit.metadata[:actions]).to eq(['index'])
+      expect(unit.metadata[:method_effects]).to eq(
+        'self.warm_cache' => {
+          jobs_enqueued: ['WarmLedgerJob'], mail_sent: [], services_called: [], columns_written: [],
+          events_published: [], external_calls: []
+        }
+      )
+    end
+
+    it 'names the action on the edge it reaches' do
+      edges = unit.dependencies.select { |dep| dep[:via] == :job_enqueue }
+
+      expect(edges).to contain_exactly(
+        { type: :job, target: 'SyncLedgerJob', via: :job_enqueue, through: 'index' },
+        { type: :job, target: 'WarmLedgerJob', via: :job_enqueue, through: 'self.warm_cache' }
+      )
+    end
+
+    it 'keeps per-action facts beside class method effects and annotated action edges' do
+      expect(unit.metadata[:actions]).to eq(['index'])
+      expect(unit.metadata.dig(:action_facts, 'index', :params))
+        .to include(hash_including(key: 'id', method: 'index'))
+      expect(unit.metadata.dig(:method_effects, 'self.warm_cache', :jobs_enqueued)).to eq(['WarmLedgerJob'])
+      expect(unit.dependencies).to include(type: :job, target: 'SyncLedgerJob', via: :job_enqueue, through: 'index')
     end
   end
 

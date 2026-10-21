@@ -5,6 +5,7 @@ require_relative '../source_inputs/consumer_errors'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'source_nesting'
 require_relative '../source_references/collector'
 require_relative 'standalone_module_discovery'
@@ -320,7 +321,7 @@ module Woods
         unit.source_code = annotate_source(source, class_name, parent_class)
         unit.metadata = extract_metadata(source, parent_class)
         unit.dependencies = extract_dependencies(source)
-        unit
+        MethodEffects.apply(unit, source)
       end
 
       # A namespace file's governed constant is a module, so no class is
@@ -416,7 +417,7 @@ module Woods
         unit.source_code = annotate_source(body, identifier, parent_class)
         unit.metadata = extract_metadata(body, parent_class)
         unit.dependencies = extract_dependencies(body)
-        unit
+        MethodEffects.apply(unit, body)
       end
 
       def module_unit(file_path, source, record)

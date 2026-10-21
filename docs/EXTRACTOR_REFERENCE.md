@@ -104,6 +104,32 @@ their source-reference edges.
 
 Once-loader ownership (#579) is included in Woods 2.1; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
 
+### Method side effects
+
+Model, service, job, PORO, manager, mailer and controller units record what each **public method** of the unit's class does, read from the unit's own file:
+
+```json
+"method_effects": {
+  "refund!": {
+    "jobs_enqueued": ["RefundJob"],
+    "mail_sent": [],
+    "services_called": [],
+    "columns_written": ["status"],
+    "events_published": ["ledger.refunded"],
+    "external_calls": ["Faraday"],
+    "via_method": { "notify": { "mail_sent": ["ReceiptMailer"] } }
+  }
+}
+```
+
+- **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
+- **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
+- **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
+- **Cap.** `method_effects_limit` (default 50) bounds the map per unit; past it the first methods are kept and `method_effects_truncated: true` is set.
+- **Edges.** The unit's existing `job_enqueue`, mailer and service edges gain `through`: the public methods that reach the target, sorted and joined with `, ` (`"through": "capture!, refund!"`). Controller actions are named here too. No edge is added or removed, so `dependents` answers are the same for a caller that ignores `through`.
+- **Limits.** The reading is static and heuristic, like callback side effects. Calls made through metaprogramming, through another object, from an included concern, or from a block in the class body are not attributed. Nested method definitions and blocks that change `self` to another object do not contribute same-class method effects. Same-line definitions are read from their own source ranges.
+
 ### Eager loading
 
 The orchestrator calls `Rails.application.eager_load!` once before extraction begins. If that fails with a `NameError` (common when `app/graphql/` references an uninstalled gem), it falls back to per-directory loading via `EXTRACTION_DIRECTORIES`. This fallback covers the directories that matter for extraction.
@@ -226,6 +252,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its declared `only`/`except` names the action; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
+- Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
@@ -337,6 +365,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata. Discovery checks `<action>.html` and `<action>.text` in every engine of `Woods::Extractors::TemplateExtensions::DETECTED` (`.erb`, `.haml`, `.jbuilder`, `.slim`).
 - Extracts `default from:`, `layout`, and per-action subject patterns
+- `action_facts` (W-7) records each action's assigns (with those of its before and around callbacks), params, redirects and the template `mail` renders (`{ template, mail: true }`, honouring `template_name:` and `template_path:`), in the controller shape above. An action without `mail` receives no implicit mail-template fact; explicit `render` calls are still recorded
+- App-owned parent mailers add an `:inheritance` edge so incremental extraction refreshes child facts when inherited callbacks or their concerns change. Framework parents add no edge. Run a full extraction once to populate this relationship in retained indexes.
 - Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
 - Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
 - Object callback filters use descriptive labels with addresses removed only from Ruby's default representation, including anonymous classes and namespaces. Custom labels and literal hexadecimal text are preserved. Labels do not serialize callback object state, and extraction never invokes callbacks.

@@ -167,7 +167,11 @@ The existing `reverse` arrays retain their bare identifiers. `reverse_via` inclu
 edges from primary nodes and typed variants; several records can share a source
 and target while differing in type, relationship, or association attributes.
 Optional `through`, `through_db`, and `disable_joins` values match the forward
-edge. A `null` relationship means unknown legacy evidence. Target type remains
+edge. On an association edge `through` is the through association; on a
+`job_enqueue`, mailer or service edge it is the sorted, comma-joined list of
+the public methods that reach the target (see "Method side effects" in
+[EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md)). A `null` relationship means
+unknown legacy evidence. Target type remains
 unresolved when the target identifier belongs to multiple types; the source type
 does not resolve that ambiguity.
 
