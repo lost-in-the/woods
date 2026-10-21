@@ -417,6 +417,22 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     end
   end
 
+  describe 'per-action facts (W-7)' do
+    it 'publishes what each admitted action body says, and nothing for a method that is not an action' do
+      facts = unit_for('WidgetsController').metadata[:action_facts]
+      expect(facts.keys).to eq(['index'])
+      expect(facts['index']).to include(
+        file: 'app/controllers/action_fixtures/widgets_controller.rb', line: 5, assigns: [],
+        renders: [{ template: 'action_fixtures/widgets/index', implicit: true, method: 'index' }]
+      )
+    end
+
+    it 'reads an action an included concern defines from the concern file' do
+      facts = unit_for('SsoGoogleController').metadata[:action_facts]
+      expect(facts['create']).to include(file: 'app/controllers/concerns/action_fixtures/sso_behavior.rb', line: 4)
+    end
+  end
+
   describe 'Metal controllers defined in app source' do
     it 'are discovered alongside Base and API controllers' do
       expect(extractor.discoverable_classes).to include(ActionFixtures::HealthController, ActionFixtures::PingController)
@@ -547,6 +563,14 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         { type: :job, target: 'SyncLedgerJob', via: :job_enqueue, through: 'index' },
         { type: :job, target: 'WarmLedgerJob', via: :job_enqueue, through: 'self.warm_cache' }
       )
+    end
+
+    it 'keeps per-action facts beside class method effects and annotated action edges' do
+      expect(unit.metadata[:actions]).to eq(['index'])
+      expect(unit.metadata.dig(:action_facts, 'index', :params))
+        .to include(hash_including(key: 'id', method: 'index'))
+      expect(unit.metadata.dig(:method_effects, 'self.warm_cache', :jobs_enqueued)).to eq(['WarmLedgerJob'])
+      expect(unit.dependencies).to include(type: :job, target: 'SyncLedgerJob', via: :job_enqueue, through: 'index')
     end
   end
 

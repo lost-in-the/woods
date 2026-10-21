@@ -3036,6 +3036,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.send(:remove_const, :Sweep) if Object.const_defined?(:Sweep, false)
     end
 
+    # W-7 (woods#757): an action's facts include the assigns of the filters
+    # that run before it, read from the file that defines each filter. Editing
+    # only the parent's file must refresh the child's facts.
+    it 'refreshes per-action facts when only a parent filter body changes' do
+      base = 'app/controllers/sweep_facts_base_controller.rb'
+      child = 'app/controllers/sweep_facts_controller.rb'
+      parent_source = lambda do |body|
+        "class SweepFactsBaseController < ApplicationController\n  private\n\n  def set_viewer\n#{body}  end\nend\n"
+      end
+      index = run_sequence([
+                             lambda do
+                               write_and_load(base, parent_source.call("    @viewer = 1\n"))
+                               write_and_load(child, <<~RUBY)
+                                 class SweepFactsController < SweepFactsBaseController
+                                   before_action :set_viewer, only: :show
+
+                                   def show
+                                     @post = Post.first
+                                   end
+                                 end
+                               RUBY
+                               [base, child]
+                             end,
+                             -> { write_and_load(base, parent_source.call("    @viewer = 1\n    @audit = 2\n")) }
+                           ])
+
+      controller = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepFactsController' }
+      facts = controller.dig('metadata', 'action_facts', 'show')
+      expect(facts['assigns'].map { |a| [a['ivar'], a['method']] })
+        .to eq([%w[@viewer set_viewer], %w[@audit set_viewer], %w[@post show]])
+    ensure
+      # The classes stay loaded for the rest of the process, so their files join the pristine tree.
+      [base, child].each do |relative|
+        next unless relative && File.exist?(app_path(relative))
+
+        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+      end
+    end
+
     it 'publishes skip-reason changes that touch no unit, and only those' do
       index = full_extraction
       empty = 'app/models/sweep_empty.rb'
