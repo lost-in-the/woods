@@ -25,26 +25,75 @@ module Woods
       # `render` keywords that name a response body instead of a template.
       BODY_FORMATS = %i[json xml plain html body js inline].freeze
       REDIRECTS = %i[redirect_to redirect_back redirect_back_or_to].freeze
+      RECEIVER_CHANGING_METHODS = %i[instance_eval instance_exec class_eval class_exec module_eval module_exec].freeze
+      GENERATED_DEFINITIONS = %i[attr_reader attr_writer attr_accessor define_method].freeze
       IVAR_WRITES = [Prism::InstanceVariableWriteNode, Prism::InstanceVariableOrWriteNode,
                      Prism::InstanceVariableAndWriteNode, Prism::InstanceVariableOperatorWriteNode,
                      Prism::InstanceVariableTargetNode].freeze
 
-      # The instance-method definition Ruby dispatches: the +def+ at +line+,
-      # or the only +def+ by that name when the line does not match.
+      # Index instance-method definitions once per source file. Ambiguous
+      # same-name, same-line definitions remain separate candidates.
       #
       # @param program [Prism::ProgramNode] a parsed file
-      # @param name [String] method name
-      # @param line [Integer, nil] the line +source_location+ reports
-      # @return [Prism::DefNode, nil]
-      def self.definition(program, name, line)
-        defs = []
+      # A nil candidate marks a generated declaration: Ruby supplies only a
+      # source line, so a def on that same line cannot disambiguate its owner.
+      # A nil name marks a generated declaration whose name is dynamic.
+      # @return [Hash{Array(String, nil, Integer) => Array<Prism::DefNode, nil>}]
+      def self.definitions(program)
+        definitions = Hash.new { |hash, key| hash[key] = [] }
         stack = [program]
         until stack.empty?
           node = stack.pop
-          defs << node if node.is_a?(Prism::DefNode) && node.receiver.nil? && node.name.to_s == name.to_s
+          if node.is_a?(Prism::DefNode) && node.receiver.nil?
+            definitions[[node.name.to_s, node.location.start_line]] << node
+          elsif node.is_a?(Prism::CallNode) && GENERATED_DEFINITIONS.include?(node.name)
+            generated_names(node).each do |name|
+              lines = [node.location.start_line]
+              lines << node.block.location.start_line if node.block.is_a?(Prism::BlockNode)
+              lines.uniq.each { |line| definitions[[name, line]] << nil }
+            end
+          end
           stack.concat(node.compact_child_nodes)
         end
-        defs.find { |d| d.location.start_line == line } || (defs.first if defs.size == 1)
+        definitions
+      end
+
+      def self.generated_names(node)
+        arguments = Array(node.arguments&.arguments)
+        arguments = arguments.first(1) if node.name == :define_method
+        arguments.flat_map do |argument|
+          next [nil] unless argument.is_a?(Prism::SymbolNode) || argument.is_a?(Prism::StringNode)
+
+          name = argument.unescaped
+          case node.name
+          when :attr_writer then ["#{name}="]
+          when :attr_accessor then [name, "#{name}="]
+          else [name]
+          end
+        end
+      end
+      private_class_method :generated_names
+
+      # A runtime source site must match exactly. Source-only callers without
+      # a line can select a name only when it identifies one definition.
+      #
+      # @param program [Prism::ProgramNode, Hash] a parsed file or definition index
+      # @param name [String] the runtime method's original name
+      # @param line [Integer, nil] the line +source_location+ reports
+      # @return [Prism::DefNode, nil]
+      def self.definition(program, name, line)
+        definitions = program.is_a?(Hash) ? program : self.definitions(program)
+        return if line && definitions.key?([nil, line])
+
+        matches = definitions.fetch([name.to_s, line], [])
+        return matches.first if matches.size == 1
+        return if line || matches.any?
+
+        candidates = definitions.select { |(defined_name, _), _| defined_name == name.to_s }
+        return if candidates.any? { |(_, defined_line), _| definitions.key?([nil, defined_line]) }
+
+        nodes = candidates.values.flatten
+        nodes.first if nodes.size == 1
       end
 
       # @param node [Prism::DefNode, nil]
@@ -52,9 +101,10 @@ module Woods
       # @param permitted [Hash{String => String}] permitted-params method => model key
       # @param mailer [Boolean] read +mail+ as the render and add no implicit render without it
       # @param implicit [Boolean] add the implicit render when the body has no response (false for a filter)
+      # @param action [String] dispatched action name, which can differ from an aliased definition's name
       # @return [Hash] +assigns+, +params+, +renders+, +redirects+, +formats+
-      def self.scan(node, view_prefix:, permitted: {}, mailer: false, implicit: true)
-        scanner = new(node&.name.to_s, view_prefix, permitted.to_h, mailer: mailer, implicit: implicit)
+      def self.scan(node, view_prefix:, permitted: {}, mailer: false, implicit: true, action: node&.name.to_s)
+        scanner = new(action, view_prefix, permitted.to_h, mailer: mailer, implicit: implicit)
         node&.body&.accept(scanner)
         scanner.result
       end
@@ -93,11 +143,25 @@ module Woods
       # @param node [Prism::CallNode]
       def visit_call_node(node)
         record_call(node)
-        if node.name == :respond_to && node.receiver.nil? && node.block.is_a?(Prism::BlockNode)
+        if foreign_body_call?(node)
+          node.compact_child_nodes.each { |child| child.accept(self) unless child.equal?(node.block) }
+        elsif node.name == :respond_to && own_receiver?(node.receiver) && node.block.is_a?(Prism::BlockNode)
           with_format_variable(node.block) { super }
         else
           super
         end
+      end
+
+      # A definition creates another callable; its body does not run as part
+      # of the action. Class/module bodies also have a different self.
+      def visit_def_node(_node); end
+
+      def visit_class_node(_node); end
+
+      def visit_module_node(_node); end
+
+      def visit_singleton_class_node(node)
+        node.expression.accept(self)
       end
 
       private
@@ -107,13 +171,28 @@ module Woods
       end
 
       def record_call(node)
-        if node.receiver.nil?
+        if own_receiver?(node.receiver)
           receiverless(node)
         elsif params_receiver?(node.receiver) && PARAMS_READERS.include?(node.name)
           param(node)
         elsif format_call?(node)
           @formats << node.name.to_s unless @formats.include?(node.name.to_s)
         end
+      end
+
+      def own_receiver?(receiver)
+        receiver.nil? || receiver.is_a?(Prism::SelfNode)
+      end
+
+      def foreign_body_call?(node)
+        return false unless node.block.is_a?(Prism::BlockNode)
+        return !own_receiver?(node.receiver) if RECEIVER_CHANGING_METHODS.include?(node.name)
+        return false unless node.name == :new
+
+        receiver = node.receiver
+        constant = receiver.is_a?(Prism::ConstantReadNode) ||
+                   (receiver.is_a?(Prism::ConstantPathNode) && receiver.parent.nil?)
+        constant && %i[Class Module Struct].include?(receiver.name)
       end
 
       def receiverless(node)
@@ -128,7 +207,8 @@ module Woods
       end
 
       def params_receiver?(receiver)
-        receiver.is_a?(Prism::CallNode) && receiver.name == :params && receiver.receiver.nil? && receiver.arguments.nil?
+        receiver.is_a?(Prism::CallNode) && receiver.name == :params && own_receiver?(receiver.receiver) &&
+          receiver.arguments.nil?
       end
 
       def param(node)
@@ -143,7 +223,8 @@ module Woods
         hash = node.arguments&.arguments&.first
         return unless hash.is_a?(Prism::KeywordHashNode) || hash.is_a?(Prism::HashNode)
 
-        first_key(hash.elements.first&.key)
+        element = hash.elements.find { |entry| entry.is_a?(Prism::AssocNode) }
+        first_key(element&.key)
       end
 
       def render(node)
@@ -152,7 +233,7 @@ module Woods
         options = keyword_options(args.last)
         fact = render_target(args.first, options)
         fact[:line] = line(node)
-        fact[:status] = literal(options[:status]) if options[:status]
+        fact[:status] = response_status(options[:status]) if options[:status]
         @renders << fact
       end
 
@@ -160,11 +241,16 @@ module Woods
         if (format = BODY_FORMATS.find { |key| options.key?(key) })
           { format: format.to_s }
         elsif options[:partial]
-          partial = { partial: partial_path(literal(options[:partial])) }
+          name = literal(options[:partial])
+          return { object: options[:partial].slice } unless name
+
+          partial = { partial: partial_path(name) }
           partial[:locals] = hash_keys(options[:locals]) if options[:locals]
           partial
         elsif options[:template] || options[:action]
-          { template: template_path(literal(options[:template] || options[:action])) }
+          target = options[:template] || options[:action]
+          name = literal(target)
+          name ? { template: template_path(name) } : { object: target.slice }
         elsif (name = literal(first))
           { template: template_path(name) }
         else
@@ -174,11 +260,16 @@ module Woods
 
       def head(node)
         @responded = true
-        @renders << { head: literal(node.arguments&.arguments&.first).to_s, line: line(node) }
+        @renders << { head: response_status(node.arguments&.arguments&.first).to_s, line: line(node) }
       end
 
       def mail(node)
         options = keyword_options(node.arguments&.arguments&.last)
+        if %i[template_name template_path].any? { |key| options[key] && !literal(options[key]) }
+          @renders << { object: node.slice, line: line(node), mail: true }
+          return
+        end
+
         name = literal(options[:template_name]) || @action
         prefix = literal(options[:template_path]) || @view_prefix
         @renders << { template: "#{prefix}/#{name}", line: line(node), mail: true }
@@ -227,6 +318,10 @@ module Woods
 
       def literal(node)
         first_key(node)
+      end
+
+      def response_status(node)
+        node.is_a?(Prism::IntegerNode) ? node.value : literal(node)
       end
 
       def template_path(name)

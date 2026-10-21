@@ -119,6 +119,22 @@ RSpec.describe Woods::Ast::Parser do
       end
     end
 
+    describe 'singleton class nodes' do
+      let(:source) do
+        'class Ledger; class << self; def own; end; end; class << other; def foreign; end; end; end'
+      end
+
+      it 'preserves self and foreign receivers' do
+        expect(parser.parse(source).find_all(:sclass).map(&:receiver)).to eq(%w[self other])
+      end
+
+      it 'preserves receivers through the parser gem fallback' do
+        allow(parser).to receive(:prism_available?).and_return(false)
+
+        expect(parser.parse(source).find_all(:sclass).map(&:receiver)).to eq(%w[self other])
+      end
+    end
+
     describe 'class nodes' do
       it 'has method_name for constant name' do
         root = parser.parse('class Foo; end')
@@ -160,6 +176,12 @@ RSpec.describe Woods::Ast::Parser do
     end
 
     describe 'const nodes' do
+      it 'reconstructs a long constant receiver without recursive string building' do
+        receiver = "#{'A::' * 16_000}Service"
+
+        expect(parser.parse("#{receiver}.call").find_first(:send).receiver).to eq(receiver)
+      end
+
       it 'uses method_name for constant name and receiver for parent' do
         root = parser.parse('Woods::Extractor')
         const_nodes = root.find_all(:const)

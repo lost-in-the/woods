@@ -43,8 +43,8 @@ module Woods
       private
 
       def facts_for_action(klass, action, options)
-        file, line = fact_method_location(klass, action)
-        own = file && scan_fact_definition(file, action, line, options)
+        file, line, original_name = fact_method_location(klass, action)
+        own = file && scan_fact_definition(file, original_name, line, options.merge(action: action))
         return nil unless own
 
         entry = { file: fact_path(file), line: line, assigns: [], params: [], renders: [], redirects: [],
@@ -55,8 +55,8 @@ module Woods
       end
 
       def add_filter_facts(entry, klass, name, options)
-        file, line = fact_method_location(klass, name)
-        facts = file && scan_fact_definition(file, name, line, options.merge(implicit: false))
+        file, line, original_name = fact_method_location(klass, name)
+        facts = file && scan_fact_definition(file, original_name, line, options.merge(implicit: false, action: name))
         attribute(entry, facts, name, file) if facts
       end
 
@@ -88,8 +88,9 @@ module Woods
       end
 
       def fact_method_location(klass, name)
-        file, line = klass.instance_method(name).source_location
-        fact_source?(file) ? [file, line] : nil
+        method = klass.instance_method(name)
+        file, line = method.source_location
+        fact_source?(file) ? [file, line, method.original_name] : nil
       rescue NameError
         nil
       end
@@ -102,13 +103,13 @@ module Woods
       end
 
       def scan_fact_definition(file, name, line, options)
-        node = ActionFacts.definition(fact_program(file), name, line)
+        node = ActionFacts.definition(fact_definitions(file), name, line)
         node && ActionFacts.scan(node, **options)
       end
 
-      # One parse per file per extractor instance, like the action-source cache.
-      def fact_program(file)
-        (@fact_programs ||= {})[file] ||= Prism.parse(SourceFile.read(file)).value
+      # One parse and definition walk per file per extractor instance.
+      def fact_definitions(file)
+        (@fact_definitions ||= {})[file] ||= ActionFacts.definitions(Prism.parse(SourceFile.read(file)).value)
       end
 
       def fact_path(file)

@@ -110,10 +110,149 @@ RSpec.describe Woods::Extractors::ActionFacts do
     expect(facts(controller, 'show', line: 2)[:formats]).to eq([])
   end
 
-  it 'takes the definition at the line Ruby reports, and the only one when the line does not match' do
+  it 'takes the definition at the line Ruby reports and requires a match when a line is supplied' do
     expect(facts(controller, 'show', line: 42)[:assigns]).to eq([{ ivar: '@redefined', line: 43 }])
     expect(described_class.definition(Prism.parse(controller).value, 'show', 99)).to be_nil
-    expect(described_class.definition(Prism.parse(controller).value, 'edit', 99)).not_to be_nil
+    expect(described_class.definition(Prism.parse(controller).value, 'edit', 99)).to be_nil
+    expect(described_class.definition(Prism.parse(controller).value, 'edit', nil)).not_to be_nil
+  end
+
+  it 'leaves same-name definitions sharing a source line unresolved' do
+    source = 'class One; def show; @one = true; end; end; class Two; def show; @two = true; end; end'
+
+    expect(described_class.definition(Prism.parse(source).value, 'show', 1)).to be_nil
+  end
+
+  it 'keeps runtime and source-only lookup unresolved on a dynamic generation source line' do
+    source = 'class One; define_method(action_name) {}; end; class Two; def show; @wrong = true; end; end'
+    definitions = described_class.definitions(Prism.parse(source).value)
+
+    expect(described_class.definition(definitions, 'show', 1)).to be_nil
+    expect(described_class.definition(definitions, 'show', nil)).to be_nil
+  end
+
+  it 'ignores splatted expect keys while recording literal keys beside them' do
+    source = 'def show; params.expect(**schema); params.expect(**schema, user: [:name]); end'
+
+    expect(facts(source, 'show')[:params]).to eq([{ key: 'user', line: 1, permitted: false }])
+  end
+
+  it 'reads explicit self responses, params and respond_to just like receiverless calls' do
+    source = <<~RUBY
+      def show
+        @user = self.params[:id]
+        self.respond_to do |format|
+          format.html { self.render :new }
+          format.json { self.head :no_content }
+        end
+        self.redirect_to root_path
+      end
+    RUBY
+    show = facts(source, 'show')
+
+    expect(show[:params]).to eq([{ key: 'id', line: 2, permitted: false }])
+    expect(show[:formats]).to eq(%w[html json])
+    expect(show[:renders]).to eq([{ template: 'users/new', line: 4 }, { head: 'no_content', line: 5 }])
+    expect(show[:redirects]).to eq([{ target: 'root_path', line: 7 }])
+  end
+
+  it 'does not borrow assigns or responses from nested definitions or class bodies' do
+    source = <<~RUBY
+      def show
+        def later
+          @deferred = true
+          render :deferred
+        end
+        ::Class.new do
+          @class_state = params[:class_state]
+          def nested; render :nested; end
+        end
+        Module.new { @module_state = true }
+        class << self
+          @singleton_state = true
+        end
+        @actual = params[:id]
+      end
+    RUBY
+    show = facts(source, 'show')
+
+    expect(show[:assigns]).to eq([{ ivar: '@actual', line: 14 }])
+    expect(show[:params]).to eq([{ key: 'id', line: 14, permitted: false }])
+    expect(show[:renders]).to eq([{ template: 'users/show', implicit: true }])
+  end
+
+  it 'retains dynamic response expressions without inventing a template or partial' do
+    source = <<~RUBY
+      def show
+        render template: params[:view]
+        render action: next_action
+        render partial: @partial_name, locals: { user: @user }
+      end
+    RUBY
+
+    expect(facts(source, 'show')[:renders]).to eq(
+      [{ object: 'params[:view]', line: 2 },
+       { object: 'next_action', line: 3 },
+       { object: '@partial_name', line: 4 }]
+    )
+  end
+
+  it 'does not substitute the default mail template for a dynamic explicit target' do
+    source = <<~RUBY
+      def digest
+        self.mail(template_name: chosen_template)
+        mail(template_path: view_paths)
+      end
+    RUBY
+
+    expect(facts(source, 'digest', mailer: true)[:renders]).to eq(
+      [{ object: 'self.mail(template_name: chosen_template)', line: 2, mail: true },
+       { object: 'mail(template_path: view_paths)', line: 3, mail: true }]
+    )
+  end
+
+  it 'does not attribute foreign eval or exec block bodies to the action' do
+    source = <<~RUBY
+      def show
+        (@receiver = params[:receiver]).instance_exec(@argument = params[:argument]) do
+          @foreign = params[:foreign]
+          render :foreign
+        end
+        other.instance_eval { @foreign_eval = true; head :no_content }
+        self.class.class_eval { @class_state = true; render :class_state }
+        other.class_exec { @class_exec = true; redirect_to root_path }
+        other.module_eval { @module_eval = true; render :module_eval }
+        other.module_exec { @module_exec = true; render :module_exec }
+      end
+    RUBY
+    show = facts(source, 'show')
+
+    expect(show[:assigns]).to eq([{ ivar: '@receiver', line: 2 }, { ivar: '@argument', line: 2 }])
+    expect(show[:params].map { |entry| entry[:key] }).to eq(%w[receiver argument])
+    expect(show[:renders]).to eq([{ template: 'users/show', implicit: true }])
+    expect(show[:redirects]).to eq([])
+  end
+
+  it 'keeps eval and exec blocks on self in the action scope' do
+    source = <<~RUBY
+      def show
+        self.instance_eval { @own = params[:id] }
+        instance_exec { render :own }
+      end
+    RUBY
+    show = facts(source, 'show')
+
+    expect(show[:assigns]).to eq([{ ivar: '@own', line: 2 }])
+    expect(show[:params]).to eq([{ key: 'id', line: 2, permitted: false }])
+    expect(show[:renders]).to eq([{ template: 'users/own', line: 3 }])
+  end
+
+  it 'records numeric response statuses without treating numbers as template names' do
+    source = 'def show; render :new, status: 422; head 204; render template: 123; end'
+
+    expect(facts(source, 'show')[:renders]).to eq(
+      [{ template: 'users/new', line: 1, status: 422 }, { head: '204', line: 1 }, { object: '123', line: 1 }]
+    )
   end
 
   it 'reads a mailer action: the template mail renders, implicit or named' do

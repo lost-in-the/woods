@@ -78,7 +78,7 @@ module Woods
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)
         unit.metadata = extract_metadata(mailer, source)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, mailer: mailer)
         HelperCallScan.annotate(self, unit, mailer)
         MethodEffects.apply(unit, source)
 
@@ -247,7 +247,7 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(source)
+      def extract_dependencies(source, mailer: nil)
         deps = []
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
@@ -258,7 +258,23 @@ module Woods
         deps.concat(scan_navigation_dependencies(source))
         deps.concat(scan_form_dependencies(source))
 
-        consolidate_dependencies(deps)
+        structural = mailer && superclass_dependency(mailer)
+        (consolidate_dependencies(deps) + [structural].compact).uniq do |dependency|
+          dependency.values_at(:type, :target, :via)
+        end
+      end
+
+      # Parent actions and private callbacks can supply a child's action
+      # facts. Keep the child in the parent's incremental blast radius even
+      # when its own source never calls a method on that parent.
+      #
+      # @param mailer [Class]
+      # @return [Hash, nil] an app-owned parent mailer, never a framework class
+      def superclass_dependency(mailer)
+        parent = mailer.superclass
+        return nil unless parent.is_a?(Class) && app_defined_mailer?(parent)
+
+        { type: :mailer, target: parent.name, via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────

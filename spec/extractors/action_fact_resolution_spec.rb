@@ -135,4 +135,95 @@ RSpec.describe Woods::Extractors::ActionFactResolution do
     load gem_file
     expect(facts(%w[gem_action])).to eq({})
   end
+
+  it 'reads an alias target at its runtime source site while keeping the dispatched action template' do
+    load write('app/controllers/facts_fixtures/aliased_controller.rb', <<~RUBY)
+      module FactsFixtures
+        class AliasedController < BaseController
+          def show
+            @obsolete = true
+            render :obsolete
+          end
+
+          def preview
+            @preview = params[:id]
+          end
+
+          alias_method :show, :preview
+        end
+      end
+    RUBY
+    result = host.resolve_action_facts(FactsFixtures::AliasedController, %w[show], view_prefix: 'aliased')
+    show = result.fetch('show')
+
+    expect(show[:line]).to eq(8)
+    expect(show[:assigns]).to eq(
+      [{ ivar: '@preview', line: 9, method: 'show', file: 'app/controllers/facts_fixtures/aliased_controller.rb' }]
+    )
+    expect(show[:renders]).to eq([{ template: 'aliased/show', implicit: true, method: 'show' }])
+  end
+
+  it 'does not borrow a same-named definition for a generated action or attribute reader' do
+    load write('app/controllers/facts_fixtures/generated_controller.rb', <<~RUBY)
+      module FactsFixtures
+        class GeneratedController < BaseController
+          attr_reader :show
+          define_method(:create) { @generated = true }
+        end
+
+        class UnrelatedController < BaseController
+          def show; @unrelated_show = true; end
+          def create; @unrelated_create = true; end
+        end
+      end
+    RUBY
+
+    result = host.resolve_action_facts(FactsFixtures::GeneratedController, %w[show create], view_prefix: 'generated')
+
+    expect(result).to eq({})
+  end
+
+  it 'builds one definition index per file across actions and shared filters' do
+    expect(Woods::Extractors::ActionFacts).to receive(:definitions).twice.and_call_original
+
+    2.times { facts }
+  end
+
+  it 'leaves generated methods unresolved when an unrelated definition shares their source line' do
+    load write('app/controllers/facts_fixtures/same_line_controller.rb',
+               'module FactsFixtures; class SameLineController < BaseController; ' \
+               'attr_reader :show; define_method(:create) { @created = true }; end; ' \
+               'class OtherSameLineController < BaseController; ' \
+               'def show; @wrong_show = true; end; def create; @wrong_create = true; end; end; end')
+
+    result = host.resolve_action_facts(FactsFixtures::SameLineController, %w[show create], view_prefix: 'same_line')
+
+    expect(result).to eq({})
+  end
+
+  it 'keeps an unambiguous same-line definition and alias beside an accessor' do
+    load write('app/controllers/facts_fixtures/same_line_alias_controller.rb',
+               'module FactsFixtures; class SameLineAliasController < BaseController; ' \
+               'attr_reader :show; def preview; @preview = true; end; alias_method :show, :preview; end; end')
+
+    result = host.resolve_action_facts(FactsFixtures::SameLineAliasController, %w[show], view_prefix: 'same_line_alias')
+
+    expect(result.fetch('show')[:assigns]).to include(hash_including(ivar: '@preview', method: 'show'))
+    expect(result.fetch('show')[:renders])
+      .to eq([{ template: 'same_line_alias/show', implicit: true, method: 'show' }])
+  end
+
+  it 'leaves dynamic generated methods unresolved beside unrelated definitions on the same line' do
+    load write('app/controllers/facts_fixtures/dynamic_same_line_controller.rb',
+               'module FactsFixtures; class DynamicSameLineController < BaseController; ' \
+               'reader = :show; creator = :create; attr_reader reader; ' \
+               'define_method(creator) { @created = true }; end; ' \
+               'class DynamicOtherController < BaseController; ' \
+               'def show; @wrong_show = true; end; def create; @wrong_create = true; end; end; end')
+
+    result = host.resolve_action_facts(FactsFixtures::DynamicSameLineController, %w[show create],
+                                       view_prefix: 'dynamic_same_line')
+
+    expect(result).to eq({})
+  end
 end

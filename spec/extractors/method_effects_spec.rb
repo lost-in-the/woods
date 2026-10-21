@@ -87,6 +87,43 @@ RSpec.describe Woods::Extractors::MethodEffects do
     expect(effects(source)).to be_nil
   end
 
+  it 'does not scan a sibling method or callback on the same line' do
+    source = <<~RUBY
+      class Ledger
+        def quiet; 1; end; def dispatch; DispatchJob.perform_later; end
+        def another_quiet; 2; end; after_commit { CallbackJob.perform_later }
+      end
+    RUBY
+    dependencies = [
+      { type: :job, target: 'DispatchJob', via: :job_enqueue },
+      { type: :job, target: 'CallbackJob', via: :job_enqueue }
+    ]
+    unit = apply(source, dependencies: dependencies)
+
+    expect(unit.metadata[:method_effects].keys).to eq(['dispatch'])
+    expect(unit.dependencies.first[:through]).to eq('dispatch')
+    expect(unit.dependencies.last).not_to have_key(:through)
+  end
+
+  it 'does not execute a nested method definition while analyzing its installer' do
+    source = <<~RUBY
+      class Ledger
+        def install
+          def dispatch
+            NestedJob.perform_later
+            ActiveSupport::Notifications.instrument('nested.event')
+            Faraday.get(url)
+          end
+          InstalledJob.perform_later
+        end
+      end
+    RUBY
+
+    expect(effects(source)['install']).to include(
+      jobs_enqueued: ['InstalledJob'], events_published: [], external_calls: []
+    )
+  end
+
   describe 'events and external calls' do
     it 'reads Wisper publishes only in a class that includes Wisper' do
       wisper = <<~RUBY
@@ -220,6 +257,40 @@ RSpec.describe Woods::Extractors::MethodEffects do
       expect(recorded['self.rebuild'][:jobs_enqueued]).to eq(['RebuildJob'])
       expect(recorded['rebuild'][:jobs_enqueued]).to eq(['InstanceJob'])
     end
+
+    it 'does not claim singleton methods defined on another object' do
+      source = <<~RUBY
+        class Ledger
+          class << OTHER_OBJECT
+            def dispatch
+              ForeignJob.perform_later
+            end
+          end
+          class << self
+            def own_dispatch
+              OwnJob.perform_later
+            end
+          end
+        end
+      RUBY
+
+      expect(effects(source).keys).to eq(['self.own_dispatch'])
+      expect(effects(source)['self.own_dispatch'][:jobs_enqueued]).to eq(['OwnJob'])
+    end
+
+    it 'honors public_class_method after private_class_method' do
+      source = <<~RUBY
+        class Ledger
+          def self.dispatch
+            DispatchJob.perform_later
+          end
+          private_class_method :dispatch
+          public_class_method :dispatch
+        end
+      RUBY
+
+      expect(effects(source).keys).to eq(['self.dispatch'])
+    end
   end
 
   describe 'which class is read' do
@@ -325,6 +396,44 @@ RSpec.describe Woods::Extractors::MethodEffects do
   end
 
   describe 'same-class calls' do
+    it 'does not follow same-named methods inside foreign eval or exec blocks' do
+      source = <<~RUBY
+        class Ledger
+          def dispatch(other)
+            other.instance_eval { deliver }
+            other.instance_exec { deliver }
+            other.class_eval { deliver }
+            other.class_exec { deliver }
+            other.module_eval { deliver }
+            other.module_exec { deliver }
+          end
+          private
+          def deliver
+            WrongJob.perform_later
+          end
+        end
+      RUBY
+
+      expect(effects(source)).to be_nil
+    end
+
+    it 'keeps following calls inside ordinary and self eval blocks' do
+      source = <<~RUBY
+        class Ledger
+          def dispatch(other)
+            other.tap { deliver }
+            self.instance_eval { deliver }
+          end
+          private
+          def deliver
+            RightJob.perform_later
+          end
+        end
+      RUBY
+
+      expect(effects(source)['dispatch'][:via_method]).to eq('deliver' => { jobs_enqueued: ['RightJob'] })
+    end
+
     it 'lists the effects of a called method under via_method' do
       source = <<~RUBY
         class Ledger
@@ -499,6 +608,24 @@ RSpec.describe Woods::Extractors::MethodEffects do
   end
 
   describe 'edges' do
+    it 'does not annotate a structural inheritance edge to a called mailer' do
+      source = <<~RUBY
+        class Ledger
+          def notify
+            ParentMailer.receipt.deliver_later
+          end
+        end
+      RUBY
+      dependencies = [
+        { type: :mailer, target: 'ParentMailer', via: :inheritance },
+        { type: :mailer, target: 'ParentMailer', via: :code_reference }
+      ]
+      unit = apply(source, dependencies: dependencies)
+
+      expect(unit.dependencies.first).not_to have_key(:through)
+      expect(unit.dependencies.last[:through]).to eq('notify')
+    end
+
     let(:source) do
       <<~RUBY
         class Ledger

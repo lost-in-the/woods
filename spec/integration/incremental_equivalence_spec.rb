@@ -1617,6 +1617,68 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'mailer callback fact freshness' do
+    %i[parent concern].each do |owner_kind|
+      it "refreshes child action facts when only the #{owner_kind} callback body changes" do
+        prefix = "#{owner_kind.to_s.camelize}FactFresh"
+        base_name = "#{prefix}BaseMailer"
+        child_name = "#{prefix}Mailer"
+        concern_name = "#{prefix}Callbacks"
+        base = "app/mailers/#{base_name.underscore}.rb"
+        child = "app/mailers/#{child_name.underscore}.rb"
+        owner = owner_kind == :parent ? base : "app/mailers/concerns/#{concern_name.underscore}.rb"
+        owner_source = lambda do |body|
+          declaration = owner_kind == :parent ? "class #{base_name} < ActionMailer::Base" : "module #{concern_name}"
+          "#{declaration}\n  private\n  def set_viewer\n#{body}  end\nend\n"
+        end
+        write_owner = lambda do |body|
+          write_file(owner, owner_source.call(body))
+          load app_path(owner)
+        end
+
+        index = run_sequence([
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n")
+                                 if owner_kind == :concern
+                                   write_file(base, <<~RUBY)
+                                     class #{base_name} < ActionMailer::Base
+                                       include #{concern_name}
+                                     end
+                                   RUBY
+                                   load app_path(base)
+                                 end
+                                 write_file(child, <<~RUBY)
+                                   class #{child_name} < #{base_name}
+                                     before_action :set_viewer
+                                     def digest
+                                       mail to: 'reader@example.test'
+                                     end
+                                   end
+                                 RUBY
+                                 load app_path(child)
+                                 [owner, base, child].uniq
+                               end,
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n    @audit = 2\n")
+                                 owner
+                               end
+                             ])
+
+        mailer = unit_snapshot(index).values.find { |unit| unit['identifier'] == child_name }
+        expect(mailer.dig('metadata', 'action_facts', 'digest', 'assigns').map { |fact| fact['ivar'] })
+          .to eq(%w[@viewer @audit])
+      ensure
+        # These runtime constants survive the example; retain their source for later full extractions.
+        [owner, base, child].compact.uniq.each do |relative|
+          next unless File.exist?(app_path(relative))
+
+          FileUtils.mkdir_p(File.dirname(File.join(@pristine_root, relative)))
+          FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+        end
+      end
+    end
+  end
+
   describe 'gap 2 — deleted files' do
     it 'prunes a service that was deleted' do
       write_file('app/services/temp_service.rb', service_source('TempService'))

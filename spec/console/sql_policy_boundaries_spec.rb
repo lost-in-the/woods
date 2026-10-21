@@ -119,6 +119,8 @@ RSpec.describe 'Console SQL policy boundaries' do
   end
 
   ['SELECT users FROM users', 'SELECT u FROM users AS u',
+   'SELECT straight_join FROM users straight_join',
+   'SELECT straight_join::text AS label FROM users straight_join',
    'SELECT (u) AS visible FROM users u', 'SELECT ARRAY[u] AS visible FROM users u',
    'SELECT (SELECT u FROM users u) AS visible', 'SELECT derived FROM (SELECT * FROM users) AS derived',
    'SELECT u$ FROM users AS u$', 'SELECT "ü" FROM users AS "ü"',
@@ -157,6 +159,13 @@ RSpec.describe 'Console SQL policy boundaries' do
     expect(request('SELECT u.id FROM users AS u')['ok']).to be true
     expect(request('SELECT u.* FROM users AS u')['ok']).to be true
     expect(request('SELECT array_agg(u.id) FROM users AS u')['ok']).to be true
+  end
+
+  it 'keeps a MySQL STRAIGHT_JOIN column projection available' do
+    allow(connection).to receive(:adapter_name).and_return('Mysql2')
+    sql = 'SELECT p.id FROM preferences p STRAIGHT_JOIN users ON users.id = p.id'
+    expect(request(sql)).to include('ok' => true)
+    expect(connection).to have_received(:select_all).with(sql)
   end
 
   %w[PostgreSQL SQLite Mysql2].each do |adapter|
@@ -249,6 +258,7 @@ RSpec.describe 'Console SQL policy boundaries' do
 
   context 'with relation column alias lists' do
     [
+      'SELECT harmless FROM users straight_join(row_id, public_name, harmless)',
       'SELECT label FROM users AS selected(row_id, label, detail)',
       'SELECT label FROM users AS count(row_id, label, detail)',
       'SELECT label FROM users count(row_id, label, detail)',

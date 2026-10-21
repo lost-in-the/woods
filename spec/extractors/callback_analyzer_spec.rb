@@ -593,6 +593,34 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
   # ── Per-node analysis ──────────────────────────────────────────
 
   describe '#method_effects' do
+    it 'uses byte boundaries when two methods share a line' do
+      analyzer = build_analyzer('class Ledger; def quiet; 1; end; def post; PostJob.perform_later; end; end')
+      quiet, post = analyzer.parsed_root.find_all(:def)
+
+      expect(analyzer.method_effects(quiet)[:jobs_enqueued]).to eq([])
+      expect(analyzer.method_effects(post)[:jobs_enqueued]).to eq(['PostJob'])
+    end
+
+    it 'blanks nested definition bytes without damaging surrounding UTF-8 source' do
+      source = <<~RUBY
+        class Ledger
+          def install
+            def café
+              NestedJob.perform_later
+            end
+            InstalledJob.perform_later
+            def résumé
+              OtherNestedJob.perform_later
+            end
+          end
+        end
+      RUBY
+      analyzer = build_analyzer(source)
+      install = analyzer.parsed_root.find_all(:def).first
+
+      expect(analyzer.method_effects(install)[:jobs_enqueued]).to eq(['InstalledJob'])
+    end
+
     let(:source) do
       <<~RUBY
         module Billing

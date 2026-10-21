@@ -105,7 +105,7 @@ module Woods
         callback_hash.merge(
           side_effects: {
             columns_written: detect_columns_written(method_source),
-            jobs_enqueued: detect_jobs_enqueued(method_source, nesting_at_line(method_node.line)),
+            jobs_enqueued: detect_jobs_enqueued(method_source, nesting_for(method_node)),
             services_called: detect_services_called(method_source),
             mailers_triggered: detect_mailers_triggered(method_source),
             database_reads: detect_database_reads(method_source),
@@ -128,10 +128,10 @@ module Woods
       #   the neutralized method text the scans ran over; nil when the method
       #   has no readable source
       def method_effects(method_node)
-        method_source = scannable_source(method_source_from_node(method_node))
+        method_source = method_scan_source(method_node)
         return nil if method_source.nil?
 
-        nesting = nesting_at_line(method_node.line)
+        nesting = nesting_for(method_node)
         {
           columns_written: detect_columns_written(method_source),
           jobs_enqueued: detect_jobs_enqueued(method_source, nesting),
@@ -172,6 +172,10 @@ module Woods
       # @param node [Ast::Node]
       # @return [String, nil]
       def method_source_from_node(node)
+        if node.start_byte && node.end_byte
+          return @source_code.byteslice(node.start_byte, node.end_byte - node.start_byte)
+        end
+
         return node.source if node.source
 
         return nil unless node.line && node.end_line
@@ -182,6 +186,41 @@ module Woods
         return nil if start_idx.negative? || end_idx >= lines.length
 
         lines[start_idx..end_idx].join
+      end
+
+      # A nested definition installs a method; its body does not run with
+      # the enclosing method. Blank only those byte ranges, preserving
+      # newlines and all surrounding executable source.
+      def method_scan_source(node)
+        source = method_source_from_node(node)
+        return nil unless source
+
+        if node.start_byte
+          ranges = []
+          pending = Array(node.children).dup
+          while (child = pending.pop)
+            next unless child.is_a?(Ast::Node)
+
+            if %i[def defs].include?(child.type)
+              first = child.start_byte && (child.start_byte - node.start_byte)
+              last = child.end_byte && (child.end_byte - node.start_byte)
+              next unless first && last && first >= 0 && last <= source.bytesize
+
+              ranges << [first, last]
+            else
+              pending.concat(Array(child.children))
+            end
+          end
+          cursor = 0
+          pieces = ranges.sort.flat_map do |first, last|
+            prefix = source.byteslice(cursor, first - cursor)
+            blank = source.byteslice(first, last - first).b.gsub(/[^\n]/, ' ').force_encoding(source.encoding)
+            cursor = last
+            [prefix, blank]
+          end
+          source = (pieces << source.byteslice(cursor..-1)).join
+        end
+        scannable_source(source)
       end
 
       # Neutralize a method body before the regex scans run over it.
@@ -272,13 +311,14 @@ module Woods
         ReferencePatterns.job_enqueues(method_source, enclosing: nesting).uniq.sort
       end
 
-      # The class and module scopes open at the start of +line+ in the
-      # composite source, innermost first.
+      # The class and module scopes open at the method's byte offset in
+      # the composite source, innermost first. A line can also contain the
+      # class declaration, so its start is only a fallback.
       #
-      # @param line [Integer, nil] 1-based line of a method definition
+      # @param node [Ast::Node] the method definition
       # @return [Array<String>]
-      def nesting_at_line(line)
-        offset = line && line_starts[line - 1]
+      def nesting_for(node)
+        offset = node.start_byte || (node.line && line_starts[node.line - 1])
         return [] unless offset
 
         @lexical_scopes ||= SourceNesting.lexical_scopes(@source_code) || []

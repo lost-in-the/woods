@@ -49,6 +49,7 @@ module Woods
       NOTIFICATION_METHODS = %w[instrument publish].freeze
       WISPER_METHODS = %w[publish broadcast].freeze
       VISIBILITY_METHODS = %w[private protected public].freeze
+      RECEIVER_CHANGING_METHODS = %w[instance_eval instance_exec class_eval class_exec module_eval module_exec].freeze
 
       # Instance methods Ruby makes private whatever section they are in.
       ALWAYS_PRIVATE = %w[initialize initialize_copy initialize_dup initialize_clone respond_to_missing?].freeze
@@ -149,6 +150,7 @@ module Woods
       # @return [Symbol, nil] the effect family a dependency edge belongs to
       def edge_family(dependency)
         return nil unless dependency.is_a?(Hash)
+        return nil if dependency[:via] == :inheritance
         return nil if dependency[:type] == :job && dependency[:via] != :job_enqueue
 
         EDGE_FAMILIES[dependency[:type]]
@@ -209,7 +211,7 @@ module Woods
 
       def analyze(definition)
         scanned = @analyzer.method_effects(definition.node) || {}
-        sends = definition.node.find_all(:send)
+        sends = method_sends(definition.node)
         {
           effects: {
             jobs_enqueued: scanned[:jobs_enqueued] || [],
@@ -219,8 +221,33 @@ module Woods
             events_published: events_published(sends),
             external_calls: external_calls(sends)
           },
-          calls: same_class_calls(sends, definition)
+          calls: same_class_calls(method_sends(definition.node, same_receiver: true), definition)
         }
+      end
+
+      # Nested definitions have their own execution scope. Ordinary blocks
+      # keep self; eval/exec blocks on another receiver do not, although the
+      # call that obtains that receiver still runs in this method.
+      def method_sends(node, same_receiver: false)
+        sends = []
+        pending = Array(node.children).dup
+        while (child = pending.pop)
+          next unless child.is_a?(Ast::Node)
+          next if %i[def defs class module].include?(child.type)
+          next if same_receiver && child.type == :sclass
+
+          sends << child if child.type == :send
+          children = Array(child.children)
+          if same_receiver && child.type == :block
+            call = children.first
+            if call&.type == :send && RECEIVER_CHANGING_METHODS.include?(call.method_name) &&
+               call.receiver && call.receiver != 'self'
+              children = [call]
+            end
+          end
+          pending.concat(children)
+        end
+        sends
       end
 
       def empty?(effects)
@@ -343,7 +370,8 @@ module Woods
           case statement.type
           when :def then define(statement, state[:section], state)
           when :defs then define_singleton(statement, :public)
-          when :sclass then read_body(body_nodes(statement), singleton: true) unless singleton
+          when :sclass
+            read_body(body_nodes(statement), singleton: true) if !singleton && statement.receiver == 'self'
           when :send then read_declaration(statement, state)
           end
         end
@@ -379,8 +407,8 @@ module Woods
           return state[:section] = name.to_sym if arguments.empty?
 
           modify(call, arguments, name.to_sym, state)
-        elsif name == 'private_class_method'
-          modify_singleton(call, arguments)
+        elsif %w[private_class_method public_class_method].include?(name)
+          modify_singleton(call, arguments, name == 'private_class_method' ? :private : :public)
         elsif name == 'module_function' && arguments.empty?
           state[:module_function] = true
         else
@@ -406,12 +434,13 @@ module Woods
         end
       end
 
-      # `private_class_method :name` and `private_class_method def self.name`.
-      def modify_singleton(call, arguments)
-        wrapped_definitions(call).each { |node| define_singleton(node, :private) if node.type == :defs }
+      # Named or inline singleton visibility, including a later
+      # `public_class_method :name` that restores a private method.
+      def modify_singleton(call, arguments, visibility)
+        wrapped_definitions(call).each { |node| define_singleton(node, visibility) if node.type == :defs }
         arguments.filter_map { |argument| symbol_literal(argument) }.each do |name|
           key = "self.#{name}"
-          @definitions[key].visibility = :private if @definitions.key?(key)
+          @definitions[key].visibility = visibility if @definitions.key?(key)
         end
       end
 

@@ -20,7 +20,7 @@ RSpec.describe 'Method effects complexity' do
   spaces = ' ' * 50_000
 
   def self.in_method(body)
-    "class Ledger\n  def post\n#{body}\n  end\nend\n"
+    "class Ledger\n  def post\n#{body}\n    SentinelJob.perform_later\n  end\nend\n"
   end
 
   every_call = (1..100).map { |m| "    m#{m}\n" }.join
@@ -72,15 +72,33 @@ RSpec.describe 'Method effects complexity' do
 
   adversarial_sources.each do |label, source|
     it "stays within budget on #{label}" do
+      logger = double('logger', warn: nil)
+      stub_const('Rails', double('Rails', logger: logger))
       unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Ledger', file_path: 'app/models/ledger.rb')
       unit.metadata = {}
-      unit.dependencies = [{ type: :job, target: 'PostJob', via: :job_enqueue }]
+      unit.dependencies = [
+        { type: :job, target: 'PostJob', via: :job_enqueue },
+        { type: :job, target: 'SentinelJob', via: :job_enqueue }
+      ]
+      source_with_sentinel = <<~RUBY
+        #{source}
+        class Ledger
+          def woods_effects_sentinel
+            SentinelJob.perform_later
+          end
+        end
+      RUBY
 
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      Woods::Extractors::MethodEffects.apply(unit, source, column_names: %w[status], limit: 50)
+      Woods::Extractors::MethodEffects.apply(unit, source_with_sentinel, column_names: %w[status], limit: 50)
       elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
 
       expect(elapsed).to be < budget_seconds * 5
+      expect(logger).not_to have_received(:warn)
+      expect(unit.dependencies.last[:through].to_s.split(', ')).to include('woods_effects_sentinel')
+      if source.include?('SentinelJob.perform_later')
+        expect(unit.metadata.dig(:method_effects, 'post', :jobs_enqueued)).to include('SentinelJob')
+      end
     end
   end
 end

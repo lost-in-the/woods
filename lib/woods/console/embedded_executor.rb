@@ -39,7 +39,7 @@ module Woods
       DEFAULT_EVAL_TIMEOUT = 10
 
       SQL_RELATION_BOUNDARIES = %w[
-        ON USING WHERE JOIN INNER LEFT RIGHT FULL CROSS NATURAL STRAIGHT_JOIN
+        ON USING WHERE JOIN INNER LEFT RIGHT FULL CROSS NATURAL
         GROUP ORDER HAVING LIMIT OFFSET UNION INTERSECT EXCEPT WINDOW FOR
       ].freeze
 
@@ -1824,7 +1824,8 @@ module Woods
           query_levels.delete(depth + 1)
         end
         query_levels[depth] = true if keyword == 'SELECT'
-        boundaries = %w[SELECT FROM JOIN STRAIGHT_JOIN ON WHERE HAVING ORDER GROUP LIMIT OFFSET]
+        boundaries = %w[SELECT FROM JOIN ON WHERE HAVING ORDER GROUP LIMIT OFFSET]
+        boundaries << 'STRAIGHT_JOIN' if sql_dialect == :mysql
         clauses[depth] = keyword if query_levels[depth] && boundaries.include?(keyword)
         clauses[depth]
       end
@@ -1936,7 +1937,10 @@ module Woods
       end
 
       def sql_relation_alias?(name, explicit:)
-        explicit || !SQL_RELATION_BOUNDARIES.include?(name.upcase)
+        return true if explicit
+        return false if sql_dialect == :mysql && name.casecmp?('STRAIGHT_JOIN')
+
+        !SQL_RELATION_BOUNDARIES.include?(name.upcase)
       end
 
       def unsafe_protected_sql_column(referenced, expressions, selected, tail, stripped)

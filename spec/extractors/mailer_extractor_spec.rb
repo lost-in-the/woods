@@ -503,6 +503,53 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Dependencies ──────────────────────────────────────────────────────
 
   describe 'dependency extraction' do
+    it 'tracks an app-owned parent whose private callbacks supply child action facts' do
+      parent_path = create_file('app/mailers/fresh_base_mailer.rb', <<~RUBY)
+        class FreshBaseMailer < ActionMailer::Base
+          private
+
+          def set_viewer
+            @viewer = 1
+          end
+        end
+      RUBY
+      child_path = create_file('app/mailers/fresh_child_mailer.rb', <<~RUBY)
+        class FreshChildMailer < FreshBaseMailer
+          def digest
+            mail to: 'reader@example.test'
+          end
+        end
+      RUBY
+      load parent_path
+      load child_path
+      FreshBaseMailer.define_singleton_method(:name) { 'FreshBaseMailer' }
+      FreshChildMailer.define_singleton_method(:name) { 'FreshChildMailer' }
+      callbacks = [build_callback(kind: :before, filter: :set_viewer)]
+      [FreshBaseMailer, FreshChildMailer].each do |mailer|
+        mailer.define_singleton_method(:default) { {} }
+        mailer.define_singleton_method(:delivery_method) { :smtp }
+        mailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+      end
+      FreshBaseMailer.define_singleton_method(:action_methods) { Set.new }
+      FreshChildMailer.define_singleton_method(:action_methods) { Set['digest'] }
+      extractor = described_class.new
+      parent = extractor.extract_mailer(FreshBaseMailer)
+      child = extractor.extract_mailer(FreshChildMailer)
+
+      expect(child.metadata.dig(:action_facts, 'digest', :assigns))
+        .to include(hash_including(ivar: '@viewer', file: 'app/mailers/fresh_base_mailer.rb'))
+      expect(child.dependencies).to include(type: :mailer, target: 'FreshBaseMailer', via: :inheritance)
+      expect(parent.dependencies).not_to include(hash_including(type: :mailer, target: 'ActionMailer::Base'))
+
+      graph = Woods::DependencyGraph.new
+      [parent, child].each { |unit| graph.register(unit) }
+      expect(graph.affected_by([parent_path])).to include('FreshChildMailer')
+    ensure
+      %i[FreshChildMailer FreshBaseMailer].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'detects service dependencies' do
       source = <<~RUBY
         class OrderMailer < ApplicationMailer

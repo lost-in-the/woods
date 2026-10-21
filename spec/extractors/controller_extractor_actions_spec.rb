@@ -300,6 +300,28 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     extractor.extract_controller(ActionFixtures.const_get(name))
   end
 
+  describe 'action-fact extraction failures' do
+    it 'keeps the controller when an action expects params through a keyword splat' do
+      load_app('app/controllers/action_fixtures/expect_splat_controller.rb', <<~RUBY)
+        class ActionFixtures::ExpectSplatController < ActionFixtures::BaseController
+          def create
+            @record = params.expect(**schema, record: [:title])
+            render :new
+          end
+        end
+      RUBY
+
+      unit = unit_for('ExpectSplatController')
+
+      expect(unit).not_to be_nil
+      expect(unit.metadata[:actions]).to eq(['create'])
+      expect(unit.metadata.dig(:action_facts, 'create', :params))
+        .to include(hash_including(key: 'record', method: 'create'))
+      expect(unit.metadata.dig(:action_facts, 'create', :renders))
+        .to include(hash_including(template: 'action_fixtures/expect_splat/new'))
+    end
+  end
+
   describe 'an action from an included app concern' do
     subject(:unit) { unit_for('SsoGoogleController') }
 
