@@ -7,6 +7,7 @@ require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'template_extensions'
@@ -77,6 +78,7 @@ module Woods
         unit.metadata = extract_metadata(mailer, source)
         unit.dependencies = extract_dependencies(source)
         HelperCallScan.annotate(self, unit, mailer)
+        MethodEffects.apply(unit, source)
 
         # Create chunks for each mail action
         unit.chunks = build_action_chunks(mailer, source)

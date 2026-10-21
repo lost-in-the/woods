@@ -106,6 +106,16 @@ RSpec.describe 'Incremental extraction configuration drift' do
         expect(artifacts).to eq(previous)
       end
 
+      it 'refuses a changed method effects cap before publishing an incremental generation' do
+        baseline
+        previous = artifacts
+        Woods.configuration.method_effects_limit = 1
+
+        expect { extractor.send(:prepare_incremental_run, operation: operation) }
+          .to raise_error(Woods::ExtractionConfigChanged, /method_effects_limit/)
+        expect(artifacts).to eq(previous)
+      end
+
       it 'warns and runs over a baseline published before the fingerprint existed' do
         baseline(extraction_config: nil)
 

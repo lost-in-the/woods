@@ -510,6 +510,46 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     end
   end
 
+  describe 'method effects' do
+    # Every public instance method in a controller's own file is an action,
+    # so the methods recorded are its class methods; an action still names
+    # itself on the edges it reaches.
+    subject(:unit) { unit_for('LedgerSyncController') }
+
+    before do
+      load_app('app/controllers/action_fixtures/ledger_sync_controller.rb', <<~RUBY)
+        class ActionFixtures::LedgerSyncController < ActionFixtures::BaseController
+          def self.warm_cache
+            WarmLedgerJob.perform_later
+          end
+
+          def index
+            SyncLedgerJob.perform_later(params[:id])
+          end
+        end
+      RUBY
+    end
+
+    it 'records the non-action public methods and leaves the actions to flows' do
+      expect(unit.metadata[:actions]).to eq(['index'])
+      expect(unit.metadata[:method_effects]).to eq(
+        'self.warm_cache' => {
+          jobs_enqueued: ['WarmLedgerJob'], mail_sent: [], services_called: [], columns_written: [],
+          events_published: [], external_calls: []
+        }
+      )
+    end
+
+    it 'names the action on the edge it reaches' do
+      edges = unit.dependencies.select { |dep| dep[:via] == :job_enqueue }
+
+      expect(edges).to contain_exactly(
+        { type: :job, target: 'SyncLedgerJob', via: :job_enqueue, through: 'index' },
+        { type: :job, target: 'WarmLedgerJob', via: :job_enqueue, through: 'self.warm_cache' }
+      )
+    end
+  end
+
   describe 'per-action chunks' do
     def chunk_actions(name)
       unit_for(name).chunks.map { |chunk| chunk[:metadata][:action] }

@@ -1298,6 +1298,48 @@ RSpec.describe Woods::DependencyGraph do
                                                    ])
     end
 
+    context 'when an enqueue edge names the methods it is reached through' do
+      def enqueuing_graph(through)
+        attributes = through ? { through: through } : {}
+        described_class.new.tap do |built|
+          built.register(make_unit(type: :job, identifier: 'RefundJob'))
+          built.register(make_unit(type: :model, identifier: 'Ledger', dependencies: [
+                                     { type: :job, target: 'RefundJob', via: :code_reference },
+                                     { type: :job, target: 'RefundJob', via: :job_enqueue }.merge(attributes)
+                                   ]))
+        end
+      end
+
+      let(:plain) { enqueuing_graph(nil) }
+      let(:annotated) { enqueuing_graph('capture!, refund!') }
+
+      it 'answers dependents and dependencies exactly as without it' do
+        expect(annotated.dependents_of('RefundJob')).to eq(plain.dependents_of('RefundJob'))
+        expect(annotated.dependents_of('RefundJob', via: :job_enqueue))
+          .to eq(plain.dependents_of('RefundJob', via: :job_enqueue))
+        expect(annotated.dependents_detail('RefundJob')).to eq(plain.dependents_detail('RefundJob'))
+        expect(annotated.dependencies_of('Ledger')).to eq(plain.dependencies_of('Ledger'))
+        expect(annotated.to_h[:reverse]).to eq(plain.to_h[:reverse])
+        expect(annotated.pagerank).to eq(plain.pagerank)
+      end
+
+      it 'keeps the edge count and carries the methods on the edge record' do
+        expect(annotated.edge_records('Ledger')).to eq([
+                                                         { target: 'RefundJob', via: :code_reference },
+                                                         { target: 'RefundJob', via: :job_enqueue,
+                                                           through: 'capture!, refund!' }
+                                                       ])
+        expect(plain.edge_records('Ledger').size).to eq(2)
+      end
+
+      it 'round-trips the methods through JSON' do
+        restored = described_class.from_h(JSON.parse(JSON.generate(annotated.to_h)))
+
+        expect(restored.edge_records('Ledger')).to eq(annotated.edge_records('Ledger'))
+        expect(restored.dependents_of('RefundJob', via: :job_enqueue)).to eq(['Ledger'])
+      end
+    end
+
     it 'keeps through_db on the edge record' do
       graph.register(make_unit(type: :model, identifier: 'Invoice', dependencies: [
                                  { type: :model, target: 'Account', via: :has_many, through: 'subscriptions',

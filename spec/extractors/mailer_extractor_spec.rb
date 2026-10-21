@@ -187,6 +187,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       create_file('app/mailers/user_mailer.rb', source)
     end
 
+    it 'records the side effects of a mailer method and names it on the edge' do
+      create_file('app/mailers/user_mailer.rb', source.sub("@user = params[:user]\n", "AuditService.call(self)\n"))
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:method_effects].keys).to eq(['welcome_email'])
+      expect(unit.metadata[:method_effects]['welcome_email'][:services_called]).to eq(['AuditService'])
+      expect(unit.dependencies)
+        .to include({ type: :service, target: 'AuditService', via: :code_reference, through: 'welcome_email' })
+    end
+
     it 'produces an ExtractedUnit with correct type and identifier' do
       unit = described_class.new.extract_mailer(mailer)
 

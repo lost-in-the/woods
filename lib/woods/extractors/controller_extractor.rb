@@ -9,6 +9,7 @@ require_relative 'ast_source_extraction'
 require_relative 'component_discovery'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 
@@ -133,6 +134,7 @@ module Woods
                         .merge(unresolved_renders: renders.unresolved, external_renders: renders.external)
         unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources, renders: renders)
         HelperCallScan.annotate(self, unit, controller)
+        MethodEffects.apply(unit, source, skip: unit.metadata[:actions])
 
         # Controllers benefit from per-action chunks
         unit.chunks = build_action_chunks(controller, unit)

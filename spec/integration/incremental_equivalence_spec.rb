@@ -1522,6 +1522,101 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'method effects (#680)' do
+    def unit_document(dir, type, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit.is_a?(Hash) && unit['identifier'] == identifier }
+    end
+
+    def enqueue_edge(document)
+      document.fetch('dependencies').find { |dep| dep['target'] == 'PublishPostJob' && dep['via'] == 'job_enqueue' }
+    end
+
+    def edge_identities(document)
+      document.fetch('dependencies').map { |dep| dep.values_at('type', 'target', 'via') }
+    end
+
+    def ledger_service(methods)
+      bodies = methods.map { |name, body| "  def #{name}(post)\n    #{body}\n  end\n" }.join("\n")
+      "class LedgerService\n#{bodies}end\n"
+    end
+
+    let(:post_model) do
+      <<~RUBY
+        class Post < ApplicationRecord
+          has_many :comments, dependent: :destroy
+
+          validates :title, presence: true
+
+          scope :recent, -> { order(created_at: :desc) }
+
+          before_save :normalize_title
+
+          def normalize_title
+            self.title = title.to_s.strip
+          end
+
+          def publish!
+            PublishPostJob.perform_later(self)
+          end
+        end
+      RUBY
+    end
+
+    it 'follows a method gaining, moving and losing an enqueue, in a service and a model' do
+      service = 'app/services/ledger_service.rb'
+      enqueue = 'PublishPostJob.perform_later(post)'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => enqueue)) },
+          lambda {
+            write_file(service, ledger_service('post_all' => 'retry_all(post)', 'retry_all' => enqueue,
+                                               'sign' => 'SignatureService.new.call(post)'))
+          },
+          -> { write_file('app/models/post.rb', post_model) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(edge_identities(document)).to eq(edge_identities(document).uniq)
+      expect(document.fetch('dependencies'))
+        .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')
+      expect(document.dig('metadata', 'method_effects', 'post_all', 'via_method'))
+        .to eq('retry_all' => { 'jobs_enqueued' => ['PublishPostJob'] })
+      expect(enqueue_edge(document)).to include('through' => 'post_all, retry_all')
+
+      model = unit_document(index, 'models', 'Post')
+      expect(model.dig('metadata', 'method_effects').keys).to eq(%w[normalize_title publish!])
+      expect(enqueue_edge(model)).to include('through' => 'publish!')
+      expect(edge_identities(model)).to eq(edge_identities(model).uniq)
+    end
+
+    it 'drops the map and the edge annotation when the last effect goes' do
+      service = 'app/services/ledger_service.rb'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => 'PublishPostJob.perform_later(post)')) },
+          -> { write_file(service, ledger_service('post_all' => 'post.touch')) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.fetch('metadata')).not_to have_key('method_effects')
+      expect(enqueue_edge(document)).to be_nil
+    end
+
+    it 'writes byte-identical unit documents on a repeat full extraction' do
+      write_file('app/services/ledger_service.rb', ledger_service('post_all' => 'PublishPostJob.perform_later(post)'))
+      write_file('app/models/post.rb', post_model)
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
   describe 'gap 2 — deleted files' do
     it 'prunes a service that was deleted' do
       write_file('app/services/temp_service.rb', service_source('TempService'))
