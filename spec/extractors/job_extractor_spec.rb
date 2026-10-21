@@ -673,7 +673,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
       unit = described_class.new.extract_job_file(path)
 
       expect(unit.dependencies.select { |d| d[:type] == :job })
-        .to eq([{ type: :job, target: 'Shipment::PingJob', via: :job_enqueue }])
+        .to eq([{ type: :job, target: 'Shipment::PingJob', via: :job_enqueue, through: 'perform' }])
     end
 
     it 'detects perform_async enqueue as a :job dependency' do
@@ -1176,7 +1176,7 @@ RSpec.describe Woods::Extractors::JobExtractor do
       RUBY
 
       units = units_by_id
-      edge = { type: :job, target: 'JobFixture::TileIconProbeWorker', via: :job_enqueue }
+      edge = { type: :job, target: 'JobFixture::TileIconProbeWorker', via: :job_enqueue, through: 'perform' }
 
       expect(units.fetch('JobFixture::TileRefreshJob').dependencies).to include(edge)
       expect(units).to have_key(edge[:target])

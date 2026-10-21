@@ -10,6 +10,7 @@ require_relative 'shared_dependency_scanner'
 require_relative 'callback_analyzer'
 require_relative 'constant_paths'
 require_relative 'table_catalog'
+require_relative 'method_effects'
 
 module Woods
   module Extractors
@@ -104,6 +105,7 @@ module Woods
         # comments concern bodies out, which Prism cannot see.
         analysis_source, segments = build_analysis_source(model, source, source_path)
         enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments)
+        MethodEffects.apply(unit, source, column_names: unit.metadata[:column_names])
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
         unit.chunks = build_chunks(unit)
