@@ -2797,6 +2797,7 @@ module Woods
     # Reads the manifest and computes per-unit content hashes, then delegates
     # to the SnapshotStore for storage and diff computation. Requires
     # enable_snapshots and a valid git_sha in the manifest.
+    # Snapshot identities use each unit's type, not its extractor family.
     #
     # @return [void]
     def capture_snapshot
@@ -2814,11 +2815,11 @@ module Woods
       store = build_snapshot_store
       return unless store
 
-      unit_hashes = @results.flat_map do |type, units|
+      unit_hashes = @results.values.flat_map do |units|
         units.map do |unit|
           {
             'identifier' => unit.identifier,
-            'type' => type.to_s,
+            'type' => unit.type.to_s,
             'source_hash' => Digest::SHA256.hexdigest(unit.source_code.to_s),
             'metadata_hash' => Digest::SHA256.hexdigest(unit.metadata.to_json),
             'dependencies_hash' => Digest::SHA256.hexdigest(unit.dependencies.to_json)
