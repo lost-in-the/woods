@@ -174,8 +174,31 @@ RSpec.describe Woods::ReloadPolicy do
       end
     end
 
+    it 'only needs re-extraction for JavaScript modules, which are read as bytes' do
+      expect(policy.classify('app/javascript/controllers/clipboard_controller.js')).to eq(:reextract)
+      expect(policy.classify('app/javascript/widgets/picker.tsx')).to eq(:reextract)
+      expect(policy.classify('app/assets/javascripts/legacy.js')).to eq(:reextract)
+    end
+
+    it 'ignores JavaScript that is not module source' do
+      expect(policy.classify('app/javascript/vendor/chart.js')).to eq(:ignore)
+      expect(policy.classify('app/javascript/site.css')).to eq(:ignore)
+      expect(policy.classify('node_modules/pkg/index.js')).to eq(:ignore)
+    end
+
+    it 'follows configured javascript_paths' do
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+      expect(policy.classify('frontend/widgets/picker.ts')).to eq(:reextract)
+      expect(policy.classify('app/javascript/entry.js')).to eq(:ignore)
+    ensure
+      Woods.configuration = original
+    end
+
     it 'ignores paths that are not extraction input' do
-      expect(policy.classify('README.md')).to eq(:ignore)
+      expect(policy.classify('NOTES.md')).to eq(:ignore)
       expect(policy.classify('.github/workflows/ci.yml')).to eq(:ignore)
       expect(policy.classify('app/assets/stylesheets/application.css')).to eq(:ignore)
       expect(policy.classify('public/favicon.ico')).to eq(:ignore)
@@ -191,7 +214,7 @@ RSpec.describe Woods::ReloadPolicy do
 
       it 'ignores a document outside the roots and other client files' do
         expect(policy.classify('docs/widget_list.graphql')).to eq(:ignore)
-        expect(policy.classify('app/javascript/widgets/widget_list.ts')).to eq(:ignore)
+        expect(policy.classify('app/javascript/widgets/widget_list.css')).to eq(:ignore)
         expect(policy.classify('app/javascript/node_modules/pkg/widget_list.graphql')).to eq(:ignore)
       end
 
@@ -218,14 +241,14 @@ RSpec.describe Woods::ReloadPolicy do
 
   describe '#classify_all' do
     it 'returns the strongest action any path demands' do
-      expect(policy.classify_all(%w[README.md app/models/user.rb])).to eq(:reload)
+      expect(policy.classify_all(%w[NOTES.md app/models/user.rb])).to eq(:reload)
       expect(policy.classify_all(%w[app/models/user.rb config/initializers/redis.rb])).to eq(:restart)
-      expect(policy.classify_all(%w[config/locales/en.yml README.md])).to eq(:reextract)
+      expect(policy.classify_all(%w[config/locales/en.yml NOTES.md])).to eq(:reextract)
     end
 
     it 'returns :ignore for an empty or irrelevant set' do
       expect(policy.classify_all([])).to eq(:ignore)
-      expect(policy.classify_all(%w[README.md CHANGELOG.md])).to eq(:ignore)
+      expect(policy.classify_all(%w[NOTES.md CHANGELOG.md])).to eq(:ignore)
     end
   end
 
@@ -235,13 +258,13 @@ RSpec.describe Woods::ReloadPolicy do
         app/models/user.rb
         config/initializers/redis.rb
         config/locales/en.yml
-        README.md
+        NOTES.md
       ]
 
       expect(policy.paths_requiring(paths, :restart)).to eq(['config/initializers/redis.rb'])
       expect(policy.paths_requiring(paths, :reload)).to eq(['app/models/user.rb'])
       expect(policy.paths_requiring(paths, :reextract)).to eq(['config/locales/en.yml'])
-      expect(policy.paths_requiring(paths, :ignore)).to eq(['README.md'])
+      expect(policy.paths_requiring(paths, :ignore)).to eq(['NOTES.md'])
     end
   end
 

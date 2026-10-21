@@ -187,6 +187,17 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       create_file('app/mailers/user_mailer.rb', source)
     end
 
+    it 'records the side effects of a mailer method and names it on the edge' do
+      create_file('app/mailers/user_mailer.rb', source.sub("@user = params[:user]\n", "AuditService.call(self)\n"))
+
+      unit = described_class.new.extract_mailer(mailer)
+
+      expect(unit.metadata[:method_effects].keys).to eq(['welcome_email'])
+      expect(unit.metadata[:method_effects]['welcome_email'][:services_called]).to eq(['AuditService'])
+      expect(unit.dependencies)
+        .to include({ type: :service, target: 'AuditService', via: :code_reference, through: 'welcome_email' })
+    end
+
     it 'produces an ExtractedUnit with correct type and identifier' do
       unit = described_class.new.extract_mailer(mailer)
 
@@ -268,6 +279,55 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   end
 
   # ── Callbacks ─────────────────────────────────────────────────────────
+
+  describe 'per-action facts (W-7)' do
+    before do
+      create_file('app/mailers/facts_digest_mailer.rb', <<~RUBY)
+        class FactsDigestMailer < ActionMailer::Base
+          def new_post(user, post)
+            @user = user
+            @post = post
+            mail(to: user.email, subject: post.title)
+            AuditService.call(self)
+          end
+
+          private
+
+          def set_footer
+            @footer = 'weekly'
+          end
+        end
+      RUBY
+      load File.join(tmp_dir, 'app/mailers/facts_digest_mailer.rb')
+      callbacks = [build_callback(kind: :before, filter: :set_footer)]
+      FactsDigestMailer.define_singleton_method(:name) { 'FactsDigestMailer' }
+      FactsDigestMailer.define_singleton_method(:action_methods) { Set.new(%w[new_post]) }
+      FactsDigestMailer.define_singleton_method(:default) { {} }
+      FactsDigestMailer.define_singleton_method(:delivery_method) { :smtp }
+      FactsDigestMailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+    end
+
+    after { Object.send(:remove_const, :FactsDigestMailer) if defined?(FactsDigestMailer) }
+
+    it 'publishes the assigns of the action and its filters and the template mail renders' do
+      facts = described_class.new.extract_mailer(FactsDigestMailer).metadata[:action_facts]['new_post']
+      expect(facts[:assigns].map { |a| [a[:ivar], a[:method]] })
+        .to eq([%w[@footer set_footer], %w[@user new_post], %w[@post new_post]])
+      expect(facts[:renders]).to eq([{ template: 'facts_digest_mailer/new_post', line: 5, mail: true,
+                                       method: 'new_post', file: 'app/mailers/facts_digest_mailer.rb' }])
+    end
+
+    it 'keeps per-action facts beside method effects and annotated service edges' do
+      unit = described_class.new.extract_mailer(FactsDigestMailer)
+
+      expect(unit.metadata[:actions]).to eq(['new_post'])
+      expect(unit.metadata.dig(:action_facts, 'new_post', :assigns))
+        .to include(hash_including(ivar: '@post', method: 'new_post'))
+      expect(unit.metadata.dig(:method_effects, 'new_post', :services_called)).to eq(['AuditService'])
+      expect(unit.dependencies)
+        .to include(type: :service, target: 'AuditService', via: :code_reference, through: 'new_post')
+    end
+  end
 
   describe 'callback extraction' do
     it 'extracts before_action callbacks' do
@@ -443,6 +503,53 @@ RSpec.describe Woods::Extractors::MailerExtractor do
   # ── Dependencies ──────────────────────────────────────────────────────
 
   describe 'dependency extraction' do
+    it 'tracks an app-owned parent whose private callbacks supply child action facts' do
+      parent_path = create_file('app/mailers/fresh_base_mailer.rb', <<~RUBY)
+        class FreshBaseMailer < ActionMailer::Base
+          private
+
+          def set_viewer
+            @viewer = 1
+          end
+        end
+      RUBY
+      child_path = create_file('app/mailers/fresh_child_mailer.rb', <<~RUBY)
+        class FreshChildMailer < FreshBaseMailer
+          def digest
+            mail to: 'reader@example.test'
+          end
+        end
+      RUBY
+      load parent_path
+      load child_path
+      FreshBaseMailer.define_singleton_method(:name) { 'FreshBaseMailer' }
+      FreshChildMailer.define_singleton_method(:name) { 'FreshChildMailer' }
+      callbacks = [build_callback(kind: :before, filter: :set_viewer)]
+      [FreshBaseMailer, FreshChildMailer].each do |mailer|
+        mailer.define_singleton_method(:default) { {} }
+        mailer.define_singleton_method(:delivery_method) { :smtp }
+        mailer.define_singleton_method(:_process_action_callbacks) { callbacks }
+      end
+      FreshBaseMailer.define_singleton_method(:action_methods) { Set.new }
+      FreshChildMailer.define_singleton_method(:action_methods) { Set['digest'] }
+      extractor = described_class.new
+      parent = extractor.extract_mailer(FreshBaseMailer)
+      child = extractor.extract_mailer(FreshChildMailer)
+
+      expect(child.metadata.dig(:action_facts, 'digest', :assigns))
+        .to include(hash_including(ivar: '@viewer', file: 'app/mailers/fresh_base_mailer.rb'))
+      expect(child.dependencies).to include(type: :mailer, target: 'FreshBaseMailer', via: :inheritance)
+      expect(parent.dependencies).not_to include(hash_including(type: :mailer, target: 'ActionMailer::Base'))
+
+      graph = Woods::DependencyGraph.new
+      [parent, child].each { |unit| graph.register(unit) }
+      expect(graph.affected_by([parent_path])).to include('FreshChildMailer')
+    ensure
+      %i[FreshChildMailer FreshBaseMailer].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'detects service dependencies' do
       source = <<~RUBY
         class OrderMailer < ApplicationMailer

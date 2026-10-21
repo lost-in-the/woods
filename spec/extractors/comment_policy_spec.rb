@@ -4,6 +4,9 @@ require 'spec_helper'
 require 'set'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
+require 'open3'
+require 'rbconfig'
 require 'timeout'
 require 'woods'
 require 'woods/extractors/comment_blanking'
@@ -75,12 +78,16 @@ RSpec.describe 'Comment policy for dependency scans' do
     end
 
     it 'blanks a heredoc under deep nesting without exhausting the stack' do
-      depth = 20_000
-      source = "#{'[' * depth}<<~TEXT#{']' * depth}\n  Widget\nTEXT\n"
+      fixture = File.expand_path('../fixtures/comment_blanking/deep_heredoc.rb', __dir__)
+      environment = { 'RUBY_THREAD_MACHINE_STACK_SIZE' => (64 * 1024 * 1024).to_s,
+                      'RUBY_THREAD_VM_STACK_SIZE' => (256 * 1024).to_s }
+      output, errors, status = Open3.capture3(environment, RbConfig.ruby, '-Ilib', fixture)
 
-      blanked = described_class.ruby(source)
-
-      expect(blanked.lines.last(2).map(&:strip)).to eq(['', 'TEXT'])
+      expect(status.success?).to be(true), errors
+      result = JSON.parse(output)
+      expect(result.fetch('last_lines')).to eq(['', 'TEXT'])
+      expect(result.fetch('blanked_bytesize')).to eq(result.fetch('source_bytesize'))
+      expect(result.fetch('valid_encoding')).to be(true)
     end
 
     it 'keeps a heredoc body tagged as Ruby' do

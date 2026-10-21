@@ -115,6 +115,10 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { [[ "$path" == README.md ]] || [[ "$path" == CLAUDE.md ]] || [[ "$path" == AGENTS.md ]] || { { [[ "$path" == *.md ]]; } && { [[ "$path" == docs/* ]] || [[ "$path" == doc/* ]] || [[ "$path" == .claude/rules/* ]] || [[ "$path" == .claude/skills/* ]] || [[ "$path" == .github/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/controllers/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
@@ -217,6 +221,14 @@ woods_input_action() {
     return
   fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == app/controllers/* ]] || [[ "$path" == app/mailers/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && [[ "$path" != */vendor/* ]] && [[ "$path" != */public/* ]] && [[ "$path" != */dist/* ]] && [[ "$path" != */build/* ]] && [[ "$path" != */builds/* ]] && [[ "$path" != */tmp/* ]] && [[ "$path" != */coverage/* ]] && [[ "$path" != *.min.js* ]] && [[ "$path" != *.min.mjs* ]] && [[ "$path" != *.d.ts* ]] && [[ "$path" != */__tests__/* ]] && [[ "$path" != */__mocks__/* ]] && [[ "$path" != */spec/* ]] && [[ "$path" != */test/* ]] && [[ "$path" != *.test.* ]] && [[ "$path" != *.spec.* ]] && { [[ "$path" == *.js ]]; } && { [[ "$path" == app/assets/javascripts/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
+  if { { [[ "$path" != */node_modules/* ]] && [[ "$path" != */vendor/* ]] && [[ "$path" != */public/* ]] && [[ "$path" != */dist/* ]] && [[ "$path" != */build/* ]] && [[ "$path" != */builds/* ]] && [[ "$path" != */tmp/* ]] && [[ "$path" != */coverage/* ]] && [[ "$path" != *.min.js* ]] && [[ "$path" != *.min.mjs* ]] && [[ "$path" != *.d.ts* ]] && [[ "$path" != */__tests__/* ]] && [[ "$path" != */__mocks__/* ]] && [[ "$path" != */spec/* ]] && [[ "$path" != */test/* ]] && [[ "$path" != *.test.* ]] && [[ "$path" != *.spec.* ]] && { [[ "$path" == *.js ]] || [[ "$path" == *.ts ]] || [[ "$path" == *.jsx ]] || [[ "$path" == *.tsx ]] || [[ "$path" == *.mjs ]]; } && { [[ "$path" == app/javascript/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi

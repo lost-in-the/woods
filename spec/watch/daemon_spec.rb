@@ -108,7 +108,7 @@ RSpec.describe Woods::Watch::Daemon do
 
   describe 'classification' do
     it 'does nothing for paths no extractor cares about' do
-      result = build.process(['README.md'])
+      result = build.process(['NOTES.md'])
 
       expect(result[:action]).to eq(:ignore)
       expect(extractor).not_to have_received(:extract_changed)
@@ -354,6 +354,48 @@ RSpec.describe Woods::Watch::Daemon do
     end
   end
 
+  describe 'configuration drift from the baseline' do
+    let(:logger) { instance_spy(Logger) }
+    let(:drift) { Woods::ExtractionConfigChanged.new('Extraction configuration differs (settings_readers)') }
+
+    before { touch('config/locales/en.yml') }
+
+    it 'escalates a refused incremental to one full extraction and logs why' do
+      allow(extractor).to receive(:extract_changed).and_raise(drift)
+
+      result = build(logger: logger).process(['config/locales/en.yml'])
+
+      expect(result).to include(action: :full, state: :running)
+      expect(extractor).to have_received(:extract_all).once
+      expect(logger).to have_received(:warn).with(/configuration changed.*full extraction/i)
+    end
+
+    it 'leaves any other refused incremental degraded without a full extraction' do
+      allow(extractor).to receive(:extract_changed).and_raise(Woods::ExtractionError, 'unrelated refusal')
+
+      result = build.process(['config/locales/en.yml'])
+
+      expect(result[:state]).to eq(:degraded)
+      expect(extractor).not_to have_received(:extract_all)
+    end
+
+    it 'keeps the full obligation once, without looping, when the escalated run fails' do
+      allow(extractor).to receive(:extract_changed).and_raise(drift)
+      allow(extractor).to receive(:extract_all).and_raise(StandardError, 'full boom')
+      daemon = build
+
+      expect(daemon.process(['config/locales/en.yml'])[:state]).to eq(:degraded)
+      expect(extractor).to have_received(:extract_all).once
+
+      allow(extractor).to receive(:extract_all) { publish_generation('full') && {} }
+      daemon.send(:drain)
+
+      expect(extractor).to have_received(:extract_changed).once
+      expect(extractor).to have_received(:extract_all).twice
+      expect(status['state']).to eq('running')
+    end
+  end
+
   describe 'storm handling' do
     it 'falls back to a full extraction above the threshold' do
       paths = Array.new(6) { |i| touch("app/services/svc_#{i}.rb") }
@@ -402,7 +444,7 @@ RSpec.describe Woods::Watch::Daemon do
       daemon = build
       daemon.process(['config/locales/en.yml'])
 
-      expect { daemon.process(['README.md']) }.not_to(change { daemon.generation.current.number })
+      expect { daemon.process(['NOTES.md']) }.not_to(change { daemon.generation.current.number })
     end
 
     it 'reports a running state with the current generation' do
@@ -1084,7 +1126,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'counts only actionable paths towards the storm threshold' do
-      paths = Array.new(6) { |i| touch("docs/note_#{i}.md") } + [touch('app/models/user.rb')]
+      paths = Array.new(6) { |i| touch("notes/note_#{i}.md") } + [touch('app/models/user.rb')]
 
       result = build(full_extraction_threshold: 3).process(paths)
 

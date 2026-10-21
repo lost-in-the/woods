@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'woods/storage_identity'
 require 'woods/retrieval/scope'
 require 'woods/retrieval/scoped_vector_store'
 require 'woods/storage/vector_store'

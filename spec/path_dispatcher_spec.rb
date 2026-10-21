@@ -139,7 +139,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'returns nothing for a path no extractor claims' do
-      expect(keys_for('README.md')).to be_empty
+      expect(keys_for('NOTES.md')).to be_empty
       expect(keys_for('config/routes.rb')).to be_empty
     end
 
@@ -366,6 +366,21 @@ RSpec.describe Woods::PathDispatcher do
         expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
       end
 
+      it 'matches a root spelled ./lib or lib//ledger the same way the full run scans it' do
+        Woods.configuration.event_paths = ['./lib', 'vendor//ledger']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('vendor/ledger/bus.rb')).to include(:events)
+      end
+
+      it 'treats . as every Ruby file under the root' do
+        Woods.configuration.event_paths = ['.']
+
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('bus.rb')).to include(:events)
+        expect(dispatcher.whole_app_keys_for('lib/ledger/bus.rake')).not_to include(:events)
+      end
+
       it 'returns to the default when the configuration object is replaced' do
         Woods.configuration.event_paths = %w[app lib]
         described_class.whole_app_rules
@@ -433,6 +448,54 @@ RSpec.describe Woods::PathDispatcher do
           [[['lib/tasks'], %w[.rake .rb], nil], [['rake'], %w[.rake .rb], nil], [[], nil, ['Rakefile']]]
         )
         expect(rake_rules.map(&:matcher)).to all(be_nil)
+      end
+    end
+
+    describe 'the js_modules rule' do
+      def js_rule
+        described_class.whole_app_rules.find { |rule| rule.extractor_key == :js_modules }
+      end
+
+      it 'describes each glob with its own directory and extensions' do
+        shapes = described_class.whole_app_rules.select { |rule| rule.extractor_key == :js_modules }
+                                .map { |rule| [rule.dirs, rule.extensions] }
+
+        expect(shapes).to eq([[%w[app/assets/javascripts], %w[.js]], [%w[app/javascript], %w[.js .ts .jsx .tsx .mjs]]])
+      end
+
+      before { Woods.configuration = Woods::Configuration.new }
+
+      it 'triggers a js_modules re-run on a module under the default roots' do
+        %w[app/javascript/controllers/clipboard_controller.js app/javascript/widgets/picker.tsx
+           app/assets/javascripts/legacy.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).to eq([:js_modules]), path
+          expect(dispatcher).to be_relevant(path)
+        end
+      end
+
+      it 'does not trigger on vendored, generated, minified or non-module files' do
+        %w[app/javascript/vendor/chart.js app/assets/javascripts/builds/application.js
+           app/javascript/widgets/picker.min.js app/javascript/types.d.ts app/javascript/site.css
+           node_modules/pkg/index.js].each do |path|
+          expect(dispatcher.whole_app_keys_for(path)).not_to include(:js_modules), path
+        end
+      end
+
+      it 'follows configured javascript_paths without an explicit reset' do
+        described_class.whole_app_rules
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(dispatcher.whole_app_keys_for('frontend/widgets/picker.ts')).to include(:js_modules)
+        expect(dispatcher.whole_app_keys_for('app/javascript/entry.js')).not_to include(:js_modules)
+      end
+
+      it 'serializes as plain data naming the configured roots, with a named matcher and no Proc' do
+        Woods.configuration.javascript_paths = ['frontend/**/*.ts']
+
+        expect(JSON.parse(JSON.generate(js_rule.to_h)))
+          .to include('dirs' => ['frontend'], 'matcher' => 'js_module_path?',
+                      'extensions' => %w[.ts])
+        expect(js_rule.to_h.values.flatten).to all(be_a(String).or(be_a(Symbol)).or(be_nil).or(be(false)))
       end
     end
 
@@ -550,7 +613,7 @@ RSpec.describe Woods::PathDispatcher do
     end
 
     it 'rejects paths no extractor cares about' do
-      expect(dispatcher).not_to be_relevant('README.md')
+      expect(dispatcher).not_to be_relevant('NOTES.md')
       expect(dispatcher).not_to be_relevant('app/assets/stylesheets/application.css')
       expect(dispatcher).not_to be_relevant('.github/workflows/ci.yml')
     end

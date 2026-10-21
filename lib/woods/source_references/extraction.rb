@@ -57,8 +57,12 @@ module Woods
         raise
       end
 
+      # +payload_dir+ falls back to the output root when no payload was
+      # opened; that root holds every published generation.
       def discard_unpublished_seed
         seed = payload_dir
+        return if File.expand_path(seed) == File.expand_path(@output_dir)
+
         active = Generation.new(output_dir: @output_dir).current.payload
         return if active && File.expand_path(active, @output_dir) == File.expand_path(seed)
 

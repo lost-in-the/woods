@@ -9,6 +9,7 @@ require_relative 'helper_catalog'
 require_relative 'helper_call_scan'
 require_relative 'comment_blanking'
 require_relative 'caller_prefix_partials'
+require_relative 'frontend_references'
 require_relative 'view_engines/base'
 require_relative 'view_engines/erb'
 require_relative 'view_engines/haml'
@@ -38,6 +39,7 @@ module Woods
     #
     class ViewTemplateExtractor
       include RouteHelperResolver
+      include FrontendReferences
 
       # Directories to scan for view templates.
       VIEW_DIRECTORIES = %w[
@@ -128,7 +130,7 @@ module Woods
         unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials, pending)
         apply_helper_calls(unit, engine, source, namespace)
 
-        unit
+        apply_frontend_references(unit, source)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract view template #{file_path}: #{e.message}")
         nil

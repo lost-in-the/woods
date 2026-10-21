@@ -514,6 +514,7 @@ end
 | `volatile_dependency_limit_per_target` | Integer or `nil` | `nil` | Optional maximum report edges per dependency (type and identifier), applied after ranking and before the global top 20. Positive integers only; `nil` leaves the default report unchanged. Distinct relationships consume separate slots. |
 | `graph_cycle_limit` | Integer or `nil` | `500` | How many distinct cycles `GraphAnalyzer` enumerates before it stops. Cycle detection finds one cycle per DFS back-edge, so a dense graph has tens of thousands of them and enumerating every one is the largest single cost of the analysis that runs on every extraction. Set to `nil` for exhaustive enumeration. |
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
+| `method_effects_limit` | Integer or `nil` | `50` | How many public methods one unit records in `metadata.method_effects`. Past the cap the first methods in source order are kept and `method_effects_truncated` is set; the `through` annotation on edges is not capped. Set to `nil` to record every method. The generation fingerprints this value; changing it requires a full extraction before incremental extraction or refresh. |
 
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
@@ -689,7 +690,7 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 ## Extractors
 
 `config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 40 extractors always run during a full extraction,
+not implemented**. All 42 extractors always run during a full extraction,
 regardless of what this array holds, nothing in the extraction path reads
 it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
 config). Setting `extractors` to anything other than its default value emits
@@ -736,6 +737,7 @@ Leave it at its default. The full list of what always runs:
 | `:database_views` | DatabaseViewExtractor | SQL views (Scenic) |
 | `:database_tables` | DatabaseTableExtractor | Tables in the live schema, including tables no model owns |
 | `:external_consumers` | ExternalConsumerExtractor | Declared external readers of shared tables |
+| `:js_modules` | JsModuleExtractor | JavaScript/TypeScript modules (shallow; Stimulus, Alpine, Stencil names) |
 | `:caching` | CachingExtractor | Cache usage patterns |
 | `:factories` | FactoryExtractor | FactoryBot factory definitions |
 | `:test_mappings` | TestMappingExtractor | Test file → subject, test support, and route coverage |
@@ -745,6 +747,7 @@ Leave it at its default. The full list of what always runs:
 | `:graphql_operations` | GraphQLOperationExtractor | Client GraphQL operation documents (needs the graphql gem loaded) |
 | `:libs` | LibExtractor | Ruby files in lib/ |
 | `:config_files` | ConfigFileExtractor | YAML configuration and data files (key structure only) |
+| `:docs` | DocExtractor | Markdown documentation (`documentation_paths`) |
 
 See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each one captures in detail.
 
@@ -931,7 +934,8 @@ end
 ```
 
 The setter requires a non-empty `Array` of non-empty `String`s, each relative
-to `Rails.root` without `..` segments, and drops a trailing slash. Anything
+to `Rails.root` without `..` segments. It drops empty and `.` segments, so
+`./lib/` and `lib//` both name `lib` and `.` names the root itself. Anything
 else raises `Woods::ConfigurationError` and keeps the previous value. A root
 that does not exist is skipped.
 
@@ -939,6 +943,16 @@ that does not exist is skipped.
 re-runs `EventExtractor` wholesale when any `.rb` file under an `event_paths`
 root changes, so with `%w[app lib]` a publisher added to or removed from a
 `lib/` file is picked up without a full extraction.
+
+**The plugin hook and the watch daemon see `app/` and `lib/` roots only.**
+The hook predicate,
+`plugin/hooks/woods-input-rules.sh`, is generated from the default rules, not
+from your configuration, so it treats a `.rb` edit under another `event_paths`
+root (`engines/ledger`, say) as ignorable. Declare such a root with
+`woods-extract --source-root PATH`: the hook reads declared roots from the
+published manifest and treats a Ruby edit under one as incremental input. The
+watch daemon reloads only `app/`, `lib/` and declared roots, so it needs the
+same declaration. A direct `woods:incremental` run does not.
 
 **Changing the `event_paths` value itself needs one full extraction.** Events
 already indexed were scanned under the old roots and stay as they are until an
@@ -1183,6 +1197,85 @@ dispatch with the current entries, and tasks indexed under the old ones stay
 until a rake file changes or `woods:extract` runs. The plugin's shell predicate
 is generated from the defaults; a custom directory is still picked up by
 `woods:incremental` and the watch daemon.
+
+### JavaScript paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `javascript_paths` | Array&lt;String&gt; | `["app/javascript/**/*.{js,ts,jsx,tsx,mjs}", "app/assets/javascripts/**/*.js"]` | Globs, relative to `Rails.root`, that `JsModuleExtractor` scans for `js_module` units. |
+
+Each matching `.js`, `.ts`, `.jsx`, `.tsx` or `.mjs` file becomes one unit
+identified by its root-relative path. Whatever a glob reaches, files under a
+`node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/` or
+`coverage/` directory, minified bundles (`*.min.js`) and TypeScript declaration
+files (`*.d.ts`) are never indexed.
+
+JavaScript tests are skipped too, unless a glob names them: a file whose name
+contains `.test.` or `.spec.`, and anything under a `__tests__/`,
+`__mocks__/`, `spec/` or `test/` directory. A glob that itself contains one of
+those markers reaches them, so
+`config.javascript_paths += ['app/javascript/**/*.test.ts']` indexes the
+TypeScript tests and nothing else from that set. The literal prefix of each glob (its
+directories before the first wildcard) is also where bare import specifiers
+such as `controllers/clipboard_controller` and `@/shared/format` resolve.
+
+```ruby
+Woods.configure do |config|
+  config.javascript_paths = %w[app/javascript/**/*.{js,ts} frontend/src/**/*.{ts,tsx}]
+end
+```
+
+Use `[]` to disable the unit type. The setter rejects a value that is not an
+Array and any entry that is not a non-empty, relative glob without `..`,
+raising `Woods::ConfigurationError` and keeping the previous value.
+
+The same predicate (`Woods::JavascriptPaths.source?`) decides which changed
+paths re-run the extractor incrementally and which the watch daemon classifies
+as `:reextract`. **Changing `javascript_paths` itself needs a full
+extraction**: the value is part of the generation's configuration fingerprint,
+so incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
+
+### Documentation paths
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `documentation_paths` | Array&lt;String&gt; | `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md` | Globs, relative to `Rails.root`, that `DocExtractor` indexes as `doc` units. |
+| `documentation_exclude` | Array&lt;String&gt; | `**/CHANGELOG*.md`, `**/node_modules/**/*`, `**/vendor/**/*`, `doc/api/**/*`, `docs/api/**/*` | Globs removed from `documentation_paths`. |
+| `retrieve_documentation` | Boolean | `true` | Whether retrieval returns `doc` units when the caller gives no `types:` filter. |
+
+```ruby
+Woods.configure do |config|
+  config.documentation_paths += ['handbook/**/*.md']
+  config.documentation_exclude += ['docs/archive/**/*']
+  config.retrieve_documentation = false
+end
+```
+
+Use `documentation_paths = []` to index no documentation. Both setters reject a
+value that is not an Array and any entry that is not a non-empty, relative glob
+without `..`, raising `Woods::ConfigurationError` and keeping the previous value.
+
+Hidden directories are not read, with three exceptions: `.claude/rules`,
+`.claude/skills` and `.github`. Source capture and the watch daemon walk those
+three and no other dot directory, so `documentation_paths` refuses a glob under
+any other one. Directories the watcher ignores (`node_modules`, `tmp`, `log`,
+`coverage`, `vendor/bundle`) are never indexed either.
+
+With `retrieve_documentation = false`, `doc` units are excluded from retrieval
+by default, like `test_mapping` units, and a caller reaches them with
+`types: ["doc"]`. An MCP server started without the host initializer takes the
+same switch from `WOODS_RETRIEVE_DOCUMENTATION=0`, which wins over the
+configuration value.
+
+**Changing `documentation_paths` or `documentation_exclude` needs a full
+extraction**: both are part of the generation's configuration fingerprint, so
+incremental extraction and `woods:refresh` refuse with
+`Woods::ExtractionConfigChanged` until `woods:extract` runs.
+`retrieve_documentation` is not: it changes what retrieval returns, not what is
+extracted. The plugin's change hook and a process that has not loaded Woods'
+extractors recognize the default roots only; the watch daemon and the rake
+tasks use the configured ones.
 
 ## Console MCP options
 

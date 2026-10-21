@@ -12,6 +12,8 @@ require 'woods/extractors/view_engines/jbuilder'
 # most polynomial patterns; the Ruby 3.0/3.1 rows are the ones that catch a
 # regression, through the Timeout fallback.
 RSpec.describe 'View engine scan complexity' do
+  include WallClockBudget
+
   budget_seconds = 1.0
   spaces = ' ' * 50_000
 
@@ -60,10 +62,7 @@ RSpec.describe 'View engine scan complexity' do
   engines.each do |engine|
     adversarial_sources.each do |label, source|
       it "#{engine.name} scans stay within #{budget_seconds}s on #{label}" do
-        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        scans.each { |scan| engine.public_send(scan, source) }
-        elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-        expect(elapsed).to be < budget_seconds
+        within_budget(budget_seconds) { scans.each { |scan| engine.public_send(scan, source) } }
       end
     end
   end

@@ -225,7 +225,7 @@ does not guarantee a speedup. See the [incremental contract](INCREMENTAL_EXTRACT
 
 **Symptom:** You expect state machines, events, decorators, or other unit types but they don't appear in the output directory.
 
-**Cause:** All 40 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
+**Cause:** All 42 extractors always run during extraction, there is no opt-in/opt-out mechanism. If a unit type is missing, it means the extractor found nothing to extract. Common reasons:
 
 - The expected directory doesn't exist (e.g., no `app/decorators/` for decorators)
 - The required gem isn't installed (e.g., `aasm` or `state_machines` for state machine extraction)
@@ -249,7 +249,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 
 **Symptom:** After changing your routes file or adding a middleware, `rake woods:incremental` doesn't seem to update those units.
 
-**Cause:** Thirteen unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `database_table`, `external_consumer`, `test_support`, `graphql_operation`, and `rails_source`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
+**Cause:** Fourteen unit types don't map to individual files, so they can't be diffed per file: `route`, `middleware`, `engine`, `scheduled_job`, `state_machine`, `factory`, `event`, `database_view`, `database_table`, `external_consumer`, `test_support`, `graphql_operation`, `rails_source`, and `js_module`. Incremental mode still updates them, it re-runs the whole extractor when a specific trigger path changes, instead of skipping the type:
 
 | Type | Trigger path |
 |------|--------------|
@@ -267,6 +267,7 @@ Note: `config.extractors` does not control anything today, it's accepted for for
 | `database_table` | a schema dump, or any file under `db/migrate` or `app/models`. A schema change with no file change needs a full extraction |
 | `external_consumer` | the file named by `external_table_consumers_path`, or any `database_table` trigger |
 | `rails_source` | `Gemfile.lock` (only when `include_framework_sources` is enabled) |
+| `js_module` | any module under `config.javascript_paths`; components and templates follow when a registered name moved |
 
 If your change doesn't match one of these trigger paths, the type genuinely wasn't updated, that's the actual bug to chase, not a documented limitation.
 

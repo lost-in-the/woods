@@ -10,6 +10,8 @@ require 'woods/extractors/shared_dependency_scanner'
 # backtracking, which hides most polynomial patterns; the Ruby 3.0/3.1 rows
 # catch a regression through the Timeout fallback.
 RSpec.describe 'Shared dependency scan complexity' do
+  include WallClockBudget
+
   budget_seconds = 1.0
   spaces = ' ' * 50_000
 
@@ -74,14 +76,13 @@ RSpec.describe 'Shared dependency scan complexity' do
 
   adversarial_sources.each do |label, source|
     it "service, job, mailer, form, and navigation scans stay within #{budget_seconds}s on #{label}" do
-      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      scanner.scan_navigation_dependencies(source)
-      scanner.scan_service_dependencies(source)
-      scanner.scan_job_dependencies(source)
-      scanner.scan_mailer_dependencies(source)
-      scanner.scan_form_dependencies(source)
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-      expect(elapsed).to be < budget_seconds
+      within_budget(budget_seconds) do
+        scanner.scan_navigation_dependencies(source)
+        scanner.scan_service_dependencies(source)
+        scanner.scan_job_dependencies(source)
+        scanner.scan_mailer_dependencies(source)
+        scanner.scan_form_dependencies(source)
+      end
     end
   end
 end

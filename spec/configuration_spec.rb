@@ -450,6 +450,28 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#method_effects_limit' do
+    it 'defaults to 50 methods per unit' do
+      expect(described_class.new.method_effects_limit).to eq(50)
+    end
+
+    it 'accepts a positive Integer, or nil to remove the cap' do
+      config = described_class.new
+      config.method_effects_limit = 10
+      expect(config.method_effects_limit).to eq(10)
+
+      config.method_effects_limit = nil
+      expect(config.method_effects_limit).to be_nil
+    end
+
+    it 'rejects zero and non-Integers' do
+      config = described_class.new
+
+      expect { config.method_effects_limit = 0 }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+      expect { config.method_effects_limit = '5' }.to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+    end
+  end
+
   describe '#durable_payload_writes' do
     it 'defaults to false: the payload is made durable in one flush at publish time' do
       expect(described_class.new.durable_payload_writes).to be(false)
@@ -578,6 +600,12 @@ RSpec.describe Woods::Configuration do
       config.event_paths = %w[app/ lib/events/]
 
       expect(config.event_paths).to eq(%w[app lib/events])
+    end
+
+    it 'normalizes ./, repeated slashes and . segments so full and incremental runs agree on a root' do
+      config.event_paths = ['./lib', 'lib//events', 'app/./services', '.', './']
+
+      expect(config.event_paths).to eq(%w[lib lib/events app/services . .])
     end
 
     it 'rejects a value that is not a non-empty Array' do
@@ -820,6 +848,20 @@ RSpec.describe Woods::Configuration do
         expect { config.unclaimed_ruby_paths = [glob] }
           .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/)
       end
+    end
+
+    it 'rejects a parent traversal hidden inside a brace alternation' do
+      ['{../shared,app}/**/*.rb', 'app/{lib,..}/*.rb', 'app{/..,}/*.rb'].each do |glob|
+        expect { config.unclaimed_ruby_paths = [glob] }
+          .to raise_error(Woods::ConfigurationError, /unclaimed_ruby_paths\[0\] must be a relative glob/), glob
+      end
+    end
+
+    it 'still accepts brace alternations and dotted names that stay inside the root' do
+      config.unclaimed_ruby_paths = ['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb']
+
+      expect(config.unclaimed_ruby_paths)
+        .to eq(['{app,lib}/**/*.rb', 'app/{helpers,view_models}/*.rb', 'lib/v1..2/*.rb'])
     end
 
     it 'keeps the previous value when an entry is invalid' do

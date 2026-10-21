@@ -22,6 +22,10 @@ module SourceReadGuard
   ].freeze
   RECEIVERS = %w[File IO].freeze
   READERS = %i[read readlines foreach].freeze
+  # Pathname#read and friends go through File with the same default encoding.
+  # A receiver built by `join` (Array#join returns a String, which has no
+  # #read), Pathname.new or Kernel#Pathname is a Pathname.
+  PATHNAME_READERS = %i[read readlines each_line].freeze
 
   # [relative path, enclosing method] => why the read stays. Every entry
   # must still match a read, so a stale entry fails too.
@@ -65,7 +69,16 @@ module SourceReadGuard
     private
 
     def bare_read?(node)
-      READERS.include?(node.name) && RECEIVERS.include?(receiver_name(node.receiver))
+      (READERS.include?(node.name) && RECEIVERS.include?(receiver_name(node.receiver))) ||
+        (PATHNAME_READERS.include?(node.name) && pathname?(node.receiver))
+    end
+
+    def pathname?(receiver)
+      return false unless receiver.is_a?(Prism::CallNode)
+      return true if receiver.name == :join && receiver.receiver
+      return true if receiver.name == :new && receiver_name(receiver.receiver) == 'Pathname'
+
+      receiver.name == :Pathname && receiver.receiver.nil?
     end
 
     def receiver_name(receiver)
@@ -128,6 +141,22 @@ RSpec.describe 'host source and index reads outside a Rails boot' do
         .to eq([['load', 3], ['load', 4], ['load', 5], ['load', 6]])
     end
 
+    it 'flags Pathname reads built from a join, Pathname.new or Pathname()' do
+      source = <<~RUBY
+        def load(path)
+          Rails.root.join(path).read
+          root.join('config', path).readlines
+          Pathname.new(path).read
+          ::Pathname.new(path).each_line { |line| line }
+          Pathname(path).read
+          Rails.root.join(path).binread
+        end
+      RUBY
+
+      expect(SourceReadGuard.reads_in(source).map { |read| [read[:method], read[:line]] })
+        .to eq([['load', 2], ['load', 3], ['load', 4], ['load', 5], ['load', 6]])
+    end
+
     it 'ignores the sanctioned readers, other receivers, comments and strings' do
       source = <<~RUBY
         # File.read(path) in a comment
@@ -135,6 +164,8 @@ RSpec.describe 'host source and index reads outside a Rails boot' do
         SourceFile.read(path)
         Widget::File.read(path)
         file.read
+        %w[a b].join(',').length
+        Widget.new(path).read
         "File.read(path)"
       RUBY
 

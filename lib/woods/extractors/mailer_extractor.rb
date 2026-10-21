@@ -7,9 +7,11 @@ require 'digest'
 require_relative 'ast_source_extraction'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'method_effects'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'template_extensions'
+require_relative 'action_fact_resolution'
 
 module Woods
   module Extractors
@@ -28,6 +30,7 @@ module Woods
     class MailerExtractor
       include AstSourceExtraction
       include SharedUtilityMethods
+      include ActionFactResolution
       include SharedDependencyScanner
       include RouteHelperResolver
 
@@ -75,8 +78,9 @@ module Woods
         unit.namespace = extract_namespace(mailer)
         unit.source_code = annotate_source(source, mailer)
         unit.metadata = extract_metadata(mailer, source)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = extract_dependencies(source, mailer: mailer)
         HelperCallScan.annotate(self, unit, mailer)
+        MethodEffects.apply(unit, source)
 
         # Create chunks for each mail action
         unit.chunks = build_action_chunks(mailer, source)
@@ -161,6 +165,9 @@ module Woods
           # Templates (if discoverable)
           templates: discover_templates(mailer, actions),
 
+          # What each action body and its applicable callbacks say (W-7)
+          action_facts: resolve_action_facts(mailer, actions, view_prefix: mailer.name.underscore, mailer: true),
+
           # Metrics
           action_count: actions.size,
           loc: source.lines.count { |l| l.strip.present? && !l.strip.start_with?('#') }
@@ -240,7 +247,7 @@ module Woods
       # Dependency Extraction
       # ──────────────────────────────────────────────────────────────────────
 
-      def extract_dependencies(source)
+      def extract_dependencies(source, mailer: nil)
         deps = []
         deps.concat(scan_model_dependencies(source))
         deps.concat(scan_service_dependencies(source))
@@ -251,7 +258,23 @@ module Woods
         deps.concat(scan_navigation_dependencies(source))
         deps.concat(scan_form_dependencies(source))
 
-        consolidate_dependencies(deps)
+        structural = mailer && superclass_dependency(mailer)
+        (consolidate_dependencies(deps) + [structural].compact).uniq do |dependency|
+          dependency.values_at(:type, :target, :via)
+        end
+      end
+
+      # Parent actions and private callbacks can supply a child's action
+      # facts. Keep the child in the parent's incremental blast radius even
+      # when its own source never calls a method on that parent.
+      #
+      # @param mailer [Class]
+      # @return [Hash, nil] an app-owned parent mailer, never a framework class
+      def superclass_dependency(mailer)
+        parent = mailer.superclass
+        return nil unless parent.is_a?(Class) && app_defined_mailer?(parent)
+
+        { type: :mailer, target: parent.name, via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────

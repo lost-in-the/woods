@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'graphql_document_paths'
+require_relative 'javascript_paths'
 
 require_relative 'extractors/config_file_extractor'
 require_relative 'path_dispatcher'
@@ -66,9 +67,10 @@ module Woods
   module ConfiguredInputs
     module_function
 
-    # YAML under `config_file_paths`, and the declared external consumers file.
+    # YAML under `config_file_paths`, Markdown under `documentation_paths`,
+    # and the declared external consumers file.
     def bytes_input?(path)
-      Extractors::ConfigFileExtractor.config_file_path?(path) ||
+      Extractors::ConfigFileExtractor.config_file_path?(path) || Extractors::DocExtractor.doc_path?(path) ||
         (Woods.respond_to?(:configuration) && path == Woods.configuration&.external_table_consumers_path)
     end
 
@@ -252,9 +254,14 @@ module Woods
 
     def reextract?(path)
       REEXTRACT_PATHS.include?(path) || under?(path, REEXTRACT_DIRECTORIES) ||
-        REEXTRACT_BASENAMES.include?(File.basename(path)) || GraphQLDocumentPaths.match?(path) ||
-        ConfiguredInputs.bytes_input?(path) || ConfiguredInputs.test_support?(path) ||
-        Extractors::RakeTaskPaths.covers?(path)
+        REEXTRACT_BASENAMES.include?(File.basename(path)) || configured_bytes_input?(path)
+    end
+
+    # Inputs whose location comes from configuration, read as bytes.
+    def configured_bytes_input?(path)
+      GraphQLDocumentPaths.match?(path) || ConfiguredInputs.bytes_input?(path) ||
+        ConfiguredInputs.test_support?(path) || Extractors::RakeTaskPaths.covers?(path) ||
+        JavascriptPaths.source?(path)
     end
 
     def under?(path, directories)

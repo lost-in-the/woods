@@ -228,6 +228,17 @@ RSpec.describe 'Source-reference extraction integration' do
     ensure
       Woods.configuration = original
     end
+
+    it 'never removes the output root when no payload was opened for the run' do
+      FileUtils.mkdir_p(@output)
+      File.write(File.join(@output, 'manifest.json'), '{}')
+      extractor = Woods::Extractor.new(output_dir: @output)
+
+      expect do
+        extractor.send(:discarding_seed_on_refusal) { raise Woods::SourceReferences::RebuildRequired, 'refused' }
+      end.to raise_error(Woods::SourceReferences::RebuildRequired)
+      expect(File.exist?(File.join(@output, 'manifest.json'))).to be(true)
+    end
   end
 
   it 'requires a full rebuild before mutating old or corrupt source-reference baselines' do

@@ -83,7 +83,10 @@ ARTIFACT_TEMPLATES = [
   # extractor's full pass is deliberately ungated for the same reason.
   ->(i) { "app/graphql/types/gqt_#{i}_type.rb" },
   ->(i) { "app/graphql/mutations/gqm_#{i}.rb" },
-  ->(i) { "app/graphql/resolvers/gqr_#{i}.rb" }
+  ->(i) { "app/graphql/resolvers/gqr_#{i}.rb" },
+  # Documentation: resolved against the whole index after every run, so an
+  # unchanged document gains and loses edges as the artifacts above come and go.
+  ->(i) { "docs/gen/doc_#{i}.md" }
 ].freeze
 
 RSpec.describe 'Incremental extraction equivalence', :booted_app do
@@ -1129,6 +1132,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'configuration drift from the baseline' do
+    def consumer_units(index_dir)
+      Dir[File.join(Woods::Generation.new(output_dir: index_dir).payload_dir, 'external_consumers', '*.json')]
+        .reject { |path| path.end_with?('_index.json') }
+    end
+
+    it 'refuses an incremental that leaves out declared consumers and stays equivalent once they match again' do
+      Woods.configuration.external_table_consumers = { 'lantern-shop' => %w[posts] }
+      index_dir = full_extraction
+      generation = Woods::Generation.new(output_dir: index_dir)
+      published = generation.current.number
+      expect(consumer_units(index_dir)).not_to be_empty
+
+      Woods.configuration.external_table_consumers = {}
+      expect { Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb']) }
+        .to raise_error(Woods::ExtractionError, /external_table_consumers.*woods:extract/m)
+      expect(generation.current.number).to eq(published)
+      expect(consumer_units(index_dir)).not_to be_empty
+
+      Woods.configuration.external_table_consumers = { 'lantern-shop' => %w[posts] }
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/models/post.rb'])
+      expect(differences(index_dir, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.external_table_consumers = {}
+    end
+  end
+
   describe 'configured event roots' do
     around do |example|
       Woods.configuration.event_paths = %w[app lib]
@@ -1245,6 +1275,412 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                        -> { delete_file('ops/support/shell.rb') },
                        -> { delete_file('ops/deploy.rake') }
                      ])
+      end
+    end
+  end
+
+  describe 'JavaScript modules and the names templates reference them by (#679)' do
+    def unit_json(dir, type_dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type_dir, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == identifier }
+    end
+
+    def js_edges(dir, type_dir, identifier)
+      unit_json(dir, type_dir, identifier).fetch('dependencies')
+                                          .select { |dep| dep['type'] == 'js_module' }
+                                          .map { |dep| dep.values_at('target', 'via') }
+    end
+
+    def write_consumers
+      write_file('app/views/posts/panel.html.erb', <<~ERB)
+        <div x-data="dropdown({ open: false })" data-controller="clipboard">
+          <x-shipment-card sku="1"></x-shipment-card>
+        </div>
+      ERB
+      write_file('app/views/posts/_badge.html.haml', "%span{ data: { controller: \"clipboard\" } }\n")
+      write_file('app/components/badge_component.rb', <<~RUBY)
+        class BadgeComponent < ApplicationComponent
+          def initialize(label:)
+            @label = label
+            super()
+          end
+
+          def call
+            div(x_data: "dropdown", data_controller: "clipboard") { @label.to_s }
+          end
+        end
+      RUBY
+    end
+
+    stimulus = "import { Controller } from \"@hotwired/stimulus\"\nexport default class extends Controller {}\n"
+
+    it 'links unchanged templates and components as modules appear, move, and disappear' do
+      write_consumers
+
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/controllers/clipboard_controller.js', stimulus) },
+          lambda {
+            [write_file('app/javascript/alpine/dropdown.js', "export default () => ({ open: false })\n"),
+             write_file('app/javascript/application.js',
+                        "import dropdown from \"./alpine/dropdown\"\nAlpine.data(\"dropdown\", dropdown)\n")]
+          },
+          # A body edit: no name moves, so no consumer is re-run wholesale.
+          -> { write_file('app/javascript/alpine/dropdown.js', "export default () => ({ open: true })\n") },
+          # The registration becomes inline: the name moves to the registering module.
+          -> { write_file('app/javascript/application.js', "Alpine.data(\"dropdown\", () => ({}))\n") },
+          lambda {
+            write_file('app/javascript/components/shipment-card.tsx',
+                       "@Component({ tag: \"x-shipment-card\" })\nexport class ShipmentCard {}\n")
+          },
+          # A rename is a delete plus an add: the convention name changes with the path.
+          lambda {
+            [delete_file('app/javascript/controllers/clipboard_controller.js'),
+             write_file('app/javascript/controllers/copier_controller.js', stimulus)]
+          },
+          -> { write_file('app/views/posts/_badge.html.haml', "%span{ data: { controller: \"copier\" } }\n") }
+        ]
+      )
+
+      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq(
+        [['app/javascript/application.js', 'alpine_data'],
+         ['app/javascript/components/shipment-card.tsx', 'custom_element']]
+      )
+      panel = unit_json(index, 'view_templates', 'posts/panel.html.erb')
+      expect(panel.dig('metadata', 'unresolved_frontend_references'))
+        .to eq([{ 'kind' => 'stimulus_controller', 'name' => 'clipboard' }])
+      expect(js_edges(index, 'view_templates', 'posts/_badge.html.haml'))
+        .to eq([['app/javascript/controllers/copier_controller.js', 'stimulus_controller']])
+      expect(js_edges(index, 'components', 'BadgeComponent')).to eq([['app/javascript/application.js', 'alpine_data']])
+      dependents = unit_json(index, 'js_modules', 'app/javascript/application.js').fetch('dependents')
+      expect(dependents.map { |d| d['identifier'] }).to include('BadgeComponent', 'posts/panel.html.erb')
+    end
+
+    it 'drops every edge and unit when the last module is deleted' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+      index = run_sequence([-> { delete_file('app/javascript/controllers/clipboard_controller.js') }])
+
+      expect(js_edges(index, 'view_templates', 'posts/panel.html.erb')).to eq([])
+      expect(unit_json(index, 'js_modules', 'app/javascript/controllers/clipboard_controller.js')).to be_nil
+    end
+
+    it 'tracks import edges as the imported module is deleted, recreated and re-pointed' do
+      write_file('app/javascript/entry.js', "import total from \"./ledger/total\"\nexport default total\n")
+      write_file('app/javascript/ledger/total.js', "export default 1\n")
+
+      index = run_sequence(
+        [
+          -> { delete_file('app/javascript/ledger/total.js') },
+          -> { write_file('app/javascript/ledger/total.ts', "export default 2\n") },
+          -> { write_file('app/javascript/ledger/index.js', "export { default } from \"./total\"\n") },
+          -> { write_file('app/javascript/entry.js', "import total from \"./ledger\"\nexport default total\n") }
+        ]
+      )
+
+      expect(js_edges(index, 'js_modules',
+                      'app/javascript/entry.js')).to eq([['app/javascript/ledger/index.js', 'import']])
+    end
+
+    it 'omits and restores source as a module crosses the size cap' do
+      big = "export const big = 1\n#{"// padding\n" * 20_000}"
+
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/big.js', big) },
+          -> { write_file('app/javascript/big.js', "export const big = 1\n") },
+          -> { write_file('app/javascript/big.js', big) }
+        ]
+      )
+
+      expect(unit_json(index, 'js_modules', 'app/javascript/big.js')).to include('source_code' => '')
+      expect(unit_json(index, 'js_modules',
+                       'app/javascript/big.js').fetch('metadata')).to include('source_omitted' => true)
+    end
+
+    it 'ignores vendored and generated JavaScript in both modes' do
+      index = run_sequence(
+        [
+          -> { write_file('app/javascript/vendor/chart.js', "window.dropdown = function () {}\n") },
+          -> { write_file('app/assets/javascripts/builds/application.js', "Alpine.data(\"dropdown\", () => ({}))\n") },
+          -> { write_file('app/assets/javascripts/legacy.js', "window.dropdown = function () { return {} }\n") }
+        ]
+      )
+
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      expect(JSON.parse(File.read(File.join(payload, 'js_modules', '_index.json'))).map { |u| u['identifier'] })
+        .to eq(['app/assets/javascripts/legacy.js'])
+    end
+
+    it 'agrees with a full extraction when a name moves outside a capped blast radius' do
+      Woods.configuration.incremental_blast_radius_depth = 1
+      write_consumers
+      write_file('app/javascript/alpine/a.js', "export default () => ({})\n")
+      write_file('app/javascript/alpine/b.js', "export default () => ({})\n")
+      write_file('app/javascript/application.js',
+                 "import dropdown from \"./alpine/a\"\nAlpine.data(\"dropdown\", dropdown)\n")
+
+      index = run_sequence(
+        [
+          lambda {
+            write_file('app/javascript/application.js',
+                       "import dropdown from \"./alpine/b\"\nAlpine.data(\"dropdown\", dropdown)\n")
+          }
+        ]
+      )
+
+      expect(js_edges(index, 'view_templates',
+                      'posts/panel.html.erb')).to eq([['app/javascript/alpine/b.js', 'alpine_data']])
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = nil
+    end
+
+    it 're-runs the name consumers wholesale only when the name map moved' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+      write_file('app/javascript/util.js', "export const one = 1\n")
+      index = full_extraction
+      reruns = []
+      templates = Woods::Extractors::ViewTemplateExtractor
+      allow_any_instance_of(templates).to receive(:extract_all).and_wrap_original do |original|
+        reruns << :view_templates
+        original.call
+      end
+
+      write_file('app/javascript/util.js', "export const one = 2\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/javascript/util.js'])
+      expect(reruns).to eq([])
+
+      write_file('app/javascript/util.js', "Alpine.data(\"dropdown\", () => ({}))\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/javascript/util.js'])
+      expect(reruns).to eq([:view_templates])
+      allow_any_instance_of(templates).to receive(:extract_all).and_call_original
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'refreshes js_modules by name and re-resolves the consumers' do
+      write_consumers
+      index = full_extraction
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+      result = Woods::Extractor.new(output_dir: index).refresh(:js_modules)
+
+      expect(result[:types]).to eq(%i[js_modules components view_components view_templates])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'is byte-identical across repeat full extractions' do
+      write_consumers
+      write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+      write_file('app/javascript/application.js', "import \"./controllers/clipboard_controller\"\n")
+
+      first = full_extraction
+      second = full_extraction
+
+      expect(differences(first, second)).to be_empty
+      %w[js_modules/_index.json view_templates/_index.json].each do |relative|
+        files = [first, second].map { |dir| File.read(Woods::Generation.new(output_dir: dir).payload_dir.join(relative)) }
+        expect(files.first).to eq(files.last)
+      end
+    end
+
+    describe 'with configured javascript_paths' do
+      around do |example|
+        Woods.configuration.javascript_paths = ['frontend/**/*.{ts,tsx}']
+        example.run
+      ensure
+        Woods.configuration.javascript_paths = Woods::JavascriptPaths::DEFAULT_GLOBS
+      end
+
+      it 'indexes a configured root and ignores the default one, through create, edit and delete' do
+        write_consumers
+        write_file('app/javascript/controllers/clipboard_controller.js', stimulus)
+
+        index = run_sequence(
+          [
+            lambda {
+              write_file('frontend/components/shipment-card.tsx',
+                         "@Component({ tag: \"x-shipment-card\" })\nexport class ShipmentCard {}\n")
+            },
+            lambda {
+              write_file('frontend/components/shipment-card.tsx',
+                         "@Component({ tag: \"x-parcel-card\" })\nexport class ShipmentCard {}\n")
+            },
+            -> { write_file('frontend/controllers/clipboard_controller.ts', stimulus) },
+            -> { delete_file('frontend/components/shipment-card.tsx') }
+          ]
+        )
+
+        expect(js_edges(index, 'view_templates', 'posts/panel.html.erb'))
+          .to eq([['frontend/controllers/clipboard_controller.ts', 'stimulus_controller']])
+        expect(unit_json(index, 'js_modules', 'app/javascript/controllers/clipboard_controller.js')).to be_nil
+      end
+    end
+  end
+
+  describe 'method effects (#680)' do
+    def unit_document(dir, type, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit.is_a?(Hash) && unit['identifier'] == identifier }
+    end
+
+    def enqueue_edge(document)
+      document.fetch('dependencies').find { |dep| dep['target'] == 'PublishPostJob' && dep['via'] == 'job_enqueue' }
+    end
+
+    def edge_identities(document)
+      document.fetch('dependencies').map { |dep| dep.values_at('type', 'target', 'via') }
+    end
+
+    def ledger_service(methods)
+      bodies = methods.map { |name, body| "  def #{name}(post)\n    #{body}\n  end\n" }.join("\n")
+      "class LedgerService\n#{bodies}end\n"
+    end
+
+    let(:post_model) do
+      <<~RUBY
+        class Post < ApplicationRecord
+          has_many :comments, dependent: :destroy
+
+          validates :title, presence: true
+
+          scope :recent, -> { order(created_at: :desc) }
+
+          before_save :normalize_title
+
+          def normalize_title
+            self.title = title.to_s.strip
+          end
+
+          def publish!
+            PublishPostJob.perform_later(self)
+          end
+        end
+      RUBY
+    end
+
+    it 'follows a method gaining, moving and losing an enqueue, in a service and a model' do
+      service = 'app/services/ledger_service.rb'
+      enqueue = 'PublishPostJob.perform_later(post)'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => enqueue)) },
+          lambda {
+            write_file(service, ledger_service('post_all' => 'retry_all(post)', 'retry_all' => enqueue,
+                                               'sign' => 'SignatureService.new.call(post)'))
+          },
+          -> { write_file('app/models/post.rb', post_model) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(edge_identities(document)).to eq(edge_identities(document).uniq)
+      expect(document.fetch('dependencies'))
+        .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')
+      expect(document.dig('metadata', 'method_effects', 'post_all', 'via_method'))
+        .to eq('retry_all' => { 'jobs_enqueued' => ['PublishPostJob'] })
+      expect(enqueue_edge(document)).to include('through' => 'post_all, retry_all')
+
+      model = unit_document(index, 'models', 'Post')
+      expect(model.dig('metadata', 'method_effects').keys).to eq(%w[normalize_title publish!])
+      expect(enqueue_edge(model)).to include('through' => 'publish!')
+      expect(edge_identities(model)).to eq(edge_identities(model).uniq)
+    end
+
+    it 'drops the map and the edge annotation when the last effect goes' do
+      service = 'app/services/ledger_service.rb'
+      index = run_sequence(
+        [
+          -> { write_file(service, ledger_service('post_all' => 'PublishPostJob.perform_later(post)')) },
+          -> { write_file(service, ledger_service('post_all' => 'post.touch')) }
+        ]
+      )
+
+      document = unit_document(index, 'services', 'LedgerService')
+      expect(document.fetch('metadata')).not_to have_key('method_effects')
+      expect(enqueue_edge(document)).to be_nil
+    end
+
+    it 'writes byte-identical unit documents on a repeat full extraction' do
+      write_file('app/services/ledger_service.rb', ledger_service('post_all' => 'PublishPostJob.perform_later(post)'))
+      write_file('app/models/post.rb', post_model)
+
+      expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
+  describe 'mailer callback fact freshness' do
+    %i[parent concern].each do |owner_kind|
+      it "refreshes child action facts when only the #{owner_kind} callback body changes" do
+        created_directories = %w[app/mailers app/mailers/concerns].reject do |relative|
+          File.directory?(app_path(relative))
+        end
+        prefix = "#{owner_kind.to_s.camelize}FactFresh"
+        base_name = "#{prefix}BaseMailer"
+        child_name = "#{prefix}Mailer"
+        concern_name = "#{prefix}Callbacks"
+        base = "app/mailers/#{base_name.underscore}.rb"
+        child = "app/mailers/#{child_name.underscore}.rb"
+        owner = owner_kind == :parent ? base : "app/mailers/concerns/#{concern_name.underscore}.rb"
+        owner_source = lambda do |body|
+          declaration = owner_kind == :parent ? "class #{base_name} < ActionMailer::Base" : "module #{concern_name}"
+          "#{declaration}\n  private\n  def set_viewer\n#{body}  end\nend\n"
+        end
+        write_owner = lambda do |body|
+          write_file(owner, owner_source.call(body))
+          load app_path(owner)
+        end
+
+        index = run_sequence([
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n")
+                                 if owner_kind == :concern
+                                   write_file(base, <<~RUBY)
+                                     class #{base_name} < ActionMailer::Base
+                                       include #{concern_name}
+                                     end
+                                   RUBY
+                                   load app_path(base)
+                                 end
+                                 write_file(child, <<~RUBY)
+                                   class #{child_name} < #{base_name}
+                                     before_action :set_viewer
+                                     def digest
+                                       mail to: 'reader@example.test'
+                                     end
+                                   end
+                                 RUBY
+                                 load app_path(child)
+                                 [owner, base, child].uniq
+                               end,
+                               lambda do
+                                 write_owner.call("    @viewer = 1\n    @audit = 2\n")
+                                 owner
+                               end
+                             ])
+
+        mailer = unit_snapshot(index).values.find { |unit| unit['identifier'] == child_name }
+        expect(mailer.dig('metadata', 'action_facts', 'digest', 'assigns').map { |fact| fact['ivar'] })
+          .to eq(%w[@viewer @audit])
+      ensure
+        # Fixture mailers and concerns must not join later examples' complete inventories.
+        [child_name, base_name, concern_name].compact.each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+        [owner, base, child].compact.uniq.each { |relative| FileUtils.rm_f(app_path(relative)) }
+        # An empty root created after Rails boot is not managed by Zeitwerk.
+        Array(created_directories).reverse_each do |relative|
+          directory = app_path(relative)
+          Dir.rmdir(directory) if File.directory?(directory) && Dir.empty?(directory)
+        end
       end
     end
   end
@@ -1480,6 +1916,200 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                  }
                                ])
       expect(unresolvable.call(index_dir)).to eq([ghost])
+    end
+  end
+
+  describe 'documentation units' do
+    def doc_unit(dir, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, 'docs', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit['identifier'] == identifier }
+    end
+
+    def edges(dir, identifier)
+      doc_unit(dir, identifier).fetch('dependencies').map { |edge| edge.values_at('type', 'target', 'via') }
+    end
+
+    def guide(*lines)
+      "# Posting guide\n\n#{lines.join("\n")}\n"
+    end
+
+    # The per-example reset globs `*`, which skips dot directories.
+    after { %w[.claude .github].each { |dir| FileUtils.rm_rf(app_path(dir)) } }
+
+    it 'indexes a document created after the baseline, with its edges and reverse edges' do
+      index = run_sequence([
+                             lambda {
+                               write_file('docs/posting.md', guide('`Post` lives in `app/models/post.rb`.',
+                                                                   'Routes: `GET /posts`. Unknown: `Shipment`.',
+                                                                   'See [the readme](../README.md).'))
+                             },
+                             -> { write_file('README.md', "# Dummy\n\nStart with [posting](docs/posting.md).\n") }
+                           ])
+
+      expect(edges(index, 'docs/posting.md')).to include(%w[model Post documents], ['route', 'GET /posts', 'documents'],
+                                                         %w[doc README.md doc_link])
+      expect(edges(index, 'README.md')).to eq([%w[doc docs/posting.md doc_link]])
+      mentions = doc_unit(index, 'docs/posting.md').dig('metadata', 'mentions')
+      expect(mentions.to_h { |mention| mention.values_at('text', 'resolved') })
+        .to include('Post' => true, 'app/models/post.rb' => true, 'GET /posts' => true, 'Shipment' => false)
+
+      graph = JSON.parse(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir,
+                                             'dependency_graph.json')))
+      expect(graph.fetch('reverse').fetch('Post')).to include('docs/posting.md')
+      expect(graph.fetch('pagerank').values_at('docs/posting.md', 'README.md')).to eq([0.0, 0.0])
+    end
+
+    it 'gives an unchanged document its edge when the target appears, and takes it back when it goes' do
+      index = run_sequence([
+                             -> { write_file('docs/late.md', guide('`LateService` and `rake late:run`.')) },
+                             -> { write_file('app/services/late_service.rb', service_source('LateService')) },
+                             -> { write_file('lib/tasks/late.rake', rake_source('late', %w[run])) }
+                           ])
+      expect(edges(index, 'docs/late.md')).to eq([%w[service LateService documents], %w[rake_task late:run documents]])
+
+      delete_file('app/services/late_service.rb')
+      delete_file('lib/tasks/late.rake')
+      Woods::Extractor.new(output_dir: index)
+                      .extract_changed(%w[app/services/late_service.rb lib/tasks/late.rake].map do |path|
+                                         app_path(path)
+                                       end)
+
+      expect(edges(index, 'docs/late.md')).to eq([])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'follows an edit, a rename and a deletion, including the documents that link to the file' do
+      run_sequence([
+                     -> { write_file('docs/a.md', guide('`Post` and [b](b.md).')) },
+                     -> { write_file('docs/b.md', guide('`Comment` and [a](a.md).')) },
+                     -> { write_file('docs/a.md', guide('No mentions now, still [b](b.md).')) },
+                     lambda {
+                       move_file('docs/b.md', 'docs/guides/b.md')
+                       %w[docs/b.md docs/guides/b.md]
+                     },
+                     -> { write_file('docs/a.md', guide('Now [b](guides/b.md).')) },
+                     -> { delete_file('docs/guides/b.md') },
+                     -> { delete_file('docs/a.md') }
+                   ])
+    end
+
+    it 'follows a route a document names when config/routes.rb changes' do
+      index = run_sequence([
+                             -> { write_file('docs/api.md', guide('```', 'GET /comments', '```')) },
+                             lambda {
+                               write_file('config/routes.rb', <<~RUBY)
+                                 Rails.application.routes.draw do
+                                   resources :posts
+                                   resources :comments, only: [:index]
+                                 end
+                               RUBY
+                               Rails.application.reload_routes!
+                               'config/routes.rb'
+                             }
+                           ])
+
+      expect(edges(index, 'docs/api.md')).to eq([['route', 'GET /comments', 'documents']])
+    end
+
+    it 'indexes agent instruction files under dot directories' do
+      index = run_sequence([
+                             -> { write_file('.claude/rules/models.md', guide('`Post` rules.')) },
+                             -> { write_file('.claude/skills/review/SKILL.md', guide('`Comment` review.')) },
+                             -> { write_file('.github/pull_request_template.md', guide('Checklist.')) },
+                             -> { write_file('.claude/rules/models.md', guide('`Comment` rules.')) },
+                             -> { delete_file('.claude/skills/review/SKILL.md') }
+                           ])
+
+      expect(edges(index, '.claude/rules/models.md')).to eq([%w[model Comment documents]])
+      expect(doc_unit(index, '.github/pull_request_template.md')).not_to be_nil
+    end
+
+    it 'publishes redacted source and section chunks identically in both modes' do
+      secret = "AKIA#{'ABCD1234' * 2}"
+      index = run_sequence([
+                             lambda {
+                               write_file('docs/keys.md', "# Keys\n\nNever commit `#{secret}`.\n\n## Rotation\n\n" \
+                                                          "#{'Rotate the ledger key every quarter. ' * 30}\n")
+                             }
+                           ])
+      unit = doc_unit(index, 'docs/keys.md')
+
+      expect(JSON.generate(unit)).not_to include(secret)
+      expect(unit.fetch('source_code')).to include('Never commit `[REDACTED]`.')
+      expect(unit.fetch('chunks').map { |chunk| chunk.dig('metadata', 'heading') }).to eq(%w[Keys Rotation])
+    end
+
+    it 'does not republish when nothing a document names has changed' do
+      write_file('docs/steady.md', guide('`Post` and `Shipment`.'))
+      index = full_extraction
+      manifest = File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json')
+      before = File.read(manifest)
+
+      expect(Woods::Extractor.new(output_dir: index).extract_changed([])).to eq([])
+      expect(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json'))).to eq(before)
+    end
+
+    it 're-resolves documents on a targeted refresh' do
+      write_file('docs/tasks.md', guide('`rake audit:run`'))
+      index = full_extraction
+      write_file('lib/tasks/audit.rake', rake_source('audit', %w[run]))
+
+      Woods::Extractor.new(output_dir: index).refresh(:rake_tasks)
+
+      expect(edges(index, 'docs/tasks.md')).to eq([%w[rake_task audit:run documents]])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'keeps one unit for a symlinked document through target edits, alias edits and a deleted alias' do
+      index = run_sequence([
+                             -> { write_file('AGENTS.md', guide('`Post` rules.')) },
+                             lambda {
+                               File.symlink('AGENTS.md', app_path('CLAUDE.md'))
+                               'CLAUDE.md'
+                             },
+                             lambda {
+                               FileUtils.mkdir_p(app_path('.github'))
+                               File.symlink('../AGENTS.md', app_path('.github/copilot-instructions.md'))
+                               '.github/copilot-instructions.md'
+                             },
+                             -> { write_file('AGENTS.md', guide('`Comment` rules.')) },
+                             lambda {
+                               File.write(app_path('CLAUDE.md'), guide('`Post` and `Comment` rules.'))
+                               'CLAUDE.md'
+                             },
+                             -> { delete_file('CLAUDE.md') }
+                           ])
+
+      expect(doc_unit(index, 'AGENTS.md').dig('metadata', 'aliases')).to eq(['.github/copilot-instructions.md'])
+      expect(edges(index, 'AGENTS.md')).to eq([%w[model Comment documents], %w[model Post documents]])
+      expect(doc_unit(index, 'CLAUDE.md')).to be_nil
+    end
+
+    it 'keeps a symlinked document when an alias is deleted without being named' do
+      write_file('AGENTS.md', guide('`Post` rules.'))
+      File.symlink('AGENTS.md', app_path('CLAUDE.md'))
+
+      index = run_sequence([
+                             lambda {
+                               delete_file('CLAUDE.md')
+                               write_file('app/services/other_service.rb', service_source('OtherService'))
+                             }
+                           ])
+
+      expect(doc_unit(index, 'AGENTS.md').dig('metadata', 'aliases')).to eq([])
+    end
+
+    it 'resolves a path to every file that defines a task, in both modes' do
+      index = run_sequence([
+                             -> { write_file('lib/tasks/ledger.rake', rake_source('ledger', %w[close])) },
+                             -> { write_file('lib/tasks/ledger_more.rake', rake_source('ledger', %w[close])) },
+                             -> { write_file('docs/closing.md', guide('Edit `lib/tasks/ledger_more.rake`.')) }
+                           ])
+
+      expect(edges(index, 'docs/closing.md')).to eq([%w[rake_task ledger:close documents]])
     end
   end
 
@@ -2472,6 +3102,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(units.map { |unit| unit['identifier'] }).to include(source.fetch('defined_in'))
     ensure
       Object.send(:remove_const, :Sweep) if Object.const_defined?(:Sweep, false)
+    end
+
+    # W-7 (woods#757): an action's facts include the assigns of the filters
+    # that run before it, read from the file that defines each filter. Editing
+    # only the parent's file must refresh the child's facts.
+    it 'refreshes per-action facts when only a parent filter body changes' do
+      base = 'app/controllers/sweep_facts_base_controller.rb'
+      child = 'app/controllers/sweep_facts_controller.rb'
+      parent_source = lambda do |body|
+        "class SweepFactsBaseController < ApplicationController\n  private\n\n  def set_viewer\n#{body}  end\nend\n"
+      end
+      index = run_sequence([
+                             lambda do
+                               write_and_load(base, parent_source.call("    @viewer = 1\n"))
+                               write_and_load(child, <<~RUBY)
+                                 class SweepFactsController < SweepFactsBaseController
+                                   before_action :set_viewer, only: :show
+
+                                   def show
+                                     @post = Post.first
+                                   end
+                                 end
+                               RUBY
+                               [base, child]
+                             end,
+                             -> { write_and_load(base, parent_source.call("    @viewer = 1\n    @audit = 2\n")) }
+                           ])
+
+      controller = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'SweepFactsController' }
+      facts = controller.dig('metadata', 'action_facts', 'show')
+      expect(facts['assigns'].map { |a| [a['ivar'], a['method']] })
+        .to eq([%w[@viewer set_viewer], %w[@audit set_viewer], %w[@post show]])
+    ensure
+      # The classes stay loaded for the rest of the process, so their files join the pristine tree.
+      [base, child].each do |relative|
+        next unless relative && File.exist?(app_path(relative))
+
+        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+      end
     end
 
     it 'publishes skip-reason changes that touch no unit, and only those' do
@@ -4388,12 +5057,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     write_file(relative, artifact_source(relative, random.rand(1_000_000), random))
   end
 
-  # rubocop:disable Metrics/CyclomaticComplexity -- a lookup table of file
-  # shape to sample content; one branch per extractor under test.
+  # rubocop:disable Metrics/CyclomaticComplexity, Metrics/MethodLength -- a lookup table
+  # of file shape to sample content; one branch per extractor under test.
   def artifact_source(relative, nonce, random)
     base = File.basename(relative).sub(/\.\w+(\.\w+)?\z/, '')
 
     case relative
+    when /\.md\z/ then doc_source(base, nonce)
     when /\.rake\z/ then rake_source(base, Array.new(1 + random.rand(3)) { |n| "task#{n}" })
     when /\.yml\z/ then "en:\n  #{base}: value_#{nonce}\n"
     when /\.sql\z/ then "SELECT #{nonce} AS answer;\n"
@@ -4413,7 +5083,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     else "class #{camelize(base)}\n  VERSION = #{nonce}\n  def call\n    Post.count\n  end\nend\n"
     end
   end
-  # rubocop:enable Metrics/CyclomaticComplexity
+  # rubocop:enable Metrics/CyclomaticComplexity, Metrics/MethodLength
 
   # Written to match `graphql_class?`'s patterns, which are what the extractor
   # actually keys on — a base-class suffix, not the presence of the gem.
@@ -4479,6 +5149,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         end
       end
     RUBY
+  end
+
+  # Mentions artifacts from the other families by constant, path, task and
+  # route, and links a sibling document. Which of them exist changes from one
+  # operation to the next.
+  def doc_source(base, nonce)
+    a, b, c = nonce.digits.first(3).map { |digit| digit % 6 }.then { |digits| digits + ([0] * (3 - digits.size)) }
+    <<~MARKDOWN
+      # #{base} #{nonce}
+
+      `Post` backs `Svc#{a}Service` and `Lb#{b}::VERSION`; see `app/services/svc_#{c}_service.rb`.
+      More in [the next document](doc_#{b}.md) and [the model](../../app/models/post.rb).
+
+      ## Operations
+
+      ```
+      bin/rake rk_#{a}:task0
+      GET /posts
+      Mgr#{c}Manager.new.call
+      ```
+    MARKDOWN
   end
 
   def migration_source(base, nonce)

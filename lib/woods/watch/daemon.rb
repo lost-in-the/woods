@@ -1104,15 +1104,39 @@ module Woods
 
         finish_extraction(action, change_set, touched, started)
       rescue ScriptError, StandardError => e
+        extraction_failed(change_set, started, e, full: full)
+      end
+
+      def extraction_failed(change_set, started, error, full:)
+        return escalate_to_full(change_set, started, error) if !full && config_drift?(error)
+
         # Extraction failed, so nothing landed — the generation stays where it
         # was and the index keeps serving its last good state.
-        reason = "extraction failed: #{e.class}: #{e.message}"
+        reason = "extraction failed: #{error.class}: #{error.message}"
         @logger.error("[Woods] watch: #{reason}")
         # The paths really did change; a later event will not mention them
         # again, so carry them forward and try once the cause clears.
         carry_forward(change_set)
         outcome(:extract, :degraded, reason: reason, count: change_set.size,
                                      duration_ms: elapsed_ms(started))
+      end
+
+      # The configuration changed since the baseline's full run, so no
+      # incremental can succeed until a full one records the new fingerprint.
+      # Take the full obligation and run it now. A full run never raises the
+      # drift refusal, so this recurses at most once; if it fails, the
+      # obligation stays set and the cycle degrades as any failure does.
+      # The error class lives in lib/woods.rb, which an embedding caller of
+      # the daemon need not have loaded.
+      def config_drift?(error)
+        defined?(Woods::ExtractionConfigChanged) && error.is_a?(Woods::ExtractionConfigChanged)
+      end
+
+      def escalate_to_full(change_set, started, error)
+        @logger.warn("[Woods] watch: configuration changed since the baseline index (#{error.message}); " \
+                     'running one full extraction')
+        @pending_mutex.synchronize { @startup_full = true }
+        run_extraction(change_set, started)
       end
 
       def full_extraction?(change_set)

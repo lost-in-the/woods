@@ -1,8 +1,8 @@
 # Woods Extractor Reference
 
-Woods ships **40 extractor classes** producing **45 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
+Woods ships **42 extractor classes** producing **47 distinct unit types**: one for each meaningful category of Rails code. This doc covers what each extractor captures, how to configure them, and the shape of the data they produce.
 
-> **Counts explained.** `lib/woods/extractors/` contains 40 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 45 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
+> **Counts explained.** `lib/woods/extractors/` contains 42 extractor classes (each ending in `_extractor.rb`) plus supporting utilities such as `shared_utility_methods`, `shared_dependency_scanner`, `callback_analyzer`, `behavioral_profile`, `route_helper_resolver`, `ast_source_extraction`, `source_nesting`, and `declared_parent`. The 47 unit types comes from some extractors emitting multiple categories, `GraphQLExtractor` alone produces four (`graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query`), `RailsSourceExtractor` produces both `rails_source` and `gem_source`, and `RouteExtractor` produces both `route` and `route_file`. Supporting utilities enrich existing extractors (callback side-effects, behavioral config, AST-based source slicing, nested-namespace resolution) but are not themselves extractors and do not appear in the unit type enumeration. The authoritative mapping is `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY` in `lib/woods/extractor.rb`.
 
 ---
 
@@ -13,7 +13,7 @@ Woods ships **40 extractor classes** producing **45 distinct unit types**: one f
 A full extraction (`bundle exec rake woods:extract`) runs five phases:
 
 ```
-Phase 1: Extract    . All 40 extractors run, producing ExtractedUnit objects
+Phase 1: Extract    . All 42 extractors run, producing ExtractedUnit objects
 Phase 1.5: Dedupe   . Re-derived same-source duplicates are dropped; a same-type identifier still derived from two different files aborts extraction naming both files
 Phase 2: Resolve    . Reverse dependency edges are built (A depends on B → B gets a dependent)
 Phase 3: Enrich     . Git metadata added (last author, change frequency, recent commits) and copied onto graph nodes
@@ -103,6 +103,32 @@ re-extract affected indexes in full to replace wrapper identities and restore
 their source-reference edges.
 
 Once-loader ownership (#579) is included in Woods 2.1; verify the loaded revision as well as the gem version. It covers declared constants under `config.autoload_lib_once` and other once-managed roots. Direct ownership across both loaders takes precedence over copied-application inference; ambiguous roots and a loader's explicit non-claim remain unmanaged. After upgrading an affected index, run one full extraction before resuming incremental maintenance to replace stale wrapper identifiers. This does not aggregate multiple unmanaged source files reopening the same namespace.
+
+### Method side effects
+
+Model, service, job, PORO, manager, mailer and controller units record what each **public method** of the unit's class does, read from the unit's own file:
+
+```json
+"method_effects": {
+  "refund!": {
+    "jobs_enqueued": ["RefundJob"],
+    "mail_sent": [],
+    "services_called": [],
+    "columns_written": ["status"],
+    "events_published": ["ledger.refunded"],
+    "external_calls": ["Faraday"],
+    "via_method": { "notify": { "mail_sent": ["ReceiptMailer"] } }
+  }
+}
+```
+
+- **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
+- **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
+- **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
+- **Cap.** `method_effects_limit` (default 50) bounds the map per unit; past it the first methods are kept and `method_effects_truncated: true` is set.
+- **Edges.** The unit's existing `job_enqueue`, mailer and service edges gain `through`: the public methods that reach the target, sorted and joined with `, ` (`"through": "capture!, refund!"`). Controller actions are named here too. No edge is added or removed, so `dependents` answers are the same for a caller that ignores `through`.
+- **Limits.** The reading is static and heuristic, like callback side effects. Calls made through metaprogramming, through another object, from an included concern, or from a block in the class body are not attributed. Nested method definitions and blocks that change `self` to another object do not contribute same-class method effects. Same-line definitions are read from their own source ranges.
 
 ### Eager loading
 
@@ -226,6 +252,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
+- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its declared `only`/`except` names the action; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
+- Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
 - `actions` comes from Rails' `action_methods`, keeping only methods whose body is application source (gem DSL methods such as `define_method` readers are excluded) and never setters. A method the controller defines in its own file is an action whether or not it is routed; any other method (from an included or prepended module, a base controller, or a DSL that defines it onto the class from another file) counts only when a route reaches it on this controller. `action_sources` records each action's owner, the indexed unit holding its body (`defined_in`), and its `file` (relative to `Rails.root`) and `line`. An action whose body lives in another unit adds a `:action_source` edge to that unit, every controller has an `:inheritance` edge to an app-defined parent controller, and an inherited action's flow is assembled from that body with this controller's own before filters
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
@@ -337,6 +365,8 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Discovery and direct extraction accept only mailers backed by an existing app-owned source file, excluding dependency mailers and fabricated convention paths.
 - Each mailer action corresponds to an email template, template paths are recorded in metadata. Discovery checks `<action>.html` and `<action>.text` in every engine of `Woods::Extractors::TemplateExtensions::DETECTED` (`.erb`, `.haml`, `.jbuilder`, `.slim`).
 - Extracts `default from:`, `layout`, and per-action subject patterns
+- `action_facts` (W-7) records each action's assigns (with those of its before and around callbacks), params, redirects and the template `mail` renders (`{ template, mail: true }`, honouring `template_name:` and `template_path:`), in the controller shape above. An action without `mail` receives no implicit mail-template fact; explicit `render` calls are still recorded
+- App-owned parent mailers add an `:inheritance` edge so incremental extraction refreshes child facts when inherited callbacks or their concerns change. Framework parents add no edge. Run a full extraction once to populate this relationship in retained indexes.
 - Action names are sorted consistently in metadata, the generated header, template discovery and action chunks. Callback chain order and duplicate registrations are preserved.
 - Direct Proc-valued defaults and Proc callback filters use source-location/kind labels without executing them; application paths are relative to `Rails.root`. Default containers, literal strings and non-Proc values retain their existing types. This does not serialize closure captures or recursively normalize arbitrary nested objects.
 - Object callback filters use descriptive labels with addresses removed only from Ruby's default representation, including anonymous classes and namespaces. Custom labels and literal hexadecimal text are preserved. Labels do not serialize callback object state, and extraction never invokes callbacks.
@@ -471,7 +501,7 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 
 **Included in Woods 2.1:** discovery and direct extraction require an existing app-owned source file; dependency components are excluded.
 
-**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, Stimulus controller names, and route helper usage.
+**What it captures:** Phlex component classes (`Phlex::HTML`, `Phlex::SVG` subclasses) from `app/components`. Extracts slots, initialize parameters, sub-component references, frontend module references (see [Frontend references](#frontend-references)), and route helper usage.
 
 **Key details:**
 - Phlex components render pure Ruby, no template files to parse separately
@@ -528,8 +558,9 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 - The `view_render` edge exists only when the controller the directory names is a runtime `ActionController::Base` or `ActionController::API` subclass. Mailer view directories link to their `ActionMailer::Base` subclass with a `:mailer` edge.
 - Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
 - **Helper call edges** (see [Application helper calls](#application-helper-calls)): a template calling `pretty_date(x)` gets a `:helper_call` edge to the helper module that defines `pretty_date`, and a `:helper_method` edge to the controller that declares a name with `helper_method`. `metadata[:helper_calls]` lists the called names per module.
+- Frontend module references (`x-data`, `data-controller`, custom element tags) become `js_module` edges; see [Frontend references](#frontend-references)
 
-**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Stimulus controller *references* are a partial exception: `PhlexExtractor` and `ViewComponentExtractor` scan `data-controller` attributes in their component source and emit `:stimulus_controller` dependency edges, the target Stimulus controller files under `app/javascript/controllers/` are not themselves parsed or extracted. The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Frontend module references are read from every parsed engine; see [Frontend references](#frontend-references). The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
 
 #### Application helper calls
 
@@ -591,6 +622,36 @@ Each key is present only when non-empty, so a unit with no helper calls is
 byte-identical to its pre-2.2 form. Incremental maintenance re-runs the five
 consumers wholesale when a helper source changes; see
 [Incremental extraction](INCREMENTAL_EXTRACTION.md#wholesale-re-runs).
+
+---
+
+### JsModuleExtractor
+
+**What it captures:** one shallow `js_module` unit per JavaScript or TypeScript file under `config.javascript_paths` (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}` and `app/assets/javascripts/**/*.js`; see [JavaScript paths](CONFIGURATION_REFERENCE.md#javascript-paths)). The identifier is the root-relative path.
+
+**Key details:**
+- Shallow by design. No JavaScript toolchain and no AST: a linear `StringScanner` token pass (`Woods::Extractors::JsTokenizer`) skips comments, strings, template literals and regular-expression literals, and `JsModuleFacts` reads the rest. Dynamic registration (a name built at runtime, a loop over a manifest) is not seen.
+- `metadata.kind` is one of `stimulus_controller`, `alpine_data`, `stencil_component`, `custom_element`, `module`. `language` is `javascript` or `typescript`.
+- `metadata.default_export` (name or `null`), `has_default_export`, `named_exports` (sorted), and `imports`: one entry per specifier with `names`, `kind` (`static`, `dynamic`, `require`, `reexport`) and `resolved`, the module path when the specifier names a local file (relative, `@/` and `~/` aliases, bare paths under a configured root, index files, extension swaps). A package import resolves to `null`.
+- `metadata.registered_names` lists the names other code uses for this module, each `{ kind:, name:, source: }`, with `source` one of `registration`, `filename`, `global`, `stencil`, `define`. `metadata.registers` lists names this file registers for another module. `metadata.stimulus_loaders` records `eagerLoadControllersFrom` / `lazyLoadControllersFrom` calls.
+- **Name resolution** (`Woods::Extractors::JsModuleRegistry`), per run. Stimulus: `application.register("clipboard", ClipboardController)` beats the `controllers/**/*_controller.{js,ts}` filename convention (`controllers/ledgers/line_item_controller.js` registers `ledgers--line-item`; loader directories count as `controllers/` too). Alpine: `Alpine.data("dropdown", ...)` beats `window.dropdown = function`. Custom elements: Stencil `@Component({ tag: "x-card" })` and `customElements.define("x-card", Card)`. `Alpine.store` names are recorded but no template edge targets them. A registration whose value is imported lands on the defining module, following barrel re-exports; an inline value lands on the registering module. Two modules claiming one name at the same precedence resolve to nothing.
+- Edges: `via: :import` to each resolved local import. Package imports produce no edge.
+- **Size cap:** a file over 200 KB (`JsModuleExtractor::MAX_SOURCE_BYTES`) keeps its metadata but stores an empty `source_code`, with `metadata.source_omitted: true`; `source_bytes` is always recorded. A file over 2 MB is listed but not tokenized (`analysis_omitted: true`).
+- Excluded wherever a glob reaches them: `node_modules/`, `vendor/`, `public/`, `dist/`, `build/`, `builds/`, `tmp/`, `coverage/` directories, `*.min.js`, `*.d.ts`.
+- JavaScript tests (`*.test.*`, `*.spec.*`, `__tests__/`, `__mocks__/`, `spec/` and `test/` directories) are skipped unless a configured glob names them; see [JavaScript paths](CONFIGURATION_REFERENCE.md#javascript-paths).
+- Incremental re-extraction re-runs `JsModuleExtractor` wholesale on any module change: a module's registered names come from whichever file registers them. When that re-run moves the name-to-module map, the components, view components and view templates are re-run too (`Extractor::JS_NAME_CONSUMER_EXTRACTORS`); a body edit that moves no name re-runs none of them. `woods:refresh[js_modules]` cascades the same way. Changing `javascript_paths` itself needs one full extraction; incremental runs refuse until then (`Woods::ExtractionConfigChanged`).
+
+### Frontend references
+
+`PhlexExtractor`, `ViewComponentExtractor` and `ViewTemplateExtractor` scan their source for the names server-rendered markup uses to reach JavaScript (`Woods::Extractors::FrontendReferences`):
+
+| Reference | Forms read | Edge |
+|---|---|---|
+| Alpine data | `x-data="dropdown"`, `x-data="picker({ ... })"`, `"x-data": "..."`, `x_data: "..."`, `"x-data" => "..."` | `{ type: :js_module, via: :alpine_data }` |
+| Stimulus controller | `data-controller="a b"` (one edge per name), `data_controller: "..."`, `data: { controller: "..." }` | `{ type: :js_module, via: :stimulus_controller }` |
+| Custom element | `<x-shipment-card>`, HAML `%x-shipment-card`, Phlex `register_element :x_shipment_card` | `{ type: :js_module, via: :custom_element }` |
+
+A ViewComponent's sidecar template (`metadata.sidecar_template`) is scanned with its Ruby source. Comments never produce a reference: ERB comment tags, HAML `-#` comments and Ruby comments are blanked first. A component's heredoc markup (`erb_template <<~ERB`) is still read. An anonymous scope (`x-data`, `x-data="true"`, Phlex `"x-data": true`, or any other JavaScript literal or keyword), an inline object (`x-data="{ open: false }"`), a `$store` reference, an interpolated value, and a routing `controller:` option outside a `data:` hash produce nothing. A name no module registers produces no edge and is listed in `metadata[:unresolved_frontend_references]` as `{ kind:, name: }`; `turbo-frame` and other framework elements land there unless the app defines them. The earlier dangling `:stimulus_controller` edges (`via: :html_attribute`) are gone: a Stimulus reference is now either a `js_module` edge or an unresolved entry.
 
 ---
 
@@ -1185,7 +1246,7 @@ namespace.
 - Recognizes ERB/HAML `cache_if`/`cache_unless` and jbuilder `json.cache!`/`json.cache_if!` blocks as fragment caching
 - Records calls on cache stores a Ruby file obtains itself (`Woods::Extractors::CacheStoreCalls`). A store expression is `X.cache_store(...)` (X not `config`), `ActiveSupport::Cache.lookup_store(...)`, `ActiveSupport::Cache::*Store.new(...)`, or an `||`/`or` with a store on either side. A receiver is a store when it is a local, instance or class variable, or constant assigned from one; a method that returns one, assigns one, or reads a bound variable; an `attr_reader`/`attr_accessor` of a bound instance variable; a forwarder or alias of such a method; or a store expression chained directly. Their `read`, `write`, `fetch`, `delete`, and `exist?` calls are recorded like `Rails.cache` calls, plus `store` (the receiver at the call site) and `store_origin` (the store expression it was first bound from, up to 120 characters), and count as low-level caching. Binding is per file and by name, not by scope.
 - Ignores cache calls inside comments (`Woods::Extractors::CommentBlanking`): Ruby `#` and `=begin`/`=end` in `.rb` and `.jbuilder`, ERB `<%# %>` and `<% # ... %>`, and HAML `-#` blocks and `- # ...` lines. A file whose only cache calls are commented out is not a caching unit. Dependency scans skip comments too, as in every other extractor.
-- Extracts: `cache` blocks, `Rails.cache.fetch`, `expire_fragment`, TTLs, and cache keys
+- Extracts: fragment `cache` blocks, `caches_action`, `Rails.cache` `fetch`/`read`/`write`/`delete`/`exist?` calls, TTLs, and cache keys. Expiry calls (`expire_fragment`, `expire_action`) are not read.
 - Each `metadata.cache_calls` entry has `type`, `key_pattern`, `ttl`, and `options`, read by parsing that call's own arguments with Prism (`Woods::Extractors::CacheCallArguments`):
   - `key_pattern`: the key expression's source text, truncated to 120 characters. The key after the condition for `cache_if`/`cache_unless`/`cache_if!`. `nil` for `caches_action`, `cache_key`, and `cache_version`.
   - `ttl`: the `expires_in:` expression, literal or not.
@@ -1338,9 +1399,43 @@ to avoid naming sibling files after their shared namespace wrapper.
 
 ---
 
+### DocExtractor
+
+**What it captures:** Project documentation as `doc` units, one per Markdown file, so a document is retrievable and a code unit lists the documents that mention it.
+
+**Key details:**
+- Roots come from `config.documentation_paths` (default `README.md`, `docs/**/*.md`, `doc/**/*.md`, `CLAUDE.md`, `AGENTS.md`, `.claude/rules/**/*.md`, `.claude/skills/**/*.md`, `.github/**/*.md`), minus `config.documentation_exclude` (changelogs, `node_modules`, `vendor`, `doc/api`, `docs/api`). See the [configuration reference](CONFIGURATION_REFERENCE.md#documentation-paths).
+- The identifier is the root-relative path (`docs/setup.md`). A file over 1 MiB is skipped with a logged warning.
+- A secret-named file (the same names `ConfigFileExtractor` refuses: `secret`, `token`, `password`, `credential` and so on in the file name) is never read, nor is a symlink whose target is not itself documentation inside the repository. In a Git checkout, ignored and untracked files are skipped.
+- A symlink that reaches another indexed document is an alias, not a unit of its own: the target's unit lists it in `metadata.aliases`, and the graph maps the alias path to that unit, so editing through either path re-extracts it. `CLAUDE.md` and `.github/copilot-instructions.md` linked to `AGENTS.md` make one unit, `AGENTS.md`. A relative link to an alias is a `doc_link` to the target, and deleting an alias keeps the target.
+- Reads bytes only: one line-based pass finds front matter, ATX and setext headings, fenced and inline code, and link targets. It is not a CommonMark parser; indented code blocks and HTML are read as prose.
+- Metadata: `title` (first heading, else the file name), `headings` (level, text, line), `front_matter` (top-level scalar keys), `word_count`, `line_count`, `links`, `mentions`, `mentions_truncated`, `redactions`.
+- **Chunks:** one per heading section, with `heading`, `level`, `heading_path`, `anchor`, `start_line` and `end_line` in the chunk metadata. Text before the first heading is its own section. A section over 6,000 characters is split on line boundaries into `section_N_part_M` chunks. A document with a single section stays whole.
+
+**Edges to code.** Inline code spans and fence lines are scanned for four kinds of mention:
+
+| Kind | Example | Resolves to |
+|---|---|---|
+| `constant` | `Widget::Importer`, `Widget::Importer::LIMIT` | every unit with that identifier, else the longest indexed prefix |
+| `path` | `app/models/widget.rb`, `lib/tasks/widgets.rake:12` | every unit defined in that file |
+| `rake_task` | `rake widgets:sync`, `bin/rails widgets:sync[1]` | the `rake_task` unit of that name |
+| `route` | `GET /widgets` | the `route` unit, or its constrained and numbered variants |
+
+A mention that names an indexed unit becomes a `documents` edge from the document to that unit and is recorded with `resolved: true`. A mention that names nothing stays in `metadata.mentions` with `resolved: false` and produces no edge, so the graph never holds a dangling documentation target. Prose outside code is not scanned. At most 500 distinct mentions are kept per document; `mentions_truncated` says when the cap dropped some.
+
+A relative link to another indexed document becomes a `doc_link` edge. A relative link to a source file becomes a `documents` edge to the units in that file. `metadata.links` records every target with its `kind` (`relative`, `external`, `anchor`), the root-relative `path` it resolves to, and whether it resolved.
+
+Resolution needs the whole index, so it runs as a post-pass after every extractor, in full and incremental runs alike. An unchanged document gains an edge when its target is first indexed and loses it when the target is deleted.
+
+**Graph.** `doc` is listed in `DependencyGraph::DOCUMENTATION_UNIT_TYPES`. Documentation edges are published (`dependents` on a model lists the documents that mention it), but documents take no part in PageRank (they score `0.0`, pass no rank, and are left out of the `pagerank` tool's node count), in the incremental blast radius, or in `graph_analysis.json` (orphans, dead ends, hubs, cycles, bridges).
+
+**Redaction.** Published source passes through the credential shapes of the Console scanner (`Woods::Console::CredentialScanner`): API keys, tokens, connection strings with a password, PEM private key blocks. The userinfo of any URL (`https://token@host`, `ftp://user:secret@host`) is then replaced the same way configuration source is redacted, keeping the scheme and host; a URL without userinfo is untouched. A front matter key that names a credential (`password`, `token`, `secret`, `api_key`, ...) has its value replaced whatever its shape. Headings, mentions, front matter and chunks are read from the redacted text. `metadata.redactions` counts what was replaced. This is best effort: it recognizes shapes, so a credential in a form the scanner does not know is published as written. Keep secrets out of documentation.
+
+---
+
 ## How do I enable or disable extractors?
 
-You can't, today. All 40 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+You can't, today. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
 `config.extractors`. The array is accepted for forward compatibility: setting
 it to anything other than its default value emits a warning and has no
 effect on which extractors run or what the retrieval pipeline sees.
@@ -1357,7 +1452,7 @@ Every extractor produces `ExtractedUnit` objects with this schema:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `type` | Symbol | Unit category, one of the 45 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support` |
+| `type` | Symbol | Unit category, one of the 47 types in `Woods::Extractor::TYPE_TO_EXTRACTOR_KEY`: `:model`, `:controller`, `:service`, `:job`, `:mailer`, `:component`, `:view_component`, `:graphql_type`, `:graphql_mutation`, `:graphql_resolver`, `:graphql_query`, `:serializer`, `:manager`, `:policy`, `:validator`, `:concern`, `:route`, `:middleware`, `:i18n`, `:pundit_policy`, `:configuration`, `:engine`, `:view_template`, `:migration`, `:action_cable_channel`, `:scheduled_job`, `:rake_task`, `:state_machine`, `:event`, `:decorator`, `:database_view`, `:caching`, `:factory`, `:test_mapping`, `:rails_source`, `:gem_source`, `:poro`, `:lib`, `:package`, `:graphql_operation`, `:config_file`, `:route_file`, `:database_table`, `:external_consumer`, `:test_support`, `:js_module`, `:doc` |
 | `identifier` | String | Unique key for this unit. Usually the class name (e.g., `"User"`, `"OrdersController"`) or a descriptive string for non-class units (e.g., `"POST /orders"`) |
 | `file_path` | String | Relative path to the source file (e.g., `"app/models/user.rb"`). Relative to `Rails.root` after normalization. A gem-owned unit (an engine model such as `ActiveStorage::Blob`, a framework source) keeps its absolute gem path, since nothing under `Rails.root` defines it. |
 | `namespace` | String\|nil | Module namespace if the class is nested (e.g., `"Admin"` for `Admin::DashboardController`) |
