@@ -104,8 +104,13 @@ module Woods
 
       def bound_cross_database?(edge)
         endpoints = edge.values_at('from', 'to')
-        endpoints.all? { |id| @types.fetch(id, []).one? } && edge['from_db'].is_a?(String) &&
-          edge['to_db'].is_a?(String) && edge['from_db'] != edge['to_db']
+        return false unless endpoints.all? { |id| @types.fetch(id, []).one? }
+
+        databases = edge.values_at('from_db', 'to_db')
+        return false unless databases.all?(String)
+
+        databases << edge['through_db'] if edge['through'] && edge['through_db'].is_a?(String)
+        databases.uniq.size > 1
       end
 
       def add(kind, family, fact)

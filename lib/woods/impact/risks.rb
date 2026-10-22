@@ -51,7 +51,7 @@ module Woods
         unit = @units.fetch(identity)
         other = comparison&.dig(identity, 'metadata')
         pair = @context['endpoint'] == 'from' ? [unit['metadata'], other] : [other, unit['metadata']]
-        collect(identity, MetadataRisks.new(identity.last, budget: @budget).call(*pair))
+        collect(identity, MetadataRisks.new(identity.last, budget: @budget).call(*pair, current: unit['metadata']))
         collect(identity, published.call(identity)) if published
       rescue IOError
         @unknowns << @context.merge('kind' => 'structural_risk_evidence_invalid',

@@ -71,6 +71,26 @@ RSpec.describe Woods::Impact::Renderers do
     expect(output).to include('&#91;', '&#124;', '&#96;', '&#60;', '&#10;')
   end
 
+  it 'retains base and head risk contexts before clipping long synthetic labels' do
+    value = data
+    unit = identity("Shared[<unit>]#{'Synthetic' * 40}")
+    value['risks'] = [%w[from 1], %w[to 2]].map do |side, generation|
+      provenance(side, generation.to_i).merge(
+        'kind' => "warning_[<flag>]\n# injected #{'synthetic' * 40}", 'unit' => unit,
+        'evidence' => { 'label' => "evidence#{'synthetic' * 40}" }
+      )
+    end
+    frozen = Woods::Impact::Value.copy(value)
+    original = JSON.generate(frozen)
+    output = described_class.markdown(frozen)
+    expect(CGI.unescapeHTML(output)).to include('from gen:1; warning_', 'to gen:2; warning_', '…')
+    expect(output).not_to include('<flag>', "\n# injected")
+    expect(output).to include('&#91;', '&#60;', '&#10;')
+    expect(output.lines.size).to be <= 60
+    expect(JSON.generate(frozen)).to eq(original)
+    expect(described_class.markdown(frozen)).to eq(output)
+  end
+
   it 'keeps equal names distinct by actual type and endpoint generation in Mermaid' do
     value = data
     value['changed'] << identity('Shared', 'service').merge('status' => 'removed', 'facets' => ['source'],
