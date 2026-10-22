@@ -3,6 +3,7 @@
 require_relative 'propagation'
 require_relative 'flows'
 require_relative 'risks'
+require_relative 'related'
 
 module Woods
   module Impact
@@ -12,8 +13,9 @@ module Woods
       # @param options [Options]
       def initialize(options)
         @options = options
-        @result = { 'affected' => [], 'flows' => [], 'risks' => [], 'unknowns' => [], 'coverage' => {} }
-        @statuses = { 'affected' => [], 'flows' => [], 'risks' => [] }
+        @statuses = %w[affected flows risks tables templates tests].to_h { |key| [key, []] }
+        @result = @statuses.transform_values { [] }.merge('unknowns' => [], 'coverage' => {})
+        %w[tables templates tests].each { |key| @statuses[key] << 'partial' }
       end
 
       # @param reader [PublishedIndex] still locked
@@ -26,12 +28,14 @@ module Woods
 
         artifacts = Artifacts.new(reader)
         arguments = { generation: reader.generation_number, endpoint: endpoint, options: @options }
-        propagation = propagate(artifacts, units, roots, arguments)
+        budget = GraphBudget.new(@options)
+        propagation = propagate(artifacts, units, roots, arguments, budget)
         flows = Flows.new(artifacts, **arguments).call(roots)
         collect('affected', propagation)
         collect('flows', flows)
         identities = roots + propagation['affected'].map { |item| item.values_at('identifier', 'type') }
         collect_risks(reader, units, identities, endpoint, comparison)
+        collect_related(units, identities, propagation['affected'], arguments, budget)
       end
 
       # @return [Hash] deterministic bounded enrichment and query parameters
@@ -50,9 +54,18 @@ module Woods
         collect('risks', risks.call(identities, comparison: comparison))
       end
 
-      def propagate(artifacts, units, roots, arguments)
+      def collect_related(units, identities, affected, arguments, budget)
+        data = Related.new(units, **arguments, budget: budget).call(identities, affected: affected)
+        %w[tables templates tests].each do |key|
+          @result[key].concat(data.fetch(key))
+          @statuses[key] << data.fetch('coverage')
+        end
+        @result['unknowns'].concat(data.fetch('unknowns'))
+      end
+
+      def propagate(artifacts, units, roots, arguments, budget)
         graph = artifacts.read('dependency_graph.json')
-        Propagation.new(graph, units, **arguments).call(roots)
+        Propagation.new(graph, units, **arguments, budget: budget).call(roots)
       rescue *Flows::READ_ERRORS
         { 'affected' => [], 'coverage' => 'unavailable',
           'unknowns' => [arguments.slice(:generation, :endpoint).transform_keys(&:to_s)

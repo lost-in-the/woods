@@ -17,7 +17,7 @@ RSpec.describe Woods::Impact::Store do
   let(:json) do
     JSON.generate('schema_version' => 1, 'parameters' => { 'mode' => 'range' }, 'range' => {},
                   'coverage' => { 'complete' => false }, 'changed' => [], 'affected' => [], 'flows' => [],
-                  'risks' => [], 'tests' => [], 'unknowns' => [])
+                  'tables' => [], 'templates' => [], 'risks' => [], 'tests' => [], 'unknowns' => [])
   end
 
   it 'saves exact bytes under their digest with restrictive directory and file modes' do

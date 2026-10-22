@@ -9,7 +9,8 @@ module Woods
       # section. Further entries stay in JSON and are counted explicitly.
       class Markdown
         SECTIONS = { 'changed' => 'Changed units', 'affected' => 'Affected units', 'flows' => 'Flows',
-                     'risks' => 'Risks', 'tests' => 'Tests', 'unknowns' => 'Unknowns' }.freeze
+                     'tables' => 'Tables', 'templates' => 'Templates', 'risks' => 'Risks',
+                     'tests' => 'Tests', 'unknowns' => 'Unknowns' }.freeze
 
         # @param data [Hash] validated version 1 report
         def initialize(data)
@@ -61,7 +62,7 @@ module Woods
           if items.size > 1
             details = items.drop(1).first(5).map { |item| entry(key, item) }.join(' · ')
             details += " · #{items.size - 6} omitted; see JSON." if items.size > 6
-            lines.push('', "<details><summary>#{items.size - 1} more entries</summary>", '', details, '', '</details>')
+            lines.push('', "<details><summary>#{items.size - 1} more entries</summary><p>#{details}</p></details>")
           end
           lines + ['']
         end
@@ -85,6 +86,15 @@ module Woods
           "#{item['entry_point']} — #{route['verb']} #{route['path']}; #{Text.context(item)}"
         end
 
+        def format_tables(item)
+          "#{Text.context(item)}; #{Text.identity(item)}; database: #{item['database'] || 'unavailable'}; " \
+            "table: #{item['table_name'] || 'unavailable'}"
+        end
+
+        def format_templates(item)
+          "#{Text.context(item)}; #{Text.identity(item)}; recorded references only"
+        end
+
         def format_risks(item)
           unit = item['unit'] || item
           label = unit.is_a?(Hash) ? Text.identity(unit) : Text.short(unit)
@@ -92,7 +102,9 @@ module Woods
         end
 
         def format_tests(item)
-          item.is_a?(Hash) ? Text.identity(item) : Text.short(item)
+          return Text.short(item) unless item.is_a?(Hash)
+
+          "#{Text.context(item)}; #{Text.identity(item)}; heuristic suggestion"
         end
 
         def format_unknowns(item)

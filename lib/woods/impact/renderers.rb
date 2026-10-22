@@ -22,9 +22,10 @@ module Woods
       def self.document(report)
         data = report.to_h
         valid = data.is_a?(Hash) && data['schema_version'] == 1 && envelope?(data) &&
-                data['coverage'].is_a?(Hash) && %w[changed affected flows risks tests unknowns].all? do |key|
-                  data[key].is_a?(Array)
-                end
+                data['coverage'].is_a?(Hash) && %w[changed affected flows tables templates risks tests
+                                                   unknowns].all? do |key|
+                                                  data[key].is_a?(Array)
+                                                end
         raise ArgumentError, 'Unsupported impact schema or report shape' unless valid
 
         data

@@ -217,4 +217,32 @@ RSpec.describe Woods::Impact::Report do
     expect { result.to_h['changed'].clear }.to raise_error(FrozenError)
     expect(result.to_h['schema_version']).to eq(1)
   end
+  it 'keeps related tables from removed and current roots bound to their own endpoints' do
+    table = unit('table:primary.widgets', 'database_table', 'schema',
+                 { 'table_name' => 'widgets', 'database' => 'primary' })
+    edge = { 'target' => table['identifier'], 'type' => 'database_table', 'via' => 'table' }
+    before = unit('OldWidget', 'model').merge('dependencies' => [edge])
+    after = unit('NewWidget', 'model').merge('dependencies' => [edge])
+    publish(1, [before, table])
+    publish(2, [after, table])
+    result = report
+    expect(result.to_h['tables'].map { |item| item.values_at('identifier', 'endpoint', 'generation') })
+      .to eq([['table:primary.widgets', 'from', 1], ['table:primary.widgets', 'to', 2]])
+    expect(result.to_h['tables'].map { |item| item['evidence'].first.dig('source', 'identifier') })
+      .to eq(%w[OldWidget NewWidget])
+    expect(result.to_h['coverage']).to include('tables' => 'partial', 'templates' => 'partial', 'tests' => 'partial')
+    expect(result.to_h['unknowns']).not_to include(include('kind' => 'not_computed', 'feature' => 'tables'))
+    expect(result.to_json).to eq(report.to_json)
+    expect(result.to_h['tables'].first['evidence']).to be_frozen
+  end
+
+  it 'exposes related focus evidence without manufacturing a range or complete coverage' do
+    template = unit('view:widgets/show', 'view_template')
+    publish(1, [template])
+    data = described_class.focus(@root, identities: [template.slice('identifier', 'type')]).to_h
+    expect(data['range']).to be_nil
+    expect(data['templates'].first).to include('identifier' => template['identifier'], 'endpoint' => 'to',
+                                               'generation' => 1, 'evidence' => [{ 'kind' => 'selected_unit' }])
+    expect(data['coverage']).to include('complete' => false, 'templates' => 'partial')
+  end
 end

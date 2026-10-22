@@ -1,0 +1,1 @@
+- Add generation-bound related table, template and heuristic test evidence to impact reports, using retained typed references and shared graph budgets with explicit partial coverage.

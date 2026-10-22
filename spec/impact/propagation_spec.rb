@@ -52,6 +52,14 @@ RSpec.describe Woods::Impact::Propagation do
     expect(result['unknowns']).to include(include('kind' => 'conflicting_target_type'))
   end
 
+  it 'does not treat a malformed false target hint as an absent type' do
+    inventory = units(%w[Changed model], %w[Caller service])
+    data = graph('Changed' => [edge('Caller', 'service', 'code_reference', false)])
+    result = compute(data, inventory, [%w[Changed model]])
+    expect(result['affected']).to eq([])
+    expect(result['unknowns']).to include(include('kind' => 'conflicting_target_type'))
+  end
+
   it 'filters traversal by actual types and via, with explicit finite budgets' do
     inventory = units(%w[Changed model], %w[Caller service], %w[Outer controller])
     data = graph('Changed' => [edge('Caller', 'service')], 'Caller' => [edge('Outer', 'controller')])
