@@ -127,8 +127,36 @@ Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
 and [baseline upgrades](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
-Inline payload growth on `rails-8.0-large` is not yet qualified against #751's
-approximately 15% decision threshold; no sidecar format is introduced here.
+Qualification used the complete tracked synthetic `apps/rails-8.0-large` corpus
+at woods-testbed `743a755dc88e87cf6c9d71562cbd144188d55974`, with the smoke dataset,
+seed `20260914` and reference time `2026-09-14T12:00:00Z`. Fresh full extractions
+compared Woods baseline `d5e3cb43bc9c9e442229fb942b6df533293797f6` with reviewed
+candidate `6a023b02e5cd2327bff060ebe17eb04cb928bae7` under Ruby 3.3.1, Bundler
+2.5.11 and Rails 8.0.5.1 (`aarch64-linux`), with identical non-Woods dependencies.
+
+Both corrected extraction children and the comparison passed: all 449 typed
+units had identical source paths, hashes and bytes; 111 verified spans across
+40 units passed validation. Complete serialized unit JSON, including empty
+reference arrays, grew from 2,826,201 to 2,859,614 bytes (+33,413, **1.182258%**),
+below #751's approximately 15% decision threshold on this corpus. The private
+reference cache was counted separately: 76,791 to 82,048 bytes (+5,257,
+6.845854%). Total active payload grew from 3,470,098 to 3,508,760 bytes (+38,662,
+1.114147%); all raw byte categories reconciled without normalization or
+subtraction. Keys, other generations, logs, database and bundle were excluded.
+No sidecar format is introduced.
+
+An earlier comparison using different Woods mount paths failed the middleware
+source-equality gate and was not a pass. The corrected pair staged both exact
+snapshots sequentially at the same physical gem path in fresh processes,
+retaining the strict equality gate. The earlier differing source text was not
+retained, so mount-path confounding remains an inference for that failed run.
+Separate validation passed 273 focused examples and two booted source-reference
+equivalence examples; no local full suite or broad backend matrix was run. These
+checks qualify the measured payload-size decision on this exact corpus and
+provide the listed focused/booted evidence. Companion source and installed-artifact
+transition acceptance is a separate gate; ordinary CI does not execute it. They
+do not complete #751, provide method-target evidence (#756), establish
+method-level reverse impact or qualify a whole release.
 
 ### Inverted flow membership
 

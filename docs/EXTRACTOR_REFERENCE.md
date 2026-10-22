@@ -102,8 +102,9 @@ span metadata, not an empty reference set. See the
 This bounded addition covers verified constants only. Other reference kinds,
 static/ambiguous candidates and method-target evidence (#756) remain separate
 work; it does not establish method-level reverse impact or complete #751.
-Payload growth on the same `rails-8.0-large` corpus remains to be measured before
-accepting the approximately 15% inline-storage threshold or deciding on a sidecar.
+The [frozen-corpus qualification](INDEX_LAYOUT.md#constant-reference-spans)
+validated 111 spans across 40 units and measured 1.182258% actual unit-JSON growth,
+including empty arrays, below the approximately 15% threshold on that corpus.
 
 ### Identifier naming (source-derived units)
 
