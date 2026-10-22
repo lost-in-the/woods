@@ -88,7 +88,7 @@ module Woods
         def format_risks(item)
           unit = item['unit'] || item
           label = unit.is_a?(Hash) ? Text.identity(unit) : Text.short(unit)
-          "#{item['kind']} — #{label}; evidence: #{Text.short(item['evidence'])}"
+          "#{Text.context(item)}; #{item['kind']} — #{label}; evidence: #{Text.short(item['evidence'])}"
         end
 
         def format_tests(item)
