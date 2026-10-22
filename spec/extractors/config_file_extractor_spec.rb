@@ -177,6 +177,8 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
 
     it 'produces identical output on repeat runs' do
       create_file('config/settings.yml', "b: 1\na:\n  c: 2\n")
+      # ExtractedUnit#to_h includes the serialization time in extracted_at.
+      allow(Time).to receive(:now).and_return(Time.utc(2026, 1, 1))
 
       first, second = Array.new(2) { serialized(unit_for('config/settings.yml')) }
 
