@@ -46,6 +46,12 @@ RSpec.describe Woods::Impact::Report do
     described_class.compare(@root, from: from, to: to)
   end
 
+  def write_graph(payload, target, via, weight)
+    edge = { 'source' => 'Caller', 'source_type' => 'service', 'via' => via }
+    data = { 'reverse_via' => { target => [edge] }, 'pagerank' => { 'Caller' => weight } }
+    File.write(File.join(payload, 'dependency_graph.json'), JSON.generate(data))
+  end
+
   it 'compares actual typed identities, including collisions and shared-directory subtypes' do
     publish(1, [unit('Shared', 'model'), unit('Shared', 'service'), unit('Query', 'graphql_query')])
     publish(2, [unit('Shared', 'model', 'updated'), unit('Shared', 'service'), unit('Query', 'graphql_type')])
@@ -77,7 +83,7 @@ RSpec.describe Woods::Impact::Report do
     expect(data.dig('range', 'from')).not_to have_key('token')
     expect(data['changed'].size).to eq(1)
     expect(data.dig('coverage', 'complete')).to be(false)
-    expect(data.dig('coverage', 'affected')).to eq('not_computed')
+    expect(data.dig('coverage', 'affected')).to eq('partial')
     expect(data['unknowns']).not_to be_empty
   end
 
@@ -164,6 +170,17 @@ RSpec.describe Woods::Impact::Report do
     expect(report(from: 'gen:2').to_h['unknowns']).to include(
       include('kind' => 'unclassified_metadata', 'metadata_keys' => ['custom_fact'])
     )
+  end
+
+  it 'keeps base removal and head current evidence separate for an affected typed identity' do
+    base = publish(1, [unit('Removed', 'model'), unit('Current', 'model'), unit('Caller', 'service')])
+    head = publish(2, [unit('Current', 'model', 'changed'), unit('Caller', 'service')])
+    write_graph(base, 'Removed', 'old', 0.1)
+    write_graph(head, 'Current', 'new', 0.8)
+    data = report.to_h
+    expect(data['affected'].map { |item| item.values_at('identifier', 'type', 'endpoint', 'generation', 'weight') })
+      .to eq([['Caller', 'service', 'from', 1, 0.1], ['Caller', 'service', 'to', 2, 0.8]])
+    expect(data['affected'].map { |item| item['paths'].first['edges'].first['via'] }).to eq(%w[old new])
   end
 
   it 'records unavailable sources even on unchanged typed units' do

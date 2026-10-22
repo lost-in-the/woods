@@ -3,11 +3,12 @@
 require_relative 'resolver'
 require_relative 'endpoint'
 require_relative 'range_diff'
+require_relative 'enrichment'
 
 module Woods
   module Impact
-    # Immutable versioned range report. This first slice computes unit differences
-    # only: empty enrichment arrays explicitly carry not_computed coverage.
+    # Immutable versioned range report with bounded typed propagation and retained
+    # flow evidence. Deferred analyses explicitly carry not_computed coverage.
     class Report
       DEFERRED = %w[affected flows tables templates tests risks commits focus].freeze
 
@@ -15,8 +16,10 @@ module Woods
       # @param index_dir [String, Pathname]
       # @param from [Integer, String]
       # @param to [Integer, String]
+      # @param parameters [Hash] depth, type/via filters and finite work budgets
       # @return [Report]
-      def self.compare(index_dir, from:, to: 'now')
+      def self.compare(index_dir, from:, to: 'now', **parameters)
+        options = Options.new(**parameters)
         Resolver.new(index_dir).open(from: from, to: to) do |before, after|
           base = Endpoint.new(before)
           head = Endpoint.new(after)
@@ -24,15 +27,29 @@ module Woods
           after_units = head.units
           changes = RangeDiff.new(before_units, after_units).changes
           unknowns = base.unknowns(before_units, 'from') + head.unknowns(after_units, 'to')
-          new({ 'from' => base.provenance(from), 'to' => head.provenance(to) }, changes, unknowns: unknowns)
+          computed = compute([[before, before_units], [after, after_units]], changes, options)
+          new({ 'from' => base.provenance(from), 'to' => head.provenance(to) }, changes,
+              unknowns: unknowns, computed: computed)
         end
       end
+
+      # @return [Hash] endpoint-specific propagation and flow evidence
+      def self.compute(endpoints, changes, options)
+        removed, current = changes.partition { |change| change['status'] == 'removed' }
+        enrichment = Enrichment.new(options)
+        endpoints.zip([removed, current], %w[from to]).each do |(reader, units), roots, side|
+          enrichment.add(reader, units, roots.map { |item| item.values_at('identifier', 'type') }, side)
+        end
+        enrichment.to_h
+      end
+      private_class_method :compute
 
       # @param range [Hash] endpoint provenance
       # @param changes [Array<Hash>] typed changes
       # @param unknowns [Array<Hash>] unavailable endpoint facts
-      def initialize(range, changes, unknowns: [])
-        @data = Value.copy(build(range, changes, unknowns))
+      # @param computed [Hash] bounded propagation and flow evidence
+      def initialize(range, changes, unknowns: [], computed: {})
+        @data = Value.copy(enrich(build(range, changes, unknowns), computed))
         freeze
       end
 
@@ -47,6 +64,17 @@ module Woods
       end
 
       private
+
+      def enrich(data, computed)
+        return data if computed.empty?
+
+        unknowns = data['unknowns'].reject do |item|
+          item['kind'] == 'not_computed' && %w[affected flows].include?(item['feature'])
+        end
+        data.merge(computed.except('coverage', 'unknowns'))
+            .merge('coverage' => data['coverage'].merge(computed.fetch('coverage')),
+                   'unknowns' => unknowns + computed.fetch('unknowns'))
+      end
 
       def build(range, changes, endpoint_unknowns)
         coverage = DEFERRED.to_h { |feature| [feature, 'not_computed'] }
