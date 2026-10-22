@@ -42,6 +42,52 @@ RSpec.describe Woods::Impact::Store do
     expect(path.dirname.children.map { |entry| entry.basename.to_s }).to eq(['impact.json'])
   end
 
+  %i[write fsync].each do |operation|
+    it "can retry after the first temporary #{operation} fails without stranding its new directory" do
+      failed = false
+      allow(Tempfile).to receive(:new).and_wrap_original do |original, *arguments|
+        original.call(*arguments).tap do |temporary|
+          unless failed
+            failed = true
+            allow(temporary).to receive(operation).and_raise(Errno::ENOSPC)
+          end
+        end
+      end
+      id = Digest::SHA256.hexdigest(json)
+      expect { store.save(json) }.to raise_error(described_class::Error)
+      expect(store.path_for(id).dirname).not_to exist
+      expect(store.save(json)).to eq(id)
+      expect(store.read(id)).to eq(json)
+    end
+  end
+
+  it 'can retry after its first no-replace link fails transiently' do
+    failed = false
+    allow(File).to receive(:link).and_wrap_original do |original, *arguments|
+      unless failed
+        failed = true
+        raise Errno::EIO
+      end
+      original.call(*arguments)
+    end
+    id = Digest::SHA256.hexdigest(json)
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(store.path_for(id).dirname).not_to exist
+    expect(store.save(json)).to eq(id)
+    expect(store.read(id)).to eq(json)
+  end
+
+  it 'preserves a nonempty destination if failure occurs after the report link is created' do
+    allow(File).to receive(:link).and_wrap_original do |original, *arguments|
+      original.call(*arguments)
+      raise Errno::EIO
+    end
+    id = Digest::SHA256.hexdigest(json)
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(store.read(id)).to eq(json)
+    expect(store.save(json)).to eq(id)
+  end
+
   it 'refuses corrupt or incomplete existing ID destinations without overwriting them' do
     id = store.save(json)
     path = store.path_for(id)
@@ -49,8 +95,10 @@ RSpec.describe Woods::Impact::Store do
     expect { store.save(json) }.to raise_error(described_class::Error)
     expect(path.read).to eq('{}')
     FileUtils.rm(path)
+    directory_inode = path.dirname.stat.ino
     expect { store.save(json) }.to raise_error(described_class::Error)
     expect(path).not_to exist
+    expect(path.dirname.stat.ino).to eq(directory_inode)
   end
 
   it 'refuses symlink components, ID directories, report files and lock files' do

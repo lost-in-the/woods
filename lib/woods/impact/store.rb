@@ -121,8 +121,7 @@ module Woods
           if destination.dirname.exist?
             raise Error, 'Conflicting saved impact report' unless read(id) == json
           else
-            Dir.mkdir(destination.dirname, 0o700)
-            publish(destination, json)
+            publish_new(destination, json)
           end
         end
         id
@@ -160,6 +159,23 @@ module Woods
           file.flock(File::LOCK_EX)
           yield
         end
+      end
+
+      def publish_new(destination, json)
+        Dir.mkdir(destination.dirname, 0o700)
+        begin
+          publish(destination, json)
+        rescue StandardError
+          discard_empty(destination.dirname)
+          raise
+        end
+      end
+
+      def discard_empty(directory)
+        Dir.rmdir(directory)
+      rescue Errno::ENOTEMPTY, Errno::EEXIST, Errno::ENOENT
+        # Preserve nonempty evidence; cleanup is only for this call's empty directory.
+        nil
       end
 
       def publish(destination, json)
