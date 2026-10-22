@@ -20,6 +20,7 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   # directory, so pointing the server at the tracked fixture would have the
   # suite write records into the repo.
   around do |example|
+    @pipeline_threads = []
     Dir.mktmpdir do |dir|
       FileUtils.cp_r(File.join(File.expand_path('../../fixtures/woods', __dir__), '.'), dir)
       @index_dir = dir
@@ -29,13 +30,20 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
         # The tool answers immediately and finishes on a background thread that
         # releases the pipeline lock from inside this directory. Let it land
         # before mktmpdir removes the ground from under it.
-        drain_background_threads
+        drain_pipeline_threads
       end
     end
   end
 
-  def drain_background_threads
-    (Thread.list - [Thread.current]).each { |t| t.join(2) }
+  def drain_pipeline_threads
+    until @pipeline_threads.empty?
+      thread = @pipeline_threads.first
+      begin
+        expect(thread.join(2)).to eq(thread)
+      ensure
+        @pipeline_threads.shift unless thread.alive?
+      end
+    end
   end
 
   let(:server) do
@@ -48,6 +56,22 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   # Woods::Extractor needs a booted Rails, so it is stubbed the same way
   # server_spec does it.
   before do
+    # Capture only the handles created synchronously by pipeline dispatch.
+    # Process-wide services (such as Timeout's worker) are not ours to join;
+    # the pipeline itself joins its lock heartbeat before releasing the lock.
+    pipeline_caller = nil
+    allow(Thread).to receive(:new).and_wrap_original do |original, *args, &block|
+      thread = original.call(*args, &block)
+      @pipeline_threads << thread if Thread.current == pipeline_caller
+      thread
+    end
+    allow(Woods::MCP::Server).to receive(:run_pipeline_in_background).and_wrap_original do |original, **args|
+      pipeline_caller = Thread.current
+      original.call(**args)
+    ensure
+      pipeline_caller = nil
+    end
+
     stub_const('Woods::Extractor', double('ExtractorClass', new: fake_extractor))
     stub_const('Woods::MCP::Server::PIPELINE_LOCK_WAIT', 0)
     config = Woods.configuration || Woods::Configuration.new
@@ -56,7 +80,7 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
   end
 
   after do
-    drain_background_threads
+    drain_pipeline_threads
   end
 
   let(:fake_extractor) { double('Extractor', raise_on_publication_failure!: nil) }
@@ -235,12 +259,10 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
       task = rpc('tasks/get', task_params(task_id)).fetch('result')
       expect(task['status']).to eq('failed')
       expect(task.dig('error', 'message')).to include('out of memory')
+      # The task record precedes thread termination. Join the owned handle so
+      # its fatal exception is asserted, not swallowed or raced by teardown.
+      expect { drain_pipeline_threads }.to raise_error(fatal, 'out of memory')
     ensure
-      # The record lands before the thread dies, so the hooks' drain could
-      # still find the thread alive and join it; Thread#join re-raises the
-      # error a thread died with, which would fail this example for the
-      # very behaviour it asserts. Let the thread finish dying first.
-      settle { (Thread.list - [Thread.current]).empty? }
       Thread.report_on_exception = previous
     end
   end
