@@ -10,6 +10,18 @@ on:
     branches: [main, release/1.6.4, release/2.0.1]
     tags: ['v*']
 
+# Keep only the newest automatic main/PR run. Release refs and reruns need
+# independent groups: even cancel-in-progress: false replaces pending runs.
+# An older SHA's rerun must never cancel the current head's validation.
+concurrency:
+  group: >-
+    ${{ github.workflow }}-${{ github.run_attempt == 1 &&
+      ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+       (github.event_name == 'pull_request' && github.base_ref == 'main' &&
+        !startsWith(github.head_ref, 'release/'))) &&
+      github.ref || format('run-{0}-attempt-{1}', github.run_id, github.run_attempt) }}
+  cancel-in-progress: true
+
 # Least-privilege default: CI only needs to read the checkout.
 # Per-job blocks can opt into stronger scopes if they ever need to.
 permissions:
