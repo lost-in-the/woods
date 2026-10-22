@@ -17,6 +17,18 @@ RSpec.describe Woods::Impact::PublishedRisks do
     expect(result['risks']).to all(include('evidence' => include('artifact' => 'graph_analysis.json')))
   end
 
+  it 'retains a producer-shaped through crossing when both endpoint databases are the same' do
+    crossing = { 'from' => 'Example', 'to' => 'Other', 'via' => 'has_many', 'from_db' => 'primary',
+                 'to_db' => 'primary', 'through' => 'example_links', 'through_db' => 'secondary',
+                 'disable_joins' => false, 'kind' => 'join_through_across_databases' }
+    analysis['cross_database_edges'] = [crossing]
+    units[%w[Other model]] = units.delete(%w[Other service])
+    result = described_class.new(analysis, units).call(%w[Example model])
+    expect(result['risks']).to include(include('kind' => 'cross_database',
+                                               'evidence' => include('fact' => crossing)))
+    expect(result['unknowns']).not_to include(include('kind' => 'cross_database_binding_unavailable'))
+  end
+
   it 'retains a contradictory published type as unknown instead of flagging another actual type' do
     analysis['hubs'].first['type'] = 'service'
     result = described_class.new(analysis, units).call(%w[Example model])
