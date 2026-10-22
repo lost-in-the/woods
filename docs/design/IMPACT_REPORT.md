@@ -1,6 +1,6 @@
 # Impact range core, JSON version 1
 
-Development contract for the first slice of [W-12 / #762](https://github.com/lost-in-the/woods/issues/762),
+Development contract for the core and propagation slices of [W-12 / #762](https://github.com/lost-in-the/woods/issues/762),
 under [#750](https://github.com/lost-in-the/woods/issues/750).
 Woods owns the comparison and report; Woods Map will render it (design decision D-1).
 This document describes implemented core behavior, not completion of the issue.
@@ -47,13 +47,15 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 |---|---|
 | `schema_version` | Integer `1` |
 | `range` | `from`, `to` endpoint objects |
+| focus mode | `range:null`, top-level `endpoint` provenance and exact typed `focus` roots; `changed:[]` |
 | endpoint | Original `selector`, integer `generation`, nullable manifest `git_sha`, `manifest_checksum` (SHA-256 of its manifest) |
-| `parameters` | `{"mode":"range"}`; no silently accepted filters |
+| `parameters` | `mode:"range"`, depth, types, via and explicit finite budgets; unsupported inputs raise |
 | `changed` | Array sorted by identifier then actual type |
 | change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats` |
 | `diff_stats` | `source_before`, `source_after`: null when absent/unavailable, otherwise `bytes` and `lines` of each complete source |
-| `affected`, `flows`, `tables`, `templates`, `tests`, `risks`, `commits` | Reserved empty arrays; corresponding coverage is `not_computed` |
-| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; all deferred analyses, including `focus`, explicitly `not_computed` |
+| `affected`, `flows`, `risks` | Bounded endpoint-specific evidence, described below |
+| `tables`, `templates`, `tests`, `commits` | Reserved empty arrays; corresponding coverage is `not_computed` |
+| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; affected/flows `bounded` or `partial`, risks `partial`; focus mode has `focus:"typed_units"`, while deferred analyses remain `not_computed` |
 | `unknowns` | Structured records for each deferred feature, unbound snapshot evidence, unavailable sources and unclassified changes |
 
 `manifest_checksum` covers only `manifest.json`, not unit content. Different
@@ -93,12 +95,159 @@ are detached and recursively frozen. Identical selectors and payload inputs
 produce identical bytes. Equivalent selectors can preserve different original
 selector values in provenance.
 
+## Typed propagation and retained flow evidence
+
+`compare` accepts `depth` (default 2, 0..10), `types` and `via` arrays (default
+null: unrestricted). Type and via filters restrict traversal at every hop,
+not just displayed results. Type strings are actual published types. No hidden
+singularization, query-time PageRank calculation or new graph analysis occurs.
+
+Removed roots traverse base evidence. Modified/added roots traverse head evidence.
+Every affected record and path carries `endpoint` (`from`/`to`) and `generation`.
+The same typed unit can appear in both endpoints with different evidence.
+Each record includes `identifier`, `type`, minimum `distance`, nullable `weight`,
+and `paths`. Paths contain the typed changed `root` and typed relationship `edges`
+with their published `via`, `through`, `through_db` and `disable_joins` attributes.
+Edges retain dependency direction (dependent source → target); the path array
+orders witnesses outward from the changed root.
+
+Traversal consumes published `reverse_via` in its published deterministic order.
+It retains exact typed source ownership and requires a matching target type hint
+or a unique actual target type. Conflicting hints, ambiguous targets, and missing
+source identities remain unknown. One shortest witness is retained per root and
+affected typed identity; these are bounded witnesses, not exhaustive paths.
+Cycles terminate. PageRank comes only from the published identifier-valued map;
+typed collisions or missing scores get null weights and explicit unknowns.
+
+Per endpoint, all roots share `max_nodes` (default 1000, cap 10000) and `max_edges`
+(default 10000, cap 100000); witness visits include roots. Edge examination is
+charged before record interpretation. Hitting a budget retains observed evidence
+and records `node_budget`/`edge_budget`. Depth bounds the requested radius;
+coverage remains bounded and never implies whole-application completeness.
+
+W13's exact typed inverse selects entrypoints. Each flow index path must stay
+inside the locked payload without symlink components or traversal. Each document
+must name the expected entrypoint and contain every claimed normalized typed step.
+Flow records carry endpoint/generation, `entry_point`, nullable published `route`,
+and typed `changed_steps`. No historical flow is assembled from current source.
+Absent/corrupt legacy artifacts produce explicit unknowns, never no-impact claims.
+
+Flow work shares endpoint budgets: `max_flow_documents` (default 100, cap 1000),
+`max_flow_steps` (default 10000, cap 100000; includes inverse memberships), and
+`max_flow_operations` (default 10000, cap 100000). Calls and async operations,
+including nested branches, preserve unknown expansion status and ambiguous
+candidates; unit membership cannot establish method-call expansion. Cycles and
+missing operation facts are explicit unknowns. Observed unknowns survive budget
+exhaustion. Dynamic-dispatch operations retain `unresolved_dynamic_dispatch`
+unknowns with captured target/method/ambiguity/argument hints and line evidence;
+operation-level cycles remain `flow_operation_cycle`, distinct from `flow_cycle`
+step markers. Nested operations use the same walk and shared work budget.
+Each optional artifact is limited to 16 MiB, recorded as
+`artifact_max_bytes`, with invalid UTF-8 and nonregular files refused.
+
+## Focus and risk evidence
+
+`Report.focus(index_dir, identities: [{"identifier" => "Example", "type" => "model"}],
+at: "now", **parameters)` plans a change against one captured retained endpoint.
+Identities must be exact, nonempty string-keyed identifier/type pairs (1..10000);
+they are deduplicated and sorted. Missing, untyped or method selectors that do not
+exist as actual typed units fail explicitly. Method names are never widened to
+their owning classes. `parameters.mode` is `focus`, `range` is null, `endpoint`
+holds provenance, and `focus` holds the roots. Current evidence uses side `to`.
+`coverage.focus` is `typed_units`; this is not method-level acceptance of E-9.
+
+Risk objects carry `kind`, typed `unit`, `endpoint`, `generation`, and `evidence`.
+The adapter consumes the selected endpoint's `graph_analysis.json`; it never
+recomputes structural analysis. Published hub/bridge flags require positive
+published metrics; cycles require unambiguous typed identities throughout, and
+cross-database facts require both endpoints to bind uniquely to inventory units
+and distinct published database names across the endpoints or a recorded through
+association. Equal endpoint databases do not erase a crossing through another
+database. Collisions and truncated cycle lists stay
+unknown. These remain the producer's bounded heuristic classifications.
+
+Captured metadata can flag changes in recorded filter arrays, callback side
+effects (including recorded callback-chain order), and removed records between
+two nonempty foreign-key captures. Legacy producers use empty foreign-key arrays
+for failed or unsupported introspection too; empty captures remain unknown without
+trustworthy completeness evidence. This adapter does not fabricate such evidence.
+Missing arrays are unavailable evidence, not empty arrays. Focus mode has no before/after
+comparison and does not manufacture change flags. Jobs are flagged as
+`job_without_retry_touched` only for a recorded Sidekiq job with explicit literal
+retry disablement and no captured enabled retry policy. Retry facts come only
+from the endpoint named on the risk; before/after metadata is used separately
+for change comparisons. Missing/inherited or
+dynamic policy stays unknown; the report does not prove global absence of retries.
+
+All inspected units/structural records and relevant metadata array entries share
+`max_risk_records` per endpoint (default 10000, cap 100000). Budget exhaustion
+retains earlier evidence and records `risk_record_budget`. Risk coverage is always
+partial. New instance-variable mismatch detection remains explicitly not computed;
+absence of flags never proves safety. Evidence locators reference published
+artifact families or metadata keys, not live files, generated URLs or runtime facts.
+
+## Pure report renderers
+
+Require `woods/impact/renderers` and pass the same immutable report (or its
+string-keyed version 1 hash) to `Renderers.markdown(report)` or
+`Renderers.mermaid(report)`. Unsupported schema versions and incompatible range
+or focus envelopes raise. Renderers query no index, source files or runtime.
+
+Markdown contains at most 60 lines, with one visible item and up to five collapsed
+items per section. Additional entries are counted as omitted and remain in JSON.
+Changed/affected units, flows, risks, tests and unknowns have separate sections;
+coverage and unknown counts remain visible even when an array is empty.
+
+Mermaid emits `flowchart LR` from recorded witness edges. Arrows point outward
+from changed or focused targets to affected dependents, rather than depicting the
+underlying dependency direction. Node identity includes endpoint, generation,
+identifier and actual type. Witness context must match its affected record.
+Display limits are 60 nodes (including a visible coverage note) and 120 edges;
+truncation is explicit. Neither renderer proves exhaustive paths or complete impact.
+
+Labels use format-specific numeric escaping, remain on one line and are clipped
+to 240 characters before escaping. Output is deterministic for a fixed report.
+This slice validates text contracts; browser/Mermaid-parser rendering remains
+unverified. Renderers return strings and do not post comments or save/share reports.
+
+## Task, saved JSON and conditional MCP
+
+`woods:impact[from,to]` requires a base selector and defaults the head to `now`.
+It reads `WOODS_OUTPUT` or the configured output directory without booting Rails.
+For pre-change planning, set `FOCUS` to a JSON array of exact typed identity
+objects, optionally `AT=gen:N`, and omit both positional range arguments.
+`WOODS_IMPACT_OPTIONS` accepts a JSON object of the existing query options;
+unknown options, mixed modes and invalid formats fail explicitly.
+
+`FORMAT` is `markdown` (default), `json` or `mermaid`. The task computes once and
+saves exact canonical `report.to_json` bytes under
+`<index>/explorer/impacts/<sha256-of-json>/impact.json`, independent of display
+format. Identical saves are idempotent; existing conflicting content and unsafe
+symlink destinations fail. Existing storage directories with permissions broader
+than 0700 are deliberately refused rather than chmodded. Saved files use 0600
+permissions and publication is atomic. Saved JSON remains available after payload
+retention without recomputing a report. Display goes to stdout; the local saved location goes to stderr. Risk
+flags do not introduce a new exit policy; invalid input or persistence errors fail.
+
+The read-only `change_impact` MCP tool registers only with `snapshot_store:`.
+That collaborator gates registration; retained payloads remain comparison authority,
+and an empty snapshot store does not prevent a retained range comparison.
+The tool accepts string `from`/`to` selectors, or `focus` plus optional `at`, the
+same query options, and `format:markdown|json|mermaid`. Depth is 0..10 and focus is
+limited to 1000 typed identities at the MCP boundary (the Ruby API allows 10000).
+Every format returns the same report under `structuredContent.data` and uses the
+shared pure renderer. The tool never saves or shares a report. Missing/corrupt
+required inputs remain errors, including non-object JSON manifests.
+
+Distributed plugin skill guidance remains deferred because its required plugin
+version bump is outside this slice. The canonical guides describe development
+capabilities; installed releases must be checked for actual tool registration.
+
 ## Remaining W-12 work and dependencies
 
-Not implemented: focus/pre-change reports, typed propagation through `reverse_via`,
-depth/type/via filters, PageRank weighting, evidence paths, flows/routes, tables,
-templates, suggested tests, risk detection, commit ranges, hunks, Markdown and
-Mermaid renderers, rake task, MCP registration, saved reports, URLs or Map UI.
+Not implemented: method-scoped pre-change reports, new instance-variable mismatch
+detection, tables, templates, suggested tests, commit ranges, hunks, distributed
+plugin guidance, URLs or Map UI.
 An empty reserved array means **not computed**, never “no impact” or “no risk”.
 
 W-10 (#773) adds ordered `source`, `metadata`, `dependencies` facets to modified
@@ -108,12 +257,12 @@ unavailable. W-11 (#774) pins payload generation N against retention, not snapsh
 rows; this core uses existing reader locks and does not manage persistent pins.
 W-13 (#775) publishes `flows/by_unit.json` as identifier → actual type → sorted
 entrypoint strings. Membership describes expanded flow steps only; absence
-cannot prove no flow reaches a unit. The core consumes none of those pending
-branches and changes no extraction layout, schema, task, configuration or MCP surface.
+cannot prove no flow reaches a unit. W-10, W-11 and W-13 are merged foundations.
+This backend changes no extraction layout or configuration. It adds one rake task
+and one conditional MCP tool, reading W13's merged format without changing its producer.
 
-Future propagation must use base evidence for removed units and head evidence
-for current units, mark ambiguous/unavailable targets, and retain generation
-provenance on paths. It must not splice generations or reuse Map's identifier-only
-BlastRadius unchanged. Method-level scope and commit lists still depend on W-1,
+Propagation uses base evidence for removed units and head evidence for current
+units and does not splice generations or reuse Map's identifier-only BlastRadius.
+Method-level scope and commit lists still depend on W-1,
 W-6 and W-3. Testbed reproducibility and the umbrella's full/incremental matrix
 acceptance remain unverified by these synthetic core contracts.

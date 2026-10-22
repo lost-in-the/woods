@@ -86,7 +86,7 @@ Use a supported Ruby (3.0 or later; the repository intentionally has no single v
 ### Index MCP
 
 - The packaged default exposes 14 tools. `codebase_retrieve` needs embeddings in default semantic mode; explicit `WOODS_RETRIEVAL_MODE=lexical` ranks published extraction units without a provider or vector artifacts.
-- The other 15 schemas require specialized builder collaborators or configuration. The packaged executable does not wire pipeline-operator or feedback-store capabilities.
+- The other 16 schemas require specialized builder collaborators or configuration. The packaged executable does not wire pipeline-operator or feedback-store capabilities.
 - Extraction runs in Rails; the Index Server reads the published index without booting Rails.
 - Docker clients must use a path visible to the process that starts MCP. Prefer running MCP through the application container when Woods is installed only there; a host launch requires the host bundle and a host-visible index.
 - Keep stdout protocol-only. Normally leave `MCP_PROTOCOL_VERSION` unset so the SDK negotiates.

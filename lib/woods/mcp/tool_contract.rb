@@ -13,6 +13,10 @@ module Woods
       INTEGER_BOUNDS = {
         'max_nodes' => [1, 10_000],
         'max_edges' => [1, 100_000],
+        'max_flow_documents' => [1, 1_000],
+        'max_flow_steps' => [1, 100_000],
+        'max_flow_operations' => [1, 100_000],
+        'max_risk_records' => [1, 100_000],
         'budget' => [1, 200_000],
         'depth' => [0, 20],
         'limit' => [1, 1_000],
@@ -101,6 +105,8 @@ module Woods
         # failure has to name the table and the property that needs the entry,
         # not surface as a bare KeyError far from its cause.
         def integer_bounds(name, tool_name)
+          return [0, 10] if tool_name == 'change_impact' && name.to_s == 'depth'
+
           INTEGER_BOUNDS.fetch(name.to_s) do
             raise ArgumentError,
                   "#{tool_name}: integer property '#{name}' has no entry in " \

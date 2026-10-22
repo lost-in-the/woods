@@ -53,7 +53,7 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ## Conditional Tools & Wiring
 
-The Index Server defines **29 schemas**: the packaged executable registers **14**, while **15** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
+The Index Server defines **30 schemas**: the packaged executable registers **14**, while **16** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
@@ -61,7 +61,7 @@ The Index Server defines **29 schemas**: the packaged executable registers **14*
 | `session_trace` | 1 | Custom/embedded Index process has a configured `session_store` supporting `read` and `sessions`; the packaged executable does not load Rails initializer configuration |
 | Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
-| Snapshot (4) | 4 | Extraction with `enable_snapshots = true` normally creates `woods.sqlite3`, which packaged servers discover. `WOODS_SNAPSHOTS=true` enables construction, preferring SQLite; it does not force JSON or import JSON history. Custom builders can pass an explicit JSON `snapshot_store:`; see [store selection](MCP_SERVERS.md#conditional-index-capabilities). Internal SQLite migrations are automatic. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail` |
+| Snapshot/impact (5) | 5 | Extraction with `enable_snapshots = true` normally creates `woods.sqlite3`, which packaged servers discover. `WOODS_SNAPSHOTS=true` enables construction, preferring SQLite; it does not force JSON or import JSON history. Custom builders can pass an explicit JSON `snapshot_store:`; see [store selection](MCP_SERVERS.md#conditional-index-capabilities). Internal SQLite migrations are automatic. Tools: `list_snapshots`, `snapshot_diff`, `unit_history`, `snapshot_detail`, `change_impact` |
 | `notion_sync` | 1 | Token and `notion_database_ids` configured inside a custom/embedded Index process; use `bin/rails woods:notion_sync` for ordinary application export |
 
 `codebase_retrieve` is always registered (no `retrieve` alias exists). Default semantic mode requires an embedding provider and a completed `woods:embed` run. Explicit `WOODS_RETRIEVAL_MODE=lexical` ranks published extraction units without a provider or embeddings; set it in the MCP process environment and restart the server. See [embedding-free lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval).

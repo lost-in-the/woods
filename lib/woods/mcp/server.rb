@@ -18,6 +18,7 @@ require_relative '../update_check'
 require_relative '../retrieval/source_evidence'
 require_relative '../session_tracer/unit_resolver'
 require_relative 'bootstrap_state'
+require_relative 'change_impact'
 require_relative 'errors'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
@@ -33,10 +34,10 @@ require_relative 'version_aware_tool_dispatch'
 
 module Woods
   module MCP
-    # Builds an MCP::Server with up to 29 tools, 2 resources, and 2 resource templates
+    # Builds an MCP::Server with up to 30 tools, 2 resources, and 2 resource templates
     # for querying Woods extraction output, managing pipelines, and collecting feedback.
-    # 14 tools are always registered; 15 more register conditionally based on wiring:
-    # 5 operator tools, 4 feedback tools, 4 snapshot tools, 1 session_trace tool,
+    # 14 tools are always registered; 16 more register conditionally based on wiring:
+    # 5 operator tools, 4 feedback tools, 5 snapshot/impact tools, 1 session_trace tool,
     # 1 Notion sync tool.
     #
     # All tools are defined inline via closures over an IndexReader instance.
@@ -205,6 +206,7 @@ module Woods
           define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator
           define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
+          define_change_impact_tool(server, index_dir, respond, respond_err) if snapshot_store
           define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
           define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
           register_resource_handler(server, reader)
@@ -1939,6 +1941,21 @@ module Woods
                                                 issues_found: issues.size,
                                                 issues: issues
                                               }))
+          end
+        end
+
+        def define_change_impact_tool(server, index_dir, respond, respond_err)
+          server.define_tool(
+            name: 'change_impact',
+            description: 'Compare retained generations or plan exact typed focus roots. Uses bounded published evidence, ' \
+                         'with explicit unknowns; never proves complete impact or safety. Returns shared Markdown, JSON ' \
+                         'or Mermaid plus the complete versioned report. Does not save or share reports.',
+            input_schema: ChangeImpact.schema
+          ) do |server_context:, **arguments|
+            text, data = ChangeImpact.call(index_dir, **arguments)
+            respond.call(text, data: data)
+          rescue ArgumentError => e
+            respond_err.call(e.message, code: :invalid_params, tool: 'change_impact')
           end
         end
 

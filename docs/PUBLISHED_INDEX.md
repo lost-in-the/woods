@@ -255,7 +255,8 @@ Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI
 `require 'woods/impact/report'` exposes
 `Woods::Impact::Report.compare(index_dir, from: 'gen:41', to: 'now')`.
 This is the first bounded slice of [W-12](https://github.com/lost-in-the/woods/issues/762),
-covering retained endpoint resolution, typed unit comparison and immutable JSON.
+covering retained endpoint resolution, typed unit comparison and immutable JSON,
+with bounded reverse propagation and retained flow evidence in a follow-up slice.
 It does not complete W-12. See the [version 1 contract](design/IMPACT_REPORT.md)
 for selectors, fields, coverage gaps and dependency boundaries.
 

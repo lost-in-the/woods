@@ -126,6 +126,12 @@ namespace :woods do
     puts JSON.generate(Woods::SourceInputs::Status.from_transport(args[:options]))
   end
 
+  desc 'Compute, save locally and render an impact report from retained generations'
+  task :impact, %i[from to] do |_task, args|
+    require 'woods/impact/task'
+    Woods::Impact::Task.new(from: args[:from], to: args[:to]).run
+  end
+
   desc 'Tend the garden — incremental extraction (alias for incremental)'
   task tend: :incremental
 

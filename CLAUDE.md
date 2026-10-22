@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (29-tool index server, 14 always-on + 15 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (30-tool index server, 14 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -172,7 +172,7 @@ lib/
 │   ├── export/                          # Shared export fact extraction (UnitFacts) over unit metadata
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
 │   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
-│   ├── mcp/                             # MCP Index Server (29 tools, 14 always-on + 15 wiring-conditional: 5 operator / 4 feedback / 4 snapshot / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (30 tools, 14 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tool schemas across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; only Tier 1 plus the two read tools register)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)

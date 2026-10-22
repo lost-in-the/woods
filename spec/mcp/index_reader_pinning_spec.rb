@@ -12,7 +12,7 @@ require 'woods/operator/pipeline_guard'
 require 'woods/operator/status_reporter'
 
 RSpec.describe Woods::MCP::IndexReaderPinning do
-  # A server with every optional collaborator wired registers all 29 tools
+  # A server with every optional collaborator wired registers all 30 tools
   # (see Woods::MCP::Server#build) — the full set pin coverage must account
   # for. Building it once per example, the same way spec/mcp/tool_contract_spec.rb
   # does, rather than the 14-tool default `spec/mcp/server_spec.rb` uses.
@@ -62,8 +62,8 @@ RSpec.describe Woods::MCP::IndexReaderPinning do
     server.instance_variable_get(:@woods_index_reader_tool_names)
   end
 
-  it 'registers all 29 tools when fully wired' do
-    expect(full_server.tools.keys.size).to eq(29)
+  it 'registers all 30 tools when fully wired' do
+    expect(full_server.tools.keys.size).to eq(30)
   end
 
   it 'leaves reload as the sole non-reader exception' do
