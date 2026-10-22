@@ -98,6 +98,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#close` | nil | Releases the retention lock; safe to call more than once |
 | `#unit(identifier, type: nil)` | Hash or nil | The unit JSON, string keys; see the collision note below |
 | `#units(type: nil)` | `Array<Hash>` | `_index.json` entries plus `"type"` |
+| `#each_unit` | Enumerator or yielded unit hashes | Guarded bulk read of complete bodies, preserving actual types; corrupt or missing indexed units raise |
 | `#edges(via: nil)`, `#each_edge` | `Array<Hash>` | Every forward edge with `through`, `through_db`, and `disable_joins`; an identifier shared by more than one type contributes one edge per owning type, never folded into a single deduplicated entry |
 | `#dependents_of(identifier, via: nil)` | `Array<String>` | Reverse index |
 | `#table_database_map` | `Hash` | Model table to database; empty on Rails 6.0 extractions |
@@ -248,6 +249,15 @@ added
 ```
 
 Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI runner that compares against an older baseline, or the older side of the comparison may no longer be published.
+
+## Impact range core (development)
+
+`require 'woods/impact/report'` exposes
+`Woods::Impact::Report.compare(index_dir, from: 'gen:41', to: 'now')`.
+This is the first bounded slice of [W-12](https://github.com/lost-in-the/woods/issues/762),
+covering retained endpoint resolution, typed unit comparison and immutable JSON.
+It does not complete W-12. See the [version 1 contract](design/IMPACT_REPORT.md)
+for selectors, fields, coverage gaps and dependency boundaries.
 
 ## Moved-message check
 

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'forwardable'
 require 'json'
 require 'pathname'
 require_relative 'generation'
@@ -60,6 +61,8 @@ module Woods
   #   end
   #
   class PublishedIndex
+    extend Forwardable
+
     # Raised when `generation.json` exists but cannot be parsed. Distinct from
     # a *missing* pointer file, which means a flat (pre-2.0) index and is not
     # an error.
@@ -161,9 +164,7 @@ module Woods
     # @return [Hash, nil] string-keyed unit, or nil
     # @raise [IOError] when a typed read fails the payload guards
     def unit(identifier, type: nil)
-      return @reader.find_unit(identifier) if type.nil?
-
-      TypedUnitReader.call(@reader, identifier, type.to_s)
+      type.nil? ? @reader.find_unit(identifier) : TypedUnitReader.call(@reader, identifier, type.to_s)
     end
 
     # Index entries, each with a `'type'` key added.
@@ -182,6 +183,15 @@ module Woods
                .filter_map { |entry| TypedUnitReader.entry(@reader, entry, dir, type&.to_s) }
       end
     end
+
+    # Enumerate complete units using the guarded bulk reader. Unlike index
+    # summaries, bodies preserve actual types in shared directories. Missing,
+    # corrupt or mismatched indexed units raise instead of being skipped.
+    # The generation remains locked for this PublishedIndex's lifetime.
+    #
+    # @yieldparam unit [Hash] string-keyed published unit
+    # @return [Enumerator, void]
+    def_delegator :@reader, :each_unit
 
     # Every forward edge in the graph, primary nodes and variants alike.
     #
