@@ -2,6 +2,7 @@
 
 require_relative 'pass'
 require_relative 'cache'
+require_relative 'projector'
 
 module Woods
   module SourceReferences
@@ -15,6 +16,7 @@ module Woods
         units = @results.values.flatten
         records = units.map { |unit| reference_record(unit) }
         result = reference_pass(records, full: true)
+        @source_reference_occurrences = result.references
         units.each do |unit|
           edges = result.dependencies[[unit.type.to_s, unit.identifier]]
           next unless edges
@@ -26,6 +28,21 @@ module Woods
         write_source_reference_cache(result)
       end
 
+      # Full extraction builds line maps after the reference pass. Projection
+      # belongs here, after normalization and before any unit is serialized.
+      def project_source_references_full
+        projector = source_reference_projector
+        @results.values.flatten.each do |unit|
+          key = [unit.type.to_s, unit.identifier]
+          raw = @source_reference_occurrences&.fetch(key, []) || []
+          unit.metadata[:references] = projector.call(reference_record(unit), raw)
+        end
+      end
+
+      def source_reference_projector
+        Projector.new(source_reader: ->(path) { @source_inputs.read_source(path).fetch('source') })
+      end
+
       def internal_reference_edges(edges)
         edges.map do |edge|
           edge.transform_keys(&:to_sym).merge(type: edge.fetch('type').to_sym, via: edge.fetch('via').to_sym)
@@ -34,7 +51,8 @@ module Woods
 
       def reference_record(unit)
         { 'type' => unit.type.to_s, 'identifier' => unit.identifier, 'file_path' => unit.file_path,
-          'metadata' => unit.metadata, 'dependencies' => JSON.parse(JSON.generate(unit.dependencies)) }
+          'source_code' => unit.source_code, 'metadata' => JSON.parse(JSON.generate(unit.metadata)),
+          'dependencies' => JSON.parse(JSON.generate(unit.dependencies)) }
       end
 
       # Called before any incremental consumer mutates the seeded generation.
@@ -103,15 +121,24 @@ module Woods
           reference_pass(records.values.map { |entry| reference_pass_unit(entry.fetch(:data)) }, full: false)
         end
         touched = Set.new
+        projector = source_reference_projector
         result.dependencies.each do |identity, edges|
           record = records.fetch(identity)
-          next if record.fetch(:data).fetch('dependencies', []) == edges
+          next unless record[:path]
 
-          rewrite_source_reference_edges(record, edges, affected_types)
+          data = record.fetch(:data)
+          references = projector.call(data, result.references.fetch(identity))
+          next if source_reference_unchanged?(data, edges, references)
+
+          rewrite_source_reference_edges(record, edges, references, affected_types)
           touched.add(identity.last)
         end
         write_source_reference_cache(result)
         touched
+      end
+
+      def source_reference_unchanged?(data, edges, references)
+        data.fetch('dependencies', []) == edges && data.dig('metadata', 'references') == references
       end
 
       # A retained unit ({Extractor#retain_unit}) is fresh to the pass, which
@@ -167,8 +194,9 @@ module Woods
         CallerPolicy.new(Woods.configuration.source_reference_callers)
       end
 
-      def rewrite_source_reference_edges(record, edges, affected_types)
+      def rewrite_source_reference_edges(record, edges, references, affected_types)
         data = record.fetch(:data)
+        (data['metadata'] ||= {})['references'] = references
         type = data.fetch('type').to_sym
         identifier = data.fetch('identifier')
         node = @dependency_graph.node(identifier, type: type)

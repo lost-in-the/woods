@@ -98,6 +98,16 @@ RSpec.describe Woods::SourceLineMap do
     end
   end
 
+  describe '.project' do
+    it 'inverts a proven run without treating a missing map as identity' do
+      expect(described_class.project([[4, 1, 2], [9, 3, 3]], 4)).to eq(10)
+      expect(described_class.project([[4, 1, 2]], 3)).to be_nil
+      expect(described_class.project(nil, 2)).to be_nil
+      expect(described_class.project([], 2)).to be_nil
+      expect(described_class.project([[1, 1, 3], [5, 1, 3]], 2)).to be_nil
+    end
+  end
+
   describe '.record' do
     let(:dir) { Dir.mktmpdir('source_line_map') }
     let(:path) { File.join(dir, 'ledgers_controller.rb') }

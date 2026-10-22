@@ -27,6 +27,11 @@ RSpec.describe Woods::ExtractedForm do
       expect(described_class.of(published)).to eq(described_class.of(unit))
     end
 
+    it 'ignores pass-derived reference metadata when deciding whether fresh extraction is retainable' do
+      published = unit('metadata' => { 'queue' => 'default', 'references' => [{ 'target' => 'Ledger' }] })
+      expect(described_class.of(published)).to eq(described_class.of(unit))
+    end
+
     it 'ignores git facts on source contributor records' do
       contributors = [{ 'file_path' => 'app/jobs/shipment_job.rb', 'git' => { 'commit_count' => 3 } }]
       bare = [{ 'file_path' => 'app/jobs/shipment_job.rb' }]

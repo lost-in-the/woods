@@ -576,6 +576,7 @@ module Woods
       # Phase 4.5: Normalize file_path to relative paths
       Rails.logger.info '[Woods] Normalizing file paths...'
       profile_phase('path normalization') { normalize_file_paths }
+      profile_phase('reference projection') { project_source_references_full }
 
       # Phase 5: Write output
       Rails.logger.info '[Woods] Writing output...'
@@ -1056,6 +1057,7 @@ module Woods
       @failed_consumers = Set.new
       @source_reference_refreshed = Set.new
       @source_reference_paths = nil
+      @source_reference_occurrences = nil
       @source_reference_baseline = nil
       @source_inputs = SourceInputs::Session.new(root: Rails.root, output_dir: @output_dir,
                                                  baseline_path: source_input_baseline_path,
@@ -2286,6 +2288,7 @@ module Woods
     # @param unit [ExtractedUnit] unit to serialize
     # @return [void]
     def write_unit_file(path, unit)
+      unit.metadata[:references] = [] unless unit.metadata.key?(:references) || unit.metadata.key?('references')
       payload = json_serialize(unit.to_h)
       return if identical_on_disk?(path, payload)
 
@@ -3977,7 +3980,7 @@ module Woods
     # Only an identical extraction permits skipping graph and enrichment work:
     # the published unit and the fresh one agree in {ExtractedForm}, which
     # leaves out what the second pass adds after registration (`dependents`,
-    # Git facts, source-reference edges). A fresh unit carries none of those,
+    # Git facts, source-reference edges and spans). A fresh unit carries none of those,
     # so compared whole it never matched a published unit that had even one
     # dependent. Changed source, metadata or extractor edges keep the ordinary
     # registration path; identity checks already ran.

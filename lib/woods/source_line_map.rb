@@ -47,6 +47,19 @@ module Woods
       start && line < start + length ? original_start + (line - start) : nil
     end
 
+    # Invert an explicit map. Callers must separately prove identity when no
+    # map exists; unlike #translate, absence never implies unchanged placement.
+    # @param map [Array<Array<Integer>>, nil] proven annotated-to-original runs
+    # @param line [Integer] an original source line
+    # @return [Integer, nil] annotated line, or nil for absent/ambiguous placement
+    def project(map, line)
+      matches = Array(map).select { |_start, first, length| line >= first && line < first + length }
+      return unless matches.one?
+
+      start, first, = matches.first
+      start + line - first
+    end
+
     # Store the map for +unit+ in its metadata, or remove a stale one.
     #
     # @param unit [Woods::ExtractedUnit] a unit whose source was read from

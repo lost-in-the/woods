@@ -41,7 +41,7 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 4
+      VERSION = 5
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -166,8 +166,12 @@ module Woods
         end
 
         def reference!(record)
-          shape!(record, %w[owner name nesting line], %w[singleton_depth])
+          shape!(record, %w[owner name nesting line column length], %w[singleton_depth])
           lexical_record!(record)
+          require!(record['column'].instance_of?(Integer) && record['column'].between?(0, MAX_LINE),
+                   'invalid source column')
+          require!(record['length'].instance_of?(Integer) && record['length'].between?(1, MAX_LINE),
+                   'invalid source length')
         end
 
         def lexical_record!(record)

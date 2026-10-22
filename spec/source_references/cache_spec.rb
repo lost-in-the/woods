@@ -52,8 +52,8 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(File.stat(path).mode & 0o777).to eq(0o600)
   end
 
-  it 'is format 4, which records the caller policy that produced the edges' do
-    expect(described_class::VERSION).to eq(4)
+  it 'is format 5, which records the caller policy that produced the edges' do
+    expect(described_class::VERSION).to eq(5)
     data.delete('callers')
     expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /record keys/)
   end
@@ -76,6 +76,23 @@ RSpec.describe Woods::SourceReferences::Cache do
     it "rejects a caller policy with #{label}" do
       data['callers'] = callers
       expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /caller policy/)
+    end
+  end
+
+  it 'refuses format 4 records without positions' do
+    analysis['references'].each do |record|
+      record.delete('column')
+      record.delete('length')
+    end
+    write_json(data.merge('version' => 4))
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
+  end
+
+  [['column', nil], ['column', -1], ['column', 1.5], ['column', 1_000_000_001],
+   ['length', nil], ['length', 0], ['length', -1], ['length', true], ['length', 1_000_000_001]].each do |key, value|
+    it "rejects invalid position #{key}=#{value.inspect}" do
+      analysis['references'].first[key] = value
+      expect { described_class.write(path, data) }.to raise_error(described_class::Invalid)
     end
   end
 

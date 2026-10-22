@@ -19,7 +19,7 @@ module Woods
     # Runtime lookup is repeated every run: source text alone cannot fingerprint
     # changed ancestors, aliases or lexical shadows in a reloaded application.
     class Pass # rubocop:disable Metrics/ClassLength -- keep ownership, policy and edge merging together
-      Result = Struct.new(:dependencies, :cache, :paths, keyword_init: true)
+      Result = Struct.new(:dependencies, :references, :cache, :paths, keyword_init: true)
 
       # @param root [String, Pathname] application root
       # @param session [SourceInputs::Session] original source capture
@@ -46,7 +46,7 @@ module Woods
 
       # rubocop:enable Metrics/ParameterLists
 
-      # @return [Result] complete dependency replacements and next cache
+      # @return [Result] dependency replacements, admitted raw occurrences and next cache
       def call
         verify_baseline! unless @full
 
@@ -69,22 +69,27 @@ module Woods
 
       def build_result
         dependencies = {}
+        references = {}
         owners = @units.filter_map do |unit|
           key = [unit['type'], unit['identifier']]
           path = @inputs.relative(unit['file_path'])
           additions = []
-          if @policy.caller?(unit['type'])
-            base = original_dependencies(unit, key)
-            additions = all_resolved_dependencies(unit).reject { |edge| pair_present?(base, edge) }
-            dependencies[key] = base + additions
-          end
+          dependencies[key], additions, references[key] = resolved_caller(unit, key) if @policy.caller?(unit['type'])
           # Target-only units also crossed Inputs' consumption gate. Retain
           # their exact ownership so bounded freshness can reuse that proof.
           owner_record(unit, path, additions)
         end
         owners.sort_by! { |owner| [owner['type'], owner['identifier']] }
         cache = { 'version' => Cache::VERSION, 'callers' => @policy.to_h, 'files' => @files, 'owners' => owners }
-        Result.new(dependencies: dependencies, cache: cache, paths: @files.keys)
+        Result.new(dependencies: dependencies, references: references, cache: cache, paths: @files.keys)
+      end
+
+      def resolved_caller(unit, key)
+        base = original_dependencies(unit, key)
+        occurrences = resolved_occurrences(unit)
+        edges = occurrences.map(&:first).uniq.sort_by { |edge| edge.values_at('type', 'target', 'via') }
+        additions = edges.reject { |edge| pair_present?(base, edge) }
+        [base + additions, additions, occurrences.map(&:last)]
       end
 
       def owner_record(unit, path, additions)
@@ -128,8 +133,8 @@ module Woods
         prior
       end
 
-      def all_resolved_dependencies(unit)
-        reference_paths(unit).flat_map { |source| resolved_dependencies(unit, source) }.uniq
+      def resolved_occurrences(unit)
+        reference_paths(unit).flat_map { |source| occurrences_in(unit, source) }
       end
 
       def same_owner_paths?(prior, unit, path)
@@ -150,12 +155,21 @@ module Woods
         edge.transform_keys(&:to_s).transform_values { |value| value.is_a?(Symbol) ? value.to_s : value }
       end
 
-      def resolved_dependencies(unit, path)
+      def occurrences_in(unit, path)
         records = @files.dig(path, 'analysis', 'references') || []
-        owned = records.select { |reference| reference['owner'] == unit['identifier'] }
-        edges = owned.filter_map { |reference| @registry.resolve(reference, file_path: path) }
-        edges = edges.map { |edge| normalize_edge(edge) }.select { |edge| @policy.permits?(unit['type'], edge['type']) }
-        edges.uniq.sort_by { |edge| [edge['type'], edge['target'], edge['via']] }
+        records.filter_map do |reference|
+          next unless reference['owner'] == unit['identifier']
+
+          edge = @registry.resolve(reference, file_path: path)
+          next unless edge && @policy.permits?(unit['type'], edge[:type])
+
+          edge = normalize_edge(edge)
+          span = reference.slice('line', 'column', 'length').merge(
+            'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
+            'kind' => 'constant', 'confidence' => 'verified'
+          )
+          [edge, span]
+        end
       end
 
       def raise_rebuild(reason)

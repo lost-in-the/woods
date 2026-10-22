@@ -101,6 +101,35 @@ Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
 
+### Constant-reference spans
+
+The development writer's bounded #751 addition publishes `metadata.references`
+in unit JSON separately from deduplicated graph edges:
+
+```json
+{"line": 8, "column": 4, "length": 6, "target": "Target", "target_type": "service", "kind": "constant", "confidence": "verified"}
+```
+
+The array preserves repeated reads and uses the actual typed registry target.
+Line numbers are 1-based in that unit's published `source_code`; columns are
+0-based UTF-8 byte offsets from the line start, and length is a byte count
+(including original newlines for a multiline qualified constant). Do not use
+character or UTF-16 string offsets to slice spans. Use `source_line_map` to
+translate annotated lines to the primary source, or validated
+`source_contributors` ranges for a composite library unit. Generated lines and
+unproven source placement have no spans. An empty array reports no admitted,
+placeable occurrences in this bounded pass; older indexes may omit the field.
+It does not prove complete call coverage or method-level reachability.
+
+The generation-local internal reference cache is format 5 for this writer;
+format 4 and earlier require a full baseline rebuild before incremental writes.
+Readers may continue to serve their original generation throughout a refused
+upgrade. Copy the complete selected payload, including its reference cache.
+See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
+and [baseline upgrades](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
+Inline payload growth on `rails-8.0-large` is not yet qualified against #751's
+approximately 15% decision threshold; no sidecar format is introduced here.
+
 ### Inverted flow membership
 
 When flows are precomputed, `flows/by_unit.json` is published alongside

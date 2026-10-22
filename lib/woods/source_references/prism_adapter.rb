@@ -85,6 +85,12 @@ module Woods
         node.receiver.nil? || node.receiver.type == :self_node
       end
 
+      # @return [Hash] 1-based line, 0-based UTF-8 byte column and byte length
+      def position(node)
+        location = node.location
+        { 'line' => location.start_line, 'column' => location.start_column, 'length' => location.length }
+      end
+
       def line(node)
         node.location.start_line
       end

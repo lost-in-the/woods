@@ -95,7 +95,7 @@ module Woods
         return skip(node, 'dynamic_constant_path', nesting) unless name
         return skip(node, 'unowned_reference', nesting) if nesting.empty?
 
-        record = { 'owner' => nesting.first, 'nesting' => nesting, 'name' => name, 'line' => @adapter.line(node) }
+        record = { 'owner' => nesting.first, 'nesting' => nesting, 'name' => name, **@adapter.position(node) }
         record['singleton_depth'] = singleton_depth if singleton_depth.positive?
         @result['references'] << record
       end
