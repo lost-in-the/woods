@@ -57,7 +57,11 @@ RSpec.describe 'Watcher reconciliation across publication' do
     Woods::Watch::Daemon.new(root: root, output_dir: index_root, watcher: watcher, debounce: 0,
                              extractor_factory: -> { consumer },
                              reloader: double(enabled?: true, reload!: true),
-                             boot_snapshot: Woods::Watch::BootSnapshot.new(root: root))
+                             boot_snapshot: Woods::Watch::BootSnapshot.new(root: root)).tap do |instance|
+      # Exercise real startup/shutdown without parking in the production tick;
+      # heartbeat cadence and staleness are covered by the daemon specs.
+      allow(instance).to receive(:heartbeat_tick).and_return(0.005)
+    end
   end
 
   # The writer cannot proceed until the edit has landed; no scheduler sleeps
