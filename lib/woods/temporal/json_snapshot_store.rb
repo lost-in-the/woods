@@ -82,6 +82,9 @@ module Woods
         symbolize_snapshot(data).except(:units)
       end
 
+      # Modified entries include changed +facets+ in stable
+      # +[:source, :metadata, :dependencies]+ order, matching SnapshotStore.
+      # Absent legacy hashes compare as nil, including nil-to-value changes.
       def diff(sha_a, sha_b)
         snap_a = load_snapshot_with_units(sha_a)
         snap_b = load_snapshot_with_units(sha_b)
@@ -208,7 +211,7 @@ module Woods
         end.to_h
       end
 
-      def compute_diff(units_a, units_b) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      def compute_diff(units_a, units_b)
         added = []
         modified = []
         deleted = []
@@ -216,10 +219,11 @@ module Woods
         units_b.each do |identifier, data_b|
           if units_a.key?(identifier)
             data_a = units_a[identifier]
-            if data_a[:source_hash] != data_b[:source_hash] ||
-               data_a[:metadata_hash] != data_b[:metadata_hash] ||
-               data_a[:dependencies_hash] != data_b[:dependencies_hash]
-              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
+            facets = %i[source metadata dependencies].reject do |facet|
+              data_a[:"#{facet}_hash"] == data_b[:"#{facet}_hash"]
+            end
+            unless facets.empty?
+              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type], facets: facets }
             end
           else
             added << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }

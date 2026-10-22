@@ -901,6 +901,17 @@ Trigger extraction, then reload the server's in-memory data:
 
 **What you'll get:** Lists of added, modified, and deleted units between the two git SHAs. Use `list_snapshots` first to find valid SHA values.
 
+Modified entries in `details.modified` retain `identifier` and `unit_type` and
+include `facets`, listing only the hashes that changed in stable order:
+`["source", "metadata", "dependencies"]`. For example, a metadata-only change
+returns `{"identifier":"Report","unit_type":"model","facets":["metadata"]}`.
+The Ruby `SnapshotStore#diff` and `JsonSnapshotStore#diff` APIs return symbols
+(`facets: [:metadata]`); the MCP response serializes them as strings. Units
+are compared by identifier and type. Added/deleted entries and aggregate
+counts keep their existing shape. Missing legacy hashes compare as `nil`:
+two missing hashes are equal; a hash becoming available or absent changes
+that facet. Facets describe hash changes, not field-level metadata changes.
+
 **Included in Woods 2.1 (#593):** use the exact stored SHAs returned by
 `list_snapshots`; prefixes are not expanded automatically. `snapshot_diff`
 returns `not_found` if either snapshot is absent and `invalid_params` for a

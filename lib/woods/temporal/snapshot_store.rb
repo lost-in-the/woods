@@ -182,6 +182,9 @@ module Woods
       end
 
       # Compute diff between two snapshots.
+      # Modified entries include +facets+, the changed hashes in stable
+      # +[:source, :metadata, :dependencies]+ order. Absent legacy hashes
+      # compare as nil: nil-to-value (or value-to-nil) is a facet change.
       #
       # @param sha_a [String] Before snapshot git SHA
       # @param sha_b [String] After snapshot git SHA
@@ -421,7 +424,7 @@ module Woods
       # @param units_a [Hash{String => Hash}] Before
       # @param units_b [Hash{String => Hash}] After
       # @return [Hash] {added: [...], modified: [...], deleted: [...]}
-      def compute_diff(units_a, units_b) # rubocop:disable Metrics/CyclomaticComplexity,Metrics/PerceivedComplexity
+      def compute_diff(units_a, units_b)
         added = []
         modified = []
         deleted = []
@@ -431,10 +434,11 @@ module Woods
         units_b.each do |identifier, data_b|
           if units_a.key?(identifier)
             data_a = units_a[identifier]
-            if data_a[:source_hash] != data_b[:source_hash] ||
-               data_a[:metadata_hash] != data_b[:metadata_hash] ||
-               data_a[:dependencies_hash] != data_b[:dependencies_hash]
-              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
+            facets = %i[source metadata dependencies].reject do |facet|
+              data_a[:"#{facet}_hash"] == data_b[:"#{facet}_hash"]
+            end
+            unless facets.empty?
+              modified << { identifier: data_b[:identifier], unit_type: data_b[:unit_type], facets: facets }
             end
           else
             added << { identifier: data_b[:identifier], unit_type: data_b[:unit_type] }
