@@ -3,7 +3,10 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'cgi'
 require 'woods/impact/store'
+require 'woods/impact/renderers'
+require 'woods/impact/value'
 
 RSpec.describe Woods::Impact::Store do
   around do |example|
@@ -17,7 +20,7 @@ RSpec.describe Woods::Impact::Store do
   let(:json) do
     JSON.generate('schema_version' => 1, 'parameters' => { 'mode' => 'range' }, 'range' => {},
                   'coverage' => { 'complete' => false }, 'changed' => [], 'affected' => [], 'flows' => [],
-                  'risks' => [], 'tests' => [], 'unknowns' => [])
+                  'tables' => [], 'templates' => [], 'risks' => [], 'tests' => [], 'unknowns' => [])
   end
 
   it 'saves exact bytes under their digest with restrictive directory and file modes' do
@@ -30,6 +33,22 @@ RSpec.describe Woods::Impact::Store do
       expect(dir.stat.mode & 0o777).to eq(0o700)
     end
     expect(store.read(id)).to eq(json)
+  end
+
+  it 'renders a stored sparse schema 1 report without changing its original JSON or values' do
+    sparse_json = JSON.pretty_generate(JSON.parse(json).except('tables', 'templates'))
+    id = store.save(sparse_json)
+    data = Woods::Impact::Value.copy(JSON.parse(store.read(id)))
+    original = JSON.generate(data)
+    markdown = CGI.unescapeHTML(Woods::Impact::Renderers.markdown(data))
+    mermaid = Woods::Impact::Renderers.mermaid(data)
+    expect(markdown).to include('tables=not_computed', 'templates=not_computed', '2 unknown records')
+    expect(mermaid).to include('Incomplete report', '2 unknown records')
+    expect(JSON.generate(data)).to eq(original)
+    expect(data).not_to have_key('tables')
+    expect(data).not_to have_key('templates')
+    expect(store.read(id)).to eq(sparse_json)
+    expect(id).to eq(Digest::SHA256.hexdigest(sparse_json))
   end
 
   it 'publishes concurrent duplicates idempotently without replacing the report' do

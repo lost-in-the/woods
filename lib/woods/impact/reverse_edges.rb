@@ -59,8 +59,8 @@ module Woods
 
       def resolve_type(identifier, hint)
         candidates = @types.fetch(identifier, [])
-        return 'conflicting_target_type' if hint && !candidates.include?(hint)
-        return hint if hint
+        return 'conflicting_target_type' unless hint.nil? || candidates.include?(hint)
+        return hint unless hint.nil?
 
         candidates.one? ? candidates.first : 'ambiguous_target'
       end

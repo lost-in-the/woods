@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 require 'set'
-require_relative 'options'
+require_relative 'graph_budget'
 require_relative 'reverse_edges'
 
 module Woods
@@ -14,14 +14,15 @@ module Woods
       # @param generation [Integer]
       # @param endpoint [String] from or to
       # @param options [Options]
-      def initialize(graph, units, generation:, endpoint:, options:)
+      # @param budget [GraphBudget, nil] shared graph work budget for this endpoint
+      # Preserve the existing query keywords while allowing one shared endpoint budget.
+      def initialize(graph, units, generation:, endpoint:, options:, budget: nil) # rubocop:disable Metrics/ParameterLists
         @edges = ReverseEdges.new(graph, units)
         @context = { 'generation' => generation, 'endpoint' => endpoint }
         @options = options.to_h
         @affected = {}
         @unknowns = []
-        @nodes = 0
-        @examined = 0
+        @budget = budget || GraphBudget.new(options)
       end
 
       # @param roots [Array<Array(String, String)>] exact changed identities
@@ -40,7 +41,7 @@ module Woods
       private
 
       def walk(root)
-        consume_node
+        @budget.consume_node
         @queue = [[root, []]]
         @visited = Set[root]
         cursor = 0
@@ -54,8 +55,7 @@ module Woods
       end
 
       def visit(root, identity, path, record)
-        @examined += 1
-        throw :impact_budget, 'edge_budget' if @examined > @options.fetch('max_edges')
+        @budget.consume_edge
         resolved = @edges.resolve(identity, record)
         if resolved.is_a?(String)
           return unknown(resolved, identity, 'edge' => record.slice('source', 'source_type', 'via', 'type'))
@@ -65,7 +65,7 @@ module Woods
         source, edge = resolved
         return unless allowed?(source, edge)
 
-        consume_node
+        @budget.consume_node
         @visited.add(source)
         next_path = path + [edge]
         @queue << [source, next_path]
@@ -87,11 +87,6 @@ module Woods
         ))
         entry['distance'] = [entry['distance'], path.size].min
         entry['paths'] << @context.merge('root' => typed(root), 'edges' => path)
-      end
-
-      def consume_node
-        @nodes += 1
-        throw :impact_budget, 'node_budget' if @nodes > @options.fetch('max_nodes')
       end
 
       def typed(identity)

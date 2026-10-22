@@ -10,7 +10,7 @@ module Woods
       # @param depth [Integer] maximum reverse hops, 0..10
       # @param types [Array<String>, nil] actual source types allowed at every hop
       # @param via [Array<String>, nil] allowed relationship labels
-      # @param max_nodes [Integer] root/witness visits per endpoint, 1..10000
+      # @param max_nodes [Integer] root/witness/related visits per endpoint, 1..10000
       # @param max_edges [Integer] examined relationships per endpoint, 1..100000
       # @param budgets [Hash] optional node, edge, flow document, step and operation budgets
       def initialize(depth: 2, types: nil, via: nil, **budgets)

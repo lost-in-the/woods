@@ -29,7 +29,7 @@ RSpec.describe Woods::Impact::Renderers do
       )],
       'flows' => [{ 'entry_point' => 'ItemsController#show', 'route' => { 'verb' => 'GET', 'path' => '/items' },
                     'endpoint' => 'to', 'generation' => 2 }],
-      'risks' => [], 'tests' => [],
+      'tables' => [], 'templates' => [], 'risks' => [], 'tests' => [],
       'unknowns' => [{ 'kind' => 'expanded_membership_only', 'endpoint' => 'to', 'generation' => 2 }]
     }
   end
@@ -53,7 +53,7 @@ RSpec.describe Woods::Impact::Renderers do
 
   it 'bounds Markdown near 60 lines and explicitly accounts for collapsed and omitted entries' do
     value = data
-    %w[changed affected flows risks tests unknowns].each do |key|
+    %w[changed affected flows tables templates risks tests unknowns].each do |key|
       value[key] = Array.new(100) { |index| value[key].first || identity("Example#{index}", 'test_mapping') }
     end
     output = described_class.markdown(value)
@@ -89,6 +89,18 @@ RSpec.describe Woods::Impact::Renderers do
     expect(output.lines.size).to be <= 60
     expect(JSON.generate(frozen)).to eq(original)
     expect(described_class.markdown(frozen)).to eq(output)
+  end
+
+  it 'shows related evidence context and qualified table names with explicit heuristic test labels' do
+    value = data
+    table = identity('table:primary.widgets', 'database_table').merge(provenance('from', 1))
+    value['tables'] = [table.merge('database' => 'primary', 'table_name' => 'widgets')]
+    value['templates'] = [identity('view:widgets/show', 'view_template').merge(provenance('to', 2))]
+    value['tests'] = [identity('spec:widget_spec', 'test_mapping').merge(provenance('to', 2))]
+    output = CGI.unescapeHTML(described_class.markdown(value))
+    expect(output).to include('from gen:1; table:primary.widgets', 'database: primary; table: widgets',
+                              'to gen:2; view:widgets/show', 'recorded references only',
+                              'to gen:2; spec:widget_spec', 'heuristic suggestion')
   end
 
   it 'keeps equal names distinct by actual type and endpoint generation in Mermaid' do
@@ -150,6 +162,14 @@ RSpec.describe Woods::Impact::Renderers do
     expect(markdown).not_to include('Range: gen:', 'gen:1')
     expect(mermaid).to include('Shared', 'focus', 'to gen:2')
     expect(mermaid).not_to include('from gen:')
+  end
+
+  it 'rejects explicitly invalid related arrays instead of treating them as absent' do
+    %w[tables templates].product([nil, false, {}, 'invalid']).each do |key, invalid|
+      value = data.merge(key => invalid)
+      expect { described_class.markdown(value) }.to raise_error(ArgumentError, /shape/)
+      expect { described_class.mermaid(value) }.to raise_error(ArgumentError, /shape/)
+    end
   end
 
   it 'rejects unsupported schema versions rather than silently rendering a partial shape' do

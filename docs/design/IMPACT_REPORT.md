@@ -54,8 +54,9 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 | change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats` |
 | `diff_stats` | `source_before`, `source_after`: null when absent/unavailable, otherwise `bytes` and `lines` of each complete source |
 | `affected`, `flows`, `risks` | Bounded endpoint-specific evidence, described below |
-| `tables`, `templates`, `tests`, `commits` | Reserved empty arrays; corresponding coverage is `not_computed` |
-| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; affected/flows `bounded` or `partial`, risks `partial`; focus mode has `focus:"typed_units"`, while deferred analyses remain `not_computed` |
+| `tables`, `templates`, `tests` | Bounded endpoint-specific related evidence; coverage is always `partial` |
+| `commits` | Reserved empty array; coverage is `not_computed` |
+| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; affected/flows `bounded` or `partial`, risks/tables/templates/tests `partial`; focus mode has `focus:"typed_units"`, while deferred analyses remain `not_computed` |
 | `unknowns` | Structured records for each deferred feature, unbound snapshot evidence, unavailable sources and unclassified changes |
 
 `manifest_checksum` covers only `manifest.json`, not unit content. Different
@@ -119,8 +120,10 @@ affected typed identity; these are bounded witnesses, not exhaustive paths.
 Cycles terminate. PageRank comes only from the published identifier-valued map;
 typed collisions or missing scores get null weights and explicit unknowns.
 
-Per endpoint, all roots share `max_nodes` (default 1000, cap 10000) and `max_edges`
-(default 10000, cap 100000); witness visits include roots. Edge examination is
+Per endpoint, propagation and related-reference inspection share `max_nodes`
+(default 1000, cap 10000) and `max_edges` (default 10000, cap 100000).
+Node work includes root/witness visits, related selected-unit inspections and
+accepted direct-reference candidates; repeated inspections consume work again. Edge examination is
 charged before record interpretation. Hitting a budget retains observed evidence
 and records `node_budget`/`edge_budget`. Depth bounds the requested radius;
 coverage remains bounded and never implies whole-application completeness.
@@ -186,6 +189,52 @@ partial. New instance-variable mismatch detection remains explicitly not compute
 absence of flags never proves safety. Evidence locators reference published
 artifact families or metadata keys, not live files, generated URLs or runtime facts.
 
+## Related tables, templates and suggested tests
+
+`tables`, `templates` and `tests` contain exact actual typed units from the
+selected endpoint: `database_table`, `view_template` and `test_mapping` respectively.
+Each entry carries `identifier`, `type`, `endpoint`, `generation`, and an `evidence`
+array. A family unit among the changed/focused roots or already affected units has
+`kind:"selected_unit"` evidence. Direct retained dependency records add
+`kind:"published_relationship"`, typed `source` and `target`, plus captured
+`via`, `through`, `through_db` and `disable_joins` attributes when present.
+Distinct evidence is retained and sorted; records are deduplicated within each
+endpoint by exact identity. Base removal and head current entries stay separate.
+
+Table entries additionally expose nullable published metadata `table_name` and
+`database`; absent/non-string metadata remains null with
+`related_table_metadata_unavailable`. The adapter never derives database names
+or table names from identifiers, nor collapses qualified table identifiers.
+Supported direct table references use `table`, `migrates`, `view_source`,
+`reads_table`, `writes_table` and `foreign_key`. Template `render` references
+select the actual target template. Recorded `test_coverage` from an actual
+`test_mapping` unit provides test suggestion evidence. Existing affected-path
+last edges also retain matching family relationships, including `view_render`
+(template to owning controller/mailer), without new traversal or extra budget.
+Their endpoint/generation and typed source must match the affected witness.
+
+This is a projection of already selected units and their direct retained
+references, not another closure or graph analysis. Direct references do not
+receive invented impact distances or paths. Type and via filters apply to direct
+candidates as well as propagation; roots retain their requested identity.
+Dependency examination is charged before filtering. Hitting the shared graph
+budget retains observed references and already recorded witness evidence, with
+an explicit `node_budget` or `edge_budget` unknown for feature `related`.
+
+Only absent/null target-type hints permit unique-type inference. Conflicting or
+malformed hints remain unknown even if only one actual target exists. In
+particular, legacy controller `render` dependencies naming type `view` are not
+silently aliased to actual `view_template` units. Test target types inferred by
+the producer are not overridden; mismatches stay `conflicting_target_type`.
+
+All three families always report partial coverage, including empty results.
+`database_access_not_exhaustive`, `render_references_only` and
+`test_suggestions_only` record the limits for inspected endpoints. References do
+not prove observed database access, dynamic render resolution or measured test
+coverage. Route-based test inference and test-support expansion are deferred.
+Missing graph artifacts can limit selection even when direct retained facts are
+available. An empty array never establishes that no related unit exists.
+
 ## Pure report renderers
 
 Require `woods/impact/renderers` and pass the same immutable report (or its
@@ -195,7 +244,7 @@ or focus envelopes raise. Renderers query no index, source files or runtime.
 
 Markdown contains at most 60 lines, with one visible item and up to five collapsed
 items per section. Additional entries are counted as omitted and remain in JSON.
-Changed/affected units, flows, risks, tests and unknowns have separate sections;
+Changed/affected units, flows, tables, templates, risks, tests and unknowns have separate sections;
 coverage and unknown counts remain visible even when an array is empty.
 
 Mermaid emits `flowchart LR` from recorded witness edges. Arrows point outward
@@ -246,9 +295,12 @@ capabilities; installed releases must be checked for actual tool registration.
 ## Remaining W-12 work and dependencies
 
 Not implemented: method-scoped pre-change reports, new instance-variable mismatch
-detection, tables, templates, suggested tests, commit ranges, hunks, distributed
-plugin guidance, URLs or Map UI.
-An empty reserved array means **not computed**, never “no impact” or “no risk”.
+detection, exhaustive related-unit discovery, route-based test inference,
+test-support expansion, commit ranges, hunks, distributed plugin guidance, URLs
+or Map UI.
+An empty reserved array means **not computed**; partial related arrays mean only
+that no entries were observed within the stated evidence and budgets, never
+“no impact” or “no risk”.
 
 W-10 (#773) adds ordered `source`, `metadata`, `dependencies` facets to modified
 snapshot diff entries with `identifier` and `unit_type`; added/deleted entries
