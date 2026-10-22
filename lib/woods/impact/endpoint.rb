@@ -9,12 +9,12 @@ module Woods
         @reader = reader
       end
 
-      # Historical tokens are unavailable; manifest checksum identifies the payload.
+      # Historical tokens are unavailable; the checksum covers only the manifest.
       # @param selector [String, Integer]
       # @return [Hash] endpoint provenance without host paths
       def provenance(selector)
         { 'selector' => selector, 'generation' => @reader.generation_number,
-          'git_sha' => @reader.manifest['git_sha'], 'payload_checksum' => @reader.external_dependency_checksum }
+          'git_sha' => @reader.manifest['git_sha'], 'manifest_checksum' => @reader.external_dependency_checksum }
       end
 
       # @return [Hash{Array(String, String) => Hash}] actual typed identities

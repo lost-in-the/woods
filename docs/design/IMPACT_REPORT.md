@@ -47,7 +47,7 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 |---|---|
 | `schema_version` | Integer `1` |
 | `range` | `from`, `to` endpoint objects |
-| endpoint | Original `selector`, integer `generation`, nullable manifest `git_sha`, `payload_checksum` (SHA-256 of its manifest) |
+| endpoint | Original `selector`, integer `generation`, nullable manifest `git_sha`, `manifest_checksum` (SHA-256 of its manifest) |
 | `parameters` | `{"mode":"range"}`; no silently accepted filters |
 | `changed` | Array sorted by identifier then actual type |
 | change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats` |
@@ -56,8 +56,11 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 | `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; all deferred analyses, including `focus`, explicitly `not_computed` |
 | `unknowns` | Structured records for each deferred feature, unbound snapshot evidence, unavailable sources and unclassified changes |
 
-`payload_checksum` is the existing PublishedIndex manifest checksum, not a digest
-of every unit byte and not a git SHA. Historical generation tokens are unavailable
+`manifest_checksum` covers only `manifest.json`, not unit content. Different
+payloads with byte-identical manifests can have the same checksum; it does not
+establish payload-content integrity or uniquely identify a payload. The integer
+generation identifies the retained payload within its index. The manifest
+checksum is not a git SHA. Historical generation tokens are unavailable
 and are omitted. The report contains no clock timestamp, random ID, source body,
 snapshot row ID or host directory. Metadata key names and typed public identifiers
 are retained. Consumers must treat these as index-derived content.

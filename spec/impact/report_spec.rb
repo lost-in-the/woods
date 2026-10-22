@@ -73,12 +73,23 @@ RSpec.describe Woods::Impact::Report do
 
     data = report.to_h
     expect(data.dig('range', 'from')).to include('generation' => 1, 'git_sha' => 'a' * 40)
-    expect(data.dig('range', 'from', 'payload_checksum')).to match(/\A[0-9a-f]{64}\z/)
+    expect(data.dig('range', 'from', 'manifest_checksum')).to match(/\A[0-9a-f]{64}\z/)
     expect(data.dig('range', 'from')).not_to have_key('token')
     expect(data['changed'].size).to eq(1)
     expect(data.dig('coverage', 'complete')).to be(false)
     expect(data.dig('coverage', 'affected')).to eq('not_computed')
     expect(data['unknowns']).not_to be_empty
+  end
+
+  it 'names the manifest-only checksum accurately when different payloads share identical manifests' do
+    publish(1, [unit('Example', 'model', 'before')])
+    publish(2, [unit('Example', 'model', 'after')])
+    data = report.to_h
+    before = data.dig('range', 'from')
+    after = data.dig('range', 'to')
+    expect(before.fetch('manifest_checksum')).to eq(after.fetch('manifest_checksum'))
+    expect(before).not_to have_key('payload_checksum')
+    expect(data.fetch('changed')).to include(include('identifier' => 'Example', 'facets' => ['source']))
   end
 
   it 'rejects ambiguous SHA selectors with generation alternatives' do
