@@ -18,13 +18,14 @@ module Woods
 
       # @param before [Hash, nil] base metadata; nil for focus or added units
       # @param after [Hash, nil] head metadata; nil for removed units
+      # @param current [Hash] metadata belonging to the reported endpoint
       # @return [Hash] risks and unknowns without endpoint context
-      def call(before, after)
+      def call(before, after, current:)
         @risks = []
         @unknowns = []
         reason = catch(:risk_budget) do
           compare(before, after) if before && after
-          retry_policy(after || before || {}) if @type == 'job'
+          retry_policy(current) if @type == 'job'
           nil
         end
         unknown(reason) if reason
@@ -71,7 +72,6 @@ module Woods
         return unless callbacks.all? { |item| item.is_a?(Hash) && item['side_effects'].is_a?(Hash) }
 
         callbacks.map { |item| item.slice('filter', 'type', 'kind', 'conditions', 'name', 'event', 'side_effects') }
-                 .sort_by { |item| Value.json(item) }
       end
 
       def foreign_keys(before, after)
@@ -80,6 +80,9 @@ module Woods
         return unknown('foreign_key_evidence_unavailable') unless old.is_a?(Array) && current.is_a?(Array)
 
         @budget.consume(old.size + current.size)
+        # Legacy producers use [] for failed/unsupported capture as well as known-empty schemas.
+        return unknown('foreign_key_capture_completeness_unavailable') if old.empty? || current.empty?
+
         current_keys = current.to_set { |item| Value.json(item) }
         removed = old.reject { |key| current_keys.include?(Value.json(key)) }
         return if removed.empty?

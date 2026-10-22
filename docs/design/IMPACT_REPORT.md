@@ -161,15 +161,22 @@ The adapter consumes the selected endpoint's `graph_analysis.json`; it never
 recomputes structural analysis. Published hub/bridge flags require positive
 published metrics; cycles require unambiguous typed identities throughout, and
 cross-database facts require both endpoints to bind uniquely to inventory units
-and distinct published database names. Collisions and truncated cycle lists stay
+and distinct published database names across the endpoints or a recorded through
+association. Equal endpoint databases do not erase a crossing through another
+database. Collisions and truncated cycle lists stay
 unknown. These remain the producer's bounded heuristic classifications.
 
 Captured metadata can flag changes in recorded filter arrays, callback side
-effects, and removed records between two complete foreign-key arrays. Missing
-arrays are unavailable evidence, not empty arrays. Focus mode has no before/after
+effects (including recorded callback-chain order), and removed records between
+two nonempty foreign-key captures. Legacy producers use empty foreign-key arrays
+for failed or unsupported introspection too; empty captures remain unknown without
+trustworthy completeness evidence. This adapter does not fabricate such evidence.
+Missing arrays are unavailable evidence, not empty arrays. Focus mode has no before/after
 comparison and does not manufacture change flags. Jobs are flagged as
 `job_without_retry_touched` only for a recorded Sidekiq job with explicit literal
-retry disablement and no captured enabled retry policy. Missing/inherited or
+retry disablement and no captured enabled retry policy. Retry facts come only
+from the endpoint named on the risk; before/after metadata is used separately
+for change comparisons. Missing/inherited or
 dynamic policy stays unknown; the report does not prove global absence of retries.
 
 All inspected units/structural records and relevant metadata array entries share
