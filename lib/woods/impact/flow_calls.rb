@@ -23,7 +23,7 @@ module Woods
           cursor += 1
           raise IOError, 'Invalid flow operation' unless operation.is_a?(Hash)
 
-          yield call_unknown(operation) if %w[call async].include?(operation['type'])
+          yield operation_unknown(operation) if %w[call async dynamic_dispatch cycle].include?(operation['type'])
           nested_operations(operation).each { |nested| queue.concat(nested) }
         end
       end
@@ -44,9 +44,14 @@ module Woods
         end
       end
 
-      def call_unknown(operation)
-        kind = operation['target'] ? 'unproven_call_expansion' : 'receiverless_call'
-        operation.slice('target', 'method', 'ambiguous_candidates').merge('kind' => kind)
+      def operation_unknown(operation)
+        kind = case operation['type']
+               when 'dynamic_dispatch' then 'unresolved_dynamic_dispatch'
+               when 'cycle' then 'flow_operation_cycle'
+               else operation['target'] ? 'unproven_call_expansion' : 'receiverless_call'
+               end
+        operation.slice('target', 'method', 'ambiguous_candidates', 'args_hint', 'line')
+                 .merge('kind' => kind, 'operation_type' => operation['type'])
       end
     end
   end

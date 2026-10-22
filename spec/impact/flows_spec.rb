@@ -48,6 +48,30 @@ RSpec.describe Woods::Impact::Flows do
     expect(compute['unknowns']).to include(include('kind' => 'unproven_call_expansion', 'method' => 'other'))
   end
 
+  it 'preserves nested dynamic dispatch and operation-cycle uncertainty with captured fields' do
+    document['steps'].first['operations'] = [
+      { 'type' => 'conditional', 'then_ops' => [
+        { 'type' => 'dynamic_dispatch', 'target' => 'Shared', 'method' => 'public_send',
+          'ambiguous_candidates' => %w[One Two], 'args_hint' => ['handler'], 'line' => 4 },
+        { 'type' => 'transaction', 'nested' => [{ 'type' => 'cycle', 'target' => 'Shared', 'line' => 5 }] }
+      ] }
+    ]
+    result = compute
+    expect(result['unknowns']).to include(
+      include('kind' => 'unresolved_dynamic_dispatch', 'target' => 'Shared', 'method' => 'public_send',
+              'ambiguous_candidates' => %w[One Two], 'args_hint' => ['handler'], 'line' => 4),
+      include('kind' => 'flow_operation_cycle', 'target' => 'Shared', 'line' => 5)
+    )
+    expect(result['coverage']).to eq('partial')
+  end
+
+  it 'distinguishes cycle-step and cycle-operation evidence emitted by the current assembler' do
+    document['steps'] << { 'unit' => 'Shared', 'type' => 'cycle',
+                           'operations' => [{ 'type' => 'cycle', 'target' => 'Shared', 'line' => nil }] }
+    expect(compute['unknowns']).to include(include('kind' => 'flow_cycle'),
+                                           include('kind' => 'flow_operation_cycle', 'target' => 'Shared'))
+  end
+
   it 'marks missing legacy inverse as unavailable, without assembling source against another generation' do
     allow(artifacts).to receive(:read).with('flows/by_unit.json').and_raise(Errno::ENOENT)
     expect(compute).to include('flows' => [], 'coverage' => 'unavailable')

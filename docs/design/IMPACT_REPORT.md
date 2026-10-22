@@ -137,7 +137,11 @@ Flow work shares endpoint budgets: `max_flow_documents` (default 100, cap 1000),
 including nested branches, preserve unknown expansion status and ambiguous
 candidates; unit membership cannot establish method-call expansion. Cycles and
 missing operation facts are explicit unknowns. Observed unknowns survive budget
-exhaustion. Each optional artifact is limited to 16 MiB, recorded as
+exhaustion. Dynamic-dispatch operations retain `unresolved_dynamic_dispatch`
+unknowns with captured target/method/ambiguity/argument hints and line evidence;
+operation-level cycles remain `flow_operation_cycle`, distinct from `flow_cycle`
+step markers. Nested operations use the same walk and shared work budget.
+Each optional artifact is limited to 16 MiB, recorded as
 `artifact_max_bytes`, with invalid UTF-8 and nonregular files refused.
 
 ## Remaining W-12 work and dependencies

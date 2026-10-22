@@ -102,7 +102,7 @@ module Woods
       end
 
       def inspect_step(step, entry)
-        return mark_unknown('flow_cycle', 'entry_point' => entry) if step['type'] == 'cycle'
+        mark_unknown('flow_cycle', 'entry_point' => entry) if step['type'] == 'cycle'
         unless step['operations'].is_a?(Array)
           return mark_unknown('flow_operations_unavailable', 'entry_point' => entry)
         end
