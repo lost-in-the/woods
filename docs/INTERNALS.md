@@ -354,6 +354,14 @@ Use the Index Server for:
 
 Note: pipeline management and feedback collection require specialized builder collaborators. The packaged `woods-mcp` executable wires neither, so those tools are not registered in a standard launch. Snapshot tools register only when snapshots are enabled (`enable_snapshots: true`, `WOODS_SNAPSHOTS=true`, or an existing snapshot database in the index directory).
 
+Temporal snapshots identify units by `(identifier, unit_type)`. Capture uses the
+extracted unit's own type (for example, `graphql_type`, `graphql_query`, or
+`gem_source`), including when one extractor family produces several types. Both
+SQLite and JSON snapshots retain historical types exactly as recorded. Older
+captures may contain family names such as `models` or `graphql`; comparing those
+with corrected captures can report an old identity deleted and a new identity
+added. Historical types are not inferred or migrated.
+
 The Index Server is safe to run anywhere, it has no database connection and makes no writes to the Rails application.
 
 ### Console server (`woods-console-mcp`)
