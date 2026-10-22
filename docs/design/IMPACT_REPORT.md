@@ -47,14 +47,15 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 |---|---|
 | `schema_version` | Integer `1` |
 | `range` | `from`, `to` endpoint objects |
+| focus mode | `range:null`, top-level `endpoint` provenance and exact typed `focus` roots; `changed:[]` |
 | endpoint | Original `selector`, integer `generation`, nullable manifest `git_sha`, `manifest_checksum` (SHA-256 of its manifest) |
 | `parameters` | `mode:"range"`, depth, types, via and explicit finite budgets; unsupported inputs raise |
 | `changed` | Array sorted by identifier then actual type |
 | change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats` |
 | `diff_stats` | `source_before`, `source_after`: null when absent/unavailable, otherwise `bytes` and `lines` of each complete source |
-| `affected`, `flows` | Bounded endpoint-specific evidence, described below |
-| `tables`, `templates`, `tests`, `risks`, `commits` | Reserved empty arrays; corresponding coverage is `not_computed` |
-| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; affected/flows `bounded` or `partial`; other analyses, including `focus`, explicitly `not_computed` |
+| `affected`, `flows`, `risks` | Bounded endpoint-specific evidence, described below |
+| `tables`, `templates`, `tests`, `commits` | Reserved empty arrays; corresponding coverage is `not_computed` |
+| `coverage` | `complete:false`, `diff:"retained_payloads"`, `snapshot_facets:"unbound"`; affected/flows `bounded` or `partial`, risks `partial`; focus mode has `focus:"typed_units"`, while deferred analyses remain `not_computed` |
 | `unknowns` | Structured records for each deferred feature, unbound snapshot evidence, unavailable sources and unclassified changes |
 
 `manifest_checksum` covers only `manifest.json`, not unit content. Different
@@ -144,10 +145,44 @@ step markers. Nested operations use the same walk and shared work budget.
 Each optional artifact is limited to 16 MiB, recorded as
 `artifact_max_bytes`, with invalid UTF-8 and nonregular files refused.
 
+## Focus and risk evidence
+
+`Report.focus(index_dir, identities: [{"identifier" => "Example", "type" => "model"}],
+at: "now", **parameters)` plans a change against one captured retained endpoint.
+Identities must be exact, nonempty string-keyed identifier/type pairs (1..10000);
+they are deduplicated and sorted. Missing, untyped or method selectors that do not
+exist as actual typed units fail explicitly. Method names are never widened to
+their owning classes. `parameters.mode` is `focus`, `range` is null, `endpoint`
+holds provenance, and `focus` holds the roots. Current evidence uses side `to`.
+`coverage.focus` is `typed_units`; this is not method-level acceptance of E-9.
+
+Risk objects carry `kind`, typed `unit`, `endpoint`, `generation`, and `evidence`.
+The adapter consumes the selected endpoint's `graph_analysis.json`; it never
+recomputes structural analysis. Published hub/bridge flags require positive
+published metrics; cycles require unambiguous typed identities throughout, and
+cross-database facts require both endpoints to bind uniquely to inventory units
+and distinct published database names. Collisions and truncated cycle lists stay
+unknown. These remain the producer's bounded heuristic classifications.
+
+Captured metadata can flag changes in recorded filter arrays, callback side
+effects, and removed records between two complete foreign-key arrays. Missing
+arrays are unavailable evidence, not empty arrays. Focus mode has no before/after
+comparison and does not manufacture change flags. Jobs are flagged as
+`job_without_retry_touched` only for a recorded Sidekiq job with explicit literal
+retry disablement and no captured enabled retry policy. Missing/inherited or
+dynamic policy stays unknown; the report does not prove global absence of retries.
+
+All inspected units/structural records and relevant metadata array entries share
+`max_risk_records` per endpoint (default 10000, cap 100000). Budget exhaustion
+retains earlier evidence and records `risk_record_budget`. Risk coverage is always
+partial. New instance-variable mismatch detection remains explicitly not computed;
+absence of flags never proves safety. Evidence locators reference published
+artifact families or metadata keys, not live files, generated URLs or runtime facts.
+
 ## Remaining W-12 work and dependencies
 
-Not implemented: focus/pre-change reports, tables,
-templates, suggested tests, risk detection, commit ranges, hunks, Markdown and
+Not implemented: method-scoped pre-change reports, new instance-variable mismatch
+detection, tables, templates, suggested tests, commit ranges, hunks, Markdown and
 Mermaid renderers, rake task, MCP registration, saved reports, URLs or Map UI.
 An empty reserved array means **not computed**, never “no impact” or “no risk”.
 

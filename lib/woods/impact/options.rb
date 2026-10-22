@@ -6,7 +6,7 @@ module Woods
     class Options
       BUDGETS = { max_nodes: [1000, 10_000], max_edges: [10_000, 100_000],
                   max_flow_documents: [100, 1000], max_flow_steps: [10_000, 100_000],
-                  max_flow_operations: [10_000, 100_000] }.freeze
+                  max_flow_operations: [10_000, 100_000], max_risk_records: [10_000, 100_000] }.freeze
       # @param depth [Integer] maximum reverse hops, 0..10
       # @param types [Array<String>, nil] actual source types allowed at every hop
       # @param via [Array<String>, nil] allowed relationship labels

@@ -4,6 +4,7 @@ require_relative 'resolver'
 require_relative 'endpoint'
 require_relative 'range_diff'
 require_relative 'enrichment'
+require_relative 'focus'
 
 module Woods
   module Impact
@@ -38,11 +39,23 @@ module Woods
         removed, current = changes.partition { |change| change['status'] == 'removed' }
         enrichment = Enrichment.new(options)
         endpoints.zip([removed, current], %w[from to]).each do |(reader, units), roots, side|
-          enrichment.add(reader, units, roots.map { |item| item.values_at('identifier', 'type') }, side)
+          comparison = endpoints[side == 'from' ? 1 : 0].last
+          enrichment.add(reader, units, roots.map { |item| item.values_at('identifier', 'type') }, side,
+                         comparison: comparison)
         end
         enrichment.to_h
       end
       private_class_method :compute
+
+      # Plan changes to exact typed units from one retained payload.
+      # @param index_dir [String, Pathname]
+      # @param identities [Array<Hash>] exact identifier/type pairs
+      # @param at [String, Integer] retained selector, default now
+      # @param parameters [Hash] bounded propagation and flow options
+      # @return [Report]
+      def self.focus(index_dir, identities:, at: 'now', **parameters)
+        Focus.new(index_dir, identities: identities, at: at, options: Options.new(**parameters)).call
+      end
 
       # @param range [Hash] endpoint provenance
       # @param changes [Array<Hash>] typed changes
@@ -69,7 +82,7 @@ module Woods
         return data if computed.empty?
 
         unknowns = data['unknowns'].reject do |item|
-          item['kind'] == 'not_computed' && %w[affected flows].include?(item['feature'])
+          item['kind'] == 'not_computed' && computed.fetch('coverage').key?(item['feature'])
         end
         data.merge(computed.except('coverage', 'unknowns'))
             .merge('coverage' => data['coverage'].merge(computed.fetch('coverage')),

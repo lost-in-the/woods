@@ -2,6 +2,7 @@
 
 require_relative 'propagation'
 require_relative 'flows'
+require_relative 'risks'
 
 module Woods
   module Impact
@@ -11,8 +12,8 @@ module Woods
       # @param options [Options]
       def initialize(options)
         @options = options
-        @result = { 'affected' => [], 'flows' => [], 'unknowns' => [], 'coverage' => {} }
-        @statuses = { 'affected' => [], 'flows' => [] }
+        @result = { 'affected' => [], 'flows' => [], 'risks' => [], 'unknowns' => [], 'coverage' => {} }
+        @statuses = { 'affected' => [], 'flows' => [], 'risks' => [] }
       end
 
       # @param reader [PublishedIndex] still locked
@@ -20,7 +21,7 @@ module Woods
       # @param roots [Array<Array(String, String)>] roots belonging to that endpoint
       # @param endpoint [String]
       # @return [void]
-      def add(reader, units, roots, endpoint)
+      def add(reader, units, roots, endpoint, comparison: nil)
         return if roots.empty?
 
         artifacts = Artifacts.new(reader)
@@ -29,6 +30,8 @@ module Woods
         flows = Flows.new(artifacts, **arguments).call(roots)
         collect('affected', propagation)
         collect('flows', flows)
+        identities = roots + propagation['affected'].map { |item| item.values_at('identifier', 'type') }
+        collect_risks(reader, units, identities, endpoint, comparison)
       end
 
       # @return [Hash] deterministic bounded enrichment and query parameters
@@ -40,6 +43,12 @@ module Woods
       end
 
       private
+
+      def collect_risks(reader, units, identities, endpoint, comparison)
+        context = { 'generation' => reader.generation_number, 'endpoint' => endpoint }
+        risks = Risks.new(reader, units, context: context, limit: @options.to_h.fetch('max_risk_records'))
+        collect('risks', risks.call(identities, comparison: comparison))
+      end
 
       def propagate(artifacts, units, roots, arguments)
         graph = artifacts.read('dependency_graph.json')
