@@ -363,7 +363,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     remaining = Dir[File.join(flows_dir, '*.json')].map { |f| File.basename(f) }
     # flow_index.json and the untouched dummy controller's referenced
     # documents survive; the orphan and every Sprockets document go.
-    expect(remaining).to include('flow_index.json')
+    expect(remaining).to include('flow_index.json', 'by_unit.json')
     expect(remaining.grep(/\APostsController_/)).to eq(remaining.grep(/\APostsController_/).sort)
     expect(remaining.grep(/Ghost_orphan|SprocketsController_/)).to be_empty
     expect(flow_index(index_dir)).to have_key('PostsController#index')
@@ -641,26 +641,28 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     expect { JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))) }.not_to raise_error
   end
 
-  it 'aborts publication when the flow index write fails' do
-    index_dir = extract_all_to_tmp
-    before_bytes = generation_bytes(index_dir)
+  %w[flow_index.json by_unit.json].each do |index_name|
+    it "aborts publication when the #{index_name} write fails" do
+      index_dir = extract_all_to_tmp
+      before_bytes = generation_bytes(index_dir)
 
-    failed = false
-    allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
-      if !failed && path.to_s.end_with?('flow_index.json')
-        failed = true
-        raise Woods::ExtractionError, 'disk full'
+      failed = false
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |original, path, content|
+        if !failed && path.to_s.end_with?(index_name)
+          failed = true
+          raise Woods::ExtractionError, 'disk full'
+        end
+        original.call(path, content)
       end
-      original.call(path, content)
+
+      load app_path('app/controllers/posts_controller.rb')
+      expect do
+        Woods::Extractor.new(output_dir: index_dir)
+                        .extract_changed(['app/controllers/posts_controller.rb'])
+      end.to raise_error(Woods::ExtractionError, /disk full/)
+
+      expect(generation_bytes(index_dir)).to eq(before_bytes)
     end
-
-    load app_path('app/controllers/posts_controller.rb')
-    expect do
-      Woods::Extractor.new(output_dir: index_dir)
-                      .extract_changed(['app/controllers/posts_controller.rb'])
-    end.to raise_error(Woods::ExtractionError, /disk full/)
-
-    expect(generation_bytes(index_dir)).to eq(before_bytes)
   end
 
   it 'aborts publication when the controller annotation write fails' do

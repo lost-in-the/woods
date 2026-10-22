@@ -31,6 +31,7 @@ A typical structural index looks like this; optional entries need not exist:
 │       │   └── <unit filename>.json
 │       └── flows/
 │           ├── flow_index.json
+│           ├── by_unit.json             # optional inverted flow membership
 │           └── <flow filename>.json
 ├── woods.json                 # optional configuration artifact
 ├── dumps/                     # optional semantic-store snapshots
@@ -78,6 +79,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. `unmodelled_tables` lists the `database_table` units no model reads. |
 | `skipped_files.json` | Swept Ruby files and GraphQL operation documents (`config.graphql_document_paths`) that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Ruby reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only`, `not_owned` and `template` (a generator template under `lib/`); document reasons are `graphql_unavailable`, `schema_definitions` and `parse_error`. A template file named by a sweep glob is listed with `non_view_template`, `unsupported_template_engine` or `rejected_by:view_templates`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
+| `flows/by_unit.json` | Optional inverted precomputed-flow membership, keyed by unit identifier, then unit type, with sorted unique entry-point arrays. See [inverted flow membership](#inverted-flow-membership). |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
 
 Unit summaries identify units, but do not carry an artifact filename. Their
@@ -98,6 +100,46 @@ artifact's actual type instead of deriving it by singularizing the directory.
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
 families and `manifest.provenance.mode`; it is not Rails runtime evidence.
+
+### Inverted flow membership
+
+When flows are precomputed, `flows/by_unit.json` is published alongside
+`flow_index.json` in the same generation payload. For example:
+
+```json
+{
+  "OrdersController": {"controller": ["OrdersController#create"]},
+  "Shared": {
+    "model": ["OrdersController#create"],
+    "service": ["OrdersController#create", "OrdersController#show"]
+  }
+}
+```
+
+The two `Shared` entries represent distinct typed units. Look up both the
+identifier and type; do not flatten the types. A controller step such as
+`OrdersController#create` contributes the unit identity `OrdersController`
+with type `controller`. Values are entry-point keys in `flow_index.json`,
+not filenames. Keys are sorted recursively and arrays are sorted and deduplicated.
+An empty object is a valid index with no expanded flow steps.
+
+Membership means that a typed step was expanded in that flow document, within
+its assembly depth limit. Unexpanded operation targets and cycle sentinels
+are excluded. This is bounded flow evidence, not proof of every possible runtime
+path or a method-level impact report.
+
+Incremental publication replaces memberships for reassembled controllers,
+removes deleted controllers' entries, and carries untouched memberships forward.
+Older generations can contain flow documents without this inverse. On the next
+flow delta, Woods reconstructs retained memberships from those documents; it
+aborts publication if the required documents or a present inverse are unreadable
+or malformed. A no-op can leave the older generation unchanged.
+
+The artifact is optional: older writers and indexes without precomputed flows
+may omit it. Absence means the lookup is unavailable, not that no entry point
+touches a unit. Consumers can derive the same mapping from typed steps in the
+selected generation's flow documents, or assemble flows on demand where that
+capability is available. Do not mix documents from different generations.
 
 ### Semantic graph validation
 

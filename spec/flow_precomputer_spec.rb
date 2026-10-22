@@ -519,6 +519,16 @@ RSpec.describe Woods::FlowPrecomputer do
   end
 
   describe '#recompute_delta with carried identifiers' do
+    before do
+      FileUtils.mkdir_p(File.join(output_dir, 'flows'))
+      %w[index show].each do |action|
+        entry = "CarriedController##{action}"
+        document = Woods::FlowDocument.new(entry_point: entry,
+                                           steps: [{ unit: entry, type: 'controller', operations: [] }])
+        File.write(File.join(output_dir, 'flows', "CarriedController_#{action}.json"), JSON.generate(document.to_h))
+      end
+    end
+
     # A re-extracted controller loses metadata[:flow_paths] whether or not
     # its flows moved, so a carried controller still gets its annotation
     # back: read out of the index entries it keeps, with no assembly.
