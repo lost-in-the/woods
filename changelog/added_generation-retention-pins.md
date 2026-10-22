@@ -1,0 +1,1 @@
+- Add persistent generation retention pins through `woods:pin[N]` and `woods:unpin[N]`, with pin status in `woods:stats`. Pins survive process restarts, remain outside immutable payloads, and serialize with pruning while retaining active-reader protection.

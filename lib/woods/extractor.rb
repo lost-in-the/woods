@@ -1379,10 +1379,7 @@ module Woods
     # @param number [Integer] the generation number actually being published
     # @return [Pathname] the payload directory under its corrected name
     def rename_payload(number)
-      destination = @payload_store.path_for(number)
-      FileUtils.rm_rf(destination.to_s)
-      FileUtils.mv(@payload_dir.to_s, destination.to_s)
-      destination
+      @payload_store.rename(@payload_dir, number)
     end
 
     # @param published [Integer] the generation just published
@@ -1390,7 +1387,9 @@ module Woods
     def prune_payloads(published)
       return unless @payload_dir
 
-      @payload_store.prune(keep: payload_retention, protect: published)
+      @payload_store.prune(keep: payload_retention, protect: published) do |number, _reason|
+        Rails.logger.info "[Woods] Retaining generation #{number}: persistent pin"
+      end
     rescue StandardError => e
       Rails.logger.warn "[Woods] Payload retention failed: #{e.message}"
     end

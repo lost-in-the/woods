@@ -2,6 +2,8 @@
 
 require 'pathname'
 require 'fileutils'
+require 'forwardable'
+require_relative 'generation_pins'
 
 module Woods
   # Writer-side owner of the per-generation payload directories.
@@ -23,7 +25,8 @@ module Woods
   #   generation.bump!(reason: 'incremental', payload: Woods::PayloadStore.name_for(next_generation))
   #   payloads.prune(keep: 3, protect: next_generation)
   #
-  class PayloadStore
+  # Keep publication and retention under one payload owner.
+  class PayloadStore # rubocop:disable Metrics/ClassLength
     DIRNAME = 'payloads'
 
     # How many payload generations to retain, overridable per host via
@@ -59,20 +62,30 @@ module Woods
       @root.join(self.class.name_for(number))
     end
 
+    extend Forwardable
+
+    # Pin/unpin return whether persistent state changed. Pins are sorted
+    # positive generation numbers, scoped to this index and retained on disk.
+    def_delegators :generation_pins, :pin, :unpin, :pins
+
     # Create the payload directory for a generation and return it.
     #
     # An existing directory is **emptied** rather than reused. It can only be
     # there because an earlier run built a payload and then failed before
     # bumping the generation — nothing points at it, and merging this run's
     # files into that run's leftovers publishes a mixture of the two.
+    # Persistently pinned destinations are refused, including counter resets.
     #
     # @param number [Integer] generation number this payload will be published as
     # @return [Pathname]
     def create(number)
-      dir = path_for(number)
-      FileUtils.rm_rf(dir.to_s)
-      FileUtils.mkdir_p(dir.to_s)
-      dir
+      replace_unpinned(number) { |dir| FileUtils.mkdir_p(dir.to_s) }
+    end
+
+    # Correct a staged payload's number without replacing persistent pins.
+    # @return [Pathname] the destination
+    def rename(source, number)
+      replace_unpinned(number, source: source) { |dir| FileUtils.mv(source.to_s, dir.to_s) }
     end
 
     # Populate +target+ with the contents of +source+ using hardlinks.
@@ -122,7 +135,7 @@ module Woods
     # leftover from before `generation.json` was lost and the counter
     # restarted lower. `sort.last(keep)` would otherwise read those stale
     # high numbers as "newest" and retain them forever while pruning the
-    # genuinely-previous generation, so they are always removed regardless
+    # genuinely-previous generation, so unpinned ones are removed regardless
     # of +keep+; ordinary retention then applies only to +protect+ and
     # below.
     #
@@ -144,15 +157,15 @@ module Woods
     # manifest inode: writers replace a cloned manifest through AtomicFile
     # before publishing, preserving generation-local lock identity.
     #
+    # Persistent pins survive process exits and are retained in addition to
+    # the recent-generation budget. Yields skipped number and :persistent_pin.
     # @return [Array<Integer>] the generation numbers removed
-    def prune(keep:, protect:)
+    def prune(keep:, protect:, &on_skip)
       return [] unless root.directory?
 
-      eligible, superseded = generation_dirs.partition { |number, _| number <= protect }
-      retained = eligible.map(&:first).sort.last(keep)
-      prunable = eligible.reject { |number, _| number == protect || retained.include?(number) }
-
-      remove_generation_dirs(superseded + prunable)
+      generation_pins.synchronize do |pins|
+        remove_generation_dirs(retention_candidates(keep, protect), pins: pins, &on_skip)
+      end
     end
 
     # Hardlink where the filesystem allows it, copy where it does not — a
@@ -178,10 +191,42 @@ module Woods
 
     private
 
+    def replace_unpinned(number, source: nil)
+      dir = path_for(number)
+      FileUtils.mkdir_p(@root)
+      generation_pins.synchronize do |pins|
+        protected_paths = pins.map { |pin| path_for(pin).expand_path }
+        if pins.include?(number) || (source && protected_paths.include?(Pathname.new(source).expand_path))
+          raise IOError, 'Cannot replace or move a persistently pinned generation'
+        end
+
+        FileUtils.rm_rf(dir.to_s)
+        yield dir
+      end
+      dir
+    end
+
+    def generation_pins
+      @generation_pins ||= GenerationPins.new(@root)
+    end
+
+    def retention_candidates(keep, protect)
+      eligible, superseded = generation_dirs.partition { |number, _| number <= protect }
+      retained = eligible.map(&:first).sort.last(keep)
+      prunable = eligible.reject { |number, _| number == protect || retained.include?(number) }
+      superseded + prunable
+    end
+
     # @param pairs [Array<Array(Integer, Pathname)>]
     # @return [Array<Integer>] the generation numbers removed
-    def remove_generation_dirs(pairs)
-      pairs.filter_map { |number, dir| remove_generation_dir(number, dir) }
+    def remove_generation_dirs(pairs, pins:)
+      pairs.filter_map do |number, dir|
+        if pins.include?(number)
+          yield number, :persistent_pin if block_given?
+          next
+        end
+        remove_generation_dir(number, dir)
+      end
     end
 
     # @return [Integer, nil] the removed generation, or nil while pinned

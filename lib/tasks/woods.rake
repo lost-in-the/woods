@@ -368,8 +368,28 @@ namespace :woods do
   desc 'Vet the data — validate index integrity (alias for validate)'
   task vet: :validate
 
+  desc 'Pin a retained generation against payload retention'
+  task :pin, [:generation] => :environment do |_task, args|
+    require 'woods/payload_store'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+    added = Woods::PayloadStore.new(output_dir).pin(args[:generation])
+    puts "#{added ? 'Pinned' : 'Already pinned'} generation #{args[:generation]}"
+  end
+
+  desc 'Release a persistent generation retention pin'
+  task :unpin, [:generation] => :environment do |_task, args|
+    require 'woods/payload_store'
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+    released = Woods::PayloadStore.new(output_dir).unpin(args[:generation])
+    puts "#{released ? 'Unpinned' : 'Already unpinned'} generation #{args[:generation]}"
+  end
+
   desc 'Show index statistics'
   task stats: :environment do
+    require 'woods/payload_store'
+
     output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
     unless output_dir.exist?
@@ -381,6 +401,8 @@ namespace :woods do
     manifest_path = payload_dir.join('manifest.json')
     manifest = manifest_path.exist? ? JSON.parse(Woods::AtomicFile.read(manifest_path)) : {}
 
+    pins = Woods::PayloadStore.new(output_dir).pins
+
     puts 'Woods Index Statistics'
     puts '=' * 50
     puts "  Extracted at:  #{manifest['extracted_at'] || 'unknown'}"
@@ -388,6 +410,7 @@ namespace :woods do
     puts "  Ruby version:  #{manifest['ruby_version'] || 'unknown'}"
     puts "  Git SHA:       #{manifest['git_sha'] || 'unknown'}"
     puts "  Git branch:    #{manifest['git_branch'] || 'unknown'}"
+    puts "  Persistent pins: #{pins.empty? ? 'none' : pins.join(', ')}"
     puts
 
     puts 'Units by Type'

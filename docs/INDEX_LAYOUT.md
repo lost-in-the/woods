@@ -241,6 +241,60 @@ immutable snapshot if that protection is unavailable. Flat indexes (including
 full-extraction fallback when a payload cannot be created) have individually
 replaced files, not multi-file atomicity; read/copy them only with writers stopped.
 
+### Persistent retention pins
+
+Current source adds `woods:pin[N]` and `woods:unpin[N]` for a review base that
+must survive several extractions and reader restarts. Check that the installed
+Woods version includes these tasks before using them. `N` is the positive
+`generation.json.number` of this index, not a Git SHA, snapshot ID, pointer token,
+or payload path. Capture it before extracting the review head:
+
+```bash
+WOODS_OUTPUT=tmp/woods bin/rails 'woods:pin[42]'
+WOODS_OUTPUT=tmp/woods bin/rails woods:stats
+# Save the review result, then release the base:
+WOODS_OUTPUT=tmp/woods bin/rails 'woods:unpin[42]'
+```
+
+The Ruby equivalent is `Woods::PayloadStore.new(output_dir).pin(42)` or
+`.unpin(42)` after `require 'woods/payload_store'`. Each returns `true` when it
+changes the pin set and `false` when already in the requested state. `.pins`
+returns sorted integer generation numbers. Pins are a set, not reference counts:
+coordinate shared ownership before unpinning a base another review still needs.
+
+Pinning requires an existing retained `payloads/gen-N` directory at or below the
+current published number, a valid atomic publication pointer, and JSON-object
+manifest and graph artifacts. Missing, future, malformed, incomplete, symlinked,
+and flat payloads are rejected. There is no historical publication ledger:
+validation identifies retained payloads in the current index history; it cannot
+certify manually restored directories. Generation numbers are local to the index
+lifetime. Replacing/resetting its pointer or payload tree is outside this contract.
+Woods refuses to reuse or rename over a pinned payload number during writer
+recovery, preserving its bytes if the marker is lost. An existing pin can be
+released even if external cleanup removed its payload.
+An unpinned unknown generation is rejected rather than silently accepted.
+
+Pins persist in `<output>/generation_pins.json`, a versioned operational JSON
+object (`{"version":1,"generations":[42]}`), outside immutable payloads and
+separate from temporal snapshot retention. Do not copy it into an exported
+structural snapshot. Missing state means no persistent pins for older indexes;
+unreadable/malformed state fails retention closed and is reported as an error.
+Update pins through Woods rather than editing state or lock files directly.
+
+Pin/unpin updates and pruning serialize on a stable advisory lock and state
+updates use durable atomic replacement. If pruning wins the race and removes a
+payload, pinning fails; a successful pin is visible before pruning can delete it.
+Retention keeps pinned payloads **in addition to** the usual recent-generation
+budget, logs each skipped persistent pin, and retries released payloads on the
+next publication. `woods:stats` lists the persistent numbers. Releasing a pin
+does not delete a payload immediately; an active reader's manifest lock still
+protects it. Disk usage can grow until pins are released.
+
+Persistent pins protect against cooperating Woods retention. `woods:clean`,
+manual deletion, index replacement, and older Woods writers that do not understand
+the registry remain outside that guarantee. Keep the manifest-lock read protocol
+above for complete reads/copies, and coordinate cleanup and writer upgrades.
+
 ## Bash and jq: read one pinned generation
 
 Requires Bash, jq, GNU `realpath`, util-linux `flock`, and Linux `/proc`. Save as
