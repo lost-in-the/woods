@@ -203,11 +203,44 @@ to 240 characters before escaping. Output is deterministic for a fixed report.
 This slice validates text contracts; browser/Mermaid-parser rendering remains
 unverified. Renderers return strings and do not post comments or save/share reports.
 
+## Task, saved JSON and conditional MCP
+
+`woods:impact[from,to]` requires a base selector and defaults the head to `now`.
+It reads `WOODS_OUTPUT` or the configured output directory without booting Rails.
+For pre-change planning, set `FOCUS` to a JSON array of exact typed identity
+objects, optionally `AT=gen:N`, and omit both positional range arguments.
+`WOODS_IMPACT_OPTIONS` accepts a JSON object of the existing query options;
+unknown options, mixed modes and invalid formats fail explicitly.
+
+`FORMAT` is `markdown` (default), `json` or `mermaid`. The task computes once and
+saves exact canonical `report.to_json` bytes under
+`<index>/explorer/impacts/<sha256-of-json>/impact.json`, independent of display
+format. Identical saves are idempotent; existing conflicting content and unsafe
+symlink destinations fail. Existing storage directories with permissions broader
+than 0700 are deliberately refused rather than chmodded. Saved files use 0600
+permissions and publication is atomic. Saved JSON remains available after payload
+retention without recomputing a report. Display goes to stdout; the local saved location goes to stderr. Risk
+flags do not introduce a new exit policy; invalid input or persistence errors fail.
+
+The read-only `change_impact` MCP tool registers only with `snapshot_store:`.
+That collaborator gates registration; retained payloads remain comparison authority,
+and an empty snapshot store does not prevent a retained range comparison.
+The tool accepts string `from`/`to` selectors, or `focus` plus optional `at`, the
+same query options, and `format:markdown|json|mermaid`. Depth is 0..10 and focus is
+limited to 1000 typed identities at the MCP boundary (the Ruby API allows 10000).
+Every format returns the same report under `structuredContent.data` and uses the
+shared pure renderer. The tool never saves or shares a report. Missing/corrupt
+required inputs remain errors, including non-object JSON manifests.
+
+Distributed plugin skill guidance remains deferred because its required plugin
+version bump is outside this slice. The canonical guides describe development
+capabilities; installed releases must be checked for actual tool registration.
+
 ## Remaining W-12 work and dependencies
 
 Not implemented: method-scoped pre-change reports, new instance-variable mismatch
-detection, tables, templates, suggested tests, commit ranges, hunks, rake task,
-MCP registration, saved reports, URLs or Map UI.
+detection, tables, templates, suggested tests, commit ranges, hunks, distributed
+plugin guidance, URLs or Map UI.
 An empty reserved array means **not computed**, never “no impact” or “no risk”.
 
 W-10 (#773) adds ordered `source`, `metadata`, `dependencies` facets to modified
@@ -218,8 +251,8 @@ rows; this core uses existing reader locks and does not manage persistent pins.
 W-13 (#775) publishes `flows/by_unit.json` as identifier → actual type → sorted
 entrypoint strings. Membership describes expanded flow steps only; absence
 cannot prove no flow reaches a unit. W-10, W-11 and W-13 are merged foundations.
-This slice changes no extraction layout, task, configuration or MCP surface. It reads
-W13's merged index format without changing its producer.
+This backend changes no extraction layout or configuration. It adds one rake task
+and one conditional MCP tool, reading W13's merged format without changing its producer.
 
 Propagation uses base evidence for removed units and head evidence for current
 units and does not splice generations or reuse Map's identifier-only BlastRadius.

@@ -61,8 +61,8 @@ RSpec.describe Woods::MCP::Server do
 
     it 'registers 14 tools when no optional collaborators are wired' do
       # Without operator / feedback_store / snapshot_store / session_store /
-      # notion config, the 15 collaborator-dependent tools (5 pipeline_*, 4
-      # retrieval_*, 4 snapshot/history, session_trace, notion_sync) are
+      # notion config, the 16 collaborator-dependent tools (5 pipeline_*, 4
+      # retrieval_*, 5 snapshot/history/impact, session_trace, notion_sync) are
       # intentionally NOT registered — advertising them in tools/list when
       # they're guaranteed to error just wastes LLM context. Core tools that
       # only need the on-disk index remain advertised.
@@ -99,7 +99,8 @@ RSpec.describe Woods::MCP::Server do
     it 'registers snapshot_* tools when snapshot_store is wired' do
       srv = described_class.build(index_dir: fixture_dir, snapshot_store: double('snap'))
       tools = srv.instance_variable_get(:@tools)
-      expect(tools.keys).to include('list_snapshots', 'snapshot_diff', 'unit_history', 'snapshot_detail')
+      expect(tools.keys).to include('list_snapshots', 'snapshot_diff', 'unit_history', 'snapshot_detail',
+                                    'change_impact')
     end
 
     it 'registers 2 resources' do

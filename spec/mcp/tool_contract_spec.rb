@@ -21,6 +21,32 @@ RSpec.describe 'Index MCP tool contracts' do
   # rubocop:disable-next Layout/LineLength
   let(:contract_oracle) do
     {
+      'change_impact' => contract(:snapshot, { 'from' => 'gen:1' }, data_projection(
+                                                                      [%w[schema_version], 1], [%w[range from generation], 1],
+                                                                      [['changed', 0, 'identifier'], 'Example'], [%w[coverage complete], false],
+                                                                      [['unknowns', 0, 'feature'], 'affected']
+                                                                    ), properties: {
+                                                                      'from' => string_contract(nil, 10_000),
+                                                                      'to' => string_contract(nil, 10_000),
+                                                                      'at' => string_contract(nil, 10_000),
+                                                                      'focus' => { 'type' => 'array', 'minItems' => 1, 'maxItems' => 1000,
+                                                                                   'items' => { 'type' => 'object', 'additionalProperties' => false,
+                                                                                                'required' => %w[identifier type],
+                                                                                                'properties' => {
+                                                                                                  'identifier' => string_contract(1, 10_000),
+                                                                                                  'type' => string_contract(1, 10_000)
+                                                                                                } } },
+                                                                      'format' => enum_contract(%w[markdown json mermaid], nil, 10_000),
+                                                                      'depth' => integer_contract(0, 10),
+                                                                      'types' => array_contract(1000, 10_000).merge('items' => string_contract(1, 10_000)),
+                                                                      'via' => array_contract(1000, 10_000).merge('items' => string_contract(1, 10_000)),
+                                                                      'max_nodes' => integer_contract(1, 10_000),
+                                                                      'max_edges' => integer_contract(1, 100_000),
+                                                                      'max_flow_documents' => integer_contract(1, 1000),
+                                                                      'max_flow_steps' => integer_contract(1, 100_000),
+                                                                      'max_flow_operations' => integer_contract(1, 100_000),
+                                                                      'max_risk_records' => integer_contract(1, 100_000)
+                                                                    }),
       'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' },
                                       exact_text("## Post\nclass Post; end"),
                                       required: %w[query], properties: {
@@ -415,6 +441,13 @@ RSpec.describe 'Index MCP tool contracts' do
     )
   end
   let(:notion_exporter) { double(sync_all: { data_models: 2, columns: 4, errors: [] }) }
+  let(:impact_report) do
+    Woods::Impact::Report.new(
+      { 'from' => { 'generation' => 1 }, 'to' => { 'generation' => 1 } },
+      [{ 'identifier' => 'Example', 'type' => 'model', 'status' => 'modified', 'facets' => ['source'],
+         'categories' => ['behaviour'], 'metadata_keys' => [] }]
+    )
+  end
   let(:full_server) { build_full_server }
 
   before do
@@ -425,6 +458,7 @@ RSpec.describe 'Index MCP tool contracts' do
     )
     File.write(feedback_path, "#{seed_rating}\n")
     allow(Woods).to receive(:configuration).and_return(config)
+    allow(Woods::Impact::Report).to receive(:compare).and_return(impact_report)
     allow(config).to receive(:output_dir).and_return(nil)
     # The background worker calls raise_on_publication_failure! after the
     # run; a double without it raised MockExpectationError (not a
@@ -918,12 +952,10 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def assert_enum_semantics(name, value, result)
+    return send("assert_#{name}_enum", value, result) if %w[change_impact woods_status].include?(name)
+
     data = result.dig('structuredContent', 'data')
     case name
-    when 'woods_status'
-      expect(data.dig('index', 'source_freshness')).to include(
-        'state' => 'unknown', 'check' => value, 'complete' => false
-      )
     when 'lookup', 'codebase_retrieve'
       assert_evidence_enum(name, value, result)
     when 'graph_analysis'
@@ -937,6 +969,18 @@ RSpec.describe 'Index MCP tool contracts' do
     else
       raise "Missing enum semantic oracle for #{name}.#{value}"
     end
+  end
+
+  def assert_woods_status_enum(value, result)
+    expect(result.dig('structuredContent', 'data', 'index', 'source_freshness')).to include(
+      'state' => 'unknown', 'check' => value, 'complete' => false
+    )
+  end
+
+  def assert_change_impact_enum(value, result)
+    assert_semantic_result('change_impact', contract_oracle.fetch('change_impact'), result)
+    text = value == 'json' ? impact_report.to_json : Woods::Impact::Renderers.public_send(value, impact_report)
+    expect(result.dig('content', 0, 'text')).to eq(text)
   end
 
   def assert_repair_enum(data, value)
@@ -1026,7 +1070,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   it 'keeps code-derived inventory as a separate drift input to the independent oracle' do
-    expect(inventory_rows.size).to eq(29)
+    expect(inventory_rows.size).to eq(30)
     expect(inventory_rows.map { |row| row.fetch('name') }).to contain_exactly(*contract_oracle.keys)
     expect(listed_tools(full_server).map { |tool| tool.fetch('name') })
       .to contain_exactly(*contract_oracle.keys)
@@ -1386,15 +1430,24 @@ RSpec.describe 'Index MCP tool contracts' do
           when 'array'
             maximum = property.fetch('maxItems')
             item_maximum = property.dig('items', 'maxLength')
-            item = property.dig('items', 'enum')&.first || 'x'
+            item = if property.dig('items', 'type') == 'object'
+                     { 'identifier' => 'Example', 'type' => 'model' }
+                   else
+                     property.dig('items', 'enum')&.first || 'x'
+                   end
             valid = contract.fetch(:arguments).merge(name => Array.new(maximum, item))
             too_many = contract.fetch(:arguments).merge(name => Array.new(maximum + 1, item))
-            long_item = contract.fetch(:arguments).merge(name => ['x' * (item_maximum + 1)])
+            long = if item.is_a?(Hash)
+                     item.merge('identifier' => 'x' * 10_001)
+                   else
+                     'x' * (item_maximum + 1)
+                   end
+            long_item = contract.fetch(:arguments).merge(name => [long])
             expect { input.validate_arguments(valid) }.not_to raise_error, "#{tool_name}.#{name}=#{maximum}"
             expect { input.validate_arguments(too_many) }
               .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name}=#{maximum + 1}"
             expect { input.validate_arguments(long_item) }
-              .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name} item=#{item_maximum + 1}"
+              .to raise_error(MCP::Tool::InputSchema::ValidationError), "#{tool_name}.#{name} oversized item"
           end
         end
       end

@@ -49,6 +49,8 @@ module Woods
       private
 
       def validate_manifest!(manifest)
+        raise IOError, 'Impact requires an object manifest' unless manifest.is_a?(Hash)
+
         counts = manifest['counts']
         total = manifest['total_units']
         valid = counts.is_a?(Hash) && total.is_a?(Integer) && total >= 0 &&

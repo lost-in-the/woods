@@ -163,9 +163,9 @@ of extracted units with verified embedding coverage. Positive counts do not
 prove complete coverage or working provider access. See
 [semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
-### Tools (29 — 14 registered in the packaged default)
+### Tools (30 — 14 registered in the packaged default)
 
-The Index Server defines 29 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
+The Index Server defines 30 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
 
 | Tool | Use it for |
 |---|---|
@@ -450,7 +450,7 @@ Partial traversal and pagination metadata retain the budget contract above.
 
 ### Conditional Index capabilities
 
-The Ruby server builder contains 15 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, and Notion sync. They register only when their required collaborators or configuration are wired.
+The Ruby server builder contains 16 additional schemas for sessions, pipeline operations, retrieval feedback, temporal snapshots, retained change impact, and Notion sync. They register only when their required collaborators or configuration are wired.
 
 The normal packaged executable does not boot Rails or load application
 initializers. It does not wire pipeline-operator or feedback-store collaborators.
@@ -460,6 +460,16 @@ Index process. `notion_sync` needs the API token and database IDs configured in
 that process. These require an explicitly configured custom/embedded builder;
 verify `tools/list`. For ordinary application Notion export, use
 `bin/rails woods:notion_sync`.
+
+`change_impact` registers with `snapshot_store:` alongside snapshot/history tools,
+but compares retained payloads rather than snapshot rows. Pass `from:"gen:1"` and
+optional `to:"now"`, or exact typed `focus` identities and optional `at:"now"`.
+Selectors are strings: `gen:N`, SHA prefixes or `now`. Mixed range/focus modes fail.
+`format` selects `markdown` (default), `json` or `mermaid`; all formats include the
+same versioned report in `structuredContent.data`. The tool never saves or shares
+reports. Depth is 0..10, with the existing type/via filters and explicit finite
+Impact budgets. Focus accepts at most 1000 typed identities over MCP. See the
+[impact report contract](design/IMPACT_REPORT.md) for coverage and limitations.
 
 Snapshots have a supported packaged path: an existing `woods.sqlite3` is
 auto-discovered. `WOODS_SNAPSHOTS=true` enables store construction but does **not**

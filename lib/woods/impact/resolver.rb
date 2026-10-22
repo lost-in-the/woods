@@ -68,10 +68,17 @@ module Woods
           raise ResolutionError, 'Use a positive generation number, gen:N, a 7–40 character SHA, or now'
         end
 
-        matches = @readers.values.select { |reader| sha_matches?(reader.manifest['git_sha'], selector) }
+        matches = @readers.values.select { |reader| sha_matches?(manifest_sha(reader), selector) }
         return matches.first if matches.one?
 
         resolution_error(selector, matches.empty? ? @readers.values : matches)
+      end
+
+      def manifest_sha(reader)
+        manifest = reader.manifest
+        raise IOError, 'Impact requires an object manifest' unless manifest.is_a?(Hash)
+
+        manifest['git_sha']
       end
 
       def sha_matches?(sha, selector)

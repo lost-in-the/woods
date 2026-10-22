@@ -70,7 +70,7 @@ module Woods
         # order, explicitly so clients can cache the list and so the tool block
         # lands identically in an LLM's prompt cache across turns. The SDK lists
         # `@tools.values` — Hash insertion order — and Woods registers 14
-        # always-on tools followed by up to 15 more gated on which collaborators
+        # always-on tools followed by up to 16 more gated on which collaborators
         # happen to be wired. Two hosts with different integrations therefore
         # advertise the same tools in different orders, and enabling an
         # integration reorders the block for everyone on that host.

@@ -10,6 +10,15 @@ The [initialization contract](MCP_SERVERS.md#initialization-guidance) describes
 availability. This guide remains the detailed reference when instructions are
 absent or the client does not display them.
 
+For builds containing #762, a registered `change_impact` tool can compare retained
+generations or plan exact typed unit focus using the shared versioned report.
+Check `tools/list`; this capability requires snapshot-store wiring and is absent
+from the default 14-tool catalog. Use `gen:N` selectors when a SHA maps to several
+retained generations. Preserve endpoint/type/generation evidence, incomplete
+coverage and unknowns. The tool does not save reports or prove complete impact.
+See the [report contract](design/IMPACT_REPORT.md) for exact bounds and unfinished
+analyses; historical source links require a separate generation-pinned route.
+
 ## Start every session with status
 
 Call `woods_status` before relying on the index. Check:

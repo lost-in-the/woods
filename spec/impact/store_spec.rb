@@ -1,0 +1,96 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'tmpdir'
+require 'fileutils'
+require 'woods/impact/store'
+
+RSpec.describe Woods::Impact::Store do
+  around do |example|
+    Dir.mktmpdir('impact-store') do |dir|
+      @root = Pathname.new(dir)
+      example.run
+    end
+  end
+
+  let(:store) { described_class.new(@root) }
+  let(:json) do
+    JSON.generate('schema_version' => 1, 'parameters' => { 'mode' => 'range' }, 'range' => {},
+                  'coverage' => { 'complete' => false }, 'changed' => [], 'affected' => [], 'flows' => [],
+                  'risks' => [], 'tests' => [], 'unknowns' => [])
+  end
+
+  it 'saves exact bytes under their digest with restrictive directory and file modes' do
+    id = store.save(json)
+    expect(id).to eq(Digest::SHA256.hexdigest(json))
+    path = store.path_for(id)
+    expect(path.binread).to eq(json)
+    expect(path.stat.mode & 0o777).to eq(0o600)
+    [path.dirname, path.dirname.parent, path.dirname.parent.parent].each do |dir|
+      expect(dir.stat.mode & 0o777).to eq(0o700)
+    end
+    expect(store.read(id)).to eq(json)
+  end
+
+  it 'publishes concurrent duplicates idempotently without replacing the report' do
+    ids = Array.new(4) { Thread.new { described_class.new(@root).save(json) } }.map(&:value)
+    expect(ids.uniq).to eq([Digest::SHA256.hexdigest(json)])
+    path = store.path_for(ids.first)
+    before = path.stat.ino
+    expect(store.save(json)).to eq(ids.first)
+    expect(path.stat.ino).to eq(before)
+    expect(path.dirname.children.map { |entry| entry.basename.to_s }).to eq(['impact.json'])
+  end
+
+  it 'refuses corrupt or incomplete existing ID destinations without overwriting them' do
+    id = store.save(json)
+    path = store.path_for(id)
+    path.write('{}')
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(path.read).to eq('{}')
+    FileUtils.rm(path)
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(path).not_to exist
+  end
+
+  it 'refuses symlink components, ID directories, report files and lock files' do
+    other = @root.join('outside')
+    other.mkdir(0o700)
+    File.symlink(other, @root.join('explorer'))
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    File.unlink(@root.join('explorer'))
+    id = store.save(json)
+    path = store.path_for(id)
+    FileUtils.rm(path)
+    File.symlink(other.join('elsewhere.json'), path)
+    expect { store.read(id) }.to raise_error(described_class::Error)
+    FileUtils.rm(path)
+    FileUtils.rmdir(path.dirname)
+    File.symlink(other, path.dirname)
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    File.unlink(path.dirname)
+    FileUtils.rm(path.dirname.parent.join('.lock'))
+    File.symlink(other.join('lock'), path.dirname.parent.join('.lock'))
+    expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(other.children).to eq([])
+  end
+
+  it 'rejects unsafe IDs, invalid reports and loosely accessible stored files' do
+    expect { store.read('../elsewhere') }.to raise_error(described_class::Error)
+    expect { store.save('{ broken') }.to raise_error(described_class::Error)
+    expect { store.save(JSON.generate('schema_version' => 9)) }.to raise_error(described_class::Error)
+    expect(@root.join('explorer')).not_to exist
+    id = store.save(json)
+    File.chmod(0o644, store.path_for(id))
+    expect { store.read(id) }.to raise_error(described_class::Error)
+  end
+
+  it 'reads saved report bytes after generation payloads have been retained away' do
+    payload = @root.join('payloads', 'gen-1')
+    FileUtils.mkdir_p(payload)
+    payload.join('manifest.json').write('{}')
+    id = store.save(json)
+    FileUtils.rm_rf(@root.join('payloads'))
+    expect(store.read(id)).to eq(json)
+  end
+end
