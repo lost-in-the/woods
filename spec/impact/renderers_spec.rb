@@ -164,6 +164,14 @@ RSpec.describe Woods::Impact::Renderers do
     expect(mermaid).not_to include('from gen:')
   end
 
+  it 'rejects explicitly invalid related arrays instead of treating them as absent' do
+    %w[tables templates].product([nil, false, {}, 'invalid']).each do |key, invalid|
+      value = data.merge(key => invalid)
+      expect { described_class.markdown(value) }.to raise_error(ArgumentError, /shape/)
+      expect { described_class.mermaid(value) }.to raise_error(ArgumentError, /shape/)
+    end
+  end
+
   it 'rejects unsupported schema versions rather than silently rendering a partial shape' do
     value = data.merge('schema_version' => 9)
     expect { described_class.markdown(value) }.to raise_error(ArgumentError, /schema/)
