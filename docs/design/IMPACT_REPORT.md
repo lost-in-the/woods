@@ -179,11 +179,35 @@ partial. New instance-variable mismatch detection remains explicitly not compute
 absence of flags never proves safety. Evidence locators reference published
 artifact families or metadata keys, not live files, generated URLs or runtime facts.
 
+## Pure report renderers
+
+Require `woods/impact/renderers` and pass the same immutable report (or its
+string-keyed version 1 hash) to `Renderers.markdown(report)` or
+`Renderers.mermaid(report)`. Unsupported schema versions and incompatible range
+or focus envelopes raise. Renderers query no index, source files or runtime.
+
+Markdown contains at most 60 lines, with one visible item and up to five collapsed
+items per section. Additional entries are counted as omitted and remain in JSON.
+Changed/affected units, flows, risks, tests and unknowns have separate sections;
+coverage and unknown counts remain visible even when an array is empty.
+
+Mermaid emits `flowchart LR` from recorded witness edges. Arrows point outward
+from changed or focused targets to affected dependents, rather than depicting the
+underlying dependency direction. Node identity includes endpoint, generation,
+identifier and actual type. Witness context must match its affected record.
+Display limits are 60 nodes (including a visible coverage note) and 120 edges;
+truncation is explicit. Neither renderer proves exhaustive paths or complete impact.
+
+Labels use format-specific numeric escaping, remain on one line and are clipped
+to 240 characters before escaping. Output is deterministic for a fixed report.
+This slice validates text contracts; browser/Mermaid-parser rendering remains
+unverified. Renderers return strings and do not post comments or save/share reports.
+
 ## Remaining W-12 work and dependencies
 
 Not implemented: method-scoped pre-change reports, new instance-variable mismatch
-detection, tables, templates, suggested tests, commit ranges, hunks, Markdown and
-Mermaid renderers, rake task, MCP registration, saved reports, URLs or Map UI.
+detection, tables, templates, suggested tests, commit ranges, hunks, rake task,
+MCP registration, saved reports, URLs or Map UI.
 An empty reserved array means **not computed**, never “no impact” or “no risk”.
 
 W-10 (#773) adds ordered `source`, `metadata`, `dependencies` facets to modified
