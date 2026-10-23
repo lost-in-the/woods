@@ -28,6 +28,7 @@ module Woods
         case node.type
         when :casgn then value_constructor(node) ? :value_class : :other
         when :block, :numblock then dynamic_scope?(node) ? :dynamic_scope : :other
+        when :send, :csend then :call
         else :other
         end
       end
@@ -44,11 +45,28 @@ module Woods
         [prefix, name.to_s].compact.join('::')
       end
 
+      def receiver(node)
+        node.children.first
+      end
+
+      def selector(node)
+        node.children[1]
+      end
+
+      def constant_receiver(node)
+        candidate = receiver(node)
+        candidate = candidate.children.first while candidate&.type == :begin && candidate.children.one?
+        candidate if candidate&.type == :const
+      end
+
       def children(node)
         nodes = case node.type
                 when :casgn then [node.children[2]]
                 when :masgn then [node.children[1]]
                 when :defs then node.children.drop(2)
+                when :op_asgn, :and_asgn, :or_asgn then compound_children(node)
+                when :resbody then assignment_children(node, 1)
+                when :for then assignment_children(node, 0)
                 else node.children
                 end
         nodes.grep(::Parser::AST::Node)
@@ -117,6 +135,33 @@ module Woods
       end
 
       private
+
+      # Rescue/for targets are assignment evidence, not explicit call sites.
+      # Match Prism's target nodes while keeping their receivers and index
+      # arguments available to the ordinary call traversal.
+      def assignment_children(node, position)
+        node.children.each_with_index.flat_map do |child, index|
+          index == position ? assignment_target(child) : [child]
+        end
+      end
+
+      def assignment_target(node)
+        return [node] unless node
+        return node.children if %i[send csend].include?(node.type)
+        return node.children.flat_map { |child| assignment_target(child) } if %i[mlhs splat].include?(node.type)
+
+        [node]
+      end
+
+      # A compound write can dispatch both a getter and setter. Prism exposes
+      # their receiver directly; flatten Parser's getter to retain the same
+      # constant spans without claiming one selector represents the operation.
+      def compound_children(node)
+        getter, *rest = node.children
+        return node.children unless getter && %i[send csend].include?(getter.type)
+
+        [*getter.children, *rest]
+      end
 
       def source_buffer(source)
         # Source::Buffer honors an encoding magic comment, and otherwise Ruby

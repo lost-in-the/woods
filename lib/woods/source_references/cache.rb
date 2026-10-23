@@ -3,6 +3,7 @@
 require 'json'
 require_relative '../atomic_file'
 require_relative 'registry'
+require_relative 'selector'
 
 module Woods
   module SourceReferences
@@ -41,7 +42,7 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 5
+      VERSION = 6
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -166,12 +167,13 @@ module Woods
         end
 
         def reference!(record)
-          shape!(record, %w[owner name nesting line column length], %w[singleton_depth])
+          shape!(record, %w[owner name nesting line column length], %w[singleton_depth method])
           lexical_record!(record)
           require!(record['column'].instance_of?(Integer) && record['column'].between?(0, MAX_LINE),
                    'invalid source column')
           require!(record['length'].instance_of?(Integer) && record['length'].between?(1, MAX_LINE),
                    'invalid source length')
+          require!(Selector.valid?(record['method']), 'invalid method selector') if record.key?('method')
         end
 
         def lexical_record!(record)

@@ -5,7 +5,7 @@ require 'prism'
 module Woods
   module SourceReferences
     # Retains AST context that the general Woods flow AST intentionally omits.
-    class PrismAdapter
+    class PrismAdapter # rubocop:disable Metrics/ClassLength -- keep backend syntax and coordinate handling together
       KINDS = { class_node: :declaration, module_node: :declaration, constant_read_node: :constant,
                 constant_path_node: :constant, singleton_class_node: :singleton, def_node: :method }.freeze
       CONSTANT_WRITES = %i[
@@ -25,7 +25,7 @@ module Woods
 
         case node.type
         when :constant_write_node, :constant_path_write_node then value_constructor(node) ? :value_class : :other
-        when :call_node then dynamic_scope?(node) ? :dynamic_scope : :other
+        when :call_node then dynamic_scope?(node) ? :dynamic_scope : :call
         else :other
         end
       end
@@ -38,6 +38,25 @@ module Woods
         parent = node.parent ? constant_name(node.parent) : ''
         name = node.respond_to?(:name) ? node.name : node.child.name
         "#{parent}::#{name}" if parent
+      end
+
+      def receiver(node)
+        node.receiver
+      end
+
+      def selector(node)
+        node.name
+      end
+
+      def constant_receiver(node)
+        candidate = receiver(node)
+        while candidate&.type == :parentheses_node
+          statements = candidate.body&.body.to_a
+          return unless statements.one?
+
+          candidate = statements.first
+        end
+        candidate if candidate && KINDS[candidate.type] == :constant
       end
 
       def children(node)

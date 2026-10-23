@@ -108,7 +108,7 @@ RSpec.describe 'Source-reference extraction integration' do
 
   def expected_span
     { 'line' => 1, 'column' => 38, 'length' => 20, 'target' => 'RefIntegrationTarget',
-      'target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified' }
+      'target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified', 'method' => 'new' }
   end
 
   it 'projects full references after source mapping and keeps unproven summaries empty' do

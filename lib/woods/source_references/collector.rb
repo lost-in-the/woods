@@ -2,6 +2,7 @@
 
 require_relative 'prism_adapter'
 require_relative 'parser_adapter'
+require_relative 'selector'
 
 module Woods
   module SourceReferences
@@ -13,7 +14,7 @@ module Woods
     # them requires the singleton constant table, not ordinary owner lookup.
     class Collector
       HANDLERS = { declaration: :declaration, value_class: :value_class, constant: :reference,
-                   singleton: :singleton, method: :method_body }.freeze
+                   singleton: :singleton, method: :method_body, call: :call_site }.freeze
       # @param backend [Symbol] :prism (default) or :parser
       # @raise [ArgumentError] for an unsupported backend
       def initialize(backend: :prism)
@@ -90,14 +91,28 @@ module Woods
           'line' => @adapter.line(node), 'end_line' => @adapter.end_line(node) }
       end
 
-      def reference(node, nesting, singleton_depth)
+      def reference(node, nesting, singleton_depth, selector = nil)
         name = @adapter.constant_name(node)
         return skip(node, 'dynamic_constant_path', nesting) unless name
         return skip(node, 'unowned_reference', nesting) if nesting.empty?
 
         record = { 'owner' => nesting.first, 'nesting' => nesting, 'name' => name, **@adapter.position(node) }
         record['singleton_depth'] = singleton_depth if singleton_depth.positive?
+        record['method'] = selector if selector
         @result['references'] << record
+      end
+
+      def call_site(node, nesting, singleton_depth)
+        receiver = @adapter.constant_receiver(node)
+        return visit_children(node, nesting, singleton_depth) unless receiver
+
+        @adapter.children(node).each do |child|
+          if child.equal?(@adapter.receiver(node))
+            reference(receiver, nesting, singleton_depth, Selector.from(@adapter.selector(node)))
+          else
+            visit(child, nesting, singleton_depth)
+          end
+        end
       end
 
       def singleton(node, nesting, singleton_depth)

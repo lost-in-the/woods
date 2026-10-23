@@ -53,6 +53,37 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(result.cache['files'].keys).to match_array(sources.keys)
   end
 
+  it 'publishes selector evidence on admitted receivers without verifying method existence or changing edges' do
+    sources['app/models/ref_caller.rb'] =
+      'class RefCaller; RefTarget.missing; RefTarget.new.execute; consume(RefTarget); RefTarget; Missing.call; end'
+    result = run_pass
+    expect(RefTarget).not_to respond_to(:missing)
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
+    records = result.references.fetch(%w[poro RefCaller])
+    expected = [
+      { 'target' => 'RefTarget', 'method' => 'missing' }, { 'target' => 'RefTarget', 'method' => 'new' },
+      { 'target' => 'RefTarget' }, { 'target' => 'RefTarget' }
+    ]
+    expect(records.map { |record| record.slice('target', 'method') }).to eq(expected)
+    expect(records).to all(include('target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified'))
+    expect(result.cache['files']['app/models/ref_caller.rb']['analysis']['references'].last)
+      .to include('name' => 'Missing', 'method' => 'call')
+  end
+
+  it 'keeps an inherited selector on the resolved receiver without attributing a method-definition owner' do
+    parent = Class.new do
+      def self.inherited_call
+        raise 'must never execute'
+      end
+    end
+    stub_const('RefTarget', Class.new(parent))
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; RefTarget.inherited_call; end'
+    span = run_pass.references.fetch(%w[poro RefCaller]).fetch(0)
+    expect(span).to include('target' => 'RefTarget', 'target_type' => 'poro', 'method' => 'inherited_call')
+    expect(span.keys).to contain_exactly('line', 'column', 'length', 'file_path', 'target', 'target_type',
+                                         'kind', 'confidence', 'method')
+  end
+
   it 'retains duplicate verified occurrences independently of existing edges and their through annotation' do
     sources['app/models/ref_caller.rb'] = 'class RefCaller; RefTarget.new; RefTarget.new; end'
     scanner = edge.merge('type' => 'service', 'through' => 'call')
@@ -141,7 +172,7 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(collector).not_to receive(:call).with(sources.fetch('app/models/ref_caller.rb'))
     result = run_pass(baseline: initial.cache, refreshed: [%w[poro RefTarget]], full: false)
     expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
-    expect(result.references.fetch(%w[poro RefCaller]).first).to include('target_type' => 'poro')
+    expect(result.references.fetch(%w[poro RefCaller]).first).to include('target_type' => 'poro', 'method' => 'new')
   end
 
   it 'withdraws only its own additions when a target disappears' do

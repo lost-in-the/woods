@@ -100,11 +100,20 @@ span metadata, not an empty reference set. See the
 [published layout](INDEX_LAYOUT.md#constant-reference-spans) for reader details.
 
 This bounded addition covers verified constants only. Other reference kinds,
-static/ambiguous candidates and method-target evidence (#756) remain separate
+static/ambiguous candidates and broader method-target behavior remain separate
 work; it does not establish method-level reverse impact or complete #751.
+The bounded #756 addition publishes optional `method` evidence only for the
+immediate syntactic selector on an admitted constant receiver. Bare/argument
+constants omit the key. The constant span and typed target stay unchanged;
+method existence, runtime dispatch and method-definition ownership are not
+verified. See the [selector contract](INDEX_LAYOUT.md#constant-reference-spans)
+for direct calls, compound-write exclusions, the shared 4096-byte bound and
+upgrade behavior. Method tables and source boundaries remain separate #752 work.
 The [frozen-corpus qualification](INDEX_LAYOUT.md#constant-reference-spans)
-validated 111 spans across 40 units and measured 1.182258% actual unit-JSON growth,
+validated the earlier seven-key producer: 111 spans across 40 units and 1.182258% actual unit-JSON growth,
 including empty arrays, below the approximately 15% threshold on that corpus.
+That measurement does not qualify the added selector field; its coordinated
+testbed oracle and source/artifact payload measurements remain required.
 
 ### Identifier naming (source-derived units)
 

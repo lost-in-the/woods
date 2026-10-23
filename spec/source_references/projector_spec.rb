@@ -20,6 +20,15 @@ RSpec.describe Woods::SourceReferences::Projector do
     expect(projector.call(unit, references)).to eq(references.map { |record| record.except('file_path') })
   end
 
+  it 'preserves optional selector evidence alongside bare constant spans through annotated source mapping' do
+    references.first['method'] = 'call'
+    unit['source_code'] = "# header\n#{original}"
+    unit['metadata']['source_line_map'] = Woods::SourceLineMap.build(original, unit['source_code'])
+    expected = references.map { |record| record.except('file_path').merge('line' => 3) }
+    expect(projector.call(unit, references)).to eq(expected)
+    expect(projector.call(unit, references).last).not_to have_key('method')
+  end
+
   it 'projects past a header and commented inlined source using the recorded line map' do
     annotated = "# Target is documentation\nclass Caller\n#   Target.call\n#{original.lines.drop(1).join}"
     unit['source_code'] = annotated

@@ -52,8 +52,41 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(File.stat(path).mode & 0o777).to eq(0o600)
   end
 
-  it 'is format 5, which records the caller policy that produced the edges' do
-    expect(described_class::VERSION).to eq(5)
+  it 'round trips optional selector evidence including operators without adding it to bare constants' do
+    data['files'].values.first['analysis'] = Woods::SourceReferences::Collector.new.call(
+      'class Caller; Target.call; Target[Argument] = Value; Target + Other; Target; end'
+    )
+    records = data['files'].values.first['analysis'].fetch('references')
+    expect(records.map { |record| record['method'] }).to eq(['call', '[]=', nil, nil, '+', nil, nil])
+    described_class.write(path, data)
+    expect(described_class.read(path)).to eq(data)
+  end
+
+  it 'requires format 6 and refuses format 5 so unchanged callers gain selector evidence after a full rebuild' do
+    expect(described_class::VERSION).to eq(6)
+    analysis['references'].each { |record| record.delete('method') }
+    write_json(data.merge('version' => 5))
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
+  end
+
+  [nil, '', 1, true, false, [], {}, "call\n", "call\0", "call\u0085", "\xFF".b, 'a' * 4097].each do |value|
+    it "rejects invalid selector evidence #{value.inspect}" do
+      analysis['references'].first['method'] = value
+      expect { described_class.write(path, data) }.to raise_error(described_class::Invalid)
+      unless value.is_a?(String) && !value.dup.force_encoding(Encoding::UTF_8).valid_encoding?
+        write_json(data)
+        expect { described_class.read(path) }.to raise_error(described_class::Invalid)
+      end
+    end
+  end
+
+  it 'allows an absent optional selector without claiming semantic completeness' do
+    analysis['references'].each { |record| record.delete('method') }
+    described_class.write(path, data)
+    expect(described_class.read(path)).to eq(data)
+  end
+
+  it 'records the caller policy that produced the edges' do
     data.delete('callers')
     expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /record keys/)
   end
