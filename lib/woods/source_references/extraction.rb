@@ -130,7 +130,7 @@ module Woods
           references = projector.call(data, result.references.fetch(identity))
           next if source_reference_unchanged?(data, edges, references)
 
-          rewrite_source_reference_edges(record, edges, references, affected_types)
+          rewrite_source_references(record, edges, references, affected_types)
           touched.add(identity.last)
         end
         write_source_reference_cache(result)
@@ -194,9 +194,15 @@ module Woods
         CallerPolicy.new(Woods.configuration.source_reference_callers)
       end
 
-      def rewrite_source_reference_edges(record, edges, references, affected_types)
+      def rewrite_source_references(record, edges, references, affected_types)
         data = record.fetch(:data)
         (data['metadata'] ||= {})['references'] = references
+        rewrite_source_reference_edges(record, edges, affected_types)
+      end
+
+      # Shared with documentation: preserve metadata unless the owning pass changed it.
+      def rewrite_source_reference_edges(record, edges, affected_types)
+        data = record.fetch(:data)
         type = data.fetch('type').to_sym
         identifier = data.fetch('identifier')
         node = @dependency_graph.node(identifier, type: type)
