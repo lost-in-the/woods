@@ -17,6 +17,176 @@ RSpec.describe Woods::SourceReferences::Collector do
         references(source).map { |reference| reference.fetch('name') }
       end
 
+      it 'records only the immediate constant receiver selector, not arguments or later dispatch' do
+        records = references(<<~SOURCE)
+          class Caller
+            Target.call(Argument)
+            Target.new.execute
+            Target.call.deliver
+            Target.send(:execute)
+            Target.public_send(MethodName)
+            consume(Target)
+            Target
+          end
+        SOURCE
+        expected = [
+          { 'name' => 'Target', 'method' => 'call' }, { 'name' => 'Argument' },
+          { 'name' => 'Target', 'method' => 'new' }, { 'name' => 'Target', 'method' => 'call' },
+          { 'name' => 'Target', 'method' => 'send' }, { 'name' => 'Target', 'method' => 'public_send' },
+          { 'name' => 'MethodName' }, { 'name' => 'Target' }, { 'name' => 'Target' }
+        ]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+      end
+
+      it 'retains syntactic safe, operator, index, setter and shorthand selectors' do
+        expressions = {
+          'Target&.ready?' => 'ready?', 'Target.save!' => 'save!', 'Target + Argument' => '+',
+          '-Target' => '-@', 'Target[Argument]' => '[]', 'Target[Argument] = Value' => '[]=',
+          'Target.value = Argument' => 'value=', 'Target.()' => 'call', 'Target::call' => 'call',
+          '(Target).call' => 'call', '((Target)).call' => 'call',
+          'Target.écrire' => 'écrire'
+        }
+        expressions.each do |expression, selector|
+          records = references("class Caller; #{expression}; end")
+          expect(records.first).to include('name' => 'Target', 'method' => selector)
+          expect(records.drop(1)).to all(satisfy { |record| !record.key?('method') })
+        end
+      end
+
+      it 'does not infer a constant receiver from a group with preceding expressions' do
+        records = references('class Caller; (Other.call; Target).work; end')
+        expected = [{ 'name' => 'Other', 'method' => 'call' }, { 'name' => 'Target' }]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+      end
+
+      it 'omits selectors exceeding the shared 4096-byte evidence bound without losing constant spans' do
+        records = references("class Caller; Target.#{'é' * 2048}; Target.#{'é' * 2049}; end")
+        expect(records.first.fetch('method')).to eq('é' * 2048)
+        expect(records.last).to include('name' => 'Target', 'length' => 6)
+        expect(records.last).not_to have_key('method')
+      end
+
+      it 'normalizes a selector from the declared source encoding to UTF-8' do
+        source = "# encoding: ISO-8859-1\nclass Caller; Target.écrire; end\n".encode(Encoding::ISO_8859_1)
+        record = references(source).first
+        expect(record).to include('name' => 'Target', 'method' => 'écrire')
+        expect(record.fetch('method').encoding).to eq(Encoding::UTF_8)
+      end
+
+      it 'omits a selector for compound writes while retaining their receiver, arguments and nested calls' do
+        records = references(<<~SOURCE)
+          class Caller
+            Target.value += Other.call
+            Target.value ||= Other
+            Target.value &&= Other
+            Target[Index.call] += Value.call
+            Target[Index] ||= Value
+            Target[Index] &&= Value
+            Target.build.value += Other.call
+          end
+        SOURCE
+        expected = [
+          { 'name' => 'Target' }, { 'name' => 'Other', 'method' => 'call' },
+          { 'name' => 'Target' }, { 'name' => 'Other' }, { 'name' => 'Target' }, { 'name' => 'Other' },
+          { 'name' => 'Target' }, { 'name' => 'Index', 'method' => 'call' }, { 'name' => 'Value', 'method' => 'call' },
+          { 'name' => 'Target' }, { 'name' => 'Index' }, { 'name' => 'Value' },
+          { 'name' => 'Target' }, { 'name' => 'Index' }, { 'name' => 'Value' },
+          { 'name' => 'Target', 'method' => 'build' }, { 'name' => 'Other', 'method' => 'call' }
+        ]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+      end
+
+      it 'keeps dynamic-scope exclusions ahead of receiver selector collection' do
+        result = collector.call(<<~SOURCE)
+          class Caller
+            Target.class_eval { Hidden.call }
+            Target.module_eval { Hidden.call }
+            Target.define_method(:read) { Hidden.call }
+            Target.define_singleton_method(:read) { Hidden.call }
+            define_method(:read) { Local.call }
+            Target.call(Other.work, Bare) { Argument.call }
+          end
+        SOURCE
+        expected = [
+          { 'name' => 'Local', 'method' => 'call' }, { 'name' => 'Target', 'method' => 'call' },
+          { 'name' => 'Other', 'method' => 'work' }, { 'name' => 'Bare' }, { 'name' => 'Argument', 'method' => 'call' }
+        ]
+        expect(result.fetch('references').map { |record| record.slice('name', 'method') }).to eq(expected)
+        expect(result.fetch('skipped').map { |record| record.fetch('reason') }).to eq(['dynamic_declaration'] * 4)
+      end
+
+      it 'retains a bare receiver span for a rescue attribute assignment target' do
+        source = 'class Caller; begin; work; rescue => Target.error; end; end'
+        records = references(source)
+        expected = [{ 'owner' => 'Caller', 'nesting' => ['Caller'], 'name' => 'Target',
+                      'line' => 1, 'column' => 37, 'length' => 6 }]
+        expect(records).to eq(expected)
+      end
+
+      it 'retains rescue index targets without losing their argument calls' do
+        records = references('class Caller; begin; work; rescue => Target[Index.call]; end; end')
+        expected = [{ 'name' => 'Target' }, { 'name' => 'Index', 'method' => 'call' }]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+        expect(records.first).to include('line' => 1, 'column' => 37, 'length' => 6)
+      end
+
+      it 'omits selectors on nested for assignment targets while retaining collection and body calls' do
+        records = references(<<~SOURCE)
+          class Caller
+            for (Target.value, (Other.value, *Target[Index.call])) in Values.call
+              Body.call
+            end
+          end
+        SOURCE
+        expected = [
+          { 'name' => 'Target' }, { 'name' => 'Other' }, { 'name' => 'Target' },
+          { 'name' => 'Index', 'method' => 'call' }, { 'name' => 'Values', 'method' => 'call' },
+          { 'name' => 'Body', 'method' => 'call' }
+        ]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+      end
+
+      it 'keeps nested receiver calls and ordinary explicit setters distinct from assignment targets' do
+        records = references(<<~SOURCE)
+          class Caller
+            begin
+              work
+            rescue => Factory.build.error
+            end
+            for Factory.build[Index.call] in Values
+            end
+            for Target.value in Values
+            end
+            Target.error = Value
+            Target[Index.call] = Value
+          end
+        SOURCE
+        expected = [
+          { 'name' => 'Factory', 'method' => 'build' }, { 'name' => 'Factory', 'method' => 'build' },
+          { 'name' => 'Index', 'method' => 'call' }, { 'name' => 'Values' },
+          { 'name' => 'Target' }, { 'name' => 'Values' },
+          { 'name' => 'Target', 'method' => 'error=' }, { 'name' => 'Value' },
+          { 'name' => 'Target', 'method' => '[]=' }, { 'name' => 'Index', 'method' => 'call' },
+          { 'name' => 'Value' }
+        ]
+        expect(records.map { |record| record.slice('name', 'method') }).to eq(expected)
+      end
+
+      it 'keeps whole repeated rooted Unicode receivers in original CRLF byte coordinates' do
+        source = "class Caller\r\n  'é'; ::Späce::\r\n    Tárget.call; ::Späce::Tárget.new\r\nend\r\n"
+        records = references(source)
+        expected = [['::Späce::Tárget', 2, 8, 23, 'call'], ['::Späce::Tárget', 3, 18, 17, 'new']]
+        expect(records.map { |record| record.values_at('name', 'line', 'column', 'length', 'method') }).to eq(expected)
+      end
+
+      it 'associates a selector on a later line only with its receiver' do
+        records = references("class Caller\r\n  Target\r\n    .call(Argument)\r\nend\r\n")
+        expect(records.first).to include('name' => 'Target', 'line' => 2, 'column' => 2, 'length' => 6,
+                                         'method' => 'call')
+        expect(records.last).to include('name' => 'Argument')
+        expect(records.last).not_to have_key('method')
+      end
+
       it 'records literal value-class assignments without attributing their dynamic block bodies' do
         result = collector.call(<<~SOURCE)
           module ValueSpace
@@ -58,15 +228,15 @@ RSpec.describe Woods::SourceReferences::Collector do
         expect(result['skipped']).to be_empty
         expected = [
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
-            'name' => 'TokenGenerator', 'line' => 2 },
+            'name' => 'TokenGenerator', 'line' => 2, 'method' => 'generate' },
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
-            'name' => 'Billing::Parser', 'line' => 3 },
+            'name' => 'Billing::Parser', 'line' => 3, 'method' => 'default' },
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
-            'name' => 'Domain::Vendor::PlanChange', 'line' => 4 },
+            'name' => 'Domain::Vendor::PlanChange', 'line' => 4, 'method' => 'new' },
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
             'name' => '::TokenCodec', 'line' => 6 },
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
-            'name' => 'CodecRegistry', 'line' => 7 }
+            'name' => 'CodecRegistry', 'line' => 7, 'method' => 'fetch' }
         ]
         expect(result['references'].map { |record| record.except('column', 'length') }).to eq(expected)
         expect(JSON.parse(JSON.generate(result))).to eq(result)
@@ -226,7 +396,8 @@ RSpec.describe Woods::SourceReferences::Collector do
           end
         RUBY_SOURCE
         result = collector.call(source)
-        expected = [{ 'owner' => 'Caller', 'nesting' => ['Caller'], 'name' => 'TokenGenerator', 'line' => 5 }]
+        expected = [{ 'owner' => 'Caller', 'nesting' => ['Caller'], 'name' => 'TokenGenerator', 'line' => 5,
+                      'method' => 'generate' }]
         expect(result['references'].map { |record| record.except('column', 'length') }).to eq(expected)
         skipped = [
           { 'owner' => 'Caller', 'reason' => 'dynamic_declaration', 'line' => 2 },
@@ -245,7 +416,8 @@ RSpec.describe Woods::SourceReferences::Collector do
 
       it 'preserves enclosing lexical nesting when a declaration is rooted' do
         source = 'module Domain; class ::Caller; Target.call; end; end'
-        expected = [{ 'owner' => 'Caller', 'nesting' => %w[Caller Domain], 'name' => 'Target', 'line' => 1 }]
+        expected = [{ 'owner' => 'Caller', 'nesting' => %w[Caller Domain], 'name' => 'Target', 'line' => 1,
+                      'method' => 'call' }]
         expect(references(source).map { |record| record.except('column', 'length') }).to eq(expected)
       end
 

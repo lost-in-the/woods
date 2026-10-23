@@ -470,9 +470,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expected_references = [
         { 'line' => 8, 'column' => 4, 'length' => 'ReferenceGraphTarget'.bytesize,
           'target' => 'ReferenceGraphTarget', 'target_type' => 'lib',
-          'kind' => 'constant', 'confidence' => 'verified' },
+          'kind' => 'constant', 'confidence' => 'verified', 'method' => 'generate' },
         { 'line' => 9, 'column' => 10, 'length' => '::ReferenceGraphTarget'.bytesize,
-          'target' => 'ReferenceGraphTarget', 'target_type' => 'lib', 'kind' => 'constant', 'confidence' => 'verified' }
+          'target' => 'ReferenceGraphTarget', 'target_type' => 'lib', 'kind' => 'constant', 'confidence' => 'verified',
+          'method' => 'generate' }
       ]
       expect(connected.fetch('metadata').fetch('references')).to eq(expected_references)
       expect(connected.fetch('extracted_at')).to eq(before.fetch('extracted_at'))
@@ -507,7 +508,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       caller_path = write_file('app/models/reference_refresh_caller.rb', <<~RUBY)
         class ReferenceRefreshCaller
           def execute
-            ReferenceRefreshFirst.new
+            ReferenceRefreshFirst.call
           end
         end
       RUBY
@@ -520,10 +521,27 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       initial = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
       first_reference = { 'line' => 8, 'column' => 4, 'length' => 'ReferenceRefreshFirst'.bytesize,
                           'target' => 'ReferenceRefreshFirst', 'target_type' => 'lib',
-                          'kind' => 'constant', 'confidence' => 'verified' }
+                          'kind' => 'constant', 'confidence' => 'verified', 'method' => 'call' }
       expect(initial.fetch('metadata').fetch('references')).to eq([first_reference])
+
+      # Same-length selector edit: coordinates, typed identity and graph edges stay fixed.
+      write_file(caller_path, File.read(app_path(caller_path)).sub('.call', '.work'))
+      load app_path(caller_path)
+      generation = Woods::Generation.new(output_dir: index)
+      token = generation.current.token
+      expect { Woods::Extractor.new(output_dir: index).refresh(:events) }
+        .to raise_error(Woods::SourceReferences::RebuildRequired, /unverified source/)
+      expect(generation.current.token).to eq(token)
+      expect(reader.find_unit('ReferenceRefreshCaller', type: 'poro')).to eq(initial)
+      Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
+      selector_edit = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
+      first_reference = first_reference.merge('method' => 'work')
+      expect(selector_edit.fetch('metadata').fetch('references')).to eq([first_reference])
+      expect(selector_edit.fetch('dependencies')).to eq(initial.fetch('dependencies'))
+      expect(differences(index, full_extraction)).to be_empty
+
       write_file(caller_path,
-                 File.read(app_path(caller_path)).sub('ReferenceRefreshFirst.new', 'ReferenceRefreshSecond.new'))
+                 File.read(app_path(caller_path)).sub('ReferenceRefreshFirst.work', 'ReferenceRefreshSecond.work'))
       load app_path(caller_path)
       Woods::Extractor.new(output_dir: index).refresh(:poros)
       graph = read_json(index, 'dependency_graph.json')
@@ -536,7 +554,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index, full_extraction)).to be_empty
 
       shifted = File.read(app_path(caller_path))
-                    .sub('    ReferenceRefreshSecond.new', '      ReferenceRefreshSecond.new')
+                    .sub('    ReferenceRefreshSecond.work', '      ReferenceRefreshSecond.work')
       write_file(caller_path, shifted)
       load app_path(caller_path)
       Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
@@ -559,6 +577,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       %i[ReferenceRefreshCaller ReferenceRefreshFirst ReferenceRefreshSecond].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
       end
+    end
+
+    it 'requires a full rebuild of format 5 before either public incremental writer can advance' do
+      caller_path = write_file('app/models/reference_upgrade_caller.rb', <<~RUBY)
+        class ReferenceUpgradeCaller
+          def call
+            MissingUpgradeTarget.call
+          end
+        end
+      RUBY
+      load app_path(caller_path)
+      index = full_extraction
+      generation = Woods::Generation.new(output_dir: index)
+      token = generation.current.token
+      cache_path = generation.payload_dir.join('source_references.json')
+      cache = read_json(index, 'source_references.json')
+      expect(cache.fetch('version')).to eq(6)
+      cache['version'] = 5
+      cache.fetch('files').each_value do |file|
+        file.fetch('analysis').fetch('references').each { |record| record.delete('method') }
+      end
+      File.binwrite(cache_path, JSON.generate(cache))
+      previous_cache = File.binread(cache_path)
+      previous_units = unit_snapshot(index)
+
+      [-> { Woods::Extractor.new(output_dir: index).extract_changed([caller_path]) },
+       -> { Woods::Extractor.new(output_dir: index).refresh(:poros) }].each do |operation|
+        expect(&operation).to raise_error(Woods::SourceReferences::RebuildRequired, /woods:extract/)
+        expect(generation.current.token).to eq(token)
+        expect(File.binread(cache_path)).to eq(previous_cache)
+        expect(unit_snapshot(index)).to eq(previous_units)
+      end
+
+      Woods::Extractor.new(output_dir: index).extract_all
+      expect(read_json(index, 'source_references.json').fetch('version')).to eq(6)
+      Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Object.send(:remove_const, :ReferenceUpgradeCaller) if Object.const_defined?(:ReferenceUpgradeCaller, false)
     end
   end
 

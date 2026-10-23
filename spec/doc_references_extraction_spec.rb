@@ -37,7 +37,7 @@ RSpec.describe Woods::DocReferences::Extraction do
     document.source_code = 'SpanTarget and `DocWriterTarget`'
     document.metadata = { mentions: [{ kind: 'constant', text: 'DocWriterTarget', resolved: false }], links: [],
                           git: { commit_count: 7 }, custom: ['keep'] }
-    document.metadata[:references] = reference_state == 'empty' ? [] : [span] unless reference_state == 'absent'
+    document.metadata[:references] = reference_spans(reference_state) unless reference_state == 'absent'
     document.chunks = [{ id: 'kept-chunk', content: 'keep' }]
     graph.register(document)
     FileUtils.mkdir_p(path.dirname)
@@ -46,7 +46,15 @@ RSpec.describe Woods::DocReferences::Extraction do
     JSON.parse(File.read(path))
   end
 
-  %w[absent empty populated].each do |reference_state|
+  def reference_spans(state)
+    case state
+    when 'empty' then []
+    when 'method' then [span.merge(method: 'call')]
+    else [span]
+    end
+  end
+
+  %w[absent empty populated method].each do |reference_state|
     it "preserves #{reference_state} source spans through document-edge additions and removals" do
       before = seed_document(reference_state)
       affected = Set.new

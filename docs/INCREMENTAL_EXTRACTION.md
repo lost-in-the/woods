@@ -1000,12 +1000,19 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
-The development constant-span writer uses cache format 5. It requires validated
+The development constant-span writer uses cache format 6. It requires validated
 line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
-produced its edges. A format 4 or earlier cache, or one written under a different
+produced its edges. It also retains optional syntactic method selectors on
+constant receiver candidates, including unresolved ones. A format 5 or earlier
+cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
+Unchanged source identities otherwise reuse cached analysis; accepting format 5
+would leave those callers without selector evidence. Missing optional fields in
+a format 6 record are valid but do not prove semantic completeness: bare reads
+have no selector, and contract tests establish expected presence on receivers.
+Updating only a reader does not enrich an existing generation.
 
 Span metadata and dependency edges are recomputed separately. Unchanged callers
 can gain or lose spans when a target arrives, disappears or becomes ambiguous,
@@ -1014,6 +1021,11 @@ preserves the unit's extraction timestamp, Git facts and chunks, and replaces
 seeded files atomically so the prior generation's bytes remain intact. An exact
 no-op preserves unit bytes. Retention comparison treats spans as pass-derived;
 the full/incremental equivalence oracle still compares serialized span metadata.
+Selector-only caller edits likewise update spans when coordinates, typed targets
+and graph edges stay fixed. Source edits can update the normal source, hash and
+extraction fields; exact metadata-only preservation applies to unchanged callers.
+Changing a target's method definition does not change the caller's recorded
+syntactic selector or establish that the selector is callable.
 
 This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
 source changed outside the selected batch, the writer refuses to combine its old

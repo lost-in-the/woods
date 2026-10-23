@@ -164,7 +164,7 @@ module Woods
           next unless edge && @policy.permits?(unit['type'], edge[:type])
 
           edge = normalize_edge(edge)
-          span = reference.slice('line', 'column', 'length').merge(
+          span = reference.slice('line', 'column', 'length', 'method').merge(
             'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
             'kind' => 'constant', 'confidence' => 'verified'
           )

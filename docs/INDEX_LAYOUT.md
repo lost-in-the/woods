@@ -121,8 +121,45 @@ unproven source placement have no spans. An empty array reports no admitted,
 placeable occurrences in this bounded pass; older indexes may omit the field.
 It does not prove complete call coverage or method-level reachability.
 
-The generation-local internal reference cache is format 5 for this writer;
-format 4 and earlier require a full baseline rebuild before incremental writes.
+The bounded #756 addition optionally attaches the immediate syntactic selector
+to an admitted constant receiver:
+
+```json
+{"line": 8, "column": 4, "length": 20, "target": "NotifySubscribersJob", "target_type": "job", "kind": "constant", "confidence": "verified", "method": "perform_later"}
+```
+
+Coordinates still cover only the original constant, including any qualification
+or root prefix. `method` is a UTF-8 string of 1–4096 bytes without control
+characters. Operators, punctuation and Unicode names are supported. Both parser
+backends apply the same bound; an unsupported selector is omitted while its
+admitted constant span remains. Bare reads and argument constants also omit the
+key, rather than using `null` or an empty string. Readers must accept mixed
+seven- and eight-key records and older indexes without selector evidence.
+
+Singleton parentheses are transparent: `(Target).call`, `Target.()`,
+`Target&.call` and `Target::call` record `call`. Simple setters and indexing
+record selectors such as `value=`, `[]` and `[]=`, and unary operators retain
+their AST names such as `-@`. Compound writes (`Target.value += 1`,
+`Target[index] ||= value`, and their other operator/boolean forms) omit a
+selector on that receiver: one string cannot represent both getter and setter.
+Nested calls in their arguments remain independent occurrences. Multi-expression
+groups are not transparent receivers.
+
+Rescue and `for` assignment targets, including nested destructuring targets,
+also retain their admitted constant spans without a selector. Calls within their
+receivers or index arguments retain their own immediate selectors. Ordinary
+explicit setters remain annotated. An absent `method` means selector evidence
+is unavailable in this bounded pass; it does not prove that the occurrence
+cannot dispatch a call.
+
+`verified` describes typed constant resolution, not method existence, visibility,
+execution, dispatch or definition owner. For `Target.new.call`, the constant's
+selector is `new`; for `Target.send(:call)`, it is `send`. Inherited job APIs and
+framework-mediated mailer dispatch do not establish a method-definition owner.
+This field adds no method table, excerpt, anchor or method-scoped reverse impact.
+
+The generation-local internal reference cache is format 6 for this writer;
+format 5 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
@@ -155,7 +192,7 @@ equivalence examples; no local full suite or broad backend matrix was run. These
 checks qualify the measured payload-size decision on this exact corpus and
 provide the listed focused/booted evidence. Companion source and installed-artifact
 transition acceptance is a separate gate; ordinary CI does not execute it. They
-do not complete #751, provide method-target evidence (#756), establish
+do not complete #751, qualify the later #756 selector addition, establish
 method-level reverse impact or qualify a whole release.
 
 ### Inverted flow membership
