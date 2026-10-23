@@ -1,0 +1,1 @@
+- Preserve concurrent Solid Cache session records while another writer is completing its first admission, initialize session activity before publishing TTL-enabled admissions, and prevent pre-clear admissions from retiring newer sessions.

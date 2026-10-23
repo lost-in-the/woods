@@ -326,11 +326,14 @@ module Woods
           membership = build_admission(session_id, epoch)
           return unless membership
 
+          # Initialize activity first so TTL readers cannot mistake the newly
+          # published mapping for an expired session.
+          refresh_activity!(membership)
           if atomic_write_if_absent(active_key(session_id), serialized_membership(membership))
-            refresh_activity!(membership)
             return finalize_admission(membership)
           end
 
+          @backend.delete(activity_key(membership)) if @expires_in
           release_directory_slot(membership)
           concurrent = owned_membership(session_id, current_epoch)
           return concurrent if concurrent
@@ -344,8 +347,7 @@ module Woods
         attributes = {
           'sequence' => increment!(index_sequence_key),
           'epoch' => epoch,
-          'session_id' => session_id.to_s,
-          'token' => SecureRandom.hex(16)
+          'session_id' => session_id.to_s
         }
         claim_directory_slot(attributes, epoch)
       end
@@ -368,22 +370,22 @@ module Woods
 
       def finalize_admission(membership)
         epoch_now = current_epoch
-        if current_membership?(membership, epoch_now) && !stale_index_sequence?(membership['sequence'])
-          return membership
-        end
+        return membership if current_membership?(membership, epoch_now)
 
         retire_membership(membership)
         owned_membership(membership['session_id'], epoch_now)
       end
 
       def claim_directory_slot(attributes, admission_epoch)
-        DIRECTORY_CLAIM_ATTEMPTS.times do |attempt|
-          epoch = attempt.zero? ? admission_epoch : current_epoch
+        DIRECTORY_CLAIM_ATTEMPTS.times do
+          epoch = current_epoch
+          return unless epoch == admission_epoch
+
           slots = directory_slots
           membership = claim_reclaimable_slot(attributes, slots, epoch)
           return membership if membership
 
-          victim = oldest_active_membership(slots.filter_map(&:membership), epoch)
+          victim = eviction_candidate(slots.filter_map(&:membership), epoch)
           retire_membership(victim) if victim
         end
 
@@ -395,7 +397,9 @@ module Woods
       def claim_reclaimable_slot(attributes, slots, epoch)
         slots.each do |entry|
           occupant = entry.membership
-          next if occupant && active_current_membership?(occupant, epoch)
+          # An unpublished admission is an occupied reservation too. Absence
+          # of its active map is not proof that the claimant has stopped.
+          next if occupant && occupant['epoch'] >= epoch
 
           if occupant
             retire_membership(occupant)
@@ -404,6 +408,7 @@ module Woods
           end
           membership = attributes.merge(
             'slot' => entry.slot,
+            'token' => SecureRandom.hex(16),
             'record_floor' => counter_value(slot_sequence_key(entry.slot), slot: entry.slot)
           )
           return membership if claim_directory_slot?(membership)
@@ -411,9 +416,12 @@ module Woods
         nil
       end
 
-      def oldest_active_membership(memberships, epoch)
-        memberships.compact.select { |membership| active_current_membership?(membership, epoch) }
-                   .min_by { |membership| membership['sequence'] }
+      # Only a full directory permits eviction of a valid reservation. Prefer
+      # expired or unpublished owners before displacing a retained session.
+      def eviction_candidate(memberships, epoch)
+        current = memberships.select { |membership| membership['epoch'] == epoch }
+        inactive = current.reject { |membership| active_current_membership?(membership, epoch) }
+        (inactive.empty? ? current : inactive).min_by { |membership| membership['sequence'] }
       end
 
       def claim_directory_slot?(membership)
@@ -555,10 +563,6 @@ module Woods
 
       def stale_sequence?(sequence, window_size, counter_key, slot = nil)
         sequence <= counter_value(counter_key, slot: slot) - window_size
-      end
-
-      def stale_index_sequence?(sequence)
-        stale_sequence?(sequence, @max_sessions, index_sequence_key)
       end
 
       def current_epoch

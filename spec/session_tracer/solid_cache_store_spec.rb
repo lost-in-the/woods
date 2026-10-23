@@ -233,6 +233,90 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       expect(store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
     end
 
+    it 'does not reclaim an admission that becomes active after an absent-owner observation' do
+      first = described_class.new(cache: cache, max_sessions: 2)
+      second = described_class.new(cache: cache, max_sessions: 2)
+      claimed = Queue.new
+      resume_owner = Queue.new
+      cache.before_write_if_absent = lambda do |key, _value|
+        next unless key == first.send(:active_key, 'shared')
+
+        claimed << true
+        resume_owner.pop
+      end
+      owner = Thread.new { first.record('shared', request_data.merge('action' => 'first')) }
+      wait_for_thread_signal(claimed, timeout: 5, owner: owner)
+      cache.before_write_if_absent = nil
+      observed = false
+      allow(second).to receive(:active_current_membership?).and_wrap_original do |original, *arguments|
+        current = original.call(*arguments)
+        next current if current || observed
+
+        observed = true
+        resume_owner << true
+        Timeout.timeout(5) { owner.value }
+        expect(first.read('shared').map { |entry| entry['action'] }).to eq(['first'])
+        current
+      end
+
+      second.record('shared', request_data.merge('action' => 'second'))
+      resume_owner << true unless observed
+      Timeout.timeout(5) { owner.value }
+
+      expect(first.read('shared').map { |entry| entry['action'] }).to contain_exactly('first', 'second')
+    ensure
+      cache.before_write_if_absent = nil
+      resume_owner << true if owner&.alive?
+      owner&.join(5) || owner&.kill&.join
+    end
+
+    it 'initializes TTL activity before exposing an active mapping to another writer' do
+      first = described_class.new(cache: cache, expires_in: 10, max_sessions: 2)
+      second = described_class.new(cache: cache, expires_in: 10, max_sessions: 2)
+      interleaved = false
+      allow(cache).to receive(:write_if_absent).and_wrap_original do |original, key, value, **options|
+        inserted = original.call(key, value, **options)
+        if inserted && key == first.send(:active_key, 'shared') && !interleaved
+          interleaved = true
+          second.record('shared', request_data.merge('action' => 'second'))
+        end
+        inserted
+      end
+
+      first.record('shared', request_data.merge('action' => 'first'))
+
+      expect(interleaved).to be(true)
+      expect(first.read('shared').map { |entry| entry['action'] }).to contain_exactly('first', 'second')
+      expect(cache.keys.grep(/:activity\z/).size).to eq(1)
+    end
+
+    it 'removes a losing admission activity key without deleting the winner activity' do
+      first = described_class.new(cache: cache, expires_in: 10, max_sessions: 2)
+      second = described_class.new(cache: cache, expires_in: 10, max_sessions: 2)
+      claimed = Queue.new
+      resume_owner = Queue.new
+      cache.before_write_if_absent = lambda do |key, _value|
+        next unless key == first.send(:active_key, 'shared')
+
+        claimed << true
+        resume_owner.pop
+      end
+      owner = Thread.new { first.record('shared', request_data.merge('action' => 'first')) }
+      wait_for_thread_signal(claimed, timeout: 5, owner: owner)
+      cache.before_write_if_absent = nil
+      second.record('shared', request_data.merge('action' => 'second'))
+      resume_owner << true
+      Timeout.timeout(5) { owner.value }
+
+      expect(first.read('shared').map { |entry| entry['action'] }).to contain_exactly('first', 'second')
+      expect(cache.keys.grep(/:activity\z/).size).to eq(1)
+      expect(cache.keys.grep(/session_index:slot:\d+\z/).size).to eq(1)
+    ensure
+      cache.before_write_if_absent = nil
+      resume_owner << true if owner&.alive?
+      owner&.join(5) || owner&.kill&.join
+    end
+
     it 'initializes absent counters before concurrent first increments' do
       racy_cache = RacyInitialIncrementCache.new
       first = described_class.new(cache: racy_cache)
@@ -467,6 +551,68 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
       3.times { |i| bounded.record("sess#{i}", request_data) }
 
       expect(bounded.sessions(limit: 10).size).to eq(2)
+    end
+
+    it 'recovers abandoned reservations when every directory slot is occupied' do
+      bounded = described_class.new(cache: cache, max_sessions: 2)
+      epoch = bounded.send(:current_epoch)
+      abandoned = 2.times.map { |index| bounded.send(:build_admission, "abandoned-#{index}", epoch) }
+
+      bounded.record('new', request_data)
+
+      expect(bounded.read('new')).to contain_exactly(request_data)
+      expect(bounded.send(:indexed_membership?, abandoned.first)).to be(false)
+      expect(cache.keys.grep(/session_index:slot:\d+\z/).size).to eq(2)
+      expect(bounded.sessions.map { |entry| entry['session_id'] }).to eq(['new'])
+    end
+
+    it 'evicts an expired reservation before a refreshed live session at capacity' do
+      now = 0
+      expiring = MockCache.new(clock: -> { now })
+      bounded = described_class.new(cache: expiring, expires_in: 10, max_sessions: 2)
+      bounded.record('keeper', request_data)
+      now = 1
+      bounded.record('expired', request_data)
+      now = 9
+      bounded.record('keeper', request_data.merge('action' => 'refreshed'))
+      now = 12
+
+      bounded.record('new', request_data)
+
+      expect(bounded.read('keeper').map { |entry| entry['action'] }).to eq(['refreshed'])
+      expect(bounded.sessions.map { |entry| entry['session_id'] }).to contain_exactly('keeper', 'new')
+    end
+
+    it 'does not reuse an exposed reservation token after a failed directory validation' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      exposed = nil
+      allow(bounded).to receive(:indexed_membership?).and_wrap_original do |original, membership|
+        unless exposed
+          exposed = membership
+          cache.delete(bounded.send(:index_slot_key, membership['slot']))
+        end
+        original.call(membership)
+      end
+
+      bounded.record('shared', request_data)
+      current = JSON.parse(cache.read(bounded.send(:active_key, 'shared')))
+      bounded.send(:retire_membership, exposed)
+
+      expect(current['token']).not_to eq(exposed['token'])
+      expect(bounded.read('shared')).to contain_exactly(request_data)
+    end
+
+    it 'keeps a current owner when competing reservation attempts advance the admission counter' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      allow(cache).to receive(:write_if_absent).and_wrap_original do |original, key, value, **options|
+        inserted = original.call(key, value, **options)
+        cache.increment(bounded.send(:index_sequence_key), 3) if key.end_with?(':active') && inserted
+        inserted
+      end
+
+      bounded.record('shared', request_data)
+
+      expect(bounded.read('shared')).to contain_exactly(request_data)
     end
 
     it 'reclaims invalid JSON directory slots before admitting a session' do
@@ -784,6 +930,62 @@ RSpec.describe Woods::SessionTracer::SolidCacheStore do
 
       expect(store.read('late')).to eq([])
       expect(store.sessions).to eq([])
+    end
+
+    it 'does not let a pre-clear admission evict a post-clear owner' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      started = Queue.new
+      resume_owner = Queue.new
+      cache.after_increment = lambda do |key, value|
+        next unless key == bounded.send(:index_sequence_key) && value == 1
+
+        started << true
+        resume_owner.pop
+      end
+      owner = Thread.new { bounded.record('late', request_data) }
+      wait_for_thread_signal(started, timeout: 5, owner: owner)
+      bounded.clear_all
+      bounded.record('new', request_data)
+      resume_owner << true
+      Timeout.timeout(5) { owner.value }
+
+      expect(bounded.read('late')).to eq([])
+      expect(bounded.read('new')).to contain_exactly(request_data)
+    ensure
+      cache.after_increment = nil
+      resume_owner << true if owner&.alive?
+      owner&.join(5) || owner&.kill&.join
+    end
+
+    it 'leaves newer owners intact when clear_all advances after the admission epoch check' do
+      bounded = described_class.new(cache: cache, max_sessions: 1)
+      bounded.send(:current_epoch)
+      cache.write(bounded.send(:index_sequence_key), 0)
+      started = Queue.new
+      resume_owner = Queue.new
+      allow(bounded).to receive(:directory_slots).and_wrap_original do |original|
+        if Thread.current[:woods_stale_admission] && !Thread.current[:woods_paused_admission]
+          Thread.current[:woods_paused_admission] = true
+          started << true
+          resume_owner.pop
+        end
+        original.call
+      end
+      owner = Thread.new do
+        Thread.current[:woods_stale_admission] = true
+        bounded.record('late', request_data)
+      end
+      wait_for_thread_signal(started, timeout: 5, owner: owner)
+      bounded.clear_all
+      bounded.record('new', request_data)
+      resume_owner << true
+      Timeout.timeout(5) { owner.value }
+
+      expect(bounded.read('late')).to eq([])
+      expect(bounded.read('new')).to contain_exactly(request_data)
+    ensure
+      resume_owner << true if owner&.alive?
+      owner&.join(5) || owner&.kill&.join
     end
 
     it 'retries reads that race a ring overwrite instead of returning a mixed window' do
