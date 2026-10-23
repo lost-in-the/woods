@@ -1000,11 +1000,20 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
-The cache is format 4. It records the
+The development constant-span writer uses cache format 5. It requires validated
+line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
-produced its edges. A format 3 cache, or one written under a different
+produced its edges. A format 4 or earlier cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
+
+Span metadata and dependency edges are recomputed separately. Unchanged callers
+can gain or lose spans when a target arrives, disappears or becomes ambiguous,
+even when an extractor-owned edge remains unchanged. A metadata-only rewrite
+preserves the unit's extraction timestamp, Git facts and chunks, and replaces
+seeded files atomically so the prior generation's bytes remain intact. An exact
+no-op preserves unit bytes. Retention comparison treats spans as pass-derived;
+the full/incremental equivalence oracle still compares serialized span metadata.
 
 This also tightens scoped refreshes: if a retained reference-bearing Ruby unit's
 source changed outside the selected batch, the writer refuses to combine its old

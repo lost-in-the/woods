@@ -6,7 +6,7 @@ module Woods
   # The part of a unit's JSON its extractor produced.
   #
   # A published unit also carries what later passes add after registration:
-  # `dependents`, Git facts, and the edges the source-reference pass resolved.
+  # `dependents`, Git facts, and source-reference edges and occurrence metadata.
   # A freshly extracted unit has none of them yet, so the two are comparable
   # only in this form. Flow annotations stay in: a controller that carries
   # them must be re-registered for its flow documents to be reassembled.
@@ -48,9 +48,9 @@ module Woods
     end
 
     # @param metadata [Hash]
-    # @return [Hash] metadata without Git facts
+    # @return [Hash] metadata without Git facts and pass-derived references
     def without_git(metadata)
-      stripped = metadata.except('git')
+      stripped = metadata.except('git', 'references')
       contributors = stripped['source_contributors']
       return stripped unless contributors.is_a?(Array)
 

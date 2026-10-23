@@ -79,6 +79,33 @@ or change resolution, including references in unchanged callers. Larger recorded
 dependency sets can increase the incremental blast radius; no separate limit is
 applied to these edges. See [source-reference baseline and upgrades](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades).
 
+**Development addition, partial #751:** unit JSON also publishes
+`metadata.references`, an array of admitted constant-read occurrences. Each entry
+has `line`, `column`, `length`, `target`, `target_type`, `kind: "constant"` and
+`confidence: "verified"`. Lines are 1-based in the published `source_code`;
+columns are 0-based UTF-8 byte offsets and lengths count bytes. Qualified and
+rooted constants occupy their whole source span. Repeated reads remain separate,
+including when an extractor already supplied a dependency edge with `through`.
+The target type comes from the typed registry; the existing caller policy and
+resolution exclusions still apply.
+
+Projection runs after source-line mapping. It requires byte-identical original
+source, a validated `source_line_map`, or exact validated library contributor
+ranges. Missing mapping never implies identity. Sliced, generated, scrubbed or
+otherwise unproven placement produces no span; commented inlined concern text
+is not an additional occurrence. Entries sort by published line and byte column,
+then length, target type and target. Pipeline-written units without proven
+occurrences publish an empty array. Absence on an older index means unavailable
+span metadata, not an empty reference set. See the
+[published layout](INDEX_LAYOUT.md#constant-reference-spans) for reader details.
+
+This bounded addition covers verified constants only. Other reference kinds,
+static/ambiguous candidates and method-target evidence (#756) remain separate
+work; it does not establish method-level reverse impact or complete #751.
+The [frozen-corpus qualification](INDEX_LAYOUT.md#constant-reference-spans)
+validated 111 spans across 40 units and measured 1.182258% actual unit-JSON growth,
+including empty arrays, below the approximately 15% threshold on that corpus.
+
 ### Identifier naming (source-derived units)
 
 File-based extractors derive an identifier in three steps, first match wins:

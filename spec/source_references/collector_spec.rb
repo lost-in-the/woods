@@ -68,7 +68,7 @@ RSpec.describe Woods::SourceReferences::Collector do
           { 'owner' => 'CheckoutController', 'nesting' => ['CheckoutController'],
             'name' => 'CodecRegistry', 'line' => 7 }
         ]
-        expect(result['references']).to eq(expected)
+        expect(result['references'].map { |record| record.except('column', 'length') }).to eq(expected)
         expect(JSON.parse(JSON.generate(result))).to eq(result)
       end
 
@@ -227,7 +227,7 @@ RSpec.describe Woods::SourceReferences::Collector do
         RUBY_SOURCE
         result = collector.call(source)
         expected = [{ 'owner' => 'Caller', 'nesting' => ['Caller'], 'name' => 'TokenGenerator', 'line' => 5 }]
-        expect(result['references']).to eq(expected)
+        expect(result['references'].map { |record| record.except('column', 'length') }).to eq(expected)
         skipped = [
           { 'owner' => 'Caller', 'reason' => 'dynamic_declaration', 'line' => 2 },
           { 'owner' => 'Caller', 'reason' => 'dynamic_declaration', 'line' => 3 },
@@ -246,7 +246,7 @@ RSpec.describe Woods::SourceReferences::Collector do
       it 'preserves enclosing lexical nesting when a declaration is rooted' do
         source = 'module Domain; class ::Caller; Target.call; end; end'
         expected = [{ 'owner' => 'Caller', 'nesting' => %w[Caller Domain], 'name' => 'Target', 'line' => 1 }]
-        expect(references(source)).to eq(expected)
+        expect(references(source).map { |record| record.except('column', 'length') }).to eq(expected)
       end
 
       it 'collects right-hand sides of constant operator assignments and optional keyword parameters' do
@@ -273,6 +273,27 @@ RSpec.describe Woods::SourceReferences::Collector do
       it 'does not emit shortened namespace prefixes or deduplicate source occurrences' do
         expect(names('class Caller; Namespace::Missing.call; Namespace::Missing.call; end'))
           .to eq(['Namespace::Missing', 'Namespace::Missing'])
+      end
+
+      it 'retains whole repeated spans in UTF-8 bytes across CRLF and nested owners' do
+        source = "class Caller\r\n  'é'; ::Space::Target.call; ::Space::Target.call\r\n  " \
+                 "class Inner; Target.call; end\r\nend\r\n"
+        actual = references(source).map { |record| record.values_at('owner', 'name', 'line', 'column', 'length') }
+        expect(actual).to eq([
+                               ['Caller', '::Space::Target', 2, 8, 15],
+                               ['Caller', '::Space::Target', 2, 30, 15],
+                               ['Caller::Inner', 'Target', 3, 15, 6]
+                             ])
+      end
+
+      it 'honors a magic encoding when converting parser character offsets back to captured bytes' do
+        source = "# encoding: ISO-8859-1\r\nclass Caller; 'é'; Target.call; end\r\n".b
+        expect(references(source).first).to include('line' => 2, 'column' => 20, 'length' => 6)
+      end
+
+      it 'measures multiline qualified constants against original bytes' do
+        source = "class Caller\r\n  Space::\r\n    Target.call\r\nend\r\n"
+        expect(references(source).first).to include('line' => 2, 'column' => 2, 'length' => 19)
       end
 
       it 'returns a parse failure and no partial references on invalid source' do

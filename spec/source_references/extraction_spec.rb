@@ -31,27 +31,32 @@ RSpec.describe 'Source-reference extraction integration' do
     path
   end
 
-  def unit(identifier, name)
+  def unit(identifier, name, proven: false)
     unit = Woods::ExtractedUnit.new(type: :poro, identifier: identifier,
                                     file_path: File.join(@root, "app/models/#{name}.rb"))
-    unit.source_code = '# formatted summary is not original source'
+    unit.source_code = proven ? File.binread(unit.file_path) : '# formatted summary is not original source'
     unit.metadata = { git: { commit_count: 7, change_frequency: 'active' }, custom: ['keep'] }
     unit.chunks = [{ id: 'kept-chunk', content: 'keep' }]
     unit
   end
 
-  def full(target: true, oversized: false)
+  # rubocop:disable Metrics/AbcSize, Metrics/MethodLength -- complete synthetic publication fixture
+  def full(target: true, oversized: false, proven: false, existing_edge: false)
     extractor = Woods::Extractor.new(output_dir: @output)
     extractor.send(:begin_source_inputs, 'full')
     extractor.send(:begin_payload!)
-    units = [unit('RefIntegrationCaller', 'caller')]
+    units = [unit('RefIntegrationCaller', 'caller', proven: proven)]
+    units.first.dependencies = [expected_edge.merge('through' => 'call')] if existing_edge
     units << unit('RefIntegrationTarget', 'target') if target
+    yield units if block_given?
     extractor.instance_variable_set(:@results, { poros: units })
     extractor.send(:enrich_source_references_full)
     graph = Woods::DependencyGraph.new
     units.each { |value| graph.register(value) }
     extractor.instance_variable_set(:@dependency_graph, graph)
     extractor.send(:resolve_dependents)
+    extractor.send(:normalize_file_paths)
+    extractor.send(:project_source_references_full)
     units.each { |value| extractor.send(:write_unit_file, unit_path(extractor, value.identifier), value) }
     extractor.send(:write_dependency_graph)
     extractor.instance_variable_get(:@source_inputs).consume_extractor(:poros, units)
@@ -61,6 +66,8 @@ RSpec.describe 'Source-reference extraction integration' do
     extractor.raise_on_publication_failure!
     extractor
   end
+
+  # rubocop:enable Metrics/AbcSize, Metrics/MethodLength
 
   def pad_manifest(extractor)
     session = extractor.instance_variable_get(:@source_inputs)
@@ -97,6 +104,82 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(extractor.dependency_graph.to_h[:reverse_via]['RefIntegrationTarget']).to include(
       source: 'RefIntegrationCaller', source_type: :poro, via: :code_reference
     )
+  end
+
+  def expected_span
+    { 'line' => 1, 'column' => 38, 'length' => 20, 'target' => 'RefIntegrationTarget',
+      'target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified' }
+  end
+
+  it 'projects full references after source mapping and keeps unproven summaries empty' do
+    proven = full(proven: true)
+    expect(read_unit(proven, 'RefIntegrationCaller').dig('metadata', 'references')).to eq([expected_span])
+    summary = full
+    expect(read_unit(summary, 'RefIntegrationCaller').dig('metadata', 'references')).to eq([])
+  end
+
+  it 'rewrites only reference metadata for an existing scanner edge on target arrival and deletion' do
+    previous = full(target: false, proven: true, existing_edge: true)
+    before = read_unit(previous, 'RefIntegrationCaller')
+    original_bytes = File.binread(unit_path(previous, 'RefIntegrationCaller'))
+    extractor = incremental
+    allow(extractor).to receive(:annotate_package)
+    allow(extractor).to receive(:source_consumer_failed?).and_return(false)
+    affected = Set.new
+    extractor.send(:register_and_write, :poros, [unit('RefIntegrationTarget', 'target', proven: true)], affected)
+    touched = extractor.send(:enrich_source_references_incremental, affected)
+    after = read_unit(extractor, 'RefIntegrationCaller')
+    expect(touched).to include('RefIntegrationCaller')
+    expect(after.dig('metadata', 'references')).to eq([expected_span])
+    expect(after.except('metadata')).to eq(before.except('metadata'))
+    expect(after['metadata'].except('references')).to eq(before['metadata'].except('references'))
+    expect(File.binread(unit_path(previous, 'RefIntegrationCaller'))).to eq(original_bytes)
+    extractor.send(:publish_generation, 'incremental')
+    extractor.raise_on_publication_failure!
+
+    File.unlink(File.join(@root, 'app/models/target.rb'))
+    deletion = incremental
+    deletion.send(:remove_unit, 'RefIntegrationTarget', Set.new, type: :poro)
+    deletion.send(:enrich_source_references_incremental, Set.new)
+    expect(read_unit(deletion, 'RefIntegrationCaller')).to eq(before)
+  end
+
+  it 'does not rewrite generated typed units outside the source-reference input boundary' do
+    previous = full do |units|
+      generated = Woods::ExtractedUnit.new(type: :poro, identifier: 'RefGenerated', file_path: 'config/generated.rb')
+      generated.source_code = '# generated'
+      units << generated
+    end
+    bytes = File.binread(unit_path(previous, 'RefGenerated'))
+    extractor = incremental
+    expect(extractor.send(:enrich_source_references_incremental, Set.new)).to be_empty
+    expect(File.binread(unit_path(extractor, 'RefGenerated'))).to eq(bytes)
+  end
+
+  it 'withdraws reference metadata when a target becomes type-ambiguous without changing its scanner edge' do
+    previous = full(proven: true, existing_edge: true)
+    before = read_unit(previous, 'RefIntegrationCaller')
+    extractor = incremental
+    allow(extractor).to receive(:annotate_package)
+    allow(extractor).to receive(:source_consumer_failed?).and_return(false)
+    target = unit('RefIntegrationTarget', 'target', proven: true)
+    target.type = :model
+    affected = Set.new
+    extractor.send(:register_and_write, :models, [target], affected)
+    expect(extractor.send(:enrich_source_references_incremental, affected)).to include('RefIntegrationCaller')
+    after = read_unit(extractor, 'RefIntegrationCaller')
+    expect(after.dig('metadata', 'references')).to eq([])
+    expect(after.except('metadata')).to eq(before.except('metadata'))
+    expect(after['metadata'].except('references')).to eq(before['metadata'].except('references'))
+    expect(read_unit(previous, 'RefIntegrationCaller')).to eq(before)
+  end
+
+  it 'preserves a proven caller byte for byte and keeps its timestamp on a no-op run' do
+    previous = full(proven: true)
+    bytes = File.binread(unit_path(previous, 'RefIntegrationCaller'))
+    extractor = incremental
+    expect(extractor.send(:enrich_source_references_incremental, Set.new)).to be_empty
+    expect(File.binread(unit_path(extractor, 'RefIntegrationCaller'))).to eq(bytes)
   end
 
   it 'keeps repeated incrementals usable with hash-bound overflow provenance and retained source references' do
@@ -208,7 +291,7 @@ RSpec.describe 'Source-reference extraction integration' do
       previous = full
       active = payload_names
       cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
-      File.write(cache_path, JSON.generate(JSON.parse(File.read(cache_path)).merge('version' => 3)))
+      File.write(cache_path, JSON.generate(JSON.parse(File.read(cache_path)).merge('version' => 4)))
       expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired)
       expect(payload_names).to eq(active)
       expect(Dir.exist?(previous.payload_dir)).to be(true)

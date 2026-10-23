@@ -53,6 +53,18 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(result.cache['files'].keys).to match_array(sources.keys)
   end
 
+  it 'retains duplicate verified occurrences independently of existing edges and their through annotation' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; RefTarget.new; RefTarget.new; end'
+    scanner = edge.merge('type' => 'service', 'through' => 'call')
+    units.first['dependencies'] = [scanner]
+    result = run_pass
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([scanner])
+    spans = result.references.fetch(%w[poro RefCaller])
+    expect(spans.map { |span| span.values_at('line', 'column', 'length') }).to eq([[1, 17, 9], [1, 32, 9]])
+    expect(spans).to all(include('target' => 'RefTarget', 'target_type' => 'poro', 'kind' => 'constant',
+                                 'confidence' => 'verified', 'file_path' => 'app/models/ref_caller.rb'))
+  end
+
   it 'adds no second edge beside one the extractor annotated with the reaching methods' do
     annotated = edge.merge('through' => 'call')
     units.first['dependencies'] = [annotated]
@@ -129,6 +141,7 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(collector).not_to receive(:call).with(sources.fetch('app/models/ref_caller.rb'))
     result = run_pass(baseline: initial.cache, refreshed: [%w[poro RefTarget]], full: false)
     expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
+    expect(result.references.fetch(%w[poro RefCaller]).first).to include('target_type' => 'poro')
   end
 
   it 'withdraws only its own additions when a target disappears' do
@@ -164,6 +177,7 @@ RSpec.describe Woods::SourceReferences::Pass do
     units << unit('RefTarget', 'app/models/ref_target.rb', 'model')
     result = run_pass(baseline: initial.cache, refreshed: [%w[model RefTarget]], full: false)
     expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+    expect(result.references.fetch(%w[poro RefCaller])).to eq([])
   end
 
   it 'requires a rebuild rather than resolve current source against stale retained metadata' do

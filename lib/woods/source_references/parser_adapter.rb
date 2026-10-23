@@ -3,7 +3,7 @@
 module Woods
   module SourceReferences
     # Optional parser-gem backend with the same ownership rules as Prism.
-    class ParserAdapter
+    class ParserAdapter # rubocop:disable Metrics/ClassLength -- keep backend coordinate conversion with parsing
       KINDS = { class: :declaration, module: :declaration, const: :constant, sclass: :singleton,
                 def: :method, defs: :method }.freeze
       DYNAMIC_BLOCK_METHODS = %i[class_eval module_eval instance_eval class_exec module_exec instance_exec].freeze
@@ -15,10 +15,7 @@ module Woods
         parser.diagnostics.consumer = ->(diagnostic) { diagnostics << diagnostic }
         parser.diagnostics.all_errors_are_fatal = true
         parser.diagnostics.ignore_warnings = true
-        # Ruby source defaults to UTF-8 even when read as untouched binary bytes.
-        # Source::Buffer still honors an explicit encoding magic comment.
-        input = source.encoding == Encoding::BINARY ? source.dup.force_encoding(Encoding::UTF_8) : source
-        buffer = ::Parser::Source::Buffer.new('(source references)', source: input)
+        buffer = source_buffer(source)
         [parser.parse(buffer), nil]
       rescue ::Parser::SyntaxError => e
         diagnostic = diagnostics.last
@@ -101,6 +98,16 @@ module Woods
         node.type == :def || node.children.first.type == :self
       end
 
+      # Parser ranges count characters and normalize CRLF. Convert both ends
+      # against the untouched input, so both backends publish original bytes.
+      # @return [Hash] 1-based line, 0-based UTF-8 byte column and byte length
+      def position(node)
+        range = node.location.expression
+        first = byte_offset(range.line, range.column)
+        last = byte_offset(range.last_line, range.last_column)
+        { 'line' => range.line, 'column' => first - @line_offsets[range.line - 1], 'length' => last - first }
+      end
+
       def line(node)
         node.location.expression.line
       end
@@ -110,6 +117,22 @@ module Woods
       end
 
       private
+
+      def source_buffer(source)
+        # Source::Buffer honors an encoding magic comment, and otherwise Ruby
+        # defaults to UTF-8 even when the captured input is binary-tagged.
+        input = source.dup
+        input.force_encoding(Encoding::UTF_8) if input.encoding == Encoding::BINARY
+        encoding = ::Parser::Source::Buffer.recognize_encoding(input.b) || input.encoding
+        @source_lines = input.dup.force_encoding(encoding).lines
+        @line_offsets = [0]
+        @source_lines.each { |text| @line_offsets << (@line_offsets.last + text.bytesize) }
+        ::Parser::Source::Buffer.new('(source references)', source: input)
+      end
+
+      def byte_offset(line, column)
+        @line_offsets.fetch(line - 1) + @source_lines.fetch(line - 1)[0, column].bytesize
+      end
 
       def dynamic_scope?(node)
         call = node.children.first

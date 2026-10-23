@@ -438,6 +438,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         class ReferenceGraphCaller
           def execute
             ReferenceGraphTarget.generate
+            "é"; ::ReferenceGraphTarget.generate
           end
         end
       RUBY
@@ -451,6 +452,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
       before = lookup.call
       expect(before.fetch('dependencies')).not_to include(hash_including('target' => 'ReferenceGraphTarget'))
+      expect(before.fetch('metadata').fetch('references')).to eq([])
 
       target_path = write_file('lib/reference_graph_target.rb', <<~RUBY)
         module ReferenceGraphTarget
@@ -461,18 +463,38 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       RUBY
       load app_path(target_path)
       Woods::Extractor.new(output_dir: index).extract_changed([target_path])
-      expect(lookup.call.fetch('dependencies')).to include(
+      connected = lookup.call
+      expect(connected.fetch('dependencies')).to include(
         'type' => 'lib', 'target' => 'ReferenceGraphTarget', 'via' => 'code_reference'
       )
-      expect(lookup.call.fetch('extracted_at')).to eq(before.fetch('extracted_at'))
+      expected_references = [
+        { 'line' => 8, 'column' => 4, 'length' => 'ReferenceGraphTarget'.bytesize,
+          'target' => 'ReferenceGraphTarget', 'target_type' => 'lib',
+          'kind' => 'constant', 'confidence' => 'verified' },
+        { 'line' => 9, 'column' => 10, 'length' => '::ReferenceGraphTarget'.bytesize,
+          'target' => 'ReferenceGraphTarget', 'target_type' => 'lib', 'kind' => 'constant', 'confidence' => 'verified' }
+      ]
+      expect(connected.fetch('metadata').fetch('references')).to eq(expected_references)
+      expect(connected.fetch('extracted_at')).to eq(before.fetch('extracted_at'))
+      expected_references.each do |reference|
+        source_line = connected.fetch('source_code').lines.fetch(reference.fetch('line') - 1)
+        spelling = source_line.byteslice(reference.fetch('column'), reference.fetch('length'))
+        expect(spelling.delete_prefix('::')).to eq(reference.fetch('target'))
+      end
       graph = read_json(index, 'dependency_graph.json')
       expect(graph.fetch('reverse').fetch('ReferenceGraphTarget')).to include('ReferenceGraphCaller')
+      expect(differences(index, full_extraction)).to be_empty
+
+      Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
+      expect(lookup.call).to eq(connected)
       expect(differences(index, full_extraction)).to be_empty
 
       File.unlink(app_path(target_path))
       Object.send(:remove_const, :ReferenceGraphTarget)
       Woods::Extractor.new(output_dir: index).extract_changed([target_path])
       expect(lookup.call.fetch('dependencies')).not_to include(hash_including('target' => 'ReferenceGraphTarget'))
+      expect(lookup.call.fetch('metadata').fetch('references')).to eq([])
+      expect(lookup.call.fetch('extracted_at')).to eq(before.fetch('extracted_at'))
       expect(read_json(index, 'dependency_graph.json').fetch('reverse').fetch('ReferenceGraphTarget', []))
         .not_to include('ReferenceGraphCaller')
       expect(differences(index, full_extraction)).to be_empty
@@ -493,6 +515,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       second_path = write_file('lib/reference_refresh_second.rb', 'class ReferenceRefreshSecond; end')
       [caller_path, first_path, second_path].each { |path| load app_path(path) }
       index = full_extraction
+      require 'woods/mcp/index_reader'
+      reader = Woods::MCP::IndexReader.new(index)
+      initial = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
+      first_reference = { 'line' => 8, 'column' => 4, 'length' => 'ReferenceRefreshFirst'.bytesize,
+                          'target' => 'ReferenceRefreshFirst', 'target_type' => 'lib',
+                          'kind' => 'constant', 'confidence' => 'verified' }
+      expect(initial.fetch('metadata').fetch('references')).to eq([first_reference])
       write_file(caller_path,
                  File.read(app_path(caller_path)).sub('ReferenceRefreshFirst.new', 'ReferenceRefreshSecond.new'))
       load app_path(caller_path)
@@ -500,6 +529,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       graph = read_json(index, 'dependency_graph.json')
       expect(graph.fetch('reverse').fetch('ReferenceRefreshSecond')).to include('ReferenceRefreshCaller')
       expect(graph.fetch('reverse').fetch('ReferenceRefreshFirst', [])).not_to include('ReferenceRefreshCaller')
+      refreshed = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
+      second_reference = first_reference.merge('length' => 'ReferenceRefreshSecond'.bytesize,
+                                               'target' => 'ReferenceRefreshSecond')
+      expect(refreshed.fetch('metadata').fetch('references')).to eq([second_reference])
+      expect(differences(index, full_extraction)).to be_empty
+
+      shifted = File.read(app_path(caller_path))
+                    .sub('    ReferenceRefreshSecond.new', '      ReferenceRefreshSecond.new')
+      write_file(caller_path, shifted)
+      load app_path(caller_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
+      moved = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
+      expect(moved.fetch('dependencies')).to eq(refreshed.fetch('dependencies'))
+      expect(moved.fetch('metadata').fetch('references')).to eq([second_reference.merge('column' => 6)])
       expect(differences(index, full_extraction)).to be_empty
 
       generation = Woods::Generation.new(output_dir: index)
@@ -511,6 +554,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .to raise_error(Woods::ExtractionError)
       expect(generation.current.token).to eq(token)
       expect(File.binread(cache_path)).to eq(cache)
+      expect(reader.find_unit('ReferenceRefreshCaller', type: 'poro')).to eq(moved)
     ensure
       %i[ReferenceRefreshCaller ReferenceRefreshFirst ReferenceRefreshSecond].each do |name|
         Object.send(:remove_const, name) if Object.const_defined?(name, false)
