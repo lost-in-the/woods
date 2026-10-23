@@ -665,6 +665,11 @@ Session traces are best-effort diagnostic data. The slot directory and record
 rings are bounded by `max_sessions` and `max_requests_per_session`, but the
 following crash/eviction limits remain:
 
+- An in-progress admission reserves its directory slot before publishing its
+  active-session mapping. Other writers leave that reservation occupied while
+  capacity is available. A full directory can evict an unpublished reservation
+  to recover an abandoned claim, so capacity pressure can still discard an
+  in-flight record. Expired or unpublished owners are preferred for eviction.
 - A crashed admission can strand an active-session mapping outside the directory.
   These mappings can accumulate across distinct session IDs, with a bounded
   amount per ID. Recording that session again reclaims its mapping; the normal

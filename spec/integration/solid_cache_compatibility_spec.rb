@@ -156,6 +156,54 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
     ensure
       writers&.each { |writer| writer.kill.join if writer.alive? }
     end
+
+    [nil, 10].each do |expiry|
+      it "preserves a first admission across a stale owner observation (expiry: #{expiry.inspect})", :postgresql do
+        first = Woods::SessionTracer::SolidCacheStore.new(
+          cache: SolidCache::Store.new(max_age: nil, max_entries: 10_000), expires_in: expiry, max_sessions: 2
+        )
+        second = Woods::SessionTracer::SolidCacheStore.new(
+          cache: SolidCache::Store.new(max_age: nil, max_entries: 10_000), expires_in: expiry, max_sessions: 2
+        )
+        claimed = Queue.new
+        resume_owner = Queue.new
+        backend = first.instance_variable_get(:@backend)
+        allow(backend).to receive(:write_if_absent).and_wrap_original do |original, key, value, **options|
+          if key == first.send(:active_key, 'shared')
+            claimed << true
+            resume_owner.pop
+          end
+          original.call(key, value, **options)
+        end
+        owner = Thread.new do
+          ActiveRecord::Base.connection_pool.with_connection(prevent_permanent_checkout: true) do
+            first.record('shared', { 'action' => 'first' })
+          end
+        end
+        wait_for_thread_signal(claimed, timeout: 5, owner: owner)
+        observed = false
+        allow(second).to receive(:active_current_membership?).and_wrap_original do |original, *arguments|
+          current = original.call(*arguments)
+          next current if current || observed
+
+          observed = true
+          resume_owner << true
+          Timeout.timeout(5) { owner.value }
+          expect(first.read('shared')).to eq([{ 'action' => 'first' }])
+          current
+        end
+
+        second.record('shared', { 'action' => 'second' })
+        resume_owner << true unless observed
+        Timeout.timeout(5) { owner.value }
+
+        expect(first.read('shared').map { |entry| entry.fetch('action') }).to contain_exactly('first', 'second')
+      ensure
+        resume_owner << true if owner&.alive?
+        owner&.join(5) || owner&.kill&.join
+      end
+    end
+
     it 'pre-creates counters before PostgreSQL increment transactions can observe absence', :postgresql do
       cache = SolidCache::Store.new(max_age: nil, max_entries: 10_000)
       direct_key = 'woods:probe:direct-absent-counter'
