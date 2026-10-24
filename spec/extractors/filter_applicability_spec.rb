@@ -113,6 +113,14 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'filter applicability' do
     expect(filter(:audit)).to include(owner: 'W8Auditing', applies_to: %w[show edit], applicability: 'resolved')
   end
 
+  it 'finds a concern whose constant location is the autoload registration site' do
+    allow(Object).to receive(:const_source_location).and_call_original
+    allow(Object).to receive(:const_source_location).with('W8Authenticating')
+                                                    .and_return(['/gems/zeitwerk/lib/zeitwerk/loader.rb', 1])
+
+    expect(filter(:authenticate)).to include(owner: 'W8Authenticating')
+  end
+
   it 'attributes a proc filter to the module whose source holds the block' do
     stamp = chain.find { |entry| entry[:filter].to_s.start_with?('#<Proc') }
 
@@ -182,9 +190,12 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'filter applicability' do
   describe 'Rails 6.0 only/except procs' do
     def legacy_condition(actions, file: 'abstract_controller/callbacks.rb')
       path = write("gems/actionpack/lib/#{file}", <<~RUBY)
-        ->(actions) { _from = actions.to_set; proc { |c| raise 'never called' if c; _from } }
+        W8_LEGACY_SCOPE = ->(actions) { _from = actions.to_set; proc { |c| raise 'never called' if c; _from } }
       RUBY
-      eval(File.read(path), TOPLEVEL_BINDING, path, 1).call(actions) # rubocop:disable Security/Eval
+      load path
+      W8_LEGACY_SCOPE.call(actions)
+    ensure
+      Object.send(:remove_const, :W8_LEGACY_SCOPE) if Object.const_defined?(:W8_LEGACY_SCOPE, false)
     end
 
     it 'reads the action set of the framework proc' do

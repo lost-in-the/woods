@@ -115,10 +115,9 @@ module Woods
       # between it and its superclass), whose application source declares
       # the callback.
       def declaring_module(klass, callback)
-        group = klass.respond_to?(:ancestors) ? klass.ancestors.take_while { |mod| !mod.equal?(klass.superclass) } : [klass]
+        group = klass.respond_to?(:ancestors) ? klass.ancestors.take_while { |mod| !mod.equal?(klass.superclass) } : []
         ([klass] + (group - [klass])).find do |mod|
-          path = owner_source_path(mod)
-          path && declares_filter?(path, callback)
+          owner_source_paths(mod).any? { |path| declares_filter?(path, callback) }
         end
       end
 
@@ -130,17 +129,36 @@ module Woods
         filter_declarations(path).key?([callback.kind.to_sym, filter.to_s])
       end
 
-      # @return [String, nil] the application source file defining +mod+
-      def owner_source_path(mod)
-        return nil unless mod.respond_to?(:name) && mod.name
+      # The application source files that define +mod+: a class's convention
+      # or constant location; for a module, also the file of its
+      # ActiveSupport::Concern +included+ block and of the methods it defines
+      # itself, because +const_source_location+ can report the autoload
+      # registration site rather than the file that defined the constant. A
+      # class's own methods are not consulted: a concern's +included+ block
+      # can define them from the concern's file.
+      #
+      # @return [Array<String>]
+      def owner_source_paths(mod)
+        return [] unless mod.respond_to?(:name) && mod.name
 
-        cache = (@owner_source_paths ||= {}.compare_by_identity)
-        return cache[mod] if cache.key?(mod)
-
-        cache[mod] = [
+        (@owner_source_paths ||= {}.compare_by_identity)[mod] ||= [
           (source_file_for(mod) if mod.is_a?(Class) && respond_to?(:source_file_for, true)),
-          constant_source_path(mod.name)
-        ].find { |path| app_source_file?(path) }
+          constant_source_path(mod.name),
+          *(mod.is_a?(Class) ? [] : [included_block_path(mod), *own_method_paths(mod)])
+        ].compact.uniq.select { |path| app_source_file?(path) }
+      end
+
+      def included_block_path(mod)
+        block = mod.instance_variable_get(:@_included_block) if mod.instance_variable_defined?(:@_included_block)
+        block.is_a?(Proc) ? block.source_location&.first : nil
+      end
+
+      def own_method_paths(mod)
+        names = mod.public_instance_methods(false) + mod.protected_instance_methods(false) +
+                mod.private_instance_methods(false)
+        names.filter_map { |name| mod.instance_method(name).source_location&.first }
+      rescue StandardError
+        []
       end
 
       def constant_source_path(name)
