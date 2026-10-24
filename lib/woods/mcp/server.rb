@@ -587,7 +587,7 @@ module Woods
                 exact_prefix: {
                   type: 'string',
                   description: 'Literal (non-regex) case-insensitive identifier prefix filter. ' \
-                               'Use for namespace scoping like "Admin::Settings::" without escaping regex metacharacters.'
+                               'Use for namespace scoping like "Reports::Settings::" without escaping regex metacharacters.'
                 },
                 exact_suffix: {
                   type: 'string',
@@ -606,7 +606,7 @@ module Woods
                 code: :unsupported_argument,
                 tool: 'search',
                 argument: 'query',
-                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Admin::Settings::" for literal prefix scoping.'
+                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Reports::Settings::" for literal prefix scoping.'
               )
             end
             types = coerce.call(types)
