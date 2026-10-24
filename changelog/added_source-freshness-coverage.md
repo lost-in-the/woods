@@ -1,0 +1,1 @@
+- Source freshness results carry `coverage: { recorded_files, verified_files }`: how many of the generation's recorded paths the check read with an unchanged identity. A quick check that stops at its time limit with no drift can now be reported as "no drift in N of M" rather than a bare `unknown`.

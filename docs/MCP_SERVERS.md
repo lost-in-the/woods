@@ -300,6 +300,21 @@ prefer that concrete type for follow-up identity checks.
 unit (the type directory that sorts last) and names every type in
 `_meta.ambiguous_types`; pass the intended `type` to choose.
 
+Identifier matches are ranked by how well they match, not by the order of type
+directories or summary files: the exact identifier first, then an exact short
+name (the last `::` segment, a table's name after `table:`, or a path segment;
+a route is named by its path, not its HTTP verb), then prefixes, then any other
+match, with shorter names first within each rank. The order is the same for
+every generation of the same source, and a broad query no longer cuts the exact
+name or its table from the page. Deep-field matches follow identifier matches
+in scan order.
+
+An in-process caller of `IndexReader#search` can pass `max_scan:` to size the
+deep-field budget for one call (a positive Integer, in unit bodies); the MCP
+tool keeps `WOODS_SEARCH_MAX_SCAN`. A deep search's Ruby result also carries
+`scan: { scanned_units:, candidate_units: }`, so a caller stopped by
+`scan_budget` can say how much it read.
+
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the
 returned count, stopping reason, known/unknown remainder, and total explicitly.

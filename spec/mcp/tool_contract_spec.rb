@@ -300,9 +300,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                                      'results' => [
                                                        { 'identifier' => 'Post', 'type' => 'model',
                                                          'match_field' => 'identifier' },
-                                                       { 'identifier' => 'PostsController', 'type' => 'controller',
-                                                         'match_field' => 'identifier' },
                                                        { 'identifier' => 'PostDecorator', 'type' => 'decorator',
+                                                         'match_field' => 'identifier' },
+                                                       { 'identifier' => 'PostsController', 'type' => 'controller',
                                                          'match_field' => 'identifier' }
                                                      ]
                                                    }),

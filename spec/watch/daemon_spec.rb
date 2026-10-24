@@ -455,6 +455,28 @@ RSpec.describe Woods::Watch::Daemon do
       expect(status).to include('state' => 'running', 'last_action' => 'incremental')
       expect(status['generation']).to eq(daemon.generation.current.number)
     end
+
+    # The extractor publishes generation.json before the daemon can
+    # write the cycle's outcome. While a cycle runs, the status says so, so a
+    # reader that sees a newer generation than the status names knows the
+    # status is about to catch up rather than reading the previous cycle as
+    # the current one.
+    it 'says a cycle is extracting while it runs, and clears it with the outcome' do
+      touch('config/locales/en.yml')
+      during = nil
+      allow(extractor).to receive(:extract_changed) do
+        during = status
+        publish_generation('incremental') && ['Thing']
+      end
+      daemon = build
+      before = daemon.generation.current.number
+      daemon.process(['config/locales/en.yml'])
+
+      expect(during).to include('cycle' => 'extracting', 'generation' => before)
+      expect(during['cycle_started_at']).to be_a(String)
+      expect(status).not_to have_key('cycle')
+      expect(status['generation']).to eq(before + 1)
+    end
   end
 
   # The lock-acquire rescue used to wrap the whole cycle, including #release
