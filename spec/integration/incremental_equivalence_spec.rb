@@ -1760,8 +1760,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       document = unit_document(index, 'models', 'Post')
       spans = document.dig('metadata', 'references').map { |span| span.values_at('kind', 'target', 'method') }
-      expect(spans).to include(['association', 'Comment', nil], ['callback_method', 'Post', 'normalize_title'],
-                               ['scope', 'Post', 'recent'])
+      expect(spans).to include(['association', 'Comment', nil], %w[callback_method Post normalize_title],
+                               %w[scope Post recent])
       methods = document.dig('metadata', 'methods').map { |entry| entry.values_at('name', 'visibility', 'owner') }
       expect(methods).to eq([%w[normalize_title public Post], %w[publish! private Post]])
     end
