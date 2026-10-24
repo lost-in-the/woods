@@ -99,9 +99,49 @@ occurrences publish an empty array. Absence on an older index means unavailable
 span metadata, not an empty reference set. See the
 [published layout](INDEX_LAYOUT.md#constant-reference-spans) for reader details.
 
-This bounded addition covers verified constants only. Other reference kinds,
-static/ambiguous candidates and broader method-target behavior remain separate
-work; it does not establish method-level reverse impact or complete #751.
+**Static and ambiguous constants (#751).** An occurrence the runtime lookup
+cannot verify can still publish a span from its literal spelling. Woods reads the
+spelling against the lexical nesting, innermost scope first and then the top
+level, and keeps the constant-owned units that declare one of those names under
+the caller policy. One candidate is `confidence: "static"` with `target` and
+`target_type`. Several (including every type of a runtime target several unit
+types share) are `confidence: "ambiguous"` with a `candidates` array of
+`{target, target_type}` and no `target`. A runtime target outside the index, an
+unverifiable owner and a self-reference publish nothing. Static evidence does not
+model lookup through ancestors, and neither confidence adds a dependency edge.
+
+**Declaration spans (#751).** The literal symbol of a class-body association
+(`belongs_to`, `has_many`, `has_one`, `has_and_belongs_to_many`), callback
+(model callbacks and controller `*_action` filters) or `scope` macro publishes a
+span only when the unit's runtime metadata confirms the declaration:
+- `kind: "association"` points at the reflected target class through the typed
+  registry. A polymorphic association publishes nothing.
+- `kind: "callback_method"` and `kind: "scope"` point at the declaring unit,
+  with `method` naming the method or scope. The method must appear in the
+  resolved `callbacks` or `filters` chain, or in `scopes`.
+
+Coordinates cover the whole `:name` literal. These spans add no edge: the
+extractors already publish association relationships. Route helpers, partials and
+macros inside concern blocks are not yet covered. Job and mailer references are
+ordinary constant spans whose `target_type` is `job` or `mailer`, with the
+selector in `method`. This does not establish method-level reverse impact.
+
+**Method table (#752).** Class-based units (models, controllers, services, jobs,
+mailers, concerns, POROs, libs and the other constant-owned types) publish
+`metadata.methods`: `[{name, kind, line, end_line, visibility, owner}]` in
+published `source_code` coordinates, sorted by line.
+- `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
+  `class_methods do`) or `module_function`.
+- `visibility` follows the literal `private`, `protected` and `public` forms,
+  including `private def`, `private :name` after the definition and
+  `private_class_method`.
+- `owner` is the lexical class or module, so a concern inlined as a commented
+  display block owns its methods at their lines inside the block.
+- Methods defined by metaprogramming or on another receiver are absent.
+- Source that does not parse publishes no table: absence means unavailable,
+  never "no methods".
+- `instance_methods` and `class_methods` are unchanged.
+- Superclass methods are not inlined.
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;
@@ -176,6 +216,30 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
+### Container attribution
+
+Every application unit carries `metadata.container` (W-9, #759): the runtime
+container it belongs to at the C4 container level. The graph node carries its
+`kind` as `container`. It is logical, not physical: how many processes run, and
+where, is not a Woods concern. The value is a function of the unit's type and
+facts its extractor already records, so full and incremental runs agree.
+
+| `kind` | Unit types | Other keys |
+|---|---|---|
+| `web` | controller, view_template, component, view_component, route, middleware, helper, action_cable_channel, GraphQL types and operations, js_module | none |
+| `jobs` | job, scheduled_job, mailer | a job's `queue`; `adapter` only when the job does not use the application's adapter (a class-level `queue_adapter` override, recorded as `metadata.queue_adapter`, or a native Sidekiq worker); a mailer's `delivery` method |
+| `database` | model, database_table, database_view | `database` |
+| `shared` | concern, service, poro, lib, manager, interactor, serializer, validator, decorator, policy, pundit_policy, state_machine, event | none |
+| `tasks` | rake_task | none |
+
+Framework sources, tests, factories, documentation, configuration, migrations,
+engines, packages and external consumers carry no container. A job without
+`adapter` runs on `background_processing.adapter` of the BehavioralProfile
+configuration unit; keeping the application-wide adapter in that one place
+means a change to `config.active_job.queue_adapter` never leaves per-job
+values stale. A mailer's `delivery` is its `delivery_method`, with the same
+staleness as that existing field.
+
 ## Core application extractors
 
 ### ModelExtractor
@@ -193,6 +257,7 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 - Direct Proc/lambda validation option values (for example inclusion/exclusion membership or message callables) use the same stable kind/source-site labels without execution. Validation order and duplicates, condition formats (`if`, `unless`, `on`), and non-Proc values are unchanged. Nested arrays/hashes are not recursively normalized, and labels do not serialize captured closure state. Run a full extraction after upgrading to refresh retained validation metadata; the stored schema is unchanged.
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
 - Reflects model class and instance methods after reading the schema, so Rails schema-loading optimizations produce the same method metadata in cold and warmed runs. Application-defined constructors remain visible; Rails versions that install an optimized singleton `new` during schema loading consistently include it in `class_methods`.
+- `metadata[:attribute_writers]` lists every attribute an instance accepts through a public writer, without the `=`. It is read from `public_instance_methods`, minus what `ActiveRecord::Base` itself defines, together with `attribute_names` and `attribute_aliases`. Unlike `instance_methods` (`instance_methods(false)`), it also covers writers from concerns and other modules: `has_secure_password`, nested attributes, store accessors, and association and collection-id writers. Attribute names count whether or not Rails has generated their methods yet, so cold and warmed runs agree.
 - Automatically skips HABTM join models and anonymous classes
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
@@ -288,7 +353,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
-- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its declared `only`/`except` names the action; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
+- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its `applies_to` (below, W-8) includes the action, so stacked `only` scopes from a `skip_before_action` intersect as Rails runs them; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
 - `filters` (W-8) lists `_process_action_callbacks` in chain order. Each entry keeps its declared evidence (`kind`, `filter`, sorted `only`/`except`, `if`/`unless` labels, and the declaring `file`/`line` when application source shows it) and adds `owner`, `applies_to` and `applicability`. `applies_to` is the subset of `metadata.actions` (in that order) that the runtime `only`/`except` scopes admit, read from ActionFilter's action set (the closed-over set on Rails 6.0, which has no ActionFilter), so inherited and concern-supplied filters and `skip_before_action ..., only:` resolve as Rails runs them. `applicability` is `resolved` when no other condition applies, or `conditional` when an `if:`/`unless:` method, proc or string also decides the filter; Woods never evaluates it, so a conditional filter's `applies_to` lists the actions it can run on. `owner` is the class or concern whose application source declares the filter: the class in whose chain the callback first appears, or a module that class includes (a proc filter by its own source file). A callback that `skip_before_action` rebuilt is traced to the declaration it replaced; a filter no application source declares (a gem concern, or a macro such as `protect_from_forgery`) is owned by the class whose chain gained it. The filters applying to one action are the entries whose `applies_to` includes it, in array order
 - Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge
@@ -597,8 +662,9 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 - Partials whose path is only known at runtime are listed in `metadata[:unresolved_partials]` and never become edges: an interpolated name in any engine (`render "rows/#{kind}"`, kind `interpolation`), and in jbuilder a helper-built path (`json.partial! some_path_helper(...)`, kind `helper`) or an object (`json.partial! @order.customer`, kind `object`). Each entry is `{ kind:, name: }`.
 - **Helper call edges** (see [Application helper calls](#application-helper-calls)): a template calling `pretty_date(x)` gets a `:helper_call` edge to the helper module that defines `pretty_date`, and a `:helper_method` edge to the controller that declares a name with `helper_method`. `metadata[:helper_calls]` lists the called names per module.
 - Frontend module references (`x-data`, `data-controller`, custom element tags) become `js_module` edges; see [Frontend references](#frontend-references)
+- **Partial locals (ERB, woods#798).** `metadata[:partial_renders]` lists each literal partial render in the template as `{ partial:, target:, locals:, implicit_local:, dynamic_locals:, line: }`. `target` is the render edge's target, or nil when caller prefixes disagree. `implicit_local` is the local an `object:` or `collection:` render defines. On partials, `metadata[:locals_read]` lists the bare identifiers and literal `local_assigns` keys the template reads. It is lexical and wide, because a helper call reads like a local, so a passed local missing from it is unread, never the reverse. `locals_read_dynamic` is set when a key is computed or `binding` is used. `locals_declared` (`{ required:, optional:, any: }`) is set when a strict-locals magic comment exists. All of these are read with Prism from the tags' Ruby, kept on its own lines. Haml and jbuilder publish none of these keys (an engine opts in through `scan_partial_locals`).
 
-**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Frontend module references are read from every parsed engine; see [Frontend references](#frontend-references). The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials` and `scan_method_calls`), and append the class to `ENGINES`.
+**Template engine coverage.** ERB, HAML, and jbuilder are parsed. All three engines regex-scan the template source; no HAML gem is loaded at extraction time. HAML scans follow comma-continued multi-line Ruby and skip `-#` comment bodies. In filter bodies other than `:ruby` and `:erb` they skip the literal text but read each `#{...}` interpolation, which HAML evaluates. Slim and Turbo Streams are not parsed; an app using Slim as its primary view engine gets zero view-layer coverage from this extractor. Frontend module references are read from every parsed engine; see [Frontend references](#frontend-references). The MCP `structure` tool surfaces the supported engine list via the `template_engines` field. The pluggable `Woods::Extractors::ViewEngines::Base` protocol and the `ViewTemplateExtractor::ENGINES` registry shipped with issue #110, Slim / Turbo implementations become plug-in additions: subclass `Base`, implement `name` / `extensions` / the three `scan_*` methods / `resolve_partial_identifier` / `scan_navigation_candidates` (and optionally `scan_unresolved_partials`, `scan_method_calls` and `scan_partial_locals`), and append the class to `ENGINES`.
 
 #### Application helper calls
 

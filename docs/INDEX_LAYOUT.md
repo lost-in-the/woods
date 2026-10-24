@@ -77,7 +77,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `source_references.json` | Internal, versioned candidate and edge-ownership cache for this generation. Included in Woods 2.1. Older indexes remain readable without it; supporting incremental writers may require a [full baseline rebuild](INCREMENTAL_EXTRACTION.md#source-reference-baseline-and-upgrades). Preserve it when copying payloads. Not a public query schema. |
 | `dependency_graph.json` | Required for a complete structural publication. Typed graph data; an empty graph is valid. |
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
-| `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. `unmodelled_tables` lists the `database_table` units no model reads. |
+| `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. `unmodelled_tables` lists the `database_table` units no model reads. `domain_clusters` lists the namespace-seeded clusters of `GraphAnalyzer#domain_clusters` (minimum size 3) over the application's own units: the types that carry a [container](EXTRACTOR_REFERENCE.md#container-attribution), with source inside the application. Framework sources, engines, tests, configuration and gem-defined models (`ActiveStorage::Blob`) take no part: `name`, `hub`, sorted `members`, `typed_members` (each `{ identifier, type }`, the type of the member's primary graph node), `member_count`, `entry_points`, at most 20 `boundary_edges` and `types` counts; `stats.domain_cluster_count` counts them. Full and incremental runs publish the same clusters for the same graph. |
 | `skipped_files.json` | Swept Ruby files and GraphQL operation documents (`config.graphql_document_paths`) that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Ruby reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only`, `not_owned` and `template` (a generator template under `lib/`); document reasons are `graphql_unavailable`, `schema_definitions` and `parse_error`. A template file named by a sweep glob is listed with `non_view_template`, `unsupported_template_engine` or `rejected_by:view_templates`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
 | `git_commits.json` | Optional [commit table](#commit-table): HEAD-reachable commits in a bounded window that touched an indexed path, with their files, and a path => commits index. Absent when the writer had no readable git history or predates the table; absence is unknown history, not "no commits". |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
@@ -160,8 +160,39 @@ selector is `new`; for `Target.send(:call)`, it is `send`. Inherited job APIs an
 framework-mediated mailer dispatch do not establish a method-definition owner.
 This field adds no method table, excerpt, anchor or method-scoped reverse impact.
 
-The generation-local internal reference cache is format 6 for this writer;
-format 5 and earlier require a full baseline rebuild before incremental writes.
+Static, ambiguous and declaration spans share the array (#751):
+
+```json
+{"line": 3, "column": 4, "length": 9, "target": "RefTarget", "target_type": "poro", "kind": "constant", "confidence": "static"}
+{"line": 5, "column": 6, "length": 8, "kind": "constant", "confidence": "ambiguous", "candidates": [{"target": "Admin::Notifier", "target_type": "service"}, {"target": "Notifier", "target_type": "lib"}]}
+{"line": 9, "column": 13, "length": 7, "target": "Author", "target_type": "model", "kind": "association", "confidence": "verified"}
+{"line": 11, "column": 14, "length": 9, "target": "Post", "target_type": "model", "kind": "callback_method", "confidence": "verified", "method": "set_slug"}
+```
+
+- An `ambiguous` record has `candidates`, sorted by target and type, and no
+  `target` or `target_type`. Never pick one silently.
+- `static` means the literal spelling names exactly one indexed unit while the
+  runtime lookup did not verify it.
+- Neither adds a graph edge.
+- `kind` values are `constant`, `association`, `callback_method` and `scope`.
+  Readers must ignore kinds they do not know.
+- Records at the same position sort after the established constant order by
+  kind and confidence.
+
+`metadata.methods` (#752) lists method definitions in the same published
+coordinates:
+
+```json
+{"name": "set_slug", "kind": "instance", "line": 41, "end_line": 43, "visibility": "private", "owner": "Post"}
+```
+
+A concern's methods inlined as a commented display block keep the concern as
+`owner`, with lines inside the block. Absence of the key means the table is
+unavailable (an older writer, or source that does not parse); an empty array
+means no literal definitions.
+
+The generation-local internal reference cache is format 7 for this writer;
+format 6 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
@@ -303,6 +334,8 @@ may omit it. Absence means the lookup is unavailable, not that no entry point
 touches a unit. Consumers can derive the same mapping from typed steps in the
 selected generation's flow documents, or assemble flows on demand where that
 capability is available. Do not mix documents from different generations.
+Ruby readers use `Woods::PublishedIndex#flow_entry_points(identifier, type:)`
+and `#flow_document(entry_point)`, which return `nil` when the artifact is absent.
 
 ### Semantic graph validation
 
@@ -491,7 +524,10 @@ updates use durable atomic replacement. If pruning wins the race and removes a
 payload, pinning fails; a successful pin is visible before pruning can delete it.
 Retention keeps pinned payloads **in addition to** the usual recent-generation
 budget, logs each skipped persistent pin, and retries released payloads on the
-next publication. `woods:stats` lists the persistent numbers. Releasing a pin
+next publication. `woods:stats` lists the persistent numbers, `woods_status`
+reports them as `index.retention_pins`, and Ruby readers call
+`Woods::PublishedIndex.retention_pins(output_dir)`. Status reports unreadable
+state as `retention_pins: null` with `retention_pins_error`, never as an empty list. Releasing a pin
 does not delete a payload immediately; an active reader's manifest lock still
 protects it. Disk usage can grow until pins are released.
 

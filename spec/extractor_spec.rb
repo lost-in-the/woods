@@ -3610,7 +3610,8 @@ RSpec.describe Woods::Extractor do
 
       extractor.send(:register_and_write, :models, [unit], Set.new)
 
-      expect(extractor.dependency_graph.to_h[:nodes]['Comment'].keys).to contain_exactly(:type, :file_path, :namespace)
+      expect(extractor.dependency_graph.to_h[:nodes]['Comment'].keys)
+        .to contain_exactly(:type, :file_path, :namespace, :container)
     end
   end
 

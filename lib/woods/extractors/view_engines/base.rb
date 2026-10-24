@@ -104,6 +104,20 @@ module Woods
           []
         end
 
+        # Partial locals (woods#798): the locals each literal partial render
+        # passes, the identifiers the template reads, and the strict locals a
+        # magic comment declares. Shaped like {TemplateLocals.scan}, plus
+        # +declared+ ({TemplateLocals.declared}, nil without a magic
+        # comment). Optional; the default publishes nothing, so a consumer
+        # can tell an engine that does not read locals from a template that
+        # renders none.
+        #
+        # @param source [String] Template source code
+        # @return [Hash, nil] +renders+, +reads+, +dynamic+, +declared+; nil when unsupported
+        def scan_partial_locals(_source)
+          nil
+        end
+
         # Application helper methods the template calls. The orchestrator
         # passes the catalog's method names; the engine finds the Ruby in
         # its own syntax and reports which of those names are called.

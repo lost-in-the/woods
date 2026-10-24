@@ -52,6 +52,34 @@ module Woods
         target_result(target, owner: reference['owner'])
       end
 
+      # Unresolved reasons whose source evidence still names a candidate: the
+      # runtime lookup did not contradict a lexical reading of the spelling.
+      # A runtime target outside the index, an unverifiable owner or a
+      # self-reference never yields one.
+      NO_CANDIDATE_REASONS = %w[unverified_owner target_not_indexed self_reference invalid_constant].freeze
+
+      # Typed candidates for an unresolved reference, from its literal spelling
+      # read against the lexical nesting (innermost first, then top level), or
+      # every type of a runtime target several unit types share. Static
+      # evidence only: Ruby's lookup through ancestors is not modelled.
+      #
+      # @param reference [Hash] collected spelling, owner and lexical nesting
+      # @param result [Hash] the unresolved {#explain} result
+      # @return [Array<Array(String, String)>] sorted [target, type] pairs
+      def candidates(reference, result)
+        return [] if result['status'] == 'resolved' || NO_CANDIDATE_REASONS.include?(result['reason'])
+
+        names = result['reason'] == 'ambiguous_target' ? [result['target']] : lexical_names(reference)
+        names.uniq.flat_map { |name| typed_targets(name).map { |type| [name, type] } }
+             .reject { |name, _| name == reference['owner'] }.uniq.sort
+      end
+
+      # @param identifier [String]
+      # @return [Array<String>] the constant-owned unit types declaring it, sorted
+      def typed_targets(identifier)
+        Array(@targets[identifier]).map { |entry| entry[:type].to_s }.uniq.sort
+      end
+
       # @param identifier [String] source declaration identity
       # @param file_path [String] original source path
       # @return [Boolean] whether exactly one extracted type owns the declaration
@@ -63,13 +91,21 @@ module Woods
       private
 
       def target_result(target, owner:)
-        return unresolved('ambiguous_target') if ambiguous?(target)
+        return unresolved('ambiguous_target').merge('target' => target) if ambiguous?(target)
 
         entries = @targets[target]
         return unresolved('target_not_indexed') unless entries&.any?
         return unresolved('self_reference') if target == owner
 
         { 'status' => 'resolved', 'target' => target, 'type' => entries.first[:type].to_s }
+      end
+
+      def lexical_names(reference)
+        name = reference['name'].to_s
+        return [] unless RuntimeLookup::CONSTANT.match?(name)
+        return [name.delete_prefix('::')] if name.start_with?('::')
+
+        reference.fetch('nesting', []).map { |scope| "#{scope}::#{name}" } + [name]
       end
 
       def entry(unit, path)

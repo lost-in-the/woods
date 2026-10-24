@@ -1184,6 +1184,13 @@ RSpec.describe Woods::DependencyGraph do
                               foreign_key_tables: %w[accounts plans])
     end
 
+    it 'records the container kind from metadata[:container] (W-9)' do
+      graph.register(unit_with_metadata(type: :job, identifier: 'SendJob',
+                                        metadata: { container: { kind: 'jobs', queue: 'mailers' } }))
+
+      expect(graph.to_h[:nodes]['SendJob']).to include(container: 'jobs')
+    end
+
     it 'adds no attribute keys when the metadata carries none' do
       graph.register(make_unit(type: :service, identifier: 'Checkout'))
 

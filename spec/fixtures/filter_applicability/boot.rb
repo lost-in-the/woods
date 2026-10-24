@@ -35,6 +35,7 @@ Dir.mktmpdir('woods_filter_applicability') do |root|
   app.routes.draw do
     resources :articles, only: %i[index show edit]
     get 'articles/health', to: 'articles#health'
+    resources :drafts, only: %i[show edit]
   end
 
   controllers = Woods::Extractors::ControllerExtractor.new.extract_all

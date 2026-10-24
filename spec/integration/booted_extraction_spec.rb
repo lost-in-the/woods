@@ -238,6 +238,31 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(second_unit.to_h[:source_hash]).to eq(first_unit.to_h[:source_hash])
   end
 
+  it 'publishes every attribute writer a model accepts, generated or module-defined (woods#797)' do
+    credentials = Module.new do
+      def passphrase=(_value); end
+    end
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+      include credentials
+
+      has_many :comments, class_name: 'Comment', foreign_key: :post_id, inverse_of: false
+      accepts_nested_attributes_for :comments
+      alias_attribute :headline, :title
+      attribute :reviewer_note, :string
+      attr_accessor :draft_note
+    end
+    stub_const('WriterProbeModel', model)
+
+    writers = Woods::Extractors::ModelExtractor.new.send(:extract_metadata, model, nil,
+                                                         inlined_concerns: [])[:attribute_writers]
+
+    expect(writers).to include('title', 'headline', 'reviewer_note', 'draft_note', 'passphrase',
+                               'comments', 'comment_ids', 'comments_attributes')
+    expect(writers).not_to include('attributes')
+    expect(writers).to eq(writers.sort.uniq)
+  end
+
   it 'retains an application-defined model constructor after schema loading (#363)' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
@@ -260,6 +285,20 @@ RSpec.describe 'Booted-app extraction', :booted_app do
   it 'extracts the controller and job units' do
     expect(index_for(:controllers).map { |u| u['identifier'] }).to include('PostsController')
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
+  end
+
+  it 'attributes each unit to its container and copies the kind onto the graph node (W-9)' do
+    expect(find_unit(:controllers, 'PostsController').dig('metadata', 'container')).to eq('kind' => 'web')
+    expect(find_unit(:jobs, 'PublishPostJob').dig('metadata', 'container')).to include('kind' => 'jobs')
+    expect(find_unit(:models, 'Post').dig('metadata', 'container')).to include('kind' => 'database')
+    graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
+    expect(graph.dig('nodes', 'PostsController', 'container')).to eq('web')
+  end
+
+  it 'publishes domain clusters with typed members in graph_analysis.json (woods#799)' do
+    analysis = JSON.parse(File.read(File.join(payload_dir, 'graph_analysis.json')))
+    expect(analysis.fetch('domain_clusters')).to all(include('name', 'members', 'typed_members'))
+    expect(analysis.dig('stats', 'domain_cluster_count')).to eq(analysis['domain_clusters'].size)
   end
 
   it 'marks a whole-file cache profile while retaining its controller in the file map (#417)' do
@@ -841,6 +880,25 @@ RSpec.describe 'Resolved filter applicability in a real Rails process (W-8)', :b
       'load_digest' => { 'owner' => 'DigestMailer', 'applies_to' => %w[daily], 'applicability' => 'resolved',
                          'except' => %w[weekly] }
     )
+  end
+
+  it 'attributes action facts only to the filters whose applies_to admits the action (W-7 and W-8 agree)' do
+    units = published
+    drafts = units.fetch('DraftsController')['metadata']
+    set_article = drafts['filters'].find { |entry| entry['filter'] == 'set_article' }
+
+    expect(set_article).to include('owner' => 'ArticlesController', 'applies_to' => %w[show],
+                                   'applicability' => 'resolved')
+    expect(drafts.dig('action_facts', 'show', 'assigns').map { |fact| fact['method'] }).to include('set_article')
+    expect(drafts.dig('action_facts', 'edit', 'assigns').map { |fact| fact['method'] }).not_to include('set_article')
+    units.values.select { |unit| unit['type'] == 'controller' }.each do |unit|
+      filters = unit.dig('metadata', 'filters')
+      unit.dig('metadata', 'action_facts').each do |action, facts|
+        admitted = filters.select { |entry| entry['applies_to'].include?(action) }.map { |entry| entry['filter'] }
+        attributed = facts['assigns'].map { |fact| fact['method'] } - [action]
+        expect(attributed - admitted).to be_empty, "#{unit['identifier']}##{action}: #{attributed - admitted}"
+      end
+    end
   end
 end
 

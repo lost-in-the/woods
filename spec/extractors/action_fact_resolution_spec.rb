@@ -122,6 +122,19 @@ RSpec.describe Woods::Extractors::ActionFactResolution do
     expect(facts['create'][:assigns].map { |a| a[:ivar] }).to eq(%w[@current_user @post])
   end
 
+  # skip_before_action ..., except: rebuilds the callback with a second only
+  # scope; Rails runs it only where every scope admits the action (W-8).
+  it 'intersects stacked only scopes and unions stacked except scopes, as Rails applies them' do
+    narrowed = callback(:before, :set_post, only: %w[show create])
+    narrowed.instance_variable_get(:@if) << action_filter(%w[show])
+    excluded = callback(:before, :logged_in_user, except: %w[index])
+    excluded.instance_variable_get(:@unless) << action_filter(%w[create])
+    FactsFixtures::PostsController.callbacks = [excluded, narrowed]
+
+    expect(facts['show'][:assigns].map { |a| a[:method] }).to eq(%w[logged_in_user set_post])
+    expect(facts['create'][:assigns].map { |a| a[:method] }).to eq(%w[create])
+  end
+
   it 'keeps a filter render out of the implicit-render decision for the action' do
     create = facts['create']
     expect(create[:renders].map { |r| r[:template] }).to eq(['posts/new'])

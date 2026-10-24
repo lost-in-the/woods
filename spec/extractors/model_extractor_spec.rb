@@ -31,7 +31,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       superclass: double('Superclass', name: 'ApplicationRecord'),
       singleton_class: double('SingletonClass', included_modules: []),
       table_exists?: false,
-      instance_methods: []
+      instance_methods: [],
+      public_instance_methods: []
     )
     stub_callback_chains(model)
     model
@@ -676,7 +677,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       model = stub_bare_model('AuditLog')
       column = double('Column', name: 'slug', type: :string, sql_type: 'varchar(255)',
                                 limit: nil, null: true, default: nil)
-      allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug])
+      allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug],
+                                       attribute_names: %w[slug], attribute_aliases: {})
       connection = double('Connection', foreign_keys: [])
       allow(model).to receive(:connection).and_return(connection)
       callback = double('Callback', filter: :set_slug, kind: :before)
@@ -725,7 +727,8 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         model = stub_bare_model('AuditLog')
         column = double('Column', name: 'slug', type: :string, sql_type: 'varchar(255)',
                                   limit: nil, null: true, default: nil)
-        allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug])
+        allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug],
+                                         attribute_names: %w[slug], attribute_aliases: {})
         allow(model).to receive(:connection).and_return(double('Connection', foreign_keys: []))
         callbacks = %i[set_slug stamp].map { |filter| double('Callback', filter: filter, kind: :before) }
         allow(model).to receive(:_save_callbacks).and_return(callbacks)
@@ -940,6 +943,62 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(line).to include('calls: AuditService')
       expect(line).to include('mails: UserMailer')
       expect(line).to include('reads: where')
+    end
+  end
+
+  # ── extract_attribute_writers (woods#797) ─────────────────────────
+
+  describe '#extract_attribute_writers' do
+    let(:framework_base) do
+      Class.new do
+        def attributes=(_value); end
+        def id=(_value); end
+      end
+    end
+
+    def writer_model(base, table: true, &body)
+      model = Class.new(base, &body)
+      model.define_singleton_method(:table_exists?) { table }
+      model.define_singleton_method(:attribute_names) { %w[id title] }
+      model.define_singleton_method(:attribute_aliases) { { 'headline' => 'title' } }
+      model
+    end
+
+    before { stub_const('ActiveRecord::Base', framework_base) }
+
+    it 'lists the writers from modules, the class body, attributes and aliases, not the framework base' do
+      secure = Module.new do
+        def password=(_value); end
+        def password_confirmation=(_value); end
+      end
+      model = writer_model(framework_base) do
+        include secure
+
+        attr_accessor :remember_token
+
+        def comments_attributes=(_value); end
+      end
+
+      expect(extractor.send(:extract_attribute_writers, model))
+        .to eq(%w[comments_attributes headline id password password_confirmation remember_token title])
+    end
+
+    it 'leaves out private, internal and operator writers' do
+      model = writer_model(framework_base) do
+        def _internal=(_value); end
+        def []=(_key, _value); end
+
+        private
+
+        def secret=(_value); end
+      end
+
+      expect(extractor.send(:extract_attribute_writers, model)).to eq(%w[headline id title])
+    end
+
+    it 'reads no attribute names without a table' do
+      model = writer_model(framework_base, table: false) { attr_writer :draft }
+      expect(extractor.send(:extract_attribute_writers, model)).to eq(['draft'])
     end
   end
 
@@ -1576,7 +1635,9 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         table_name: 'invoices',
         table_exists?: true,
         columns: [],
-        column_names: []
+        column_names: [],
+        attribute_names: [],
+        attribute_aliases: {}
       )
       connection = double('Connection')
       allow(model).to receive(:connection).and_return(connection)

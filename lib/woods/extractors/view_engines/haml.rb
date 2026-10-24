@@ -109,6 +109,14 @@ module Woods
           super(scannable_source(source))
         end
 
+        # Not read for Haml yet: the ERB reader would find no tags and claim
+        # none (woods#798).
+        #
+        # @see Base#scan_partial_locals
+        def scan_partial_locals(_source)
+          nil
+        end
+
         # @see Base#scan_method_calls
         def scan_method_calls(source, names)
           HelperCallScan.method_calls(ruby_code(source), names)

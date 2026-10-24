@@ -2,6 +2,7 @@
 
 require 'digest'
 require 'set'
+require_relative 'container_attribution'
 
 module Woods
   # GraphAnalyzer computes structural properties of the dependency graph.
@@ -75,12 +76,15 @@ module Woods
     # @param cycle_limit [Integer, nil] see {DEFAULT_CYCLE_LIMIT}
     # @param cycle_max_length [Integer, nil] see {DEFAULT_CYCLE_MAX_LENGTH}
     # @param controller_resolver [#call, nil] see {#unresolvable_routes}
+    # @param application_source [#call, nil] called with a node's file path, true when the
+    #   source is the application's own; see {#published_domain_clusters}. Nil counts every path.
     def initialize(dependency_graph, volatile_ratio: DEFAULT_VOLATILE_RATIO, volatile_limit_per_target: nil,
                    cycle_limit: DEFAULT_CYCLE_LIMIT, cycle_max_length: DEFAULT_CYCLE_MAX_LENGTH,
-                   controller_resolver: nil)
+                   controller_resolver: nil, application_source: nil)
       # Documentation units are not structure: see DependencyGraph#structural_graph.
       @graph = dependency_graph.respond_to?(:structural_graph) ? dependency_graph.structural_graph : dependency_graph
       @controller_resolver = controller_resolver
+      @application_source = application_source
       @volatile_ratio = volatile_ratio.to_f
       @volatile_limit_per_target = volatile_limit_per_target
       @cycle_limit = cycle_limit
@@ -343,9 +347,10 @@ module Woods
     #
     # @param min_size [Integer] Minimum units per cluster before merging (default: 3)
     # @param types [Array<String>, nil] Filter to these unit types (default: all)
+    # @param only [#call, nil] a further filter, called with each node's identifier and metadata
     # @return [Array<Hash>] Clusters sorted by member count descending.
     #   Each hash: { name:, hub:, members:, member_count:, entry_points:, boundary_edges:, types: }
-    def domain_clusters(min_size: 3, types: nil)
+    def domain_clusters(min_size: 3, types: nil, only: nil)
       nodes = graph_nodes
       return [] if nodes.empty?
 
@@ -356,6 +361,7 @@ module Woods
                      else
                        nodes.keys
                      end
+      filtered_ids = filtered_ids.select { |id| only.call(id, nodes[id]) } if only
 
       return [] if filtered_ids.empty?
 
@@ -431,6 +437,7 @@ module Woods
       computed_undeclared = undeclared_package_edges
       computed_unresolvable = unresolvable_routes
       computed_unmodelled = unmodelled_tables
+      computed_clusters = published_domain_clusters
 
       {
         orphans: computed_orphans,
@@ -443,6 +450,7 @@ module Woods
         undeclared_package_edges: computed_undeclared,
         unresolvable_routes: computed_unresolvable,
         unmodelled_tables: computed_unmodelled,
+        domain_clusters: computed_clusters,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
@@ -453,9 +461,31 @@ module Woods
           **volatile_dependency_stats(computed_volatile),
           undeclared_package_edge_count: computed_undeclared.size,
           unresolvable_route_count: computed_unresolvable.size,
-          unmodelled_table_count: computed_unmodelled.size
+          unmodelled_table_count: computed_unmodelled.size,
+          domain_cluster_count: computed_clusters.size
         }
       }
+    end
+
+    # {#domain_clusters} over the application's own units, as
+    # `graph_analysis.json` publishes it (woods#799): the types with a
+    # container ({ContainerAttribution::APPLICATION_TYPES}) whose source is
+    # inside the application. Framework sources, engines, tests,
+    # configuration and the models a gem defines (`ActiveStorage::Blob`, with
+    # an absolute gem path) would otherwise seed clusters of their own and pull
+    # application units into them. Each cluster also lists
+    # `typed_members`, the members with the type of their graph node, since an
+    # identifier alone does not say which unit it names.
+    #
+    # @return [Array<Hash>]
+    def published_domain_clusters
+      nodes = graph_nodes
+      source = @application_source
+      own = source && ->(_id, meta) { meta[:file_path].nil? || source.call(meta[:file_path].to_s) }
+      domain_clusters(types: ContainerAttribution::APPLICATION_TYPES, only: own).map do |cluster|
+        typed = cluster[:members].map { |id| { identifier: id, type: nodes.dig(id, :type).to_s } }
+        cluster.merge(typed_members: typed)
+      end
     end
 
     private

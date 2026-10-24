@@ -62,11 +62,23 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(described_class.read(path)).to eq(data)
   end
 
-  it 'requires format 6 and refuses format 5 so unchanged callers gain selector evidence after a full rebuild' do
-    expect(described_class::VERSION).to eq(6)
-    analysis['references'].each { |record| record.delete('method') }
-    write_json(data.merge('version' => 5))
+  it 'requires format 7 and refuses format 6 so unchanged callers gain declaration evidence after a full rebuild' do
+    expect(described_class::VERSION).to eq(7)
+    analysis.delete('macros')
+    write_json(data.merge('version' => 6))
     expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
+  end
+
+  it 'round trips declaration macros and rejects a macro outside the declaration set' do
+    data['files'].values.first['analysis'] = Woods::SourceReferences::Collector.new.call(
+      "class Caller\n  belongs_to :author\n  before_save :set_slug, :touch_it\n  scope :recent, -> {}\nend\n"
+    )
+    described_class.write(path, data)
+    macros = described_class.read(path).dig('files', 'app/models/caller.rb', 'analysis', 'macros')
+    expect(macros.map { |record| record.values_at('macro', 'name') })
+      .to eq([%w[belongs_to author], %w[before_save set_slug], %w[before_save touch_it], %w[scope recent]])
+    data['files'].values.first['analysis']['macros'].first['macro'] = 'define_method'
+    expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /declaration macro/)
   end
 
   [nil, '', 1, true, false, [], {}, "call\n", "call\0", "call\u0085", "\xFF".b, 'a' * 4097].each do |value|

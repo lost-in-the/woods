@@ -222,8 +222,29 @@ module Woods
           perform_params: runtime_perform_params(job_class),
           loc: count_loc(site.source),
           generated: true,
-          generated_by: site.generated_by
+          generated_by: site.generated_by,
+          **{ queue_adapter: queue_adapter_override(job_class) }.compact
         )
+      end
+
+      # The queue adapter an Active Job class uses when it is not the
+      # application's: a `self.queue_adapter =` on the class or an ancestor.
+      # Nil for every job that follows `config.active_job.queue_adapter`, so
+      # the app-wide adapter stays one fact on the BehavioralProfile unit and
+      # a configuration change never leaves per-job values stale (W-9).
+      #
+      # @param job_class [Class]
+      # @return [String, nil]
+      def queue_adapter_override(job_class)
+        return nil unless defined?(::ActiveJob::Base) && job_class.is_a?(Class) && job_class < ::ActiveJob::Base
+        unless job_class.respond_to?(:queue_adapter_name) && ::ActiveJob::Base.respond_to?(:queue_adapter_name)
+          return nil
+        end
+
+        name = job_class.queue_adapter_name.to_s
+        name.empty? || name == ::ActiveJob::Base.queue_adapter_name.to_s ? nil : name
+      rescue StandardError
+        nil
       end
 
       # A queue the class states as a plain name. A queue computed by a block
@@ -359,6 +380,8 @@ module Woods
         # Enhance with runtime introspection if available
         base_metadata[:job_type] = runtime_job_type(job_class) || :unknown if base_metadata[:job_type] == :unknown
         base_metadata[:queue] ||= job_class.queue_name if job_class.respond_to?(:queue_name)
+        adapter = queue_adapter_override(job_class)
+        base_metadata[:queue_adapter] = adapter if adapter
 
         base_metadata[:sidekiq_options] = job_class.sidekiq_options_hash if job_class.respond_to?(:sidekiq_options_hash)
 

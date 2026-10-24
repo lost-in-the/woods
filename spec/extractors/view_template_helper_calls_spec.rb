@@ -127,7 +127,7 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor, 'helper call edges' do
 
     show = unit('widgets/show.html.erb')
     expect(show.metadata.keys).to eq(%i[template_engine is_partial partials_rendered instance_variables
-                                        helpers_called loc])
+                                        helpers_called loc partial_renders])
     expect(show.dependencies).to eq([])
   end
 end
