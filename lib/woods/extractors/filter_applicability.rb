@@ -48,15 +48,29 @@ module Woods
       #   +applies_to+ (Array<String>, a subset of +actions+ in their order) and
       #   +applicability+ ({RESOLVED} or {CONDITIONAL})
       def filter_applicability(klass, callback, actions)
-        only_sets = action_scopes(callback, :@if)
-        except_sets = action_scopes(callback, :@unless)
-        conditional = (only_sets + except_sets).include?(nil)
-        applies_to = actions.map(&:to_s).select do |action|
-          only_sets.compact.all? { |set| set.include?(action) } && except_sets.compact.none? { |set| set.include?(action) }
-        end
+        conditional = (action_scopes(callback, :@if) + action_scopes(callback, :@unless)).include?(nil)
 
-        { owner: filter_owner(klass, callback), applies_to: applies_to,
+        { owner: filter_owner(klass, callback), applies_to: filter_applies_to(callback, actions),
           applicability: conditional ? CONDITIONAL : RESOLVED }
+      end
+
+      # The actions a callback's only/except scopes admit: every only scope
+      # must name the action and no except scope may. Stacked scopes (a
+      # +skip_before_action+ that rebuilt the callback) therefore intersect
+      # and union exactly as Rails evaluates them. Other conditions are not
+      # evaluated and do not narrow the list. The single source of
+      # applicability for {#filter_applicability} and the per-action facts
+      # ({ActionFactResolution}).
+      #
+      # @param callback [ActiveSupport::Callbacks::Callback]
+      # @param actions [Array<String, Symbol>]
+      # @return [Array<String>] a subset of +actions+, in their order
+      def filter_applies_to(callback, actions)
+        only_sets = action_scopes(callback, :@if).compact
+        except_sets = action_scopes(callback, :@unless).compact
+        actions.map(&:to_s).select do |action|
+          only_sets.all? { |set| set.include?(action) } && except_sets.none? { |set| set.include?(action) }
+        end
       end
 
       private

@@ -842,6 +842,25 @@ RSpec.describe 'Resolved filter applicability in a real Rails process (W-8)', :b
                          'except' => %w[weekly] }
     )
   end
+
+  it 'attributes action facts only to the filters whose applies_to admits the action (W-7 and W-8 agree)' do
+    units = published
+    drafts = units.fetch('DraftsController')['metadata']
+    set_article = drafts['filters'].find { |entry| entry['filter'] == 'set_article' }
+
+    expect(set_article).to include('owner' => 'ArticlesController', 'applies_to' => %w[show],
+                                   'applicability' => 'resolved')
+    expect(drafts.dig('action_facts', 'show', 'assigns').map { |fact| fact['method'] }).to include('set_article')
+    expect(drafts.dig('action_facts', 'edit', 'assigns').map { |fact| fact['method'] }).not_to include('set_article')
+    units.values.select { |unit| unit['type'] == 'controller' }.each do |unit|
+      filters = unit.dig('metadata', 'filters')
+      unit.dig('metadata', 'action_facts').each do |action, facts|
+        admitted = filters.select { |entry| entry['applies_to'].include?(action) }.map { |entry| entry['filter'] }
+        attributed = facts['assigns'].map { |fact| fact['method'] } - [action]
+        expect(attributed - admitted).to be_empty, "#{unit['identifier']}##{action}: #{attributed - admitted}"
+      end
+    end
+  end
 end
 
 RSpec.describe 'Controllers outside ActionController::Base, in a real Rails process', :booted_app do
