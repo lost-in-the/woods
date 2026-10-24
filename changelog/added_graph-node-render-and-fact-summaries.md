@@ -1,0 +1,1 @@
+- Graph nodes summarise each unit's unresolved renders (`unresolved_render_count`) and the actions its action facts cover (`fact_actions`), with `node_facts` naming the summaries the writer publishes. `PublishedIndex#units_with(:unresolved_renders | :action_facts)` answers from them without opening units, or nil for an older generation (#837).

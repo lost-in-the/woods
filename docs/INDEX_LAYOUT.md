@@ -400,6 +400,32 @@ Raw consumers of older indexes must treat absent markers as unclassified or use
 the documented type list. Identifiers, `file_map`, and type membership retain
 their existing shapes; older readers can ignore `kind`.
 
+### Node summaries: unresolved renders and action facts
+
+New writers summarise two per-unit facts on each graph node, primary and
+variant alike, so a reader can find the units that have something to report
+without opening every unit (#837):
+
+- `unresolved_render_count`: how many entries the unit's
+  `metadata.unresolved_renders` lists; omitted when there are none.
+- `fact_actions`: the sorted actions the unit's `metadata.action_facts`
+  covers (controllers and mailers); omitted when the unit publishes no
+  action facts.
+
+```json
+{
+  "nodes": {
+    "WidgetsController": { "type": "controller", "unresolved_render_count": 2, "fact_actions": ["index", "show"] }
+  },
+  "node_facts": ["fact_actions", "unresolved_render_count"]
+}
+```
+
+`node_facts` names the summaries the writer publishes, so a reader can tell
+"no unit has one" from "this writer does not summarise it". Both values are
+derived from the unit's own metadata when it registers, by the full and the
+incremental writer alike. `PublishedIndex#units_with` reads them.
+
 ### Reverse relationship records
 
 New writers add `reverse_via` to `dependency_graph.json`. Each target identifier
