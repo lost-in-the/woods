@@ -4,12 +4,13 @@ require 'prism'
 require_relative 'method_table'
 
 module Woods
-  # Where each model callback is declared in a unit's published
-  # `source_code` (#817): the line range of the `before_save :name` style
-  # call, in annotated-source coordinates (the same as `metadata.methods`
-  # and `metadata.references`), recorded on the callback entry as
-  # `declaration`. With the method table it lets a reader tie a changed line
-  # to the lifecycle step it declares or defines.
+  # Where each model callback (#817) and controller filter (#820) is
+  # declared in a unit's published `source_code`: the line range of the
+  # `before_save :name` or `before_action :name` style call, in
+  # annotated-source coordinates (the same as `metadata.methods` and
+  # `metadata.references`), recorded on the entry as `declaration`. With the
+  # method table it lets a reader tie a changed line to the lifecycle step or
+  # filter it declares or defines.
   #
   # Declarations come from one Prism walk of the published text and of each
   # inlined concern block (as {MethodTable} decodes them). Only a literal
@@ -18,28 +19,33 @@ module Woods
   # metaprogrammed or ambiguous declaration keeps no `declaration`. Nothing
   # is executed.
   module CallbackSites
-    MACRO = /\A(?:before|after|around)_[a-z_]+\z/
+    MACRO = /\A(?:(?:prepend|append)_)?(?:before|after|around)_[a-z_]+\z/
+    # Controller filter macros: the kind the filter chain reports.
+    FILTER = /\A(?:(?:prepend|append)_)?(before|after|around)_(?:action|filter)\z/
     # Declarations whose runtime chain entry is an `after_commit`.
     COMMIT = /\Aafter_(?:create|update|destroy|save)_commit\z/
 
     module_function
 
-    # Record declaration sites on the callbacks of a unit about to be written.
+    # Record declaration sites on the callbacks and filters of a unit about
+    # to be written.
     #
     # @param unit [ExtractedUnit]
     # @return [void]
     def record(unit)
-      callbacks = unit.metadata[:callbacks] || unit.metadata['callbacks']
-      return unless callbacks.is_a?(Array) && callbacks.any?
+      callbacks = entries(unit, :callbacks)
+      filters = entries(unit, :filters)
+      return if callbacks.empty? && filters.empty?
 
       sites = call(unit.source_code)
-      callbacks.each { |callback| annotate(callback, sites) if callback.is_a?(Hash) }
+      callbacks.each { |callback| annotate(callback, sites, :type) }
+      filters.each { |filter| annotate(filter, sites, :kind) }
     end
 
     # @param source [String, nil] published annotated source
     # @return [Hash{Array(String, String) => Array<Hash>}] [runtime type,
-    #   method] => every declaring call's `line` and `end_line`; empty when
-    #   the source is absent or does not parse
+    #   method] (a filter's type is `filter:<kind>`) => every declaring call's
+    #   `line` and `end_line`; empty when the source is absent or does not parse
     def call(source)
       return {} unless source.is_a?(String) && !source.empty?
 
@@ -58,17 +64,28 @@ module Woods
     # @param name [String] the declaring macro
     # @return [String] the callback type the runtime chain reports for it
     def runtime_type(name)
-      name.match?(COMMIT) ? 'after_commit' : name
+      kind = name[FILTER, 1]
+      return "filter:#{kind}" if kind
+      return 'after_commit' if name.match?(COMMIT)
+
+      name.delete_prefix('prepend_').delete_prefix('append_')
     end
 
-    def annotate(callback, sites)
-      symbol = callback.key?(:filter) || callback.key?(:type)
+    def entries(unit, key)
+      list = unit.metadata[key] || unit.metadata[key.to_s]
+      list.is_a?(Array) ? list.grep(Hash) : []
+    end
+
+    # @param entry [Hash] a callback (typed by `type`) or a filter (by `kind`)
+    def annotate(entry, sites, type_key)
+      symbol = entry.key?(:filter) || entry.key?(type_key)
       key = symbol ? :declaration : 'declaration'
-      callback.delete(key)
-      type = (callback[:type] || callback['type']).to_s
-      filter = (callback[:filter] || callback['filter']).to_s
+      entry.delete(key)
+      type = (entry[type_key] || entry[type_key.to_s]).to_s
+      type = "filter:#{type}" if type_key == :kind
+      filter = (entry[:filter] || entry['filter']).to_s
       found = sites.fetch([type, filter], [])
-      callback[key] = found.first if found.size == 1
+      entry[key] = found.first if found.size == 1
     end
 
     def collect(root, offset, sites)

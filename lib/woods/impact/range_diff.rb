@@ -60,7 +60,30 @@ module Woods
           'facets' => facets, 'categories' => categories(before, after, facets),
           'metadata_keys' => changed_metadata_keys(before, after),
           'diff_stats' => { 'source_before' => source_size(before), 'source_after' => source_size(after) } }
-          .merge(source_changes(before, after, facets))
+          .merge(source_changes(before, after, facets)).merge(column_changes(before, after))
+      end
+
+      # Which columns moved (#821), by name, when a modified unit's `columns`
+      # metadata did and both endpoints publish named columns.
+      def column_changes(before, after)
+        old = named_columns(before)
+        new = named_columns(after)
+        return {} unless old && new && Value.json(old) != Value.json(new)
+
+        modified = (old.keys & new.keys).reject { |name| Value.json(old[name]) == Value.json(new[name]) }
+        { 'column_changes' => { 'added' => (new.keys - old.keys).sort, 'removed' => (old.keys - new.keys).sort,
+                                'modified' => modified.sort } }
+      end
+
+      def named_columns(unit)
+        columns = unit && unit.fetch('metadata')['columns']
+        return nil unless columns.is_a?(Array) && columns.all? { |column| named?(column) }
+
+        columns.to_h { |column| [column['name'], column] }
+      end
+
+      def named?(column)
+        column.is_a?(Hash) && column['name'].is_a?(String)
       end
 
       # Where a modified unit's source moved (#802): changed line ranges in

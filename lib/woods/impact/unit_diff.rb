@@ -56,7 +56,7 @@ module Woods
         record = RangeDiff.new({ identity => old }.compact, { identity => new }.compact).changes.first
         moved = { 'status' => record ? record['status'] : 'unchanged',
                   'facets' => [], 'categories' => [], 'metadata_keys' => [] }
-                .merge(record.to_h.slice('facets', 'categories', 'metadata_keys'))
+                .merge(record.to_h.slice('facets', 'categories', 'metadata_keys', 'column_changes'))
         return moved unless old && new
 
         moved.merge('source_changes' => LineDiff.new(old['source_code'], new['source_code'])
