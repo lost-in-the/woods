@@ -231,6 +231,14 @@ RSpec.describe Woods::Coordination::PipelineLock do
       expect(contender.acquire).to be false
     end
 
+    it 'reports the recorded holder, and nothing for a missing or unreadable lock' do
+      expect(contender.holder).to be_nil
+      write_lock(pid: 4321, host: host)
+      expect(contender.holder).to include('pid' => 4321, 'host' => host, 'locked_at' => a_kind_of(String))
+      File.write(lock_path, '{torn')
+      expect(contender.holder).to be_nil
+    end
+
     it 'still retires an old lock on another host by its age' do
       write_lock(pid: dead_pid, host: "#{host}-elsewhere")
       FileUtils.touch(lock_path, mtime: Time.now - 3600)

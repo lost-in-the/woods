@@ -145,6 +145,18 @@ module Woods
         end
       end
 
+      # Who the lock file says holds it, for a waiting writer to report.
+      #
+      # @return [Hash, nil] +'pid'+, +'host'+ and +'locked_at'+ as recorded
+      #   (any may be missing from a lock an older version wrote), or nil
+      #   when there is no readable lock
+      def holder
+        record = JSON.parse(File.read(@lock_path))
+        record.is_a?(Hash) ? record.slice('pid', 'host', 'locked_at') : nil
+      rescue JSON::ParserError, SystemCallError, EncodingError
+        nil
+      end
+
       # Whether the lock is currently held by this instance.
       #
       # @return [Boolean]
