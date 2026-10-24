@@ -1531,7 +1531,7 @@ Git history is required.
 | `last_author` | Name of the author who last modified the file |
 | `commit_count` | Total commit count for this file (past 365 days) |
 | `contributors` | Top 5 contributors by commit count: `[{ name:, commits: }]` |
-| `recent_commits` | Last 5 commits: `[{ sha:, message:, date:, author: }]` |
+| `recent_commits` | Last 5 commits (`config.git_recent_commits`): `[{ sha:, message:, date:, author: }]`; `sha` is shortened to 8 characters. The complete window, with files and descriptions, is the generation's [commit table](INDEX_LAYOUT.md#commit-table) |
 | `change_frequency` | `:new`, `:hot`, `:active`, `:stable`, or `:dormant` |
 
 ### Full example JSON

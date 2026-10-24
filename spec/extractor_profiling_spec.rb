@@ -120,8 +120,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
          'package annotation',
          'source references', 'graph rebuild', 'doc references', 'dependents', 'git enrichment', 'graph analysis',
          'path normalization', 'reference projection',
-         'write results', 'orphan sweep', 'flows', 'graph write', 'skipped files', 'manifest and summary',
-         'snapshot', 'source verification', 'payload sync', 'publish', 'payload prune']
+         'write results', 'orphan sweep', 'flows', 'graph write', 'skipped files', 'commit table',
+         'manifest and summary', 'snapshot', 'source verification', 'payload sync', 'publish', 'payload prune']
       )
     end
 
@@ -135,7 +135,7 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
         ['source capture', 'payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
          're-extraction', 'reconciliation', 'source references', 'doc references', 'git enrichment',
          'unit finalization', 'type index',
-         'graph write', 'skipped files', 'graph analysis', 'flows', 'manifest and summary',
+         'graph write', 'skipped files', 'commit table', 'graph analysis', 'flows', 'manifest and summary',
          'source verification', 'payload sync', 'publish', 'payload prune']
       )
     end
