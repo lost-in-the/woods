@@ -10,7 +10,10 @@ require 'stringio'
 RSpec.describe Woods::GitCommitTable do
   let(:root) { Dir.mktmpdir('woods_commit_table') }
   let(:logger) { double('Logger').as_null_object }
-  let(:settings) { { 'window_days' => 365, 'max_commits' => 5000, 'max_files_per_commit' => 100 } }
+  let(:settings) do
+    { 'window_days' => 365, 'max_commits' => 5000, 'max_files_per_commit' => 100, 'line_stats' => false,
+      'hunk_budget' => 50_000 }
+  end
   let(:today) { Time.now.utc.to_date }
   let(:table) { described_class.new(root: root, logger: logger, settings: settings, today: today) }
 
@@ -59,7 +62,7 @@ RSpec.describe Woods::GitCommitTable do
       result = table.build(%w[app/controllers/posts_controller.rb app/models/post.rb], head: head)
 
       expect(result.keys).to eq(%w[schema_version head since window_days max_commits max_files_per_commit
-                                   indexed_paths_sha256 truncated commits paths])
+                                   line_stats hunk_budget indexed_paths_sha256 truncated commits paths])
       expect(result).to include('schema_version' => 1, 'head' => second, 'window_days' => 365,
                                 'since' => (today - 365).iso8601, 'truncated' => false)
       expect(result['commits'].map { |row| row['sha'] }).to eq([second, first])
@@ -161,6 +164,60 @@ RSpec.describe Woods::GitCommitTable do
     end
   end
 
+  describe 'line counts and hunks (#804)' do
+    let(:lines) do
+      described_class.new(root: root, logger: logger, settings: settings.merge('line_stats' => true), today: today)
+    end
+
+    def file_stats(table, sha)
+      table['commits'].find { |row| row['sha'] == sha }['files'].to_h { |file| [file['path'], file.except('path')] }
+    end
+
+    it 'records each file’s added and removed lines and its hunks in the commit’s own coordinates' do
+      commit('root', { 'app/a.rb' => "one\ntwo\nthree\nfour\n", 'app/gone.rb' => "x\ny\n" })
+      sha = commit('edit', { 'app/a.rb' => "one\n2\nthree\nfour\nfive\nsix\n", 'app/new.rb' => "n\n" },
+                   remove: ['app/gone.rb'])
+
+      stats = file_stats(lines.build(%w[app/a.rb app/new.rb app/gone.rb], head: head), sha)
+
+      expect(stats['app/a.rb']).to eq(
+        'status' => 'modified', 'additions' => 3, 'deletions' => 1, 'hunks_truncated' => false,
+        'hunks' => [{ 'old' => [2, 1], 'new' => [2, 1] }, { 'old' => [4, 0], 'new' => [5, 2] }]
+      )
+      expect(stats['app/new.rb']).to include('status' => 'added', 'additions' => 1, 'deletions' => 0,
+                                             'hunks' => [{ 'old' => [0, 0], 'new' => [1, 1] }])
+      expect(stats['app/gone.rb']).to include('status' => 'deleted', 'additions' => 0, 'deletions' => 2)
+    end
+
+    it 'leaves binary files without counts and finds quoted and nested paths' do
+      commit('root',
+             { 'apps/web/app/a.rb' => 'a', 'apps/web/app/bin.dat' => "\0\1", "apps/web/app/tab\tcafé.rb" => 'x' })
+      sha = commit('edit', { 'apps/web/app/bin.dat' => "\0\2", "apps/web/app/tab\tcafé.rb" => "x\ny\n" })
+      nested = described_class.new(root: File.join(root, 'apps/web'), logger: logger,
+                                   settings: settings.merge('line_stats' => true), today: today)
+
+      stats = file_stats(nested.build(["app/tab\tcafé.rb", 'app/bin.dat'], head: head), sha)
+
+      expect(stats['app/bin.dat']).to include('additions' => nil, 'deletions' => nil, 'hunks' => [])
+      expect(stats["app/tab\tcafé.rb"]).to include('additions' => 2, 'deletions' => 1)
+    end
+
+    it 'spends the table-wide hunk budget on the newest commits first and says where it ran out' do
+      commit('root', { 'app/a.rb' => "1\n2\n3\n4\n5\n" })
+      older = commit('older', { 'app/a.rb' => "x\n2\n3\n4\ny\n" })
+      newer = commit('newer', { 'app/a.rb' => "x\n2\nz\n4\ny\n" })
+      budgeted = described_class.new(root: root, logger: logger, today: today,
+                                     settings: settings.merge('line_stats' => true, 'hunk_budget' => 2))
+
+      table = budgeted.build(%w[app/a.rb], head: head)
+
+      expect(file_stats(table, newer)['app/a.rb']).to include('hunks_truncated' => false, 'additions' => 1)
+      expect(file_stats(table, older)['app/a.rb']).to include('hunks' => [{ 'old' => [1, 1], 'new' => [1, 1] }],
+                                                              'hunks_truncated' => true, 'additions' => 2)
+      expect(table).to include('line_stats' => true, 'hunk_budget' => 2)
+    end
+  end
+
   describe '#key and .current?' do
     it 'matches a table built from the same head, paths and settings, and nothing else' do
       commit('root', { 'app/a.rb' => 'a', 'app/b.rb' => 'b' })
@@ -200,14 +257,18 @@ RSpec.describe Woods::GitCommitTable do
   describe '.settings' do
     it 'reads the configured bounds and falls back to the documented defaults' do
       expect(described_class.settings(nil)).to eq('window_days' => 365, 'max_commits' => 5000,
-                                                  'max_files_per_commit' => 100)
+                                                  'max_files_per_commit' => 100, 'line_stats' => true,
+                                                  'hunk_budget' => 50_000)
       config = Woods::Configuration.new
       config.git_commit_table_days = 90
       config.git_commit_table_limit = 200
       config.git_commit_table_files_limit = 20
+      config.git_commit_table_line_stats = false
+      config.git_commit_table_hunk_budget = 7
 
       expect(described_class.settings(config)).to eq('window_days' => 90, 'max_commits' => 200,
-                                                     'max_files_per_commit' => 20)
+                                                     'max_files_per_commit' => 20, 'line_stats' => false,
+                                                     'hunk_budget' => 7)
     end
   end
 end

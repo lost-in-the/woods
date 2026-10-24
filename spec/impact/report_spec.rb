@@ -63,6 +63,30 @@ RSpec.describe Woods::Impact::Report do
     expect(changes.last).to include('facets' => ['source'], 'categories' => ['behaviour'])
   end
 
+  it 'records where a modified unit\'s source moved, in each endpoint\'s lines (#802)' do
+    publish(1, [unit('Example', 'model', "class Example\n  def a; end\nend\n"), unit('Other', 'model')])
+    publish(2, [unit('Example', 'model', "class Example\n  def a; end\n  def b; end\nend\n"),
+                unit('Other', 'model', 'original', { 'columns' => [] })])
+
+    changes = report.to_h.fetch('changed').to_h { |change| [change['identifier'], change] }
+    expect(changes['Example']['source_changes']).to eq(
+      'hunks' => [{ 'before' => [2, 0], 'after' => [3, 1] }], 'added_lines' => 1, 'removed_lines' => 0,
+      'coverage' => 'complete'
+    )
+    expect(changes['Other']).not_to have_key('source_changes')
+  end
+
+  it 'spends one changed-range budget across the report' do
+    publish(1, [unit('A', 'model', "1\n2\n3\n"), unit('B', 'model', "1\n2\n3\n")])
+    publish(2, [unit('A', 'model', "x\n2\ny\n"), unit('B', 'model', "x\n2\ny\n")])
+
+    changes = described_class.compare(@root, from: 'gen:1', max_source_hunks: 3).to_h.fetch('changed')
+    expect(changes.map do |change|
+      change['source_changes'].values_at('coverage') + [change['source_changes']['hunks'].size]
+    end)
+      .to eq([['complete', 2], ['truncated', 1]])
+  end
+
   it 'matches the synthetic typed range fixture without normalizing public type strings' do
     fixture = JSON.parse(File.read(File.expand_path('../fixtures/impact/typed_range.json', __dir__)))
     publish(1, fixture.fetch('before'))
@@ -119,9 +143,9 @@ RSpec.describe Woods::Impact::Report do
   it 'holds both selected readers through comparison and releases locks afterwards' do
     publish(1, [unit('Example', 'model')])
     publish(2, [])
-    allow(Woods::Impact::RangeDiff).to receive(:new).and_wrap_original do |original, *args|
+    allow(Woods::Impact::RangeDiff).to receive(:new).and_wrap_original do |original, *args, **options|
       expect(Woods::PayloadStore.new(@root).prune(keep: 1, protect: 2)).to eq([])
-      original.call(*args)
+      original.call(*args, **options)
     end
     report
     expect(Woods::PayloadStore.new(@root).prune(keep: 1, protect: 2)).to eq([1])
@@ -155,9 +179,9 @@ RSpec.describe Woods::Impact::Report do
   it 'does not adopt a newer now endpoint during computation' do
     publish(1, [])
     publish(2, [])
-    allow(Woods::Impact::RangeDiff).to receive(:new).and_wrap_original do |original, *args|
+    allow(Woods::Impact::RangeDiff).to receive(:new).and_wrap_original do |original, *args, **options|
       publish(3, [unit('Later', 'model')])
-      original.call(*args)
+      original.call(*args, **options)
     end
     expect(report.to_h.dig('range', 'to', 'generation')).to eq(2)
   end

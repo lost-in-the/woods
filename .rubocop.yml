@@ -51,6 +51,7 @@ Metrics/ModuleLength:
 
 Metrics/ClassLength:
   Exclude:
+    - 'lib/woods/impact/line_diff.rb'
     # PipelineLock is a cohesive lock implementation whose length is mostly
     # atomicity handling (TOCTOU-safe acquire, rename-then-inspect release,
     # ownership-checked touch). Splitting it would scatter invariants that
@@ -96,6 +97,8 @@ Metrics/MethodLength:
 Metrics/AbcSize:
   Max: 25
   Exclude:
+    # Myers' diff (Impact::LineDiff) reads best as the paper's loops.
+    - 'lib/woods/impact/line_diff.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'
@@ -113,6 +116,7 @@ Metrics/AbcSize:
 
 Metrics/CyclomaticComplexity:
   Exclude:
+    - 'lib/woods/impact/line_diff.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'
@@ -129,6 +133,7 @@ Metrics/CyclomaticComplexity:
 
 Metrics/PerceivedComplexity:
   Exclude:
+    - 'lib/woods/impact/line_diff.rb'
     - 'lib/woods/ast/**/*'
     - 'lib/woods/extractors/**/*'
     - 'lib/woods/mcp/**/*'

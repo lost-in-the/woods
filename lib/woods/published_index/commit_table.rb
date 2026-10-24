@@ -69,6 +69,17 @@ module Woods
         @data['max_files_per_commit']
       end
 
+      # @return [Boolean] whether listed files carry `additions`, `deletions`
+      #   and `hunks` (#804); false for a table written without them or before them
+      def line_stats?
+        @data['line_stats'] == true
+      end
+
+      # @return [Integer, nil] the table-wide hunk bound, nil before #804
+      def hunk_budget
+        @data['hunk_budget']
+      end
+
       # @return [Boolean] whether older commits in the window were dropped by the bound
       def truncated?
         @data['truncated']

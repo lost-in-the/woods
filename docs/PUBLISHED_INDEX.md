@@ -129,6 +129,7 @@ publishes an empty table.
 | `#co_changes(*paths)` | `[{ "path" =>, "commits" => }]`: other indexed paths changed in the same commits, most first, ties by path |
 | `#paths`, `#to_h` | The published `paths` index and the whole table |
 | `#head`, `#since`, `#window_days`, `#max_commits`, `#max_files_per_commit`, `#truncated?` | What the table covers |
+| `#line_stats?`, `#hunk_budget` | Whether file rows carry `additions`, `deletions`, `hunks` and `hunks_truncated` (#804), and the table-wide hunk bound |
 
 ```ruby
 Woods::PublishedIndex.open(Rails.root.join('tmp/woods')) do |index|

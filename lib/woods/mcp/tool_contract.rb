@@ -17,6 +17,7 @@ module Woods
         'max_flow_steps' => [1, 100_000],
         'max_flow_operations' => [1, 100_000],
         'max_risk_records' => [1, 100_000],
+        'max_source_hunks' => [1, 100_000],
         'budget' => [1, 200_000],
         'depth' => [0, 20],
         'limit' => [1, 1_000],

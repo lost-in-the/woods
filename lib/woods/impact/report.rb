@@ -26,7 +26,8 @@ module Woods
           head = Endpoint.new(after)
           before_units = base.units
           after_units = head.units
-          changes = RangeDiff.new(before_units, after_units).changes
+          changes = RangeDiff.new(before_units, after_units,
+                                  max_source_hunks: options.to_h.fetch('max_source_hunks')).changes
           unknowns = base.unknowns(before_units, 'from') + head.unknowns(after_units, 'to')
           computed = compute([[before, before_units], [after, after_units]], changes, options)
           new({ 'from' => base.provenance(from), 'to' => head.provenance(to) }, changes,

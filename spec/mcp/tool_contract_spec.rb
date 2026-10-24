@@ -45,7 +45,8 @@ RSpec.describe 'Index MCP tool contracts' do
                                                                       'max_flow_documents' => integer_contract(1, 1000),
                                                                       'max_flow_steps' => integer_contract(1, 100_000),
                                                                       'max_flow_operations' => integer_contract(1, 100_000),
-                                                                      'max_risk_records' => integer_contract(1, 100_000)
+                                                                      'max_risk_records' => integer_contract(1, 100_000),
+                                                                      'max_source_hunks' => integer_contract(1, 100_000)
                                                                     }),
       'codebase_retrieve' => contract(:always, { 'query' => 'How does Post work?' },
                                       exact_text("## Post\nclass Post; end"),
