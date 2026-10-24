@@ -2939,6 +2939,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/rt_shelf/row_component.rb
         app/components/rt_desk/card_component.rb
         app/controllers/rt_desk_controller.rb
+        app/controllers/rt_lamp_controller.rb
+        app/components/rt_lamp/shade_component.rb
       ]
     end
 
@@ -3034,6 +3036,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            ])
 
       expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
+    end
+
+    it 'summarises unresolved renders and action facts on the graph node, full and incremental alike (#837)' do
+      node = ->(index) { read_json(index, 'dependency_graph.json').fetch('nodes').fetch('RtLampController') }
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_lamp_controller.rb', <<~RUBY)
+                                 class RtLampController < ApplicationController
+                                   def show
+                                     render RtLamp::ShadeComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+      expect(node.call(index)).to include('unresolved_render_count' => 1, 'fact_actions' => ['show'])
+      expect(read_json(index, 'dependency_graph.json').fetch('node_facts'))
+        .to eq(%w[fact_actions unresolved_render_count])
+
+      component = write_and_load('app/components/rt_lamp/shade_component.rb', <<~RUBY)
+        module RtLamp
+          class ShadeComponent < ApplicationComponent
+            def call = "shade"
+          end
+        end
+      RUBY
+      Woods::Extractor.new(output_dir: index).extract_changed([component])
+      expect(node.call(index)).not_to have_key('unresolved_render_count')
+      expect(differences(index, full_extraction)).to be_empty
     end
   end
 
