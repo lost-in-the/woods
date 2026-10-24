@@ -67,6 +67,16 @@ module Woods
       # it names no unit, so it must never become a :test_coverage target.
       CONSTANT_PATH = /\A[A-Z]\w*(?:::[A-Z]\w*)*\z/
 
+      # The unit type a subject's name suffix decides. A helper is a module
+      # the PORO extractor publishes as `poro` (woods#809).
+      SUFFIX_TYPES = [[/Controller\z/, :controller], [/Job\z/, :job], [/Mailer\z/, :mailer],
+                      [/(?:Service|Interactor)\z/, :service], [/Helper\z/, :poro]].freeze
+
+      # A Minitest integration or system test class names a scenario
+      # (`FollowPagesTest`, `UsersSignupTest`), not a class in the app, unless
+      # its suffix names a unit type (`UsersControllerTest`). woods#809.
+      MINITEST_SCENARIO_DIR = %r{/test/(?:integration|system)/}
+
       # Rake tasks are identified by name, so a task-shaped string describe in
       # a task spec directory (`describe 'ledger:rebuild_balances'`) names a
       # unit when a task of that name exists. A describe that names a
@@ -210,6 +220,7 @@ module Woods
       def names_unit?(subject, group, file_path)
         return true if group&.match?(RSPEC_CONSTANT_DESCRIBE)
         return false if group&.match?(RSPEC_FEATURE_GROUP)
+        return false if file_path.match?(MINITEST_SCENARIO_DIR) && suffix_type(subject).nil?
         return true if subject.match?(CONSTANT_PATH)
 
         rake_subject?(subject, file_path) && rake_task_names.include?(subject)
@@ -424,15 +435,14 @@ module Woods
       def extract_dependencies(subject_class, test_type)
         return [] unless subject_class
 
-        target_type = case subject_class
-                      when /Controller\z/ then :controller
-                      when /Job\z/ then :job
-                      when /Mailer\z/ then :mailer
-                      when /Service\z/, /Interactor\z/ then :service
-                      else infer_type_from_test_type(test_type)
-                      end
-
+        target_type = suffix_type(subject_class) || infer_type_from_test_type(test_type)
         [{ type: target_type, target: subject_class, via: :test_coverage }]
+      end
+
+      # @param subject [String]
+      # @return [Symbol, nil] the unit type the subject's suffix names
+      def suffix_type(subject)
+        SUFFIX_TYPES.find { |pattern, _| subject.match?(pattern) }&.last
       end
 
       # Infer dependency type from test_type when class name suffix is ambiguous.
