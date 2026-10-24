@@ -179,4 +179,34 @@ RSpec.describe Woods::SourceInputs::Status do
   ensure
     Rake.application = old
   end
+
+  # The quick budget covers the whole check, not only the file walk: time
+  # spent reading the manifest and preparing the scan comes out of it, so a
+  # quick check costs about its budget.
+  it 'charges the time before the walk to the quick budget' do
+    publish_source
+    allow(Woods::SourceInputs::Manifest).to receive(:parse).and_wrap_original do |original, *args|
+      sleep(described_class::BUDGETS.fetch('quick') + 0.05)
+      original.call(*args)
+    end
+
+    result = status(mode: 'quick')
+    expect(result['state']).to eq('unknown')
+    expect(result['verification_reasons']).to include('scan_time_budget')
+  end
+
+  it 'reaches current when the whole tree fits the budget and nothing drifted' do
+    publish_source
+    expect(status(mode: 'quick')).to include('state' => 'current', 'reasons' => [])
+  end
+
+  it 'gives each mode its own budget, counted from the start of the check' do
+    publish_source
+    allow(Woods::SourceInputs::Verifier).to receive(:new).and_call_original
+    before = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    status(mode: 'deep')
+
+    expect(Woods::SourceInputs::Verifier).to have_received(:new)
+      .with(hash_including(max_seconds: 5.0, deadline: be_between(before + 5.0, before + 6.0)))
+  end
 end

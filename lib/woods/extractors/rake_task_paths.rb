@@ -103,7 +103,13 @@ module Woods
 
       # @param path [String]
       # @return [Hash, nil] +{ exact: }+, or +{ dir:, suffix:, recursive: }+; nil when malformed
+      # Parsed once per distinct entry: classification asks for every file a
+      # source check visits.
       def parse(path)
+        (@parsed ||= {}).fetch(path) { @parsed[path] = parse_entry(path) }
+      end
+
+      def parse_entry(path)
         return nil if path.empty? || path.start_with?('/') || path.include?("\0")
         return nil if path.split('/', -1).any? { |part| ['', '.', '..'].include?(part) }
         return { exact: path } unless glob?(path)
