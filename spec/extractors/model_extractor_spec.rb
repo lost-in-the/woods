@@ -973,6 +973,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       end
       model = writer_model(framework_base) do
         include secure
+
         attr_accessor :remember_token
 
         def comments_attributes=(_value); end
