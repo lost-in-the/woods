@@ -94,6 +94,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `.new(index_dir, generation: nil)` | reader, holding a lock | `generation:` pins a published `payloads/gen-N`; omit for the currently published one |
 | `.open(index_dir, generation: nil) { |index| ... }` | the block's value | releases the lock in `ensure`, on return or exception |
 | `.available_generations(index_dir)` | `Array<Integer>` | Published generations, ascending: see below |
+| `.retention_pins(index_dir)` | `Array<Integer>` | Persistent `woods:pin[N]` pins, ascending; reads no payload. A pin whose payload was deleted outside Woods stays listed, so intersect with `.available_generations`. Raises `IOError` for unreadable or malformed pin state. See [persistent retention pins](INDEX_LAYOUT.md#persistent-retention-pins) |
 | `#generation_number` | Integer | 0 for an index written flat (pre-2.0 layout) |
 | `#close` | nil | Releases the retention lock; safe to call more than once |
 | `#unit(identifier, type: nil)` | Hash or nil | The unit JSON, string keys; see the collision note below |
@@ -104,6 +105,8 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#table_database_map` | `Hash` | Model table to database; empty on Rails 6.0 extractions |
 | `#git_commits` | `CommitTable` or nil | The pinned generation's [commit table](INDEX_LAYOUT.md#commit-table); nil when it publishes none. Raises `CorruptArtifactError` for a symlinked, unparseable or unknown-schema file |
 | `#external_dependency_checksum` | String | SHA-256 of the pinned payload's `manifest.json` |
+| `#flow_entry_points(identifier, type:)` | `Array<String>` or nil | Entry points whose precomputed flow documents expanded this typed unit, from `flows/by_unit.json`; `[]` when none did, `nil` when the generation publishes no inverse. See [inverted flow membership](INDEX_LAYOUT.md#inverted-flow-membership) |
+| `#flow_document(entry_point)` | Hash or nil | One precomputed flow document listed by `flows/flow_index.json`, string keys as published; `nil` without precomputed flows or for an unlisted entry point. Both flow readers raise `CorruptArtifactError` for an unreadable, malformed or symlinked artifact |
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
@@ -140,6 +143,17 @@ end
 Paths are application-relative, like unit `file_path` values. Map a path to its
 units through the graph of the same generation (`file_path` and `source_paths`),
 not through the filesystem.
+
+### `#flow_entry_points` and `#flow_document`: precomputed flows
+
+Both flow readers use the pinned payload only, read through the bounded no-follow
+reader the impact report uses, and parse each index once per reader. Absent
+artifacts answer nil, which means the generation cannot say, not "no flows". A
+present but unreadable, malformed or symlinked artifact, or a document whose
+`entry_point` differs from the one requested, raises `CorruptArtifactError`. An
+empty membership list is bounded evidence, not proof that no runtime path
+reaches the unit.
+
 
 ### `#unit`: an identifier shared across types
 

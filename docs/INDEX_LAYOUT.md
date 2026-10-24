@@ -297,6 +297,8 @@ may omit it. Absence means the lookup is unavailable, not that no entry point
 touches a unit. Consumers can derive the same mapping from typed steps in the
 selected generation's flow documents, or assemble flows on demand where that
 capability is available. Do not mix documents from different generations.
+Ruby readers use `Woods::PublishedIndex#flow_entry_points(identifier, type:)`
+and `#flow_document(entry_point)`, which return `nil` when the artifact is absent.
 
 ### Semantic graph validation
 
@@ -485,7 +487,10 @@ updates use durable atomic replacement. If pruning wins the race and removes a
 payload, pinning fails; a successful pin is visible before pruning can delete it.
 Retention keeps pinned payloads **in addition to** the usual recent-generation
 budget, logs each skipped persistent pin, and retries released payloads on the
-next publication. `woods:stats` lists the persistent numbers. Releasing a pin
+next publication. `woods:stats` lists the persistent numbers, `woods_status`
+reports them as `index.retention_pins`, and Ruby readers call
+`Woods::PublishedIndex.retention_pins(output_dir)`. Status reports unreadable
+state as `retention_pins: null` with `retention_pins_error`, never as an empty list. Releasing a pin
 does not delete a payload immediately; an active reader's manifest lock still
 protects it. Disk usage can grow until pins are released.
 
