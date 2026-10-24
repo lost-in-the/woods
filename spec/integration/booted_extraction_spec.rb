@@ -238,6 +238,31 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(second_unit.to_h[:source_hash]).to eq(first_unit.to_h[:source_hash])
   end
 
+  it 'publishes every attribute writer a model accepts, generated or module-defined (woods#797)' do
+    credentials = Module.new do
+      def passphrase=(_value); end
+    end
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+      include credentials
+
+      has_many :comments, class_name: 'Comment', foreign_key: :post_id, inverse_of: false
+      accepts_nested_attributes_for :comments
+      alias_attribute :headline, :title
+      attribute :reviewer_note, :string
+      attr_accessor :draft_note
+    end
+    stub_const('WriterProbeModel', model)
+
+    writers = Woods::Extractors::ModelExtractor.new.send(:extract_metadata, model, nil,
+                                                         inlined_concerns: [])[:attribute_writers]
+
+    expect(writers).to include('title', 'headline', 'reviewer_note', 'draft_note', 'passphrase',
+                               'comments', 'comment_ids', 'comments_attributes')
+    expect(writers).not_to include('attributes')
+    expect(writers).to eq(writers.sort.uniq)
+  end
+
   it 'retains an application-defined model constructor after schema loading (#363)' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'

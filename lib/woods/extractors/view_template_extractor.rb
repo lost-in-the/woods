@@ -127,7 +127,9 @@ module Woods
         code = CommentBlanking.blank(source, file_path)
         interpolated, partials = engine.scan_partials(code).partition { |name| name.include?(INTERPOLATION_MARKER) }
         unit.metadata = build_metadata(engine, source, code, file_path, partials, interpolated)
-        unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials, pending)
+        targets = {}
+        unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials, pending, targets)
+        apply_partial_locals(unit, engine, source, identifier, targets)
         apply_helper_calls(unit, engine, source, namespace)
 
         apply_frontend_references(unit, source)
@@ -263,8 +265,9 @@ module Woods
       # @param identifier [String] Template identifier
       # @param partials [Array<String>] Pre-extracted partial names
       # @param pending [Hash] Collects each relative partial no file was found for
+      # @param targets [Hash{String => String}] Filled with each partial name's render-edge target
       # @return [Array<Hash>]
-      def build_dependencies(engine, code, file_path, identifier, partials, pending)
+      def build_dependencies(engine, code, file_path, identifier, partials, pending, targets = {})
         deps = []
 
         partials.each do |partial_name|
@@ -275,6 +278,7 @@ module Woods
               (pending[identifier] ||= []) << { name: partial_name, target: partial_identifier }
             end
           end
+          targets[partial_name] = partial_identifier
           deps << { type: :view_template, target: partial_identifier, via: :render }
         end
         engine.scan_templates(code).each do |template_name|
@@ -288,6 +292,36 @@ module Woods
         deps.concat(resolve_navigation_candidates(engine, code))
 
         deps.uniq { |d| [d[:type], d[:target], d[:via]] }
+      end
+
+      # Record partial locals (woods#798) when the engine reads them: every
+      # template's literal partial renders with the locals each passes and
+      # the render edge's target, and on a partial the identifiers it reads
+      # and the strict locals it declares. Absent for an engine that does
+      # not read locals, so a consumer never mistakes that for none.
+      #
+      # @param unit [ExtractedUnit]
+      # @param engine [ViewEngines::Base]
+      # @param source [String] Template source, magic comments included
+      # @param identifier [String] Template identifier
+      # @param targets [Hash{String => String}] Partial name => render-edge target, from {#build_dependencies}
+      # @return [void]
+      def apply_partial_locals(unit, engine, source, identifier, targets)
+        facts = engine.scan_partial_locals(source)
+        return unless facts
+
+        unit.metadata[:partial_renders] = facts[:renders].map do |render|
+          name = render[:partial]
+          target = targets.fetch(name) do
+            resolve_partial(engine, name, identifier) unless name.include?(INTERPOLATION_MARKER)
+          end
+          { partial: name, target: target }.merge(render.except(:partial))
+        end
+        return unless unit.metadata[:is_partial]
+
+        unit.metadata[:locals_read] = facts[:reads]
+        unit.metadata[:locals_read_dynamic] = facts[:dynamic]
+        unit.metadata[:locals_declared] = facts[:declared] if facts[:declared]
       end
 
       # Add `helper_call` edges to the helper modules whose methods the

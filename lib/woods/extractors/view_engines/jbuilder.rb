@@ -70,6 +70,14 @@ module Woods
           partials.to_a
         end
 
+        # Not read for Jbuilder yet: its renders are `json.partial!` calls,
+        # which the ERB reader does not see (woods#798).
+        #
+        # @see Base#scan_partial_locals
+        def scan_partial_locals(_source)
+          nil
+        end
+
         # A runtime expression followed by `(` is a helper call; anything
         # else is treated as an object. A paren-less helper call with
         # arguments is therefore recorded as an object; the name is kept.

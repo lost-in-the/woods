@@ -135,6 +135,7 @@ module Woods
       def rewrite(unit, entries, directories)
         entries.each do |entry|
           targets = targets_for(unit.identifier, entry[:name], directories)
+          retarget_partial_renders(unit, entry, targets.size == 1 ? targets.first : nil)
           if targets.size == 1
             unit.dependencies = unit.dependencies.map do |dep|
               placeholder?(dep, entry) ? dep.merge(target: targets.first) : dep
@@ -145,6 +146,17 @@ module Woods
           end
         end
         unit.dependencies = unit.dependencies.uniq { |dep| [dep[:type], dep[:target], dep[:via]] }
+      end
+
+      # A partial render published under +partial_renders+ follows its edge:
+      # the resolved target, or none when the callers disagree (woods#798).
+      def retarget_partial_renders(unit, entry, target)
+        renders = unit.metadata[:partial_renders]
+        return unless renders
+
+        unit.metadata[:partial_renders] = renders.map do |render|
+          render[:partial] == entry[:name] && render[:target] == entry[:target] ? render.merge(target: target) : render
+        end
       end
 
       def placeholder?(dep, entry)

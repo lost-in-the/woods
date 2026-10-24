@@ -42,6 +42,9 @@ module Woods
         (?:after|before)_(?:add|remove)_for_         # collection callbacks
       )/x
 
+      # A public attribute writer: +title=+, not +_internal=+, +[]=+ or +==+.
+      ATTRIBUTE_WRITER_PATTERN = /\A[a-z]\w*=\z/
+
       # Rails exposes one chain per event; each entry supplies its own kind.
       # before_commit is itself an event, unlike before_save and after_commit.
       CALLBACK_EVENTS = %i[
@@ -471,6 +474,7 @@ module Woods
           # full extraction and a warmed incremental run see the same API.
           class_methods: model.methods(false).sort,
           instance_methods: filter_instance_methods(model.instance_methods(false)).sort,
+          attribute_writers: extract_attribute_writers(model),
 
           # Foreign keys as the connection reports them. The target table's
           # database is a graph-level concern, resolved by the
@@ -1301,6 +1305,31 @@ module Woods
         attributes.any? && attributes.all? { |a| belongs_to_names.include?(a.to_sym) }
       rescue StandardError
         false
+      end
+
+      # Every attribute an instance accepts through a public writer, by name
+      # (woods#797): writers the class, its concerns and any other module
+      # define (association and collection-id writers, nested attributes,
+      # +has_secure_password+, store accessors, +attr_accessor+), plus the
+      # attribute names and aliases whose writers Rails generates lazily.
+      # Writers +ActiveRecord::Base+ itself defines (+attributes=+, +id=+) are
+      # left out, as are internal +_+-prefixed and operator writers.
+      #
+      # Attribute names count whether or not their methods are generated yet,
+      # so a cold run and a warmed one publish the same list.
+      #
+      # @param model [Class] The ActiveRecord model class
+      # @return [Array<String>] Sorted writer names, without the trailing +=+
+      def extract_attribute_writers(model)
+        framework = defined?(ActiveRecord::Base) ? ActiveRecord::Base.public_instance_methods : []
+        names = (model.public_instance_methods - framework).filter_map do |method_name|
+          method_name.to_s.delete_suffix('=') if ATTRIBUTE_WRITER_PATTERN.match?(method_name.to_s)
+        end
+        if model.table_exists?
+          names.concat(model.attribute_names.map(&:to_s))
+          names.concat(model.attribute_aliases.keys.map(&:to_s)) if model.respond_to?(:attribute_aliases)
+        end
+        names.uniq.sort
       end
 
       # Filter out ActiveRecord-internal generated instance methods

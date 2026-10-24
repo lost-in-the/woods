@@ -5,6 +5,7 @@ require 'strscan'
 require_relative 'base'
 require_relative '../form_action_scan'
 require_relative '../helper_call_scan'
+require_relative '../template_locals'
 
 module Woods
   module Extractors
@@ -71,6 +72,8 @@ module Woods
         # A strict-locals magic comment: `<%# locals: (title:, size: 1) %>`.
         STRICT_LOCALS = /\A#\s*+locals:\s*+\(/
         STRICT_LOCAL_NAME = /([a-z_]\w*+):/
+        # The parameter list of a strict-locals magic comment.
+        STRICT_LOCALS_LIST = /\A#\s*+locals:\s*+\((.*)\)\s*\z/m
 
         # @see Base#name
         def name
@@ -167,6 +170,11 @@ module Woods
           end
         end
 
+        # @see Base#scan_partial_locals
+        def scan_partial_locals(source)
+          TemplateLocals.scan(ruby_lines(source)).merge(declared: strict_locals(source))
+        end
+
         # @see Base#scan_navigation_candidates
         def scan_navigation_candidates(source)
           link_to_candidates = source.scan(ROUTE_HELPER_PATTERN).map do |route_name, suffix|
@@ -199,6 +207,41 @@ module Woods
             end
           end
           [code, locals]
+        end
+
+        # The Ruby inside the template's ERB tags, kept on the lines it sits
+        # on: markup and comments leave only their newlines, and each tag
+        # ends in a `;` so adjacent tags stay separate statements. One
+        # forward pass.
+        #
+        # @param source [String]
+        # @return [String]
+        def ruby_lines(source)
+          scanner = StringScanner.new(source.valid_encoding? ? source : source.scrub(' '))
+          code = +''
+          while (text = scanner.scan_until(ERB_TAG_OPEN))
+            code << ("\n" * text.count("\n"))
+            next scanner.getch if scanner.peek(1) == '%'
+
+            body = scanner.scan_until(ERB_TAG_CLOSE)&.delete_suffix('%>')
+            body ||= scanner.rest.tap { scanner.terminate }
+            code << (body.start_with?('#') ? "\n" * body.count("\n") : "#{body.sub(ERB_TAG_MARKER, '').delete_suffix('-')};")
+          end
+          code
+        end
+
+        # The first strict-locals magic comment, parsed.
+        #
+        # @param source [String]
+        # @return [Hash, nil] See {TemplateLocals.declared}
+        def strict_locals(source)
+          scanner = StringScanner.new(source.valid_encoding? ? source : source.scrub(' '))
+          while scanner.skip_until(ERB_TAG_OPEN)
+            body = scanner.scan_until(ERB_TAG_CLOSE)&.delete_suffix('%>').to_s
+            list = body.strip.match(STRICT_LOCALS_LIST)
+            return TemplateLocals.declared(list[1]) if list
+          end
+          nil
         end
 
         # Extension {#resolve_partial_identifier} appends to a partial name.
