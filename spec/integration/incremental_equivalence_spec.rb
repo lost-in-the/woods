@@ -2116,30 +2116,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # Rails serves a routed action with no method by implicit render (#726):
     # the template alone resolves it, and removing the template unresolves it
     # again, through incremental runs that agree with a full one at each step.
+    # Its own controller: the sibling example loads an `archive` method into
+    # LanternsController, and a class stays loaded for the rest of the process.
     it 'follows a template that serves the action by implicit render' do
-      # A sibling example may have loaded an `archive` method into the class;
-      # reopening it would keep that method, so start from a fresh constant.
-      Object.send(:remove_const, :LanternsController) if Object.const_defined?(:LanternsController, false)
-      write_file('app/controllers/lanterns_controller.rb', lanterns_source('index'))
-      load app_path('app/controllers/lanterns_controller.rb')
+      controller = 'app/controllers/beacons_controller.rb'
+      write_file(controller, "class BeaconsController < ApplicationController\n  def index\n  end\nend\n")
+      load app_path(controller)
       write_file('config/routes.rb', <<~RUBY)
         Rails.application.routes.draw do
           resources :posts, only: %i[index show create]
-          resources :lanterns, only: %i[index]
-          get 'lanterns/archive', to: 'lanterns#archive'
+          resources :beacons, only: %i[index]
+          get 'beacons/archive', to: 'beacons#archive'
         end
       RUBY
       Rails.application.reload_routes!
-      archive = { 'route' => 'GET /lanterns/archive', 'controller' => 'LanternsController',
+      archive = { 'route' => 'GET /beacons/archive', 'controller' => 'BeaconsController',
                   'action' => 'archive', 'reason' => 'missing_action' }
       unresolvable = ->(dir) { read_json(dir, 'graph_analysis.json')['unresolvable_routes'] }
-      template = 'app/views/lanterns/archive.html.erb'
+      template = 'app/views/beacons/archive.html.erb'
 
       index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }])
       expect(unresolvable.call(index_dir)).to eq([])
 
       index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }, -> { delete_file(template) }])
       expect(unresolvable.call(index_dir)).to eq([archive])
+    ensure
+      # The class stays loaded, so its file joins the pristine tree.
+      FileUtils.cp(app_path(controller), File.join(@pristine_root, controller)) if File.exist?(app_path(controller))
     end
   end
 
