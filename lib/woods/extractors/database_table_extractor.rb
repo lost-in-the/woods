@@ -1,5 +1,8 @@
 # frozen_string_literal: true
 
+require 'digest'
+require 'json'
+
 require_relative '../extracted_unit'
 require_relative '../source_inputs/consumer_errors'
 require_relative 'table_catalog'
@@ -99,17 +102,25 @@ module Woods
         }
       end
 
-      # Default *presence* only: a default value can be data, and the unit is
-      # about shape.
+      # Default *presence* and a digest, never the value: a default value can
+      # be data, and the unit is about shape. The digest (#824) moves when the
+      # default moves, so a range report can name the column as modified.
       def column_facts(column)
         function = column.respond_to?(:default_function) ? column.default_function : nil
+        present = !column.default.nil? || !function.nil?
         {
           name: column.name.to_s,
           type: column.type.to_s,
           sql_type: column.sql_type.to_s,
           null: column.null ? true : false,
-          has_default: !column.default.nil? || !function.nil?
+          has_default: present,
+          default_digest: present ? default_digest(column.default, function) : nil
         }
+      end
+
+      # @return [String] 16 hex characters of SHA-256 over the default and its function
+      def default_digest(default, function)
+        Digest::SHA256.hexdigest(JSON.generate([default&.to_s, function&.to_s]))[0, 16]
       end
 
       # An expression index reports its columns as one SQL string.
