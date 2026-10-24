@@ -727,6 +727,7 @@ party) behaves exactly as it always did.
     "generation": 42,
     "generation_reason": "incremental",
     "generation_updated_at": "2026-07-27T04:55:12Z",
+    "retention_pins": [40],              // woods:pin[N]; null + retention_pins_error when unreadable
     "git_sha_matches_head": true,
     "working_tree_dirty": true,           // git_sha_matches_head only sees committed HEAD
     "working_tree_fingerprint": "3f9a2c81ad3e4b7c",

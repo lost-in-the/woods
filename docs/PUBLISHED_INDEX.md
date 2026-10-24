@@ -94,6 +94,7 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `.new(index_dir, generation: nil)` | reader, holding a lock | `generation:` pins a published `payloads/gen-N`; omit for the currently published one |
 | `.open(index_dir, generation: nil) { |index| ... }` | the block's value | releases the lock in `ensure`, on return or exception |
 | `.available_generations(index_dir)` | `Array<Integer>` | Published generations, ascending: see below |
+| `.retention_pins(index_dir)` | `Array<Integer>` | Persistent `woods:pin[N]` pins, ascending; reads no payload. A pin whose payload was deleted outside Woods stays listed, so intersect with `.available_generations`. Raises `IOError` for unreadable or malformed pin state. See [persistent retention pins](INDEX_LAYOUT.md#persistent-retention-pins) |
 | `#generation_number` | Integer | 0 for an index written flat (pre-2.0 layout) |
 | `#close` | nil | Releases the retention lock; safe to call more than once |
 | `#unit(identifier, type: nil)` | Hash or nil | The unit JSON, string keys; see the collision note below |
