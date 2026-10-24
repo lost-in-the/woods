@@ -19,6 +19,21 @@ RSpec.describe Woods::Impact::MetadataRisks do
     expect(result['risks']).to all(include('evidence' => include('metadata_key')))
   end
 
+  it 'does not report a filter-chain change when only one side carries resolved applicability (W-8)' do
+    declared = { 'kind' => 'before', 'filter' => 'set_post', 'only' => %w[show] }
+    resolved = declared.merge('owner' => 'PostsController', 'applies_to' => %w[show], 'applicability' => 'resolved')
+    expect(evaluate({ 'filters' => [declared] }, { 'filters' => [resolved] }, 'controller')['risks']).to be_empty
+    expect(evaluate({ 'filters' => [resolved] }, { 'filters' => [declared] }, 'controller')['risks']).to be_empty
+  end
+
+  it 'reports a change in resolved applicability when both sides carry it' do
+    resolved = { 'kind' => 'before', 'filter' => 'track', 'owner' => 'ApplicationController',
+                 'applies_to' => %w[index show], 'applicability' => 'resolved' }
+    widened = resolved.merge('applies_to' => %w[index show edit])
+    expect(evaluate({ 'filters' => [resolved] }, { 'filters' => [widened] }, 'controller')['risks'])
+      .to contain_exactly(include('kind' => 'filter_chain_change'))
+  end
+
   it 'preserves callback identity when side effects move between same-kind callbacks' do
     first = { 'filter' => 'first', 'type' => 'after_save', 'kind' => 'after', 'conditions' => {},
               'side_effects' => { 'jobs_enqueued' => ['OneJob'] } }

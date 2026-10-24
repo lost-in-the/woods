@@ -10,6 +10,9 @@ module Woods
     class MetadataRisks
       REQUIRED = { 'model' => ['callbacks'], 'controller' => ['filters'],
                    'database_table' => ['foreign_keys'] }.freeze
+      # Resolved filter applicability (W-8). A generation produced before W-8
+      # lacks these keys, so they are compared only when both sides carry them.
+      FILTER_APPLICABILITY_KEYS = %w[owner applies_to applicability].freeze
       # @param type [String] actual unit type
       def initialize(type, budget: RiskBudget.new(10_000))
         @type = type
@@ -35,13 +38,31 @@ module Woods
       private
 
       def compare(before, after)
-        changed_array(before, after, 'filters', 'filter_chain_change') if recorded?('filters', before, after)
+        if recorded?('filters', before, after)
+          old_filters, new_filters = comparable_filters(before['filters'], after['filters'])
+          changed_array({ 'filters' => old_filters }, { 'filters' => new_filters }, 'filters', 'filter_chain_change')
+        end
         callbacks(before['callbacks'], after['callbacks']) if recorded?('callbacks', before, after)
         foreign_keys(before, after) if recorded?('foreign_keys', before, after)
       end
 
       def recorded?(key, before, after)
         REQUIRED.fetch(@type, []).include?(key) || before.key?(key) || after.key?(key)
+      end
+
+      # @return [Array(Object, Object)] both filter lists, without the W-8
+      #   keys when only one side's producer published them
+      def comparable_filters(old, current)
+        return [old, current] unless old.is_a?(Array) && current.is_a?(Array)
+        return [old, current] if applicability?(old) == applicability?(current)
+
+        [old, current].map do |filters|
+          filters.map { |item| item.is_a?(Hash) ? item.except(*FILTER_APPLICABILITY_KEYS) : item }
+        end
+      end
+
+      def applicability?(filters)
+        filters.any? { |item| item.is_a?(Hash) && item.key?('applicability') }
       end
 
       def changed_array(before, after, key, kind)
