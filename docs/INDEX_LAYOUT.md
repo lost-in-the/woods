@@ -191,6 +191,17 @@ A concern's methods inlined as a commented display block keep the concern as
 unavailable (an older writer, or source that does not parse); an empty array
 means no literal definitions.
 
+A model callback entry can carry `declaration` (#817), the range of the single
+call that declares it, in the same coordinates:
+
+```json
+{"type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {}, "declaration": {"line": 3, "end_line": 3}}
+```
+
+Absence means the declaration is not a single literal-symbol macro call (a
+proc, a framework callback, metaprogramming, two declaring calls) or the writer
+predates the field.
+
 The generation-local internal reference cache is format 7 for this writer;
 format 6 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
