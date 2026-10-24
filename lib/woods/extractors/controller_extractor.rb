@@ -978,10 +978,10 @@ module Woods
           renders ||= component_renders(controller, source)
           deps.concat(renders.targets.map { |target| { type: :component, target: target, via: :render } })
 
-          # Other view renders
-          source.scan(%r{render\s+["'](\w+/\w+)["']}).flatten.uniq.each do |template|
-            deps << { type: :view, target: template, via: :render }
-          end
+          # A template render (`render "static_pages/home"`) publishes no edge:
+          # no unit type is `view`, and which view_template a spelling reaches
+          # depends on the files present, which a controller re-extraction does
+          # not track (woods#809). action_facts keeps each render as written.
 
           # redirect_to with named route helpers
           deps.concat(scan_navigation_dependencies(source, via_type: :redirect_to))
