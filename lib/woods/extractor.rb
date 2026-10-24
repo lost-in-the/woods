@@ -16,6 +16,7 @@ require_relative 'extracted_unit'
 require_relative 'extracted_form'
 require_relative 'dependency_graph'
 require_relative 'container_attribution'
+require_relative 'source_size'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
 require_relative 'git_provenance'
@@ -552,6 +553,12 @@ module Woods
       # #register_and_write and both modes publish the same value.
       profile_phase('container annotation') do
         @results.each_value { |units| units.each { |unit| ContainerAttribution.annotate(unit) } }
+      end
+      # Source size (#810) is a function of the unit's type and its file's
+      # bytes; #register_and_write records it per unit on the incremental path.
+      profile_phase('source size') do
+        root = Rails.root.to_s
+        @results.each_value { |units| units.each { |unit| SourceSize.record(unit, root: root) } }
       end
       profile_phase('source references') { enrich_source_references_full }
 
@@ -4052,6 +4059,7 @@ module Woods
       units.each_with_object(Set.new) do |unit, written|
         annotate_package(unit)
         ContainerAttribution.annotate(unit)
+        SourceSize.record(unit, root: Rails.root.to_s)
         unless source_consumer_failed?(extractor_key)
           SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
         end

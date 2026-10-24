@@ -992,6 +992,40 @@ RSpec.describe Woods::GraphAnalyzer do
     end
   end
 
+  describe '#package_sizes' do
+    def sized(identifier, type, path, package, lines, loc)
+      make_unit(type: type, identifier: identifier, file_path: path,
+                metadata: { package: package, source_size: { lines: lines, loc: loc } }.compact)
+    end
+
+    it 'totals each package over its distinct files, with loc by unit type (#810)' do
+      graph.register(sized('Invoice', :model, '/app/packs/billing/invoice.rb', 'packs/billing', 40, 30))
+      graph.register(sized('BillingService', :service, '/app/packs/billing/service.rb', 'packs/billing', 20, 12))
+      graph.register(sized('User', :model, '/app/models/user.rb', '.', 10, 8))
+      graph.register(sized('Card', :poro, '/app/models/user.rb', '.', 10, 8))
+      graph.register(make_unit(type: :route, identifier: 'GET /', metadata: { package: '.' }))
+
+      expect(analyzer.package_sizes).to eq(
+        '.' => { files: 1, lines: 10, loc: 8, types: { 'model' => 8 } },
+        'packs/billing' => { files: 2, lines: 60, loc: 42, types: { 'model' => 30, 'service' => 12 } }
+      )
+    end
+
+    it 'counts a typed variant that has its own file' do
+      graph.register(sized('reports', :database_view, '/app/views/reports.rb', '.', 5, 5))
+      graph.register(sized('reports', :service, '/app/services/reports.rb', '.', 9, 7))
+
+      expect(analyzer.package_sizes['.']).to include(files: 2, loc: 12, types: { 'database_view' => 5, 'service' => 7 })
+    end
+
+    it 'is empty without packages, and published under graph_analysis' do
+      graph.register(sized('User', :model, '/app/models/user.rb', nil, 10, 8))
+
+      expect(analyzer.package_sizes).to eq({})
+      expect(analyzer.analyze).to include(package_sizes: {})
+    end
+  end
+
   describe '#undeclared_package_edges' do
     def package(name, dependencies: [])
       make_unit(type: :package, identifier: name, file_path: "/app/#{name}/package.yml",
