@@ -2,6 +2,7 @@
 
 require 'digest'
 require_relative 'value'
+require_relative 'line_diff'
 
 module Woods
   module Impact
@@ -22,11 +23,16 @@ module Woods
         'tests' => %w[tested_units test_files]
       }.freeze
 
+      # Changed line ranges kept for one unit (#802).
+      SOURCE_HUNKS_PER_UNIT = 200
+
       # @param before [Hash] typed units
       # @param after [Hash] typed units
-      def initialize(before, after)
+      # @param max_source_hunks [Integer] changed line ranges kept across the report
+      def initialize(before, after, max_source_hunks: 10_000)
         @before = before
         @after = after
+        @source_budget = max_source_hunks
       end
 
       # @return [Array<Hash>] changes sorted by identifier and actual type
@@ -54,6 +60,19 @@ module Woods
           'facets' => facets, 'categories' => categories(before, after, facets),
           'metadata_keys' => changed_metadata_keys(before, after),
           'diff_stats' => { 'source_before' => source_size(before), 'source_after' => source_size(after) } }
+          .merge(source_changes(before, after, facets))
+      end
+
+      # Where a modified unit's source moved (#802): changed line ranges in
+      # each endpoint's annotated `source_code`, bounded per unit and across
+      # the report; a budget spent says `truncated`.
+      def source_changes(before, after, facets)
+        return {} unless before && after && facets.include?('source')
+
+        changes = LineDiff.new(before['source_code'], after['source_code'])
+                          .ranges(max_hunks: [SOURCE_HUNKS_PER_UNIT, @source_budget].min)
+        @source_budget -= changes['hunks'].size
+        { 'source_changes' => changes }
       end
 
       def status(before, after)

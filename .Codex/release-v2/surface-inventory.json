@@ -88,8 +88,12 @@
     "git_commit_table_days=",
     "git_commit_table_files_limit",
     "git_commit_table_files_limit=",
+    "git_commit_table_hunk_budget",
+    "git_commit_table_hunk_budget=",
     "git_commit_table_limit",
     "git_commit_table_limit=",
+    "git_commit_table_line_stats",
+    "git_commit_table_line_stats=",
     "git_recent_commits",
     "git_recent_commits=",
     "graph_cycle_limit",
@@ -1109,7 +1113,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 160,
+    "configuration_attributes": 164,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

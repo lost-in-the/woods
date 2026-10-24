@@ -194,7 +194,7 @@ module Woods
                 :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
                 :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation,
                 :git_recent_commits, :git_commit_table_days, :git_commit_table_limit,
-                :git_commit_table_files_limit
+                :git_commit_table_files_limit, :git_commit_table_line_stats, :git_commit_table_hunk_budget
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -267,6 +267,8 @@ module Woods
       @git_commit_table_days = 365
       @git_commit_table_limit = 5_000
       @git_commit_table_files_limit = 100
+      @git_commit_table_line_stats = true
+      @git_commit_table_hunk_budget = 50_000
       # nil = the unbounded transitive closure. See the setter for why the
       # default is not a small number.
       @incremental_blast_radius_depth = nil
@@ -530,6 +532,31 @@ module Woods
     # @raise [ConfigurationError] otherwise
     def git_commit_table_files_limit=(value)
       @git_commit_table_files_limit = validate_positive_integer!(:git_commit_table_files_limit, value)
+    end
+
+    # Whether the commit table records each listed file's line counts and
+    # hunks (default true, woods#804). They come from a second, `-U0` patch
+    # walk over only the table's commits, which costs far more than the
+    # table's own walk on a large history; false leaves the fields out.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless true or false
+    def git_commit_table_line_stats=(value)
+      unless [true, false].include?(value)
+        raise ConfigurationError, "git_commit_table_line_stats must be true or false, got #{value.inspect}"
+      end
+
+      @git_commit_table_line_stats = value
+    end
+
+    # The most hunks the commit table keeps across all its commits (default
+    # 50000), newest commits first; files past it keep their line counts and
+    # say `hunks_truncated`. One file keeps at most 100.
+    #
+    # @param value [Integer] must be a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def git_commit_table_hunk_budget=(value)
+      @git_commit_table_hunk_budget = validate_positive_integer!(:git_commit_table_hunk_budget, value)
     end
 
     # How many reverse hops an incremental run walks from a changed file

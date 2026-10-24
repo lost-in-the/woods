@@ -215,6 +215,8 @@ worktree whose git directory is not reachable) or when the walk fails. An empty
   "window_days": 365,
   "max_commits": 5000,
   "max_files_per_commit": 100,
+  "line_stats": true,
+  "hunk_budget": 50000,
   "indexed_paths_sha256": "9f2c...",
   "truncated": false,
   "commits": [
@@ -226,8 +228,10 @@ worktree whose git directory is not reachable) or when the walk fails. An empty
       "message": "Touch the author when a post is saved",
       "description": "Authors expect their profile's updated_at to move when they publish.",
       "files": [
-        { "path": "app/models/post.rb", "status": "modified" },
-        { "path": "spec/models/post_spec.rb", "status": "modified" }
+        { "path": "app/models/post.rb", "status": "modified", "additions": 6, "deletions": 1,
+          "hunks": [{ "old": [38, 1], "new": [38, 6] }], "hunks_truncated": false },
+        { "path": "spec/models/post_spec.rb", "status": "added", "additions": 14, "deletions": 0,
+          "hunks": [{ "old": [0, 0], "new": [1, 14] }], "hunks_truncated": false }
       ],
       "files_omitted": 0
     }
@@ -245,11 +249,13 @@ worktree whose git directory is not reachable) or when the walk fails. An empty
 | `since`, `window_days` | The window: commits whose committer date is on or after `since` (UTC midnight), `window_days` before the run's UTC date. |
 | `max_commits`, `truncated` | The commit bound (`config.git_commit_table_limit`); `truncated: true` when older commits inside the window were dropped by it. |
 | `max_files_per_commit` | The per-commit file bound (`config.git_commit_table_files_limit`). |
+| `line_stats`, `hunk_budget` | Whether files carry line counts and hunks (`config.git_commit_table_line_stats`, default true) and the table-wide hunk bound (`config.git_commit_table_hunk_budget`, default 50000). Both are part of what decides the table's content. |
 | `indexed_paths_sha256` | SHA-256 of the sorted, newline-joined indexed paths the table was built for. With `head`, `since` and the bounds it decides the content: an incremental run that finds them all unchanged keeps the file, and otherwise rebuilds it whole. |
 | `commits[].sha`, `parents` | Full object names. A merge lists every parent; its `files` are its diff against the first parent, as for `metadata.git`. |
 | `commits[].author`, `date` | The author name as git records it (no email) and the committer date, ISO 8601 with offset. |
 | `commits[].message`, `description` | The subject line, and the rest of the message trimmed (`""` when there is none). |
-| `commits[].files`, `files_omitted` | Every path the commit touched inside the application root, indexed or not, application-relative, in git's order, with `status` `added`, `modified`, `deleted` or `type_changed`; renames appear as a deletion and an addition. At most `max_files_per_commit` are listed; the rest, and any path that is not valid UTF-8, are counted in `files_omitted`. No line counts or hunks. |
+| `commits[].files`, `files_omitted` | Every path the commit touched inside the application root, indexed or not, application-relative, in git's order, with `status` `added`, `modified`, `deleted` or `type_changed`; renames appear as a deletion and an addition. At most `max_files_per_commit` are listed; the rest, and any path that is not valid UTF-8, are counted in `files_omitted`. |
+| `commits[].files[].additions`, `deletions`, `hunks`, `hunks_truncated` | When `line_stats` is true: added and removed lines (null for a binary file or one the patch walk did not report), and the hunks as `[{old: [start, length], new: [start, length]}]` in the commit's own coordinates against its first parent (git `-U0`; an empty side starts at the line before). At most 100 hunks per file and `hunk_budget` across the table, newest commits first; a file cut by either says `hunks_truncated: true` and keeps its counts. Hunks are not mapped onto the current file. |
 | `paths` | Each indexed path that has a commit in the table, sorted, to its commits' shas, newest first. Never bounded by `max_files_per_commit`, so co-change is complete: the commits of one path and the other `paths` entries that list the same shas. |
 
 The walk is the one per-unit `metadata.git` uses: HEAD only (no unmerged branches

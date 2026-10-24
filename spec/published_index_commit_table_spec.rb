@@ -87,7 +87,8 @@ RSpec.describe Woods::PublishedIndex, '#git_commits' do
       expect(table.commit('2e8')).to be_nil
       expect(table.commit('0000000')).to be_nil
       expect(table).to have_attributes(head: model_sha, since: '2025-10-23', window_days: 365, max_commits: 5000,
-                                       max_files_per_commit: 100, truncated?: false)
+                                       max_files_per_commit: 100, truncated?: false, line_stats?: false,
+                                       hunk_budget: nil)
       expect(table.commits).to be_frozen
       expect(table.commits.first['files']).to be_frozen
     end

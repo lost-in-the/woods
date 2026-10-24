@@ -7,6 +7,7 @@ require 'pathname'
 require 'set'
 require_relative 'atomic_file'
 require_relative 'git_log'
+require_relative 'git_line_stats'
 
 module Woods
   # The generation's commit table, `git_commits.json` (W-3, #753).
@@ -40,13 +41,18 @@ module Woods
     # Default bound on the files listed for one commit; the rest are counted
     # in `files_omitted`.
     DEFAULT_MAX_FILES_PER_COMMIT = 100
+    # Default bound on hunks across the whole table (#804); files past it
+    # keep their line counts and say `hunks_truncated`.
+    DEFAULT_HUNK_BUDGET = 50_000
+    # Hunks kept for one file of one commit.
+    HUNKS_PER_FILE = 100
 
     # Raw diff status letter => published status.
     STATUS = { 'A' => 'added', 'M' => 'modified', 'D' => 'deleted', 'T' => 'type_changed' }.freeze
 
     # The fields that decide the table's content; equal fields mean equal tables.
-    KEY_FIELDS = %w[schema_version head since window_days max_commits max_files_per_commit
-                    indexed_paths_sha256].freeze
+    KEY_FIELDS = %w[schema_version head since window_days max_commits max_files_per_commit line_stats
+                    hunk_budget indexed_paths_sha256].freeze
 
     FORMAT = '%x00%H%x00%P%x00%an%x00%cI%x00%s%x00%b%x00'
     private_constant :FORMAT
@@ -59,8 +65,16 @@ module Woods
       {
         'window_days' => config&.git_commit_table_days || DEFAULT_DAYS,
         'max_commits' => config&.git_commit_table_limit || DEFAULT_MAX_COMMITS,
-        'max_files_per_commit' => config&.git_commit_table_files_limit || DEFAULT_MAX_FILES_PER_COMMIT
+        'max_files_per_commit' => config&.git_commit_table_files_limit || DEFAULT_MAX_FILES_PER_COMMIT,
+        'line_stats' => line_stats?(config),
+        'hunk_budget' => config&.git_commit_table_hunk_budget || DEFAULT_HUNK_BUDGET
       }
+    end
+
+    # @param config [Woods::Configuration, nil]
+    # @return [Boolean] line counts and hunks are on unless configured off
+    def self.line_stats?(config)
+      config.nil? || config.git_commit_table_line_stats ? true : false
     end
 
     # Whether a published table was built from exactly these inputs.
@@ -117,6 +131,8 @@ module Woods
       { 'schema_version' => SCHEMA_VERSION, 'head' => head, 'since' => @since,
         'window_days' => @settings.fetch('window_days'), 'max_commits' => @settings.fetch('max_commits'),
         'max_files_per_commit' => @settings.fetch('max_files_per_commit'),
+        'line_stats' => @settings.fetch('line_stats', true),
+        'hunk_budget' => @settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET),
         'indexed_paths_sha256' => Digest::SHA256.hexdigest(paths.uniq.sort.join("\n")) }
     end
 
@@ -129,7 +145,9 @@ module Woods
     def build(paths, head:)
       parser = Parser.new(prefix: @log.repository_prefix, indexed: paths.to_set, settings: @settings)
       @log.stream(format: FORMAT, since: "#{@since}T00:00:00Z", revision: head) { |io| parser.parse(io) }
-      key(paths, head: head).merge(parser.result)
+      result = parser.result
+      LineStats.new(@log, @settings).attach(result['commits']) if @settings.fetch('line_stats', true)
+      key(paths, head: head).merge(result)
     rescue StandardError => e
       @logger.warn('[Woods] Git commit table omitted: history could not be read completely. ' \
                    'Git 2.31 or newer is required; check the application repository and git installation. ' \
@@ -222,5 +240,49 @@ module Woods
       end
     end
     private_constant :Parser
+
+    # Adds each listed file's line counts and hunks (#804) from one patch walk
+    # over the table's own commits, newest first, within the hunk budget.
+    class LineStats
+      # @param log [GitLog]
+      # @param settings [Hash]
+      def initialize(log, settings)
+        @log = log
+        @budget = settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET)
+      end
+
+      # @param rows [Array<Hash>] the table's commit rows, changed in place
+      # @return [void]
+      def attach(rows)
+        files = index(rows)
+        prefix = @log.repository_prefix
+        stats = GitLineStats.new(root: @log.root, hunks_per_file: HUNKS_PER_FILE)
+        stats.each_file(rows.map { |row| row['sha'] }) do |sha, file|
+          next unless file.path.start_with?(prefix)
+
+          entry = files[[sha, file.path.byteslice(prefix.bytesize..).force_encoding(Encoding::UTF_8)]]
+          fill(entry, file) if entry
+        end
+      end
+
+      private
+
+      def index(rows)
+        rows.each_with_object({}) do |row, map|
+          row['files'].each do |file|
+            file.merge!('additions' => nil, 'deletions' => nil, 'hunks' => [], 'hunks_truncated' => false)
+            map[[row['sha'], file['path']]] = file
+          end
+        end
+      end
+
+      def fill(entry, file)
+        kept = file.hunks.first([@budget, 0].max)
+        @budget -= kept.size
+        entry.merge!('additions' => file.additions, 'deletions' => file.deletions, 'hunks' => kept,
+                     'hunks_truncated' => file.more || kept.size < file.hunks.size)
+      end
+    end
+    private_constant :LineStats
   end
 end

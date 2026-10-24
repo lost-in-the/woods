@@ -28,6 +28,9 @@ module Woods
       @root = root
     end
 
+    # @return [String, Pathname] the application root the walk is rooted at
+    attr_reader :root
+
     # The application's path inside its repository, as bytes ending in `/`,
     # or empty when the application is the repository root.
     #
@@ -65,6 +68,35 @@ module Woods
           raise ReadError, "history command exited #{wait.value.exitstatus}" unless wait.value.success?
         ensure
           stdout.close
+          drain.join
+        end
+      end
+    end
+
+    # Run a patch walk over exactly +shas+ (fed on stdin, in that order) and
+    # yield its binary stdout: a NUL-led `%H` line per commit, then that
+    # commit's `-U0` patch against its first parent. Paths are not quoted
+    # for non-ASCII bytes (`core.quotePath=false`); see {GitLineStats}.
+    #
+    # @param shas [Array<String>] full commit names
+    # @yieldparam stdout [IO]
+    # @return [void]
+    # @raise [ReadError] when git exits unsuccessfully
+    def patch_stream(shas)
+      argv = GitCommand.argv(@root, '-c', 'log.showSignature=false', '-c', 'core.quotePath=false', 'log',
+                             '--no-walk=unsorted', '--stdin', '-p', '-U0', '--no-color', '--no-renames',
+                             '--no-relative', '--no-ext-diff', '--no-textconv', '--diff-merges=first-parent',
+                             '--src-prefix=a/', '--dst-prefix=b/', '--encoding=UTF-8', '--format=%x00%H')
+      Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
+        writer = Thread.new { stdin.write(shas.map { |sha| "#{sha}\n" }.join).then { stdin.close } }
+        stdout.binmode
+        drain = Thread.new { stderr.read(16_384) until stderr.eof? }
+        begin
+          yield stdout
+          raise ReadError, "patch command exited #{wait.value.exitstatus}" unless wait.value.success?
+        ensure
+          stdout.close
+          writer.join
           drain.join
         end
       end
