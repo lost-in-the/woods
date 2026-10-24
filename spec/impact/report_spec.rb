@@ -122,10 +122,30 @@ RSpec.describe Woods::Impact::Report do
     expect(data.fetch('changed')).to include(include('identifier' => 'Example', 'facets' => ['source']))
   end
 
-  it 'rejects ambiguous SHA selectors with generation alternatives' do
-    publish(1, [])
-    publish(2, [])
-    expect { report(from: 'aaaaaaa') }.to raise_error(Woods::Impact::ResolutionError, /gen:1.*gen:2/)
+  it 'resolves a commit captured by several generations: from its first capture, to its last' do
+    publish(1, [], sha: 'b' * 40)
+    publish(2, [], sha: 'a' * 40)
+    publish(3, [], sha: 'a' * 40)
+    publish(4, [], sha: 'a' * 40)
+    range = report(from: 'aaaaaaa', to: 'aaaaaaa').to_h['range']
+    expect([range.dig('from', 'generation'), range.dig('to', 'generation')]).to eq([2, 4])
+    expect(report(from: 'a' * 40).to_h.dig('range', 'from', 'generation')).to eq(2)
+  end
+
+  it 'answers a range whose endpoints are one payload without reading its units' do
+    publish(1, [unit('Example', 'model')])
+    allow(Woods::Impact::RangeDiff).to receive(:new).and_call_original
+    data = report(from: 'gen:1', to: 'now').to_h
+    expect(Woods::Impact::RangeDiff).not_to have_received(:new)
+    expect(data.dig('range', 'from', 'generation')).to eq(1)
+    expect(data.dig('range', 'to', 'generation')).to eq(1)
+    expect(data.values_at('changed', 'affected', 'flows')).to all(eq([]))
+  end
+
+  it 'rejects a SHA prefix that matches different commits, with generation alternatives' do
+    publish(1, [], sha: "abcdef0#{'1' * 33}")
+    publish(2, [], sha: "abcdef0#{'2' * 33}")
+    expect { report(from: 'abcdef0') }.to raise_error(Woods::Impact::ResolutionError, /gen:1.*gen:2/)
   end
 
   it 'resolves unique SHA prefixes and integer generations' do
