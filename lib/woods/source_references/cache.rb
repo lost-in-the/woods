@@ -4,6 +4,7 @@ require 'json'
 require_relative '../atomic_file'
 require_relative 'registry'
 require_relative 'selector'
+require_relative 'collector'
 
 module Woods
   module SourceReferences
@@ -42,7 +43,10 @@ module Woods
       private_constant :UniqueObject
 
       FILE_NAME = 'source_references.json'
-      VERSION = 6
+      # Analysis record groups and the validator of each record.
+      CHECKS = { 'declarations' => :declaration!, 'references' => :reference!, 'skipped' => :skipped!,
+                 'macros' => :macro! }.freeze
+      VERSION = 7
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -140,15 +144,11 @@ module Woods
         end
 
         def analysis!(analysis)
-          shape!(analysis, %w[declarations references skipped parse_error])
-          declarations = records!(analysis['declarations'])
-          references = records!(analysis['references'])
-          skipped = records!(analysis['skipped'])
-          total = declarations.size + references.size + skipped.size
+          shape!(analysis, %w[declarations references skipped macros parse_error])
+          groups = CHECKS.keys.to_h { |key| [key, records!(analysis[key])] }
+          total = groups.values.sum(&:size)
           require!(total <= MAX_RECORDS, 'candidate record limit exceeded')
-          declarations.each { |record| declaration!(record) }
-          references.each { |record| reference!(record) }
-          skipped.each { |record| skipped!(record) }
+          groups.each { |key, records| records.each { |record| send(CHECKS.fetch(key), record) } }
           parse_error!(analysis['parse_error'], total)
           total
         end
@@ -174,6 +174,18 @@ module Woods
           require!(record['length'].instance_of?(Integer) && record['length'].between?(1, MAX_LINE),
                    'invalid source length')
           require!(Selector.valid?(record['method']), 'invalid method selector') if record.key?('method')
+        end
+
+        def macro!(record)
+          shape!(record, %w[owner macro name line column length])
+          constant!(record['owner'])
+          require!(Collector::MACROS.include?(record['macro']), 'invalid declaration macro')
+          string!(record['name'])
+          line!(record['line'])
+          require!(record['column'].instance_of?(Integer) && record['column'].between?(0, MAX_LINE),
+                   'invalid source column')
+          require!(record['length'].instance_of?(Integer) && record['length'].between?(1, MAX_LINE),
+                   'invalid source length')
         end
 
         def lexical_record!(record)

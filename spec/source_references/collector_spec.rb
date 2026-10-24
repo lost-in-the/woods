@@ -474,10 +474,31 @@ RSpec.describe Woods::SourceReferences::Collector do
         expect(result.values_at('declarations', 'references', 'skipped')).to eq([[], [], []])
       end
 
+      it 'records the literal symbols of class-body declaration macros with byte positions' do
+        result = collector.call(<<~RUBY)
+          class Post < ApplicationRecord
+            belongs_to :author, class_name: "User"
+            before_save :set_slug, :touch_ré, if: :title_changed?
+            scope :recent, -> { order(:id) }
+            has_many(:comments)
+            validates :title, presence: true
+            Other.belongs_to :ignored
+            class << self
+              before_save :singleton_ignored
+            end
+          end
+        RUBY
+        expect(result['macros'].map { |record| record.values_at('macro', 'name', 'line', 'column', 'length') })
+          .to eq([['belongs_to', 'author', 2, 13, 7], ['before_save', 'set_slug', 3, 14, 9],
+                  ['before_save', 'touch_ré', 3, 25, 10], ['scope', 'recent', 4, 8, 7],
+                  ['has_many', 'comments', 5, 11, 9]])
+        expect(result['macros']).to all(include('owner' => 'Post'))
+      end
+
       it 'returns an empty successful result for empty input and can be reused' do
         collector.call('class Caller; TokenCodec.call; end')
         expect(collector.call('')).to eq('declarations' => [], 'references' => [], 'skipped' => [],
-                                         'parse_error' => nil)
+                                         'macros' => [], 'parse_error' => nil)
       end
     end
   end

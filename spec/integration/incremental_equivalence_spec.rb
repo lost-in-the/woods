@@ -579,7 +579,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'requires a full rebuild of format 5 before either public incremental writer can advance' do
+    it 'requires a full rebuild of format 6 before either public incremental writer can advance' do
       caller_path = write_file('app/models/reference_upgrade_caller.rb', <<~RUBY)
         class ReferenceUpgradeCaller
           def call
@@ -593,11 +593,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       token = generation.current.token
       cache_path = generation.payload_dir.join('source_references.json')
       cache = read_json(index, 'source_references.json')
-      expect(cache.fetch('version')).to eq(6)
-      cache['version'] = 5
-      cache.fetch('files').each_value do |file|
-        file.fetch('analysis').fetch('references').each { |record| record.delete('method') }
-      end
+      expect(cache.fetch('version')).to eq(7)
+      cache['version'] = 6
+      cache.fetch('files').each_value { |file| file.fetch('analysis').delete('macros') }
       File.binwrite(cache_path, JSON.generate(cache))
       previous_cache = File.binread(cache_path)
       previous_units = unit_snapshot(index)
@@ -611,7 +609,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
 
       Woods::Extractor.new(output_dir: index).extract_all
-      expect(read_json(index, 'source_references.json').fetch('version')).to eq(6)
+      expect(read_json(index, 'source_references.json').fetch('version')).to eq(7)
       Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
       expect(differences(index, full_extraction)).to be_empty
     ensure
@@ -1694,6 +1692,23 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(model.dig('metadata', 'method_effects').keys).to eq(%w[normalize_title publish!])
       expect(enqueue_edge(model)).to include('through' => 'publish!')
       expect(edge_identities(model)).to eq(edge_identities(model).uniq)
+    end
+
+    it 'keeps declaration spans and the method table equivalent as a model changes (#751, #752)' do
+      model = 'app/models/post.rb'
+      index = run_sequence(
+        [
+          -> { write_file(model, post_model) },
+          -> { write_file(model, post_model.sub("  def publish!\n", "  private\n\n  def publish!\n")) }
+        ]
+      )
+
+      document = unit_document(index, 'models', 'Post')
+      spans = document.dig('metadata', 'references').map { |span| span.values_at('kind', 'target', 'method') }
+      expect(spans).to include(['association', 'Comment', nil], ['callback_method', 'Post', 'normalize_title'],
+                               ['scope', 'Post', 'recent'])
+      methods = document.dig('metadata', 'methods').map { |entry| entry.values_at('name', 'visibility', 'owner') }
+      expect(methods).to eq([%w[normalize_title public Post], %w[publish! private Post]])
     end
 
     it 'drops the map and the edge annotation when the last effect goes' do

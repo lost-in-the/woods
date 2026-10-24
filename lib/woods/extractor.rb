@@ -65,6 +65,7 @@ require_relative 'graph_analyzer'
 require_relative 'model_name_cache'
 require_relative 'flow_precomputer'
 require_relative 'source_line_map'
+require_relative 'method_table'
 require_relative 'change_set'
 require_relative 'generation'
 require_relative 'path_dispatcher'
@@ -2348,6 +2349,7 @@ module Woods
       @results.each_value do |units|
         units.each do |unit|
           SourceLineMap.record(unit, root: root)
+          MethodTable.record(unit)
           unit.file_path = normalize_file_path(unit.file_path)
         end
       end
@@ -3953,6 +3955,7 @@ module Woods
         (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
         # Before the unchanged check: the unit on disk carries its map.
         SourceLineMap.record(unit, root: Rails.root.to_s)
+        MethodTable.record(unit)
         next if unchanged_registered_unit?(type_dir, unit)
 
         affected_types&.add(extractor_key)

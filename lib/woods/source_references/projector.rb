@@ -27,10 +27,18 @@ module Woods
         projected = references.group_by { |record| record.fetch('file_path') }.flat_map do |path, records|
           project_file(unit, path, records, contributors)
         end
-        projected.sort_by { |record| record.values_at('line', 'column', 'length', 'target_type', 'target') }
+        projected.sort_by { |record| sort_key(record) }
       end
 
       private
+
+      # Verified constants keep their established order; declaration kinds and
+      # ambiguous candidates (no single target) follow at the same position.
+      def sort_key(record)
+        [*record.values_at('line', 'column', 'length'), record['target_type'].to_s, record['target'].to_s,
+         record['kind'].to_s, record['confidence'].to_s,
+         Array(record['candidates']).map { |candidate| candidate.values_at('target_type', 'target') }]
+      end
 
       def project_file(unit, path, records, contributors)
         original = @reader.call(path)

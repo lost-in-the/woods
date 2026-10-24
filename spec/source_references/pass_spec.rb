@@ -70,6 +70,71 @@ RSpec.describe Woods::SourceReferences::Pass do
       .to include('name' => 'Missing', 'method' => 'call')
   end
 
+  it 'publishes a static span for an indexed constant that runtime lookup cannot see, and no edge' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; class << self; def build; RefTarget.create; end; end; end'
+    result = run_pass
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
+    expect(result.references.fetch(%w[poro RefCaller])).to eq([
+                                                                { 'line' => 1, 'column' => 43, 'length' => 9,
+                                                                  'method' => 'create',
+                                                                  'file_path' => 'app/models/ref_caller.rb',
+                                                                  'kind' => 'constant', 'target' => 'RefTarget',
+                                                                  'target_type' => 'poro', 'confidence' => 'static' }
+                                                              ])
+  end
+
+  it 'lists every lexical candidate of an unresolved spelling as ambiguous' do
+    sources['app/models/admin/ref_target.rb'] = 'module Admin; class RefTarget; end; end'
+    sources['app/models/ref_caller.rb'] = 'module Admin; class RefCaller; class << self; RefTarget; end; end; end'
+    units.replace([unit('Admin::RefCaller', 'app/models/ref_caller.rb'), unit('RefTarget', 'app/models/ref_target.rb'),
+                   unit('Admin::RefTarget', 'app/models/admin/ref_target.rb')])
+    stub_const('Admin', Module.new)
+    stub_const('Admin::RefCaller', Class.new)
+    stub_const('Admin::RefTarget', Class.new)
+    spans = run_pass.references.fetch(%w[poro Admin::RefCaller])
+    expect(spans.map { |span| span.values_at('confidence', 'candidates') }).to eq([
+                                                                                    ['ambiguous', [
+                                                                                      { 'target' => 'Admin::RefTarget',
+                                                                                        'target_type' => 'poro' },
+                                                                                      { 'target' => 'RefTarget',
+                                                                                        'target_type' => 'poro' }
+                                                                                    ]]
+                                                                                  ])
+  end
+
+  it 'publishes no candidate for a runtime target outside the index or for the owner itself' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; String.new; RefCaller.new; end'
+    expect(run_pass.references.fetch(%w[poro RefCaller])).to eq([])
+  end
+
+  it 'publishes declaration spans the runtime metadata confirms, without edges' do
+    sources['app/models/ref_caller.rb'] = <<~RUBY
+      class RefCaller
+        belongs_to :ref_target
+        has_many :ghosts
+        before_save :set_slug, :undeclared
+        scope :recent, -> { where(x: 1) }
+      end
+    RUBY
+    units.first.merge!('type' => 'model', 'metadata' => {
+                         'associations' => [{ 'name' => 'ref_target', 'type' => 'belongs_to',
+                                              'target' => 'RefTarget' }],
+                         'callbacks' => [{ 'type' => 'before_save', 'filter' => 'set_slug' }],
+                         'scopes' => [{ 'name' => 'recent', 'source' => 'scope :recent' }]
+                       })
+    result = run_pass
+    expect(result.dependencies.fetch(%w[model RefCaller])).to eq([])
+    expected = [
+      { 'line' => 2, 'column' => 13, 'length' => 11, 'target' => 'RefTarget', 'target_type' => 'poro',
+        'kind' => 'association', 'confidence' => 'verified' },
+      { 'line' => 4, 'column' => 14, 'length' => 9, 'target' => 'RefCaller', 'target_type' => 'model',
+        'kind' => 'callback_method', 'confidence' => 'verified', 'method' => 'set_slug' },
+      { 'line' => 5, 'column' => 8, 'length' => 7, 'target' => 'RefCaller', 'target_type' => 'model',
+        'kind' => 'scope', 'confidence' => 'verified', 'method' => 'recent' }
+    ]
+    expect(result.references.fetch(%w[model RefCaller]).map { |span| span.except('file_path') }).to eq(expected)
+  end
+
   it 'keeps an inherited selector on the resolved receiver without attributing a method-definition owner' do
     parent = Class.new do
       def self.inherited_call
@@ -202,13 +267,17 @@ RSpec.describe Woods::SourceReferences::Pass do
       .dependencies.fetch(%w[poro RefCaller])).to eq([edge])
   end
 
-  it 'removes stale additions when a formerly unique target becomes type-ambiguous' do
+  it 'removes stale additions when a formerly unique target becomes type-ambiguous, keeping an ambiguous span' do
     initial = run_pass
     units.first['dependencies'] = [edge]
     units << unit('RefTarget', 'app/models/ref_target.rb', 'model')
     result = run_pass(baseline: initial.cache, refreshed: [%w[model RefTarget]], full: false)
     expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([])
-    expect(result.references.fetch(%w[poro RefCaller])).to eq([])
+    spans = result.references.fetch(%w[poro RefCaller])
+    expect(spans.map { |span| span.values_at('confidence', 'candidates') }.uniq)
+      .to eq([['ambiguous', [{ 'target' => 'RefTarget', 'target_type' => 'model' },
+                             { 'target' => 'RefTarget', 'target_type' => 'poro' }]]])
+    expect(spans).to all(satisfy { |span| !span.key?('target') })
   end
 
   it 'requires a rebuild rather than resolve current source against stale retained metadata' do

@@ -99,9 +99,49 @@ occurrences publish an empty array. Absence on an older index means unavailable
 span metadata, not an empty reference set. See the
 [published layout](INDEX_LAYOUT.md#constant-reference-spans) for reader details.
 
-This bounded addition covers verified constants only. Other reference kinds,
-static/ambiguous candidates and broader method-target behavior remain separate
-work; it does not establish method-level reverse impact or complete #751.
+**Static and ambiguous constants (#751).** An occurrence the runtime lookup
+cannot verify can still publish a span from its literal spelling. Woods reads the
+spelling against the lexical nesting, innermost scope first and then the top
+level, and keeps the constant-owned units that declare one of those names under
+the caller policy. One candidate is `confidence: "static"` with `target` and
+`target_type`. Several (including every type of a runtime target several unit
+types share) are `confidence: "ambiguous"` with a `candidates` array of
+`{target, target_type}` and no `target`. A runtime target outside the index, an
+unverifiable owner and a self-reference publish nothing. Static evidence does not
+model lookup through ancestors, and neither confidence adds a dependency edge.
+
+**Declaration spans (#751).** The literal symbol of a class-body association
+(`belongs_to`, `has_many`, `has_one`, `has_and_belongs_to_many`), callback
+(model callbacks and controller `*_action` filters) or `scope` macro publishes a
+span only when the unit's runtime metadata confirms the declaration:
+- `kind: "association"` points at the reflected target class through the typed
+  registry. A polymorphic association publishes nothing.
+- `kind: "callback_method"` and `kind: "scope"` point at the declaring unit,
+  with `method` naming the method or scope. The method must appear in the
+  resolved `callbacks` or `filters` chain, or in `scopes`.
+
+Coordinates cover the whole `:name` literal. These spans add no edge: the
+extractors already publish association relationships. Route helpers, partials and
+macros inside concern blocks are not yet covered. Job and mailer references are
+ordinary constant spans whose `target_type` is `job` or `mailer`, with the
+selector in `method`. This does not establish method-level reverse impact.
+
+**Method table (#752).** Class-based units (models, controllers, services, jobs,
+mailers, concerns, POROs, libs and the other constant-owned types) publish
+`metadata.methods`: `[{name, kind, line, end_line, visibility, owner}]` in
+published `source_code` coordinates, sorted by line.
+- `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
+  `class_methods do`) or `module_function`.
+- `visibility` follows the literal `private`, `protected` and `public` forms,
+  including `private def`, `private :name` after the definition and
+  `private_class_method`.
+- `owner` is the lexical class or module, so a concern inlined as a commented
+  display block owns its methods at their lines inside the block.
+- Methods defined by metaprogramming or on another receiver are absent.
+- Source that does not parse publishes no table: absence means unavailable,
+  never "no methods".
+- `instance_methods` and `class_methods` are unchanged.
+- Superclass methods are not inlined.
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;
