@@ -758,6 +758,52 @@ RSpec.describe Woods::Extractors::TestMappingExtractor do
         expect(unit.metadata[:test_type]).to eq(:model)
       end
 
+      # woods#809: an integration or system test class names a scenario
+      # (FollowPagesTest, UsersSignupTest), not a class in the app.
+      it 'takes the class name of an integration test as a description, not a subject' do
+        path = create_file('test/integration/following_test.rb', <<~RUBY)
+          class FollowPagesTest < ActionDispatch::IntegrationTest
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to be_nil
+        expect(unit.metadata[:description]).to eq('FollowPages')
+        expect(unit.dependencies.select { |dep| dep[:via] == :test_coverage }).to eq([])
+      end
+
+      it 'takes the class name of a system test as a description, not a subject' do
+        path = create_file('test/system/users_signup_test.rb', <<~RUBY)
+          class UsersSignupTest < ApplicationSystemTestCase
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.metadata[:subject_class]).to be_nil
+        expect(unit.dependencies).to eq([])
+      end
+
+      it 'keeps an integration test subject whose suffix names a unit type' do
+        path = create_file('test/integration/users_controller_test.rb', <<~RUBY)
+          class UsersControllerTest < ActionDispatch::IntegrationTest
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.dependencies).to eq([{ type: :controller, target: 'UsersController', via: :test_coverage }])
+      end
+
+      # woods#809: a helper module is extracted as a poro, never a model.
+      it 'links a helper test to the helper as a poro' do
+        path = create_file('test/helpers/sessions_helper_test.rb', <<~RUBY)
+          class SessionsHelperTest < ActionView::TestCase
+          end
+        RUBY
+
+        unit = described_class.new.extract_test_file(path)
+        expect(unit.dependencies).to eq([{ type: :poro, target: 'SessionsHelper', via: :test_coverage }])
+      end
+
       it 'links to model via :test_coverage dependency' do
         path = create_file('test/models/user_test.rb', <<~RUBY)
           class UserTest < ActiveSupport::TestCase

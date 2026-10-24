@@ -857,11 +857,13 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         .to eq([{ type: :component, target: 'Shelf::RowComponent', via: :render }])
     end
 
-    it 'keeps the template render edge and takes no ordinary method for a render' do
+    # woods#809: no unit type is `view`, and the template a spelling names
+    # depends on which files exist; the render stays in action_facts as written.
+    it 'publishes no edge for a template render and takes no ordinary method for a render' do
       deps = extractor.send(:extract_dependencies, controller, controller_source, action_sources: {})
 
-      expect(deps).to include(type: :view, target: 'shelf/items', via: :render)
-      expect(deps.map { |dep| dep[:target] }).not_to include('Ghost', 'Integer')
+      expect(deps.map { |dep| dep[:type] }).not_to include(:view)
+      expect(deps.map { |dep| dep[:target] }).not_to include('shelf/items', 'Ghost', 'Integer')
     end
 
     it 'records a render that names no component in the unit metadata' do

@@ -1158,6 +1158,30 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # Source size (#810): the file's line counts on the node, and the package
+  # totals in graph_analysis.json, follow edits and package changes on both paths.
+  describe 'source sizes' do
+    def node(dir, identifier)
+      read_json(dir, 'dependency_graph.json').fetch('nodes').fetch(identifier)
+    end
+
+    it 'counts the same lines through full and incremental runs as a file and a package change' do
+      path = write_file('app/services/sized_service.rb', service_source('SizedService'))
+      index = full_extraction
+      expect(node(index, 'SizedService')).to include('lines' => 5, 'loc' => 5)
+
+      write_file(path, "# frozen_string_literal: true\n\n#{service_source('SizedService', dependency: 'Post')}\n")
+      package = write_file('app/services/package.yml', "enforce_dependencies: false\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([path, package])
+      oracle = full_extraction
+
+      expect(node(index, 'SizedService')).to include('lines' => 8, 'loc' => 6, 'package' => 'app/services')
+      expect(read_json(index, 'graph_analysis.json').fetch('package_sizes').fetch('app/services'))
+        .to include('types' => include('service' => be >= 6))
+      expect(differences(index, oracle)).to be_empty
+    end
+  end
+
   it 'omits ignored configuration YAML in both full and incremental extraction' do
     _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'init', '--quiet'))
     raise err unless status.success?

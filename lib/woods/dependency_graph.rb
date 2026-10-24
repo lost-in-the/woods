@@ -37,9 +37,10 @@ module Woods
     # to a controller action. Together they let the analyzer report routes that
     # do not resolve without re-running the route extractor on controller edits.
     # container: the kind of {ContainerAttribution}'s `metadata[:container]` (W-9).
+    # lines, loc: {SourceSize}'s count of an application unit's own file (#810).
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
-      actions inherited_gem_actions route_action container
+      actions inherited_gem_actions route_action container lines loc
     ].freeze
 
     # These extractors describe a whole source file rather than one constant.
@@ -768,6 +769,7 @@ module Woods
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
       container = metadata[:container]
       attrs[:container] = container[:kind] if container.is_a?(Hash) && !container[:kind].nil?
+      attrs.merge!(source_size_attributes(metadata[:source_size] || metadata['source_size']))
       attrs[:actions] = metadata[:actions] if unit.type == :controller && metadata[:actions].is_a?(Array)
       gem_actions = metadata[:inherited_gem_actions]
       if unit.type == :controller && gem_actions.is_a?(Hash) && gem_actions.any?
@@ -783,6 +785,17 @@ module Woods
         attrs[:change_frequency] = git[:change_frequency] unless git[:change_frequency].nil?
       end
       attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
+    end
+
+    # @param size [Hash, nil] {SourceSize}'s `{ lines:, loc: }`, symbol or string keys
+    # @return [Hash{Symbol => Integer}] `lines` and `loc`, or empty
+    def source_size_attributes(size)
+      return {} unless size.is_a?(Hash)
+
+      %i[lines loc].each_with_object({}) do |key, attrs|
+        value = size.key?(key) ? size[key] : size[key.to_s]
+        attrs[key] = value if value.is_a?(Integer)
+      end
     end
 
     # Every physical source of a unit assembled from several files: a library
@@ -1155,7 +1168,7 @@ module Woods
     def self.normalize_node_attribute(key, value)
       case key
       when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions then Array(value).map(&:to_s).uniq.sort
-      when :commit_count then value.to_i
+      when :commit_count, :lines, :loc then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
       else value.to_s
       end
