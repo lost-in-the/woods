@@ -249,6 +249,22 @@ means a change to `config.active_job.queue_adapter` never leaves per-job
 values stale. A mailer's `delivery` is its `delivery_method`, with the same
 staleness as that existing field.
 
+### Source size
+
+Every application unit read from a file under the application root carries
+`metadata.source_size` (#810): `lines`, every line of that file, and `loc`, the
+lines with anything but whitespace. The graph node carries both as `lines` and
+`loc`. The count is of the file, not of the unit. Two units read from one file
+carry the same numbers, and a model's inlined concerns are not added.
+
+The units counted are the types that carry a [container](#container-attribution),
+except routes, which all point at the routes file. Framework and gem sources,
+engines, configuration, migrations, tests and documentation carry no size, so
+absence never reads as zero. Neither does a generated class such as an
+`async_method` worker: its file is the declaring unit's. With Packwerk packages, `graph_analysis.json`
+totals each package's distinct files under `package_sizes`. The numbers are a
+function of the file's bytes, so full and incremental runs publish the same values.
+
 ## Core application extractors
 
 ### ModelExtractor

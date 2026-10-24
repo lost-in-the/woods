@@ -438,6 +438,7 @@ module Woods
       computed_unresolvable = unresolvable_routes
       computed_unmodelled = unmodelled_tables
       computed_clusters = published_domain_clusters
+      computed_sizes = package_sizes
 
       {
         orphans: computed_orphans,
@@ -451,6 +452,7 @@ module Woods
         unresolvable_routes: computed_unresolvable,
         unmodelled_tables: computed_unmodelled,
         domain_clusters: computed_clusters,
+        package_sizes: computed_sizes,
         stats: {
           orphan_count: computed_orphans.size,
           dead_end_count: computed_dead_ends.size,
@@ -478,6 +480,29 @@ module Woods
     # identifier alone does not say which unit it names.
     #
     # @return [Array<Hash>]
+    # The source size of each Packwerk package (#810): the `lines` and `loc`
+    # of the distinct files its application units were read from, each file
+    # counted once, with `loc` by unit type. A file read by units of several
+    # types counts toward the type that sorts first. Empty when no node has a
+    # package, so an application without Packwerk publishes `{}`.
+    #
+    # @return [Hash{String => Hash}] package => `{ files:, lines:, loc:, types: { type => loc } }`, key-sorted
+    def package_sizes
+      files = sized_files
+      return {} unless files.any? { |_, file| file[:package] }
+
+      sizes = files.each_value.with_object({}) do |file, by_package|
+        next unless file[:package]
+
+        size = by_package[file[:package]] ||= { files: 0, lines: 0, loc: 0, types: Hash.new(0) }
+        size[:files] += 1
+        size[:lines] += file[:lines]
+        size[:loc] += file[:loc]
+        size[:types][file[:type]] += file[:loc]
+      end
+      sizes.sort.to_h { |name, size| [name, size.merge(types: size[:types].sort.to_h)] }
+    end
+
     def published_domain_clusters
       nodes = graph_nodes
       source = @application_source
@@ -489,6 +514,19 @@ module Woods
     end
 
     private
+
+    # @return [Hash{String => Hash}] file path => `{ package:, type:, lines:, loc: }`
+    #   for every node carrying a source size, primary nodes and variants alike;
+    #   the first type in sort order claims a shared file
+    def sized_files
+      records = graph_nodes.map { |identifier, meta| meta.merge(identifier: identifier) } +
+                Array(graph_data[:variants])
+      sized = records.select { |record| record[:loc].is_a?(Integer) && record[:file_path] }
+      sized.sort_by { |record| [record[:type].to_s, record[:identifier].to_s] }.each_with_object({}) do |record, files|
+        files[record[:file_path].to_s] ||= { package: record[:package]&.to_s, type: record[:type].to_s,
+                                             lines: record[:lines].to_i, loc: record[:loc] }
+      end
+    end
 
     # @param identifier [String] a route node
     # @return [Hash, nil] the report entry, or nil when the route resolves

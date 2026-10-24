@@ -1214,6 +1214,20 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.to_h[:nodes]['User']).to include(commit_count: 12, change_frequency: 'hot')
     end
 
+    it 'records lines and loc from the source size, and nothing without one (#810)' do
+      graph.register(unit_with_metadata(type: :model, identifier: 'User',
+                                        metadata: { source_size: { lines: 40, loc: 31 } }))
+      graph.register(unit_with_metadata(type: :service, identifier: 'Pay',
+                                        metadata: { 'source_size' => { 'lines' => 3, 'loc' => 2 } }))
+      graph.register(unit_with_metadata(type: :route, identifier: 'GET /', metadata: {}))
+
+      expect(graph.to_h[:nodes]['User']).to include(lines: 40, loc: 31)
+      expect(graph.to_h[:nodes]['Pay']).to include(lines: 3, loc: 2)
+      expect(graph.to_h[:nodes]['GET /'].keys).not_to include(:lines, :loc)
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      expect(restored.to_h[:nodes]['User']).to include(lines: 40, loc: 31)
+    end
+
     it 'round-trips node attributes through JSON' do
       graph.register(unit_with_metadata(type: :model, identifier: 'Invoice',
                                         metadata: { table_name: 'invoices', database: 'billing',
