@@ -169,9 +169,9 @@ RSpec.describe 'Typed export selection with a published IndexReader' do
           depth -= 1
         end
       end
-      allow(reader).to receive(:read_published_unit).and_wrap_original do |method, *args|
+      allow(reader).to receive(:read_published_unit).and_wrap_original do |method, *args, **options|
         observations << depth
-        method.call(*args)
+        method.call(*args, **options)
       end
       allow(notion_client).to receive(:create_page) do |**arguments|
         observations << depth
