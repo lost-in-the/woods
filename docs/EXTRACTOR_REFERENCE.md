@@ -251,7 +251,8 @@ carry the same numbers, and a model's inlined concerns are not added.
 The units counted are the types that carry a [container](#container-attribution),
 except routes, which all point at the routes file. Framework and gem sources,
 engines, configuration, migrations, tests and documentation carry no size, so
-absence never reads as zero. With Packwerk packages, `graph_analysis.json`
+absence never reads as zero. Neither does a generated class such as an
+`async_method` worker: its file is the declaring unit's. With Packwerk packages, `graph_analysis.json`
 totals each package's distinct files under `package_sizes`. The numbers are a
 function of the file's bytes, so full and incremental runs publish the same values.
 

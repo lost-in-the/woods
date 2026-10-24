@@ -55,6 +55,12 @@ RSpec.describe Woods::SourceSize do
     FileUtils.remove_entry(outside) if outside
   end
 
+  it 'records nothing for a class another unit generates, whose file is the declaring unit\'s' do
+    u = unit(:job, write('app/models/widget.rb', "class Widget\n  async_method :sync\nend\n"))
+    u.metadata[:generated] = true
+    expect(described_class.for_unit(u, root: @root)).to be_nil
+  end
+
   it 'clears a size a unit no longer has, such as a deleted file' do
     u = unit(:model, File.join(@root, 'app/models/gone.rb'))
     u.metadata[:source_size] = { lines: 9, loc: 9 }
