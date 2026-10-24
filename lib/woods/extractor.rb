@@ -15,6 +15,7 @@ require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'extracted_form'
 require_relative 'dependency_graph'
+require_relative 'container_attribution'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
 require_relative 'git_provenance'
@@ -545,6 +546,12 @@ module Woods
       # Phase 1.6: Package membership. Runs before the graph is rebuilt so
       # registration copies metadata[:package] onto the node (#280).
       profile_phase('package annotation') { annotate_packages }
+      # Container attribution (W-9) is a function of each unit's own type and
+      # metadata, so the incremental path applies it per unit in
+      # #register_and_write and both modes publish the same value.
+      profile_phase('container annotation') do
+        @results.each_value { |units| units.each { |unit| ContainerAttribution.annotate(unit) } }
+      end
       profile_phase('source references') { enrich_source_references_full }
 
       # Rebuild the graph from deduped results. #164 gave DependencyGraph
@@ -2120,8 +2127,22 @@ module Woods
         volatile_limit_per_target: config&.volatile_dependency_limit_per_target,
         cycle_limit: config ? config.graph_cycle_limit : GraphAnalyzer::DEFAULT_CYCLE_LIMIT,
         cycle_max_length: config ? config.graph_cycle_max_length : GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH,
-        controller_resolver: method(:defined_controller?)
+        controller_resolver: method(:defined_controller?),
+        application_source: method(:application_source?)
       )
+    end
+
+    # Whether a graph node's file is the application's own: relative to
+    # Rails.root (a node read back from disk) or absolute under it (one this
+    # run registered). A gem's files, such as Active Storage's models, are not.
+    #
+    # @param path [String]
+    # @return [Boolean]
+    def application_source?(path)
+      return true unless path.start_with?('/')
+
+      root = Rails.root.to_s
+      path.start_with?(root.end_with?('/') ? root : "#{root}/")
     end
 
     # Whether a route's controller constant names a class in the running
@@ -4028,6 +4049,7 @@ module Woods
 
       units.each_with_object(Set.new) do |unit, written|
         annotate_package(unit)
+        ContainerAttribution.annotate(unit)
         unless source_consumer_failed?(extractor_key)
           SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
         end

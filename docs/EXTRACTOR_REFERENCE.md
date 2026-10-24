@@ -176,6 +176,30 @@ Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-con
 
 ---
 
+### Container attribution
+
+Every application unit carries `metadata.container` (W-9, #759): the runtime
+container it belongs to at the C4 container level. The graph node carries its
+`kind` as `container`. It is logical, not physical: how many processes run, and
+where, is not a Woods concern. The value is a function of the unit's type and
+facts its extractor already records, so full and incremental runs agree.
+
+| `kind` | Unit types | Other keys |
+|---|---|---|
+| `web` | controller, view_template, component, view_component, route, middleware, helper, action_cable_channel, GraphQL types and operations, js_module | none |
+| `jobs` | job, scheduled_job, mailer | a job's `queue`; `adapter` only when the job does not use the application's adapter (a class-level `queue_adapter` override, recorded as `metadata.queue_adapter`, or a native Sidekiq worker); a mailer's `delivery` method |
+| `database` | model, database_table, database_view | `database` |
+| `shared` | concern, service, poro, lib, manager, interactor, serializer, validator, decorator, policy, pundit_policy, state_machine, event | none |
+| `tasks` | rake_task | none |
+
+Framework sources, tests, factories, documentation, configuration, migrations,
+engines, packages and external consumers carry no container. A job without
+`adapter` runs on `background_processing.adapter` of the BehavioralProfile
+configuration unit; keeping the application-wide adapter in that one place
+means a change to `config.active_job.queue_adapter` never leaves per-job
+values stale. A mailer's `delivery` is its `delivery_method`, with the same
+staleness as that existing field.
+
 ## Core application extractors
 
 ### ModelExtractor
