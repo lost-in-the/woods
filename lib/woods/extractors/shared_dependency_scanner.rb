@@ -7,6 +7,7 @@ require_relative 'reference_patterns'
 require_relative 'form_action_scan'
 require_relative 'route_helper_resolver'
 require_relative 'config_read_scanner'
+require_relative '../external_services'
 
 module Woods
   module Extractors
@@ -106,7 +107,9 @@ module Woods
       #
       # Targets keep their namespace ({ReferencePatterns.service_references}):
       # `Billing::ChargeService.call` records the fully-qualified name the
-      # service's own unit is identified by.
+      # service's own unit is identified by. Calls through a catalogued client
+      # constant (`Stripe::Charge.create`) add an `:external_service` edge to
+      # the service it reaches ({ExternalServices}, #814).
       #
       # @param source [String] Ruby source code to scan
       # @param via [Symbol] Relationship label (default: :code_reference)
@@ -114,7 +117,7 @@ module Woods
       def scan_service_dependencies(source, via: :code_reference)
         ReferencePatterns.service_references(source).uniq.map do |service|
           { type: :service, target: service, via: via }
-        end
+        end + ExternalServices.dependencies(source)
       end
 
       # Scan for background job references (e.g., FooJob.perform_later,

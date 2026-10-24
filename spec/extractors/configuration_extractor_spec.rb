@@ -346,6 +346,23 @@ RSpec.describe Woods::Extractors::ConfigurationExtractor do
       expect(unit.dependencies).to be_empty
     end
 
+    it 'names the external services whose client gem the Gemfile declares for runtime (#814)' do
+      path = create_file('Gemfile', <<~RUBY)
+        gem 'stripe'
+        gem 'aws-sdk-s3'
+        group :development do
+          gem 'sentry-ruby'
+        end
+      RUBY
+
+      unit = described_class.new.extract_configuration_file(path)
+
+      expect(unit.metadata[:external_services]).to eq(
+        [{ name: 'Amazon S3', category: 'storage', gems: ['aws-sdk-s3'] },
+         { name: 'Stripe', category: 'payments', gems: ['stripe'] }]
+      )
+    end
+
     it 'parses multiline gems, nested groups, source blocks, and path/git sources with Prism' do
       path = create_file('Gemfile', <<~RUBY)
         # gem 'commented'

@@ -3513,6 +3513,26 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(unit_of(index, 'configuration', 'deploy/production.rb')).to be_nil
     end
 
+    it 'names external services from the Gemfile and follows calls to them through code edits (#814)' do
+      write_file('Gemfile', "source 'https://rubygems.org'\ngem 'rails'\ngem 'stripe'\n")
+      path = write_file('app/services/charge_service.rb', service_source('ChargeService'))
+
+      index = full_extraction
+      expect(unit_of(index, 'configuration', 'Gemfile').dig('metadata', 'external_services'))
+        .to eq([{ 'name' => 'Stripe', 'category' => 'payments', 'gems' => ['stripe'] }])
+      expect(reverse_edges(index, 'Stripe')).to be_empty
+
+      write_file(path, "class ChargeService\n  def call = Stripe::Charge.create(amount: 1)\nend\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+      expect(reverse_edges(index, 'Stripe')).to include('ChargeService')
+      expect(differences(index, full_extraction)).to be_empty
+
+      write_file(path, service_source('ChargeService'))
+      Woods::Extractor.new(output_dir: index).extract_changed([path])
+      expect(reverse_edges(index, 'Stripe')).to be_empty
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
     it 'publishes the Gemfile, Rakefile and boot files on a full run and leaves their edits to one' do
       write_file('Gemfile', "source 'https://rubygems.org'\ngem 'rails'\n")
       write_file('Rakefile', "require_relative 'config/application'\n")

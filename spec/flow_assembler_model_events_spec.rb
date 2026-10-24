@@ -91,6 +91,25 @@ RSpec.describe Woods::FlowAssembler, 'model callback event entries' do
     expect(ops[2]).to include(method: 'autosave_associated_records_for_author', unexpanded: 'not defined in the unit')
   end
 
+  it 'reads a callback an inlined concern defines as application code, and expands it in the concern' do
+    callbacks = post_callbacks + [callback('before_save', 'normalize_tags', 'before')]
+    write_unit('Post', type: 'model', metadata: { 'callbacks' => callbacks, 'inlined_concerns' => ['Taggable'] },
+                       source_code: "class Post < ApplicationRecord\n  include Taggable\nend\n")
+    write_unit('Taggable', type: 'concern', source_code: <<~RUBY)
+      module Taggable
+        extend ActiveSupport::Concern
+        def normalize_tags = self.tags = tags.map(&:downcase)
+      end
+    RUBY
+    allow(graph).to receive(:node_exists?) { |id| %w[Post Taggable NotifySubscribersJob].include?(id) }
+
+    flow = assembler.assemble('Post@create')
+    tags = flow.steps.first[:operations].find { |op| op[:method] == 'normalize_tags' }
+    expect(tags).to include(defined_in: 'Taggable')
+    expect(tags).not_to have_key(:unexpanded)
+    expect(flow.steps.map { |step| step[:unit] }).to include('Taggable#normalize_tags')
+  end
+
   it 'expands each application callback into its own step, following async hops' do
     units = assembler.assemble('Post@create').steps.map { |step| step[:unit] }
     expect(units).to eq(['Post@create', 'Post#normalize_title', 'Post#set_slug', 'Post#log_creation',

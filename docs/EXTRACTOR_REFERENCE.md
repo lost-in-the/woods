@@ -274,6 +274,23 @@ absence never reads as zero. Neither does a generated class such as an
 totals each package's distinct files under `package_sizes`. The numbers are a
 function of the file's bytes, so full and incremental runs publish the same values.
 
+### External services
+
+The Gemfile configuration unit carries `metadata.external_services` (#814): the
+services whose client gem the Gemfile declares for runtime (no group, `default`
+or `production`). Each entry has its `name`, a `category` (payments, storage,
+email, messaging, search, monitoring, api) and the declared `gems` as evidence.
+A unit whose source calls through a client constant (`Stripe::Charge.create`,
+`Aws::S3::Client.new`, `Sentry.capture_exception`) gains an
+`external_service` dependency to that service with `via: service_call`, whether
+or not the gem is installed, so `dependents` of `Stripe` lists the callers.
+
+The services come from a curated catalog (`Woods::ExternalServices::CATALOG`).
+An unknown gem publishes nothing, and a generic HTTP client (Faraday,
+`Net::HTTP`) names no service. No URL, credential or configuration value is
+read. Both facts are functions of source text, so full and incremental runs
+publish the same values.
+
 ## Core application extractors
 
 ### ModelExtractor

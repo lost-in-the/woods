@@ -119,6 +119,11 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       expect(result.first[:type]).to eq(:service)
     end
 
+    it 'adds an external service edge for a call through a catalogued client constant (#814)' do
+      result = scanner.scan_service_dependencies('Stripe::Refund.create(charge: id)')
+      expect(result).to include(type: :external_service, target: 'Stripe', via: :service_call)
+    end
+
     it 'uses :code_reference as the default via label' do
       source = 'FooService.call'
       result = scanner.scan_service_dependencies(source)
