@@ -104,10 +104,19 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#dependents_of(identifier, via: nil)` | `Array<String>` | Reverse index |
 | `#table_database_map` | `Hash` | Model table to database; empty on Rails 6.0 extractions |
 | `#external_dependency_checksum` | String | SHA-256 of the pinned payload's `manifest.json` |
+| `#flow_entry_points(identifier, type:)` | `Array<String>` or nil | Entry points whose precomputed flow documents expanded this typed unit, from `flows/by_unit.json`; `[]` when none did, `nil` when the generation publishes no inverse. See [inverted flow membership](INDEX_LAYOUT.md#inverted-flow-membership) |
+| `#flow_document(entry_point)` | Hash or nil | One precomputed flow document listed by `flows/flow_index.json`, string keys as published; `nil` without precomputed flows or for an unlisted entry point |
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
 What a reader returns is the caller's. `#edges` and `#dependents_of` build their records from a deep-frozen copy of `dependency_graph.json`, so a returned string cannot be changed in place (`FrozenError`), and `#dependents_of` returns a fresh array. Inside the gem, `Woods::DependencyGraph#to_h` hands out a snapshot whose containers and strings are all copies: mutating a snapshot, however deeply, changes neither what `#dependencies_of` answers nor what the next publish writes, and a mutated snapshot fed back through `.from_h` carries only the caller's own change.
+
+Both flow readers use the pinned payload only, read through the bounded no-follow
+reader the impact report uses, and parse each index once per reader. A present
+but unreadable, malformed or symlinked artifact, or a document whose
+`entry_point` differs from the one requested, raises `IOError`; it is never
+reported as "no flows". An empty membership list is bounded evidence, not proof
+that no runtime path reaches the unit.
 
 ### `#unit`: an identifier shared across types
 

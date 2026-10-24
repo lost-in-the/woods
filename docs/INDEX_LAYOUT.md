@@ -234,6 +234,8 @@ may omit it. Absence means the lookup is unavailable, not that no entry point
 touches a unit. Consumers can derive the same mapping from typed steps in the
 selected generation's flow documents, or assemble flows on demand where that
 capability is available. Do not mix documents from different generations.
+Ruby readers use `Woods::PublishedIndex#flow_entry_points(identifier, type:)`
+and `#flow_document(entry_point)`, which return `nil` when the artifact is absent.
 
 ### Semantic graph validation
 

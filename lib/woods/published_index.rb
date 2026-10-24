@@ -8,6 +8,7 @@ require_relative 'generation'
 require_relative 'payload_store'
 require_relative 'mcp/index_reader'
 require_relative 'published_index/edge_shaper'
+require_relative 'published_index/flow_readers'
 require_relative 'published_index/generation_catalog'
 require_relative 'published_index/typed_unit_reader'
 
