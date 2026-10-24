@@ -234,11 +234,9 @@ module Woods
       end
 
       def doc_reference_graph_records
-        @dependency_graph.to_h.fetch(:type_index).flat_map do |type, identifiers|
-          identifiers.map do |identifier|
-            node = @dependency_graph.node(identifier, type: type.to_sym)
-            doc_reference_record(type, identifier, node[:source_paths] || Array(node[:file_path]))
-          end
+        @dependency_graph.typed_identifiers.map do |type, identifier|
+          node = @dependency_graph.node(identifier, type: type)
+          doc_reference_record(type, identifier, node[:source_paths] || Array(node[:file_path]))
         end
       end
 

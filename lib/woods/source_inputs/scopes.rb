@@ -23,15 +23,46 @@ module Woods
         @policy = ReloadPolicy.new
       end
 
-      def for_path(path) # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity -- each independent consumer contributes a scope
+      def for_path(path)
         scopes = []
         action = @policy.classify(path)
         scopes << 'boot' if boot_path?(path, action)
         scopes << 'runtime' if runtime_path?(path, action)
-        @file_rules.each { |rule| scopes << "file:#{rule.extractor_key}" if rule.matches?(path) }
-        @whole_rules.each { |rule| scopes << "whole:#{rule.extractor_key}" if rule.matches?(path) }
+        scopes.concat(rule_scopes(path))
         scopes << 'declared' if @extra_roots.any? { |dir| path.start_with?("#{dir}/") }
         scopes.uniq.sort
+      end
+
+      # The dispatch rules' scopes depend only on the path and the rule set,
+      # which is fixed for the life of these scopes, so each path is matched
+      # once: a run classifies its whole tree twice, at capture and at the
+      # publication recheck, and matching is the larger part of classifying.
+      #
+      # @param path [String]
+      # @return [Array<String>] frozen
+      def rule_scopes(path)
+        (@rule_scopes ||= {})[path] ||= begin
+          scopes = @file_rules.filter_map { |rule| "file:#{rule.extractor_key}" if rule.matches?(path) }
+          @whole_rules.each { |rule| scopes << "whole:#{rule.extractor_key}" if rule.matches?(path) }
+          scopes.freeze
+        end
+      end
+
+      # Answer the Git exclusions the next {#for_path} calls need for +paths+
+      # from one batch of git queries, rather than two processes per
+      # configuration source. Each answer is used once.
+      #
+      # @param paths [Enumerable<String>] root-relative paths about to be classified
+      # @return [void]
+      def prefetch(paths)
+        @policy.dispatcher.prefetch_git(paths)
+      end
+
+      # Forget every prefetched answer {#for_path} has not used.
+      #
+      # @return [void]
+      def discard_prefetched
+        @policy.dispatcher.discard_prefetched_git
       end
 
       def boot_path?(path, action)

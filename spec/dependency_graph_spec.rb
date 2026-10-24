@@ -225,9 +225,71 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe '#typed_identifiers' do
+    it 'lists every registration in the order to_h publishes its type index' do
+      graph.register(colliding_view)
+      graph.register(colliding_factory)
+      graph.register(make_unit(type: :model, identifier: 'User'))
+      graph.register(make_unit(type: :model, identifier: 'Account'))
+      published = graph.to_h[:type_index].flat_map { |type, ids| ids.map { |id| [type, id] } }
+
+      expect(graph.typed_identifiers).to eq(published)
+      expect(graph.typed_identifiers).to eq([[:database_view, 'reports'], [:factory, 'reports'],
+                                             [:model, 'Account'], [:model, 'User']])
+    end
+  end
+
   describe '#pagerank' do
     it 'returns empty hash for empty graph' do
       expect(graph.pagerank).to eq({})
+    end
+
+    # Writing the graph and analysing it both rank it; the second ranking of
+    # an unchanged graph reuses the first (W5).
+    describe 'memoization' do
+      before do
+        graph.register(make_unit(type: :model, identifier: 'User'))
+        graph.register(make_unit(type: :model, identifier: 'Order', dependencies: [{ type: :model, target: 'User' }]))
+      end
+
+      it 'ranks an unchanged graph once' do
+        first = graph.pagerank
+        allow(graph).to receive(:pagerank_step).and_call_original
+
+        expect(graph.pagerank).to eq(first)
+        expect(graph).not_to have_received(:pagerank_step)
+      end
+
+      it 'hands each caller its own scores' do
+        graph.pagerank['User'] = 99.0
+
+        expect(graph.pagerank['User']).not_to eq(99.0)
+      end
+
+      it 'ranks again after a registration or a removal' do
+        before_change = graph.pagerank
+        graph.register(make_unit(type: :service, identifier: 'Billing',
+                                 dependencies: [{ type: :model, target: 'Order' }]))
+        added = graph.pagerank
+        graph.remove('Billing', type: :service)
+
+        expect(added).not_to eq(before_change)
+        expect(added).to include('Billing')
+        expect(graph.pagerank).to eq(before_change)
+      end
+
+      it 'keeps scores across an annotation, which no score depends on' do
+        first = graph.pagerank
+        allow(graph).to receive(:pagerank_step).and_call_original
+        graph.annotate('User', type: :model, commit_count: 3)
+
+        expect(graph.pagerank).to eq(first)
+        expect(graph).not_to have_received(:pagerank_step)
+      end
+
+      it 'keeps separate scores per damping and iteration count' do
+        expect(graph.pagerank(damping: 0.5)).not_to eq(graph.pagerank)
+      end
     end
 
     it 'assigns higher scores to highly-depended-upon nodes' do

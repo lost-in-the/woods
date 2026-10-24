@@ -40,6 +40,14 @@ module Woods
         @bytes = 0
         @visited = 0
         @directory_links = {}
+        scan
+      ensure
+        @scopes.discard_prefetched
+      end
+
+      private
+
+      def scan
         walk
         verify_directory_links
         result
@@ -54,14 +62,12 @@ module Woods
         result
       end
 
-      private
-
       def walk
         raise Errno::ENOENT, @root unless File.directory?(@root)
 
         @resolved_root = SourcePathEncoding.utf8!(File.realpath(@root))
         @resolved_output = File.directory?(@output_dir) ? resolved_path(@output_dir) : nil
-        pending = children(@root).map { |path| [path, [@resolved_root]] }
+        pending = prefetched(children(@root)).map { |path| [path, [@resolved_root]] }
         until pending.empty?
           path, ancestors = pending.pop
           scan_entry(path, pending, ancestors)
@@ -110,7 +116,19 @@ module Woods
 
         @directory_links[path] = real if symlink
         branch = ancestors + [real]
-        pending.concat(children(path).map { |child| [child, branch] })
+        pending.concat(prefetched(children(path)).map { |child| [child, branch] })
+      end
+
+      # Classifying a configuration source asks git whether it is ignored or
+      # untracked. One batch per directory listing replaces two git processes
+      # per file; each answer is still taken when the file is visited.
+      #
+      # @param entries [Array<String>] absolute binary child paths
+      # @return [Array<String>] the same entries
+      def prefetched(entries)
+        prefix = "#{@root}/"
+        @scopes.prefetch(entries.filter_map { |entry| SourcePathEncoding.utf8(entry)&.delete_prefix(prefix) })
+        entries
       end
 
       def verify_directory_links

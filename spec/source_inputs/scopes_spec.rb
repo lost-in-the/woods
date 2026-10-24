@@ -7,6 +7,19 @@ require 'woods/source_inputs/scopes'
 RSpec.describe Woods::SourceInputs::Scopes do
   before { Woods.configuration = Woods::Configuration.new }
 
+  describe '#for_path' do
+    it 'matches each path against the dispatch rules once, answering the same each time' do
+      scopes = described_class.new
+      first = scopes.for_path('app/services/pay.rb')
+      matched = scopes.rule_scopes('app/services/pay.rb')
+
+      expect(scopes.for_path('app/services/pay.rb')).to eq(first)
+      expect(first).to include('file:services', 'runtime')
+      expect(scopes.rule_scopes('app/services/pay.rb')).to equal(matched)
+      expect(matched).to be_frozen
+    end
+  end
+
   describe '#fingerprint' do
     it 'is stable across a rule reset for the same configuration' do
       before_reset = described_class.new.fingerprint

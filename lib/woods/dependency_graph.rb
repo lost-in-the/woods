@@ -75,6 +75,7 @@ module Woods
       @type_index = {} # type => Set of identifiers
       @to_h = nil
       @suffix_groups = nil
+      @pagerank = nil
     end
 
     # Register a unit in the graph.
@@ -95,6 +96,7 @@ module Woods
     def register(unit)
       @to_h = nil
       @suffix_groups = nil
+      @pagerank = nil
 
       unregister(unit.identifier, type: unit.type) if @nodes[unit.identifier]&.key?(unit.type)
 
@@ -275,6 +277,7 @@ module Woods
 
       @to_h = nil
       @suffix_groups = nil
+      @pagerank = nil
       unregister(identifier, type: type)
 
       return remove_all(identifier, nodes) unless type
@@ -622,6 +625,17 @@ module Woods
       @type_index.fetch(type, Set.new).to_a
     end
 
+    # Every registered unit as a type and identifier, in the order {#to_h}'s
+    # `type_index` lists them (types, then identifiers, sorted), without
+    # serializing and copying the whole graph to read it.
+    #
+    # @return [Array<Array(Symbol, String)>]
+    def typed_identifiers
+      @type_index.sort_by { |type, _| type.to_s }.flat_map do |type, identifiers|
+        identifiers.sort.map { |identifier| [type, identifier] }
+      end
+    end
+
     # Compute PageRank scores for all nodes
     #
     # Uses the reverse edges (dependents) as the link structure: a node
@@ -637,10 +651,23 @@ module Woods
     # dangling, exactly like a node with no edges at all — its rank
     # redistributes uniformly instead of vanishing.
     #
+    # Memoized per damping and iteration count until the next {#register} or
+    # {#remove}: writing the graph and analysing it both rank it, and on a
+    # large index each ranking costs a fraction of a second. Node attributes
+    # ({#annotate}) take no part in it. Each call returns its own copy.
+    #
     # @param damping [Float] Damping factor (default: 0.85)
     # @param iterations [Integer] Number of iterations (default: 20)
     # @return [Hash<String, Float>] Identifier => PageRank score
     def pagerank(damping: 0.85, iterations: 20)
+      memo = (@pagerank ||= {})
+      key = [damping, iterations]
+      memo[key] ||= compute_pagerank(damping, iterations).freeze
+      memo[key].dup
+    end
+
+    # @see #pagerank
+    def compute_pagerank(damping, iterations)
       structural = structural_graph
       unless structural.equal?(self)
         documentation = @nodes.keys.reject { |identifier| structural.node_exists?(identifier) }
@@ -662,6 +689,7 @@ module Woods
       unranked.each { |id| scores[id] = 0.0 }
       scores
     end
+    private :compute_pagerank
 
     # How many identifiers PageRank ranks: every one except documentation.
     #

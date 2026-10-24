@@ -104,9 +104,11 @@ module Woods
       #
       # @return [Array<ExtractedUnit>] List of configuration units
       def extract_all
-        units = (find_files_in_directories(@directories) + boot_and_root_files).filter_map do |file|
-          extract_configuration_file(file)
-        end
+        files = find_files_in_directories(@directories) + boot_and_root_files
+        # One batch of git queries for the whole set, each answer taken once
+        # by extract_configuration_file, rather than two git processes per file.
+        git_filter.prefetch(files)
+        units = files.filter_map { |file| extract_configuration_file(file) }
 
         profile = extract_behavioral_profile
         units << profile if profile
@@ -115,6 +117,8 @@ module Woods
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "BehavioralProfile integration failed: #{e.message}")
         units || []
+      ensure
+        @git_filter&.discard_prefetched
       end
 
       # Re-derive the synthetic unit from resolved runtime values, never from
@@ -135,7 +139,7 @@ module Woods
         config_type = detect_config_type(file_path)
         return nil unless config_type && readable?(file_path)
 
-        return nil if (@git_filter ||= GitSourceFilter.new(root: Rails.root)).skip_reason(file_path)
+        return nil if git_filter.skip_reason(file_path)
 
         # Credential-shaped text never reaches the published source or metadata.
         source = ConfigSourceGuard.redact(SourceFile.read(file_path))
@@ -160,6 +164,10 @@ module Woods
       end
 
       private
+
+      def git_filter
+        @git_filter ||= GitSourceFilter.new(root: Rails.root)
+      end
 
       # Initializers and environments are read as found. Every other file must
       # resolve under the application root, so a symlink cannot publish a

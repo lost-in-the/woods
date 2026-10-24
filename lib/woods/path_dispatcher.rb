@@ -558,6 +558,22 @@ module Woods
       self.class.configuration_source_path?(path) && !@git_filter.skip_reason(path).nil?
     end
 
+    # Answer the next {#git_excluded?} for each configuration source among
+    # +paths+ from one batch of git queries (see {GitSourceFilter#prefetch}).
+    #
+    # @param paths [Enumerable<String>] root-relative paths
+    # @return [void]
+    def prefetch_git(paths)
+      @git_filter.prefetch(paths.select { |path| self.class.configuration_source_path?(path) })
+    end
+
+    # Forget every prefetched answer {#git_excluded?} has not used.
+    #
+    # @return [void]
+    def discard_prefetched_git
+      @git_filter.discard_prefetched
+    end
+
     # File-based rules matching a path.
     #
     # @param relative_path [String] Rails.root-relative path

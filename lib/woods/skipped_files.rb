@@ -121,17 +121,24 @@ module Woods
       globs = [*Extractors::ConfigFileExtractor.configured_paths, *config::SOURCE_FILES,
                *config::DIRECTORY_TYPES.keys.map { |dir| "#{dir}/**/*.rb" },
                'config/routes.rb', 'config/routes/**/*.rb', 'lib/**/generators/**/*.rb']
-      globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }.select do |relative|
-        File.file?(File.join(@root, relative)) && PathDispatcher.configuration_source_path?(relative) &&
-          @git_filter.skip_reason(relative)
+      sources = globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }.select do |relative|
+        File.file?(File.join(@root, relative)) && PathDispatcher.configuration_source_path?(relative)
       end
+      @git_reasons = @git_filter.skip_reasons(sources)
+      sources.select { |relative| @git_reasons[relative] }
+    end
+
+    # Answered from the batch {#configuration_candidates} took, so a path is
+    # never sent to git twice in one report.
+    def git_skip_reason(relative)
+      @git_reasons&.key?(relative) ? @git_reasons[relative] : @git_filter.skip_reason(relative)
     end
 
     # The file's own shape decides first, so `module Admin; end` under an
     # owned directory reads namespace_only, not rejected_by its owner.
     def reason_for(relative)
       if PathDispatcher.configuration_source_path?(relative)
-        reason = @git_filter.skip_reason(relative)
+        reason = git_skip_reason(relative)
         return reason if reason
       end
 

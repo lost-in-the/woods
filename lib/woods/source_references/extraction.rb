@@ -110,9 +110,7 @@ module Woods
       end
 
       def source_reference_identities
-        @dependency_graph.to_h.fetch(:type_index).flat_map do |type, identifiers|
-          identifiers.map { |identifier| [type.to_sym, identifier] }
-        end
+        @dependency_graph.typed_identifiers
       end
 
       def enrich_source_references_incremental(affected_types)
