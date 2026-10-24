@@ -4187,12 +4187,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
+    # W-14: best-effort mode keeps the same contract, failures included:
+    # skipped_files.json's flow_failures must match a full run's.
+    it 'stays equivalent in best-effort mode while one action fails to assemble' do
+      Woods.configuration.precompute_flows = :best_effort
+      allow_any_instance_of(Woods::FlowAssembler).to receive(:assemble).and_wrap_original do |original, entry, **opts|
+        raise StandardError, "cannot trace #{entry}" if entry == 'SievesController#show'
+
+        original.call(entry, **opts)
+      end
+      sieves = lambda do |scope, show|
+        actions = ["  def index\n    @sieves = Post.#{scope}\n  end\n"]
+        actions << "  def show\n    @sieve = Post.find(params[:id])\n  end\n" if show
+        write_file('app/controllers/sieves_controller.rb',
+                   "class SievesController < ApplicationController\n#{actions.join("\n")}end\n")
+        load app_path('app/controllers/sieves_controller.rb')
+        'app/controllers/sieves_controller.rb'
+      end
+      run_sequence([-> { sieves.call('recent', false) }, -> { sieves.call('recent', true) },
+                    -> { sieves.call('all', true) }])
+    end
+
     # ThingsController stays in the controller descendants for the rest of
     # the process and resolves to this file. Fold it into the pristine tree
     # so the runtime and the filesystem keep agreeing in every later
     # example. The gauges controllers leak the same way.
     after do
-      %w[things_controller base_gauges_controller gauges_controller].each do |name|
+      %w[things_controller base_gauges_controller gauges_controller sieves_controller].each do |name|
         created = app_path("app/controllers/#{name}.rb")
         FileUtils.cp(created, File.join(@pristine_root, "app/controllers/#{name}.rb")) if File.exist?(created)
       end

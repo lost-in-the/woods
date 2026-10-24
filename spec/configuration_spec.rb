@@ -104,6 +104,20 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#precompute_flows=' do
+    it 'accepts false, true and best effort, as a symbol or a string (W-14)' do
+      expect(config.precompute_flows).to be(false)
+      config.precompute_flows = 'best_effort'
+      expect([config.precompute_flows, config.best_effort_flows?]).to eq([:best_effort, true])
+      config.precompute_flows = true
+      expect([config.precompute_flows, config.best_effort_flows?]).to eq([true, false])
+    end
+
+    it 'rejects any other value' do
+      expect { config.precompute_flows = :sometimes }.to raise_error(Woods::ConfigurationError, /best_effort/)
+    end
+  end
+
   describe 'console MCP configuration' do
     it 'allows setting console_embedded_read_tools' do
       config.console_embedded_read_tools = true

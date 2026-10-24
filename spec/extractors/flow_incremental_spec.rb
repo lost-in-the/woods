@@ -706,4 +706,89 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
 
     expect(generation_bytes(index_dir)).to eq(before_bytes)
   end
+
+  # ── W-14: best-effort mode ─────────────────────────────────────────────
+
+  describe 'best-effort mode (W-14)' do
+    around do |example|
+      Woods.configuration.precompute_flows = :best_effort
+      example.run
+    ensure
+      Woods.configuration.precompute_flows = true
+    end
+
+    # One action fails to assemble wherever it is assembled; the rest work.
+    def fail_assembly_of(entry_point)
+      allow_any_instance_of(Woods::FlowAssembler).to receive(:assemble).and_wrap_original do |original, entry, **opts|
+        raise StandardError, "cannot trace #{entry}" if entry == entry_point
+
+        original.call(entry, **opts)
+      end
+    end
+
+    def flow_failures(index_dir)
+      JSON.parse(File.read(File.join(payload_of(index_dir), 'skipped_files.json'))).fetch('flow_failures', [])
+    end
+
+    it 'publishes the flows that assemble and records the failing action' do
+      write_controller('valves_controller', 'ValvesController', index: '@v = Post.recent', show: '@v = Post.first')
+      fail_assembly_of('ValvesController#show')
+      index_dir = extract_all_to_tmp
+
+      expect(flow_index(index_dir)).to include('ValvesController#index')
+      expect(flow_index(index_dir)).not_to include('ValvesController#show')
+      expect(flow_paths_of(index_dir, 'ValvesController').keys).to eq(['index'])
+      expect(flow_failures(index_dir)).to eq(
+        [{ 'entry_point' => 'ValvesController#show', 'controller' => 'ValvesController', 'action' => 'show',
+           'reason' => 'flow_assembly_error', 'error' => 'StandardError: cannot trace ValvesController#show' }]
+      )
+      fold_into_pristine('app/controllers/valves_controller.rb')
+    end
+
+    it 'records the same failures and flows incrementally as a full run does' do
+      index_dir = extract_all_to_tmp
+      fail_assembly_of('SpoutsController#show')
+      write_controller('spouts_controller', 'SpoutsController', index: '@s = Post.recent', show: '@s = Post.first')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/controllers/spouts_controller.rb'])
+      write_controller('spouts_controller', 'SpoutsController', index: '@s = Post.all', show: '@s = Post.first')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/controllers/spouts_controller.rb'])
+      full_dir = extract_all_to_tmp
+
+      expect(flow_failures(index_dir)).to eq(flow_failures(full_dir))
+      expect(flow_failures(index_dir).map { |f| f['entry_point'] }).to eq(['SpoutsController#show'])
+      expect(flow_index(index_dir)).to eq(flow_index(full_dir))
+      expect(flow_paths_of(index_dir, 'SpoutsController')).to eq(flow_paths_of(full_dir, 'SpoutsController'))
+      fold_into_pristine('app/controllers/spouts_controller.rb')
+    end
+
+    it 'drops a recorded failure once the action assembles again' do
+      write_controller('nozzles_controller', 'NozzlesController', show: '@n = Post.first')
+      fail_assembly_of('NozzlesController#show')
+      index_dir = extract_all_to_tmp
+      expect(flow_failures(index_dir).size).to eq(1)
+
+      RSpec::Mocks.space.proxy_for(Woods::FlowAssembler).reset
+      allow_any_instance_of(Woods::FlowAssembler).to receive(:assemble).and_call_original
+      write_controller('nozzles_controller', 'NozzlesController', show: '@n = Post.last')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/controllers/nozzles_controller.rb'])
+
+      expect(flow_failures(index_dir)).to eq([])
+      expect(flow_index(index_dir)).to include('NozzlesController#show')
+      fold_into_pristine('app/controllers/nozzles_controller.rb')
+    end
+
+    it 'refuses to carry a recorded failure once precompute_flows is strict again' do
+      write_controller('taps_controller', 'TapsController', show: '@t = Post.first')
+      fail_assembly_of('TapsController#show')
+      index_dir = extract_all_to_tmp
+      before_bytes = generation_bytes(index_dir)
+
+      Woods.configuration.precompute_flows = true
+      expect do
+        Woods::Extractor.new(output_dir: index_dir).extract_changed(['app/controllers/taps_controller.rb'])
+      end.to raise_error(Woods::ExtractionError, /best-effort flow failures/)
+      expect(generation_bytes(index_dir)).to eq(before_bytes)
+      fold_into_pristine('app/controllers/taps_controller.rb')
+    end
+  end
 end

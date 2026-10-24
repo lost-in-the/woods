@@ -94,6 +94,8 @@ Woods.configure do |config|
   # ── Pipeline ────────────────────────────────────────────────────────────
 
   # Pre-compute per-action request flow maps during extraction (slow).
+  # true aborts the run when any flow fails to assemble; :best_effort publishes
+  # the flows that assemble and records the rest in skipped_files.json.
   # config.precompute_flows = false
 
   # Extract link_to / redirect_to / form_action navigation edges.

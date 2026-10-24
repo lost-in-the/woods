@@ -119,6 +119,30 @@ RSpec.describe Woods::MCP::IndexReader do
     end
   end
 
+  describe '#flow_failures' do
+    after { (@flow_dirs || []).each { |dir| FileUtils.rm_rf(dir) } }
+
+    def reader_with(report)
+      dir = Dir.mktmpdir('woods-reader-flow-failures')
+      (@flow_dirs ||= []) << dir
+      FileUtils.cp_r(File.join(fixture_dir, '.'), dir)
+      File.write(File.join(dir, 'skipped_files.json'), JSON.generate(report)) if report
+      described_class.new(dir)
+    end
+
+    it 'reads the best-effort flow failures of the pinned payload (W-14)' do
+      failure = { 'entry_point' => 'PostsController#show', 'controller' => 'PostsController', 'action' => 'show',
+                  'reason' => 'flow_assembly_error', 'error' => 'StandardError: x' }
+      report = { 'total' => 0, 'counts' => {}, 'files' => [], 'flow_failures' => [failure] }
+      expect(reader_with(report).flow_failures).to eq([failure])
+    end
+
+    it 'is empty without the report or without failures' do
+      expect(reader_with(nil).flow_failures).to eq([])
+      expect(reader_with('total' => 0, 'counts' => {}, 'files' => []).flow_failures).to eq([])
+    end
+  end
+
   describe '#warmup!' do
     it 'reports success for every step when artefacts are present' do
       result = reader.warmup!

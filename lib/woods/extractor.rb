@@ -612,6 +612,7 @@ module Woods
       # alongside a new graph, or half-rewritten annotations would violate
       # the atomic-generation and full/incremental-equivalence contracts;
       # being opt-in does not excuse it.
+      @flow_failures = []
       if Woods.configuration.precompute_flows
         Rails.logger.info '[Woods] Precomputing request flows...'
         profile_phase('flows') { precompute_flows }
@@ -623,7 +624,9 @@ module Woods
         write_dependency_graph
         write_graph_analysis
       end
-      profile_phase('skipped files') { write_skipped_files(@results.values.flatten.map(&:file_path)) }
+      profile_phase('skipped files') do
+        write_skipped_files(@results.values.flatten.map(&:file_path), flow_failures: Array(@flow_failures))
+      end
       profile_phase('commit table') { refresh_commit_table(full: true) }
       profile_phase('manifest and summary') do
         write_manifest
@@ -1001,6 +1004,9 @@ module Woods
       # A payload without one predates the report and gains it on its next
       # publishing run; that absence alone does not publish.
       skipped, published_skipped = profile_phase('skipped files') { skipped_files_report }
+      tree_skipped = skipped
+      @flow_failures = published_flow_failures(published_skipped)
+      skipped = SkippedFiles.with_flow_failures(tree_skipped, @flow_failures)
       skipped_changed = !published_skipped.nil? && skipped != published_skipped
       # HEAD can move while no indexed file does (a commit of files already
       # extracted), and the table must follow it like a full run would.
@@ -1013,6 +1019,7 @@ module Woods
 
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
+      skipped = SkippedFiles.with_flow_failures(tree_skipped, @flow_failures)
       SkippedFiles.write(payload_dir, skipped, durable: payload_writes_durable?) unless skipped == published_skipped
       profile_phase('manifest and summary') do
         write_manifest(incremental: true)
@@ -1728,11 +1735,46 @@ module Woods
     # @raise [Woods::ExtractionError] when any flow-family step fails
     def precompute_flows
       all_units = @results.values.flatten(1)
-      precomputer = FlowPrecomputer.new(units: all_units, graph: @dependency_graph, output_dir: payload_dir.to_s)
+      precomputer = flow_precomputer(all_units)
       flow_map = precomputer.precompute
+      @flow_failures = precomputer.failures.values
       rewrite_flow_annotated_units
       sweep_orphaned_flow_files
       Rails.logger.info "[Woods] Precomputed #{flow_map.size} request flows"
+      log_flow_failures
+    end
+
+    # @param units [Array<ExtractedUnit>]
+    # @return [FlowPrecomputer] in the configured mode (W-14)
+    def flow_precomputer(units)
+      FlowPrecomputer.new(units: units, graph: @dependency_graph, output_dir: payload_dir.to_s,
+                          best_effort: Woods.configuration.best_effort_flows?, root: Rails.root)
+    end
+
+    def log_flow_failures
+      return if Array(@flow_failures).empty?
+
+      Rails.logger.warn "[Woods] #{@flow_failures.size} request flow(s) did not assemble (best effort); " \
+                        "recorded in skipped_files.json: #{@flow_failures.map { |f| f['entry_point'] }.sort.join(', ')}"
+    end
+
+    # The best-effort failures the previous generation published, which an
+    # incremental run carries for the controllers it does not reassemble.
+    # Outside best-effort mode there is nothing to carry, and a published
+    # failure cannot stand: a full run would raise on that action, so the
+    # incremental one does too rather than publish a different index.
+    #
+    # @param published [Hash, nil] the payload's skipped_files.json
+    # @return [Array<Hash>]
+    # @raise [Woods::ExtractionError] when strict mode meets a recorded failure
+    def published_flow_failures(published)
+      failures = Array(published&.fetch('flow_failures', nil))
+      return [] unless Woods.configuration.precompute_flows
+      return failures if Woods.configuration.best_effort_flows? || failures.empty?
+
+      raise Woods::ExtractionError,
+            'the published index records best-effort flow failures but precompute_flows is true; ' \
+            "run a full extraction (#{failures.map { |f| f['entry_point'] }.sort.join(', ')})"
     end
 
     # Withdraw the derived family in this unpublished payload. Atomic unit
@@ -1837,12 +1879,15 @@ module Woods
       )
       Rails.logger.info "[Woods] Refreshing flows for #{reassemble.size} controller(s), " \
                         "#{carried.size} carried forward, #{removed.size} removed..."
-      precomputer = FlowPrecomputer.new(units: [], graph: @dependency_graph, output_dir: payload_dir.to_s)
+      precomputer = flow_precomputer([])
       annotations = precomputer.recompute_delta(
         touched_units: reassemble,
         removed_identifiers: removed.to_a,
-        carried_identifiers: carried.map(&:identifier)
+        carried_identifiers: carried.map(&:identifier),
+        previous_failures: Array(@flow_failures)
       )
+      @flow_failures = precomputer.failures.values
+      log_flow_failures
       patch_flow_annotations(annotations)
       sweep_orphaned_flow_files
       # The annotation patch changed controller JSON after the run's type
@@ -1925,7 +1970,8 @@ module Woods
     # @return [Set<String>]
     # @raise [Woods::ExtractionError] when the index is missing or corrupt
     def previous_flow_index_controllers
-      previous_flow_index_entries.keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first }
+      previous_flow_index_entries.keys.to_set { |entry_point| entry_point.to_s.split('#', 2).first } |
+        Array(@flow_failures).to_set { |failure| failure['controller'] }
     end
 
     # The previous generation's flow index itself, read once per run: both
@@ -2764,8 +2810,9 @@ module Woods
     #
     # @param unit_paths [Enumerable<String, nil>] every unit file_path
     # @return [void]
-    def write_skipped_files(unit_paths)
-      report = SkippedFiles.new(root: Rails.root).build(unit_paths)
+    # @param flow_failures [Array<Hash>] best-effort flow failures (W-14)
+    def write_skipped_files(unit_paths, flow_failures: [])
+      report = SkippedFiles.with_flow_failures(SkippedFiles.new(root: Rails.root).build(unit_paths), flow_failures)
       SkippedFiles.write(payload_dir, report, durable: payload_writes_durable?)
     end
 
