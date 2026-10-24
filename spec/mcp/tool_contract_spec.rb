@@ -300,9 +300,9 @@ RSpec.describe 'Index MCP tool contracts' do
                                                      'results' => [
                                                        { 'identifier' => 'Post', 'type' => 'model',
                                                          'match_field' => 'identifier' },
-                                                       { 'identifier' => 'PostsController', 'type' => 'controller',
-                                                         'match_field' => 'identifier' },
                                                        { 'identifier' => 'PostDecorator', 'type' => 'decorator',
+                                                         'match_field' => 'identifier' },
+                                                       { 'identifier' => 'PostsController', 'type' => 'controller',
                                                          'match_field' => 'identifier' }
                                                      ]
                                                    }),
@@ -338,6 +338,21 @@ RSpec.describe 'Index MCP tool contracts' do
                                     'sha_a' => string_contract(1, 10_000),
                                     'sha_b' => string_contract(1, 10_000)
                                   }),
+      'diagram' => contract(:always, { 'kind' => 'neighbourhood', 'identifier' => 'Comment' }, exact_data({
+                                                                                                            'kind' => 'neighbourhood', 'identifier' => 'Comment', 'type' => 'model',
+                                                                                                            'depth' => 1, 'budget' => 150, 'size' => 2, 'direction' => 'both',
+                                                                                                            'types' => nil, 'via' => nil, 'edges' => 1, 'generation' => 0
+                                                                                                          }),
+                            required: %w[kind identifier], properties: {
+                              'kind' => enum_contract(%w[neighbourhood schema lifecycle impact], 1, 10_000),
+                              'identifier' => string_contract(1, 10_000),
+                              'type' => string_contract(nil, 10_000),
+                              'depth' => integer_contract(0, 10),
+                              'direction' => enum_contract(%w[both dependents dependencies], nil, 10_000),
+                              'types' => array_contract(1_000, 10_000),
+                              'via' => array_contract(1_000, 10_000),
+                              'event' => enum_contract(%w[create update destroy], nil, 10_000)
+                            }),
       'structure' => contract(:always, {}, exact_data({
                                                         'manifest' => expected_manifest,
                                                         'template_engines' => %w[erb haml jbuilder]
@@ -460,6 +475,7 @@ RSpec.describe 'Index MCP tool contracts' do
     File.write(feedback_path, "#{seed_rating}\n")
     allow(Woods).to receive(:configuration).and_return(config)
     allow(Woods::Impact::Report).to receive(:compare).and_return(impact_report)
+    allow(Woods::Impact::Report).to receive(:focus).and_return(impact_report)
     allow(config).to receive(:output_dir).and_return(nil)
     # The background worker calls raise_on_publication_failure! after the
     # run; a double without it raised MockExpectationError (not a
@@ -842,7 +858,8 @@ RSpec.describe 'Index MCP tool contracts' do
       %w[search limit] => :assert_limited_results,
       %w[retrieval_rate score] => :assert_rating_score,
       %w[lookup budget] => :assert_lookup_evidence_budget,
-      %w[trace_flow depth] => :assert_trace_depth
+      %w[trace_flow depth] => :assert_trace_depth,
+      %w[diagram depth] => :assert_diagram_depth
     }
   end
 
@@ -953,7 +970,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def assert_enum_semantics(name, value, result)
-    return send("assert_#{name}_enum", value, result) if %w[change_impact woods_status].include?(name)
+    return send("assert_#{name}_enum", value, result) if %w[change_impact woods_status diagram].include?(name)
 
     data = result.dig('structuredContent', 'data')
     case name
@@ -976,6 +993,16 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(result.dig('structuredContent', 'data', 'index', 'source_freshness')).to include(
       'state' => 'unknown', 'check' => value, 'complete' => false
     )
+  end
+
+  def assert_diagram_depth(data, value, _name)
+    expect(data).to include('kind' => 'impact', 'depth' => value, 'identifier' => 'Comment')
+  end
+
+  def assert_diagram_enum(value, result)
+    data = result.dig('structuredContent', 'data')
+    expect(data.values_at('kind', 'direction', 'event')).to include(value)
+    expect(result.dig('content', 0, 'text')).to match(/\A(flowchart LR|erDiagram|sequenceDiagram)\n/)
   end
 
   def assert_change_impact_enum(value, result)
@@ -1071,7 +1098,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   it 'keeps code-derived inventory as a separate drift input to the independent oracle' do
-    expect(inventory_rows.size).to eq(30)
+    expect(inventory_rows.size).to eq(31)
     expect(inventory_rows.map { |row| row.fetch('name') }).to contain_exactly(*contract_oracle.keys)
     expect(listed_tools(full_server).map { |tool| tool.fetch('name') })
       .to contain_exactly(*contract_oracle.keys)
@@ -1352,6 +1379,8 @@ RSpec.describe 'Index MCP tool contracts' do
           [property.fetch('minimum'), property.fetch('maximum')].each do |value|
             arguments = contract.fetch(:arguments).merge(name => value)
             arguments['evidence'] = 'compact' if tool_name == 'lookup' && name == 'budget'
+            # Each diagram kind narrows depth; impact's range is the whole wire range.
+            arguments['kind'] = 'impact' if tool_name == 'diagram' && name == 'depth'
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
             expect(result['isError']).to be(false), label
@@ -1463,9 +1492,9 @@ RSpec.describe 'Index MCP tool contracts' do
 
           property.fetch('enum').each do |value|
             prepare_enum_semantics(tool_name, value)
-            result = call_tool(
-              full_server, tool_name, contract.fetch(:arguments).merge(name => value)
-            ).fetch('result')
+            arguments = contract.fetch(:arguments).merge(name => value)
+            arguments['kind'] = 'lifecycle' if tool_name == 'diagram' && name == 'event'
+            result = call_tool(full_server, tool_name, arguments).fetch('result')
             expect(result['isError']).to be(false), "#{tool_name}.#{name}=#{value}"
             assert_enum_semantics(tool_name, value, result)
           end

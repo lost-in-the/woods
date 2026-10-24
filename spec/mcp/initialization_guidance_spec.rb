@@ -72,7 +72,7 @@ RSpec.describe 'Index MCP initialization guidance' do
 
       expect(registered_names(text)).to eq(server.tools.keys.sort)
       expect(text.bytesize).to be <= 2048
-      expect(server.tools.size).to eq(30) if operator && feedback && snapshots && sessions && notion
+      expect(server.tools.size).to eq(31) if operator && feedback && snapshots && sessions && notion
     end
   end
 

@@ -38,7 +38,7 @@ If the worktree contains unrelated changes, preserve them. Do not overwrite an e
 
 ## 2. Choose the installation path
 
-Use structural-only setup when the user wants code navigation, runtime Rails structure, dependencies, flows, or blast-radius analysis. Fourteen tools register in the normal packaged launch without an embedding provider.
+Use structural-only setup when the user wants code navigation, runtime Rails structure, dependencies, flows, or blast-radius analysis. Fifteen tools register in the normal packaged launch without an embedding provider.
 
 If the user wants ranked discovery through `codebase_retrieve`, offer [explicit lexical mode](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over the published index without a provider or embeddings. Check that the installed version supports it, set `WOODS_RETRIEVAL_MODE=lexical` in the MCP process environment, restart that server, and verify `woods_status.retriever.mode`. Keep structural-only setup as the default unless this mode is requested.
 

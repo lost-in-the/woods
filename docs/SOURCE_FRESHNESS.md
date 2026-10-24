@@ -35,11 +35,22 @@ coverage incomplete while scanning continues through accessible siblings.
 ```
 
 Pass this to `woods_status` for an explicit five-second content scan. The default
-`quick` scan has a 250ms budget. Both read and HMAC source bytes; there is no
+`quick` scan has a 250ms budget, counted from the start of the check: reading
+the manifest and preparing the walk come out of it, so a quick check costs about
+its budget. The walk reads Git's index and ignore rules once per check (two
+`git` processes) to classify configuration sources, rather than once per file. Both read and HMAC source bytes; there is no
 stat-only `current` shortcut, so same-size/same-mtime edits are detected. Limits
 also cap traversal at 50,000 visited files and 128 MiB read. Budgets are checked
 between filesystem operations; an operating-system read that itself stalls can
 outlast the scan deadline. A limit produces unknown coverage, never current.
+
+`coverage` says how much of the captured baseline a check got through:
+`recorded_files` is the number of distinct paths the generation recorded, and
+`verified_files` is how many of them this check read with an unchanged
+identity. When a check stops at a limit with no added, changed or removed path,
+a caller can report "no drift in `verified_files` of `recorded_files`" instead
+of a bare unknown. The state is still `unknown`: an unread file may have
+changed, and a new file under an unread directory may exist.
 
 The result is tied to the **served** generation, including a reader holding an
 older generation during a concurrent publication. It is recomputed on each call;

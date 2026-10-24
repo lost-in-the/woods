@@ -51,7 +51,7 @@ For a single-call health snapshot, call the Index Server's `woods_status` tool. 
 - Overall readiness plus index, watch, retriever, and bootstrap state (`ready`, `index`, `watch`, `retriever`, `bootstrap` sections)
 - Which optional features are configured (embedding provider, Notion, session tracer)
 - Per-feature config-key hints for anything missing
-- `server.update`: the installed gem version, the newest version the process knows about (the latest published release, or the installed version itself when the install is ahead of the registry or the check could not run), and an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`)
+- `server.update`: the installed gem version, the newest version the process knows about (the latest published release, or the installed version itself when the install is ahead of the registry), an `update_available` flag (a best-effort RubyGems check, cached 24h; disable with `WOODS_NO_UPDATE_CHECK=1`), and `checked`. When the check is disabled or could not reach the registry, `checked` is false and `latest_version` is null rather than a version nobody checked
 
 Agents cold-connecting to a server should call `woods_status` before any other tool, it eliminates most "why is this empty?" guesswork.
 

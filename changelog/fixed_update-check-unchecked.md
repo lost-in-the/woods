@@ -1,0 +1,1 @@
+- `woods_status` no longer names a latest version it never checked. With `WOODS_NO_UPDATE_CHECK=1`, or when the registry probe fails, `server.update.latest_version` is null and the new `checked` field is false; it used to repeat the installed version.

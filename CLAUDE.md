@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (30-tool index server, 14 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (31-tool index server, 15 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
 
 ## Commands
 
@@ -19,6 +19,7 @@ bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
 WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http
 WOODS_RUN_BOOTED_APP=1  bin/rspec spec/integration/booted_extraction_spec.rb
 WOODS_RUN_PERF_SPECS=1  bin/rspec --tag perf
+WOODS_RUN_GITHUB_MERMAID=1 bin/rspec spec/diagrams/github_mermaid_spec.rb   # needs Node
 
 # In a host Rails app (extraction requires Rails boot)
 bundle exec rake woods:extract           # Full extraction
@@ -36,6 +37,7 @@ bundle exec rake "woods:retrieve[query]" # Ad-hoc retrieval against the index
 bundle exec rake woods:evaluate          # Score retrieval against a ground-truth query set
 bundle exec rake "woods:evaluate:baseline[grep]" # Score a naive baseline for comparison
 bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
+bundle exec rake "woods:diagram[kind,id]" # Mermaid for one unit (neighbourhood, schema, lifecycle, impact)
 bundle exec rake woods:console           # Embedded Console MCP server (stdio)
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
 bundle exec rake woods:unblocked_sync    # Sync to an Unblocked collection
@@ -152,6 +154,7 @@ lib/
 │   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
 │   ├── retriever.rb                     # Retriever orchestrator (strategy dispatch + type-rank reporting)
+│   ├── diagrams.rb                      # Mermaid per unit on demand (neighbourhood/schema/lifecycle/impact), cached per generation; diagrams/ holds the builders
 │   ├── flow_precomputer.rb             # Pre-computed per-action request flow maps
 │   ├── flow_assembler.rb               # Per-query runtime flow aggregation
 │   ├── flow_document.rb                # Serialization envelope for flow output
@@ -175,7 +178,7 @@ lib/
 │   ├── export/                          # Shared export fact extraction (UnitFacts) over unit metadata
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
 │   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
-│   ├── mcp/                             # MCP Index Server (30 tools, 14 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (31 tools, 15 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tool schemas across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; only Tier 1 plus the two read tools register)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)
@@ -325,6 +328,8 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - Every Woods-written JSON artifact is read through `AtomicFile.read`. A bare `File.read` tags content with the process default external encoding (US-ASCII under `LANG=C`) and raises on multibyte bytes.
 
 ### MCP servers
+
+- The `diagram` tool (#826) builds on demand from the pinned generation through `Woods::Diagrams`, cached per generation identity in `Diagrams::Cache`; never precompute diagrams at extraction (cost, and a depth-2 neighbourhood would widen incremental invalidation). Each kind owns its `depth` range (`Diagrams::DEPTHS`); over budget is a refusal (`over_budget`), never a truncated text. The neighbourhood, schema at depth 1 and lifecycle at depth 0 are Woods Map's texts byte for byte, and the map draws from them: change their output only together with the map. `spec/diagrams/github_mermaid_spec.rb` (`WOODS_RUN_GITHUB_MERMAID=1`) parses every kind with GitHub's Mermaid.
 
 - Tool dispatch uses a `Mutex`. Do not call tool handlers from multiple threads outside the server's dispatch.
 - The Index Server defaults to **pattern-only mode** when no `woods.json` is present and no provider is configured (#138). Default semantic `codebase_retrieve` needs a provider; explicit `WOODS_RETRIEVAL_MODE=lexical` instead loads the published extraction units without provider resolution or vector artifacts (#404). Lexical mode requires a valid extraction index and never activates as a hidden fallback. `WOODS_REQUIRE_INDEX=1` restores fail-closed semantic boot. `WOODS_ALLOW_AUTODETECT` is a back-compat no-op. See `ConfigResolver.resolve_without_artifact` and `PublishedLexicalRetriever`.

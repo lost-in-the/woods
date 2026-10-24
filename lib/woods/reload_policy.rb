@@ -265,7 +265,7 @@ module Woods
     end
 
     def under?(path, directories)
-      directories.any? { |dir| path.start_with?("#{dir}/") }
+      directories.any? { |dir| PathDispatcher.under_directory?(path, dir) }
     end
   end
 end

@@ -26,6 +26,19 @@ module Woods
       def self.json(value)
         JSON.generate(copy(value))
       end
+
+      # Whether two JSON values have the same {.json}, without building it.
+      # `Hash#eql?` and `Array#eql?` compare members with `eql?`, so key
+      # order is ignored while array order and the Integer/Float distinction
+      # are not (`1` and `1.0` generate different JSON). The one pair whose
+      # JSON differs but which compares the same is `-0.0` and `0.0`.
+      #
+      # @param left [Object] JSON-compatible value
+      # @param right [Object] JSON-compatible value
+      # @return [Boolean]
+      def self.same?(left, right)
+        left.eql?(right)
+      end
     end
   end
 end

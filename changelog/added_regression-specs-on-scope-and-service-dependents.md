@@ -1,0 +1,1 @@
+- Regression specs: `after_update_commit` and `before_validation ..., on: :update` publish `on: ["update"]` from the real Rails lambdas, and a service object called from a PORO, a job and another service reports each caller as a dependent, before and after one caller stops calling it.

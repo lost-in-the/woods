@@ -1089,6 +1089,7 @@ module Woods
       def run_extraction(change_set, started)
         full = full_extraction?(change_set)
         before = @generation.current.number
+        announce_cycle(full, before)
         extractor = @extractor_factory.call
         touched = if full
                     extractor.extract_all
@@ -1265,6 +1266,19 @@ module Woods
 
         { action: action, state: state, reason: reason, generation: generation,
           count: count, duration_ms: duration_ms, touched: touched }
+      end
+
+      # The extractor publishes generation.json as the last write of a run,
+      # before the daemon can write the cycle's outcome. Say a cycle is
+      # running first, so a reader that finds a newer generation than this
+      # record names knows the record is about to catch up. The outcome's
+      # record replaces this one and carries no +cycle+.
+      def announce_cycle(full, generation)
+        last = @last_status || { state: :running, reason: nil }
+        details = last.except(:state, :reason, :generation, :cycle, :cycle_kind, :cycle_started_at)
+        publish_status(last[:state], reason: last[:reason], generation: generation, **details,
+                                     cycle: 'extracting', cycle_kind: full ? 'full' : 'incremental',
+                                     cycle_started_at: Time.now.utc.iso8601)
       end
 
       def publish_status(state, reason:, generation: nil, **details)

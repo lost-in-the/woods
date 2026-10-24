@@ -163,9 +163,9 @@ of extracted units with verified embedding coverage. Positive counts do not
 prove complete coverage or working provider access. See
 [semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
-### Tools (30 — 14 registered in the packaged default)
+### Tools (31 — 15 registered in the packaged default)
 
-The Index Server defines 30 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
+The Index Server defines 31 schemas across core and conditional capabilities. The normal packaged executable registers the 15 tools below; the remaining schemas require the specialized wiring described afterward.
 
 | Tool | Use it for |
 |---|---|
@@ -176,6 +176,7 @@ The Index Server defines 30 schemas across core and conditional capabilities. Th
 | `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `structure` | Summarize structural relationships around a unit |
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
+| `diagram` | Mermaid text of one unit for a pull request or a review: `neighbourhood`, `schema`, `lifecycle` or `impact`, each with its own `depth`; refused over its budget, never truncated ([diagrams](MCP_TOOL_COOKBOOK.md#diagrams)) |
 | `framework` | Inspect relevant Rails or installed gem source |
 | `recent_changes` | Find indexed units changed recently |
 | `graph_analysis` | Structural reports: orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, undeclared package edges |
@@ -298,6 +299,21 @@ prefer that concrete type for follow-up identity checks.
 `lookup` of an identifier published under more than one type still returns one
 unit (the type directory that sorts last) and names every type in
 `_meta.ambiguous_types`; pass the intended `type` to choose.
+
+Identifier matches are ranked by how well they match, not by the order of type
+directories or summary files: the exact identifier first, then an exact short
+name (the last `::` segment, a table's name after `table:`, or a path segment;
+a route is named by its path, not its HTTP verb), then prefixes, then any other
+match, with shorter names first within each rank. The order is the same for
+every generation of the same source, and a broad query no longer cuts the exact
+name or its table from the page. Deep-field matches follow identifier matches
+in scan order.
+
+An in-process caller of `IndexReader#search` can pass `max_scan:` to size the
+deep-field budget for one call (a positive Integer, in unit bodies); the MCP
+tool keeps `WOODS_SEARCH_MAX_SCAN`. A deep search's Ruby result also carries
+`scan: { scanned_units:, candidate_units: }`, so a caller stopped by
+`scan_budget` can say how much it read.
 
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the

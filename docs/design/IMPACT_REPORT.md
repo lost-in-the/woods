@@ -21,9 +21,13 @@ when the current reader opens; `now` does not move during comparison. Each
 selected `PublishedIndex` stays open through comparison and serialization value
 construction. All readers close on success or exception.
 
-A SHA matches retained manifests' `git_sha` provenance. Multiple matching
-generations, including repeated captures at the identical full SHA, raise
-`Woods::Impact::ResolutionError` with `gen:N` alternatives. Missing generations,
+A SHA matches retained manifests' `git_sha` provenance. Several generations
+can record the same commit, because incremental runs and the watch daemon
+extract again without a new commit. When every match records one full SHA,
+the selector names that commit's captures: as `from` it resolves to the oldest
+of them (the commit as first extracted), as `to` to the newest (everything
+extracted before the next commit). A prefix that matches different commits
+raises `Woods::Impact::ResolutionError` with `gen:N` alternatives. Missing generations,
 unknown SHAs and unsupported selectors fail; a missing current endpoint never
 falls back to an older payload. Flat indexes are unsupported for ranges.
 Errors retain the underlying I/O or parser exception for corrupt payloads.
@@ -97,6 +101,43 @@ JSON object keys are sorted, arrays have deterministic order, and report values
 are detached and recursively frozen. Identical selectors and payload inputs
 produce identical bytes. Equivalent selectors can preserve different original
 selector values in provenance.
+
+### Cost of a range
+
+A range reads every unit of both endpoints, because propagation, risks and
+related evidence resolve against each endpoint's complete typed inventory.
+Two measures keep that read bounded:
+
+- **One parse per unit.** A publish writes every unit again with its own
+  `extracted_at`. `Endpoint::SharedParse` parses the `to` endpoint, then masks
+  that one top-level value in each `from` file. Only the end of the file is
+  searched, and only the shape the writer emits matches. A `from` file whose
+  bytes then equal its `to` counterpart's shares that parsed, validated object,
+  deeply frozen. Every other file is parsed on its own, so the report is
+  exactly what separate parses would give.
+- **Facets compare by value.** `Value.same?` compares parsed values with
+  `eql?`, so key order is ignored while array order and the Integer/Float
+  distinction are kept, as canonical JSON keeps them. The one exception is
+  `-0.0` against `0.0`.
+
+`Report.compare(..., cache: ReportCache.new(size: N))` keeps the comparison for
+each resolved pair of payloads: generation number, payload directory and
+manifest digest on both sides, plus the parameters. Retained payloads never
+change, so an entry never goes stale. A new publish changes what `now` or a SHA
+resolves to, and with it the key; a re-extracted generation of the same number
+has another manifest digest. Selectors that name the same pair (`gen:N`, a SHA,
+`now`) share one comparison, and each report still records its own selectors.
+The cache keeps the most recently used entries, never keeps a failure, and is
+thread-safe. Two threads that miss on one key at once may both compute it.
+
+On a generated application of about 10,300 units, with a commit that touched a
+hub model and about 320 files (753 changed units):
+- one range's first comparison takes about 4.6 s, against 8.5 s before these
+  measures, with 4.1M allocations against 6.2M and half the live objects;
+- a cached pair answers in about 40 ms.
+Most of the first comparison is reading and parsing the `to` endpoint, and the
+garbage collection that goes with it. Skipping unchanged units without parsing
+them would need a per-unit content digest in the published index.
 
 ## One unit's unified diff
 

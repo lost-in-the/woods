@@ -353,6 +353,16 @@ within a debounce window), `degraded` (alive but *cannot* update, index frozen
 at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
+The extractor publishes `generation.json` as the last write of a run, before
+the daemon can write the cycle's outcome. While a cycle runs, the record says
+so: `"cycle": "extracting"`, with `cycle_kind` (`full` or `incremental`) and
+`cycle_started_at`, alongside the generation the cycle started from. The
+outcome replaces that record without a `cycle` field. `woods_status` reports
+both, plus `published_generation` and `status_behind`, which is true when the
+record names an older generation than the one published. A reader in that
+window knows the record is about to catch up, and does not take the previous
+cycle's outcome for the current one.
+
 The file is written world-readable (0644) by design: host-side hooks read it
 through a bind mount. Writes through `Woods::AtomicFile` default to owner-only
 0600 unless the caller supplies another mode. This is not a guarantee for every

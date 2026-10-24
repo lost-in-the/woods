@@ -1698,6 +1698,29 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(metadata[:foreign_keys]).to eq([{ from_table: 'invoices', to_table: 'accounts', column: 'account_id' }])
     end
 
+    # A framework model whose table the application never installed (an
+    # optional engine's subclass of another of its models): Rails decides
+    # descends_from_active_record? from the inheritance column, so the call
+    # raises. The class tree still says what the model is; extraction must not
+    # fail over it, warn about it, or mark the models extractor's consumption
+    # unverified.
+    it 'extracts an STI child whose table is absent without failing' do
+      stub_const('ActiveRecord', Module.new)
+      stub_const('ActiveRecord::Base', Class.new { def self.abstract_class? = false })
+      parent = Class.new(ActiveRecord::Base) { def self.name = 'Gadget' }
+      model = stub_bare_model('Gadget::Sealed')
+      allow(model).to receive(:superclass).and_return(parent)
+      allow(model).to receive(:descends_from_active_record?)
+        .and_raise(StandardError, "Could not find table 'gadgets'")
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      metadata = extractor.send(:extract_metadata, model, nil)
+
+      expect(metadata).to include(is_sti_base: false, is_sti_child: true, table_exists: false)
+      expect(extractor.warnings).to eq([])
+    end
+
     it 'records an empty foreign key list when the table does not exist' do
       model = stub_bare_model('Ghost')
       allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],

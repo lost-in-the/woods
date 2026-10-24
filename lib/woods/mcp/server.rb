@@ -20,6 +20,7 @@ require_relative '../retrieval/source_evidence'
 require_relative '../session_tracer/unit_resolver'
 require_relative 'bootstrap_state'
 require_relative 'change_impact'
+require_relative 'diagram_tool'
 require_relative 'errors'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
@@ -197,6 +198,7 @@ module Woods
           define_reload_tool(server, reader, respond, respond_err, retriever_reloader, bootstrap_state)
           define_retrieve_tool(server, retriever, respond, respond_err, bootstrap_state)
           define_trace_flow_tool(server, reader, respond, respond_err, renderer)
+          define_diagram_tool(server, reader, index_dir, respond, respond_err)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
           # isError: true when the wiring was missing — that added token
@@ -585,7 +587,7 @@ module Woods
                 exact_prefix: {
                   type: 'string',
                   description: 'Literal (non-regex) case-insensitive identifier prefix filter. ' \
-                               'Use for namespace scoping like "Next::Settings::" without escaping regex metacharacters.'
+                               'Use for namespace scoping like "Reports::Settings::" without escaping regex metacharacters.'
                 },
                 exact_suffix: {
                   type: 'string',
@@ -604,7 +606,7 @@ module Woods
                 code: :unsupported_argument,
                 tool: 'search',
                 argument: 'query',
-                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Next::Settings::" for literal prefix scoping.'
+                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Reports::Settings::" for literal prefix scoping.'
               )
             end
             types = coerce.call(types)
@@ -1947,6 +1949,31 @@ module Woods
           end
         end
 
+        # Always registered: Mermaid for one unit from the published index (woods#826).
+        def define_diagram_tool(server, reader, index_dir, respond, respond_err)
+          server.define_tool(
+            name: 'diagram',
+            description: DiagramTool::DESCRIPTION,
+            input_schema: DiagramTool.schema
+          ) do |server_context:, **arguments|
+            result = DiagramTool.call(reader, index_dir, **arguments)
+            data = DiagramTool.data(result)
+            next respond.call(result.text, data: data) if result.drawn?
+
+            respond_err.call(DiagramTool.refusal_message(result), code: :over_budget, tool: DiagramTool::NAME, **data)
+          rescue Woods::Diagrams::InvalidRequest => e
+            respond_err.call(e.message, code: :invalid_params, tool: DiagramTool::NAME)
+          rescue Woods::Diagrams::UnitNotFound => e
+            respond_err.call("#{e.message}; use search and lookup to select an indexed unit.",
+                             code: :not_found, tool: DiagramTool::NAME)
+          rescue StandardError => e
+            raise unless ToolContract.artifact_error?(e)
+
+            respond_err.call('diagram could not read a required Index artifact.', code: :corrupt_artifact,
+                                                                                  tool: DiagramTool::NAME)
+          end
+        end
+
         def define_change_impact_tool(server, index_dir, respond, respond_err)
           server.define_tool(
             name: 'change_impact',
@@ -2458,12 +2485,31 @@ module Woods
           # `state`, because the recorded state and the liveness verdict answer
           # different questions and an operator wants both.
           status = Woods::Watch::Status.new(output_dir: index_dir)
-          { state: record['state'], reason: record['reason'], generation: record['generation'],
-            pid: record['pid'], updated_at: record['updated_at'],
-            alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
-            last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+          section = { state: record['state'], reason: record['reason'], generation: record['generation'],
+                      pid: record['pid'], updated_at: record['updated_at'],
+                      alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
+                      last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+          section.merge(watch_cycle_fields(record, index_dir))
         rescue StandardError
           { state: 'absent' }
+        end
+
+        # The extractor publishes generation.json before the daemon writes a
+        # cycle's outcome. Name the published generation, whether the
+        # record is behind it, and the cycle the daemon says is running, so a
+        # reader never takes the previous cycle's record for the current one.
+        #
+        # @return [Hash]
+        def watch_cycle_fields(record, index_dir)
+          fields = {}
+          fields[:cycle] = record['cycle'] if record['cycle']
+          fields[:cycle_started_at] = record['cycle_started_at'] if record['cycle_started_at']
+          published = Woods::Generation.new(output_dir: index_dir).current.number
+          if published.positive? && record['generation'].is_a?(Integer)
+            fields[:published_generation] = published
+            fields[:status_behind] = record['generation'] < published
+          end
+          fields
         end
 
         # Resolve the current HEAD SHA for the git repo containing +index_dir+.

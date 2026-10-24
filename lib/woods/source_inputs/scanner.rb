@@ -205,8 +205,10 @@ module Woods
         SourcePathEncoding.utf8!(File.realpath(path))
       end
 
+      # One HMAC context per walk, reset per file: building a context costs
+      # more than hashing a typical source file.
       def hash_stream(file)
-        digest = OpenSSL::HMAC.new(@key.bytes, OpenSSL::Digest.new('SHA256'))
+        digest = (@hmac ||= OpenSSL::HMAC.new(@key.bytes, OpenSSL::Digest.new('SHA256'))).reset
         while (chunk = file.read(16_384))
           @bytes += chunk.bytesize
           check_budget!
@@ -219,8 +221,13 @@ module Woods
         [stat.dev, stat.ino, stat.size, stat.mtime.to_r, stat.ctime.to_r]
       end
 
+      # +deadline+ (a monotonic time) ends the walk with the same reason as
+      # +max_seconds+: a caller that spent part of its budget before the walk
+      # passes the time it must finish by.
       def check_budget!
-        raise BudgetExceeded, 'scan_time_budget' if monotonic - @started > @limits[:max_seconds]
+        now = monotonic
+        raise BudgetExceeded, 'scan_time_budget' if now - @started > @limits[:max_seconds]
+        raise BudgetExceeded, 'scan_time_budget' if @limits[:deadline] && now > @limits[:deadline]
         raise BudgetExceeded, 'scan_file_budget' if @visited > @limits[:max_files]
         raise BudgetExceeded, 'scan_byte_budget' if @bytes > @limits[:max_bytes]
       end

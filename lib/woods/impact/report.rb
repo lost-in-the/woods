@@ -5,6 +5,7 @@ require_relative 'endpoint'
 require_relative 'range_diff'
 require_relative 'enrichment'
 require_relative 'focus'
+require_relative 'report_cache'
 
 module Woods
   module Impact
@@ -18,22 +19,59 @@ module Woods
       # @param from [Integer, String]
       # @param to [Integer, String]
       # @param parameters [Hash] depth, type/via filters and finite work budgets
+      # @param cache [ReportCache, nil] keeps the comparison per resolved pair
+      #   of payloads, so another selector naming the same pair (`gen:N`, a
+      #   SHA, `now`) reuses it; the report still names this call's selectors
       # @return [Report]
-      def self.compare(index_dir, from:, to: 'now', **parameters)
+      def self.compare(index_dir, from:, to: 'now', cache: nil, **parameters)
         options = Options.new(**parameters)
         Resolver.new(index_dir).open(from: from, to: to) do |before, after|
-          base = Endpoint.new(before)
-          head = Endpoint.new(after)
-          before_units = base.units
-          after_units = head.units
-          changes = RangeDiff.new(before_units, after_units,
-                                  max_source_hunks: options.to_h.fetch('max_source_hunks')).changes
-          unknowns = base.unknowns(before_units, 'from') + head.unknowns(after_units, 'to')
-          computed = compute([[before, before_units], [after, after_units]], changes, options)
-          new({ 'from' => base.provenance(from), 'to' => head.provenance(to) }, changes,
-              unknowns: unknowns, computed: computed)
+          parts = if cache
+                    cache.fetch(cache_key(before, after, options)) { comparison(before, after, options) }
+                  else
+                    comparison(before, after, options)
+                  end
+          range = { 'from' => Endpoint.new(before).provenance(from), 'to' => Endpoint.new(after).provenance(to) }
+          new(range, parts.fetch('changes'), unknowns: parts.fetch('unknowns'), computed: parts.fetch('computed'))
         end
       end
+
+      # The comparison of two resolved payloads, without provenance. Every
+      # unit is parsed once when its file differs between them only in its
+      # extraction time ({Endpoint::SharedParse}).
+      # @return [Hash] frozen changes, unknowns and computed evidence
+      def self.comparison(before, after, options)
+        return unchanged(before, options) if before.equal?(after)
+
+        base = Endpoint.new(before)
+        head = Endpoint.new(after)
+        parse = Endpoint::SharedParse.new
+        after_units = head.units(decode: parse.method(:remember))
+        before_units = base.units(decode: parse.method(:reuse))
+        changes = RangeDiff.new(before_units, after_units,
+                                max_source_hunks: options.to_h.fetch('max_source_hunks')).changes
+        unknowns = base.unknowns(before_units, 'from') + head.unknowns(after_units, 'to')
+        Value.copy('changes' => changes, 'unknowns' => unknowns,
+                   'computed' => compute([[before, before_units], [after, after_units]], changes, options))
+      end
+      private_class_method :comparison
+
+      # The exact payloads and parameters a comparison covers.
+      def self.cache_key(before, after, options)
+        [before, after].map do |reader|
+          [File.expand_path(reader.index_dir.to_s), reader.generation_number, reader.payload_dir.to_s,
+           reader.external_dependency_checksum]
+        end.push(Value.json(options.to_h)).freeze
+      end
+      private_class_method :cache_key
+
+      # Both endpoints are one payload: nothing changed, so no unit is read or
+      # compared. The report says so with the same envelope as any range.
+      def self.unchanged(reader, options)
+        Endpoint.new(reader).manifest
+        Value.copy('changes' => [], 'unknowns' => [], 'computed' => compute([[reader, []], [reader, []]], [], options))
+      end
+      private_class_method :unchanged
 
       # @return [Hash] endpoint-specific propagation and flow evidence
       def self.compute(endpoints, changes, options)
