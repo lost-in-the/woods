@@ -804,8 +804,16 @@ RSpec.describe 'Resolved filter applicability in a real Rails process (W-8)', :b
     JSON.parse(output.lines.last.force_encoding('UTF-8')).fetch('units')
   end
 
+  # The forgery-protection filters come from a framework macro; their owner
+  # depends on whether the Rails version's Base already declares them.
+  def app_filters(entries)
+    entries.reject { |entry| entry['filter'].start_with?('verify_') }
+  end
+
   def applicability(entries)
-    entries.to_h { |entry| [entry['filter'], entry.slice('owner', 'applies_to', 'applicability', 'only', 'except')] }
+    app_filters(entries).to_h do |entry|
+      [entry['filter'], entry.slice('owner', 'applies_to', 'applicability', 'only', 'except')]
+    end
   end
 
   it 'publishes each filter’s owner and the admitted actions it applies to, inherited and concern-supplied alike' do
@@ -813,7 +821,7 @@ RSpec.describe 'Resolved filter applicability in a real Rails process (W-8)', :b
     articles = units.fetch('ArticlesController')['metadata']
 
     expect(articles['actions']).to contain_exactly('edit', 'health', 'index', 'show')
-    expect(articles['filters'].map { |entry| entry['filter'] })
+    expect(app_filters(articles['filters']).map { |entry| entry['filter'] })
       .to eq(%w[require_login set_locale track_visit set_article log_render])
     expect(applicability(articles['filters'])).to eq(
       'require_login' => { 'owner' => 'SignedIn', 'applies_to' => %w[edit health index show],
