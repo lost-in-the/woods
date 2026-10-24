@@ -58,6 +58,7 @@ Identifiers are namespaced and typed. Never invent one from a filename when
 | Understand what a unit calls or includes | `dependencies` | `lookup` on important nodes |
 | Follow request-to-model-to-view/job behavior | `trace_flow` | `lookup` at ambiguous steps |
 | Understand a unit's neighborhood | `structure` | targeted traversal |
+| Show a unit's relationships, schema, lifecycle or impact in a pull request | `diagram` | paste its text in a ```` ```mermaid ```` block |
 | Inspect Rails or gem behavior | `framework` | current source files |
 | Find recently changed indexed units | `recent_changes` | git diff/history |
 | Discover architectural domains | `domain_clusters` | `graph_analysis` |
@@ -233,9 +234,9 @@ If retrieval is disabled, use `search`, `lookup`, and graph tools. Do not reques
 
 ## Index Server boundaries
 
-The normal packaged server registers 14 tools:
+The normal packaged server registers 15 tools:
 
-`woods_status`, `search`, `lookup`, `dependencies`, `dependents`, `structure`, `trace_flow`, `framework`, `recent_changes`, `graph_analysis`, `domain_clusters`, `pagerank`, `reload`, and `codebase_retrieve`.
+`woods_status`, `search`, `lookup`, `dependencies`, `dependents`, `structure`, `trace_flow`, `diagram`, `framework`, `recent_changes`, `graph_analysis`, `domain_clusters`, `pagerank`, `reload`, and `codebase_retrieve`.
 
 Source inventory contains conditional tools for sessions, pipeline operation, feedback, snapshots, and Notion. Do not call or promise them unless they appear in the connected server's tool list and their backing collaborator is configured.
 

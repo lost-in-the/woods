@@ -59,7 +59,7 @@ RSpec.describe Woods::MCP::Server do
       expect(first.configuration).not_to equal(second.configuration)
     end
 
-    it 'registers 14 tools when no optional collaborators are wired' do
+    it 'registers 15 tools when no optional collaborators are wired' do
       # Without operator / feedback_store / snapshot_store / session_store /
       # notion config, the 16 collaborator-dependent tools (5 pipeline_*, 4
       # retrieval_*, 5 snapshot/history/impact, session_trace, notion_sync) are
@@ -67,7 +67,7 @@ RSpec.describe Woods::MCP::Server do
       # they're guaranteed to error just wastes LLM context. Core tools that
       # only need the on-disk index remain advertised.
       tools = server.instance_variable_get(:@tools)
-      expect(tools.size).to eq(14)
+      expect(tools.size).to eq(15)
     end
 
     it 'registers the always-on tool names when no optional collaborators are wired' do
@@ -76,7 +76,7 @@ RSpec.describe Woods::MCP::Server do
         'lookup', 'search', 'dependencies', 'dependents',
         'structure', 'graph_analysis', 'domain_clusters', 'pagerank', 'framework',
         'recent_changes', 'reload', 'codebase_retrieve',
-        'trace_flow',
+        'trace_flow', 'diagram',
         'woods_status'
       )
     end

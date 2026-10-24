@@ -163,9 +163,9 @@ of extracted units with verified embedding coverage. Positive counts do not
 prove complete coverage or working provider access. See
 [semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
-### Tools (30 — 14 registered in the packaged default)
+### Tools (31 — 15 registered in the packaged default)
 
-The Index Server defines 30 schemas across core and conditional capabilities. The normal packaged executable registers the 14 tools below; the remaining schemas require the specialized wiring described afterward.
+The Index Server defines 31 schemas across core and conditional capabilities. The normal packaged executable registers the 15 tools below; the remaining schemas require the specialized wiring described afterward.
 
 | Tool | Use it for |
 |---|---|
@@ -176,6 +176,7 @@ The Index Server defines 30 schemas across core and conditional capabilities. Th
 | `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `structure` | Summarize structural relationships around a unit |
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
+| `diagram` | Mermaid text of one unit for a pull request or a review: `neighbourhood`, `schema`, `lifecycle` or `impact`, each with its own `depth`; refused over its budget, never truncated ([diagrams](MCP_TOOL_COOKBOOK.md#diagrams)) |
 | `framework` | Inspect relevant Rails or installed gem source |
 | `recent_changes` | Find indexed units changed recently |
 | `graph_analysis` | Structural reports: orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, undeclared package edges |

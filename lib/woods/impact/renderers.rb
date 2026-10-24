@@ -16,7 +16,17 @@ module Woods
       # @param report [Report, Hash] schema version 1 report
       # @return [String] bounded Mermaid flowchart of recorded impact witnesses
       def self.mermaid(report)
-        Mermaid.new(document(report)).render
+        mermaid_renderer(report).render
+      end
+
+      # The Mermaid renderer itself, so a caller that must never show a
+      # truncated diagram can ask {Mermaid#truncated?} after rendering
+      # (Woods::Diagrams, woods#826).
+      #
+      # @param report [Report, Hash] schema version 1 report
+      # @return [Mermaid]
+      def self.mermaid_renderer(report)
+        Mermaid.new(document(report))
       end
 
       def self.document(report)
