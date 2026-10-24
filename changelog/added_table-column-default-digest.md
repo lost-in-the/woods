@@ -1,0 +1,1 @@
+- `database_table` columns carry `default_digest` (16 hex characters of SHA-256 over the default and its function, `null` without one), so a changed default is a modified column in the impact report's `column_changes` while default values themselves are still not recorded (#824).

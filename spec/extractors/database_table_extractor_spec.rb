@@ -74,12 +74,16 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
       expect(units.map(&:identifier)).to eq(%w[table:ledger_entries table:widgets])
     end
 
-    it 'records columns in schema order with type, nullability and default presence only' do
+    it 'records columns in schema order with type, nullability and default presence, never the value' do
+      digest = ->(default, function) { Digest::SHA256.hexdigest(JSON.generate([default, function]))[0, 16] }
       expect(unit('table:widgets').metadata[:columns]).to eq(
-        [{ name: 'id', type: 'integer', sql_type: 'bigint', null: false, has_default: false },
-         { name: 'name', type: 'string', sql_type: 'varchar(255)', null: true, has_default: true },
-         { name: 'created_at', type: 'datetime', sql_type: 'datetime', null: false, has_default: true }]
+        [{ name: 'id', type: 'integer', sql_type: 'bigint', null: false, has_default: false, default_digest: nil },
+         { name: 'name', type: 'string', sql_type: 'varchar(255)', null: true, has_default: true,
+           default_digest: digest.call('unnamed', nil) },
+         { name: 'created_at', type: 'datetime', sql_type: 'datetime', null: false, has_default: true,
+           default_digest: digest.call(nil, 'CURRENT_TIMESTAMP') }]
       )
+      expect(JSON.generate(unit('table:widgets').metadata[:columns])).not_to include('unnamed')
     end
 
     it 'records the primary key and sorted indexes' do
