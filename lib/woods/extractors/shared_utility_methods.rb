@@ -27,6 +27,10 @@ module Woods
     module SharedUtilityMethods
       include SourceNesting
 
+      # Where Rails 6.0 builds its only/except procs
+      # ({#legacy_action_filter_actions}).
+      LEGACY_ACTION_FILTER_SOURCE = 'abstract_controller/callbacks.rb'
+
       # Glob files matching a pattern across a list of directories.
       #
       # Centralizes the `Dir[dir.join('**/*.rb')]` loop duplicated across
@@ -241,17 +245,39 @@ module Woods
 
       # Extract action names from an ActionFilter-like condition object.
       # Duck-types on the @actions ivar being a Set, avoiding dependence
-      # on private class names across Rails versions.
+      # on private class names across Rails versions. Rails 6.0 has no
+      # ActionFilter: it normalizes only/except into a proc closing over the
+      # action set, read here through the proc's binding (never called).
       #
       # @param condition [Object] A condition from the callback's @if/@unless array
       # @return [Array<String>, nil] Action names, or nil if not an ActionFilter
       def extract_action_filter_actions(condition)
+        return legacy_action_filter_actions(condition) if condition.is_a?(Proc)
         return nil unless condition.instance_variable_defined?(:@actions)
 
         actions = condition.instance_variable_get(:@actions)
         return nil unless actions.is_a?(Set)
 
         actions.to_a
+      end
+
+      # The action set of a Rails 6.0 only/except proc: built by
+      # AbstractController::Callbacks#_normalize_callback_option as
+      # `proc { |c| _from.include? c.action_name }`.
+      #
+      # @param condition [Proc]
+      # @return [Array<String>, nil] nil for any other proc
+      def legacy_action_filter_actions(condition)
+        file, = condition.source_location
+        return nil unless file&.end_with?(LEGACY_ACTION_FILTER_SOURCE)
+
+        scope = condition.binding
+        return nil unless scope.local_variable_defined?(:_from)
+
+        actions = scope.local_variable_get(:_from)
+        actions.is_a?(Set) ? actions.to_a : nil
+      rescue ArgumentError
+        nil
       end
 
       # Rails 6 exposes a numeric Proc identity through #filter, and the
@@ -290,7 +316,7 @@ module Woods
         label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
       end
 
-      private :callback_filter, :stable_filter, :callback_filter_label
+      private :callback_filter, :stable_filter, :callback_filter_label, :legacy_action_filter_actions
 
       # Human-readable label for a non-ActionFilter condition.
       #

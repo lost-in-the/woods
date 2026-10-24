@@ -13,6 +13,7 @@ require_relative 'method_effects'
 require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'action_fact_resolution'
+require_relative 'filter_applicability'
 
 module Woods
   module Extractors
@@ -37,15 +38,11 @@ module Woods
       include SharedDependencyScanner
       include RouteHelperResolver
       include ActionFactResolution
+      include FilterApplicability
 
       # Matches everything between a `def foo_params` line and its
       # params.require/permit or params.expect call, without crossing into
       # a sibling method's body. Used by {#extract_permitted_params}.
-      # The DSL calls that declare a process-action callback, by callback kind.
-      FILTER_DECLARATIONS = %i[before after around].to_h do |kind|
-        [kind, %W[#{kind}_action prepend_#{kind}_action append_#{kind}_action]]
-      end.freeze
-
       PARAMS_METHOD_BODY = /(?:(?!\bdef\b)[\s\S])*?/
 
       # @return [Array<String>] Warnings collected during extraction
@@ -294,7 +291,15 @@ module Woods
         FILTERS
       end
 
-      def extract_filter_chain(controller)
+      # The controller's process-action filter chain, in chain order, with
+      # each filter's declared only/except/if/unless and declaration site.
+      #
+      # @param controller [Class]
+      # @param actions [Array<String>, nil] the admitted actions; when given,
+      #   each entry also carries +owner+, +applies_to+ and +applicability+
+      #   ({FilterApplicability#filter_applicability}, W-8)
+      # @return [Array<Hash>]
+      def extract_filter_chain(controller, actions: nil)
         process_action_callbacks(controller).map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
@@ -304,7 +309,8 @@ module Woods
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
           site = filter_declaration_site(controller, callback)
-          site ? result.merge(site) : result
+          result.merge!(site) if site
+          actions ? result.merge(filter_applicability(controller, callback, actions)) : result
         end
       end
 
@@ -358,36 +364,6 @@ module Woods
       # @return [Boolean]
       def app_source_file?(path)
         path.is_a?(String) && path.start_with?("#{Rails.root}/") && File.file?(path)
-      end
-
-      # Filter declarations in one source file, parsed once per extractor.
-      #
-      # @param path [String]
-      # @return [Hash{Array(Symbol, String) => Integer}] `[kind, name]` to the
-      #   line of its first declaration
-      def filter_declarations(path)
-        (@filter_declarations ||= {})[path] ||= begin
-          parsed = Prism.parse(SourceFile.read(path))
-          sites = {}
-          collect_filter_declarations(parsed.value, sites) if parsed.success?
-          sites
-        end
-      end
-
-      # @return [void]
-      def collect_filter_declarations(node, sites)
-        if node.is_a?(Prism::CallNode) && node.receiver.nil? && (kind = filter_declaration_kind(node.name))
-          Array(node.arguments&.arguments).grep(Prism::SymbolNode).each do |symbol|
-            sites[[kind, symbol.unescaped]] ||= node.location.start_line
-          end
-        end
-        node.compact_child_nodes.each { |child| collect_filter_declarations(child, sites) }
-      end
-
-      # @param name [Symbol] a called method's name
-      # @return [Symbol, nil] the callback kind it declares
-      def filter_declaration_kind(name)
-        FILTER_DECLARATIONS.find { |_kind, methods| methods.include?(name.to_s) }&.first
       end
 
       # A Metal controller has no callback chain until it includes a
@@ -819,8 +795,8 @@ module Woods
           inherited_gem_actions: resolve_inherited_gem_actions(controller),
           routes: @routes_map[controller.name] || {},
 
-          # Filter chain
-          filters: extract_filter_chain(controller),
+          # Filter chain, with each filter's resolved actions and owner (W-8)
+          filters: extract_filter_chain(controller, actions: actions),
 
           # Runtime superclass, e.g. ApplicationController or ActionController::Metal
           parent_class: controller.superclass&.name,

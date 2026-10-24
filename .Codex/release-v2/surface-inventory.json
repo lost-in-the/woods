@@ -84,6 +84,14 @@
     "extractors=",
     "gem_configs",
     "gem_configs=",
+    "git_commit_table_days",
+    "git_commit_table_days=",
+    "git_commit_table_files_limit",
+    "git_commit_table_files_limit=",
+    "git_commit_table_limit",
+    "git_commit_table_limit=",
+    "git_recent_commits",
+    "git_recent_commits=",
     "graph_cycle_limit",
     "graph_cycle_limit=",
     "graph_cycle_max_length",
@@ -1101,7 +1109,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 152,
+    "configuration_attributes": 160,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

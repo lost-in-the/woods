@@ -14,6 +14,7 @@ require 'woods/filename_utils'
 # flow document, in the reader's pinned generation without resolving payload
 # paths themselves.
 RSpec.describe 'Woods::PublishedIndex flow readers' do
+  let(:corrupt) { Woods::PublishedIndex::CorruptArtifactError }
   let(:index) { Dir.mktmpdir('woods-published-flows') }
   let(:store) { Woods::PayloadStore.new(index) }
   let(:inverse) do
@@ -99,14 +100,14 @@ RSpec.describe 'Woods::PublishedIndex flow readers' do
       malformed = { 'Shared' => { 'model' => 'OrdersController#create' } }
       File.write(payload.join('flows/by_unit.json'), JSON.generate(malformed))
       with_reader do |reader|
-        expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(IOError, /inverse/)
+        expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(corrupt, /inverse/)
       end
     end
 
     it 'raises for an inverse that is not a JSON object' do
       payload = publish(1)
       File.write(payload.join('flows/by_unit.json'), '[]')
-      with_reader { |reader| expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(IOError) }
+      with_reader { |reader| expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(corrupt) }
     end
 
     it 'refuses a symlinked inverse' do
@@ -115,7 +116,7 @@ RSpec.describe 'Woods::PublishedIndex flow readers' do
       File.write(outside, JSON.generate(inverse))
       File.delete(payload.join('flows/by_unit.json'))
       File.symlink(outside, payload.join('flows/by_unit.json'))
-      with_reader { |reader| expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(IOError) }
+      with_reader { |reader| expect { reader.flow_entry_points('Shared', type: 'model') }.to raise_error(corrupt) }
     end
   end
 
@@ -141,13 +142,13 @@ RSpec.describe 'Woods::PublishedIndex flow readers' do
       payload = publish(1)
       filename = Woods::FilenameUtils.flow_filename('OrdersController', 'create')
       File.write(payload.join('flows', filename), JSON.generate(document.merge('entry_point' => 'Other#x')))
-      with_reader { |reader| expect { reader.flow_document('OrdersController#create') }.to raise_error(IOError) }
+      with_reader { |reader| expect { reader.flow_document('OrdersController#create') }.to raise_error(corrupt) }
     end
 
     it 'raises when an indexed document is missing' do
       payload = publish(1)
       File.delete(payload.join('flows', Woods::FilenameUtils.flow_filename('OrdersController', 'create')))
-      with_reader { |reader| expect { reader.flow_document('OrdersController#create') }.to raise_error(IOError) }
+      with_reader { |reader| expect { reader.flow_document('OrdersController#create') }.to raise_error(corrupt) }
     end
   end
 end

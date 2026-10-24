@@ -3,6 +3,7 @@
 require 'json'
 require_relative '../filename_utils'
 require_relative '../impact/artifacts'
+require_relative 'optional_artifacts'
 
 module Woods
   class PublishedIndex
@@ -10,7 +11,8 @@ module Woods
     # `flows/by_unit.json` (W-13, #763) and the documents `flows/flow_index.json`
     # lists. Both are optional artifacts, so absence answers `nil` ("this
     # generation cannot say"), never an empty result. Present but unreadable,
-    # malformed or symlinked artifacts raise `IOError`.
+    # malformed or symlinked artifacts raise {CorruptArtifactError}, as the
+    # other optional readers ({OptionalArtifacts}) do.
     #
     # Reads go through the bounded, no-follow {Woods::Impact::Artifacts} reader
     # that the impact report uses, against this reader's `payload_dir`, so
@@ -27,17 +29,17 @@ module Woods
       # @param type [String, Symbol] the unit's actual singular type
       # @return [Array<String>, nil] sorted entry-point keys of
       #   `flows/flow_index.json`; nil when the generation publishes no inverse
-      # @raise [IOError] when the inverse is unreadable or malformed
+      # @raise [CorruptArtifactError] when the inverse is unreadable or malformed
       def flow_entry_points(identifier, type:)
         inverse = flow_inverse
         return nil if inverse.nil?
 
         typed = inverse.fetch(identifier.to_s, {})
-        raise IOError, 'Invalid typed flow inverse' unless typed.is_a?(Hash)
+        raise CorruptArtifactError, 'Invalid typed flow inverse' unless typed.is_a?(Hash)
 
         entries = typed.fetch(type.to_s, [])
         unless entries.is_a?(Array) && entries.all? { |entry| entry.is_a?(String) && !entry.empty? }
-          raise IOError, 'Invalid flow inverse membership'
+          raise CorruptArtifactError, 'Invalid flow inverse membership'
         end
 
         entries.dup
@@ -49,7 +51,7 @@ module Woods
       # @param entry_point [String] a `flows/flow_index.json` key, e.g. `OrdersController#create`
       # @return [Hash, nil] nil when the generation has no flow index or the
       #   index does not list the entry point
-      # @raise [IOError] when the index or the listed document is unreadable,
+      # @raise [CorruptArtifactError] when the index or the listed document is unreadable,
       #   malformed, or names another entry point
       def flow_document(entry_point)
         index = flow_index
@@ -57,7 +59,7 @@ module Woods
 
         document = flow_artifact(flow_document_path(entry_point.to_s))
         unless document.is_a?(Hash) && document['entry_point'] == entry_point.to_s && document['steps'].is_a?(Array)
-          raise IOError, 'Flow document does not match its flow index entry'
+          raise CorruptArtifactError, 'Flow document does not match its flow index entry'
         end
 
         document
@@ -72,7 +74,7 @@ module Woods
         return @flow_inverse if defined?(@flow_inverse)
 
         inverse = optional_flow_artifact('flows/by_unit.json')
-        raise IOError, 'Invalid flow inverse: not a JSON object' unless inverse.nil? || inverse.is_a?(Hash)
+        raise CorruptArtifactError, 'Invalid flow inverse: not a JSON object' unless inverse.nil? || inverse.is_a?(Hash)
 
         @flow_inverse = inverse
       end
@@ -85,7 +87,7 @@ module Woods
       # @return [String] payload-relative path
       def flow_document_path(entry_point)
         controller, action = entry_point.split('#', 2)
-        raise IOError, 'Invalid flow entry point' if controller.to_s.empty? || action.to_s.empty?
+        raise CorruptArtifactError, 'Invalid flow entry point' if controller.to_s.empty? || action.to_s.empty?
 
         "flows/#{Woods::FilenameUtils.flow_filename(controller, action)}"
       end
@@ -97,7 +99,7 @@ module Woods
         return @flow_index if defined?(@flow_index)
 
         index = optional_flow_artifact('flows/flow_index.json')
-        raise IOError, 'Invalid flow index: not a JSON object' unless index.nil? || index.is_a?(Hash)
+        raise CorruptArtifactError, 'Invalid flow index: not a JSON object' unless index.nil? || index.is_a?(Hash)
 
         @flow_index = index
       end
@@ -113,11 +115,11 @@ module Woods
 
       # @param relative [String] payload-relative path
       # @return [Hash, Array]
-      # @raise [IOError]
+      # @raise [CorruptArtifactError]
       def flow_artifact(relative)
         Woods::Impact::Artifacts.new(self).read(relative)
-      rescue JSON::ParserError, SystemCallError, EncodingError => e
-        raise IOError, "Unreadable flow artifact #{relative}: #{e.class}"
+      rescue IOError, JSON::ParserError, SystemCallError, EncodingError => e
+        raise CorruptArtifactError, "Unreadable flow artifact #{relative}: #{e.class}"
       end
     end
 

@@ -450,6 +450,39 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe 'git history bounds' do
+    it 'defaults to five recent commits per unit and a 365-day, 5000-commit, 100-file commit table' do
+      config = described_class.new
+
+      expect(config.git_recent_commits).to eq(5)
+      expect(config.git_commit_table_days).to eq(365)
+      expect(config.git_commit_table_limit).to eq(5000)
+      expect(config.git_commit_table_files_limit).to eq(100)
+    end
+
+    it 'accepts positive Integers and rejects anything else' do
+      config = described_class.new
+      %i[git_recent_commits git_commit_table_days git_commit_table_limit git_commit_table_files_limit].each do |key|
+        config.public_send(:"#{key}=", 20)
+        expect(config.public_send(key)).to eq(20)
+        [0, -1, nil, 2.5, '20'].each do |bad|
+          expect { config.public_send(:"#{key}=", bad) }
+            .to raise_error(Woods::ConfigurationError, /#{key} must be a positive Integer/)
+        end
+        expect(config.public_send(key)).to eq(20)
+      end
+    end
+
+    it 'fingerprints the recent-commit count, which retained units cannot reconcile incrementally' do
+      config = described_class.new
+      before = config.extraction_fingerprint.fetch('git_recent_commits')
+      config.git_recent_commits = 10
+
+      expect(config.extraction_fingerprint.fetch('git_recent_commits')).not_to eq(before)
+      expect(config.extraction_fingerprint.keys).not_to include('git_commit_table_limit')
+    end
+  end
+
   describe '#method_effects_limit' do
     it 'defaults to 50 methods per unit' do
       expect(described_class.new.method_effects_limit).to eq(50)

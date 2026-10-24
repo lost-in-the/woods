@@ -16,7 +16,8 @@ require 'woods/generation'
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
 #    `generated_at` in `graph_analysis.json`, and `generated_at` inside each
-#    flow document (M3 flow equivalence). A unit an incremental run correctly
+#    flow document (M3 flow equivalence), and `since` in `git_commits.json`
+#    (the window's first UTC day). A unit an incremental run correctly
 #    left alone keeps an older stamp. `graph_sha` is *not* excluded: it
 #    digests `dependency_graph.json`, whose serialization is a pure function
 #    of graph content (B-180), so the two runs must publish the same digest.
@@ -40,6 +41,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   VOLATILE_MANIFEST_KEYS = %w[extracted_at].freeze
   VOLATILE_ANALYSIS_KEYS = %w[generated_at].freeze
   VOLATILE_FLOW_KEYS = %w[generated_at].freeze
+  VOLATILE_COMMIT_TABLE_KEYS = %w[since].freeze
 
   module_function
 
@@ -52,6 +54,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       graph_differences(incremental_dir, full_dir) +
       manifest_differences(incremental_dir, full_dir) +
       skipped_files_differences(incremental_dir, full_dir) +
+      commit_table_differences(incremental_dir, full_dir) +
       analysis_differences(incremental_dir, full_dir) +
       flow_differences(incremental_dir, full_dir) +
       summary_differences(incremental_dir) +
@@ -120,6 +123,19 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return [] if incremental == full
 
     ["skipped_files.json: #{brief(hash_delta(incremental, full))}"]
+  end
+
+  # The commit table (`git_commits.json`) is a pure function of HEAD, the
+  # indexed paths and the bounds. Only `since`, the window's first UTC day,
+  # is a wall-clock stamp: two runs either side of midnight UTC differ there
+  # and nowhere else unless a commit sits on the boundary. Presence must
+  # match too: one run publishing a table and the other none is a difference.
+  def commit_table_differences(incremental_dir, full_dir)
+    incremental = read_json(incremental_dir, 'git_commits.json')&.except(*VOLATILE_COMMIT_TABLE_KEYS)
+    full = read_json(full_dir, 'git_commits.json')&.except(*VOLATILE_COMMIT_TABLE_KEYS)
+    return [] if incremental == full
+
+    ["git_commits.json: #{brief(hash_delta(incremental, full))}"]
   end
 
   # SUMMARY.md's totals against the manifest of the SAME index (M4).

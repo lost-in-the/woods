@@ -7,9 +7,11 @@ require 'pathname'
 require_relative 'generation'
 require_relative 'payload_store'
 require_relative 'mcp/index_reader'
+require_relative 'published_index/optional_artifacts'
 require_relative 'published_index/edge_shaper'
 require_relative 'published_index/flow_readers'
 require_relative 'published_index/generation_catalog'
+require_relative 'published_index/retention_pins'
 require_relative 'published_index/typed_unit_reader'
 
 module Woods
@@ -63,6 +65,7 @@ module Woods
   #
   class PublishedIndex
     extend Forwardable
+    include OptionalArtifacts
 
     # Raised when `generation.json` exists but cannot be parsed. Distinct from
     # a *missing* pointer file, which means a flat (pre-2.0) index and is not
@@ -85,21 +88,6 @@ module Woods
     def self.available_generations(index_dir)
       GenerationCatalog.available(Pathname.new(index_dir.to_s))
     end
-
-    # Generation numbers held by persistent retention pins (`woods:pin[N]`),
-    # ascending. Pins are operational state beside the payloads, not part of
-    # any generation, so this reads no payload and takes no retention lock.
-    #
-    # The set is reported as recorded: a pin whose payload was removed outside
-    # Woods retention (`woods:clean`, manual deletion) stays listed until it is
-    # released. Intersect with {.available_generations} for readable pinned
-    # payloads.
-    #
-    # @param index_dir [String, Pathname]
-    # @return [Array<Integer>] empty when no pin was ever recorded
-    # @raise [IOError] when the pin state is unreadable or malformed; never
-    #   reported as "no pins", which would hide retention protection
-    def self.retention_pins(index_dir) = Woods::GenerationPins.new(index_dir).pins
 
     # Open a reader, yield it, and guarantee the generation lock is released.
     #

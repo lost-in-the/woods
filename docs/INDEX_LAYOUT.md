@@ -25,6 +25,7 @@ A typical structural index looks like this; optional entries need not exist:
 │       ├── dependency_graph.json
 │       ├── graph_analysis.json
 │       ├── skipped_files.json          # optional on older indexes
+│       ├── git_commits.json            # optional: absent without readable git history
 │       ├── SUMMARY.md
 │       ├── models/
 │       │   ├── _index.json
@@ -78,6 +79,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `<type>/_index.json` and unit JSON | Present for extracted families. `_index.json` is an array of unit summaries; an empty array is valid. Disabled/unavailable families may be absent. Do not infer completeness from a fixed count of directories. |
 | `graph_analysis.json` | Derived graph analysis when produced. Treat absence as unavailable analysis, not an empty or corrupt unit index. `unmodelled_tables` lists the `database_table` units no model reads. |
 | `skipped_files.json` | Swept Ruby files and GraphQL operation documents (`config.graphql_document_paths`) that produced no unit: `total`, `counts` by reason, and `files` as `{ path, reason }` sorted by path. Ruby reasons are `rejected_by:<extractor>`, `parse_error`, `no_declaration`, `namespace_only`, `not_owned` and `template` (a generator template under `lib/`); document reasons are `graphql_unavailable`, `schema_definitions` and `parse_error`. A template file named by a sweep glob is listed with `non_view_template`, `unsupported_template_engine` or `rejected_by:view_templates`. Written by full and incremental runs alike; older indexes may omit it. Informational, never a validation failure. |
+| `git_commits.json` | Optional [commit table](#commit-table): HEAD-reachable commits in a bounded window that touched an indexed path, with their files, and a path => commits index. Absent when the writer had no readable git history or predates the table; absence is unknown history, not "no commits". |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
 | `flows/by_unit.json` | Optional inverted precomputed-flow membership, keyed by unit identifier, then unit type, with sorted unique entry-point arrays. See [inverted flow membership](#inverted-flow-membership). |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
@@ -194,6 +196,67 @@ provide the listed focused/booted evidence. Companion source and installed-artif
 transition acceptance is a separate gate; ordinary CI does not execute it. They
 do not complete #751, qualify the later #756 selector addition, establish
 method-level reverse impact or qualify a whole release.
+
+### Commit table
+
+`git_commits.json` lists every HEAD-reachable commit inside the window that
+touched at least one indexed path (an application-owned `file_path` or
+`source_paths` entry of a unit in this generation's graph), newest first in
+`git log` order. It is optional: no file is written for an application without
+readable history (no `.git` at the root, git missing, a shallow clone, a linked
+worktree whose git directory is not reachable) or when the walk fails. An empty
+`commits` array means readable history with nothing in the window.
+
+```json
+{
+  "schema_version": 1,
+  "head": "361468d0c3...",
+  "since": "2025-10-23",
+  "window_days": 365,
+  "max_commits": 5000,
+  "max_files_per_commit": 100,
+  "indexed_paths_sha256": "9f2c...",
+  "truncated": false,
+  "commits": [
+    {
+      "sha": "361468d0c3...",
+      "parents": ["2e8d0b4a17..."],
+      "author": "Leah Armstrong",
+      "date": "2026-10-20T14:02:11+02:00",
+      "message": "Touch the author when a post is saved",
+      "description": "Authors expect their profile's updated_at to move when they publish.",
+      "files": [
+        { "path": "app/models/post.rb", "status": "modified" },
+        { "path": "spec/models/post_spec.rb", "status": "modified" }
+      ],
+      "files_omitted": 0
+    }
+  ],
+  "paths": {
+    "app/models/post.rb": ["361468d0c3...", "2e8d0b4a17..."]
+  }
+}
+```
+
+| Field | Contract |
+|---|---|
+| `schema_version` | `1`. A reader must refuse another value rather than guess. |
+| `head` | The full HEAD sha the walk started from; matches the manifest's `git_sha` for the same run. |
+| `since`, `window_days` | The window: commits whose committer date is on or after `since` (UTC midnight), `window_days` before the run's UTC date. |
+| `max_commits`, `truncated` | The commit bound (`config.git_commit_table_limit`); `truncated: true` when older commits inside the window were dropped by it. |
+| `max_files_per_commit` | The per-commit file bound (`config.git_commit_table_files_limit`). |
+| `indexed_paths_sha256` | SHA-256 of the sorted, newline-joined indexed paths the table was built for. With `head`, `since` and the bounds it decides the content: an incremental run that finds them all unchanged keeps the file, and otherwise rebuilds it whole. |
+| `commits[].sha`, `parents` | Full object names. A merge lists every parent; its `files` are its diff against the first parent, as for `metadata.git`. |
+| `commits[].author`, `date` | The author name as git records it (no email) and the committer date, ISO 8601 with offset. |
+| `commits[].message`, `description` | The subject line, and the rest of the message trimmed (`""` when there is none). |
+| `commits[].files`, `files_omitted` | Every path the commit touched inside the application root, indexed or not, application-relative, in git's order, with `status` `added`, `modified`, `deleted` or `type_changed`; renames appear as a deletion and an addition. At most `max_files_per_commit` are listed; the rest, and any path that is not valid UTF-8, are counted in `files_omitted`. No line counts or hunks. |
+| `paths` | Each indexed path that has a commit in the table, sorted, to its commits' shas, newest first. Never bounded by `max_files_per_commit`, so co-change is complete: the commits of one path and the other `paths` entries that list the same shas. |
+
+The walk is the one per-unit `metadata.git` uses: HEAD only (no unmerged branches
+or remote refs), rooted at the application with `git -C`, honouring
+`WOODS_GIT_DIR`, and mapping a nested application's paths out of a monorepo.
+`metadata.git` counts a rolling 365 days; the table's window starts at a UTC
+day boundary, so near the boundary the two can differ by up to a day.
 
 ### Inverted flow membership
 
