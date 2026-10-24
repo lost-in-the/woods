@@ -163,6 +163,9 @@ module Woods
       def hidden?(relative)
         relative = SourcePathEncoding.utf8(relative)
         return true unless relative
+        # Only a segment that starts with a dot can be hidden; most paths
+        # have none, and a source check asks about every file.
+        return false unless relative.start_with?('.') || relative.include?('/.')
 
         beyond_visible_dot_directory(relative).split(File::SEPARATOR).any? { |segment| hidden_segment?(segment) }
       end
@@ -193,7 +196,7 @@ module Woods
       # @param ignored [Array<String>] directory names/prefixes to skip
       # @return [Boolean]
       def ignored?(relative, ignored)
-        ignored.any? { |dir| relative == dir || relative.start_with?("#{dir}/") }
+        ignored.any? { |dir| relative == dir || (relative.start_with?(dir) && relative.getbyte(dir.bytesize) == 47) }
       end
     end
   end
