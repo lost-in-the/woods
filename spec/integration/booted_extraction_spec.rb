@@ -215,6 +215,25 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(save[:conditions]).to include(unless: [':skip_save?'])
   end
 
+  it 'publishes the on: actions of commit and validation callbacks from the real Rails lambdas (W-5)' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'posts'
+      before_validation :normalize_on_create, on: :create
+      after_commit :notify_created, on: :create
+      after_commit :reindex, on: %i[create update]
+      after_create_commit :welcome
+      after_commit :always
+    end
+    stub_const('CommitScopeProbe', model)
+    callbacks = Woods::Extractors::ModelExtractor.new.send(:extract_callbacks, model)
+    on = ->(filter) { callbacks.find { |entry| entry[:filter] == filter }[:conditions] }
+    expect(on.call('normalize_on_create')).to eq(on: ['create'])
+    expect(on.call('notify_created')).to eq(on: ['create'])
+    expect(on.call('reindex')).to eq(on: %w[create update])
+    expect(on.call('welcome')).to eq(on: ['create'])
+    expect(on.call('always')).to eq({})
+  end
+
   it 'reflects model methods consistently before and after schema loading (#363)' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
@@ -310,6 +329,26 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     analysis = JSON.parse(File.read(File.join(payload_dir, 'graph_analysis.json')))
     expect(analysis.fetch('domain_clusters')).to all(include('name', 'members', 'typed_members'))
     expect(analysis.dig('stats', 'domain_cluster_count')).to eq(analysis['domain_clusters'].size)
+  end
+
+  it 'publishes job resilience facts from the class, inherited declarations included (W-4, #754)' do
+    metadata = find_unit(:jobs, 'ResilientJob')['metadata']
+    expect(metadata).to include('retry_on' => ['Timeout::Error'], 'discard_on' => ['KeyError'],
+                                'resilience_source' => 'runtime')
+    expect(metadata['rescue_handlers']).to eq(
+      [{ 'kind' => 'retry_on', 'exceptions' => ['Timeout::Error'], 'wait' => 5,
+         'attempts' => 2, 'block' => false, 'declared_in' => 'ApplicationJob' },
+       { 'kind' => 'discard_on', 'exceptions' => ['KeyError'], 'block' => false, 'declared_in' => 'ResilientJob' },
+       { 'kind' => 'rescue_from', 'exceptions' => ['IndexError'], 'with' => 'report',
+         'declared_in' => 'ResilientJob' }]
+    )
+    expect(metadata['around_perform']).to eq([{ 'method' => 'with_lock', 'block' => false,
+                                                'declared_in' => 'ResilientJob' }])
+  end
+
+  it 'publishes empty resilience facts for a job that declares none' do
+    metadata = find_unit(:jobs, 'PublishPostJob')['metadata']
+    expect(metadata.values_at('retry_on', 'discard_on', 'rescue_from', 'around_perform')).to all(eq([]))
   end
 
   it 'marks a whole-file cache profile while retaining its controller in the file map (#417)' do

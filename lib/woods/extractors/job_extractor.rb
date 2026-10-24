@@ -8,6 +8,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'method_effects'
 require_relative 'job_ancestry'
+require_relative 'job_resilience'
 require_relative '../source_references/runtime_lookup'
 
 module Woods
@@ -119,6 +120,8 @@ module Woods
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata_from_source(source, class_name)
+        live = live_job_class(class_name)
+        apply_runtime_resilience(unit.metadata, live) if live
         unit.dependencies = extract_dependencies(source, class_name)
         MethodEffects.apply(unit, source)
 
@@ -359,10 +362,6 @@ module Woods
           perform_params: extract_perform_params(source),
           scheduled: source.match?(/perform_later|perform_in|perform_at/),
 
-          # Error handling
-          discard_on: extract_discard_on(source),
-          retry_on: extract_retry_on(source),
-
           # Callbacks
           callbacks: extract_callbacks(source),
 
@@ -371,7 +370,19 @@ module Woods
 
           # Metrics
           loc: source.lines.count { |l| l.strip.present? && !l.strip.start_with?('#') }
-        }
+        }.merge(JobResilience.static(source, class_name))
+      end
+
+      # `retry_config`'s retry_on entries from the resilience facts (W-4).
+      #
+      # @param handlers [Array<Hash>] rescue_handlers
+      # @return [Array<Hash>, nil] error, wait, attempts per retried exception
+      def retry_entries(handlers)
+        entries = handlers.select { |handler| handler[:kind] == 'retry_on' }.flat_map do |handler|
+          attempts = handler[:attempts].is_a?(Integer) ? handler[:attempts] : nil
+          handler[:exceptions].map { |error| { error: error, wait: handler[:wait]&.to_s, attempts: attempts } }
+        end
+        entries.empty? ? nil : entries
       end
 
       def extract_metadata_from_class(job_class, source)
@@ -384,8 +395,36 @@ module Woods
         base_metadata[:queue_adapter] = adapter if adapter
 
         base_metadata[:sidekiq_options] = job_class.sidekiq_options_hash if job_class.respond_to?(:sidekiq_options_hash)
+        apply_runtime_resilience(base_metadata, job_class)
+      end
 
-        base_metadata
+      # The loaded class a job file declares, when the booted app has it, so
+      # its resilience facts come from the class (W-4); nil otherwise, and
+      # the class-body reading stands.
+      #
+      # @param class_name [String]
+      # @return [Class, nil]
+      def live_job_class(class_name)
+        value = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
+        value if value.is_a?(Class) && value.respond_to?(:rescue_handlers)
+      rescue StandardError
+        nil
+      end
+
+      # Active Job classes answer from the class (inherited and concern
+      # declarations included); Sidekiq workers add their retry option.
+      def apply_runtime_resilience(metadata, job_class)
+        if job_class.respond_to?(:rescue_handlers)
+          metadata.merge!(JobResilience.runtime(job_class, root: Rails.root))
+          config = (metadata[:retry_config] || {}).except(:retry_on)
+          retries = retry_entries(metadata[:rescue_handlers])
+          metadata[:retry_config] = retries ? { retry_on: retries }.merge(config) : config
+        end
+        options = metadata[:sidekiq_options]
+        if options.is_a?(Hash) && (options.key?('retry') || options.key?(:retry))
+          metadata[:sidekiq_retry] = options['retry'] || options[:retry]
+        end
+        metadata
       end
 
       def extract_sidekiq_options(source)
@@ -404,20 +443,10 @@ module Woods
       def extract_retry_config(source)
         config = {}
 
-        # ActiveJob retry_on. The error capture spans `::` (matching the
-        # sibling `extract_retry_on`): `\w+` alone recorded `Net` for
-        # `Net::OpenTimeout` and, because the wait/attempts tail is matched
-        # against the same token run, dropped both of them (EXTA-10).
-        source.scan(
-          /retry_on\s+(\w+(?:::\w+)*)(?:,\s*wait:\s*([^,\n]+))?(?:,\s*attempts:\s*(\d+))?/
-        ) do |error, wait, attempts|
-          config[:retry_on] ||= []
-          config[:retry_on] << {
-            error: error,
-            wait: wait,
-            attempts: attempts&.to_i
-          }
-        end
+        # ActiveJob retry_on comes from the class-body calls (W-4): a regex
+        # over the file read comments and strings as declarations.
+        retries = retry_entries(JobResilience.static(source, nil)[:rescue_handlers])
+        config[:retry_on] = retries if retries
 
         # Sidekiq retries
         config[:sidekiq_retries] = ::Regexp.last_match(1) if source =~ /sidekiq_options.*retry:\s*(\d+|false|true)/
@@ -443,24 +472,8 @@ module Woods
         end
       end
 
-      def extract_discard_on(source)
-        source.scan(/discard_on\s+(\w+(?:::\w+)*)/).flatten
-      end
-
-      def extract_retry_on(source)
-        source.scan(/retry_on\s+(\w+(?:::\w+)*)/).flatten
-      end
-
       def extract_callbacks(source)
-        callbacks = []
-
-        %w[before_enqueue after_enqueue before_perform after_perform around_perform].each do |cb|
-          source.scan(/#{cb}\s+(?::(\w+)|do)/) do |method|
-            callbacks << { type: cb, method: method&.first }
-          end
-        end
-
-        callbacks
+        JobResilience.static_callbacks(source)
       end
 
       # ──────────────────────────────────────────────────────────────────────

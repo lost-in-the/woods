@@ -47,6 +47,15 @@ module Woods
 
       # Rails exposes one chain per event; each entry supplies its own kind.
       # before_commit is itself an event, unlike before_save and after_commit.
+      # Rails files whose generated lambdas carry a callback's `on:` scope,
+      # and the local each one closes over (W-5): `after_commit ..., on:` in
+      # Active Record's transactions, `before_validation ..., on:` in Active
+      # Model's validation callbacks.
+      GENERATED_ON_SCOPES = {
+        %r{/active_record/transactions\.rb\z} => :fire_on,
+        %r{/active_model/validations/callbacks\.rb\z} => :options
+      }.freeze
+
       CALLBACK_EVENTS = %i[
         validation save create update destroy commit rollback before_commit initialize find touch
       ].freeze
@@ -1265,9 +1274,14 @@ module Woods
       # @return [Hash]
       def format_callback_conditions(callback)
         conditions = {}
+        scopes = []
 
         if callback.instance_variable_defined?(:@if)
-          if_conds = Array(callback.instance_variable_get(:@if))
+          if_conds = Array(callback.instance_variable_get(:@if)).reject do |condition|
+            scope = generated_on_scope(condition)
+            scopes.concat(scope) if scope
+            scope
+          end
           conditions[:if] = if_conds.map { |c| condition_label(c) } if if_conds.any?
         end
 
@@ -1276,7 +1290,29 @@ module Woods
           conditions[:unless] = unless_conds.map { |c| condition_label(c) } if unless_conds.any?
         end
 
+        conditions[:on] = scopes.map(&:to_s).uniq if scopes.any?
         conditions
+      end
+
+      # The `on:` actions a Rails-generated condition encodes, read from the
+      # lambda's captured local without calling it; nil for any other
+      # condition, an application lambda included.
+      #
+      # @param condition [Object] one entry of a callback's @if
+      # @return [Array<Symbol>, nil]
+      def generated_on_scope(condition)
+        return nil unless condition.is_a?(Proc)
+
+        file = condition.source_location&.first.to_s
+        local = GENERATED_ON_SCOPES.find { |pattern, _| file.match?(pattern) }&.last
+        return nil unless local && condition.binding.local_variable_defined?(local)
+
+        value = condition.binding.local_variable_get(local)
+        value = value[:on] if local == :options && value.is_a?(Hash)
+        scope = Array(value).map(&:to_sym)
+        scope.empty? ? nil : scope
+      rescue StandardError
+        nil
       end
 
       # Detect Rails-generated implicit belongs_to presence validators.

@@ -1,0 +1,1 @@
+- Flows continue through mail deliveries: `MailingListMailer.new_post(user).deliver_later` (or `deliver_now`, `deliver`) in a traced method expands into `MailingListMailer#new_post`, and the operation names it as `mailer_action`. Before, the `Mailer.action` receiver never resolved, so a job's flow stopped at the delivery. Only an indexed mailer is followed.

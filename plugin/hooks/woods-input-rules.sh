@@ -175,6 +175,10 @@ woods_input_action() {
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return
   fi
+  if { [[ "$path" == db/schema.rb ]] || [[ "$path" == db/structure.sql ]] || { { [[ "$path" == *.rb ]]; } && { [[ "$path" == db/migrate/* ]] || [[ "$path" == app/models/* ]]; }; }; }; then
+    case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
+    return
+  fi
   if { { { [[ "$path" == *.rb ]]; } && { [[ "$path" == spec/factories/* ]] || [[ "$path" == test/factories/* ]]; }; }; }; then
     case "$operation" in delete|move) printf full ;; *) printf incremental ;; esac
     return

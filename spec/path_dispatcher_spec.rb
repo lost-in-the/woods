@@ -346,6 +346,13 @@ RSpec.describe Woods::PathDispatcher do
       expect(dispatcher.whole_app_keys_for('app/models/post.rb')).to include(:state_machines, :events)
     end
 
+    it 'triggers a state-machine re-run on a schema change, whose columns decide callback writes (#796)' do
+      %w[db/schema.rb db/structure.sql db/migrate/20260101000000_add_published_at.rb].each do |path|
+        expect(dispatcher.whole_app_keys_for(path)).to include(:state_machines), path
+      end
+      expect(dispatcher.whole_app_keys_for('db/seeds.rb')).not_to include(:state_machines)
+    end
+
     describe 'the events rule' do
       def event_rule
         described_class.whole_app_rules.find { |rule| rule.extractor_key == :events }

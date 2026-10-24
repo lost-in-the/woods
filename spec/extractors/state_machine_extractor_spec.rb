@@ -1034,4 +1034,189 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(parsed['identifier']).to eq('Order::aasm')
     end
   end
+
+  # ── Structured transition callbacks (#796) ───────────────────────────
+
+  describe 'transition_callbacks' do
+    def callbacks_for(source, path: 'app/models/post.rb')
+      described_class.new.extract_model_file(create_file(path, source)).first.metadata[:transition_callbacks]
+    end
+
+    it 'publishes the literal scope, the method and its side effects' do
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status, initial: :draft do
+            # after_transition on: :archive, do: :forget
+            after_transition on: :publish, do: :notify_subscribers
+          end
+
+          def notify_subscribers
+            NotifySubscribersJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      expect(entries.size).to eq(1)
+      expect(entries.first).to include(kind: 'after_transition', on: ['publish'], from: [], to: [],
+                                       method: 'notify_subscribers', block: false)
+      expect(entries.first[:side_effects]).to include(jobs_enqueued: ['NotifySubscribersJob'], columns_written: [])
+      expect(entries.first).not_to have_key(:unresolved)
+    end
+
+    it 'keeps the raw callback lines for the deprecation window' do
+      path = create_file('app/models/post.rb', <<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish, do: :notify_subscribers
+          end
+        end
+      RUBY
+
+      metadata = described_class.new.extract_model_file(path).first.metadata
+      expect(metadata[:callbacks]).to eq(['after_transition on: :publish, do: :notify_subscribers'])
+    end
+
+    it 'reads a from => to pair, arrays and positional methods' do
+      entries = callbacks_for(<<~RUBY)
+        class Vehicle < ApplicationRecord
+          state_machine initial: :parked do
+            before_transition :parked => :idling, :do => :put_on_seatbelt
+            before_transition [:idling, :first_gear] => :parked, do: [:park, :log]
+            after_failure :log_failure
+            around_transition on: %i[ignite shift_up], do: :time
+          end
+        end
+      RUBY
+
+      expect(entries.map { |e| e.slice(:kind, :from, :to, :on, :method) }).to eq(
+        [
+          { kind: 'before_transition', from: ['parked'], to: ['idling'], on: [], method: 'put_on_seatbelt' },
+          { kind: 'before_transition', from: %w[idling first_gear], to: ['parked'], on: [], method: 'park' },
+          { kind: 'before_transition', from: %w[idling first_gear], to: ['parked'], on: [], method: 'log' },
+          { kind: 'after_failure', from: [], to: [], on: [], method: 'log_failure' },
+          { kind: 'around_transition', from: [], to: [], on: %w[ignite shift_up], method: 'time' }
+        ]
+      )
+    end
+
+    it 'leaves a scope that is not literal empty and names it, without evaluating it' do
+      entries = callbacks_for(<<~RUBY)
+        class Vehicle < ApplicationRecord
+          state_machine do
+            after_transition any - [:parked] => any, do: :log
+            after_transition from: STATES, to: any, do: :log
+          end
+        end
+      RUBY
+
+      expect(entries.map { |e| e.slice(:from, :to, :unresolved) }).to eq(
+        [{ from: [], to: [], unresolved: ['from'] }, { from: [], to: [], unresolved: ['from'] }]
+      )
+    end
+
+    it 'marks a block or a proc and leaves it unanalysed' do
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish do |post, transition|
+              NotifySubscribersJob.perform_later(post.id)
+            end
+            before_transition on: :archive, do: ->(post) { post.touch }
+          end
+        end
+      RUBY
+
+      expect(entries.map { |e| e.slice(:method, :block, :side_effects, :unanalysed) }).to eq(
+        [{ method: nil, block: true, side_effects: nil, unanalysed: 'block' },
+         { method: nil, block: true, side_effects: nil, unanalysed: 'block' }]
+      )
+    end
+
+    it 'says when the method is not defined in the model or its concerns' do
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish, do: :inherited_hook
+          end
+        end
+      RUBY
+
+      expect(entries.first).to include(side_effects: nil, unanalysed: 'not defined in the model or its concerns')
+    end
+
+    it 'analyses a method an included app/models concern defines' do
+      create_file('app/models/concerns/announces.rb', <<~RUBY)
+        module Announces
+          def announce
+            AnnouncementMailer.published(self).deliver_later
+          end
+        end
+      RUBY
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          include Announces
+
+          state_machine :status do
+            after_transition to: :published, do: :announce
+          end
+        end
+      RUBY
+
+      expect(entries.first[:to]).to eq(['published'])
+      expect(entries.first[:side_effects]).to include(mailers_triggered: ['AnnouncementMailer'])
+    end
+
+    it 'reports columns written against the loaded model\'s columns' do
+      stub_const('Post', Class.new do
+        def self.column_names = %w[published_at status]
+        def self.table_exists? = true
+      end)
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition to: :published, do: :stamp
+          end
+
+          def stamp
+            update_column(:published_at, Time.current)
+          end
+        end
+      RUBY
+
+      expect(entries.first[:side_effects][:columns_written]).to eq(['published_at'])
+    end
+
+    it 'reads Statesman callbacks from the machine class' do
+      entries = callbacks_for(<<~RUBY, path: 'app/models/order_state_machine.rb')
+        class OrderStateMachine
+          include Statesman::Machine
+
+          state :pending, initial: true
+          state :paid
+
+          after_transition(from: :pending, to: :paid) do |order, transition|
+            ReceiptJob.perform_later(order.id)
+          end
+
+          def self.helper
+            after_transition(to: :ignored)
+          end
+        end
+      RUBY
+
+      expect(entries).to eq([{ kind: 'after_transition', on: [], from: ['pending'], to: ['paid'],
+                               method: nil, block: true, side_effects: nil, unanalysed: 'block' }])
+    end
+
+    it 'publishes an empty list for a machine without callbacks' do
+      expect(callbacks_for(<<~RUBY)).to eq([])
+        class Order < ApplicationRecord
+          include AASM
+          aasm do
+            state :pending, initial: true
+          end
+        end
+      RUBY
+    end
+  end
 end

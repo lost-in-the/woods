@@ -1,0 +1,1 @@
+- State machine `metadata.callbacks`, one raw DSL line per callback, is deprecated in favour of `metadata.transition_callbacks` and will be removed after one release. Run a full `woods:extract` after upgrading to publish job resilience facts, model callback `on:` scopes and structured transition callbacks in retained units.

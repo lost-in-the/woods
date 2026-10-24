@@ -7,6 +7,8 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative 'class_declarations'
+require_relative 'transition_callbacks'
+require_relative '../source_references/runtime_lookup'
 
 module Woods
   module Extractors
@@ -107,6 +109,7 @@ module Woods
         initial_state = parse_initial_state_aasm(source)
         events = parse_events_from_source(source, /\Aevent\s+:(\w+)/)
         callbacks = parse_state_machine_callbacks(source)
+        transition_callbacks = TransitionCallbacks.read(Prism.parse(source).value)
 
         [build_unit(
           identifier: "#{class_name}::aasm",
@@ -118,7 +121,8 @@ module Woods
           events: events,
           transitions: events.flat_map { |e| e[:transitions] },
           initial_state: initial_state,
-          callbacks: callbacks
+          callbacks: callbacks,
+          transition_callbacks: transition_callbacks
         )]
       end
 
@@ -155,6 +159,7 @@ module Woods
         initial_state = source.match(/state\s+:(\w+)[^#\n]*,\s*initial:\s*true/)&.[](1)
         transitions = parse_statesman_transitions(source)
         callbacks = parse_state_machine_callbacks(source)
+        transition_callbacks = TransitionCallbacks.read(Prism.parse(source).value)
 
         [build_unit(
           identifier: "#{class_name}::statesman",
@@ -166,7 +171,8 @@ module Woods
           events: [],
           transitions: transitions,
           initial_state: initial_state,
-          callbacks: callbacks
+          callbacks: callbacks,
+          transition_callbacks: transition_callbacks
         )]
       end
 
@@ -207,6 +213,7 @@ module Woods
           events = parse_events_from_source(block, /\Aevent\s+:(\w+)/)
           initial_state = state_machine_initial_state(declaration)
           callbacks = parse_state_machine_callbacks(block)
+          transition_callbacks = TransitionCallbacks.read(declaration.block)
 
           build_unit(
             identifier: "#{class_name}::state_machine_#{attr_name}",
@@ -218,7 +225,8 @@ module Woods
             events: events,
             transitions: events.flat_map { |e| e[:transitions] },
             initial_state: initial_state,
-            callbacks: callbacks
+            callbacks: callbacks,
+            transition_callbacks: transition_callbacks
           )
         end
       end
@@ -373,10 +381,13 @@ module Woods
       # @param events [Array<Hash>] Detected events with transitions
       # @param transitions [Array<Hash>] Flat list of all transitions
       # @param initial_state [String, nil] Initial state name
-      # @param callbacks [Array<String>] Detected callbacks
+      # @param callbacks [Array<String>] Detected callbacks, one raw DSL line
+      #   each (deprecated: kept for one window beside transition_callbacks)
+      # @param transition_callbacks [Array<Hash>] structured callbacks from
+      #   {TransitionCallbacks.read}, side effects not yet analysed
       # @return [ExtractedUnit]
       def build_unit(identifier:, class_name:, file_path:, source:, gem_detected:,
-                     states:, events:, transitions:, initial_state:, callbacks:)
+                     states:, events:, transitions:, initial_state:, callbacks:, transition_callbacks:)
         unit = ExtractedUnit.new(
           type: :state_machine,
           identifier: identifier,
@@ -392,10 +403,42 @@ module Woods
           transitions: transitions,
           initial_state: initial_state,
           callbacks: callbacks,
+          transition_callbacks: analyze_transition_callbacks(transition_callbacks, class_name, source, file_path),
           model_name: class_name
         }
         unit.dependencies = build_dependencies(class_name, source)
         unit
+      end
+
+      # Side effects of each symbol method, analysed as model callbacks are.
+      #
+      # @param entries [Array<Hash>] from {TransitionCallbacks.read}
+      # @param class_name [String] the model
+      # @param source [String] the model file
+      # @param file_path [String] its path
+      # @return [Array<Hash>]
+      def analyze_transition_callbacks(entries, class_name, source, file_path)
+        return entries if entries.empty?
+
+        code, segments = TransitionCallbacks.analysis_source(source, file_path, Rails.root.to_s)
+        analyzer = CallbackAnalyzer.new(source_code: code, column_names: loaded_column_names(class_name),
+                                        segments: segments)
+        TransitionCallbacks.analyze(entries, analyzer)
+      end
+
+      # The columns of an already loaded model, read without autoloading;
+      # empty when the class is not loaded or has no table. A schema change
+      # re-runs this family (PathDispatcher), so the columns stay current.
+      #
+      # @param class_name [String]
+      # @return [Array<String>]
+      def loaded_column_names(class_name)
+        model = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
+        return [] unless model.respond_to?(:column_names) && model.respond_to?(:table_exists?) && model.table_exists?
+
+        Array(model.column_names).map(&:to_s)
+      rescue StandardError
+        []
       end
 
       # Build dependencies for a state machine unit.

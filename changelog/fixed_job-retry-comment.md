@@ -1,0 +1,1 @@
+- A comment or string that mentions `retry_on`, `discard_on` or a job callback no longer becomes job metadata. `NotifySubscribersJob`, whose comment says it "declares no retry_on or discard_on", published `retry_on: ["or"]`; job declarations and `callbacks` are now read from calls (or from the loaded class), never from text.

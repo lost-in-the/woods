@@ -521,6 +521,23 @@ Static tools miss all of these because they only exist after Rails processes the
 
 ---
 
+### "What runs when a Post is created?"
+
+**Tool:** `trace_flow` (Index Server)
+
+```json
+{
+  "entry_point": "Post@create",
+  "depth": 3
+}
+```
+
+A model event entry point (W-5, #755) is `Model@create`, `Model@update` or `Model@destroy`: the model's published callbacks for that event in the order Rails runs them (validation and save for create and update, the event's own chain, then commit and rollback), keeping only those whose `on:` scope admits the event. `Model@after_commit(create)` narrows to one callback type and event, and `Model@after_commit` lists that type for every event. Each callback the model defines is expanded like a method entry, so an `after_commit` that enqueues a job continues into the job. A callback the unit does not define (a framework callback or a proc) is listed with `unexpanded` and its reason. Model event flows are assembled on demand; `precompute_flows` covers controller actions only.
+
+Every flow continues across async hops: a `perform_later` into the job's `perform`, and a mail delivery (`MailingListMailer.new_post(user).deliver_later`) into the mailer action, which the operation names as `mailer_action`.
+
+---
+
 ### "Why is this page slow?"
 
 `console_slow_endpoints` is Tier 3, schema-only, not executable in any supported mode (see [Conditional Tools & Wiring](#conditional-tools--wiring)). Trace the code path directly instead:
