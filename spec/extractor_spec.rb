@@ -528,6 +528,22 @@ RSpec.describe Woods::Extractor do
       expect(index.first['estimated_tokens']).to eq(10) # 40 chars / 4.0
       expect(index.first['chunk_count']).to eq(1)
     end
+
+    # The full path indexes the in-memory unit's type; the incremental
+    # rebuild must index the same entry from the written file.
+    it 'records each unit type as the full path does' do
+      output_dir = File.join(tmpdir, 'output')
+      type_dir = File.join(output_dir, 'routes')
+      FileUtils.mkdir_p(type_dir)
+      unit = Woods::ExtractedUnit.new(type: :route_file, identifier: 'config/routes.rb', file_path: 'config/routes.rb')
+      File.write(File.join(type_dir, 'config__routes.rb.json'), JSON.generate(unit.to_h))
+
+      extractor.send(:regenerate_type_index, :routes)
+
+      index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+      expect(index).to eq(JSON.parse(JSON.generate(extractor.send(:type_index_entries, [unit]))))
+      expect(index.first['type']).to eq('route_file')
+    end
   end
 
   # ── extract_all_concurrent — warning survival ──────────────────────

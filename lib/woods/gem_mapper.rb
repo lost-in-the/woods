@@ -249,7 +249,7 @@ module Woods
         AtomicFile.write(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
       end
       index = units.map do |unit|
-        { identifier: unit.identifier, file_path: unit.file_path, namespace: unit.namespace,
+        { identifier: unit.identifier, type: unit.type.to_s, file_path: unit.file_path, namespace: unit.namespace,
           estimated_tokens: unit.estimated_tokens, chunk_count: unit.chunks.size }
       end
       AtomicFile.write(directory.join('_index.json'), JSON.pretty_generate(index))
