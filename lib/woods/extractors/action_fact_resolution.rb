@@ -3,6 +3,7 @@
 require 'prism'
 require_relative '../source_file'
 require_relative 'action_facts'
+require_relative 'filter_applicability'
 
 module Woods
   module Extractors
@@ -10,17 +11,21 @@ module Woods
     #
     # For each action: the facts {ActionFacts} reads from the action's own
     # body, plus the assigns, params, redirects and renders of every before
-    # or around filter whose declared +only+/+except+ names the action. Each
+    # or around filter whose +only+/+except+ scopes admit the action. Each
     # fact is attributed to the method and file it was read from, so an
     # instance variable a parent controller's filter assigns reads as that
     # filter's, at that file's line. A filter given as a proc, a filter whose
     # body lives outside the application, and an +if:+/+unless+ condition are
     # not evaluated: the facts are what the source declares.
     #
-    # Including classes provide +extract_callback_conditions+ (from
+    # Which filters apply to an action is {FilterApplicability#filter_applies_to}
+    # (W-8), the same answer published as each filter's +applies_to+.
+    # Including classes provide +extract_action_filter_actions+ (from
     # {SharedUtilityMethods}); a class that defines +app_action_source?+ uses
     # it to keep gem-installed bodies out.
     module ActionFactResolution
+      include FilterApplicability
+
       FILTER_KINDS = %i[before around].freeze
       FACT_KINDS = %i[assigns params redirects].freeze
 
@@ -69,7 +74,7 @@ module Woods
       end
 
       # The symbol filters that run before the action, in chain order, whose
-      # declared only/except names it.
+      # only/except scopes admit it ({FilterApplicability#filter_applies_to}).
       def fact_filters(klass, action)
         return [] unless klass.respond_to?(:_process_action_callbacks)
 
@@ -78,10 +83,7 @@ module Woods
 
           filter = callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter
           next unless filter.is_a?(Symbol) || filter.is_a?(String)
-
-          only, except = extract_callback_conditions(callback)
-          next if only.any? && !only.include?(action)
-          next if except.include?(action)
+          next if filter_applies_to(callback, [action]).empty?
 
           filter.to_s
         end.uniq
