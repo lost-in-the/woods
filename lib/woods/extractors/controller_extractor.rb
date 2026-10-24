@@ -132,6 +132,7 @@ module Woods
                                                              action_sources: action_sources)
                         .merge(unresolved_renders: renders.unresolved, external_renders: renders.external)
         unit.dependencies = extract_dependencies(controller, source, action_sources: action_sources, renders: renders)
+        apply_route_helper_references(unit, source, via_type: :redirect_to, forms: false)
         HelperCallScan.annotate(self, unit, controller)
         MethodEffects.apply(unit, source, skip: unit.metadata[:actions])
 

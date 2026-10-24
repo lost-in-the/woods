@@ -287,6 +287,17 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
   end
 
+  it 'publishes the route helper and action behind each navigation edge (woods#795)' do
+    posts = find_unit(:controllers, 'PostsController')
+
+    expect(posts.dig('metadata', 'route_helper_references')).to include(
+      include('helper' => 'posts_path', 'route_name' => 'posts', 'controller' => 'PostsController',
+              'action' => 'index', 'verb' => 'GET', 'via' => 'redirect_to')
+    )
+    expect(posts['dependencies']).to include(include('type' => 'controller', 'target' => 'PostsController',
+                                                     'via' => 'redirect_to'))
+  end
+
   it 'attributes each unit to its container and copies the kind onto the graph node (W-9)' do
     expect(find_unit(:controllers, 'PostsController').dig('metadata', 'container')).to eq('kind' => 'web')
     expect(find_unit(:jobs, 'PublishPostJob').dig('metadata', 'container')).to include('kind' => 'jobs')
