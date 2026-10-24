@@ -32,15 +32,17 @@ module Woods
     # package: any app-owned unit under a Packwerk package (Task 8)
     # enforce_dependencies: package units (Task 7)
     # commit_count, change_frequency: git enrichment (Task 5)
-    # actions, inherited_gem_actions: controller units (the second holds routed
-    # actions whose body is gem code); route_action: route units that dispatch
-    # to a controller action. Together they let the analyzer report routes that
+    # actions, inherited_gem_actions, action_missing: controller units (the
+    # second holds routed actions whose body is gem code; the third is present,
+    # and true, only when the controller defines `action_missing`);
+    # route_action: route units that dispatch to a controller action.
+    # Together they let the analyzer report routes that
     # do not resolve without re-running the route extractor on controller edits.
     # container: the kind of {ContainerAttribution}'s `metadata[:container]` (W-9).
     # lines, loc: {SourceSize}'s count of an application unit's own file (#810).
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
-      actions inherited_gem_actions route_action container lines loc
+      actions inherited_gem_actions action_missing route_action container lines loc
     ].freeze
 
     # These extractors describe a whole source file rather than one constant.
@@ -775,6 +777,7 @@ module Woods
       if unit.type == :controller && gem_actions.is_a?(Hash) && gem_actions.any?
         attrs[:inherited_gem_actions] = gem_actions.keys
       end
+      attrs[:action_missing] = true if unit.type == :controller && metadata[:action_missing] == true
       attrs[:route_action] = metadata[:action] if unit.type == :route && metadata[:controller] && metadata[:action]
       if unit.type == :package && !metadata[:enforce_dependencies].nil?
         attrs[:enforce_dependencies] = metadata[:enforce_dependencies]
@@ -1170,6 +1173,7 @@ module Woods
       when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions then Array(value).map(&:to_s).uniq.sort
       when :commit_count, :lines, :loc then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
+      when :action_missing then value == true
       else value.to_s
       end
     end

@@ -2112,6 +2112,32 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                ])
       expect(unresolvable.call(index_dir)).to eq([ghost])
     end
+
+    # Rails serves a routed action with no method by implicit render (#726):
+    # the template alone resolves it, and removing the template unresolves it
+    # again, through incremental runs that agree with a full one at each step.
+    it 'follows a template that serves the action by implicit render' do
+      write_file('app/controllers/lanterns_controller.rb', lanterns_source('index'))
+      load app_path('app/controllers/lanterns_controller.rb')
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts, only: %i[index show create]
+          resources :lanterns, only: %i[index]
+          get 'lanterns/archive', to: 'lanterns#archive'
+        end
+      RUBY
+      Rails.application.reload_routes!
+      archive = { 'route' => 'GET /lanterns/archive', 'controller' => 'LanternsController',
+                  'action' => 'archive', 'reason' => 'missing_action' }
+      unresolvable = ->(dir) { read_json(dir, 'graph_analysis.json')['unresolvable_routes'] }
+      template = 'app/views/lanterns/archive.html.erb'
+
+      index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }])
+      expect(unresolvable.call(index_dir)).to eq([])
+
+      index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }, -> { delete_file(template) }])
+      expect(unresolvable.call(index_dir)).to eq([archive])
+    end
   end
 
   describe 'documentation units' do

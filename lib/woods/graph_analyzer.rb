@@ -398,7 +398,14 @@ module Woods
     # - `missing_action`: the controller node's `actions` lack the action.
     #   A controller node with no recorded `actions` is not judged, and an
     #   action in the node's `inherited_gem_actions` (a routed action Rails
-    #   dispatches to a gem-defined body) resolves.
+    #   dispatches to a gem-defined body) resolves. So does an action Rails
+    #   serves by implicit render: a non-partial view template of that name,
+    #   in any format or handler, owned (`view_render`) by the controller or
+    #   by a controller it inherits from. A controller that defines
+    #   `action_missing` serves every routed action, so none is reported.
+    #   The graph does not say whether a controller renders implicitly at
+    #   all (ActionController::API does not), so a template beside an API
+    #   controller still resolves its action.
     #
     # Routes with no controller or action (mounts, redirects, Rack
     # endpoints) carry no `route_action` and are never reported.
@@ -554,8 +561,54 @@ module Woods
       actions = node[:actions]
       return nil unless actions.is_a?(Array)
       return nil if actions.include?(action) || Array(node[:inherited_gem_actions]).include?(action)
+      return nil if node[:action_missing] == true || implicit_render_actions(controller).include?(action)
 
       'missing_action'
+    end
+
+    # Actions Rails can serve for +controller+ by rendering a template: the
+    # stems of the non-partial templates owned by it or by any controller it
+    # inherits from, mirroring the view prefixes Rails searches.
+    #
+    # @param controller [String]
+    # @return [Set<String>]
+    def implicit_render_actions(controller)
+      (@implicit_render_actions ||= {})[controller] ||=
+        controller_lineage(controller).each_with_object(Set.new) do |owner, actions|
+          actions.merge(template_actions.fetch(owner, []))
+        end
+    end
+
+    # @param controller [String]
+    # @return [Array<String>] the controller and its ancestors along
+    #   `inheritance` edges, each once (the graph can hold cycles)
+    def controller_lineage(controller)
+      lineage = []
+      pending = [controller]
+      while (current = pending.shift)
+        next if lineage.include?(current)
+
+        lineage << current
+        @graph.edge_records(current, type: :controller).each do |edge|
+          pending << edge[:target] if edge[:via] == :inheritance
+        end
+      end
+      lineage
+    end
+
+    # @return [Hash{String => Set<String>}] owner => action names its
+    #   templates render: `show` for `ledgers/show.html.erb` and for
+    #   `ledgers/show.haml`, never a `_partial`
+    def template_actions
+      @template_actions ||= @graph.units_of_type(:view_template).each_with_object({}) do |identifier, owners|
+        name = File.basename(identifier)
+        next if name.start_with?('_')
+
+        action = name.split('.', 2).first
+        @graph.edge_records(identifier, type: :view_template).each do |edge|
+          (owners[edge[:target]] ||= Set.new) << action if edge[:via] == :view_render
+        end
+      end
     end
 
     # ──────────────────────────────────────────────────────────────────────
