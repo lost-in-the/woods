@@ -130,6 +130,16 @@ module Woods
         node.location.expression.line
       end
 
+      # @return [Array<Array(String, Hash)>] literal symbol arguments before the
+      #   first other argument, each with the position of the whole `:name`
+      def leading_symbols(node)
+        node.children.drop(2).take_while { |argument| argument.is_a?(::Parser::AST::Node) && argument.type == :sym }
+            .filter_map do |symbol|
+          name = symbol.children.first.to_s
+          [name, position(symbol)] unless name.empty? || symbol.location.begin.nil?
+        end
+      end
+
       def end_line(node)
         node.location.expression.last_line
       end

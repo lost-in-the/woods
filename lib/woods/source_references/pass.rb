@@ -7,6 +7,7 @@ require_relative 'registry'
 require_relative 'inputs'
 require_relative 'cache'
 require_relative 'caller_policy'
+require_relative 'declarations'
 
 module Woods
   module SourceReferences
@@ -87,7 +88,7 @@ module Woods
       def resolved_caller(unit, key)
         base = original_dependencies(unit, key)
         occurrences = resolved_occurrences(unit)
-        edges = occurrences.map(&:first).uniq.sort_by { |edge| edge.values_at('type', 'target', 'via') }
+        edges = occurrences.filter_map(&:first).uniq.sort_by { |edge| edge.values_at('type', 'target', 'via') }
         additions = edges.reject { |edge| pair_present?(base, edge) }
         [base + additions, additions, occurrences.map(&:last)]
       end
@@ -134,7 +135,14 @@ module Woods
       end
 
       def resolved_occurrences(unit)
-        reference_paths(unit).flat_map { |source| occurrences_in(unit, source) }
+        reference_paths(unit).flat_map do |source|
+          occurrences_in(unit,
+                         source) + Declarations.new(unit, @registry, @policy).call(macros_in(unit, source), source)
+        end
+      end
+
+      def macros_in(unit, path)
+        Array(@files.dig(path, 'analysis', 'macros')).select { |record| record['owner'] == unit['identifier'] }
       end
 
       def same_owner_paths?(prior, unit, path)
@@ -155,21 +163,44 @@ module Woods
         edge.transform_keys(&:to_s).transform_values { |value| value.is_a?(Symbol) ? value.to_s : value }
       end
 
+      # Verified occurrences carry their edge; static and ambiguous ones are
+      # published spans only and never add a dependency.
       def occurrences_in(unit, path)
         records = @files.dig(path, 'analysis', 'references') || []
         records.filter_map do |reference|
           next unless reference['owner'] == unit['identifier']
 
-          edge = @registry.resolve(reference, file_path: path)
-          next unless edge && @policy.permits?(unit['type'], edge[:type])
+          result = @registry.explain(reference, file_path: path)
+          next candidate_occurrence(unit, reference, result, path) unless result['status'] == 'resolved'
 
-          edge = normalize_edge(edge)
+          edge = { 'type' => result.fetch('type'), 'target' => result.fetch('target'), 'via' => 'code_reference' }
+          next unless @policy.permits?(unit['type'], edge['type'].to_sym)
+
           span = reference.slice('line', 'column', 'length', 'method').merge(
             'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
             'kind' => 'constant', 'confidence' => 'verified'
           )
           [edge, span]
         end
+      end
+
+      # One typed candidate is `static`; several are `ambiguous`, each listed.
+      def candidate_occurrence(unit, reference, result, path)
+        candidates = @registry.candidates(reference, result).select do |_, type|
+          @policy.permits?(unit['type'], type.to_sym)
+        end
+        return if candidates.empty?
+
+        span = reference.slice('line', 'column', 'length', 'method').merge('file_path' => path, 'kind' => 'constant')
+        if candidates.one?
+          target, type = candidates.first
+          return [nil, span.merge('target' => target, 'target_type' => type, 'confidence' => 'static')]
+        end
+
+        [nil, span.merge('confidence' => 'ambiguous',
+                         'candidates' => candidates.map do |target, type|
+                           { 'target' => target, 'target_type' => type }
+                         end)]
       end
 
       def raise_rebuild(reason)

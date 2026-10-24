@@ -156,7 +156,7 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(File.binread(unit_path(extractor, 'RefGenerated'))).to eq(bytes)
   end
 
-  it 'withdraws reference metadata when a target becomes type-ambiguous without changing its scanner edge' do
+  it 'replaces verified reference metadata with an ambiguous span when a target becomes type-ambiguous' do
     previous = full(proven: true, existing_edge: true)
     before = read_unit(previous, 'RefIntegrationCaller')
     extractor = incremental
@@ -168,7 +168,9 @@ RSpec.describe 'Source-reference extraction integration' do
     extractor.send(:register_and_write, :models, [target], affected)
     expect(extractor.send(:enrich_source_references_incremental, affected)).to include('RefIntegrationCaller')
     after = read_unit(extractor, 'RefIntegrationCaller')
-    expect(after.dig('metadata', 'references')).to eq([])
+    expect(after.dig('metadata', 'references').map { |span| span.values_at('confidence', 'candidates') })
+      .to eq([['ambiguous', [{ 'target' => 'RefIntegrationTarget', 'target_type' => 'model' },
+                             { 'target' => 'RefIntegrationTarget', 'target_type' => 'poro' }]]])
     expect(after.except('metadata')).to eq(before.except('metadata'))
     expect(after['metadata'].except('references')).to eq(before['metadata'].except('references'))
     expect(read_unit(previous, 'RefIntegrationCaller')).to eq(before)

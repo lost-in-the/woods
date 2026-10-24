@@ -1008,19 +1008,31 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
-The development constant-span writer uses cache format 6. It requires validated
+The development constant-span writer uses cache format 7. It requires validated
 line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
 produced its edges. It also retains optional syntactic method selectors on
-constant receiver candidates, including unresolved ones. A format 5 or earlier
+constant receiver candidates, including unresolved ones. Format 7 adds the
+class-body declaration macros (associations, callbacks, scopes) with the
+position of each literal symbol argument. A format 6 or earlier
 cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
-Unchanged source identities otherwise reuse cached analysis; accepting format 5
-would leave those callers without selector evidence. Missing optional fields in
-a format 6 record are valid but do not prove semantic completeness: bare reads
+Unchanged source identities otherwise reuse cached analysis; accepting format 6
+would leave those callers without declaration evidence. Missing optional fields in
+a format 7 record are valid but do not prove semantic completeness: bare reads
 have no selector, and contract tests establish expected presence on receivers.
 Updating only a reader does not enrich an existing generation.
+
+Static and ambiguous constant spans and declaration spans are resolved again on
+every run against the current typed registry, like verified ones, so a target that
+appears, disappears or gains a second type moves a span between `verified`,
+`static` and `ambiguous` without a source change. They never add a dependency
+edge. `metadata.methods` is computed from the unit's final published source
+whenever a unit is written, by the full and the incremental writer alike; a unit
+retained unchanged keeps the table it was written with, so a generation written
+before this field existed gains it only for re-extracted units. Run one full
+extraction to publish it everywhere.
 
 Span metadata and dependency edges are recomputed separately. Unchanged callers
 can gain or lose spans when a target arrives, disappears or becomes ambiguous,
