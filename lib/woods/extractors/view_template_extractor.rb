@@ -129,6 +129,8 @@ module Woods
         unit.metadata = build_metadata(engine, source, code, file_path, partials, interpolated)
         targets = {}
         unit.dependencies = build_dependencies(engine, code, file_path, identifier, partials, pending, targets)
+        references = navigation_references(engine, code)
+        unit.metadata[:route_helper_references] = references if references
         apply_partial_locals(unit, engine, source, identifier, targets)
         apply_helper_calls(unit, engine, source, namespace)
 
@@ -503,6 +505,24 @@ module Woods
           seen.add(key)
           { type: :controller, target: resolved[:controller], via: cand[:via] }
         end
+      end
+
+      # Every route helper the template calls that names a live route
+      # (woods#795), with its named route, action, verb, path and via, beside
+      # the controller-level navigation edges {#resolve_navigation_candidates}
+      # keeps. Nil when navigation edges are off.
+      #
+      # @param engine [ViewEngines::Base]
+      # @param source [String]
+      # @return [Array<Hash>, nil]
+      def navigation_references(engine, source)
+        return nil unless Woods.configuration&.extract_navigation_edges
+
+        references = engine.scan_navigation_candidates(source).filter_map do |candidate|
+          resolved = resolve_route_helper(candidate[:helper])
+          resolved && route_helper_reference(candidate[:helper], resolved, candidate[:via])
+        end
+        collate_route_helper_references(references)
       end
 
       # The class that renders templates from a view directory: the
