@@ -227,7 +227,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
       before_validation :normalize_on_create, on: :create
+      before_validation :normalize_on_update, on: :update
       after_commit :notify_created, on: :create
+      after_update_commit :notify_updated
       after_commit :reindex, on: %i[create update]
       after_create_commit :welcome
       after_commit :always
@@ -236,7 +238,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     callbacks = Woods::Extractors::ModelExtractor.new.send(:extract_callbacks, model)
     on = ->(filter) { callbacks.find { |entry| entry[:filter] == filter }[:conditions] }
     expect(on.call('normalize_on_create')).to eq(on: ['create'])
+    expect(on.call('normalize_on_update')).to eq(on: ['update'])
     expect(on.call('notify_created')).to eq(on: ['create'])
+    expect(on.call('notify_updated')).to eq(on: ['update'])
     expect(on.call('reindex')).to eq(on: %w[create update])
     expect(on.call('welcome')).to eq(on: ['create'])
     expect(on.call('always')).to eq({})

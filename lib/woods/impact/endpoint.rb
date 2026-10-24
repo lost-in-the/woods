@@ -17,11 +17,17 @@ module Woods
           'git_sha' => @reader.manifest['git_sha'], 'manifest_checksum' => @reader.external_dependency_checksum }
       end
 
+      # The manifest checks {#units} makes, without reading a unit.
+      # @return [Hash] the manifest
+      # @raise [IOError] if the manifest is not an object with valid counts
+      def manifest
+        @reader.manifest.tap { |manifest| validate_manifest!(manifest) }
+      end
+
       # @return [Hash{Array(String, String) => Hash}] actual typed identities
       # @raise [IOError] if required inventory or fields are unavailable
       def units
-        manifest = @reader.manifest
-        validate_manifest!(manifest)
+        manifest = self.manifest
         records = @reader.each_unit.to_a
         raise IOError, 'Impact payload total_units mismatch' unless records.size == manifest['total_units']
 

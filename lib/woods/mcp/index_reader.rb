@@ -559,8 +559,18 @@ module Woods
       # A "broad" pattern is one that matches more than 50% of the entries in a
       # type directory. Broad patterns still run but the result includes a :note.
       #
-      # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500).
-      # When the cap is reached the result includes :partial => true.
+      # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500),
+      # or at +max_scan+ for one call. When the cap is reached the result
+      # includes :partial => true. A deep search's +:scan+ names how many
+      # candidate bodies it read (+scanned_units+) of how many it had queued
+      # (+candidate_units+).
+      #
+      # Identifier matches rank by match quality, independent of directory
+      # and summary order: the exact identifier, then an exact short name
+      # (the last +::+ segment, a table's name after +table:+, a path
+      # segment; a route ranks by its path, not its verb), then prefixes,
+      # then any other match; shorter names first within a rank. Deep-field
+      # matches follow them in scan order.
       #
       # The optional +exact_prefix+ / +exact_suffix+ filters restrict results to
       # identifiers whose start/end matches the given string literally (case-
@@ -575,22 +585,31 @@ module Woods
       # @param limit [Integer] Maximum results to return
       # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
       # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
+      # @param max_scan [Integer, nil] deep-field scan budget for this call, in
+      #   unit bodies; nil keeps WOODS_SEARCH_MAX_SCAN or the default. An
+      #   in-process caller that is not bound by an agent's token budget can
+      #   size it to the index.
       # @return [Hash] results, optional note/partial, and explicit completeness evidence
-      # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank
+      # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank,
+      #   or +max_scan+ is not a positive Integer
       def search(query = nil, types: nil, fields: %w[identifier], limit: 20, exact_prefix: nil, exact_suffix: nil,
-                 packages: nil, source_paths: nil)
+                 packages: nil, source_paths: nil, max_scan: nil)
         # Keep summaries, typed deep reads and lookahead on one generation,
         # including when publication advances after the result page fills.
         with_pinned_generation do
           search_within_pin(query, types: types, fields: fields, limit: limit,
                                    exact_prefix: exact_prefix, exact_suffix: exact_suffix,
-                                   packages: packages, source_paths: source_paths)
+                                   packages: packages, source_paths: source_paths, max_scan: max_scan)
         end
       end
 
       # @api private
       def search_within_pin(query = nil, types: nil, fields: %w[identifier], limit: 20,
-                            exact_prefix: nil, exact_suffix: nil, packages: nil, source_paths: nil)
+                            exact_prefix: nil, exact_suffix: nil, packages: nil, source_paths: nil, max_scan: nil)
+        unless max_scan.nil? || (max_scan.is_a?(Integer) && max_scan.positive?)
+          raise ArgumentError, 'search max_scan must be a positive Integer'
+        end
+
         types = normalize_search_types(types)
         scope = search_scope(packages, source_paths, types)
         prefix = exact_prefix.blank? ? nil : exact_prefix.downcase
@@ -602,13 +621,14 @@ module Woods
         # When only prefix/suffix are provided, the regex acts as a match-all
         # wildcard so the existing phase-1/phase-2 pipeline still works.
         pattern = compile_search_pattern(query.to_s.empty? ? '.*' : query)
-        max_scan_env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip
-        max_scan = max_scan_env.empty? ? DEFAULT_SEARCH_MAX_SCAN : max_scan_env.to_i
-        max_scan = DEFAULT_SEARCH_MAX_SCAN if max_scan <= 0
+        max_scan ||= search_max_scan_from_env
+        literal = search_literal(query, prefix)
 
         results = SearchResults.new(limit: limit)
         notes = []
         phase2_scanned = 0
+        phase2_candidates = 0
+        identifier_matches = []
 
         begin
           dirs = types ? types.map { |type| UNIT_TYPE_TO_DIR.fetch(type) }.uniq : TYPE_DIRS
@@ -617,7 +637,6 @@ module Woods
           phase2_queues = {}
           catch(:search_done) do
             dirs.each do |dir|
-              type_name = DIR_TO_TYPE[dir]
               entries = search_index_entries(dir)
               entries = if scope
                           scoped_search_entries(entries, dir, scope)
@@ -640,19 +659,18 @@ module Woods
                 next unless identifier_passes_prefix_suffix?(id, prefix, suffix)
 
                 if fields.include?('identifier') && pattern.match?(id)
-                  type_name = search_entry_type(entry, dir, results)
-                  next unless type_name
-
-                  results.add(identifier: id, type: type_name, match_field: 'identifier')
-                  throw :search_done if results.result_limit_reached?
-
+                  identifier_matches << [identifier_rank(id, literal), dir, entry]
                   next
                 end
                 next unless fields.include?('metadata') || fields.include?('source_code')
 
                 (phase2_queues[dir] ||= []) << [entry, dir]
+                phase2_candidates += 1
               end
             end
+
+            add_ranked_identifier_matches(identifier_matches, results)
+            throw :search_done if results.result_limit_reached?
 
             queues = phase2_queues.values
             loop do
@@ -695,13 +713,80 @@ module Woods
           raise unless regexp_timeout_error?(e)
 
           notes << "search aborted: the pattern exceeded the #{SEARCH_PATTERN_TIMEOUT}s per-match limit"
+          # Identifier matches already found are kept, ranked, before stopping.
+          add_ranked_identifier_matches(identifier_matches, results)
           results.stop('regex_timeout')
         end
 
         response = results.finish.response(note: notes.join('; '))
+        if fields.include?('metadata') || fields.include?('source_code')
+          response[:scan] = { scanned_units: phase2_scanned, candidate_units: phase2_candidates }
+        end
         response[:applied_scope] = scope.summary if scope
         response
       end
+
+      # Add identifier matches best first, stopping at the page's lookahead.
+      def add_ranked_identifier_matches(matches, results)
+        matches.sort_by! { |rank, dir, entry| [rank, entry['identifier'], dir] }
+        matches.each do |_rank, dir, entry|
+          type_name = search_entry_type(entry, dir, results)
+          next unless type_name
+
+          results.add(identifier: entry['identifier'], type: type_name, match_field: 'identifier')
+          break if results.result_limit_reached?
+        end
+        matches.clear
+      end
+      private :add_ranked_identifier_matches
+
+      def search_max_scan_from_env
+        value = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip.to_i
+        value.positive? ? value : DEFAULT_SEARCH_MAX_SCAN
+      end
+      private :search_max_scan_from_env
+
+      # The literal a query names, for ranking: an escaped or plain-word
+      # query compares as text; any other pattern ranks every match alike.
+      def search_literal(query, prefix)
+        return prefix if query.to_s.empty?
+
+        unescaped = query.gsub(/\\(.)/m, '\\1')
+        return unescaped.downcase if Regexp.escape(unescaped) == query
+
+        query.downcase if query.match?(%r{\A[\p{Alnum}_:/-]+\z})
+      end
+      private :search_literal
+
+      # Rank of an identifier match: [tier, matched name length, form].
+      # Tier 0 is the exact identifier, 1 an exact short name, 2 a prefix of
+      # either, 3 any other match. Forms are the identifier, its last +::+
+      # segment, its name after a +type:+ prefix and its path segments.
+      def identifier_rank(identifier, literal)
+        id = identifier.downcase
+        return [3, id.length, 0] unless literal
+
+        forms = search_name_forms(id)
+        return [0, id.length, 0] if id == literal
+
+        exact = forms.index(literal)
+        return [1, literal.length, exact] if exact
+
+        prefixed = forms.each_with_index.select { |form, _| form.start_with?(literal) }
+        return [3, id.length, 0] if prefixed.empty?
+
+        form, index = prefixed.min_by { |candidate, position| [candidate.length, position] }
+        [2, form.length, index]
+      end
+      private :identifier_rank
+
+      # A route's identifier leads with its HTTP verb, which is not part of
+      # its name: rank it by its path.
+      def search_name_forms(id)
+        id = id.sub(%r{\A[a-z]+ (?=/)}, '')
+        [id, id.split('::').last, id.sub(/\A[a-z_]+:(?!:)/, ''), *id.split('/').reject(&:empty?)].compact.uniq
+      end
+      private :search_name_forms
 
       # Scope preparation resolves from the scope facts of the complete pinned
       # unit snapshot, read once per loaded generation (F6 step 2) rather than

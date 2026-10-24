@@ -71,13 +71,20 @@ module Woods
     # invalid. +update_available+ semantics are unchanged: true only when the
     # published version is strictly newer than the installed one.
     #
-    # @return [Hash] +{ current_version:, latest_version:, update_available: }+
+    # +checked+ says whether a published version was learned at all. With
+    # update checks disabled (+WOODS_NO_UPDATE_CHECK=1+) or a failed probe it
+    # is false and +latest_version+ is nil: the payload never names a latest
+    # version it did not check.
+    #
+    # @return [Hash] +{ current_version:, latest_version:, update_available:, checked: }+
     def status_hash(current: Woods::VERSION, **opts)
       r = check(current: current, **opts)
+      checked = !r[:latest].nil?
       {
         current_version: r[:current],
-        latest_version: newest_known_version(r[:current], r[:latest]),
-        update_available: r[:update_available]
+        latest_version: checked ? newest_known_version(r[:current], r[:latest]) : nil,
+        update_available: r[:update_available],
+        checked: checked
       }
     end
 

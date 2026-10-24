@@ -33,6 +33,29 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(search('charge').first.matched_fields).to include('file_path:charge')
   end
 
+  # A question in the plural reaches a method named in the singular, and
+  # a unit that holds more of its words outranks units that only repeat one
+  # rare word in their names.
+  it 'ranks the unit whose method name answers the question above units named after one word' do
+    source = "before_validation :set_widget_label\ndef set_widget_label\n  self.label ||= next_label\nend"
+    callbacks = [{ 'type' => 'before_validation', 'filter' => 'set_widget_label' }]
+    widget = add('Widget', path: 'app/models/widget.rb', source: source, metadata: { 'callbacks' => callbacks })
+    add('Labels', type: 'lib', path: 'lib/seeds/labels.rb', source: 'LABELS = %w[red blue].freeze')
+    add('PrintLabelsController', type: 'controller', path: 'app/controllers/print_labels_controller.rb',
+                                 source: 'def index; @labels = Labels::LABELS; end')
+    8.times { |i| add("WidgetPart#{i}", source: 'widget widget') }
+
+    results = search('how are widget labels assigned')
+    expect(results.first.identifier).to eq(widget)
+    expect(results.first.matched_fields).to include('source_code:widget', 'source_code:label', 'runtime:label')
+  end
+
+  it 'leaves a one-word query scored by that word alone' do
+    one = add('Gadget', source: 'label')
+    two = add('Labels', type: 'lib', source: 'nothing')
+    expect(search('labels').map(&:identifier)).to eq([two, one])
+  end
+
   it 'finds resolved callback metadata without a literal target name' do
     target = add('Record', metadata: { 'callbacks' => { 'before_save' => ['normalize_phone'] } })
     expect(search('normalize phone').first.identifier).to eq(target)
