@@ -54,7 +54,6 @@ module Woods
         @concern_cache = {}
         @concern_module_cache = {}
         @warnings = []
-        build_route_helper_map
       end
 
       # Extract all controllers in the application
@@ -670,6 +669,15 @@ module Woods
 
           actions[name] = { owner: method.owner.name }
         end
+      end
+
+      # The route helper map, like {#routes_map}, is built when a controller is
+      # first scanned for helpers rather than when the extractor is built.
+      #
+      # @see RouteHelperResolver#resolve_route_helper
+      def resolve_route_helper(helper_name)
+        build_route_helper_map unless @route_helper_map
+        super
       end
 
       # Controller name => routed actions, built on first use. Reconciling

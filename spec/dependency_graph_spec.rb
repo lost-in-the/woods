@@ -245,7 +245,7 @@ RSpec.describe Woods::DependencyGraph do
     end
 
     # Writing the graph and analysing it both rank it; the second ranking of
-    # an unchanged graph reuses the first (W5).
+    # an unchanged graph reuses the first.
     describe 'memoization' do
       before do
         graph.register(make_unit(type: :model, identifier: 'User'))
