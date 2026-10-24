@@ -161,7 +161,7 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
   # A holder killed mid-run (a container restart, SIGKILL) leaves a fresh lock
   # behind. Its pid is evidence only inside the namespace that issued it, so
-  # the lock records the host the way Watch::Status does (W7).
+  # the lock records the host the way Watch::Status does.
   describe 'abandoned lock detection' do
     let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
     let(:host) { Woods::Watch::Status.host_identity }

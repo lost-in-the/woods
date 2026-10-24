@@ -92,7 +92,7 @@ RSpec.describe 'Watch daemon multi-instance operation' do
 
     # A writer killed mid-run (a container restart) leaves a fresh lock that
     # no process holds. Waiting out LOCK_STALE_TIMEOUT left the index frozen
-    # for ten minutes (W7); a same-host lock whose pid is gone is abandoned.
+    # for ten minutes; a same-host lock whose pid is gone is abandoned.
     it 'takes over a fresh lock abandoned by a dead writer on this host' do
       touch(0, 'config/locales/en.yml')
       dead = fork { exit!(0) }
