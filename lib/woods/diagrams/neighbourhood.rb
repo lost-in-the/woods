@@ -7,8 +7,8 @@ require_relative 'builder'
 module Woods
   module Diagrams
     # The typed edges around one unit as a flowchart (`flowchart LR`): each
-    # node is `identifier (type)`, each edge labelled with its `via`, the unit
-    # itself classed `focus`. Breadth-first over the published edges and
+    # node is declared once as `identifier (type)`, each edge labelled with
+    # its `via`, the unit itself classed `focus`. Breadth-first over the published edges and
     # `reverse_via`, one level per depth, each edge once; variant nodes are
     # followed by their own edges. `types` keeps the edges whose first-reached
     # endpoint has one of those types; `via` keeps those mechanisms.
@@ -59,15 +59,20 @@ module Woods
         { 'direction' => @direction, 'types' => @types, 'via' => @via, 'edges' => edges.size }
       end
 
+      # Each unit declared once with its label, the unit first, then the
+      # edges by id; the unit carries the `focus` class, which the text
+      # declares.
       def mermaid
-        lines = ['flowchart LR', "  #{mermaid_node(*@focus)}"]
+        lines = ['flowchart LR'] + mermaid_nodes.map { |node| "  #{mermaid_node(*node)}" }
         edges.each do |edge|
-          from = mermaid_node(edge.from, edge.from_type)
           arrow = edge.via.empty? ? '-->' : "-->|#{edge.via}|"
-          lines << "  #{from} #{arrow} #{mermaid_node(edge.to, edge.to_type)}"
+          lines << "  #{node_id(edge.from, edge.from_type)} #{arrow} #{node_id(edge.to, edge.to_type)}"
         end
-        lines << "  class #{node_id(*@focus)} focus"
-        lines.join("\n")
+        (lines + ['  classDef focus stroke-width:3px', "  class #{node_id(*@focus)} focus"]).join("\n")
+      end
+
+      def mermaid_nodes
+        ([@focus] + edges.flat_map { |edge| [[edge.from, edge.from_type], [edge.to, edge.to_type]] }).uniq
       end
 
       def node_id(identifier, type)
@@ -103,12 +108,8 @@ module Woods
 
       def outgoing(node)
         identifier, type = node
-        primary = @source.type_of(identifier) == type
-        raw = if primary
-                @source.graph.dig('edges', identifier)
-              else
-                @source.graph_node(identifier, type: type)&.dig('edges')
-              end
+        own = @source.type_of(identifier) == type
+        raw = own ? @source.graph.dig('edges', identifier) : @source.graph_node(identifier, type: type)&.dig('edges')
         Array(raw).map do |edge|
           edge = { 'target' => edge } unless edge.is_a?(Hash) # a graph from before typed edges
           Edge.new(from: identifier, from_type: type, via: edge['via'].to_s, to: edge['target'].to_s,
