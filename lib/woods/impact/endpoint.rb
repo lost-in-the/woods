@@ -1,9 +1,54 @@
 # frozen_string_literal: true
 
+require 'json'
+
 module Woods
   module Impact
     # Validated typed unit inventory from one locked published payload.
     class Endpoint
+      # One parse per unit across a range's two endpoints. A publish writes
+      # every unit again with its own `extracted_at`, so a unit nothing
+      # changed still differs from its previous file in that one value.
+      # Masking it, a `from` file whose bytes then equal the `to` file's
+      # shares that parsed (and validated) object; any other file is parsed
+      # on its own. Shared objects are deeply frozen.
+      class SharedParse
+        # The writer's last two top-level members, pretty or compact: the
+        # anchor at the end of the document keeps a nested `extracted_at`
+        # from matching. A file of any other shape is never masked.
+        STAMP = /"extracted_at":\s*"([^"\\]*)",\s*"source_hash":\s*"[0-9a-f]{64}"\s*\}\s*\z/n
+        # Bytes at the end of a file that can hold those two members.
+        TAIL = 256
+
+        def initialize
+          @parsed = {}
+        end
+
+        # @param content [String] a `to` unit file's checked bytes
+        # @return [Object] its frozen data, remembered for {#reuse}
+        def remember(content)
+          @parsed[masked(content)] = JSON.parse(content, freeze: true)
+        end
+
+        # @param content [String] a `from` unit file's checked bytes
+        # @return [Object] the data remembered for equivalent bytes, or its own frozen parse
+        def reuse(content)
+          @parsed.fetch(masked(content)) { JSON.parse(content, freeze: true) }
+        end
+
+        private
+
+        # The file's bytes without its extraction time. Only the tail is
+        # searched, as bytes, so the cost does not grow with the unit.
+        def masked(content)
+          start = [content.bytesize - TAIL, 0].max
+          match = STAMP.match(content.byteslice(start, TAIL).b)
+          return content.freeze unless match
+
+          (content.byteslice(0, start + match.begin(1)) << content.byteslice((start + match.end(1))..)).freeze
+        end
+      end
+
       # @param reader [PublishedIndex] caller retains ownership of its lock
       def initialize(reader)
         @reader = reader
@@ -24,11 +69,13 @@ module Woods
         @reader.manifest.tap { |manifest| validate_manifest!(manifest) }
       end
 
+      # @param decode [#call, nil] how each unit file's checked bytes become
+      #   its data ({SharedParse}); nil parses them
       # @return [Hash{Array(String, String) => Hash}] actual typed identities
       # @raise [IOError] if required inventory or fields are unavailable
-      def units
+      def units(decode: nil)
         manifest = self.manifest
-        records = @reader.each_unit.to_a
+        records = @reader.each_unit(decode: decode).to_a
         raise IOError, 'Impact payload total_units mismatch' unless records.size == manifest['total_units']
 
         records.each_with_object({}) do |unit, result|

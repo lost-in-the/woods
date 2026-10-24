@@ -1,6 +1,5 @@
 # frozen_string_literal: true
 
-require 'digest'
 require_relative 'value'
 require_relative 'line_diff'
 
@@ -40,7 +39,7 @@ module Woods
         (@before.keys | @after.keys).sort.filter_map do |identity|
           before = @before[identity]
           after = @after[identity]
-          facets = FIELDS.keys.reject { |facet| fingerprint(before, facet) == fingerprint(after, facet) }
+          facets = FIELDS.filter_map { |facet, field| facet unless same_field?(before, after, field) }
           next if before && after && facets.empty?
 
           change(identity, before, after, facets)
@@ -49,10 +48,12 @@ module Woods
 
       private
 
-      def fingerprint(unit, facet)
-        return unless unit
-
-        Digest::SHA256.hexdigest(Value.json(unit.fetch(FIELDS.fetch(facet))))
+      # A facet is unchanged when both endpoints carry it with the same
+      # canonical JSON. Compared structurally: most units of a range are
+      # unchanged, and serialising each one to compare it dominated a large
+      # large range.
+      def same_field?(before, after, field)
+        before && after && Value.same?(before.fetch(field), after.fetch(field))
       end
 
       def change(identity, before, after, facets)
@@ -68,9 +69,9 @@ module Woods
       def column_changes(before, after)
         old = named_columns(before)
         new = named_columns(after)
-        return {} unless old && new && Value.json(old) != Value.json(new)
+        return {} unless old && new && !Value.same?(old, new)
 
-        modified = (old.keys & new.keys).reject { |name| Value.json(old[name]) == Value.json(new[name]) }
+        modified = (old.keys & new.keys).reject { |name| Value.same?(old[name], new[name]) }
         { 'column_changes' => { 'added' => (new.keys - old.keys).sort, 'removed' => (old.keys - new.keys).sort,
                                 'modified' => modified.sort } }
       end
@@ -109,7 +110,7 @@ module Woods
         old = before ? before.fetch('metadata') : {}
         current = after ? after.fetch('metadata') : {}
         (old.keys | current.keys).sort.reject do |key|
-          old.key?(key) == current.key?(key) && Value.json(old[key]) == Value.json(current[key])
+          old.key?(key) == current.key?(key) && Value.same?(old[key], current[key])
         end
       end
 
