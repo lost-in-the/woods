@@ -223,4 +223,19 @@ RSpec.describe Woods::SkippedFiles do
     expect(described_class.read(payload)).to eq(data)
     expect(described_class.read(payload.join('missing'))).to be_nil
   end
+
+  describe '.with_flow_failures' do
+    let(:report) { { 'total' => 1, 'counts' => { 'parse_error' => 1 }, 'files' => [{ 'path' => 'a.rb' }] } }
+
+    it 'adds best-effort flow failures sorted by entry point, leaving the file tallies alone' do
+      failures = [{ 'entry_point' => 'B#x' }, { 'entry_point' => 'A#y' }]
+      merged = described_class.with_flow_failures(report, failures)
+      expect(merged.slice('total', 'counts', 'files')).to eq(report)
+      expect(merged['flow_failures'].map { |f| f['entry_point'] }).to eq(%w[A#y B#x])
+    end
+
+    it 'omits the key when there are no failures' do
+      expect(described_class.with_flow_failures(report.merge('flow_failures' => [{}]), [])).to eq(report)
+    end
+  end
 end

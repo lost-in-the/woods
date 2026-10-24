@@ -31,18 +31,32 @@ module Woods
   class FlowPrecomputer
     # Default maximum recursion depth for flow assembly
     DEFAULT_MAX_DEPTH = 3
+    # The reason a best-effort run records for an action whose flow did not assemble.
+    FAILURE_REASON = 'flow_assembly_error'
+
+    # @return [Hash{String => Hash}] best-effort failures by entry point after
+    #   {#precompute} or {#recompute_delta}: +entry_point+, +controller+,
+    #   +action+, +reason+ and +error+ (string keys, ready to publish)
+    attr_reader :failures
 
     # @param units [Array<ExtractedUnit>] All extracted units
     # @param graph [DependencyGraph] The dependency graph
     # @param output_dir [String] Base output directory
     # @param max_depth [Integer] Maximum flow assembly depth
-    def initialize(units:, graph:, output_dir:, max_depth: DEFAULT_MAX_DEPTH)
+    # @param best_effort [Boolean] record an action that fails to assemble in
+    #   {#failures} and leave it out of the index, instead of raising (W-14)
+    # @param root [String, nil] application root, stripped from recorded error
+    #   messages so the published bytes do not depend on where the app lives
+    def initialize(units:, graph:, output_dir:, max_depth: DEFAULT_MAX_DEPTH, best_effort: false, root: nil)
       @units = units
       @graph = graph
       @output_dir = output_dir
       @max_depth = max_depth
+      @best_effort = best_effort
+      @root = root&.to_s
       @flows_dir = File.join(output_dir, 'flows')
       @by_unit = {}
+      @failures = {}
     end
 
     # Pre-compute flow documents for all controller actions.
@@ -51,7 +65,9 @@ module Woods
     # raises instead of skipping the entry, so a partial index — missing
     # entries alongside a freshly written graph — is never written and the
     # caller aborts before publishing. The full extraction path shares this
-    # contract with the incremental delta.
+    # contract with the incremental delta. In best-effort mode (W-14) the
+    # failure is recorded in {#failures} instead and the entry is left out;
+    # every write failure still raises.
     #
     # @return [Hash{String => String}] Map of entry_point to output_dir-relative
     #   flow file path (e.g. "flows/OrdersController_create.json")
@@ -59,6 +75,7 @@ module Woods
     def precompute
       FileUtils.mkdir_p(@flows_dir)
       @by_unit = {}
+      @failures = {}
 
       assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
       flow_map = {}
@@ -98,16 +115,21 @@ module Woods
     #   of those entries, because a re-extracted unit lost the annotation
     #   whether or not its flows moved. Skipping the assembly is the whole
     #   saving; skipping the annotation would diverge from a full run.
+    # @param previous_failures [Array<Hash>] the previous generation's
+    #   best-effort failures; those of controllers this delta does not
+    #   replace carry forward into {#failures}, as their index entries do
     # @return [Hash{String => Hash{String => String}}] per-controller
     #   annotation (action => relative flow path) to write into the units'
     #   metadata; an empty hash means "no flows", which clears any
     #   annotation a previous run had written
-    def recompute_delta(touched_units:, removed_identifiers: [], carried_identifiers: [])
+    def recompute_delta(touched_units:, removed_identifiers: [], carried_identifiers: [], previous_failures: [])
       FileUtils.mkdir_p(@flows_dir)
 
       previous = previous_flow_index
       replaced = touched_units.map(&:identifier) + Array(removed_identifiers)
       carried = previous.reject { |entry_point, _path| replaced.include?(controller_of(entry_point)) }
+      @failures = Array(previous_failures).reject { |failure| replaced.include?(failure['controller']) }
+                                          .to_h { |failure| [failure['entry_point'], failure] }
       @by_unit = carried_inverse(carried)
 
       assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
@@ -162,8 +184,10 @@ module Woods
       actions = unit.metadata[:actions] || unit.metadata['actions'] || []
       actions.each do |action|
         entry_point = "#{unit.identifier}##{action}"
-        flow_path = assemble_and_write(assembler, entry_point, unit.identifier, action)
+        flow = assemble(assembler, entry_point, unit.identifier, action)
+        next unless flow
 
+        flow_path = write_flow(flow, entry_point, unit.identifier, action)
         entries[entry_point] = flow_path
         unit_flow_paths[action] = flow_path
       end
@@ -208,23 +232,48 @@ module Woods
       raise Woods::ExtractionError, "previous flow_index.json does not parse: #{e.message}"
     end
 
-    # Assemble a flow for one entry point and write the JSON file.
+    # Assemble the flow for one entry point. In best-effort mode a failure is
+    # recorded and nil returned; otherwise it raises.
+    #
+    # @param assembler [FlowAssembler]
+    # @param entry_point [String]
+    # @param controller_id [String]
+    # @param action [String]
+    # @return [Hash, nil] the flow document, nil when best-effort recorded a failure
+    # @raise [Woods::ExtractionError] when assembly fails outside best-effort mode
+    def assemble(assembler, entry_point, controller_id, action)
+      assembler.assemble(entry_point, max_depth: @max_depth).to_h
+    rescue StandardError => e
+      raise Woods::ExtractionError, "flow precompute failed for #{entry_point}: #{e.message}" unless @best_effort
+
+      @failures[entry_point] = { 'entry_point' => entry_point, 'controller' => controller_id, 'action' => action.to_s,
+                                 'reason' => FAILURE_REASON, 'error' => "#{e.class}: #{portable(e.message)}" }
+      nil
+    end
+
+    # An error message without this machine's application root.
+    #
+    # @param message [String]
+    # @return [String]
+    def portable(message)
+      @root ? message.to_s.gsub("#{@root}/", '') : message.to_s
+    end
+
+    # Write one assembled flow document.
     #
     # Written via {Woods::AtomicFile} (temp + rename) like every other index
     # artifact. A plain +File.write+ interrupted mid-write left a torn
     # partial for the MCP read side to trip over. Not durable by default: see
     # {#durable_writes?}.
     #
-    # @param assembler [FlowAssembler]
+    # @param data [Hash] the assembled flow document
     # @param entry_point [String]
     # @param controller_id [String]
     # @param action [String]
     # @return [String] The output_dir-relative path of the written file
     #   (e.g. "flows/OrdersController_create.json")
-    # @raise [Woods::ExtractionError] when assembly or the write fails
-    def assemble_and_write(assembler, entry_point, controller_id, action)
-      flow = assembler.assemble(entry_point, max_depth: @max_depth)
-      data = flow.to_h
+    # @raise [Woods::ExtractionError] when the write fails
+    def write_flow(data, entry_point, controller_id, action)
       index_flow_steps(data, entry_point)
 
       filename = Woods::FilenameUtils.flow_filename(controller_id, action)

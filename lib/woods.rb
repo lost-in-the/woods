@@ -169,7 +169,7 @@ module Woods
     attr_accessor :include_framework_sources, :gem_configs,
                   :vector_store, :metadata_store, :graph_store, :embedding_provider,
                   :vector_store_options, :metadata_store_options, :embedding_options,
-                  :concurrent_extraction, :precompute_flows, :extract_navigation_edges, :enable_snapshots,
+                  :concurrent_extraction, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_tracer_allow_production,
                   :session_store, :session_id_proc, :session_exclude_paths,
                   :console_mcp_enabled, :console_mcp_http_enabled, :console_mcp_path, :console_mcp_token,
@@ -184,7 +184,8 @@ module Woods
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
                   :dump_retention_count, :component_paths
-    attr_reader :retrieval_mode, :embedding_model, :max_context_tokens, :similarity_threshold, :extractors,
+    attr_reader :precompute_flows,
+                :retrieval_mode, :embedding_model, :max_context_tokens, :similarity_threshold, :extractors,
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length, :method_effects_limit,
@@ -418,6 +419,32 @@ module Woods
       end
 
       @retrieval_mode = value.to_sym
+    end
+
+    # Request-flow precomputation (W-14, woods#764).
+    #
+    # * +false+ (default): no flow family is written, and an existing one is withdrawn.
+    # * +true+: every controller action's flow is assembled; any failure aborts the
+    #   run before the generation is published (fail closed).
+    # * +:best_effort+: every flow that assembles is published; an action that does
+    #   not is left out of +flows/flow_index.json+ and recorded under
+    #   +flow_failures+ in +skipped_files.json+ (reason +flow_assembly_error+).
+    #
+    # @param value [Boolean, Symbol, String] +false+, +true+ or +:best_effort+ (also +"best_effort"+)
+    # @raise [ConfigurationError] for any other value
+    def precompute_flows=(value)
+      @precompute_flows = case value
+                          when true, false, nil then value || false
+                          when :best_effort, 'best_effort' then :best_effort
+                          else
+                            raise ConfigurationError,
+                                  "precompute_flows must be true, false or :best_effort, got #{value.inspect}"
+                          end
+    end
+
+    # @return [Boolean] whether flow precomputation publishes the flows it can and records the rest
+    def best_effort_flows?
+      @precompute_flows == :best_effort
     end
 
     # @param value [Symbol] Must be one of :claude, :markdown, :plain, :json

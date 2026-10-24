@@ -303,6 +303,7 @@ module Woods
         @summary = nil
         @dependency_graph = nil
         @graph_analysis = nil
+        @flow_failures = nil
         @raw_graph_data = nil
         @normalized_graph_edges = nil
         @graph_node_types = nil
@@ -373,6 +374,21 @@ module Woods
       def graph_analysis
         ensure_fresh!
         @graph_analysis ||= parse_json('graph_analysis.json')
+      end
+
+      # The request flows a best-effort extraction could not assemble (W-14,
+      # #764), from +skipped_files.json+ of the pinned payload: each with
+      # +entry_point+, +controller+, +action+, +reason+ and +error+. Empty
+      # when none failed, when flows were precomputed fail closed or not at
+      # all, or when the generation predates the report.
+      #
+      # @return [Array<Hash>]
+      def flow_failures
+        ensure_fresh!
+        @flow_failures ||= begin
+          path = current_payload_dir.join('skipped_files.json')
+          path.file? ? Array(JSON.parse(read_utf8(path))['flow_failures']).grep(Hash) : []
+        end
       end
 
       # Find a single unit by identifier.
