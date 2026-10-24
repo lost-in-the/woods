@@ -3,6 +3,7 @@
 require_relative 'prism_adapter'
 require_relative 'parser_adapter'
 require_relative 'selector'
+require_relative 'macros'
 
 module Woods
   module SourceReferences
@@ -15,6 +16,8 @@ module Woods
     class Collector
       HANDLERS = { declaration: :declaration, value_class: :value_class, constant: :reference,
                    singleton: :singleton, method: :method_body, call: :call_site }.freeze
+      include Macros
+
       # @param backend [Symbol] :prism (default) or :parser
       # @raise [ArgumentError] for an unsupported backend
       def initialize(backend: :prism)
@@ -32,7 +35,7 @@ module Woods
       # @param source [String] original Ruby source
       # @return [Hash] declarations, references, skipped records and parse_error
       def call(source)
-        @result = { 'declarations' => [], 'references' => [], 'skipped' => [], 'parse_error' => nil }
+        @result = { 'declarations' => [], 'references' => [], 'skipped' => [], 'macros' => [], 'parse_error' => nil }
         root, error = @adapter.parse(source)
         @result['parse_error'] = error
         visit(root, []) unless error
@@ -103,6 +106,7 @@ module Woods
       end
 
       def call_site(node, nesting, singleton_depth)
+        macro(node, nesting) if singleton_depth.zero? && nesting.any?
         receiver = @adapter.constant_receiver(node)
         return visit_children(node, nesting, singleton_depth) unless receiver
 
@@ -112,6 +116,21 @@ module Woods
           else
             visit(child, nesting, singleton_depth)
           end
+        end
+      end
+
+      # Receiverless class-body macros: each literal symbol argument (the first
+      # only for associations and scopes) with its source position.
+      def macro(node, nesting)
+        return unless @adapter.receiver(node).nil?
+
+        name = @adapter.selector(node).to_s
+        return unless MACROS.include?(name)
+
+        symbols = @adapter.leading_symbols(node)
+        symbols = symbols.first(1) unless CALLBACK_MACROS.include?(name)
+        symbols.each do |symbol, position|
+          @result['macros'] << { 'owner' => nesting.first, 'macro' => name, 'name' => symbol, **position }
         end
       end
 

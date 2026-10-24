@@ -99,9 +99,49 @@ occurrences publish an empty array. Absence on an older index means unavailable
 span metadata, not an empty reference set. See the
 [published layout](INDEX_LAYOUT.md#constant-reference-spans) for reader details.
 
-This bounded addition covers verified constants only. Other reference kinds,
-static/ambiguous candidates and broader method-target behavior remain separate
-work; it does not establish method-level reverse impact or complete #751.
+**Static and ambiguous constants (#751).** An occurrence the runtime lookup
+cannot verify can still publish a span from its literal spelling. Woods reads the
+spelling against the lexical nesting, innermost scope first and then the top
+level, and keeps the constant-owned units that declare one of those names under
+the caller policy. One candidate is `confidence: "static"` with `target` and
+`target_type`. Several (including every type of a runtime target several unit
+types share) are `confidence: "ambiguous"` with a `candidates` array of
+`{target, target_type}` and no `target`. A runtime target outside the index, an
+unverifiable owner and a self-reference publish nothing. Static evidence does not
+model lookup through ancestors, and neither confidence adds a dependency edge.
+
+**Declaration spans (#751).** The literal symbol of a class-body association
+(`belongs_to`, `has_many`, `has_one`, `has_and_belongs_to_many`), callback
+(model callbacks and controller `*_action` filters) or `scope` macro publishes a
+span only when the unit's runtime metadata confirms the declaration:
+- `kind: "association"` points at the reflected target class through the typed
+  registry. A polymorphic association publishes nothing.
+- `kind: "callback_method"` and `kind: "scope"` point at the declaring unit,
+  with `method` naming the method or scope. The method must appear in the
+  resolved `callbacks` or `filters` chain, or in `scopes`.
+
+Coordinates cover the whole `:name` literal. These spans add no edge: the
+extractors already publish association relationships. Route helpers, partials and
+macros inside concern blocks are not yet covered. Job and mailer references are
+ordinary constant spans whose `target_type` is `job` or `mailer`, with the
+selector in `method`. This does not establish method-level reverse impact.
+
+**Method table (#752).** Class-based units (models, controllers, services, jobs,
+mailers, concerns, POROs, libs and the other constant-owned types) publish
+`metadata.methods`: `[{name, kind, line, end_line, visibility, owner}]` in
+published `source_code` coordinates, sorted by line.
+- `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
+  `class_methods do`) or `module_function`.
+- `visibility` follows the literal `private`, `protected` and `public` forms,
+  including `private def`, `private :name` after the definition and
+  `private_class_method`.
+- `owner` is the lexical class or module, so a concern inlined as a commented
+  display block owns its methods at their lines inside the block.
+- Methods defined by metaprogramming or on another receiver are absent.
+- Source that does not parse publishes no table: absence means unavailable,
+  never "no methods".
+- `instance_methods` and `class_methods` are unchanged.
+- Superclass methods are not inlined.
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;
@@ -313,7 +353,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
 - Route context is inlined in `source_code` as a comment header, not just in metadata
 - Chunks per-action: each admitted action (exactly `metadata.actions`) becomes a `:action` chunk with its applicable filters and route. An action with no `def` body (a public `attr_reader`, or a method a DSL defines from its own file) gets a chunk holding the line Ruby reports as its definition site, with `metadata.declaration_line`
 - Metadata includes permitted params (strong parameters), response formats, and applied filters per action
-- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its declared `only`/`except` names the action; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
+- `action_facts` (W-7) records, for each admitted action, what its body and the filters that run before it say, read from the syntax tree: `assigns` (`{ ivar, line, method, file }`, including those a before or around filter makes, attributed to the filter and its file), `params` (`{ key, line, permitted, method, file }`, a call to a permitted-params method recorded with `permitted: true` and `via:`), `renders` (`{ template | partial (with locals) | format | head | object, line, status }`, plus `{ template, implicit: true }` when the body neither renders, redirects nor heads), `redirects` (`{ target, line }`, the target as written) and `formats` (the `respond_to` block's formats). A filter applies when its `applies_to` (below, W-8) includes the action, so stacked `only` scopes from a `skip_before_action` intersect as Rails runs them; `if:`/`unless:` conditions are not evaluated, proc filters and bodies outside the application are skipped, and helpers the action calls are not followed
 - `filters` (W-8) lists `_process_action_callbacks` in chain order. Each entry keeps its declared evidence (`kind`, `filter`, sorted `only`/`except`, `if`/`unless` labels, and the declaring `file`/`line` when application source shows it) and adds `owner`, `applies_to` and `applicability`. `applies_to` is the subset of `metadata.actions` (in that order) that the runtime `only`/`except` scopes admit, read from ActionFilter's action set (the closed-over set on Rails 6.0, which has no ActionFilter), so inherited and concern-supplied filters and `skip_before_action ..., only:` resolve as Rails runs them. `applicability` is `resolved` when no other condition applies, or `conditional` when an `if:`/`unless:` method, proc or string also decides the filter; Woods never evaluates it, so a conditional filter's `applies_to` lists the actions it can run on. `owner` is the class or concern whose application source declares the filter: the class in whose chain the callback first appears, or a module that class includes (a proc filter by its own source file). A callback that `skip_before_action` rebuilt is traced to the declaration it replaced; a filter no application source declares (a gem concern, or a macro such as `protect_from_forgery`) is owned by the class whose chain gained it. The filters applying to one action are the entries whose `applies_to` includes it, in array order
 - Facts bind to the runtime method's original name and exact source line; an alias keeps the dispatched action's implicit template. A line containing multiple definitions, a block/lambda opening, or a recognized generated-method declaration is ambiguous: Ruby can report that line for a renamed Proc-backed method installed elsewhere. Facts for such source sites are omitted, including compact real methods sharing those lines; `actions` remains unchanged. String-evaluated definitions with synthetic source locations are outside this static attribution contract. Nested definitions and foreign receiver eval/exec bodies do not supply action facts. Explicit `self` calls are recognized, splatted params keys remain unresolved, and dynamic template/partial targets retain their expression under `object` rather than inventing a path. Literal integer response statuses remain integers under `status` and strings under `head`.
 - `render RowComponent.new` in a controller produces a `render` edge to the component unit the running app reaches, resolved from the controller's lexical scope as [PhlexExtractor](#phlexextractor) describes for rendered constants (Kit calls and slots do not apply to a controller). A render that names no component class is listed in `metadata.unresolved_renders`; a gem's component in `metadata.external_renders`; neither produces an edge

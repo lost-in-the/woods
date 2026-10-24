@@ -23,7 +23,9 @@ class ArticlesController < ApplicationController
 
   private
 
-  def set_article; end
+  def set_article
+    @article = :loaded
+  end
 
   def log_render; end
 end

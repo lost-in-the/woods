@@ -189,7 +189,7 @@ lib/
 │   ├── db/                              # Schema management (migrations, Migrator, SchemaVersion)
 │   ├── evaluation/                      # Retrieval evaluation (Metrics, Evaluator, BaselineRunner)
 │   ├── unblocked/                       # Unblocked exporter (Client, DocumentBuilder, Exporter, RateLimiter, SyncManifest)
-│   ├── published_index/                 # PublishedIndex helpers (EdgeShaper, GenerationCatalog, TypedUnitReader)
+│   ├── published_index/                 # PublishedIndex helpers (EdgeShaper, GenerationCatalog, TypedUnitReader, OptionalArtifacts + CommitTable, FlowReaders, retention_pins)
 │   └── checks/                          # woods:check:* tasks (GenerationResolution, MovedMessages)
 ├── generators/woods/                    # Rails generators (install, pgvector)
 ├── tasks/

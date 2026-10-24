@@ -10,6 +10,7 @@ require 'set'
 require 'uri'
 require_relative '../atomic_file'
 require_relative '../generation'
+require_relative '../generation_pins'
 require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../watch/supervision_status'
@@ -2301,6 +2302,7 @@ module Woods
                                       { 'state' => 'unknown', 'reasons' => ['source_reader_unavailable'], 'complete' => false }
                                     end
           base.merge!(generation_fields(index_dir, reader))
+          base.merge!(retention_pin_fields(index_dir))
           base.merge!(working_tree_fields(index_dir))
 
           manifest_sha = manifest && manifest['git_sha']
@@ -2339,6 +2341,24 @@ module Woods
           fields.merge(served_generation_fields(marker, reader))
         rescue StandardError
           {}
+        end
+
+        # Persistent retention pins (`woods:pin[N]`, #761), the generations
+        # retention keeps beyond `WOODS_PAYLOAD_RETENTION` until released.
+        #
+        # Unreadable or malformed pin state is reported as unknown (`nil` with
+        # the reason), never as an empty list: an empty list would claim no
+        # review base is protected while retention itself fails closed.
+        #
+        # @param index_dir [String, Pathname, nil]
+        # @return [Hash] `{retention_pins: [Integer]}`, or `{retention_pins: nil,
+        #   retention_pins_error: String}`; empty without an index directory
+        def retention_pin_fields(index_dir)
+          return {} unless index_dir
+
+          { retention_pins: Woods::GenerationPins.new(index_dir).pins }
+        rescue StandardError => e
+          { retention_pins: nil, retention_pins_error: e.message }
         end
 
         # What the *reader* is actually serving, which is not always what is

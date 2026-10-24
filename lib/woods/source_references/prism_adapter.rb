@@ -114,6 +114,15 @@ module Woods
         node.location.start_line
       end
 
+      # @return [Array<Array(String, Hash)>] literal symbol arguments before the
+      #   first other argument, each with the position of the whole `:name`
+      def leading_symbols(node)
+        node.arguments&.arguments.to_a.take_while { |argument| argument.type == :symbol_node }.filter_map do |symbol|
+          name = symbol.unescaped.to_s
+          [name, position(symbol)] unless name.empty? || symbol.opening_loc.nil?
+        end
+      end
+
       def end_line(node)
         node.location.end_line
       end

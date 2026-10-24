@@ -160,8 +160,39 @@ selector is `new`; for `Target.send(:call)`, it is `send`. Inherited job APIs an
 framework-mediated mailer dispatch do not establish a method-definition owner.
 This field adds no method table, excerpt, anchor or method-scoped reverse impact.
 
-The generation-local internal reference cache is format 6 for this writer;
-format 5 and earlier require a full baseline rebuild before incremental writes.
+Static, ambiguous and declaration spans share the array (#751):
+
+```json
+{"line": 3, "column": 4, "length": 9, "target": "RefTarget", "target_type": "poro", "kind": "constant", "confidence": "static"}
+{"line": 5, "column": 6, "length": 8, "kind": "constant", "confidence": "ambiguous", "candidates": [{"target": "Admin::Notifier", "target_type": "service"}, {"target": "Notifier", "target_type": "lib"}]}
+{"line": 9, "column": 13, "length": 7, "target": "Author", "target_type": "model", "kind": "association", "confidence": "verified"}
+{"line": 11, "column": 14, "length": 9, "target": "Post", "target_type": "model", "kind": "callback_method", "confidence": "verified", "method": "set_slug"}
+```
+
+- An `ambiguous` record has `candidates`, sorted by target and type, and no
+  `target` or `target_type`. Never pick one silently.
+- `static` means the literal spelling names exactly one indexed unit while the
+  runtime lookup did not verify it.
+- Neither adds a graph edge.
+- `kind` values are `constant`, `association`, `callback_method` and `scope`.
+  Readers must ignore kinds they do not know.
+- Records at the same position sort after the established constant order by
+  kind and confidence.
+
+`metadata.methods` (#752) lists method definitions in the same published
+coordinates:
+
+```json
+{"name": "set_slug", "kind": "instance", "line": 41, "end_line": 43, "visibility": "private", "owner": "Post"}
+```
+
+A concern's methods inlined as a commented display block keep the concern as
+`owner`, with lines inside the block. Absence of the key means the table is
+unavailable (an older writer, or source that does not parse); an empty array
+means no literal definitions.
+
+The generation-local internal reference cache is format 7 for this writer;
+format 6 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
@@ -297,6 +328,8 @@ may omit it. Absence means the lookup is unavailable, not that no entry point
 touches a unit. Consumers can derive the same mapping from typed steps in the
 selected generation's flow documents, or assemble flows on demand where that
 capability is available. Do not mix documents from different generations.
+Ruby readers use `Woods::PublishedIndex#flow_entry_points(identifier, type:)`
+and `#flow_document(entry_point)`, which return `nil` when the artifact is absent.
 
 ### Semantic graph validation
 
@@ -485,7 +518,10 @@ updates use durable atomic replacement. If pruning wins the race and removes a
 payload, pinning fails; a successful pin is visible before pruning can delete it.
 Retention keeps pinned payloads **in addition to** the usual recent-generation
 budget, logs each skipped persistent pin, and retries released payloads on the
-next publication. `woods:stats` lists the persistent numbers. Releasing a pin
+next publication. `woods:stats` lists the persistent numbers, `woods_status`
+reports them as `index.retention_pins`, and Ruby readers call
+`Woods::PublishedIndex.retention_pins(output_dir)`. Status reports unreadable
+state as `retention_pins: null` with `retention_pins_error`, never as an empty list. Releasing a pin
 does not delete a payload immediately; an active reader's manifest lock still
 protects it. Disk usage can grow until pins are released.
 
