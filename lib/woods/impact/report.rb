@@ -22,6 +22,8 @@ module Woods
       def self.compare(index_dir, from:, to: 'now', **parameters)
         options = Options.new(**parameters)
         Resolver.new(index_dir).open(from: from, to: to) do |before, after|
+          next unchanged(before, from, to, options) if before.equal?(after)
+
           base = Endpoint.new(before)
           head = Endpoint.new(after)
           before_units = base.units
@@ -34,6 +36,16 @@ module Woods
               unknowns: unknowns, computed: computed)
         end
       end
+
+      # Both endpoints are one payload: nothing changed, so no unit is read or
+      # compared. The report says so with the same envelope as any range.
+      def self.unchanged(reader, from, to, options)
+        endpoint = Endpoint.new(reader)
+        endpoint.manifest
+        new({ 'from' => endpoint.provenance(from), 'to' => endpoint.provenance(to) }, [],
+            computed: compute([[reader, []], [reader, []]], [], options))
+      end
+      private_class_method :unchanged
 
       # @return [Hash] endpoint-specific propagation and flow evidence
       def self.compute(endpoints, changes, options)

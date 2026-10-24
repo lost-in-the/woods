@@ -21,9 +21,13 @@ when the current reader opens; `now` does not move during comparison. Each
 selected `PublishedIndex` stays open through comparison and serialization value
 construction. All readers close on success or exception.
 
-A SHA matches retained manifests' `git_sha` provenance. Multiple matching
-generations, including repeated captures at the identical full SHA, raise
-`Woods::Impact::ResolutionError` with `gen:N` alternatives. Missing generations,
+A SHA matches retained manifests' `git_sha` provenance. Several generations
+can record the same commit, because incremental runs and the watch daemon
+extract again without a new commit. When every match records one full SHA,
+the selector names that commit's captures: as `from` it resolves to the oldest
+of them (the commit as first extracted), as `to` to the newest (everything
+extracted before the next commit). A prefix that matches different commits
+raises `Woods::Impact::ResolutionError` with `gen:N` alternatives. Missing generations,
 unknown SHAs and unsupported selectors fail; a missing current endpoint never
 falls back to an older payload. Flat indexes are unsupported for ranges.
 Errors retain the underlying I/O or parser exception for corrupt payloads.
