@@ -504,6 +504,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.send(:remove_const, :ReferenceGraphTarget) if Object.const_defined?(:ReferenceGraphTarget, false)
     end
 
+    it 'reports every unit that calls a service object as its dependent, before and after a caller stops' do
+      sources = {
+        'app/services/gadget_pricer.rb' => "class GadgetPricer\n  def self.call(gadget)\n    gadget\n  end\nend\n",
+        'app/services/gadget_batch.rb' => "class GadgetBatch\n  def run\n    GadgetPricer.call(nil)\n  end\nend\n",
+        'app/models/gadget_quote.rb' => "class GadgetQuote\n  def total\n    GadgetPricer.call(self)\n  end\nend\n",
+        'app/jobs/gadget_refresh_job.rb' =>
+          "class GadgetRefreshJob < ApplicationJob\n  def perform\n    GadgetPricer.call(nil)\n  end\nend\n"
+      }
+      sources.each { |relative, source| load app_path(write_file(relative, source)) }
+      index = full_extraction
+      reverse = -> { read_json(index, 'dependency_graph.json').fetch('reverse').fetch('GadgetPricer', []) }
+      expect(reverse.call).to include('GadgetBatch', 'GadgetQuote', 'GadgetRefreshJob')
+
+      quote = write_file('app/models/gadget_quote.rb', "class GadgetQuote\n  def total\n    0\n  end\nend\n")
+      load app_path(quote)
+      Woods::Extractor.new(output_dir: index).extract_changed([quote])
+      expect(reverse.call).to include('GadgetBatch', 'GadgetRefreshJob')
+      expect(reverse.call).not_to include('GadgetQuote')
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      %i[GadgetPricer GadgetBatch GadgetQuote GadgetRefreshJob].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'refreshes source references after a caller edit and retains its last generation after a parse failure' do
       caller_path = write_file('app/models/reference_refresh_caller.rb', <<~RUBY)
         class ReferenceRefreshCaller
