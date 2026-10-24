@@ -516,6 +516,10 @@ end
 | `graph_cycle_max_length` | Integer or `nil` | `50` | The longest cycle recorded, in distinct nodes. A back-edge deep in the DFS closes a cycle as long as the path, which on a large graph is thousands of nodes: unreadable as a report and expensive to canonicalize. Set to `nil` to record a cycle of any length. |
 | `method_effects_limit` | Integer or `nil` | `50` | How many public methods one unit records in `metadata.method_effects`. Past the cap the first methods in source order are kept and `method_effects_truncated` is set; the `through` annotation on edges is not capped. Set to `nil` to record every method. The generation fingerprints this value; changing it requires a full extraction before incremental extraction or refresh. |
 
+| `git_recent_commits` | Integer | `5` | How many commit records each unit keeps in `metadata.git.recent_commits`. `commit_count` and `contributors` always cover the whole 365-day window. The generation fingerprints this value; changing it requires a full extraction before incremental extraction or refresh. |
+| `git_commit_table_days` | Integer | `365` | How many days before the run's UTC date the commit table (`git_commits.json`, see [Index layout](INDEX_LAYOUT.md#commit-table)) reaches back. |
+| `git_commit_table_limit` | Integer | `5000` | The most commits the commit table publishes. The newest are kept; when older commits in the window are dropped the table records `truncated: true`. |
+| `git_commit_table_files_limit` | Integer | `100` | The most files the commit table lists for one commit; the rest are counted in that commit's `files_omitted`. The table's `paths` index is never bounded by it, so co-change stays complete. |
 | `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
 

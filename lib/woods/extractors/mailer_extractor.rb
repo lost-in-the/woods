@@ -12,6 +12,7 @@ require_relative 'route_helper_resolver'
 require_relative 'helper_call_scan'
 require_relative 'template_extensions'
 require_relative 'action_fact_resolution'
+require_relative 'filter_applicability'
 
 module Woods
   module Extractors
@@ -31,6 +32,7 @@ module Woods
       include AstSourceExtraction
       include SharedUtilityMethods
       include ActionFactResolution
+      include FilterApplicability
       include SharedDependencyScanner
       include RouteHelperResolver
 
@@ -153,8 +155,8 @@ module Woods
           # Delivery configuration
           delivery_method: mailer.delivery_method,
 
-          # Callbacks
-          callbacks: extract_callbacks(mailer),
+          # Callbacks, with each one's resolved actions and owner (W-8)
+          callbacks: extract_callbacks(mailer, actions),
 
           # Layout
           layout: extract_layout(mailer, source),
@@ -181,7 +183,15 @@ module Woods
         {}
       end
 
-      def extract_callbacks(mailer)
+      # The mailer's action callbacks in chain order, with their declared
+      # only/except/if/unless.
+      #
+      # @param mailer [Class]
+      # @param actions [Array<String>, nil] the mailer's actions; when given,
+      #   each entry also carries +owner+, +applies_to+ and +applicability+
+      #   ({FilterApplicability#filter_applicability}, W-8)
+      # @return [Array<Hash>]
+      def extract_callbacks(mailer, actions = nil)
         mailer._process_action_callbacks.map do |cb|
           only, except, if_conds, unless_conds = extract_callback_conditions(cb)
 
@@ -193,7 +203,7 @@ module Woods
           result[:except] = except if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
           result[:unless] = unless_conds.join(', ') if unless_conds.any?
-          result
+          actions ? result.merge(filter_applicability(mailer, cb, actions)) : result
         end
       rescue StandardError
         []

@@ -151,7 +151,8 @@ module Woods
                          config_file_paths config_file_values settings_readers
                          external_table_consumers external_table_consumers_path
                          test_support_paths test_subdomain_helpers rake_task_paths javascript_paths
-                         documentation_paths documentation_exclude method_effects_limit].freeze
+                         documentation_paths documentation_exclude method_effects_limit
+                         git_recent_commits].freeze
 
     # Markdown the documentation extractor indexes as `doc` units, as
     # root-relative globs. See {#documentation_paths=}.
@@ -191,7 +192,9 @@ module Woods
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
                 :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
-                :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation
+                :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation,
+                :git_recent_commits, :git_commit_table_days, :git_commit_table_limit,
+                :git_commit_table_files_limit
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -258,6 +261,12 @@ module Woods
       @graph_cycle_limit = GraphAnalyzer::DEFAULT_CYCLE_LIMIT
       @graph_cycle_max_length = GraphAnalyzer::DEFAULT_CYCLE_MAX_LENGTH
       @method_effects_limit = 50
+      # Commit records each unit keeps in `metadata.git.recent_commits`.
+      @git_recent_commits = 5
+      # Bounds of the generation's commit table, git_commits.json. See the setters.
+      @git_commit_table_days = 365
+      @git_commit_table_limit = 5_000
+      @git_commit_table_files_limit = 100
       # nil = the unbounded transitive closure. See the setter for why the
       # default is not a small number.
       @incremental_blast_radius_depth = nil
@@ -478,6 +487,49 @@ module Woods
     # @raise [ConfigurationError] otherwise
     def method_effects_limit=(value)
       @method_effects_limit = validate_optional_positive_integer!(:method_effects_limit, value)
+    end
+
+    # How many commit records each unit keeps in `metadata.git.recent_commits`
+    # (default 5). `commit_count` and `contributors` always cover the whole
+    # 365-day window; only the list of records is bounded.
+    #
+    # The value is part of the generation's configuration fingerprint: after
+    # changing it, incremental extraction refuses until one full extraction.
+    #
+    # @param value [Integer] must be a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def git_recent_commits=(value)
+      @git_recent_commits = validate_positive_integer!(:git_recent_commits, value)
+    end
+
+    # How many days before the run's UTC date the commit table
+    # (`git_commits.json`) reaches back (default 365, the window of
+    # `metadata.git`).
+    #
+    # @param value [Integer] must be a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def git_commit_table_days=(value)
+      @git_commit_table_days = validate_positive_integer!(:git_commit_table_days, value)
+    end
+
+    # The most commits the commit table publishes (default 5000). The newest
+    # are kept; when older commits in the window are dropped the table says
+    # `truncated: true`.
+    #
+    # @param value [Integer] must be a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def git_commit_table_limit=(value)
+      @git_commit_table_limit = validate_positive_integer!(:git_commit_table_limit, value)
+    end
+
+    # The most files the commit table lists for one commit (default 100); the
+    # rest are counted in the commit's `files_omitted`. The `paths` table is
+    # never bounded by it.
+    #
+    # @param value [Integer] must be a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def git_commit_table_files_limit=(value)
+      @git_commit_table_files_limit = validate_positive_integer!(:git_commit_table_files_limit, value)
     end
 
     # How many reverse hops an incremental run walks from a changed file
@@ -838,6 +890,14 @@ module Woods
       when Regexp then { 'source' => value.source, 'options' => value.options }
       else value
       end
+    end
+
+    # @return [Integer] +value+ when it is a positive Integer
+    # @raise [ConfigurationError] otherwise
+    def validate_positive_integer!(name, value)
+      return value if value.is_a?(Integer) && value.positive?
+
+      raise ConfigurationError, "#{name} must be a positive Integer, got #{value.inspect}"
     end
 
     # @return [Integer, nil] +value+ when it is nil or a positive Integer

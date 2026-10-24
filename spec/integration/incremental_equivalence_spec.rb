@@ -1181,6 +1181,61 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     FileUtils.rm_f(app_path('.gitignore'))
   end
 
+  describe 'commit table (W-3)' do
+    def app_git(*args, author: 'Leah Armstrong')
+      env = { 'GIT_AUTHOR_NAME' => author, 'GIT_AUTHOR_EMAIL' => 'author@example.invalid',
+              'GIT_COMMITTER_NAME' => author, 'GIT_COMMITTER_EMAIL' => 'author@example.invalid' }
+      out, err, status = Open3.capture3(env, *Woods::GitCommand.argv(@app_root, *args))
+      raise err unless status.success?
+
+      out.strip
+    end
+
+    def commit_table(index)
+      Woods::GitCommitTable.read(Woods::Generation.new(output_dir: index).payload_dir)
+    end
+
+    it 'publishes no table for an application without git history, on either path' do
+      index = full_extraction
+      changed = write_file('app/services/no_history_service.rb', service_source('NoHistoryService'))
+      Woods::Extractor.new(output_dir: index).extract_changed([changed])
+
+      expect(commit_table(index)).to be_nil
+      expect(differences(index, full_extraction)).to be_empty
+    end
+
+    it 'keeps the table equivalent to a full run as files change and HEAD moves' do
+      app_git('init', '--quiet', '-b', 'main')
+      QuietGit.configure(@app_root)
+      app_git('add', '.')
+      app_git('commit', '-qm', 'Initial application')
+      index = full_extraction
+      expect(commit_table(index)['paths']).to include('app/models/post.rb')
+
+      service = write_file('app/services/digest_service.rb', service_source('DigestService', dependency: 'Post'))
+      app_git('add', '.')
+      app_git('commit', '-qm', 'Send digests', author: 'Sam Okafor-Whitfield')
+      Woods::Extractor.new(output_dir: index).extract_changed([service])
+      expect(differences(index, full_extraction)).to be_empty
+      expect(commit_table(index)['paths'].fetch(service)).to eq([app_git('rev-parse', 'HEAD')])
+
+      # Extracted before it is committed, then committed: the commit moves
+      # HEAD under an unchanged unit, and the commit range names the file
+      # again (as woods:incremental's git range does).
+      edited = write_file(service, service_source('DigestService', dependency: 'Comment'))
+      Woods::Extractor.new(output_dir: index).extract_changed([edited])
+      app_git('commit', '-qam', 'Digest comments too')
+      Woods::Extractor.new(output_dir: index).extract_changed([edited])
+
+      table = commit_table(index)
+      expect(table['head']).to eq(app_git('rev-parse', 'HEAD'))
+      expect(table['commits'].map { |row| row['message'] }.first(2)).to eq(['Digest comments too', 'Send digests'])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      FileUtils.rm_rf(app_path('.git'))
+    end
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)
