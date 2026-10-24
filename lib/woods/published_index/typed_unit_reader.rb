@@ -40,6 +40,10 @@ module Woods
       end
 
       # Preserve subtype identity in an index entry from a shared type directory.
+      # An entry that names a type of its directory (indexes written since
+      # Woods records it) is labelled from the index; an older entry, or one
+      # naming a type the directory cannot hold, is labelled by reading its
+      # unit through the guarded typed path.
       #
       # @param reader [Woods::MCP::IndexReader]
       # @param entry [Hash] published index entry
@@ -49,16 +53,22 @@ module Woods
       # @raise [IOError] when a multi-type directory's unit fails the reader's guards
       def self.entry(reader, entry, dir, requested_type)
         family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
-        actual_type = if Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch(dir).size > 1
-                        call(reader, entry['identifier'], family)&.fetch('type')
-                      else
-                        family
-                      end
+        actual_type = entry_type(reader, entry, dir, family)
         return unless actual_type
         return if requested_type && requested_type != family && requested_type != actual_type
 
         entry.merge('type' => actual_type)
       end
+
+      # @return [String, nil] the entry's actual type
+      def self.entry_type(reader, entry, dir, family)
+        types = Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch(dir)
+        return family if types.one?
+        return entry['type'] if types.include?(entry['type'])
+
+        call(reader, entry['identifier'], family)&.fetch('type')
+      end
+      private_class_method :entry_type
     end
   end
 end
