@@ -31,6 +31,11 @@ module Woods
           "#{lines.join("\n")}\n"
         end
 
+        # @return [Boolean] whether {#render} dropped nodes or edges at the display budget
+        def truncated?
+          @truncated
+        end
+
         private
 
         def header

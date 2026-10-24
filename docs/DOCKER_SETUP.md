@@ -11,7 +11,7 @@ HOST                                    APPLICATION CONTAINER
 ─────────────────────────────           ───────────────────────────
 MCP client                              Rails App + Woods bundle
   docker compose exec -T ────────────▶    woods-mcp /app/tmp/woods
-                                          30 schemas; 14 registered
+                                          31 schemas; 15 registered
                                           reads the published index
 
 Extraction commands ─────────────────▶   bundle exec rake woods:extract

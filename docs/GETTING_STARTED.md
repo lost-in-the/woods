@@ -123,7 +123,7 @@ For example:
 
 > Use Woods to find `Order`, inspect its resolved callbacks and associations, and list the first two levels of code that depend on it. Cite the Woods identifiers you used.
 
-The Index schema inventory totals 30 schemas. Fourteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but needs embeddings in the default semantic mode, or explicit [lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over extraction output. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
+The Index schema inventory totals 31 schemas. Fifteen register as tools in a normal packaged launch; `codebase_retrieve` is among them but needs embeddings in the default semantic mode, or explicit [lexical retrieval](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval) over extraction output. The other structural tools work immediately. See [Agent guide](AGENT_GUIDE.md) for a reliable query workflow.
 
 ## Optional next steps
 

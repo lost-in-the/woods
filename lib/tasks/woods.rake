@@ -14,6 +14,7 @@
 #   bundle exec rake woods:clean             # Remove index
 #   bundle exec rake woods:self_analyze      # Analyze gem's own source
 #   bundle exec rake woods:flow[EntryPoint]  # Generate execution flow
+#   bundle exec rake "woods:diagram[kind,identifier]" # Mermaid for one unit
 
 # Reading Woods JSON artifacts with a bare File.read tags the result with the
 # process's default external encoding — US-ASCII under LANG=C, the common
@@ -130,6 +131,15 @@ namespace :woods do
   task :impact, %i[from to] do |_task, args|
     require 'woods/impact/task'
     Woods::Impact::Task.new(from: args[:from], to: args[:to]).run
+  end
+
+  desc 'Mermaid for one unit from the published index (neighbourhood, schema, lifecycle or impact)'
+  task :diagram, %i[kind identifier] do |_task, args|
+    require 'woods/diagrams/task'
+    result = Woods::Diagrams::Task.new(kind: args[:kind], identifier: args[:identifier]).run
+    exit 1 unless result.drawn?
+  rescue Woods::Diagrams::InvalidRequest, Woods::Diagrams::UnitNotFound => e
+    abort e.message
   end
 
   desc 'Tend the garden — incremental extraction (alias for incremental)'

@@ -420,6 +420,12 @@ jobs:
           spec/mcp/http_server_e2e_spec.rb
           spec/integration/mcp_official_ruby_client_spec.rb
           spec/integration/mcp_inspector_contract_spec.rb
+      # The diagram tool's text must parse with the Mermaid GitHub renders
+      # (woods#826): the vendored build runs in this job's Node.
+      - name: Parse diagram texts with GitHub's Mermaid
+        env:
+          WOODS_RUN_GITHUB_MERMAID: '1'
+        run: bundle exec rspec spec/diagrams/github_mermaid_spec.rb
 
   coverage:
     runs-on: ubuntu-latest

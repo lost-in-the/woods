@@ -106,7 +106,8 @@ module Woods
         # failure has to name the table and the property that needs the entry,
         # not surface as a bare KeyError far from its cause.
         def integer_bounds(name, tool_name)
-          return [0, 10] if tool_name == 'change_impact' && name.to_s == 'depth'
+          # Each diagram kind narrows depth further (Woods::Diagrams::DEPTHS) and answers invalid_params.
+          return [0, 10] if %w[change_impact diagram].include?(tool_name) && name.to_s == 'depth'
 
           INTEGER_BOUNDS.fetch(name.to_s) do
             raise ArgumentError,
