@@ -325,6 +325,25 @@ RSpec.describe Woods::Extractors::JobExtractor do
     end
   end
 
+  describe 'queue adapter override (W-9)' do
+    let(:extractor) { described_class.new }
+
+    before do
+      base = Class.new { def self.queue_adapter_name = 'solid_queue' }
+      stub_const('ActiveJob::Base', base)
+    end
+
+    it 'records the adapter of a class that overrides the application adapter' do
+      job = Class.new(ActiveJob::Base) { def self.queue_adapter_name = 'async' }
+      expect(extractor.send(:queue_adapter_override, job)).to eq('async')
+    end
+
+    it 'records nothing for a class on the application adapter or outside Active Job' do
+      expect(extractor.send(:queue_adapter_override, Class.new(ActiveJob::Base))).to be_nil
+      expect(extractor.send(:queue_adapter_override, Class.new)).to be_nil
+    end
+  end
+
   # ── Retry Config ─────────────────────────────────────────────────────
 
   describe 'retry config extraction' do

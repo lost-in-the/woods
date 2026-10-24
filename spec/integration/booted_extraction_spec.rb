@@ -262,6 +262,20 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:jobs).map { |u| u['identifier'] }).to include('PublishPostJob')
   end
 
+  it 'attributes each unit to its container and copies the kind onto the graph node (W-9)' do
+    expect(find_unit(:controllers, 'PostsController').dig('metadata', 'container')).to eq('kind' => 'web')
+    expect(find_unit(:jobs, 'PublishPostJob').dig('metadata', 'container')).to include('kind' => 'jobs')
+    expect(find_unit(:models, 'Post').dig('metadata', 'container')).to include('kind' => 'database')
+    graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
+    expect(graph.dig('nodes', 'PostsController', 'container')).to eq('web')
+  end
+
+  it 'publishes domain clusters with typed members in graph_analysis.json (woods#799)' do
+    analysis = JSON.parse(File.read(File.join(payload_dir, 'graph_analysis.json')))
+    expect(analysis.fetch('domain_clusters')).to all(include('name', 'members', 'typed_members'))
+    expect(analysis.dig('stats', 'domain_cluster_count')).to eq(analysis['domain_clusters'].size)
+  end
+
   it 'marks a whole-file cache profile while retaining its controller in the file map (#417)' do
     graph = JSON.parse(File.read(File.join(payload_dir, 'dependency_graph.json')))
     path = 'app/controllers/profiled_controller.rb'

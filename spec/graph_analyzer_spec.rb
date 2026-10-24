@@ -400,6 +400,38 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(report).to have_key(:stats)
     end
 
+    it 'publishes the domain clusters with each member typed (woods#799)' do
+      %w[Order::Item Order::Payment Order::Refund].each do |identifier|
+        graph.register(make_unit(type: :model, identifier: identifier))
+      end
+      graph.register(make_unit(type: :service, identifier: 'Order::Checkout'))
+
+      cluster = analyzer.analyze[:domain_clusters].find { |c| c[:name] == 'Order' }
+
+      expect(cluster).to include(members: %w[Order::Checkout Order::Item Order::Payment Order::Refund])
+      expect(cluster[:typed_members]).to include({ identifier: 'Order::Checkout', type: 'service' },
+                                                 { identifier: 'Order::Item', type: 'model' })
+      expect(analyzer.analyze[:stats][:domain_cluster_count]).to eq(analyzer.analyze[:domain_clusters].size)
+    end
+
+    it 'publishes clusters of application units only, never of framework sources' do
+      %w[ActiveRecord::Base ActiveRecord::Relation ActiveRecord::Migration].each do |identifier|
+        graph.register(make_unit(type: :rails_source, identifier: identifier))
+      end
+
+      expect(analyzer.analyze[:domain_clusters].map { |c| c[:name] }).not_to include('ActiveRecord')
+    end
+
+    it 'leaves out the models a gem defines, whose source is outside the application' do
+      %w[ActiveStorage::Blob ActiveStorage::Attachment ActiveStorage::VariantRecord].each do |identifier|
+        graph.register(make_unit(type: :model, identifier: identifier,
+                                 file_path: "/gems/activestorage/app/models/#{identifier.underscore}.rb"))
+      end
+
+      app_only = described_class.new(graph, application_source: ->(path) { path.start_with?('/app/') })
+      expect(app_only.analyze[:domain_clusters].map { |c| c[:name] }).not_to include('ActiveStorage')
+    end
+
     it 'includes stats with counts' do
       stats = analyzer.analyze[:stats]
 

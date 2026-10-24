@@ -36,9 +36,10 @@ module Woods
     # actions whose body is gem code); route_action: route units that dispatch
     # to a controller action. Together they let the analyzer report routes that
     # do not resolve without re-running the route extractor on controller edits.
+    # container: the kind of {ContainerAttribution}'s `metadata[:container]` (W-9).
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
-      actions inherited_gem_actions route_action
+      actions inherited_gem_actions route_action container
     ].freeze
 
     # These extractors describe a whole source file rather than one constant.
@@ -765,6 +766,8 @@ module Woods
       source_paths = source_paths_of(unit, metadata)
       attrs[:source_paths] = source_paths if source_paths
       attrs[:package] = metadata[:package] unless metadata[:package].nil?
+      container = metadata[:container]
+      attrs[:container] = container[:kind] if container.is_a?(Hash) && !container[:kind].nil?
       attrs[:actions] = metadata[:actions] if unit.type == :controller && metadata[:actions].is_a?(Array)
       gem_actions = metadata[:inherited_gem_actions]
       if unit.type == :controller && gem_actions.is_a?(Hash) && gem_actions.any?
