@@ -157,7 +157,8 @@ module Woods
         next if operation[:unexpanded]
 
         visited.delete(unit_id)
-        expand("#{unit_id}##{operation[:method]}", steps, visited, depth: 1, max_depth: max_depth)
+        owner = operation[:defined_in] || unit_id
+        expand("#{owner}##{operation[:method]}", steps, visited, depth: 1, max_depth: max_depth)
       end
     end
 
@@ -187,9 +188,26 @@ module Woods
       name = callback[:filter].to_s
       operation = { type: :callback, callback: callback[:type].to_s, target: unit_id, method: name, line: nil,
                     conditions: stringify(callback[:conditions] || {}) }
-      defined = name.match?(/\A\w+[?!]?\z/) && method_node(unit_id, unit[:source_code].to_s, name)
-      operation[:unexpanded] = 'not defined in the unit' unless defined
+      owner = name.match?(/\A\w+[?!]?\z/) && callback_owner(unit_id, unit, name)
+      operation[:unexpanded] = 'not defined in the unit' unless owner
+      operation[:defined_in] = owner if owner && owner != unit_id
       operation
+    end
+
+    # Where a callback method is defined: the model itself, or a concern it
+    # inlines (`metadata.inlined_concerns`). A model's `source_code` carries
+    # its concerns only as comment blocks, so their methods are read from the
+    # concern units.
+    #
+    # @return [String, nil] the defining unit's identifier, or nil (a gem's or
+    #   Rails' own callback, or a proc)
+    def callback_owner(unit_id, unit, name)
+      return unit_id if method_node(unit_id, unit[:source_code].to_s, name)
+
+      Array((unit[:metadata] || {})[:inlined_concerns]).map(&:to_s).find do |concern_id|
+        concern = load_unit(concern_id)
+        concern && method_node(concern_id, concern[:source_code].to_s, name)
+      end
     end
 
     def stringify(hash)

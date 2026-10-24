@@ -243,7 +243,10 @@ module Woods
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') },
           method_count: source.scan(/def\s+(?:self\.)?\w+/).size
         }
-        metadata[:gems] = gems if config_type == 'gemfile'
+        if config_type == 'gemfile'
+          metadata[:gems] = gems
+          metadata[:external_services] = ExternalServices.from_gems(gems)
+        end
         metadata
       end
 
@@ -323,7 +326,7 @@ module Woods
         end
 
         consolidate_dependencies(deps).select do |edge|
-          next true if edge[:type] == :config_file
+          next true if %i[config_file external_service].include?(edge[:type])
 
           target = edge[:target]
           target.match?(/\A[A-Z]/) && app_source?(Object.const_source_location(target)&.first, Rails.root.to_s)
