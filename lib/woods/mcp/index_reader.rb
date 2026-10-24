@@ -514,8 +514,14 @@ module Woods
       # Bulk consumers must fail closed on a corrupt/missing entry instead of
       # silently constructing a partial retrieval index. Bare-name lookup cannot
       # do this because multiple types can legitimately share an identifier.
-      def each_unit
-        return enum_for(__method__) unless block_given?
+      #
+      # @param decode [#call, nil] turns a unit file's checked UTF-8 bytes
+      #   into its data; nil parses them. Every result is still validated as
+      #   the typed unit its entry names. A bulk consumer reading two
+      #   generations can share one parse between equivalent files.
+      # @yieldparam unit [Hash]
+      def each_unit(decode: nil)
+        return enum_for(__method__, decode: decode) unless block_given?
 
         with_pinned_generation do
           TYPE_DIRS.each do |dir|
@@ -530,7 +536,7 @@ module Woods
                 raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
               end
 
-              yield read_published_unit(dir, id)
+              yield read_published_unit(dir, id, decode: decode)
             end
           end
         end
@@ -1569,7 +1575,7 @@ module Woods
         entries
       end
 
-      def read_published_unit(dir, identifier)
+      def read_published_unit(dir, identifier, decode: nil)
         base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
         filename = "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
         path = current_payload_dir.join(dir, filename)
@@ -1586,7 +1592,7 @@ module Woods
           content = file.binmode.read.force_encoding(Encoding::UTF_8)
           raise JSON::ParserError, "invalid UTF-8 in unit file: #{dir}/#{filename}" unless content.valid_encoding?
 
-          JSON.parse(content)
+          decode ? decode.call(content) : JSON.parse(content)
         end
         unless valid_published_unit?(data, dir, identifier)
           raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"

@@ -142,6 +142,94 @@ RSpec.describe Woods::Impact::Report do
     expect(data.values_at('changed', 'affected', 'flows')).to all(eq([]))
   end
 
+  describe 'units whose files differ only in their extraction time' do
+    def stamped(data, at)
+      data.merge('extracted_at' => at, 'source_hash' => Digest::SHA256.hexdigest(data['source_code'].to_s))
+    end
+
+    def publish_stamped(number, units)
+      publish(number, units.map { |data| stamped(data, "2026-01-0#{number}T00:00:00+00:00") })
+    end
+
+    before do
+      publish_stamped(1, [unit('Kept', 'model'), unit('Edited', 'model'), unit('Gone', 'service')])
+      publish_stamped(2, [unit('Kept', 'model'), unit('Edited', 'model', 'updated'), unit('New', 'job')])
+    end
+
+    it 'reads each unchanged unit once and reports exactly what separate parses report' do
+      allow(JSON).to receive(:parse).and_call_original
+      shared = report.to_json
+      # Three head units, then the two base units whose files differ beyond their extraction time.
+      expect(JSON).to have_received(:parse).with(anything, freeze: true).exactly(5).times
+      separate = Class.new do
+        def remember(content) = JSON.parse(content)
+        def reuse(content) = JSON.parse(content)
+      end
+      allow(Woods::Impact::Endpoint::SharedParse).to receive(:new).and_return(separate.new)
+      expect(report.to_json).to eq(shared)
+      expect(JSON.parse(shared)['changed'].map { |change| change.values_at('identifier', 'status') })
+        .to eq([%w[Edited modified], %w[Gone removed], %w[New added]])
+    end
+  end
+
+  describe 'a report cache' do
+    let(:cache) { Woods::Impact::ReportCache.new(size: 2) }
+
+    before do
+      publish(1, [unit('Example', 'model')], sha: 'b' * 40)
+      publish(2, [unit('Example', 'model', 'updated')], sha: 'c' * 40)
+      allow(Woods::Impact::RangeDiff).to receive(:new).and_call_original
+    end
+
+    def cached(from:, to: 'now', **parameters)
+      described_class.compare(@root, from: from, to: to, cache: cache, **parameters)
+    end
+
+    it 'compares a generation pair once, however its endpoints are named' do
+      first = cached(from: 'gen:1').to_h
+      again = cached(from: 'bbbbbbb', to: 'gen:2').to_h
+      expect(Woods::Impact::RangeDiff).to have_received(:new).once
+      expect(again.except('range')).to eq(first.except('range'))
+      expect(again['range'].transform_values { |endpoint| endpoint['selector'] })
+        .to eq('from' => 'bbbbbbb', 'to' => 'gen:2')
+      expect(cached(from: 1, to: 'c' * 40).to_json).to eq(described_class.compare(@root, from: 1, to: 'c' * 40).to_json)
+    end
+
+    it 'keeps separate reports for separate parameters and pairs' do
+      cached(from: 'gen:1')
+      cached(from: 'gen:1', depth: 1)
+      publish(3, [unit('Example', 'model', 'again')], sha: 'd' * 40)
+      expect(cached(from: 'gen:1').to_h.dig('range', 'to', 'generation')).to eq(3)
+      expect(Woods::Impact::RangeDiff).to have_received(:new).exactly(3).times
+    end
+
+    it 'holds a bounded number of reports, dropping the least recently used' do
+      publish(3, [unit('Example', 'model', 'again')], sha: 'd' * 40)
+      cached(from: 'gen:1', to: 'gen:2')
+      cached(from: 'gen:2', to: 'gen:3')
+      cached(from: 'gen:1', to: 'gen:2')
+      cached(from: 'gen:1', to: 'gen:3')
+      cached(from: 'gen:1', to: 'gen:2')
+      cached(from: 'gen:2', to: 'gen:3')
+      expect(Woods::Impact::RangeDiff).to have_received(:new).exactly(4).times
+    end
+
+    it 'tells a re-extracted generation of the same number from the one it replaced' do
+      cached(from: 'gen:1', to: 'gen:2')
+      publish(2, [unit('Example', 'model', 'rewritten')], sha: 'e' * 40)
+      expect(cached(from: 'gen:1', to: 'gen:2').to_h['changed'].first['diff_stats']['source_after']['bytes'])
+        .to eq('rewritten'.bytesize)
+    end
+
+    it 'keeps no failure' do
+      expect { cached(from: 'gen:9') }.to raise_error(Woods::Impact::ResolutionError)
+      allow(Woods::Impact::RangeDiff).to receive(:new).and_raise(IOError)
+      expect { cached(from: 'gen:1') }.to raise_error(IOError)
+      allow(Woods::Impact::RangeDiff).to receive(:new).and_call_original
+      expect(cached(from: 'gen:1').to_h['changed'].size).to eq(1)
+    end
+  end
+
   it 'rejects a SHA prefix that matches different commits, with generation alternatives' do
     publish(1, [], sha: "abcdef0#{'1' * 33}")
     publish(2, [], sha: "abcdef0#{'2' * 33}")
