@@ -174,6 +174,10 @@ module Woods
           target = op[:target]
           line = location(op, file)
           lines << "| #{num} | cycle | #{target} (revisit) | #{line} |"
+        when 'callback'
+          line = location(op, file)
+          note = op[:unexpanded] ? " (unexpanded: #{op[:unexpanded]})" : ''
+          lines << "| #{num} | #{op[:callback]} | #{op[:target]}##{op[:method]}#{note} | #{line} |"
         when 'dynamic_dispatch'
           target = op[:target]
           method = op[:method]

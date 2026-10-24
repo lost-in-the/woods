@@ -458,6 +458,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | `config/recurring.yml`, `config/sidekiq_cron.yml`, `config/schedule.rb`, `config/schedule.yml`, `config/sidekiq.yml` | scheduled_jobs |
 | `app/jobs/**/*.rb`, `app/workers/**/*.rb`, `app/sidekiq/**/*.rb` | scheduled_jobs (a schedule entry's `job_class_resolved` follows whether its class is loaded) |
 | `app/models/**/*.rb` | state_machines |
+| `db/schema.rb`, `db/structure.sql`, `db/migrate/**/*.rb` | state_machines (a transition callback's columns written) |
 | `<root>/**/*.rb` for each `event_paths` root (default `app`) | events |
 | `spec/factories/**`, `test/factories/**` | factories, test_support |
 | files under `config.test_support_paths` (default `spec/support/**`, `spec/*_helper.rb`, `spec/lib/**`, and the same under `test/`; never the test files `test_mappings` claims) | test_support, test_mappings |

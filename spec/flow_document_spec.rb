@@ -115,6 +115,21 @@ RSpec.describe Woods::FlowDocument do
   end
 
   describe '#to_markdown' do
+    it 'renders a model event callback row, naming one it could not expand (W-5)' do
+      event = described_class.new(
+        entry_point: 'Post@create', route: nil, max_depth: 3,
+        steps: [{ unit: 'Post@create', type: 'model_event', file_path: 'app/models/post.rb', operations: [
+          { type: :callback, callback: 'before_save', target: 'Post', method: 'set_slug', line: nil },
+          { type: :callback, callback: 'after_commit', target: 'Post', method: 'Proc', line: nil,
+            unexpanded: 'not defined in the unit' }
+        ] }]
+      )
+
+      md = event.to_markdown
+      expect(md).to include('| 1 | before_save | Post#set_slug |')
+      expect(md).to include('| 2 | after_commit | Post#Proc (unexpanded: not defined in the unit) |')
+    end
+
     it 'includes the route header' do
       md = doc.to_markdown
       expect(md).to include('## POST /posts')

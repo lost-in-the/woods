@@ -1538,6 +1538,17 @@ RSpec.describe Woods::MCP::Server do
       expect(mock_assembler).to have_received(:assemble).with('PostsController#create', max_depth: 5)
     end
 
+    it 'starts from a model callback event of an indexed model (W-5)' do
+      call_tool(server, 'trace_flow', entry_point: 'Post@after_commit(create)')
+      expect(mock_assembler).to have_received(:assemble).with('Post@after_commit(create)', max_depth: 3)
+    end
+
+    it 'refuses a model event of a unit that is not indexed' do
+      response = call_tool(server, 'trace_flow', entry_point: 'Ghost@create')
+      expect(response.error?).to be(true)
+      expect(mock_assembler).not_to have_received(:assemble)
+    end
+
     it 'uses default depth of 3 when not specified' do
       call_tool(server, 'trace_flow', entry_point: 'PostsController#index')
       expect(mock_assembler).to have_received(:assemble).with('PostsController#index', max_depth: 3)

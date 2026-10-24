@@ -245,6 +245,52 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  describe '#format_callback_conditions (on: scopes, W-5)' do
+    # Rails turns `after_commit ..., on: :create` and `before_validation ...,
+    # on: :create` into generated lambdas over a local (`fire_on`, `options`).
+    # The scope is read from those locals, never by calling the lambda.
+    def generated(file, line, **locals)
+      fire_on = locals[:fire_on]
+      options = locals[:options]
+      callable = fire_on ? -> { raise "must not run #{fire_on}" } : ->(_record) { raise "must not run #{options}" }
+      allow(callable).to receive(:source_location).and_return([file, line])
+      callable
+    end
+
+    let(:transactions) { '/gems/activerecord-8.0.0/lib/active_record/transactions.rb' }
+    let(:validation_callbacks) { '/gems/activemodel-8.0.0/lib/active_model/validations/callbacks.rb' }
+
+    def callback_with(if_conditions, unless_conditions = [])
+      callback = Object.new
+      callback.instance_variable_set(:@if, if_conditions)
+      callback.instance_variable_set(:@unless, unless_conditions)
+      callback
+    end
+
+    it 'publishes the transaction actions of a commit callback as on, and drops the generated lambdas' do
+      stub_const('Rails', double(root: Pathname.new('/app')))
+      user_condition = :published?
+      callback = callback_with([generated(transactions, 313, fire_on: [:create]),
+                                generated(transactions, 339, fire_on: [:create]), user_condition])
+
+      expect(extractor.send(:format_callback_conditions, callback)).to eq(if: [':published?'], on: ['create'])
+    end
+
+    it 'publishes a validation callback on: scope' do
+      callback = callback_with([generated(validation_callbacks, 104, options: { on: %i[create update] })])
+
+      expect(extractor.send(:format_callback_conditions, callback)).to eq(on: %w[create update])
+    end
+
+    it 'keeps an application lambda as a Proc label even when it closes over a local named fire_on' do
+      fire_on = [:destroy]
+      own = -> { fire_on }
+      allow(own).to receive(:source_location).and_return(['/app/app/models/post.rb', 9])
+
+      expect(extractor.send(:format_callback_conditions, callback_with([own]))).to eq(if: ['Proc'])
+    end
+  end
+
   describe '#extract_validations' do
     let(:validator_class) { stub_const('OptionValidator', Struct.new(:options)) }
 

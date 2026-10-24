@@ -453,9 +453,14 @@ module Woods
       end
 
       # Families read from model and schema directories by their own globs.
+      # A state machine callback's columns written come from the model's
+      # columns, so a schema change re-runs the family as well (#796).
       def model_adjacent_rules
         [whole_app_rule(:state_machines, Woods::Extractors::StateMachineExtractor::MODEL_DIRECTORIES,
                         extensions: %w[.rb]),
+         whole_app_rule(:state_machines, %w[db/migrate app/models],
+                        extensions: %w[.rb], exact_paths: %w[db/schema.rb db/structure.sql],
+                        matcher: :database_schema_path?),
          whole_app_rule(:factories, Woods::Extractors::FactoryExtractor::FACTORY_DIRECTORIES,
                         extensions: %w[.rb]),
          whole_app_rule(:database_views, %w[db/views], extensions: %w[.sql])]

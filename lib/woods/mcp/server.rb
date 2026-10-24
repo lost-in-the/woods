@@ -1199,8 +1199,9 @@ module Woods
                 entry_point: {
                   type: 'string',
                   description: 'Exact UnitIdentifier, optionally followed by #method (e.g., UsersController#create ' \
-                               'or CheckoutService#order). Bare names identify units, including factories; ' \
-                               'a bare method name does not locate its owning class. Use search and lookup first.'
+                               'or CheckoutService#order), or a model callback event: Post@create, ' \
+                               'Post@after_commit(create) or Post@after_commit. Bare names identify units, including ' \
+                               'factories; a bare method name does not locate its owning class. Use search and lookup first.'
                 },
                 depth: {
                   type: 'integer',
@@ -1211,7 +1212,8 @@ module Woods
             }
           ) do |entry_point:, server_context:, depth: nil|
             max_depth = coerce_int.call(depth) || 3
-            unless reader.find_unit(entry_point.split('#', 2).first)
+            entry_unit = Woods::FlowAssembler.model_event(entry_point)&.first || entry_point.split('#', 2).first
+            unless reader.find_unit(entry_unit)
               next respond_err.call('Flow entry unit not found; use search and lookup to select an indexed unit.',
                                     code: :not_found, tool: 'trace_flow', entry_point: entry_point)
             end

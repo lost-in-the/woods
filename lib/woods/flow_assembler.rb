@@ -49,6 +49,41 @@ module Woods
     # `:async` operation recorded.
     JOB_ENTRY_METHOD = 'perform'
 
+    # Delivery methods on a mail message. `Mailer.action.deliver_later` runs
+    # the mailer's +action+, in another process for the `_later` forms.
+    DELIVERY_METHODS = %w[deliver_later deliver_later! deliver_now deliver_now! deliver].freeze
+
+    # The `Mailer.action` receiver of a delivery.
+    MAILER_ACTION = /\A(?<mailer>(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+)\.(?<action>[a-z_]\w*+)\z/
+
+    # The callback types Rails runs for each persistence event, in the order
+    # it runs them (W-5, #755). Commit callbacks carry the event in their
+    # published `conditions.on`; one without `on` runs for every event.
+    EVENT_CHAINS = {
+      'create' => %w[before_validation after_validation before_save around_save before_create around_create
+                     after_create after_save before_commit after_commit after_rollback],
+      'update' => %w[before_validation after_validation before_save around_save before_update around_update
+                     after_update after_save before_commit after_commit after_rollback],
+      'destroy' => %w[before_destroy around_destroy after_destroy before_commit after_commit after_rollback]
+    }.freeze
+
+    # A model callback event entry point: `Post@create` (every callback a
+    # create runs), `Post@after_commit(create)` (one callback type for one
+    # event) or `Post@after_commit` (one type, every event).
+    MODEL_EVENT = /\A(?<unit>(?:::)?[A-Z]\w*(?:::[A-Z]\w*)*)@(?:(?<event>create|update|destroy)|
+                    (?<type>[a-z][a-z_]*)(?:\((?<scoped>create|update|destroy)\))?)\z/x
+
+    # @param entry_point [String]
+    # @return [Array(String, String, String), nil] unit, callback type (or
+    #   nil for a whole event) and event (or nil for every event), or nil
+    #   when +entry_point+ is not a model event entry
+    def self.model_event(entry_point)
+      match = MODEL_EVENT.match(entry_point.to_s)
+      return nil unless match
+
+      [match[:unit], match[:type], match[:event] || match[:scoped]]
+    end
+
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
     def initialize(graph:, extracted_dir:)
@@ -68,6 +103,9 @@ module Woods
     # @param max_depth [Integer] Maximum recursion depth
     # @return [FlowDocument] The assembled flow document
     def assemble(entry_point, max_depth: 5)
+      event_entry = self.class.model_event(entry_point)
+      return assemble_model_event(entry_point, *event_entry, max_depth: max_depth) if event_entry
+
       visited = Set.new
       steps = []
 
@@ -84,6 +122,79 @@ module Woods
     end
 
     private
+
+    # A model callback event (W-5): one `model_event` step listing the
+    # callbacks the event runs, in chain order, then each callback the model
+    # defines expanded as its own `Model#method` step. Framework callbacks
+    # (autosave, counter caches) and procs are listed but not expanded, and
+    # say so; receiverless calls inside a callback stay as the operation
+    # extractor labels them.
+    #
+    # @param entry_point [String]
+    # @param unit_id [String]
+    # @param type [String, nil]
+    # @param event [String, nil]
+    # @param max_depth [Integer]
+    # @return [FlowDocument]
+    def assemble_model_event(entry_point, unit_id, type, event, max_depth:)
+      unit = load_unit(unit_id)
+      callbacks = unit && unit[:type].to_s == 'model' ? event_callbacks(unit, type, event) : []
+      steps = []
+      unless callbacks.empty?
+        operations = callbacks.map { |callback| callback_operation(unit_id, unit, callback) }
+        steps << { unit: entry_point, type: 'model_event', file_path: unit[:file_path], operations: operations }
+        expand_callbacks(unit_id, operations, steps, max_depth)
+      end
+
+      FlowDocument.new(entry_point: entry_point, route: nil, max_depth: max_depth, steps: steps)
+    end
+
+    # Each defined callback runs in the same model, so the model is
+    # re-entered once per callback; units they reach are still expanded once.
+    def expand_callbacks(unit_id, operations, steps, max_depth)
+      visited = Set.new
+      operations.each do |operation|
+        next if operation[:unexpanded]
+
+        visited.delete(unit_id)
+        expand("#{unit_id}##{operation[:method]}", steps, visited, depth: 1, max_depth: max_depth)
+      end
+    end
+
+    # @return [Array<Hash>] the published callbacks the entry selects, in the
+    #   order Rails runs them
+    def event_callbacks(unit, type, event)
+      callbacks = Array((unit[:metadata] || {})[:callbacks]).grep(Hash)
+      chain = event ? EVENT_CHAINS.fetch(event) : nil
+      selected = callbacks.select do |callback|
+        callback_type = callback[:type].to_s
+        next false if type && callback_type != type
+        next false if chain && !chain.include?(callback_type)
+
+        on = Array((callback[:conditions] || {})[:on]).map(&:to_s)
+        event.nil? || on.empty? || on.include?(event)
+      end
+      if chain
+        selected.each_with_index.sort_by do |callback, index|
+          [chain.index(callback[:type].to_s), index]
+        end.map(&:first)
+      else
+        selected
+      end
+    end
+
+    def callback_operation(unit_id, unit, callback)
+      name = callback[:filter].to_s
+      operation = { type: :callback, callback: callback[:type].to_s, target: unit_id, method: name, line: nil,
+                    conditions: stringify(callback[:conditions] || {}) }
+      defined = name.match?(/\A\w+[?!]?\z/) && method_node(unit_id, unit[:source_code].to_s, name)
+      operation[:unexpanded] = 'not defined in the unit' unless defined
+      operation
+    end
+
+    def stringify(hash)
+      hash.to_h { |key, value| [key.to_s, value] }
+    end
 
     # Recursively expand a unit into flow steps.
     #
@@ -347,6 +458,11 @@ module Woods
         target = op[:target]
         return unless target
 
+        if (action = mailer_action(op))
+          op[:mailer_action] = action
+          return expand(action, steps, visited, depth: depth + 1, max_depth: max_depth, path: path)
+        end
+
         resolution = resolve_target(target)
         return unless resolution
 
@@ -372,6 +488,23 @@ module Woods
           expand_operation(branch_op, current_unit, steps, visited, depth: depth, max_depth: max_depth, path: path)
         end
       end
+    end
+
+    # A mail delivery (`MailingListMailer.new_post(user).deliver_later`)
+    # continues into the mailer action it runs, named on the operation as
+    # `mailer_action` so a reader need not parse the receiver text. Anything
+    # but an indexed mailer is left to the ordinary call path.
+    #
+    # @param op [Hash] a call operation
+    # @return [String, nil] `Mailer#action`, or nil when +op+ delivers no indexed mailer
+    def mailer_action(op)
+      return nil unless op[:type] == :call && DELIVERY_METHODS.include?(op[:method].to_s)
+
+      match = MAILER_ACTION.match(op[:target].to_s)
+      mailer = match && resolve_target(match[:mailer])
+      return nil unless mailer.is_a?(String) && load_unit(mailer)&.dig(:type).to_s == 'mailer'
+
+      "#{mailer}##{match[:action]}"
     end
 
     # Resolve a call target to a unit identifier using graph-wide lookup.
