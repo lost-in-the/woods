@@ -1,0 +1,1 @@
+- Refresh the CI-only MCP Inspector lock resolution of `undici` (8.12.3) and `fast-uri` (3.1.9) within their declared ranges, resolving the newly reported audit findings. These Node dependencies are development tooling and are not shipped in the Ruby gem.

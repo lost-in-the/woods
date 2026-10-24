@@ -810,6 +810,54 @@ RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   end
 end
 
+RSpec.describe 'Resolved filter applicability in a real Rails process (W-8)', :booted_app do
+  def published
+    script = File.expand_path('../fixtures/filter_applicability/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    expect(status.success?).to be(true), error
+    JSON.parse(output.lines.last.force_encoding('UTF-8')).fetch('units')
+  end
+
+  # The forgery-protection filters come from a framework macro; their owner
+  # depends on whether the Rails version's Base already declares them.
+  def app_filters(entries)
+    entries.reject { |entry| entry['filter'].start_with?('verify_') }
+  end
+
+  def applicability(entries)
+    app_filters(entries).to_h do |entry|
+      [entry['filter'], entry.slice('owner', 'applies_to', 'applicability', 'only', 'except')]
+    end
+  end
+
+  it 'publishes each filter’s owner and the admitted actions it applies to, inherited and concern-supplied alike' do
+    units = published
+    articles = units.fetch('ArticlesController')['metadata']
+
+    expect(articles['actions']).to contain_exactly('edit', 'health', 'index', 'show')
+    expect(app_filters(articles['filters']).map { |entry| entry['filter'] })
+      .to eq(%w[require_login set_locale track_visit set_article log_render])
+    expect(applicability(articles['filters'])).to eq(
+      'require_login' => { 'owner' => 'SignedIn', 'applies_to' => %w[edit health index show],
+                           'applicability' => 'conditional' },
+      'set_locale' => { 'owner' => 'ApplicationController', 'applies_to' => %w[edit health index show],
+                        'applicability' => 'resolved' },
+      'track_visit' => { 'owner' => 'ApplicationController', 'applies_to' => %w[edit show],
+                         'applicability' => 'resolved', 'except' => %w[health index] },
+      'set_article' => { 'owner' => 'ArticlesController', 'applies_to' => %w[edit show],
+                         'applicability' => 'resolved', 'only' => %w[edit show] },
+      'log_render' => { 'owner' => 'ArticlesController', 'applies_to' => %w[edit health index show],
+                        'applicability' => 'conditional' }
+    )
+    expect(articles['filters'].find { |entry| entry['filter'] == 'require_login' })
+      .to include('unless' => ':public_page?')
+    expect(applicability(units.fetch('DigestMailer')['metadata']['callbacks'])).to eq(
+      'load_digest' => { 'owner' => 'DigestMailer', 'applies_to' => %w[daily], 'applicability' => 'resolved',
+                         'except' => %w[weekly] }
+    )
+  end
+end
+
 RSpec.describe 'Controllers outside ActionController::Base, in a real Rails process', :booted_app do
   def controller_lines
     script = File.expand_path('../fixtures/controller_runtime/boot.rb', __dir__)
@@ -837,7 +885,8 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
     expect(units.fetch('PingController')['metadata']).to include(
       'metal' => true, 'actions' => ['index'],
       'filters' => [{ 'kind' => 'before', 'filter' => 'stamp',
-                      'line' => 6, 'file' => 'app/controllers/ping_controller.rb' }]
+                      'line' => 6, 'file' => 'app/controllers/ping_controller.rb',
+                      'owner' => 'PingController', 'applies_to' => ['index'], 'applicability' => 'resolved' }]
     )
   end
 
