@@ -507,7 +507,7 @@ end
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `precompute_flows` | Boolean | `false` | Pre-compute per-action request flow maps during extraction |
+| `precompute_flows` | Boolean or `:best_effort` | `false` | Pre-compute per-action request flow maps during extraction. `true` fails closed: any action whose flow does not assemble aborts the run before publication. `:best_effort` publishes the flows that assemble and records each failure under `flow_failures` in `skipped_files.json` (`entry_point`, `controller`, `action`, `reason: flow_assembly_error`, `error`), leaving the action out of `flows/flow_index.json`. After switching from `:best_effort` back to `true`, run a full extraction: an incremental run refuses to carry recorded failures |
 | `extract_navigation_edges` | Boolean | `true` | Extract `link_to`, `redirect_to`, and `form_action` navigation edges from views and controllers |
 | `enable_snapshots` | Boolean | `false` | Enable temporal snapshots. Woods automatically migrates its internal output-directory SQLite store; if SQLite is unavailable, it uses the JSON snapshot store. No Rails migration is required. |
 | `volatile_dependency_ratio` | Float | `3.0` | A dependency whose commit count (last 365 days) exceeds the dependent's by this ratio appears in the `volatile_dependencies` report (top 20, ranked by PageRank). Must be greater than 1. Report only, never a gate. |

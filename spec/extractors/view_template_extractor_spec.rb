@@ -827,6 +827,22 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
       expect(form_deps).to include(a_hash_including(target: 'PostsController'))
     end
 
+    it 'publishes each route helper the template calls with its action (woods#795)' do
+      create_file('app/views/posts/new.html.erb', <<~ERB)
+        <%= form_with url: posts_path do |f| %>
+          <%= f.submit %>
+        <% end %>
+      ERB
+
+      references = form_extractor.extract_all.first.metadata[:route_helper_references]
+      expect(references).to contain_exactly(
+        { helper: 'posts_path', route_name: 'posts', controller: 'PostsController', action: 'create',
+          verb: 'POST', path: '/posts', via: 'form_action' },
+        { helper: 'posts_path', route_name: 'posts', controller: 'PostsController', action: 'create',
+          verb: 'POST', path: '/posts', via: 'link_to' }
+      )
+    end
+
     it 'extracts form_for targeting a route helper' do
       create_file('app/views/posts/new.html.erb', <<~ERB)
         <%= form_for @post, url: posts_path do |f| %>

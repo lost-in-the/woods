@@ -81,6 +81,7 @@ module Woods
         unit.source_code = annotate_source(source, mailer)
         unit.metadata = extract_metadata(mailer, source)
         unit.dependencies = extract_dependencies(source, mailer: mailer)
+        apply_route_helper_references(unit, source)
         HelperCallScan.annotate(self, unit, mailer)
         MethodEffects.apply(unit, source)
 

@@ -217,25 +217,9 @@ module Woods
       def scan_navigation_dependencies(source, via_type: :link_to)
         return [] unless Woods.configuration&.extract_navigation_edges
 
-        source = CommentBlanking.ruby(source)
-        seen_helpers = source.scan(ROUTE_HELPER_SHAPED_DEF).flatten.to_set
-        seen_targets = Set.new
-        deps = []
-        source.scan(ROUTE_HELPER_CALL).each do |route_name, suffix|
-          helper = "#{route_name}_#{suffix}"
-          next if seen_helpers.include?(helper)
-
-          seen_helpers.add(helper)
-          resolved = resolve_route_helper(helper)
-          next unless resolved
-
-          target = resolved[:controller]
-          next if seen_targets.include?(target)
-
-          seen_targets.add(target)
-          deps << { type: :controller, target: target, via: via_type }
+        navigation_route_helpers(source).map { |_helper, resolved| resolved[:controller] }.uniq.map do |target|
+          { type: :controller, target: target, via: via_type }
         end
-        deps
       end
 
       # Scan source for form_with/form_for calls targeting named route helpers.
@@ -248,19 +232,71 @@ module Woods
       def scan_form_dependencies(source)
         return [] unless Woods.configuration&.extract_navigation_edges
 
-        seen = Set.new
-        deps = []
-        FormActionScan.route_helpers(CommentBlanking.ruby(source), stop: FORM_SPAN_STOP).each do |route_name, suffix|
-          resolved = resolve_route_helper("#{route_name}_#{suffix}")
-          next unless resolved
-
-          target = resolved[:controller]
-          next if seen.include?(target)
-
-          seen.add(target)
-          deps << { type: :controller, target: target, via: :form_action }
+        form_route_helpers(source).map { |_helper, resolved| resolved[:controller] }.uniq.map do |target|
+          { type: :controller, target: target, via: :form_action }
         end
-        deps
+      end
+
+      # Every route helper the source calls, resolved (woods#795): the same
+      # helpers {#scan_navigation_dependencies} and {#scan_form_dependencies}
+      # reduce to one edge per controller, each kept with its named route,
+      # action, verb and path.
+      #
+      # @param source [String] Ruby source code; its comments are not read
+      # @param via_type [Symbol] the label of a plain helper call
+      # @param forms [Boolean] whether form_with/form_for actions are read
+      # @return [Array<Hash>, nil] {RouteHelperResolver#route_helper_reference}
+      #   hashes, or nil when navigation edges are off
+      def scan_route_helper_references(source, via_type: :link_to, forms: true)
+        return nil unless Woods.configuration&.extract_navigation_edges
+
+        references = navigation_route_helpers(source).map do |helper, resolved|
+          route_helper_reference(helper, resolved, via_type)
+        end
+        if forms
+          references.concat(form_route_helpers(source).map do |helper, resolved|
+            route_helper_reference(helper, resolved, :form_action)
+          end)
+        end
+        collate_route_helper_references(references)
+      end
+
+      # Set +metadata[:route_helper_references]+ from the unit's source;
+      # leave it absent when navigation edges are off.
+      #
+      # @param unit [ExtractedUnit]
+      # @param source [String]
+      # @return [void]
+      def apply_route_helper_references(unit, source, **options)
+        references = scan_route_helper_references(source.to_s, **options)
+        unit.metadata[:route_helper_references] = references if references
+      end
+
+      private
+
+      # @return [Array<Array(String, Hash)>] each distinct helper call the
+      #   source makes that names a live route, with its resolution
+      def navigation_route_helpers(source)
+        source = CommentBlanking.ruby(source)
+        seen_helpers = source.scan(ROUTE_HELPER_SHAPED_DEF).flatten.to_set
+        source.scan(ROUTE_HELPER_CALL).filter_map do |route_name, suffix|
+          helper = "#{route_name}_#{suffix}"
+          next if seen_helpers.include?(helper)
+
+          seen_helpers.add(helper)
+          resolved = resolve_route_helper(helper)
+          [helper, resolved] if resolved
+        end
+      end
+
+      # @return [Array<Array(String, Hash)>] each form action helper that
+      #   names a live route, with its resolution
+      def form_route_helpers(source)
+        FormActionScan.route_helpers(CommentBlanking.ruby(source), stop: FORM_SPAN_STOP).filter_map do |route_name, suffix|
+          helper = "#{route_name}_#{suffix}"
+          resolved = resolve_route_helper(helper)
+          [helper, resolved] if resolved
+        end
       end
     end
   end

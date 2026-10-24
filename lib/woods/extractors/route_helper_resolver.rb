@@ -87,6 +87,24 @@ module Woods
         @route_helper_map&.[](base)
       end
 
+      # One published route helper reference (woods#795): the helper as
+      # written, the named route and what it dispatches to.
+      #
+      # @param helper [String] e.g. "edit_post_path"
+      # @param resolved [Hash] from {#resolve_route_helper}
+      # @param via [Symbol, String] :link_to, :redirect_to or :form_action
+      # @return [Hash] helper, route_name, controller, action, verb, path, via
+      def route_helper_reference(helper, resolved, via)
+        { helper: helper, route_name: helper.sub(/_(path|url)\z/, ''), controller: resolved[:controller],
+          action: resolved[:action].to_s, verb: resolved[:verb], path: resolved[:path], via: via.to_s }
+      end
+
+      # @param references [Array<Hash>]
+      # @return [Array<Hash>] unique references ordered by helper, then via
+      def collate_route_helper_references(references)
+        references.uniq.sort_by { |reference| [reference[:helper], reference[:via]] }
+      end
+
       private
 
       # Extract the HTTP verb from a route.

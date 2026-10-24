@@ -71,6 +71,21 @@ module Woods
       { 'total' => files.size, 'counts' => counts, 'files' => files }
     end
 
+    # The report with the best-effort flow failures (W-14) under
+    # +flow_failures+, sorted by entry point; without the key when there are
+    # none. They are actions, not files, so +files+, +counts+ and +total+ keep
+    # describing files alone.
+    #
+    # @param report [Hash] result of {#build}
+    # @param failures [Array<Hash>] +entry_point+, +controller+, +action+, +reason+, +error+
+    # @return [Hash]
+    def self.with_flow_failures(report, failures)
+      report = report.except('flow_failures')
+      return report if failures.empty?
+
+      report.merge('flow_failures' => failures.sort_by { |failure| failure['entry_point'] })
+    end
+
     # @param payload_dir [Pathname] generation payload directory
     # @param report [Hash] result of {#build}
     # @param durable [Boolean] fsync the file before returning

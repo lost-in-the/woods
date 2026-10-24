@@ -304,7 +304,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.
 - `BehavioralProfile` guards every config read with `respond_to?`/`defined?`; a missing section yields `nil`.
-- `FlowPrecomputer` is gated by `precompute_flows` (default false). Per-action errors are **not** rescued: both the full path and the incremental delta assemble fail closed, and any flow-family failure aborts the run before the generation publish.
+- `FlowPrecomputer` is gated by `precompute_flows` (default false). With `true`, per-action errors are **not** rescued: both the full path and the incremental delta assemble fail closed, and any flow-family failure aborts the run before the generation publish. With `:best_effort` (W-14, #764), an action that fails to assemble is left out of `flow_index.json` and recorded under `flow_failures` in `skipped_files.json` (reason `flow_assembly_error`); write failures still abort. An incremental run carries the failures of controllers it does not reassemble, and refuses to carry them in strict mode.
 
 ### Incremental extraction
 
