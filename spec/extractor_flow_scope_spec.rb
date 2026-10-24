@@ -23,7 +23,7 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
   end
 
   let(:extractor) { described_class.new(output_dir: File.join(tmpdir, 'output')) }
-  let(:precomputer) { instance_double(Woods::FlowPrecomputer) }
+  let(:precomputer) { instance_double(Woods::FlowPrecomputer, failures: {}) }
   let(:recompute_calls) { [] }
 
   # ModelLeaf is the file that changes. NearController reaches it in two
