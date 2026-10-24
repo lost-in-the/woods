@@ -19,6 +19,7 @@ require_relative 'extraction_identities'
 require_relative 'payload_store'
 require_relative 'git_provenance'
 require_relative 'git_history'
+require_relative 'git_commit_table'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -616,6 +617,7 @@ module Woods
         write_graph_analysis
       end
       profile_phase('skipped files') { write_skipped_files(@results.values.flatten.map(&:file_path)) }
+      profile_phase('commit table') { refresh_commit_table(full: true) }
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
@@ -993,8 +995,11 @@ module Woods
       # publishing run; that absence alone does not publish.
       skipped, published_skipped = profile_phase('skipped files') { skipped_files_report }
       skipped_changed = !published_skipped.nil? && skipped != published_skipped
+      # HEAD can move while no indexed file does (a commit of files already
+      # extracted), and the table must follow it like a full run would.
+      commits_changed = profile_phase('commit table') { refresh_commit_table(full: false) }
 
-      if touched.empty? && !withdrew_flows && !skipped_changed
+      if touched.empty? && !withdrew_flows && !skipped_changed && !commits_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
         return
       end
@@ -2478,10 +2483,86 @@ module Woods
 
       relative_paths = file_paths.map { |path| normalize_file_path(path) }.uniq
       recent_after = Time.current - 90.days
-      raw = GitHistory.new(root: Rails.root, logger: Rails.logger).read(relative_paths, recent_after: recent_after)
+      raw = GitHistory.new(root: Rails.root, logger: Rails.logger, recent_limit: recent_commit_limit)
+                      .read(relative_paths, recent_after: recent_after)
       return {} unless raw
 
       raw.transform_values { |data| build_file_metadata(data, recent_after.iso8601) }
+    end
+
+    # @return [Integer] `config.git_recent_commits`, or the default when unconfigured
+    def recent_commit_limit
+      Woods.configuration&.git_recent_commits || GitHistory::DEFAULT_RECENT_LIMIT
+    end
+
+    # Write, keep or withdraw this generation's `git_commits.json` (W-3).
+    #
+    # The table is a pure function of HEAD, the indexed path set and the
+    # bounds ({GitCommitTable}). A full run always walks; an incremental run
+    # keeps the seeded table when it records the same inputs and rebuilds the
+    # whole table otherwise, so both modes publish the same bytes. Without a
+    # readable history the table is withdrawn rather than published empty.
+    #
+    # Runs after the graph is final, because the indexed path set is read
+    # off it.
+    #
+    # @param full [Boolean] whether this is a full extraction
+    # @return [Symbol, nil] `:written` or `:withdrawn` when the payload's
+    #   table changed, nil when it is unchanged
+    def refresh_commit_table(full:)
+      published = published_commit_table
+      table = commit_table_for_run(published, full: full)
+      return nil if table == published
+
+      if table
+        GitCommitTable.write(payload_dir, table, durable: payload_writes_durable?)
+        :written
+      else
+        GitCommitTable.delete(payload_dir)
+        :withdrawn
+      end
+    end
+
+    # @return [Hash, nil] the table this payload was seeded with; an unreadable
+    #   one counts as none, so it is rebuilt or withdrawn
+    def published_commit_table
+      GitCommitTable.read(payload_dir)
+    rescue JSON::ParserError, SystemCallError => e
+      Rails.logger.warn "[Woods] Rebuilding #{GitCommitTable::FILENAME}: the seeded copy is unreadable (#{e.class})"
+      nil
+    end
+
+    # @param published [Hash, nil]
+    # @param full [Boolean]
+    # @return [Hash, nil] the table this run publishes, nil for none
+    def commit_table_for_run(published, full:)
+      return nil unless git_available?
+
+      head = run_git('rev-parse', '--verify', 'HEAD^{commit}')
+      return nil unless head.match?(GitLog::SHA)
+
+      paths = commit_table_paths
+      builder = GitCommitTable.new(root: Rails.root, logger: Rails.logger, settings: GitCommitTable.settings)
+      return published if !full && GitCommitTable.current?(published, builder.key(paths, head: head))
+
+      builder.build(paths, head: head)
+    end
+
+    # Application-owned paths of every indexed unit, by the same rule
+    # per-unit git enrichment uses ({#git_enrichable_path?}), read off the
+    # final graph so full and incremental runs see one set.
+    #
+    # @return [Array<String>] sorted root-relative paths
+    def commit_table_paths
+      root = "#{Rails.root}/"
+      framework = %i[rails_source gem_source]
+      @dependency_graph.registered_paths.filter_map do |registered|
+        path = File.expand_path(registered.to_s, Rails.root.to_s)
+        next unless git_enrichable_path?(path, root)
+        next if @dependency_graph.units_for_path(registered).all? { |_, type| framework.include?(type) }
+
+        normalize_file_path(path)
+      end.uniq.sort
     end
 
     # Classify how frequently a file changes based on commit counts.
@@ -2514,7 +2595,7 @@ module Woods
                       .sort_by { |_, count| -count }
                       .first(5)
                       .map { |name, count| { name: name, commits: count } },
-        recent_commits: all_commits.first(5).map do |c|
+        recent_commits: all_commits.first(recent_commit_limit).map do |c|
           { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
         end,
         change_frequency: classify_change_frequency(total_count, recent_count)

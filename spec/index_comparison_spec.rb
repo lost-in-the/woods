@@ -39,6 +39,25 @@ RSpec.describe IndexComparison do
     end
   end
 
+  it 'compares commit tables, tolerating only the window start day' do
+    Dir.mktmpdir('woods-index-comparison') do |root|
+      left = File.join(root, 'incremental')
+      right = File.join(root, 'full')
+      write_index(left, note: 'same')
+      write_index(right, note: 'same')
+      table = { 'head' => 'a' * 40, 'since' => '2025-10-23', 'commits' => [], 'paths' => {} }
+      File.write(File.join(left, 'git_commits.json'), JSON.generate(table))
+
+      expect(described_class.differences(left, right)).to include(a_string_starting_with('git_commits.json'))
+
+      File.write(File.join(right, 'git_commits.json'), JSON.generate(table.merge('since' => '2025-10-24')))
+      expect(described_class.differences(left, right)).to eq([])
+
+      File.write(File.join(right, 'git_commits.json'), JSON.generate(table.merge('head' => 'b' * 40)))
+      expect(described_class.differences(left, right)).to include(a_string_starting_with('git_commits.json'))
+    end
+  end
+
   it 'still reports a multibyte difference under a POSIX default external encoding' do
     Dir.mktmpdir('woods-index-comparison') do |root|
       left = File.join(root, 'incremental')

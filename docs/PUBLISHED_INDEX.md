@@ -102,11 +102,44 @@ Opening a numbered generation acquires that generation's `manifest.json` lock th
 | `#edges(via: nil)`, `#each_edge` | `Array<Hash>` | Every forward edge with `through`, `through_db`, and `disable_joins`; an identifier shared by more than one type contributes one edge per owning type, never folded into a single deduplicated entry |
 | `#dependents_of(identifier, via: nil)` | `Array<String>` | Reverse index |
 | `#table_database_map` | `Hash` | Model table to database; empty on Rails 6.0 extractions |
+| `#git_commits` | `CommitTable` or nil | The pinned generation's [commit table](INDEX_LAYOUT.md#commit-table); nil when it publishes none. Raises `CorruptArtifactError` for a symlinked, unparseable or unknown-schema file |
 | `#external_dependency_checksum` | String | SHA-256 of the pinned payload's `manifest.json` |
 
 The reader wraps `Woods::MCP::IndexReader` with `auto_refresh: false`; the unit and graph shapes are the ones documented in [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
 What a reader returns is the caller's. `#edges` and `#dependents_of` build their records from a deep-frozen copy of `dependency_graph.json`, so a returned string cannot be changed in place (`FrozenError`), and `#dependents_of` returns a fresh array. Inside the gem, `Woods::DependencyGraph#to_h` hands out a snapshot whose containers and strings are all copies: mutating a snapshot, however deeply, changes neither what `#dependencies_of` answers nor what the next publish writes, and a mutated snapshot fed back through `.from_h` carries only the caller's own change.
+
+### `#git_commits`: commits, timelines and co-change
+
+`#git_commits` returns a frozen `Woods::PublishedIndex::CommitTable`, or nil when
+the generation has no table. Nil means the history was unknown to the writer (no
+`.git`, a shallow clone, an unresolvable worktree, an older writer), never that
+nothing changed: an application with readable history and no recent commits
+publishes an empty table.
+
+| Method | Returns |
+|---|---|
+| `#commits` | Every published commit row, newest first |
+| `#commit(sha)` | One row by full sha or a unique prefix of at least 4 characters (the 8-character `recent_commits` shas resolve) |
+| `#commits_for(*paths)` | Rows that touched any of the paths, newest first |
+| `#indexed_paths_for(sha)` | The indexed paths one commit touched, sorted |
+| `#co_changes(*paths)` | `[{ "path" =>, "commits" => }]`: other indexed paths changed in the same commits, most first, ties by path |
+| `#paths`, `#to_h` | The published `paths` index and the whole table |
+| `#head`, `#since`, `#window_days`, `#max_commits`, `#max_files_per_commit`, `#truncated?` | What the table covers |
+
+```ruby
+Woods::PublishedIndex.open(Rails.root.join('tmp/woods')) do |index|
+  table = index.git_commits or next puts('no commit table (history unknown)')
+  job = 'app/jobs/notify_subscribers_job.rb'
+  mailer = 'app/mailers/mailing_list_mailer.rb'
+  (table.commits_for(job) & table.commits_for(mailer)).map { |row| row.values_at('sha', 'author', 'message') }
+  table.co_changes(job) # => [{ "path" => "app/mailers/mailing_list_mailer.rb", "commits" => 1 }, ...]
+end
+```
+
+Paths are application-relative, like unit `file_path` values. Map a path to its
+units through the graph of the same generation (`file_path` and `source_paths`),
+not through the filesystem.
 
 ### `#unit`: an identifier shared across types
 

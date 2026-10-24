@@ -7,6 +7,7 @@ require 'pathname'
 require_relative 'generation'
 require_relative 'payload_store'
 require_relative 'mcp/index_reader'
+require_relative 'published_index/optional_artifacts'
 require_relative 'published_index/edge_shaper'
 require_relative 'published_index/generation_catalog'
 require_relative 'published_index/typed_unit_reader'
@@ -62,6 +63,7 @@ module Woods
   #
   class PublishedIndex
     extend Forwardable
+    include OptionalArtifacts
 
     # Raised when `generation.json` exists but cannot be parsed. Distinct from
     # a *missing* pointer file, which means a flat (pre-2.0) index and is not

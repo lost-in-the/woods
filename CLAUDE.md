@@ -158,6 +158,8 @@ lib/
 │   ├── filename_utils.rb               # Safe filename generation
 │   ├── index_artifact.rb               # Dump promotion + safe path handling
 │   ├── atomic_file.rb                   # Crash-safe temp+fsync+rename file writes (shared)
+│   ├── git_log.rb                       # The one HEAD history walk (GitHistory per-unit facts, GitCommitTable)
+│   ├── git_commit_table.rb              # git_commits.json: commits + path => shas per generation (W-3)
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
 │   ├── extractors/                      # One class per *_extractor.rb (count: surface inventory) plus supporting utilities (e.g. shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting, declared_parent)
@@ -297,6 +299,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - A present `.git` whose ref cannot be resolved (an unmounted worktree git dir in a container) yields `"unknown"`, never a stale env value.
   - `GIT_BRANCH`/`GIT_SHA` env vars count only when there is **no** `.git` at the root, or git is unavailable.
   - `capture_snapshot` treats `"unknown"` as no-sha (#137). Per-file enrichment and manifest provenance both use `GitCommand`, rooted at the application directory with the same `WOODS_GIT_DIR` override. Per-file history is scoped to the selected `HEAD`.
+- `git_commits.json` (`GitCommitTable`, W-3) is rebuilt whole, never patched: it is a pure function of the resolved HEAD sha, the indexed path set read off the final graph, the window's first UTC day and the bounds, all recorded in the file. Incremental/refresh runs keep it only when every one matches (`GitCommitTable.current?`); a changed table alone publishes a generation. No readable history means the file is withdrawn, never written empty. Readers go through `PublishedIndex#git_commits`.
 - Model name scanning uses a precomputed regex via `ModelNameCache`, invalidated per run. Three passes: whole-word fully-qualified names; string literals passed to `constantize`/`const_get`; unambiguous bare short names via `ModelNameCache.resolve_short_name`. Ambiguous short names are skipped.
 - `extract_dependencies` in every extractor must include `:via`. See `model_extractor` for reference values.
 - `CallbackAnalyzer` is regex-based, not AST. Proc and lambda callbacks are skipped.
