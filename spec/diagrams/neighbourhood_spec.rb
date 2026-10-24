@@ -21,13 +21,16 @@ RSpec.describe Woods::Diagrams::Neighbourhood do
     node(identifier, type)[/\An_\h+/]
   end
 
-  it 'draws the typed edges around the unit at depth 1 by default, the unit classed focus' do
+  it 'draws the typed edges around the unit at depth 1 by default, each unit declared once, the unit classed focus' do
     result = build(identifier: 'AuditJob')
     expect(result.text).to eq(<<~MERMAID.chomp)
       flowchart LR
         #{node('AuditJob', 'job')}
-        #{node('AuditJob', 'job')} -->|code_reference| #{node('User', 'model')}
-        #{node('NotifyJob', 'job')} -->|job_enqueue| #{node('AuditJob', 'job')}
+        #{node('User', 'model')}
+        #{node('NotifyJob', 'job')}
+        #{id('AuditJob', 'job')} -->|code_reference| #{id('User', 'model')}
+        #{id('NotifyJob', 'job')} -->|job_enqueue| #{id('AuditJob', 'job')}
+        classDef focus stroke-width:3px
         class #{id('AuditJob', 'job')} focus
     MERMAID
     expect(result.details).to include('depth' => 1, 'direction' => 'both', 'size' => 3, 'edges' => 2)
@@ -59,10 +62,21 @@ RSpec.describe Woods::Diagrams::Neighbourhood do
     expect(build(identifier: 'AuditJob').text).to eq(<<~MERMAID.chomp)
       flowchart LR
         #{node('AuditJob', 'job')}
-        #{node('AuditJob', 'job')} --> #{node('User', 'model')}
-        #{node('NotifyJob', 'job')} --> #{node('AuditJob', 'job')}
+        #{node('User', 'model')}
+        #{node('NotifyJob', 'job')}
+        #{id('AuditJob', 'job')} --> #{id('User', 'model')}
+        #{id('NotifyJob', 'job')} --> #{id('AuditJob', 'job')}
+        classDef focus stroke-width:3px
         class #{id('AuditJob', 'job')} focus
     MERMAID
+  end
+
+  it 'declares every unit once however many edges name it' do
+    text = build(identifier: 'AuditJob', depth: 3).text
+    declarations = text.lines.grep(/\A  n_\h+\[/).map { |line| line[/n_\h+/] }
+    expect(declarations).to eq(declarations.uniq)
+    expect(declarations.size).to eq(build(identifier: 'AuditJob', depth: 3).details['size'])
+    expect(text.lines.grep(/-->/)).to all(match(/\A  n_\h+ -->(\|\w+\|)? n_\h+\n?\z/))
   end
 
   it 'refuses a neighbourhood over its node budget with its size, and draws nothing' do

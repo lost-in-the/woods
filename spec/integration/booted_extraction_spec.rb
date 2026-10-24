@@ -137,6 +137,14 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:models)).not_to be_empty
   end
 
+  it 'names each unit type in the type indexes, shared directories included (#828)' do
+    %i[models controllers routes].each do |type|
+      expected = units_in(type).to_h { |unit| [unit['identifier'], unit['type']] }
+      expect(index_for(type).to_h { |entry| [entry['identifier'], entry['type']] }).to eq(expected)
+    end
+    expect(index_for(:routes).map { |entry| entry['type'] }).to include('route')
+  end
+
   it 'extracts the application models from real source' do
     identifiers = index_for(:models).map { |u| u['identifier'] }
     expect(identifiers).to include('Post', 'Comment')

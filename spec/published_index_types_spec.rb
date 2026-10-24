@@ -60,6 +60,37 @@ RSpec.describe Woods::PublishedIndex, 'published unit types' do
       .to contain_exactly('rails_source', 'gem_source')
   end
 
+  # An index entry naming its own type labels a unit of a shared directory
+  # without opening the unit: listing a large routes directory otherwise
+  # reads every route file.
+  describe 'entries that name their published type' do
+    def write_typed_index(directory, entries)
+      FileUtils.mkdir_p(File.join(@dir, directory))
+      File.write(File.join(@dir, directory, '_index.json'), JSON.generate(entries))
+    end
+
+    before do
+      write_typed_index('routes', [{ 'identifier' => 'GET /', 'type' => 'route', 'namespace' => nil },
+                                   { 'identifier' => 'config/routes.rb', 'type' => 'route_file', 'namespace' => nil }])
+      allow(Woods::PublishedIndex::TypedUnitReader).to receive(:call).and_call_original
+    end
+
+    it 'labels them without reading the units' do
+      expect(@index.units(type: 'route_file'))
+        .to eq([{ 'identifier' => 'config/routes.rb', 'type' => 'route_file', 'namespace' => nil }])
+      expect(@index.units(type: 'route').map { |entry| entry['type'] }).to eq(%w[route route_file])
+      expect(Woods::PublishedIndex::TypedUnitReader).not_to have_received(:call)
+    end
+
+    it 'reads the unit when the named type does not belong to the directory' do
+      write_typed_index('routes', [{ 'identifier' => 'GET /', 'type' => 'model', 'namespace' => nil }])
+      filename = Class.new { include Woods::FilenameUtils }.new.collision_safe_filename('GET /')
+      File.write(File.join(@dir, 'routes', filename), JSON.generate('identifier' => 'GET /', 'type' => 'route'))
+      expect(@index.units(type: 'route_file')).to eq([])
+      expect(Woods::PublishedIndex::TypedUnitReader).to have_received(:call).with(anything, 'GET /', 'route')
+    end
+  end
+
   it 'returns no units for an unknown type' do
     expect(@index.unit('Example::graphql_type', type: 'unknown')).to be_nil
     expect(@index.units(type: 'unknown')).to eq([])
