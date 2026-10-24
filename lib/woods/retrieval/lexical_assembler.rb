@@ -8,6 +8,15 @@ module Woods
     # Lexical context keeps matching evidence visible and charges every notice,
     # header and truncation marker to the same character-based token estimate.
     class LexicalAssembler
+      # In full evidence a source may take at most an even share of what is
+      # left among this many of the remaining candidates, so one long
+      # top source cannot crowd out the rest. A short source leaves its unused
+      # share to those after it.
+      FAIR_SHARE_SOURCES = 4
+      # Below this many characters a share is too small to show evidence; the
+      # source then takes what is left, as one truncated source.
+      MIN_SHARE_CHARS = 800
+
       def estimate_tokens(text)
         (text.length / 4.0).ceil
       end
@@ -21,7 +30,7 @@ module Woods
         notice = count_notice(candidates.size, candidates.size)
         context = notice[0, budget * 4]
         sources = []
-        candidates.each do |candidate|
+        candidates.each_with_index do |candidate, index|
           unit = candidate.metadata
           header = "\n\n## #{unit['identifier']} (#{unit['type']})\n#{SourceContributors.label(unit)}\n" \
                    "Matched: #{candidate.matched_fields.join(', ')}\n\n"
@@ -42,15 +51,15 @@ module Woods
           end
 
           source = evidence_text(candidate)
-          truncated = source.length > remaining
+          share = fair_share(remaining, header.length, candidates.size - index)
+          truncated = source.length > share
           marker = "\n[Published evidence truncated; use lookup for the full unit.]"
-          next if truncated && remaining <= marker.length
+          next if truncated && share <= marker.length
 
-          context += header + (truncated ? source[0, remaining - marker.length] + marker : source)
+          context += header + (truncated ? source[0, share - marker.length] + marker : source)
           sources << { identifier: unit['identifier'], type: unit['type'], file_path: unit['file_path'],
                        score: candidate.score, matched_fields: candidate.matched_fields, truncated: truncated }
                      .merge(SourceContributors.attribution(unit))
-          break if truncated
         end
         body = context[notice.length..].to_s
         context = (count_notice(candidates.size, sources.size) + body)[0, budget * 4]
@@ -59,6 +68,18 @@ module Woods
       end
 
       private
+
+      # The characters this source may use: an even share, among the next
+      # {FAIR_SHARE_SOURCES} candidates, of what is left once each of the
+      # others has its header; all of it when that share would be too small
+      # to read.
+      def fair_share(remaining, header_length, candidates_left)
+        sharing = [candidates_left, FAIR_SHARE_SOURCES].min
+        return remaining if sharing <= 1
+
+        share = (remaining - ((sharing - 1) * header_length)) / sharing
+        share < MIN_SHARE_CHARS ? remaining : share
+      end
 
       def count_notice(candidates, included)
         text = "Mode: lexical (field-aware BM25; sources included: #{included}; " \

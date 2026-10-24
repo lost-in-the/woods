@@ -2458,12 +2458,31 @@ module Woods
           # `state`, because the recorded state and the liveness verdict answer
           # different questions and an operator wants both.
           status = Woods::Watch::Status.new(output_dir: index_dir)
-          { state: record['state'], reason: record['reason'], generation: record['generation'],
-            pid: record['pid'], updated_at: record['updated_at'],
-            alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
-            last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+          section = { state: record['state'], reason: record['reason'], generation: record['generation'],
+                      pid: record['pid'], updated_at: record['updated_at'],
+                      alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
+                      last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
+          section.merge(watch_cycle_fields(record, index_dir))
         rescue StandardError
           { state: 'absent' }
+        end
+
+        # The extractor publishes generation.json before the daemon writes a
+        # cycle's outcome. Name the published generation, whether the
+        # record is behind it, and the cycle the daemon says is running, so a
+        # reader never takes the previous cycle's record for the current one.
+        #
+        # @return [Hash]
+        def watch_cycle_fields(record, index_dir)
+          fields = {}
+          fields[:cycle] = record['cycle'] if record['cycle']
+          fields[:cycle_started_at] = record['cycle_started_at'] if record['cycle_started_at']
+          published = Woods::Generation.new(output_dir: index_dir).current.number
+          if published.positive? && record['generation'].is_a?(Integer)
+            fields[:published_generation] = published
+            fields[:status_behind] = record['generation'] < published
+          end
+          fields
         end
 
         # Resolve the current HEAD SHA for the git repo containing +index_dir+.

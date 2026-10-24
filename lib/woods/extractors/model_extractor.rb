@@ -1378,13 +1378,36 @@ module Woods
         end
       end
 
+      # Rails answers descends_from_active_record? from the inheritance column,
+      # so the call raises for a model whose table is absent (a framework
+      # model the application never installed). The class tree still
+      # answers it: a model descends from Active Record when its parent is
+      # Base or abstract, and is otherwise an STI child of that parent.
+      #
+      # @param model [Class]
+      # @return [Boolean]
+      def descends_from_active_record?(model)
+        model.descends_from_active_record?
+      rescue StandardError
+        raise if table_present?(model)
+
+        parent = model.superclass
+        parent == ActiveRecord::Base || (parent.respond_to?(:abstract_class?) && parent.abstract_class?)
+      end
+
+      def table_present?(model)
+        model.table_exists?
+      rescue StandardError
+        false
+      end
+
       # True STI base detection: requires both descends_from_active_record? AND
       # the inheritance column actually exists in the table
       #
       # @param model [Class]
       # @return [Boolean]
       def sti_base?(model)
-        return false unless model.descends_from_active_record?
+        return false unless descends_from_active_record?(model)
         return false unless model.table_exists?
 
         model.column_names.include?(model.inheritance_column)
@@ -1395,7 +1418,7 @@ module Woods
       # @param model [Class]
       # @return [Boolean]
       def sti_child?(model)
-        return false if model.descends_from_active_record?
+        return false if descends_from_active_record?(model)
 
         model.superclass < ActiveRecord::Base && model.superclass != ActiveRecord::Base
       end

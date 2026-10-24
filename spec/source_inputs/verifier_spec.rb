@@ -100,6 +100,29 @@ RSpec.describe Woods::SourceInputs::Verifier do
     expect(result['reasons']).to include('scan_byte_budget')
   end
 
+  # A bounded check that stops early still says how much of the
+  # recorded baseline it read and found unchanged, so a caller can say
+  # "no drift in N of M" instead of a bare unknown.
+  it 'reports how many recorded files a budget-limited check verified unchanged' do
+    3.times { |i| write("app/services/thing_#{i}.rb", "source #{i}") }
+    baseline = manifest
+    result = verify(baseline, max_files: 2)
+    expect(result['state']).to eq('unknown')
+    expect(result['reasons']).to include('scan_file_budget')
+    expect(result['counts'].values).to all(eq(0))
+    expect(result['coverage']).to eq('recorded_files' => 3, 'verified_files' => 2)
+  end
+
+  it 'reports full coverage when every recorded file was read' do
+    3.times { |i| write("app/services/thing_#{i}.rb", "source #{i}") }
+    baseline = manifest
+    write('app/services/thing_0.rb', 'changed')
+    result = verify(baseline)
+    expect(result['state']).to eq('drifted')
+    expect(result['coverage']).to eq('recorded_files' => 3, 'verified_files' => 2)
+    expect(verify(manifest)['coverage']).to eq('recorded_files' => 3, 'verified_files' => 3)
+  end
+
   it 'bounds and sorts summaries independently of drift state' do
     baseline = manifest
     40.times { |i| write("app/services/pay_#{i}.rb", 'added') }
