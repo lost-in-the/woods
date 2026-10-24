@@ -150,7 +150,8 @@ RSpec.describe Woods::UpdateCheck do
       expect(hash).to eq(
         current_version: '1.5.0',
         latest_version: '1.6.0',
-        update_available: true
+        update_available: true,
+        checked: true
       )
     end
 
@@ -163,7 +164,8 @@ RSpec.describe Woods::UpdateCheck do
       expect(hash).to eq(
         current_version: '2.0.0',
         latest_version: '2.0.0',
-        update_available: false
+        update_available: false,
+        checked: true
       )
     end
 
@@ -176,11 +178,12 @@ RSpec.describe Woods::UpdateCheck do
       expect(hash).to eq(
         current_version: '1.6.0',
         latest_version: '1.6.0',
-        update_available: false
+        update_available: false,
+        checked: true
       )
     end
 
-    it 'reports the installed version as latest_version when the registry probe fails' do
+    it 'reports no latest_version, and that it did not check, when the registry probe fails' do
       hash = described_class.status_hash(
         current: '1.5.0', cache_path: cache_path, now: now,
         fetcher: ->(_url) { raise SocketError, 'offline' }
@@ -188,9 +191,21 @@ RSpec.describe Woods::UpdateCheck do
 
       expect(hash).to eq(
         current_version: '1.5.0',
-        latest_version: '1.5.0',
-        update_available: false
+        latest_version: nil,
+        update_available: false,
+        checked: false
       )
+    end
+
+    it 'reports no latest_version, and that it did not check, when update checks are disabled' do
+      original = ENV.fetch('WOODS_NO_UPDATE_CHECK', nil)
+      ENV['WOODS_NO_UPDATE_CHECK'] = '1'
+      fetcher = ->(_url) { raise 'the probe must not run' }
+      hash = described_class.status_hash(current: '1.5.0', cache_path: cache_path, now: now, fetcher: fetcher)
+
+      expect(hash).to eq(current_version: '1.5.0', latest_version: nil, update_available: false, checked: false)
+    ensure
+      ENV['WOODS_NO_UPDATE_CHECK'] = original
     end
   end
 

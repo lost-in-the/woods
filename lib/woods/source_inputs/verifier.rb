@@ -62,7 +62,16 @@ module Woods
         previous.each { |scope, paths| compare_scope(scope, paths, changes, current) }
         add_new_scopes(previous, changes, current) if complete?(current)
         reasons = coverage_reasons(current)
-        summarized(changes, reasons, current)
+        summarized(changes, reasons, current).merge('coverage' => coverage(previous, current))
+      end
+
+      # How much of the recorded baseline this check read and found unchanged:
+      # a bounded check that stops early can still say "no drift in N of M"
+      # rather than only "unknown".
+      def coverage(previous, current)
+        recorded = previous.values.reduce({}, :merge)
+        files = current.fetch('files')
+        { 'recorded_files' => recorded.size, 'verified_files' => recorded.count { |path, id| files[path] == id } }
       end
 
       def complete?(current)
