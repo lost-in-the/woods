@@ -2117,6 +2117,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # the template alone resolves it, and removing the template unresolves it
     # again, through incremental runs that agree with a full one at each step.
     it 'follows a template that serves the action by implicit render' do
+      # A sibling example may have loaded an `archive` method into the class;
+      # reopening it would keep that method, so start from a fresh constant.
+      Object.send(:remove_const, :LanternsController) if Object.const_defined?(:LanternsController, false)
       write_file('app/controllers/lanterns_controller.rb', lanterns_source('index'))
       load app_path('app/controllers/lanterns_controller.rb')
       write_file('config/routes.rb', <<~RUBY)
