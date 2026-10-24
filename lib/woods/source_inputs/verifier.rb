@@ -69,11 +69,9 @@ module Woods
       # a bounded check that stops early can still say "no drift in N of M"
       # rather than only "unknown".
       def coverage(previous, current)
-        recorded = {}
-        previous.each_value { |paths| recorded.merge!(paths) }
+        recorded = previous.values.reduce({}, :merge)
         files = current.fetch('files')
-        verified = recorded.count { |path, identity| files[path] == identity }
-        { 'recorded_files' => recorded.size, 'verified_files' => verified }
+        { 'recorded_files' => recorded.size, 'verified_files' => recorded.count { |path, id| files[path] == id } }
       end
 
       def complete?(current)
