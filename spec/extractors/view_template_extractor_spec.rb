@@ -580,6 +580,76 @@ RSpec.describe Woods::Extractors::ViewTemplateExtractor do
     end
   end
 
+  describe 'partial locals (woods#798)' do
+    def unit_for(identifier)
+      described_class.new.extract_all.find { |u| u.identifier == identifier }
+    end
+
+    before do
+      create_file('app/views/posts/show.html.erb', <<~ERB)
+        <h1><%= @post.title %></h1>
+        <%= render "posts/card", post: @post, compact: true %>
+      ERB
+      create_file('app/views/posts/index.html.erb', <<~ERB)
+        <%= render partial: "posts/card", collection: @posts, as: :post %>
+      ERB
+      create_file('app/views/posts/_card.html.erb', <<~ERB)
+        <%# locals: (post:, compact: false) %>
+        <article><%= link_to post.title, post %></article>
+      ERB
+    end
+
+    it 'records each literal partial render with the locals it passes and its render-edge target' do
+      expect(unit_for('posts/show.html.erb').metadata[:partial_renders]).to eq(
+        [{ partial: 'posts/card', target: 'posts/_card.html.erb', locals: %w[post compact], implicit_local: nil,
+           dynamic_locals: false, line: 2 }]
+      )
+      expect(unit_for('posts/index.html.erb').metadata[:partial_renders].first)
+        .to include(target: 'posts/_card.html.erb', locals: [], implicit_local: 'post')
+    end
+
+    it 'records what a partial reads and declares, and nothing of the kind on a page' do
+      card = unit_for('posts/_card.html.erb').metadata
+      expect(card.slice(:locals_read, :locals_read_dynamic, :locals_declared))
+        .to eq(locals_read: ['post'], locals_read_dynamic: false,
+               locals_declared: { required: ['post'], optional: ['compact'], any: false })
+      expect(unit_for('posts/show.html.erb').metadata).not_to have_key(:locals_read)
+    end
+
+    it 'publishes nothing for an engine that does not read locals' do
+      create_file('app/views/posts/edit.html.haml', "= render 'posts/card', post: @post\n")
+      expect(unit_for('posts/edit.html.haml').metadata).not_to have_key(:partial_renders)
+    end
+  end
+
+  describe 'partial locals through controller view prefixes (woods#798)' do
+    before do
+      stub_const('ActionController::Base', Class.new)
+      stub_const('ProfileController', Class.new(ActionController::Base))
+      stub_const('Profile::PasswordController', Class.new(ProfileController) do
+        def self._prefixes
+          %w[profile/password profile application]
+        end
+      end)
+      create_file('app/views/profile/password/edit.html.erb', "<%= render 'show', user: @user %>\n")
+    end
+
+    def edit_renders
+      described_class.new.extract_all.find { |u| u.identifier == 'profile/password/edit.html.erb' }
+                     .metadata[:partial_renders]
+    end
+
+    it 'follows the render edge to the partial a caller prefix resolves' do
+      create_file('app/views/profile/_show.html.erb', '<p><%= user.name %></p>')
+      expect(edit_renders.map { |r| r.slice(:partial, :target, :locals) })
+        .to eq([{ partial: 'show', target: 'profile/_show.html.erb', locals: ['user'] }])
+    end
+
+    it 'leaves the target empty when no prefix holds the partial' do
+      expect(edit_renders.map { |r| r.slice(:partial, :target) }).to eq([{ partial: 'show', target: nil }])
+    end
+  end
+
   describe 'view_render edges' do
     before { stub_const('ActionController::Base', Class.new) }
 
