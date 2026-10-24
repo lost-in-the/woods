@@ -147,6 +147,15 @@ the concern declares it. `after_{create,update,destroy,save}_commit` count as
 the runtime `after_commit`. Procs, framework callbacks and metaprogrammed or
 ambiguous declarations have no `declaration`, and neither does any callback of a
 source that does not parse.
+
+**Filter declarations (#820).** Each controller filter entry (W-8) declared by
+exactly one receiverless `before_action`/`after_action`/`around_action` call
+(also `prepend_`/`append_` and the legacy `*_filter` forms) with a literal
+symbol argument carries `declaration: {line, end_line}` in the same published
+coordinates, matched by the entry's `kind` and name. It sits beside the existing
+`line`/`file`, which locate the declaration in the declaring file, possibly an
+ancestor's; a filter inherited from another controller's source, a proc, a
+`skip_*` call or an ambiguous declaration has no `declaration`.
 - Source that does not parse publishes no table: absence means unavailable,
   never "no methods".
 - `instance_methods` and `class_methods` are unchanged.

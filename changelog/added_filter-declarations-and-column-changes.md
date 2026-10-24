@@ -1,0 +1,2 @@
+- Controller filter entries carry `declaration: {line, end_line}` in published `source_code` coordinates, like model callbacks (#817), for filters the controller's own source declares (#820).
+- Impact report `changed` records (and `Woods::Impact::UnitDiff.compare`) name the columns that moved, `column_changes: {added, removed, modified}`, when a modified unit's `columns` metadata moved (#821).

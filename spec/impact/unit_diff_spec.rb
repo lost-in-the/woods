@@ -66,6 +66,18 @@ RSpec.describe Woods::Impact::UnitDiff do
       .to include('facets' => ['source'], 'categories' => ['behaviour'])
   end
 
+  it 'names the columns that moved, as the report records them (#821)' do
+    columns = ->(*names) { names.map { |name| { 'name' => name, 'type' => 'string' } } }
+    publish(3,
+            [unit('Post',
+                  "class Post\n  def a; 1; end\nend\n").merge('metadata' => { 'columns' => columns.call('id') })])
+    publish(4, [unit('Post', "class Post\n  def a; 1; end\nend\n")
+      .merge('metadata' => { 'columns' => columns.call('id', 'slug') })])
+
+    expect(described_class.compare(@root, unit: post, from: 'gen:3', to: 'gen:4')['column_changes'])
+      .to eq('added' => ['slug'], 'removed' => [], 'modified' => [])
+  end
+
   it 'names an added, removed, absent or unchanged unit without a diff to draw' do
     statuses = %w[New Gone Nope].map do |identifier|
       described_class.compare(@root, unit: { 'identifier' => identifier, 'type' => 'model' }, from: 'gen:1')['status']

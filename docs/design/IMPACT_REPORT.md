@@ -51,9 +51,10 @@ on unchanged units, and is recorded per endpoint in `unknowns`.
 | endpoint | Original `selector`, integer `generation`, nullable manifest `git_sha`, `manifest_checksum` (SHA-256 of its manifest) |
 | `parameters` | `mode:"range"`, depth, types, via and explicit finite budgets; unsupported inputs raise |
 | `changed` | Array sorted by identifier then actual type |
-| change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats`, and `source_changes` when a modified unit's `source` facet moved |
+| change | `identifier`, `type`, `status` (`added`, `modified`, `removed`), `facets`, `categories`, `metadata_keys`, `diff_stats`, `source_changes` when a modified unit's `source` facet moved, and `column_changes` when a modified unit's `columns` metadata moved |
 | `diff_stats` | `source_before`, `source_after`: null when absent/unavailable, otherwise `bytes` and `lines` of each complete source |
 | `source_changes` | Where the source moved (#802): `hunks` as `[{before: [start, length], after: [start, length]}]` in each endpoint's annotated `source_code` lines, git `-U0` style (an empty side starts at the line before), `added_lines`, `removed_lines`, and `coverage`: `complete`, `truncated` (past 200 ranges for one unit or the report's `max_source_hunks`, default 10000, cap 100000) or `too_large` (more than 20000 lines on a side or 1000 edits; no ranges and null counts) |
+| `column_changes` | Which columns moved (#821), when both endpoints publish `columns` as named objects: `added`, `removed` and `modified` column names, sorted; a column is modified when any published attribute differs |
 | `affected`, `flows`, `risks` | Bounded endpoint-specific evidence, described below |
 | `tables`, `templates`, `tests` | Bounded endpoint-specific related evidence; coverage is always `partial` |
 | `commits` | Reserved empty array; coverage is `not_computed` |
@@ -104,7 +105,7 @@ resolves the endpoints as `Report.compare` does and returns one unit's unified
 source diff, frozen and string-keyed: `schema_version` 1, `range` (both endpoint
 provenance objects), `identifier`, `type`, `status` (`added`, `removed`,
 `modified`, `unchanged` or `absent`), the `facets`, `categories` and
-`metadata_keys` that moved exactly as the report's `changed` record names them
+`metadata_keys` (and `column_changes`, #821) that moved exactly as the report's `changed` record names them
 (empty arrays when unchanged, omitted when `absent`) and, when both endpoints
 hold the unit, `source_changes` with the counts and `coverage` above and `hunks` carrying
 `before`, `after` and `lines`: `[{op: " " | "+" | "-", before:, after:, text:}]`

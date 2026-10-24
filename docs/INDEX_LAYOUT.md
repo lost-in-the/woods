@@ -200,7 +200,9 @@ call that declares it, in the same coordinates:
 
 Absence means the declaration is not a single literal-symbol macro call (a
 proc, a framework callback, metaprogramming, two declaring calls) or the writer
-predates the field.
+predates the field. Controller filter entries carry the same `declaration`
+(#820) beside their file-relative `line` and `file`, for filters this unit's own
+source declares.
 
 The generation-local internal reference cache is format 7 for this writer;
 format 6 and earlier require a full baseline rebuild before incremental writes.

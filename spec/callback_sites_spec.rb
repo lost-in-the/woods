@@ -84,4 +84,51 @@ RSpec.describe Woods::CallbackSites do
     described_class.record(broken)
     expect(broken.metadata[:callbacks].first).not_to have_key(:declaration)
   end
+  describe 'controller filters (#820)' do
+    def controller(source, filters)
+      Woods::ExtractedUnit.new(type: :controller, identifier: 'PostsController',
+                               file_path: 'app/controllers/posts_controller.rb').tap do |u|
+        u.source_code = source
+        u.metadata[:filters] = filters
+      end
+    end
+
+    let(:source) do
+      <<~RUBY
+        class PostsController < ApplicationController
+          before_action :set_post, only: %i[show edit
+                                            update]
+          prepend_before_action :authenticate
+          after_action :track, :log
+          around_action :wrap
+          skip_before_action :verify, only: :index
+          before_action -> { head :ok }, only: :ping
+        end
+      RUBY
+    end
+
+    it "records each filter's single declaring call by its kind and name" do
+      filters = [{ kind: :before, filter: 'set_post', only: %w[edit show update] },
+                 { kind: :before, filter: 'authenticate' }, { kind: :after, filter: 'log' },
+                 { kind: :around, filter: 'wrap' }]
+      unit = controller(source, filters)
+      described_class.record(unit)
+
+      expect(unit.metadata[:filters].map { |f| f[:declaration] })
+        .to eq([{ 'line' => 2, 'end_line' => 3 }, { 'line' => 4, 'end_line' => 4 }, { 'line' => 5, 'end_line' => 5 },
+                { 'line' => 6, 'end_line' => 6 }])
+    end
+
+    it 'leaves inherited, skipped, proc and mistyped filters without a site' do
+      filters = [{ 'kind' => 'before', 'filter' => 'require_login', 'line' => 3,
+                   'file' => 'app/controllers/application_controller.rb' },
+                 { 'kind' => 'before', 'filter' => 'verify' }, { 'kind' => 'before', 'filter' => '#<Proc app/x.rb:8>' },
+                 { 'kind' => 'after', 'filter' => 'set_post' }]
+      unit = controller(source, filters)
+      described_class.record(unit)
+
+      expect(unit.metadata[:filters].map { |f| f.key?('declaration') }).to all(be(false))
+      expect(unit.metadata[:filters].first).to include('line' => 3)
+    end
+  end
 end
