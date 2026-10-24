@@ -1029,8 +1029,9 @@ Static and ambiguous constant spans and declaration spans are resolved again on
 every run against the current typed registry, like verified ones, so a target that
 appears, disappears or gains a second type moves a span between `verified`,
 `static` and `ambiguous` without a source change. They never add a dependency
-edge. `metadata.methods` is computed from the unit's final published source
-whenever a unit is written, by the full and the incremental writer alike; a unit
+edge. `metadata.methods`, and each callback's `declaration` (#817), are computed
+from the unit's final published source whenever a unit is written, by the full
+and the incremental writer alike; a unit
 retained unchanged keeps the table it was written with, so a generation written
 before this field existed gains it only for re-extracted units. Run one full
 extraction to publish it everywhere.

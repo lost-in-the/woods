@@ -138,6 +138,15 @@ published `source_code` coordinates, sorted by line.
 - `owner` is the lexical class or module, so a concern inlined as a commented
   display block owns its methods at their lines inside the block.
 - Methods defined by metaprogramming or on another receiver are absent.
+
+**Callback declarations (#817).** Each model callback entry whose method is
+declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with
+a literal symbol argument carries `declaration: {line, end_line}`: that call's
+range in the same published coordinates, inside an inlined concern block when
+the concern declares it. `after_{create,update,destroy,save}_commit` count as
+the runtime `after_commit`. Procs, framework callbacks and metaprogrammed or
+ambiguous declarations have no `declaration`, and neither does any callback of a
+source that does not parse.
 - Source that does not parse publishes no table: absence means unavailable,
   never "no methods".
 - `instance_methods` and `class_methods` are unchanged.

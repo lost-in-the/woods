@@ -1,0 +1,1 @@
+- Model callback entries carry `declaration: {line, end_line}`, the range of the single literal-symbol macro call that declares them in the published `source_code` (inlined concern blocks included), so a reader can tie a changed line to the lifecycle step it declares (#817). Procs, framework callbacks and ambiguous or metaprogrammed declarations have none.
