@@ -1,0 +1,4 @@
+- Impact ranges are cheaper on large applications, with byte-identical reports. On a generated application of about 10,300 units with 753 changed, a range's comparison went from about 8.5 s to 4.6 s and from 6.2M to 4.1M allocations.
+  - `RangeDiff` compares each unit's facets by value (`Woods::Impact::Value.same?`) instead of hashing the canonical JSON of every facet on both endpoints.
+  - A unit whose file differs between the endpoints only in its `extracted_at` is parsed once and shared, frozen (`Woods::Impact::Endpoint::SharedParse`). `IndexReader#each_unit` takes an optional `decode:` for this; every result is still validated.
+  - `Report.compare` takes `cache:`, a bounded `Woods::Impact::ReportCache` that keeps the comparison per resolved pair of payloads and parameters. `gen:N`, a SHA and `now` naming the same pair share it, and each report keeps its own selectors. A cached pair answers in about 40 ms.

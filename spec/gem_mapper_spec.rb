@@ -49,6 +49,13 @@ RSpec.describe Woods::GemMapper do
       .to include(hash_including(identifier: 'Woods::RubyAnalyzer', type: 'ruby_module'))
   end
 
+  it 'names each unit type in its type index' do
+    described_class.new(root: root, output_dir: output_dir).map!
+
+    entries = JSON.parse(payload_dir.join('ruby_modules', '_index.json').read)
+    expect(entries).to all(include('type' => 'ruby_module'))
+  end
+
   it 'skips an unchanged tree without advancing the generation' do
     mapper = described_class.new(root: root, output_dir: output_dir)
     mapper.map!

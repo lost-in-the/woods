@@ -6,7 +6,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 
 | Task | Start here | You will finish with |
 |---|---|---|
-| Install Woods in a Rails app | [Getting started](GETTING_STARTED.md) | A validated codebase index with the 14 packaged-default tools connected |
+| Install Woods in a Rails app | [Getting started](GETTING_STARTED.md) | A validated codebase index with the 15 packaged-default tools connected |
 | Ask an agent to install or configure Woods | [Agent setup runbook](AGENT_SETUP.md) | A safe, reviewable install with an agent handoff report |
 | Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server and, if authorized, an optional Console Server |
 | Use Woods tools as an agent | [Agent guide](AGENT_GUIDE.md) | A repeatable query workflow for code context, flows, and blast radius |

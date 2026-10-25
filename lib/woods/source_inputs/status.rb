@@ -44,6 +44,7 @@ module Woods
       end
 
       def call
+        deadline = budget_deadline
         return unknown(@resolution_error || 'atomic_source_manifest_unavailable') unless resolve_payload
 
         flags = File::RDONLY | File::NONBLOCK
@@ -55,7 +56,7 @@ module Woods
           Manifest.parse(file.read(Manifest::MAX_BYTES + 1))
         end
         result = Verifier.new(manifest: manifest, output_dir: @output, root: @root,
-                              generation: @generation, max_seconds: BUDGETS.fetch(@mode)).call
+                              generation: @generation, max_seconds: BUDGETS.fetch(@mode), deadline: deadline).call
         result.merge('check' => @mode, 'recommendations' => recommendations(result, manifest))
       rescue Errno::ENOENT
         unknown('source_manifest_unavailable')
@@ -66,6 +67,12 @@ module Woods
       end
 
       private
+
+      # The budget covers the whole check: reading the manifest and preparing
+      # the walk come out of it, not on top of it.
+      def budget_deadline
+        Process.clock_gettime(Process::CLOCK_MONOTONIC) + BUDGETS.fetch(@mode)
+      end
 
       def recommendations(result, manifest)
         return ['inspect_source_limits'] if result['state'] == 'unavailable'

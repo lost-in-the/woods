@@ -137,6 +137,14 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:models)).not_to be_empty
   end
 
+  it 'names each unit type in the type indexes, shared directories included (#828)' do
+    %i[models controllers routes].each do |type|
+      expected = units_in(type).to_h { |unit| [unit['identifier'], unit['type']] }
+      expect(index_for(type).to_h { |entry| [entry['identifier'], entry['type']] }).to eq(expected)
+    end
+    expect(index_for(:routes).map { |entry| entry['type'] }).to include('route')
+  end
+
   it 'extracts the application models from real source' do
     identifiers = index_for(:models).map { |u| u['identifier'] }
     expect(identifiers).to include('Post', 'Comment')
@@ -219,7 +227,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'
       before_validation :normalize_on_create, on: :create
+      before_validation :normalize_on_update, on: :update
       after_commit :notify_created, on: :create
+      after_update_commit :notify_updated
       after_commit :reindex, on: %i[create update]
       after_create_commit :welcome
       after_commit :always
@@ -228,7 +238,9 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     callbacks = Woods::Extractors::ModelExtractor.new.send(:extract_callbacks, model)
     on = ->(filter) { callbacks.find { |entry| entry[:filter] == filter }[:conditions] }
     expect(on.call('normalize_on_create')).to eq(on: ['create'])
+    expect(on.call('normalize_on_update')).to eq(on: ['update'])
     expect(on.call('notify_created')).to eq(on: ['create'])
+    expect(on.call('notify_updated')).to eq(on: ['update'])
     expect(on.call('reindex')).to eq(on: %w[create update])
     expect(on.call('welcome')).to eq(on: ['create'])
     expect(on.call('always')).to eq({})

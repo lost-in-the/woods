@@ -87,19 +87,23 @@ module Woods
       private
 
       def basename_match?(relative_path)
-        basenames.include?(File.basename(relative_path)) &&
-          exclude.to_a.none? { |segment| relative_path.include?(segment) }
+        basenames.include?(File.basename(relative_path)) && !excluded?(relative_path)
+      end
+
+      def excluded?(relative_path)
+        exclude&.any? { |segment| relative_path.include?(segment) }
       end
 
       def filters_pass?(relative_path)
-        (extensions.nil? || extensions.any? { |ext| relative_path.end_with?(ext) }) &&
-          exclude.to_a.none? { |segment| relative_path.include?(segment) } &&
+        (extensions.nil? || extensions.any? { |ext| relative_path.end_with?(ext) }) && !excluded?(relative_path) &&
           (require_segment.nil? || relative_path.include?(require_segment))
       end
 
+      # Prefix tests without building a "dir/" string per rule and path: a
+      # source check asks every rule about every file.
       def under_a_directory?(relative_path)
-        dirs.to_a.any? do |dir|
-          next false unless dir == '.' || relative_path.start_with?("#{dir}/")
+        dirs&.any? do |dir|
+          next false unless dir == '.' || PathDispatcher.under_directory?(relative_path, dir)
 
           recursive == false ? File.dirname(relative_path) == dir : true
         end
@@ -131,6 +135,16 @@ module Woods
     ].freeze
 
     class << self
+      # Is +path+ inside +dir+ (both root-relative)? The same test as
+      # +path.start_with?(dir + '/')+, without allocating the prefix.
+      #
+      # @param path [String]
+      # @param dir [String]
+      # @return [Boolean]
+      def under_directory?(path, dir)
+        path.start_with?(dir) && path.getbyte(dir.bytesize) == 47 # '/'
+      end
+
       # Paths introduced by configuration-source discovery, including generators.
       # @param path [String] root-relative path
       # @return [Boolean]
@@ -556,22 +570,6 @@ module Woods
     # @return [Boolean] whether a configuration source is excluded by Git
     def git_excluded?(path)
       self.class.configuration_source_path?(path) && !@git_filter.skip_reason(path).nil?
-    end
-
-    # Answer the next {#git_excluded?} for each configuration source among
-    # +paths+ from one batch of git queries (see {GitSourceFilter#prefetch}).
-    #
-    # @param paths [Enumerable<String>] root-relative paths
-    # @return [void]
-    def prefetch_git(paths)
-      @git_filter.prefetch(paths.select { |path| self.class.configuration_source_path?(path) })
-    end
-
-    # Forget every prefetched answer {#git_excluded?} has not used.
-    #
-    # @return [void]
-    def discard_prefetched_git
-      @git_filter.discard_prefetched
     end
 
     # File-based rules matching a path.

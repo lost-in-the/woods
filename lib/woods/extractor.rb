@@ -2782,6 +2782,7 @@ module Woods
       units.map do |u|
         {
           identifier: u.identifier,
+          type: u.type.to_s,
           file_path: u.file_path,
           namespace: u.namespace,
           estimated_tokens: u.estimated_tokens,
@@ -3146,6 +3147,7 @@ module Woods
         data = JSON.parse(AtomicFile.read(file))
         {
           identifier: data['identifier'],
+          type: data['type'],
           file_path: data['file_path'],
           namespace: data['namespace'],
           # Unit JSON has no estimated_tokens field (ExtractedUnit#to_h

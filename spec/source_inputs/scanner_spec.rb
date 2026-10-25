@@ -53,53 +53,6 @@ RSpec.describe Woods::SourceInputs::Scanner do
     )
   end
 
-  # Classifying a configuration source asks git whether it is ignored or
-  # untracked. Two git processes per file cost seconds on a large application,
-  # twice per run (capture and publication recheck).
-  describe 'git-filtered configuration sources' do
-    before do
-      require 'open3'
-      stub_const('Rails', double('Rails', root: Pathname.new(@root)))
-      git = ->(*args) { Open3.capture3(*Woods::GitCommand.argv(@root, *args)).last.success? || raise(args.inspect) }
-      git.call('init', '--quiet')
-      %w[a b c d e f].each { |name| write("config/initializers/#{name}.rb", "# #{name}\n") }
-      write('config/initializers/local.rb', "# local\n")
-      write('config/initializers/draft.rb', "# draft\n")
-      write('.gitignore', "config/initializers/local.rb\nindex/\n")
-      git.call('add', '.gitignore', *%w[a b c d e f].map { |n| "config/initializers/#{n}.rb" })
-    end
-
-    def git_processes
-      count = 0
-      allow(Open3).to receive(:capture3).and_wrap_original do |original, *args, **kwargs|
-        count += 1 if args.include?('check-ignore') || args.include?('ls-files')
-        original.call(*args, **kwargs)
-      end
-      [yield, count]
-    end
-
-    it 'asks git once per directory of configuration sources' do
-      result, processes = git_processes { scan }
-
-      expect(result['complete']).to be(true)
-      expect(result['files'].keys).to include('config/initializers/a.rb', 'config/initializers/local.rb')
-      # One batch for the initializers directory (an ignore query and an index
-      # query) and one confirmation for the untracked draft. One query pair
-      # per file made sixteen.
-      expect(processes).to eq(3)
-    end
-
-    it 'classifies exactly as one query per file does' do
-      batched = scan
-      scopes = Woods::SourceInputs::Scopes.new
-      allow(scopes).to receive(:prefetch)
-      single = described_class.new(root: @root, output_dir: @output, key: @key, scopes: scopes).call
-
-      expect(batched.slice('files', 'scope_paths', 'errors', 'complete'))
-        .to eq(single.slice('files', 'scope_paths', 'errors', 'complete'))
-    end
-  end
-
   it 'covers launcher boot files and declared roots while retaining generated-directory exclusions' do
     paths = %w[Rakefile config.ru application.gemspec config/application_config.rb .custom/loader.rb]
     paths.each { |path| write(path, 'input') }

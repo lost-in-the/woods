@@ -89,7 +89,7 @@ RSpec.describe 'MCP CLI integration' do
       output, errors, status = initialize_over_stdio(request, fixture_dir)
       expect(status.success?).to be(true), utf8(errors)
       tools = JSON.parse(utf8(output)).fetch('result').fetch('tools')
-      expect(tools.size).to eq(14)
+      expect(tools.size).to eq(15)
       { 'dependencies' => 'Comment', 'dependents' => 'Post' }.each do |name, identifier|
         tool = tools.find { |entry| entry['name'] == name }
         expect(tool.fetch('inputSchema').fetch('properties')).not_to have_key('format')

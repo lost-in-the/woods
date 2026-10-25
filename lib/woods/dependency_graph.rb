@@ -32,16 +32,28 @@ module Woods
     # package: any app-owned unit under a Packwerk package (Task 8)
     # enforce_dependencies: package units (Task 7)
     # commit_count, change_frequency: git enrichment (Task 5)
-    # actions, inherited_gem_actions: controller units (the second holds routed
-    # actions whose body is gem code); route_action: route units that dispatch
-    # to a controller action. Together they let the analyzer report routes that
+    # actions, inherited_gem_actions, action_missing: controller units (the
+    # second holds routed actions whose body is gem code; the third is present,
+    # and true, only when the controller defines `action_missing`);
+    # route_action: route units that dispatch to a controller action.
+    # Together they let the analyzer report routes that
     # do not resolve without re-running the route extractor on controller edits.
     # container: the kind of {ContainerAttribution}'s `metadata[:container]` (W-9).
     # lines, loc: {SourceSize}'s count of an application unit's own file (#810).
+    # unresolved_render_count, fact_actions: how many renders the unit's
+    # `metadata.unresolved_renders` lists, and the actions its
+    # `metadata.action_facts` covers (#837), so a reader opens only the units
+    # that have something to report.
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
-      actions inherited_gem_actions route_action container lines loc
+      actions inherited_gem_actions action_missing route_action container lines loc unresolved_render_count
+      fact_actions
     ].freeze
+
+    # The node summaries this writer publishes for every unit (#837), listed
+    # in the graph as `node_facts`, so a reader can tell "none" from "not
+    # summarised by this writer".
+    NODE_FACTS = %w[fact_actions unresolved_render_count].freeze
 
     # These extractors describe a whole source file rather than one constant.
     # Other types remain unclassified: a path-like identifier is not evidence
@@ -803,16 +815,30 @@ module Woods
       if unit.type == :controller && gem_actions.is_a?(Hash) && gem_actions.any?
         attrs[:inherited_gem_actions] = gem_actions.keys
       end
+      attrs[:action_missing] = true if unit.type == :controller && metadata[:action_missing] == true
       attrs[:route_action] = metadata[:action] if unit.type == :route && metadata[:controller] && metadata[:action]
       if unit.type == :package && !metadata[:enforce_dependencies].nil?
         attrs[:enforce_dependencies] = metadata[:enforce_dependencies]
       end
+      attrs.merge!(render_and_fact_attributes(metadata))
       git = metadata[:git]
       if git.is_a?(Hash)
         attrs[:commit_count] = git[:commit_count] unless git[:commit_count].nil?
         attrs[:change_frequency] = git[:change_frequency] unless git[:change_frequency].nil?
       end
       attrs.to_h { |key, value| [key, self.class.normalize_node_attribute(key, value)] }
+    end
+
+    # @param metadata [Hash] the unit's metadata
+    # @return [Hash] `unresolved_render_count` when renders went unresolved,
+    #   `fact_actions` when the unit publishes action facts (#837)
+    def render_and_fact_attributes(metadata)
+      attrs = {}
+      renders = metadata[:unresolved_renders] || metadata['unresolved_renders']
+      attrs[:unresolved_render_count] = renders.size if renders.is_a?(Array) && renders.any?
+      facts = metadata[:action_facts] || metadata['action_facts']
+      attrs[:fact_actions] = facts.keys if facts.is_a?(Hash)
+      attrs
     end
 
     # @param size [Hash, nil] {SourceSize}'s `{ lines:, loc: }`, symbol or string keys
@@ -952,6 +978,7 @@ module Woods
           edges: key_sorted(primary_edges),
           reverse: key_sorted(@reverse.transform_values { |ids| ids.to_a.sort }),
           reverse_via: published_reverse_via,
+          node_facts: NODE_FACTS,
           file_map: key_sorted(self.class.relativize_file_map(@file_map, root)),
           type_index: key_sorted(@type_index.transform_values { |ids| ids.to_a.sort }),
           stats: {
@@ -1195,9 +1222,11 @@ module Woods
     # @return [Object]
     def self.normalize_node_attribute(key, value)
       case key
-      when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions then Array(value).map(&:to_s).uniq.sort
-      when :commit_count, :lines, :loc then value.to_i
+      when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions, :fact_actions
+        Array(value).map(&:to_s).uniq.sort
+      when :commit_count, :lines, :loc, :unresolved_render_count then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
+      when :action_missing then value == true
       else value.to_s
       end
     end

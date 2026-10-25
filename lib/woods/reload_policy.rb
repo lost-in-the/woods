@@ -199,12 +199,6 @@ module Woods
       @dispatcher = PathDispatcher.new(root: root)
     end
 
-    # The dispatcher whose Git filter {#classify} consults, so a caller can
-    # batch those queries ({PathDispatcher#prefetch_git}).
-    #
-    # @return [PathDispatcher]
-    attr_reader :dispatcher
-
     # What has to happen before this path can be re-extracted truthfully.
     #
     # @param relative_path [String] Rails.root-relative path
@@ -271,7 +265,7 @@ module Woods
     end
 
     def under?(path, directories)
-      directories.any? { |dir| path.start_with?("#{dir}/") }
+      directories.any? { |dir| PathDispatcher.under_directory?(path, dir) }
     end
   end
 end

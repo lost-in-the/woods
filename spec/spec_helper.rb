@@ -68,7 +68,7 @@ RSpec.configure do |config|
   Kernel.srand config.seed
 
   # A WOODS_RUN_* env-var name drift (opt-in CI lanes: booted_app,
-  # live_backends, http_server, mcp_inspector, packaged_gem, perf) would
+  # live_backends, http_server, mcp_inspector, github_mermaid, packaged_gem, perf) would
   # otherwise filter every example out of a run and still exit 0 — a silent
   # green job that tested nothing.
   config.fail_if_no_examples = true
@@ -110,6 +110,10 @@ RSpec.configure do |config|
   # The official Inspector contract requires the pinned Node package and boots
   # both MCP executables. Release validation opts in after `npm ci`.
   config.filter_run_excluding(mcp_inspector: true) unless ENV['WOODS_RUN_MCP_INSPECTOR']
+
+  # The GitHub Mermaid parse spec (woods#826) runs the vendored Mermaid build
+  # in Node; CI opts in with WOODS_RUN_GITHUB_MERMAID=1 where Node is set up.
+  config.filter_run_excluding(github_mermaid: true) unless ENV['WOODS_RUN_GITHUB_MERMAID']
 
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)

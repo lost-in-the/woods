@@ -504,6 +504,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.send(:remove_const, :ReferenceGraphTarget) if Object.const_defined?(:ReferenceGraphTarget, false)
     end
 
+    it 'reports every unit that calls a service object as its dependent, before and after a caller stops' do
+      sources = {
+        'app/services/gadget_pricer.rb' => "class GadgetPricer\n  def self.call(gadget)\n    gadget\n  end\nend\n",
+        'app/services/gadget_batch.rb' => "class GadgetBatch\n  def run\n    GadgetPricer.call(nil)\n  end\nend\n",
+        'app/models/gadget_quote.rb' => "class GadgetQuote\n  def total\n    GadgetPricer.call(self)\n  end\nend\n",
+        'app/jobs/gadget_refresh_job.rb' =>
+          "class GadgetRefreshJob < ApplicationJob\n  def perform\n    GadgetPricer.call(nil)\n  end\nend\n"
+      }
+      sources.each { |relative, source| load app_path(write_file(relative, source)) }
+      index = full_extraction
+      reverse = -> { read_json(index, 'dependency_graph.json').fetch('reverse').fetch('GadgetPricer', []) }
+      expect(reverse.call).to include('GadgetBatch', 'GadgetQuote', 'GadgetRefreshJob')
+
+      quote = write_file('app/models/gadget_quote.rb', "class GadgetQuote\n  def total\n    0\n  end\nend\n")
+      load app_path(quote)
+      Woods::Extractor.new(output_dir: index).extract_changed([quote])
+      expect(reverse.call).to include('GadgetBatch', 'GadgetRefreshJob')
+      expect(reverse.call).not_to include('GadgetQuote')
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      %i[GadgetPricer GadgetBatch GadgetQuote GadgetRefreshJob].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
     it 'refreshes source references after a caller edit and retains its last generation after a parse failure' do
       caller_path = write_file('app/models/reference_refresh_caller.rb', <<~RUBY)
         class ReferenceRefreshCaller
@@ -2112,6 +2137,38 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                ])
       expect(unresolvable.call(index_dir)).to eq([ghost])
     end
+
+    # Rails serves a routed action with no method by implicit render (#726):
+    # the template alone resolves it, and removing the template unresolves it
+    # again, through incremental runs that agree with a full one at each step.
+    # Its own controller: the sibling example loads an `archive` method into
+    # LanternsController, and a class stays loaded for the rest of the process.
+    it 'follows a template that serves the action by implicit render' do
+      controller = 'app/controllers/beacons_controller.rb'
+      write_file(controller, "class BeaconsController < ApplicationController\n  def index\n  end\nend\n")
+      load app_path(controller)
+      write_file('config/routes.rb', <<~RUBY)
+        Rails.application.routes.draw do
+          resources :posts, only: %i[index show create]
+          resources :beacons, only: %i[index]
+          get 'beacons/archive', to: 'beacons#archive'
+        end
+      RUBY
+      Rails.application.reload_routes!
+      archive = { 'route' => 'GET /beacons/archive', 'controller' => 'BeaconsController',
+                  'action' => 'archive', 'reason' => 'missing_action' }
+      unresolvable = ->(dir) { read_json(dir, 'graph_analysis.json')['unresolvable_routes'] }
+      template = 'app/views/beacons/archive.html.erb'
+
+      index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }])
+      expect(unresolvable.call(index_dir)).to eq([])
+
+      index_dir = run_sequence([-> { write_file(template, "<h1>Archive</h1>\n") }, -> { delete_file(template) }])
+      expect(unresolvable.call(index_dir)).to eq([archive])
+    ensure
+      # The class stays loaded, so its file joins the pristine tree.
+      FileUtils.cp(app_path(controller), File.join(@pristine_root, controller)) if File.exist?(app_path(controller))
+    end
   end
 
   describe 'documentation units' do
@@ -2914,6 +2971,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/rt_shelf/row_component.rb
         app/components/rt_desk/card_component.rb
         app/controllers/rt_desk_controller.rb
+        app/controllers/rt_lamp_controller.rb
+        app/components/rt_lamp/shade_component.rb
       ]
     end
 
@@ -3009,6 +3068,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            ])
 
       expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
+    end
+
+    it 'summarises unresolved renders and action facts on the graph node, full and incremental alike (#837)' do
+      node = ->(index) { read_json(index, 'dependency_graph.json').fetch('nodes').fetch('RtLampController') }
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_lamp_controller.rb', <<~RUBY)
+                                 class RtLampController < ApplicationController
+                                   def show
+                                     render RtLamp::ShadeComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+      expect(node.call(index)).to include('unresolved_render_count' => 1, 'fact_actions' => ['show'])
+      expect(read_json(index, 'dependency_graph.json').fetch('node_facts'))
+        .to eq(%w[fact_actions unresolved_render_count])
+
+      component = write_and_load('app/components/rt_lamp/shade_component.rb', <<~RUBY)
+        module RtLamp
+          class ShadeComponent < ApplicationComponent
+            def call = "shade"
+          end
+        end
+      RUBY
+      Woods::Extractor.new(output_dir: index).extract_changed([component])
+      expect(node.call(index)).not_to have_key('unresolved_render_count')
+      expect(differences(index, full_extraction)).to be_empty
     end
   end
 

@@ -71,7 +71,7 @@ RSpec.describe 'release-v2 public-surface inventory' do
   it 'rejects a drifted Index MCP count in the current guide' do
     documentation_path = File.join(root, 'docs/MCP_SERVERS.md')
     original = File.read(documentation_path, encoding: Encoding::UTF_8)
-    changed = original.sub('### Tools (30', '### Tools (29')
+    changed = original.sub('### Tools (31', '### Tools (30')
     expect(changed).not_to eq(original)
 
     allow(surface_inventory).to receive(:read_utf8).with(Pathname.new(documentation_path)).and_return(changed)

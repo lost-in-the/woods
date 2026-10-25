@@ -1,105 +1,80 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'fileutils'
 require 'open3'
 require 'tmpdir'
-require 'fileutils'
 require 'woods/git_source_filter'
-require 'woods/git_command'
 
+# The filter answers for every configuration path a source check or a
+# dispatch classifies. It used to spawn one or two git processes per path,
+# which on its own used up a quick freshness check's time budget; it now
+# reads the index and the ignore rules once per filter.
 RSpec.describe Woods::GitSourceFilter do
-  let(:root) { Dir.mktmpdir('woods_git_filter') }
-  let(:filter) { described_class.new(root: root) }
-  let(:paths) do
-    ['config/tracked.rb', 'config/ignored_tracked.rb', 'config/local.yml', 'config/untracked.rb', 'config/odd name.rb']
+  around do |example|
+    Dir.mktmpdir('woods-git-filter') do |dir|
+      @repo = dir
+      example.run
+    end
   end
 
-  after { FileUtils.rm_rf(root) }
-
-  def git(*args)
-    _out, err, status = Open3.capture3(*Woods::GitCommand.argv(root, *args))
+  def git(*args, dir: @repo)
+    _out, err, status = Open3.capture3('git', '-C', dir, *args)
     raise err unless status.success?
   end
 
-  before do
-    git('init', '--quiet')
-    paths.each do |path|
-      FileUtils.mkdir_p(File.join(root, File.dirname(path)))
-      File.write(File.join(root, path), "# source\n")
-    end
-    git('add', 'config/tracked.rb', 'config/ignored_tracked.rb', 'config/odd name.rb')
-    File.write(File.join(root, '.gitignore'), "config/ignored_tracked.rb\nconfig/local.yml\n")
+  def write(path, root: @repo)
+    full = File.join(root, path)
+    FileUtils.mkdir_p(File.dirname(full))
+    File.write(full, "# #{path}\n")
   end
 
-  def git_processes
+  def git_spawns
     count = 0
-    allow(Open3).to receive(:capture3).and_wrap_original do |original, *args, **kwargs|
-      count += 1 if args.include?('check-ignore') || args.include?('ls-files')
-      original.call(*args, **kwargs)
+    allow(Open3).to receive(:capture3).and_wrap_original do |original, *args, **options|
+      count += 1 if args.first == 'git'
+      original.call(*args, **options)
     end
     yield
     count
   end
 
-  describe '#skip_reasons' do
-    it 'gives each path the answer #skip_reason gives it' do
-      expected = paths.to_h { |path| [path, described_class.new(root: root).skip_reason(path)] }
+  let(:tracked) { Array.new(40) { |i| "config/initializers/setting_#{i}.rb" } + ['config/odd name [1].yml'] }
 
-      expect(expected).to eq('config/tracked.rb' => nil, 'config/ignored_tracked.rb' => 'git_ignored',
-                             'config/local.yml' => 'git_ignored', 'config/untracked.rb' => 'untracked',
-                             'config/odd name.rb' => nil)
-      expect(filter.skip_reasons(paths)).to eq(expected)
-    end
-
-    it 'keys absolute paths as given' do
-      absolute = File.join(root, 'config/untracked.rb')
-
-      expect(filter.skip_reasons([absolute])).to eq(absolute => 'untracked')
-    end
-
-    it 'asks git once for ignores and once for the index, confirming only untracked verdicts' do
-      filter.available?
-
-      # check-ignore, ls-files, and one confirmation for config/untracked.rb
-      expect(git_processes { filter.skip_reasons(paths) }).to eq(3)
-    end
-
-    it 'answers nil for every path when the filter is unavailable' do
-      unavailable = described_class.new(root: nil)
-
-      expect(unavailable.skip_reasons(paths)).to eq(paths.to_h { |path| [path, nil] })
-    end
-
-    it 'falls back to one query per path when a batch query fails' do
-      allow(Open3).to receive(:capture3).and_wrap_original do |original, *args, **kwargs|
-        if args.include?('--stdin')
-          next ['', 'fatal',
-                instance_double(Process::Status, success?: false, exitstatus: 128)]
-        end
-
-        original.call(*args, **kwargs)
-      end
-
-      expect(filter.skip_reasons(paths)['config/local.yml']).to eq('git_ignored')
-      expect(filter.skip_reasons(paths)['config/untracked.rb']).to eq('untracked')
-    end
+  def build_repository
+    git('init', '--quiet')
+    tracked.each { |path| write(path) }
+    write('config/tracked_then_ignored.yml')
+    git('add', '.')
+    File.write(File.join(@repo, '.gitignore'), "config/tracked_then_ignored.yml\nconfig/local.yml\n")
+    write('config/local.yml')
+    write('config/untracked.yml')
   end
 
-  describe '#prefetch' do
-    it 'answers each prefetched path once from the batch, then asks git again' do
-      filter.prefetch(paths)
+  it 'gives the same reasons as one git call per path' do
+    build_repository
+    filter = described_class.new(root: @repo)
 
-      expect(git_processes { expect(filter.skip_reason('config/tracked.rb')).to be_nil }).to eq(0)
-      expect(git_processes { expect(filter.skip_reason('config/tracked.rb')).to be_nil }).to eq(2)
-    end
+    expect(tracked.map { |path| filter.skip_reason(path) }.uniq).to eq([nil])
+    expect(filter.skip_reason('config/tracked_then_ignored.yml')).to eq('git_ignored')
+    expect(filter.skip_reason('config/local.yml')).to eq('git_ignored')
+    expect(filter.skip_reason('config/untracked.yml')).to eq('untracked')
+    expect(filter.skip_reason(File.join(@repo, 'config/untracked.yml'))).to eq('untracked')
+  end
 
-    it 'keeps no answer past #discard_prefetched' do
-      filter.prefetch(paths)
-      git('add', '--force', 'config/local.yml')
-      File.write(File.join(root, '.gitignore'), '')
-      filter.discard_prefetched
+  it 'answers many tracked paths with a fixed number of git processes' do
+    build_repository
+    filter = described_class.new(root: @repo)
 
-      expect(filter.skip_reason('config/local.yml')).to be_nil
-    end
+    spawns = git_spawns { tracked.each { |path| filter.skip_reason(path) } }
+    expect(spawns).to be <= 4
+  end
+
+  it 'probes a root it has already found usable only once per process' do
+    build_repository
+    described_class.new(root: @repo).skip_reason(tracked.first)
+
+    spawns = git_spawns { described_class.new(root: @repo).skip_reason(tracked.first) }
+    expect(spawns).to eq(2)
   end
 end

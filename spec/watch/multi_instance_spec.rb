@@ -90,6 +90,23 @@ RSpec.describe 'Watch daemon multi-instance operation' do
       other_writer&.release
     end
 
+    # A writer killed mid-run (a container restart) leaves a fresh lock that
+    # no process holds. Waiting out LOCK_STALE_TIMEOUT left the index frozen
+    # for ten minutes; a same-host lock whose pid is gone is abandoned.
+    it 'takes over a fresh lock abandoned by a dead writer on this host' do
+      touch(0, 'config/locales/en.yml')
+      dead = fork { exit!(0) }
+      Process.wait(dead)
+      File.write(File.join(outputs[0], "#{Woods::Watch::Daemon::LOCK_NAME}.lock"),
+                 JSON.generate(pid: dead, host: Woods::Watch::Status.host_identity,
+                               locked_at: Time.now.iso8601, name: Woods::Watch::Daemon::LOCK_NAME, token: 'killed'))
+
+      result = daemon_for(0, marker: 'Recovered').process(['config/locales/en.yml'])
+
+      expect(result[:action]).to eq(:incremental)
+      expect(Dir[File.join(outputs[0], 'models', '*.json')].map { |f| File.basename(f, '.json') }).to eq(['Recovered'])
+    end
+
     # A cycle skipped for contention must not lose its paths — the files
     # really did change, and no later event will mention them again.
     it 'carries the skipped paths into the next cycle' do

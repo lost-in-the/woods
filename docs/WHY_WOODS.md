@@ -119,7 +119,7 @@ exactly which HTTP verbs and paths map to which actions. URL → code is always 
 **Dependency graph.** 42 extractors build a bidirectional graph: what each unit depends on,
 and what depends on it. Change `Auditable` and you can trace every model affected.
 
-**Two MCP servers.** The Index Server defines 30 schemas and registers 14 in the normal
+**Two MCP servers.** The Index Server defines 31 schemas and registers 15 in the normal
 packaged launch; it reads pre-extracted JSON without booting Rails. The Console Server
 has a 31-schema inventory but registers 9 tools by default, or 11 with explicit embedded
 read tools, and bridges to a live Rails process for bounded database queries.

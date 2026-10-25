@@ -21,6 +21,9 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 **Debugging**
 - ["What happens when POST /orders is called?"](#what-happens-when-post-orders-is-called)
 - ["Why is this page slow?"](#why-is-this-page-slow)
+**Diagrams**
+- ["Show the schema around Order in a pull request comment"](#show-the-schema-around-order-in-a-pull-request-comment)
+- ["What runs, across jobs and mailers, when a Post is created?"](#what-runs-across-jobs-and-mailers-when-a-post-is-created)
 **Architecture Analysis**
 - ["Find dead code in our codebase"](#find-dead-code-in-our-codebase)
 - ["What are the most important models?"](#what-are-the-most-important-models)
@@ -53,11 +56,11 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ## Conditional Tools & Wiring
 
-The Index Server defines **30 schemas**: the packaged executable registers **14**, while **16** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
+The Index Server defines **31 schemas**: the packaged executable registers **15**, while **16** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
-| Always-on | 14 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `woods_status` |
+| Always-on | 15 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `diagram`, `woods_status` |
 | `session_trace` | 1 | Custom/embedded Index process has a configured `session_store` supporting `read` and `sessions`; the packaged executable does not load Rails initializer configuration |
 | Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
@@ -555,6 +558,35 @@ Every flow continues across async hops: a `perform_later` into the job's `perfor
 
 ---
 
+## Diagrams
+
+**Tool:** `diagram` (Index Server, always registered)
+
+`diagram` answers with Mermaid text for one unit, built on demand from the pinned published generation and cached per generation. Nothing is computed at extraction. The text parses with the Mermaid GitHub renders (11.16.1), so an agent reviewing a pull request can paste it into a ```` ```mermaid ```` block. `bin/rake "woods:diagram[kind,identifier]"` prints the same text, taking `TYPE`, `DEPTH`, `DIRECTION`, `EVENT`, `TYPES` and `VIA` from the environment.
+
+| `kind` | Draws | `depth` | Budget |
+|---|---|---|---|
+| `neighbourhood` | the typed edges around the unit as a `flowchart LR`, each labelled with its mechanism (`direction`: both, dependents or dependencies; `types` and `via` filter) | graph hops, 1 to 3, default 1 | 150 units |
+| `schema` | a model's table and its associations as an `erDiagram` | association hops from the model's table, 1 to 3, default 1 | 40 tables |
+| `lifecycle` | a model event's callback chain as a `sequenceDiagram` (`event`: create, update or destroy) | 0 is the event's own chain (default); 1 and 2 follow its async hops (`perform_later`, `deliver_later`) into the jobs and mailers they reach, from flow data assembled over the published units | 150 participants and messages |
+| `impact` | the change impact report's flowchart for the unit as a planned change | reverse dependency hops of the report, 0 to 10, default 2 | the report renderer's 60 nodes and 120 edges |
+
+**Over the budget.** A diagram over its budget is refused, never truncated. The answer is an `over_budget` error naming the size, the budget and the depth; retry with a smaller depth or narrower filters.
+
+**Errors.** A depth outside the kind's range, a kind the unit cannot have (a lifecycle of a job) or an option the kind does not take is `invalid_params`. An unknown unit is `not_found`. The structured data of every answer records `kind`, `identifier`, `type`, `depth`, `budget`, `size` and `generation`.
+
+### "Show the schema around Order in a pull request comment"
+
+```text
+diagram(kind: "schema", identifier: "Order", depth: 2)
+```
+
+### "What runs, across jobs and mailers, when a Post is created?"
+
+```text
+diagram(kind: "lifecycle", identifier: "Post", event: "create", depth: 1)
+```
+
 ## Architecture Analysis
 
 ### "Find dead code in our codebase"
@@ -685,7 +717,7 @@ Every flow continues across async hops: a `perform_later` into the job's `perfor
 }
 ```
 
-**What you'll get:** `route`, `controller`, `action`, and `reason` for every route whose controller has no unit (`missing_controller`) or whose action the controller does not have (`missing_action`). Controllers a gem or engine defines, and routed actions a controller inherits from a gem, resolve and are not listed.
+**What you'll get:** `route`, `controller`, `action`, and `reason` for every route whose controller has no unit (`missing_controller`) or whose action the controller does not have (`missing_action`). Controllers a gem or engine defines, routed actions a controller inherits from a gem, actions served by implicit render from a template, and every action of a controller that defines `action_missing` resolve and are not listed.
 
 ---
 

@@ -232,7 +232,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
     listed = post({ jsonrpc: '2.0', id: 1, method: 'tools/list', params: {} })
     expect(listed.code).to eq('200')
     tools = JSON.parse(listed.body).fetch('result').fetch('tools')
-    expect(tools.size).to eq(14)
+    expect(tools.size).to eq(15)
     { 'dependencies' => 'Comment', 'dependents' => 'Post' }.each do |name, identifier|
       tool = tools.find { |entry| entry['name'] == name }
       expect(tool.fetch('inputSchema').fetch('properties')).not_to have_key('format')

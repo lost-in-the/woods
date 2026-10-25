@@ -56,13 +56,14 @@ RSpec.describe 'woods_status tool' do
       expect(status[:index]).to include(woods_version: nil)
     end
 
-    it 'embeds an update sub-hash reporting the installed version (no update by default)' do
-      # spec_helper stubs the network fetch to nil, so a hermetic run reports no update
-      # and latest_version falls back to the installed version (the newest one known).
+    it 'embeds an update sub-hash that names no latest version it never learned' do
+      # spec_helper stubs the network fetch to nil, so a hermetic run learns no
+      # published version: latest_version is unknown, not the installed one.
       expect(status[:server][:update]).to eq(
         current_version: Woods::VERSION,
-        latest_version: Woods::VERSION,
-        update_available: false
+        latest_version: nil,
+        update_available: false,
+        checked: false
       )
     end
 
@@ -73,7 +74,8 @@ RSpec.describe 'woods_status tool' do
       expect(s[:server][:update]).to include(
         current_version: Woods::VERSION,
         latest_version: '999.0.0',
-        update_available: true
+        update_available: true,
+        checked: true
       )
     end
 
@@ -275,6 +277,28 @@ RSpec.describe 'woods_status tool' do
 
         expect(status_for[:watch]).to include(state: 'degraded', generation: 7)
         expect(status_for[:watch][:reason]).to include('SyntaxError')
+      end
+
+      # generation.json lands before the daemon writes the cycle's
+      # outcome. The section names the published generation and says when the
+      # status record is behind it, and whether a cycle is still running.
+      it 'says when the status names an older generation than the one published' do
+        generation = Woods::Generation.new(output_dir: index_dir)
+        2.times { generation.bump!(reason: 'incremental') }
+        Woods::Watch::Status.new(output_dir: index_dir)
+                            .write(state: :running, generation: 1, cycle: 'extracting',
+                                   cycle_started_at: '2026-01-01T00:00:00Z')
+
+        expect(status_for[:watch]).to include(generation: 1, published_generation: 2, status_behind: true,
+                                              cycle: 'extracting', cycle_started_at: '2026-01-01T00:00:00Z')
+      end
+
+      it 'says the status is current when it names the published generation' do
+        Woods::Generation.new(output_dir: index_dir).bump!(reason: 'full')
+        Woods::Watch::Status.new(output_dir: index_dir).write(state: :running, generation: 1)
+
+        expect(status_for[:watch]).to include(published_generation: 1, status_behind: false)
+        expect(status_for[:watch]).not_to have_key(:cycle)
       end
 
       it 'reports absent rather than raising on an unreadable status file' do

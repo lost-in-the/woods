@@ -353,6 +353,16 @@ within a debounce window), `degraded` (alive but *cannot* update, index frozen
 at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
+The extractor publishes `generation.json` as the last write of a run, before
+the daemon can write the cycle's outcome. While a cycle runs, the record says
+so: `"cycle": "extracting"`, with `cycle_kind` (`full` or `incremental`) and
+`cycle_started_at`, alongside the generation the cycle started from. The
+outcome replaces that record without a `cycle` field. `woods_status` reports
+both, plus `published_generation` and `status_behind`, which is true when the
+record names an older generation than the one published. A reader in that
+window knows the record is about to catch up, and does not take the previous
+cycle's outcome for the current one.
+
 The file is written world-readable (0644) by design: host-side hooks read it
 through a bind mount. Writes through `Woods::AtomicFile` default to owner-only
 0600 unless the caller supplies another mode. This is not a guarantee for every
@@ -852,8 +862,9 @@ and a hook-triggered `woods:incremental`. They share the existing file-based
 | Situation | Behaviour |
 |---|---|
 | Daemon cycle while another writer holds the lock | Daemon yields, publishes a `contended` degraded status, and **carries its paths into the next cycle** so nothing is lost |
-| Manual `woods:extract` / `woods:incremental` / `woods:refresh` (including `woods:extract_framework`) | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, then **exits non-zero** rather than proceeding unlocked. It also exits non-zero with a typed error when the final generation marker cannot be published; the previous generation remains readable. A storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
+| Manual `woods:extract` / `woods:incremental` / `woods:refresh` (including `woods:extract_framework`) | Waits up to `LOCK_STALE_TIMEOUT` (600 s; override with `WOODS_LOCK_WAIT`) for the lock, saying once which pid, host and lock time it is waiting on, then **exits non-zero** rather than proceeding unlocked. It also exits non-zero with a typed error when the final generation marker cannot be published; the previous generation remains readable. A storm-triggered `extract_all` can hold the lock for minutes on a large host, and two concurrent writers rewrite the dependency graph from divergent copies, so the loser's work is silently discarded under a generation that says "fresh" |
 | Hook sync on a tree a daemon is already watching | Skips entirely: the daemon has already seen those changes. `WOODS_IGNORE_WATCH=1` overrides |
+| A writer was killed mid-run (container restart, `SIGKILL`, OOM) | The lock records the holder's pid and host. A lock written on this host by a pid that no longer exists is stale at once, so the next writer takes it over without waiting for `LOCK_STALE_TIMEOUT`. A lock from another host, or from a version that recorded no host, is still judged by its age, because a pid cannot be checked across namespaces. As with [cross-host liveness](#cross-host-liveness), a hostname shared by two live containers cannot prove pid-namespace identity |
 
 A hook can check cheaply:
 

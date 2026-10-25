@@ -1276,6 +1276,26 @@ RSpec.describe Woods::DependencyGraph do
       expect(graph.to_h[:nodes]['User']).to include(commit_count: 12, change_frequency: 'hot')
     end
 
+    it 'summarises unresolved renders and the actions with facts, so readers skip the other units (#837)' do
+      graph.register(unit_with_metadata(type: :controller, identifier: 'WidgetsController',
+                                        metadata: { actions: %w[index show edit],
+                                                    action_facts: { 'show' => {}, 'index' => {} },
+                                                    unresolved_renders: [{ name: 'Ghost', reason: 'no_component' },
+                                                                         { name: 'Shade', reason: 'no_component' }] }))
+      graph.register(unit_with_metadata(type: :component, identifier: 'BadgeComponent',
+                                        metadata: { unresolved_renders: [] }))
+      graph.register(unit_with_metadata(type: :mailer, identifier: 'WidgetMailer',
+                                        metadata: { action_facts: { 'shipped' => {} } }))
+
+      nodes = graph.to_h[:nodes]
+      expect(nodes['WidgetsController']).to include(unresolved_render_count: 2, fact_actions: %w[index show])
+      expect(nodes['BadgeComponent'].keys).not_to include(:unresolved_render_count, :fact_actions)
+      expect(nodes['WidgetMailer']).to include(fact_actions: %w[shipped])
+      expect(graph.to_h[:node_facts]).to eq(%w[fact_actions unresolved_render_count])
+      restored = described_class.from_h(JSON.parse(JSON.generate(graph.to_h)))
+      expect(JSON.generate(restored.to_h)).to eq(JSON.generate(graph.to_h))
+    end
+
     it 'records lines and loc from the source size, and nothing without one (#810)' do
       graph.register(unit_with_metadata(type: :model, identifier: 'User',
                                         metadata: { source_size: { lines: 40, loc: 31 } }))

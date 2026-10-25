@@ -2,6 +2,7 @@
 
 require 'json'
 require 'set'
+require 'active_support/inflector'
 require_relative 'query_classifier'
 require_relative 'search_executor'
 
@@ -35,6 +36,7 @@ module Woods
       # @param statistics [Array(Hash, Hash), nil] per-field length totals
       #   and document frequencies already known for +documents+
       def initialize(metadata_store: nil, documents: nil, statistics: nil)
+        @stems = {}
         @documents = (documents || build_documents(metadata_store)).freeze
         @units = @documents.to_h { |doc| [doc.key, doc.unit] }.freeze
         @totals, @frequencies = statistics || tally(@documents)
@@ -70,6 +72,7 @@ module Woods
           next unless eligible?(doc.unit, type_filter, exclude_types)
 
           score, fields = score_document(doc, terms)
+          score *= coordination(doc, terms)
           exact = doc.unit['identifier'].to_s.casecmp?(query.strip)
           score += 1.0 if exact
           fields << 'identifier:exact' if exact
@@ -125,10 +128,22 @@ module Woods
         [totals, frequencies]
       end
 
+      # Terms: CamelCase and snake_case parts, singular (a question about
+      # "labels" must reach a method named +set_label+), without stop
+      # words. Each distinct term is singularized once per index.
       def tokenize(value)
         value.to_s.gsub(/(\p{Ll}|\d)(\p{Lu})/u, '\1 \2')
              .gsub(/(\p{Lu})(\p{Lu}\p{Ll})/u, '\1 \2').downcase
              .scan(/[\p{L}\p{N}]+/u).reject { |term| QueryClassifier::STOP_WORDS.include?(term) }
+             .map! { |term| stem(term) }
+      end
+
+      def stem(term)
+        @stems[term] ||= if term.length > 3 && term.match?(/\A\p{L}+\z/u)
+                           ActiveSupport::Inflector.singularize(term)
+                         else
+                           term
+                         end
       end
 
       def field_values(unit)
@@ -151,6 +166,16 @@ module Woods
         return allowed.map(&:to_s).include?(unit['type']) if allowed && !allowed.empty?
 
         !Array(excluded).map(&:to_s).include?(unit['type'])
+      end
+
+      # The share of the query's words a document holds anywhere, squared: a
+      # unit that answers every word of a question outranks one that repeats
+      # a single rare word in its name. A one-word query is unchanged.
+      def coordination(doc, terms)
+        return 1.0 if terms.size < 2
+
+        held = terms.count { |term| doc.fields.each_value.any? { |counts| counts.key?(term) } }
+        (held.to_f / terms.size)**2
       end
 
       def score_document(doc, terms)

@@ -48,23 +48,6 @@ module Woods
         end
       end
 
-      # Answer the Git exclusions the next {#for_path} calls need for +paths+
-      # from one batch of git queries, rather than two processes per
-      # configuration source. Each answer is used once.
-      #
-      # @param paths [Enumerable<String>] root-relative paths about to be classified
-      # @return [void]
-      def prefetch(paths)
-        @policy.dispatcher.prefetch_git(paths)
-      end
-
-      # Forget every prefetched answer {#for_path} has not used.
-      #
-      # @return [void]
-      def discard_prefetched
-        @policy.dispatcher.discard_prefetched_git
-      end
-
       def boot_path?(path, action)
         return true if action == :restart || BOOT_FILES.include?(path)
         return false unless action == :ignore

@@ -874,15 +874,6 @@ to find unaccounted work; each line rounds to hundredths of a second. Rails
 boot, Bundler and watch reload work outside the call require separate wall
 measurements. Do not infer that all unaccounted time is boot.
 
-Subprocesses are not attributed to a phase of their own. Each one forks the
-extracting process, so on a large application one costs tens of milliseconds.
-Git source filtering therefore batches its queries: a directory listing during
-source capture or the publication recheck, the skipped-files candidates, and
-the configuration extractor's file set are each answered by one ignore query
-and one index query, with a single-path confirmation only for an untracked
-verdict (`GitSourceFilter#skip_reasons`, `#prefetch`). A new caller that asks
-`skip_reason` in a loop over many paths should batch the same way.
-
 Both full and incremental runs currently seed the prior payload. Cloning uses
 per-file hardlinks (or copies where links are unsupported); updated files are
 replaced atomically, preserving previous generations. Full-run carry-forward
