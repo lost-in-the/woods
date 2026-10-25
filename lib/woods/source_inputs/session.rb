@@ -265,8 +265,17 @@ module Woods
         @rules.extra_roots.any? { |root| relative.start_with?("#{root}/") }
       end
 
+      # Memoized per spelling: every consumed unit asks for its paths several
+      # times, and the gem-root comparison behind each answer is linear in
+      # the bundle. The root, declared roots and installed gems are fixed for
+      # the session. An undecodable path is not memoized, so each use still
+      # records its error.
       def relative_path(path)
         return nil if path.nil? || path.to_s.empty?
+
+        memo = (@relative_paths ||= {})
+        key = path.to_s
+        return memo[key] if memo.key?(key)
 
         decoded = SourcePathEncoding.utf8(path)
         unless decoded
@@ -274,7 +283,7 @@ module Woods
           return nil
         end
 
-        application_source_path(File.expand_path(decoded, @root))
+        memo[key.dup.freeze] = application_source_path(File.expand_path(decoded, @root))&.freeze
       end
 
       def application_source_path(absolute)

@@ -68,6 +68,49 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
     units.find { |candidate| candidate.identifier == identifier }
   end
 
+  # A model edit moves ownership, never the live schema: schema changes reach
+  # an incremental run only with a db/ path, which reads it live.
+  describe 'schema cache' do
+    let(:catalog) { catalog_for(schema, models: { 'widgets' => ['Gadget'] }) }
+
+    def published(unit)
+      JSON.parse(JSON.generate(unit.to_h))
+    end
+
+    it 'builds the same units from published schema facts without asking the connection' do
+      live = described_class.new(table_catalog: catalog).extract_all
+      cache = described_class.schema_cache_from(live.map { |unit| published(unit) })
+      allow(catalog.tables.first.pool).to receive(:with_connection).and_raise('connection used')
+      cached = described_class.new(table_catalog: catalog, schema_cache: cache).extract_all
+
+      expect(cached.map { |unit| published(unit) }).to eq(live.map { |unit| published(unit) })
+    end
+
+    it 'reads a table the cache does not hold from the connection' do
+      cache = described_class.schema_cache_from([])
+
+      expect(described_class.new(table_catalog: catalog, schema_cache: cache).extract_all.size).to eq(2)
+    end
+
+    it 'takes ownership from the live catalog, not from the cache' do
+      stale = described_class.new(table_catalog: catalog_for(schema, models: { 'widgets' => ['Widget'] })).extract_all
+      cache = described_class.schema_cache_from(stale.map { |unit| published(unit) })
+      widgets = described_class.new(table_catalog: catalog, schema_cache: cache).extract_all
+                               .find { |unit| unit.identifier == 'table:widgets' }
+
+      expect(widgets.metadata).to include(model: 'Gadget', models: ['Gadget'])
+    end
+  end
+
+  describe '.schema_trigger_path?' do
+    it 'is true for schema dumps and migrations and false for model files' do
+      expect(described_class.schema_trigger_path?('db/migrate/20260101000000_create_widgets.rb')).to be(true)
+      expect(described_class.schema_trigger_path?('db/schema.rb')).to be(true)
+      expect(described_class.schema_trigger_path?('app/models/widget.rb')).to be(false)
+      expect(described_class.schema_trigger_path?('packs/billing/app/models/invoice.rb')).to be(false)
+    end
+  end
+
   describe '#extract_all' do
     it 'emits one database_table unit per live table' do
       expect(units.map(&:type).uniq).to eq([:database_table])

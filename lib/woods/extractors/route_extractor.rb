@@ -103,13 +103,12 @@ module Woods
         files = (@route_files ||= {})
         return files[relative] if files.key?(relative)
 
-        if (@git_filter ||= GitSourceFilter.new(root: application_root)).skip_reason(relative)
-          return files[relative] = false
-        end
-
+        # Only a named route file is worth a git query: an engine's or gem's
+        # route file never is one, and each query costs two git processes.
         named = relative == ROUTES_FILE || (relative.start_with?("#{ROUTES_DIRECTORY}/") && relative.end_with?('.rb'))
         files[relative] = named && !relative.split('/').include?('..') &&
-                          ConfigSourceGuard.inside_root?(File.join(application_root, relative), application_root)
+                          ConfigSourceGuard.inside_root?(File.join(application_root, relative), application_root) &&
+                          (@git_filter ||= GitSourceFilter.new(root: application_root)).skip_reason(relative).nil?
       end
 
       # Attach a recorded location to a route unit.

@@ -228,7 +228,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     let(:app_root) { '/app' }
 
     before do
-      extractor.instance_variable_get(:@routes_map) # already initialized
+      extractor.send(:routes_map) # built before Rails.root is stubbed
       allow(Rails).to receive(:root).and_return(Pathname.new(app_root))
     end
 

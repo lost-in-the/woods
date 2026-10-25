@@ -41,8 +41,42 @@ module Woods
         path = relative_path.to_s
         return model_path?(path) unless path.start_with?('db/')
 
+        schema_trigger_path?(path)
+      end
+
+      # Whether a changed path can change the live schema itself, rather than
+      # only which model owns a table: a schema dump or a migration.
+      #
+      # @param relative_path [String] Rails.root-relative path
+      # @return [Boolean]
+      def self.schema_trigger_path?(relative_path)
+        path = relative_path.to_s
         (SCHEMA_FILE_GLOBS + MIGRATION_GLOBS).any? { |glob| File.fnmatch?(glob, path, File::FNM_PATHNAME) }
       end
+
+      # Schema facts from published table units, keyed by database and table
+      # name, for {#initialize}'s +schema_cache+.
+      #
+      # @param units [Array<Hash>] string-keyed published database_table units
+      # @return [Hash{Array(String, String) => Hash}] `{ columns:, indexes:, foreign_keys:, primary_key: }`
+      def self.schema_cache_from(units)
+        units.each_with_object({}) do |unit, cache|
+          metadata = unit['metadata']
+          next unless unit['type'] == 'database_table' && metadata.is_a?(Hash) && metadata['table_name']
+
+          cache[[metadata['database'], metadata['table_name']]] = {
+            columns: symbolized(metadata['columns']), indexes: symbolized(metadata['indexes']),
+            foreign_keys: symbolized(metadata['foreign_keys']), primary_key: metadata['primary_key']
+          }
+        end
+      end
+
+      # @param records [Array<Hash>, nil]
+      # @return [Array<Hash>]
+      def self.symbolized(records)
+        Array(records).map { |record| record.transform_keys(&:to_sym) }
+      end
+      private_class_method :symbolized
 
       # A model file at the application root or under a pack or engine
       # (`packs/billing/app/models/invoice.rb`): ownership comes from the
@@ -55,8 +89,16 @@ module Woods
       end
 
       # @param table_catalog [TableCatalog, nil] defaults to the running application's tables
-      def initialize(table_catalog: nil)
+      # @param schema_cache [Hash, nil] {.schema_cache_from} facts to use instead of
+      #   asking the connection. Only valid while the live schema is the one the
+      #   cache was published from: an incremental run whose changes include no
+      #   {.schema_trigger_path?}. Ownership still comes from the live catalog,
+      #   and a table the cache does not hold is read from the connection.
+      attr_writer :schema_cache
+
+      def initialize(table_catalog: nil, schema_cache: nil)
         @table_catalog = table_catalog
+        @schema_cache = schema_cache
       end
 
       # Extract a unit for every live table.
@@ -73,7 +115,8 @@ module Woods
       # @param catalog [TableCatalog] resolves foreign key targets
       # @return [ExtractedUnit, nil] nil when the table's schema cannot be read
       def extract_table(table, catalog)
-        schema = table.pool.with_connection { |connection| read_schema(connection, table.name) }
+        schema = @schema_cache&.[]([table.database, table.name]) ||
+                 table.pool.with_connection { |connection| read_schema(connection, table.name) }
 
         unit = ExtractedUnit.new(type: :database_table, identifier: table.identifier, file_path: nil)
         unit.namespace = nil

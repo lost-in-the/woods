@@ -51,11 +51,9 @@ module Woods
       attr_reader :warnings
 
       def initialize
-        @routes_map = build_routes_map
         @concern_cache = {}
         @concern_module_cache = {}
         @warnings = []
-        build_route_helper_map
       end
 
       # Extract all controllers in the application
@@ -246,7 +244,7 @@ module Woods
       end
 
       def build_routes_comment(controller)
-        routes = @routes_map[controller.name] || {}
+        routes = routes_map[controller.name] || {}
         return '' if routes.empty?
 
         lines = routes.flat_map do |action, route_list|
@@ -673,6 +671,24 @@ module Woods
         end
       end
 
+      # The route helper map, like {#routes_map}, is built when a controller is
+      # first scanned for helpers rather than when the extractor is built.
+      #
+      # @see RouteHelperResolver#resolve_route_helper
+      def resolve_route_helper(helper_name)
+        build_route_helper_map unless @route_helper_map
+        super
+      end
+
+      # Controller name => routed actions, built on first use. Reconciling
+      # controllers in an incremental run asks only for discoverable classes,
+      # and building the map walks every route in the application.
+      #
+      # @return [Hash{String => Hash}]
+      def routes_map
+        @routes_map ||= build_routes_map
+      end
+
       # Rails dispatches a routed action with no method to +action_missing+
       # when the controller responds to it, privately or through an ancestor.
       # Recorded only when present, so other controllers' metadata is unchanged.
@@ -699,7 +715,7 @@ module Woods
       # @param controller [Class]
       # @return [Set<String>] actions a route dispatches to on this controller
       def routed_actions(controller)
-        (@routes_map[controller.name] || {}).keys.to_set(&:to_s)
+        (routes_map[controller.name] || {}).keys.to_set(&:to_s)
       end
 
       # Whether a method body lives in application source: under Rails.root,
@@ -807,7 +823,7 @@ module Woods
           action_facts: resolve_action_facts(controller, actions, view_prefix: controller_view_prefix(controller),
                                                                   permitted: permitted_params.transform_values { |p| p[:model] }),
           inherited_gem_actions: resolve_inherited_gem_actions(controller),
-          routes: @routes_map[controller.name] || {},
+          routes: routes_map[controller.name] || {},
 
           # Filter chain, with each filter's resolved actions and owner (W-8)
           filters: extract_filter_chain(controller, actions: actions),
@@ -1057,7 +1073,7 @@ module Woods
       # actions, none of which is an indexed action.
       def build_action_chunks(controller, unit)
         Array(unit.metadata[:actions]).filter_map do |action|
-          route_info = @routes_map.dig(controller.name, action.to_s)
+          route_info = routes_map.dig(controller.name, action.to_s)
           filters = applicable_filters(controller, action)
 
           action_source, declaration_line = chunk_source(controller, action)

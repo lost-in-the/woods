@@ -3741,12 +3741,39 @@ module Woods
       # controller. Nothing about that is reachable by a graph walk, so the
       # run drops its flow scope and reassembles every touched controller.
       @flow_scope = nil if keys.include?(:routes) || helper_keys.include?(:controllers)
+      prime_table_schema_cache(change_set) if keys.include?(:database_tables)
 
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
       end
       touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
       touched
+    end
+
+    # A model edit re-runs the table extractor for ownership: which model owns
+    # each table. The schema itself only changes with a schema dump (a
+    # restart) or a migration, and a migration path reads it live, so without
+    # one the published table units already hold every column, index and
+    # foreign key. Reading them back replaces four schema queries per table.
+    #
+    # @param change_set [ChangeSet]
+    # @return [void]
+    def prime_table_schema_cache(change_set)
+      return if change_set.relative_paths.any? { |path| Extractors::DatabaseTableExtractor.schema_trigger_path?(path) }
+
+      extractor = extractor_for(:database_tables)
+      return unless extractor.is_a?(Extractors::DatabaseTableExtractor)
+
+      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
+      return unless directory.directory?
+
+      units = directory.children.sort.filter_map do |file|
+        JSON.parse(AtomicFile.read(file)) if file.extname == '.json' && file.basename.to_s != '_index.json'
+      end
+      extractor.schema_cache = Extractors::DatabaseTableExtractor.schema_cache_from(units)
+    rescue JSON::ParserError, SystemCallError, EncodingError
+      # An unreadable published unit leaves the cache unset: every table is read live.
+      nil
     end
 
     # Re-extract the models whose table edge no longer matches the live
