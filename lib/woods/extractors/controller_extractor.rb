@@ -673,6 +673,19 @@ module Woods
         end
       end
 
+      # Rails dispatches a routed action with no method to +action_missing+
+      # when the controller responds to it, privately or through an ancestor.
+      # Recorded only when present, so other controllers' metadata is unchanged.
+      #
+      # @param controller [Class]
+      # @return [Hash] +{ action_missing: true }+ or empty
+      def action_missing_metadata(controller)
+        return {} unless controller.is_a?(Module)
+
+        defined = controller.method_defined?(:action_missing) || controller.private_method_defined?(:action_missing)
+        defined ? { action_missing: true } : {}
+      end
+
       # Rails' +action_methods+ is a Set whose order follows method
       # definition and inclusion order, so it is sorted before anything
       # derived from it is emitted.
@@ -827,7 +840,7 @@ module Woods
 
           # Strong parameters if definable
           permitted_params: permitted_params
-        }
+        }.merge(action_missing_metadata(controller))
       end
 
       # The view path Rails renders an action's implicit template from.

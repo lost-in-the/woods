@@ -60,6 +60,18 @@ RSpec.describe 'public extraction helpers' do
         holder&.release
       end
 
+      it 'says which writer it is waiting for, once, before it gives up' do
+        holder = writer_lock
+        expect(holder.acquire).to be(true)
+        allow(ENV).to receive(:fetch).and_call_original
+        allow(ENV).to receive(:fetch).with('WOODS_LOCK_WAIT', anything).and_return('0.3')
+        expect { expect { run.call }.to raise_error(Woods::Coordination::LockError) }
+          .to output(/\AWaiting up to 0.3s for the extraction lock held by pid #{Process.pid} on \S+ since \S+ /)
+          .to_stderr
+      ensure
+        holder&.release
+      end
+
       it 'raises publication failures and releases the lock for retry' do
         allow(extractor).to receive(raw_method).and_return(result)
         allow(extractor).to receive(:raise_on_publication_failure!).and_raise(Woods::ExtractionError, 'not published')

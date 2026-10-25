@@ -159,6 +159,94 @@ RSpec.describe Woods::Coordination::PipelineLock do
     end
   end
 
+  # A holder killed mid-run (a container restart, SIGKILL) leaves a fresh lock
+  # behind. Its pid is evidence only inside the namespace that issued it, so
+  # the lock records the host the way Watch::Status does.
+  describe 'abandoned lock detection' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:host) { Woods::Watch::Status.host_identity }
+    let(:contender) { described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 600) }
+
+    def dead_pid
+      pid = fork { exit!(0) }
+      Process.wait(pid)
+      pid
+    end
+
+    def write_lock(**fields)
+      File.write(lock_path, JSON.generate({ locked_at: Time.now.iso8601, name: 'extraction', token: 'held' }
+                                            .merge(fields).compact))
+    end
+
+    it 'records the host beside the pid' do
+      lock.acquire
+
+      expect(JSON.parse(File.read(lock_path))).to include('pid' => Process.pid, 'host' => host)
+    end
+
+    it 'takes over a fresh lock whose same-host holder no longer exists' do
+      write_lock(pid: dead_pid, host: host)
+
+      expect(contender.acquire).to be true
+      expect(JSON.parse(File.read(lock_path))['pid']).to eq(Process.pid)
+    end
+
+    it 'retires a fresh lock whose same-host holder no longer exists' do
+      write_lock(pid: dead_pid, host: host)
+
+      expect(contender.retire_stale).to eq(:cleared)
+      expect(File.exist?(lock_path)).to be false
+    end
+
+    it 'keeps a fresh lock whose same-host holder is alive' do
+      write_lock(pid: Process.pid, host: host)
+
+      expect(contender.acquire).to be false
+    end
+
+    it 'keeps a fresh lock whose holder exists but cannot be signalled' do
+      pid = dead_pid
+      write_lock(pid: pid, host: host)
+      allow(Process).to receive(:kill).and_call_original
+      allow(Process).to receive(:kill).with(0, pid).and_raise(Errno::EPERM)
+
+      expect(contender.acquire).to be false
+    end
+
+    it 'keeps a fresh lock recorded on another host, whatever its pid' do
+      write_lock(pid: dead_pid, host: "#{host}-elsewhere")
+
+      expect(contender.acquire).to be false
+    end
+
+    it 'keeps a fresh lock written before the host was recorded' do
+      write_lock(pid: dead_pid)
+
+      expect(contender.acquire).to be false
+    end
+
+    it 'keeps a fresh lock with no usable pid' do
+      write_lock(pid: 'unknown', host: host)
+
+      expect(contender.acquire).to be false
+    end
+
+    it 'reports the recorded holder, and nothing for a missing or unreadable lock' do
+      expect(contender.holder).to be_nil
+      write_lock(pid: 4321, host: host)
+      expect(contender.holder).to include('pid' => 4321, 'host' => host, 'locked_at' => a_kind_of(String))
+      File.write(lock_path, '{torn')
+      expect(contender.holder).to be_nil
+    end
+
+    it 'still retires an old lock on another host by its age' do
+      write_lock(pid: dead_pid, host: "#{host}-elsewhere")
+      FileUtils.touch(lock_path, mtime: Time.now - 3600)
+
+      expect(contender.acquire).to be true
+    end
+  end
+
   describe '#retire_stale' do
     let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
     let(:repair) do

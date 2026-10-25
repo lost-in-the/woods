@@ -717,7 +717,7 @@ diagram(kind: "lifecycle", identifier: "Post", event: "create", depth: 1)
 }
 ```
 
-**What you'll get:** `route`, `controller`, `action`, and `reason` for every route whose controller has no unit (`missing_controller`) or whose action the controller does not have (`missing_action`). Controllers a gem or engine defines, and routed actions a controller inherits from a gem, resolve and are not listed.
+**What you'll get:** `route`, `controller`, `action`, and `reason` for every route whose controller has no unit (`missing_controller`) or whose action the controller does not have (`missing_action`). Controllers a gem or engine defines, routed actions a controller inherits from a gem, actions served by implicit render from a template, and every action of a controller that defines `action_missing` resolve and are not listed.
 
 ---
 

@@ -352,6 +352,76 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(analyzer.unresolvable_routes).to eq([])
     end
 
+    # Rails serves a routed action with no method by implicit render when a
+    # template exists under the controller's view prefixes (#726).
+    describe 'template-only actions' do
+      def template(identifier, owner)
+        make_unit(type: :view_template, identifier: identifier,
+                  dependencies: [{ type: :controller, target: owner, via: :view_render }])
+      end
+
+      def reasons
+        analyzer.unresolvable_routes.to_h { |entry| [entry[:action], entry[:reason]] }
+      end
+
+      before do
+        graph.register(route('GET /ledgers/:id', 'LedgersController', 'show'))
+        graph.register(route('GET /ledgers/summary', 'LedgersController', 'summary'))
+        graph.register(route('GET /ledgers/export', 'LedgersController', 'export'))
+        graph.register(route('GET /ledgers/preview', 'LedgersController', 'preview'))
+      end
+
+      it 'resolves an action whose template the controller owns, in any format or handler' do
+        graph.register(template('ledgers/show.html.erb', 'LedgersController'))
+        graph.register(template('ledgers/summary.haml', 'LedgersController'))
+        graph.register(template('ledgers/export.csv+compact.erb', 'LedgersController'))
+
+        expect(reasons).to eq('preview' => 'missing_action')
+      end
+
+      it 'does not treat a partial as an action template' do
+        graph.register(template('ledgers/_preview.html.erb', 'LedgersController'))
+
+        expect(reasons).to include('preview' => 'missing_action')
+      end
+
+      it 'ignores a template another controller owns' do
+        graph.register(controller('ReportsController', %w[index]))
+        graph.register(template('reports/preview.html.erb', 'ReportsController'))
+
+        expect(reasons).to include('preview' => 'missing_action')
+      end
+
+      it 'resolves a template under an ancestor controller prefix' do
+        graph.register(controller('ApplicationController', []))
+        graph.register(make_unit(type: :controller, identifier: 'LedgersController',
+                                 metadata: { actions: %w[index create] },
+                                 dependencies: [{ type: :controller, target: 'ApplicationController',
+                                                  via: :inheritance }]))
+        graph.register(template('application/preview.html.erb', 'ApplicationController'))
+
+        expect(reasons).not_to include('preview')
+      end
+
+      it 'reaches the same verdicts from a graph reloaded from JSON' do
+        graph.register(template('ledgers/show.html.erb', 'LedgersController'))
+        restored = Woods::DependencyGraph.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+        expect(described_class.new(restored).unresolvable_routes.map { |entry| entry[:action] })
+          .to eq(%w[export preview summary])
+      end
+    end
+
+    it 'resolves every routed action of a controller that defines action_missing' do
+      graph.register(make_unit(type: :controller, identifier: 'PagesController',
+                               metadata: { actions: [], action_missing: true }))
+      graph.register(route('GET /pages/about', 'PagesController', 'about'))
+      restored = Woods::DependencyGraph.from_h(JSON.parse(JSON.generate(graph.to_h)))
+
+      expect(analyzer.unresolvable_routes).to eq([])
+      expect(described_class.new(restored).unresolvable_routes).to eq([])
+    end
+
     it 'skips routes that carry no controller or action' do
       graph.register(make_unit(type: :route, identifier: 'MOUNT /widgets', file_path: nil, metadata: {}))
 

@@ -496,6 +496,47 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     end
   end
 
+  # Rails dispatches any action name to `action_missing` when the controller
+  # responds to it, privately or through an ancestor (#726).
+  describe 'action_missing' do
+    before do
+      load_app('app/controllers/action_fixtures/pages_controller.rb', <<~RUBY)
+        class ActionFixtures::PagesController < ActionFixtures::BaseController
+          private
+
+          def action_missing(name, *) = render(name)
+        end
+      RUBY
+      load_app('app/controllers/action_fixtures/help_pages_controller.rb', <<~RUBY)
+        class ActionFixtures::HelpPagesController < ActionFixtures::PagesController
+        end
+      RUBY
+    end
+
+    it 'is recorded on a controller that defines it' do
+      expect(unit_for('PagesController').metadata[:action_missing]).to be(true)
+    end
+
+    it 'is recorded on a controller that inherits it' do
+      expect(unit_for('HelpPagesController').metadata[:action_missing]).to be(true)
+    end
+
+    it 'is absent from a controller without it' do
+      expect(unit_for('LedgersController').metadata).not_to have_key(:action_missing)
+    end
+
+    it 'keeps every route to such a controller out of the unresolvable-route report' do
+      graph = Woods::DependencyGraph.new
+      graph.register(unit_for('PagesController'))
+      graph.register(Woods::ExtractedUnit.new(type: :route, identifier: 'GET /pages/about', file_path: nil).tap do |r|
+        r.metadata = { controller: 'action_fixtures/pages', action: 'about' }
+        r.dependencies = [{ type: :controller, target: 'ActionFixtures::PagesController', via: :route_dispatch }]
+      end)
+
+      expect(Woods::GraphAnalyzer.new(graph).unresolvable_routes).to eq([])
+    end
+  end
+
   describe 'routed actions whose body is gem code' do
     subject(:unit) { unit_for('Members::SessionsController') }
 

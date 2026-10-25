@@ -8,6 +8,7 @@ require 'securerandom'
 # be loaded directly (the watch daemon reaches for it without loading the
 # whole gem first).
 require 'woods'
+require 'woods/watch/status'
 
 module Woods
   module Coordination
@@ -15,8 +16,9 @@ module Woods
 
     # File-based lock for preventing concurrent pipeline operations.
     #
-    # Creates a lock file with PID and timestamp. Supports stale lock
-    # detection for crashed processes.
+    # Creates a lock file with PID, host and timestamp. A lock is stale when
+    # it is older than the stale timeout, or when it was written on this host
+    # by a process that no longer exists (a holder killed mid-run).
     #
     # @example
     #   lock = PipelineLock.new(lock_dir: '/tmp', name: 'extraction')
@@ -141,6 +143,18 @@ module Woods
         ensure
           release
         end
+      end
+
+      # Who the lock file says holds it, for a waiting writer to report.
+      #
+      # @return [Hash, nil] +'pid'+, +'host'+ and +'locked_at'+ as recorded
+      #   (any may be missing from a lock an older version wrote), or nil
+      #   when there is no readable lock
+      def holder
+        record = JSON.parse(File.read(@lock_path))
+        record.is_a?(Hash) ? record.slice('pid', 'host', 'locked_at') : nil
+      rescue JSON::ParserError, SystemCallError, EncodingError
+        nil
       end
 
       # Whether the lock is currently held by this instance.
@@ -352,8 +366,49 @@ module Woods
         return false unless File.exist?(@lock_path)
 
         age = Time.now - File.mtime(@lock_path)
-        age > @stale_timeout
+        age > @stale_timeout || abandoned?(@lock_path)
       rescue Errno::ENOENT
+        true
+      end
+
+      # Whether the lock at +path+ was written on this host by a process that
+      # no longer exists.
+      #
+      # A holder killed mid-run (a container restart's grace period ending,
+      # SIGKILL, an OOM kill) never releases its lock, and a fresh lock would
+      # otherwise block every writer for the whole stale window. A pid is only
+      # evidence inside the namespace that issued it, so this mirrors
+      # {Watch::Status#alive?}: the recorded host must match before the pid is
+      # checked. A lock from another host, from a version that recorded no
+      # host, or without a usable pid is judged by its age alone. A reused or
+      # shared hostname cannot establish pid-namespace identity, the residual
+      # Watch::Status documents too; a pid that has been reused by another
+      # process reads as alive, which only delays the takeover.
+      #
+      # @param path [String]
+      # @return [Boolean]
+      def abandoned?(path)
+        record = JSON.parse(File.read(path))
+        host = Watch::Status.host_identity
+        return false unless record.is_a?(Hash) && host != 'unknown' && record['host'] == host
+
+        pid = record['pid']
+        pid.is_a?(Integer) && pid.positive? && !process_alive?(pid)
+      rescue JSON::ParserError, SystemCallError, EncodingError
+        false
+      end
+
+      # Signal 0 asks whether the process could be signalled without sending
+      # anything. EPERM means it exists but belongs to someone else.
+      #
+      # @param pid [Integer]
+      # @return [Boolean]
+      def process_alive?(pid)
+        Process.kill(0, pid)
+        true
+      rescue Errno::ESRCH
+        false
+      rescue Errno::EPERM
         true
       end
 
@@ -404,21 +459,23 @@ module Woods
         FileUtils.rm_f(graveyard)
       end
 
-      # Whether the file at +path+ is older than the stale timeout.
+      # Whether the file at +path+ is older than the stale timeout, or was
+      # abandoned by a holder on this host (see {#abandoned?}).
       #
       # @param path [String]
       # @return [Boolean]
       def stale_file?(path)
-        Time.now - File.mtime(path) > @stale_timeout
+        Time.now - File.mtime(path) > @stale_timeout || abandoned?(path)
       rescue Errno::ENOENT
         false
       end
 
-      # @return [String] Lock file content (JSON with PID, timestamp, and
-      #   an ownership token release verifies before deleting)
+      # @return [String] Lock file content (JSON with PID, host, timestamp,
+      #   and an ownership token release verifies before deleting)
       def lock_content
         @token = SecureRandom.hex(8)
-        JSON.generate(pid: Process.pid, locked_at: Time.now.iso8601, name: @name, token: @token)
+        JSON.generate(pid: Process.pid, host: Watch::Status.host_identity, locked_at: Time.now.iso8601,
+                      name: @name, token: @token)
       end
     end
   end

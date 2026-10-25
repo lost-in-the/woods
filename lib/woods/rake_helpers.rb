@@ -109,11 +109,27 @@ module Woods
     def woods_acquire_within(lock, wait)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
       acquired = lock.acquire
+      warn woods_lock_wait_message(lock, wait) if !acquired && wait.positive?
       until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         sleep 0.25
         acquired = lock.acquire
       end
       acquired
+    end
+
+    # Said once, when a writer starts waiting: a wait of up to ten minutes
+    # with no output reads as a hang.
+    #
+    # @param lock [Coordination::PipelineLock]
+    # @param wait [Numeric] seconds the writer will wait
+    # @return [String]
+    def woods_lock_wait_message(lock, wait)
+      holder = lock.holder || {}
+      held_by = holder['pid'] ? "pid #{holder['pid']}" : 'another writer'
+      held_by += " on #{holder['host']}" if holder['host']
+      held_by += " since #{holder['locked_at']}" if holder['locked_at']
+      "Waiting up to #{format('%g', wait.round(1))}s for the extraction lock held by #{held_by} " \
+        '(set WOODS_LOCK_WAIT to change the wait).'
     end
 
     def woods_abort_on_lock_timeout(wait, raise_error: false)
