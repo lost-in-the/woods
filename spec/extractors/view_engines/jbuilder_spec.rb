@@ -53,6 +53,27 @@ RSpec.describe Woods::Extractors::ViewEngines::Jbuilder do
       expect(engine.scan_partials(source)).to eq(['api/widgets/widget'])
     end
 
+    it 'extracts the partial: option of a call whose arguments open on the next line' do
+      source = <<~RUBY
+        json.array!(
+          @posts,
+          partial: 'posts/post'
+        )
+      RUBY
+      expect(engine.scan_partials(source)).to eq(['posts/post'])
+    end
+
+    it 'extracts the partial: option of a parenthesized call with the partial: option after other options' do
+      source = <<~RUBY
+        json.shipments(
+          @ledger.shipments,
+          as: :shipment,
+          partial: 'api/shipments/shipment'
+        )
+      RUBY
+      expect(engine.scan_partials(source)).to eq(['api/shipments/shipment'])
+    end
+
     it 'extracts the partial: option of a named attribute continued over lines' do
       source = <<~RUBY
         json.shipments @ledger.shipments,
