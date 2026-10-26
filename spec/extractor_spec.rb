@@ -3497,8 +3497,8 @@ RSpec.describe Woods::Extractor do
 
       extractor.send(:resolve_dependents)
 
-      expect(view.dependents).to eq([{ type: :model, identifier: 'Report' }])
-      expect(factory.dependents).to eq([{ type: :model, identifier: 'Report' }])
+      expect(view.dependents).to eq([{ type: :model, identifier: 'Report', via: :code_reference }])
+      expect(factory.dependents).to eq([{ type: :model, identifier: 'Report', via: :code_reference }])
     end
 
     it 'lists a dependent once when two edges of one via name the same target under two types' do
@@ -3511,7 +3511,61 @@ RSpec.describe Woods::Extractor do
 
       extractor.send(:resolve_dependents)
 
-      expect(target.dependents).to eq([{ type: :controller, identifier: 'ShipmentsController' }])
+      expect(target.dependents).to eq([{ type: :controller, identifier: 'ShipmentsController', via: :code_reference }])
+    end
+  end
+
+  describe 'dependents carry the edge kind' do
+    it 'lists one caller once per via when it reaches a target through two edge kinds' do
+      target = Woods::ExtractedUnit.new(type: :model, identifier: 'Order', file_path: nil)
+      caller_unit = Woods::ExtractedUnit.new(type: :graphql_type, identifier: 'Types::OrderType', file_path: nil)
+      caller_unit.dependencies = [{ type: :model, target: 'Order', via: :type_reference },
+                                  { type: :model, target: 'Order', via: :code_reference }]
+
+      extractor.instance_variable_set(:@results, { models: [target], graphql_types: [caller_unit] })
+      extractor.send(:resolve_dependents)
+
+      expect(target.to_h[:dependents]).to eq(
+        [{ type: :graphql_type, identifier: 'Types::OrderType', via: :code_reference },
+         { type: :graphql_type, identifier: 'Types::OrderType', via: :type_reference }]
+      )
+    end
+  end
+
+  describe 'deterministic per-type _index.json' do
+    def build_unit(identifier)
+      Woods::ExtractedUnit.new(type: :job, identifier: identifier, file_path: "app/jobs/#{identifier.downcase}.rb")
+    end
+
+    def written_index(units)
+      extractor.send(:begin_payload!)
+      units.each { |unit| extractor.dependency_graph.register(unit) }
+      FileUtils.mkdir_p(extractor.send(:payload_dir).join('job').to_s)
+      extractor.instance_variable_set(:@results, { job: units })
+      extractor.send(:write_results)
+      File.read(extractor.send(:payload_dir).join('job', '_index.json'))
+    end
+
+    let(:identifiers) { %w[ZetaJob Admin::SyncJob AlphaJob Mailer::Preview::DigestJob Admin::PruneJob MidJob] }
+
+    it 'writes identical bytes whatever order the units were discovered in' do
+      orders = Array.new(4) { |seed| identifiers.shuffle(random: Random.new(seed)) }.push(identifiers.reverse)
+      bytes = orders.map do |order|
+        index = written_index(order.map { |identifier| build_unit(identifier) })
+        FileUtils.rm_rf(extractor.send(:payload_dir).join('job').to_s)
+        index
+      end
+
+      expect(bytes.uniq.size).to eq(1)
+      expect(JSON.parse(bytes.first).map { |entry| entry['identifier'] }).to eq(identifiers.sort)
+    end
+
+    it 'matches the index an incremental run regenerates from the unit files' do
+      full = written_index(identifiers.shuffle(random: Random.new(7)).map { |identifier| build_unit(identifier) })
+      extractor.send(:regenerate_type_index, :job)
+      regenerated = File.read(extractor.send(:payload_dir).join('job', '_index.json'))
+
+      expect(regenerated).to eq(full)
     end
   end
 

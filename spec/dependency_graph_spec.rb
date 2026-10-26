@@ -68,7 +68,7 @@ RSpec.describe Woods::DependencyGraph do
       restored.remove('First', type: :service)
 
       expect(restored.dependents_of('http_api', via: :code_reference)).to eq(['First'])
-      expect(restored.dependents_detail('http_api')).to eq([{ type: :job, identifier: 'First' }])
+      expect(restored.dependents_detail('http_api')).to eq([{ type: :job, identifier: 'First', via: :code_reference }])
       restored.remove('First', type: :job)
       expect(restored.to_h[:reverse]).to be_empty
       expect(restored.dependents_of('http_api', via: :code_reference)).to be_empty
@@ -945,7 +945,7 @@ RSpec.describe Woods::DependencyGraph do
         make_unit(type: :service, identifier: 'Signup', dependencies: [{ target: 'User', via: :code_reference }])
       )
 
-      expect(graph.dependents_detail('User')).to eq([{ type: :service, identifier: 'Signup' }])
+      expect(graph.dependents_detail('User')).to eq([{ type: :service, identifier: 'Signup', via: :code_reference }])
     end
 
     it 'preserves multiplicity when one unit references a target twice' do
@@ -974,9 +974,11 @@ RSpec.describe Woods::DependencyGraph do
       forward = described_class.new.tap { |built| units.each { |unit| built.register(unit) } }
       backward = described_class.new.tap { |built| units.reverse_each { |unit| built.register(unit) } }
 
-      expect(forward.dependents_detail('Ledger')).to eq([{ type: :job, identifier: 'Audit' },
-                                                         { type: :service, identifier: 'Shipment' },
-                                                         { type: :model, identifier: 'Widget' }])
+      expect(forward.dependents_detail('Ledger')).to eq(
+        [{ type: :job, identifier: 'Audit', via: :code_reference },
+         { type: :service, identifier: 'Shipment', via: :code_reference },
+         { type: :model, identifier: 'Widget', via: :belongs_to }]
+      )
       expect(backward.dependents_detail('Ledger')).to eq(forward.dependents_detail('Ledger'))
       expect(JSON.generate(backward.to_h)).to eq(JSON.generate(forward.to_h))
     end

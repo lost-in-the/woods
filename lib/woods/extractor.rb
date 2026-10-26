@@ -1677,7 +1677,8 @@ module Woods
               target_unit.dependents ||= []
               target_unit.dependents << {
                 type: unit.type,
-                identifier: unit.identifier
+                identifier: unit.identifier,
+                via: dep[:via]&.to_sym
               }
             end
           end
@@ -2800,10 +2801,14 @@ module Woods
     # emit the index from the authoritative in-memory `@results` rather than
     # re-deriving it from disk.
     #
+    # Entries are sorted by identifier so the file does not depend on the
+    # order discovery enumerated units in; {#regenerate_type_index} sorts the
+    # same way.
+    #
     # @param units [Array<ExtractedUnit>]
     # @return [Array<Hash>]
     def type_index_entries(units)
-      units.map do |u|
+      units.sort_by(&:identifier).map do |u|
         {
           identifier: u.identifier,
           type: u.type.to_s,
@@ -3165,7 +3170,7 @@ module Woods
       @persisted_index_stats = nil
 
       # Scan existing unit JSON files (exclude _index.json)
-      index = type_dir.children.sort.filter_map do |file|
+      entries = type_dir.children.sort.filter_map do |file|
         next unless file.extname == '.json' && file.basename.to_s != '_index.json'
 
         data = JSON.parse(AtomicFile.read(file))
@@ -3181,6 +3186,7 @@ module Woods
           chunk_count: (data['chunks'] || []).size
         }
       end
+      index = entries.sort_by { |entry| entry[:identifier].to_s }
 
       AtomicFile.write(
         type_dir.join('_index.json'),

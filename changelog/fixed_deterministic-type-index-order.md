@@ -1,0 +1,1 @@
+- Each per-type `_index.json` is now sorted by identifier, in full and incremental runs alike. Previously its order followed discovery order, so the tail of `jobs/_index.json` differed between two identical full extractions.
