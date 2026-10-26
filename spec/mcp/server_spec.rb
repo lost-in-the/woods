@@ -593,6 +593,139 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  describe 'tool: domain_clusters paging' do
+    let(:paged_dir) { Dir.mktmpdir('woods-cluster-paging') }
+    let(:paged_server) { described_class.build(index_dir: paged_dir, response_format: :json) }
+    let(:markdown_server) { described_class.build(index_dir: paged_dir, response_format: :markdown) }
+    let(:plain_server) { described_class.build(index_dir: paged_dir, response_format: :plain) }
+
+    before do
+      File.write(File.join(paged_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+      nodes = {}
+      # One large cluster of 60 members, then 29 disconnected clusters of 3 to 4 members.
+      60.times { |i| nodes["Big::Unit#{i.to_s.rjust(2, '0')}"] = { 'type' => i.even? ? 'model' : 'service' } }
+      29.times do |c|
+        (c.even? ? 3 : 4).times { |i| nodes["Dom#{c.to_s.rjust(2, '0')}::Unit#{i}"] = { 'type' => 'model' } }
+      end
+      File.write(File.join(paged_dir, 'dependency_graph.json'),
+                 JSON.pretty_generate(nodes: nodes, edges: {}, reverse: {}))
+    end
+
+    after { FileUtils.remove_entry(paged_dir) if File.directory?(paged_dir) }
+
+    def cluster_names(data)
+      data['clusters'].map { |c| c['name'] }
+    end
+
+    it 'returns 20 clusters by default, largest first, with the full total and a has_more flag' do
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1))
+
+      expect(data['clusters'].size).to eq(20)
+      expect(data['total']).to eq(30)
+      expect(data['clusters'].first['name']).to eq('Big')
+      expect(data['completeness']).to include('has_more' => true, 'total_matches' => 30, 'status' => 'partial')
+    end
+
+    it 'pages through every cluster exactly once and reports the last page as complete' do
+      first = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 12))
+      second = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 12, offset: 12))
+      third = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 12, offset: 24))
+      beyond = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 12, offset: 99))
+
+      all = cluster_names(first) + cluster_names(second) + cluster_names(third)
+      expect(all.size).to eq(30)
+      expect(all.uniq.size).to eq(30)
+      expect(third['clusters'].size).to eq(6)
+      expect(third['completeness']).to include('has_more' => false, 'status' => 'complete')
+      expect(beyond['clusters']).to eq([])
+      expect(beyond['total']).to eq(30)
+      expect(beyond['completeness']).to include('has_more' => false)
+    end
+
+    it 'keeps a stable order, breaking size ties by name' do
+      first = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 30))
+      again = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 30))
+
+      expect(cluster_names(first)).to eq(cluster_names(again))
+      four_member = first['clusters'].select { |c| c['member_count'] == 4 }.map { |c| c['name'] }
+      expect(four_member).to eq(four_member.sort)
+    end
+
+    it 'caps members at 50 per cluster and reports how many were left out' do
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 1))
+      big = data['clusters'].first
+
+      expect(big['member_count']).to eq(60)
+      expect(big['members'].size).to eq(50)
+      expect(big['members']).to eq(big['members'].sort)
+      expect(big['members_omitted']).to eq(10)
+    end
+
+    it 'does not mark clusters within the member cap' do
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 30))
+      small = data['clusters'].last
+
+      expect(small['members'].size).to eq(small['member_count'])
+      expect(small).not_to have_key('members_omitted')
+    end
+
+    it 'makes every member reachable with member_limit' do
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 1, member_limit: 100))
+
+      expect(data['clusters'].first['members'].size).to eq(60)
+      expect(data['clusters'].first).not_to have_key('members_omitted')
+    end
+
+    it 'filters by types before paging' do
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1, types: ['service']))
+
+      expect(cluster_names(data)).to eq(['Big'])
+      expect(data['total']).to eq(1)
+      expect(data['clusters'].first['member_count']).to eq(30)
+      expect(data['completeness']).to include('has_more' => false)
+    end
+
+    it 'reads default limits from the environment' do
+      allow(ENV).to receive(:fetch).and_call_original
+      allow(ENV).to receive(:fetch).with('WOODS_DOMAIN_CLUSTERS_LIMIT', anything).and_return('5')
+      allow(ENV).to receive(:fetch).with('WOODS_DOMAIN_CLUSTERS_MEMBER_LIMIT', anything).and_return('7')
+
+      data = parse_response(call_tool(paged_server, 'domain_clusters', min_size: 1))
+
+      expect(data['clusters'].size).to eq(5)
+      expect(data['clusters'].first['members'].size).to eq(7)
+      expect(data['clusters'].first['members_omitted']).to eq(53)
+    end
+
+    it 'computes clusters once per generation and exact parameters' do
+      allow(Woods::GraphAnalyzer).to receive(:new).and_call_original
+      3.times { |i| call_tool(paged_server, 'domain_clusters', min_size: 1, limit: 5, offset: i * 5) }
+      expect(Woods::GraphAnalyzer).to have_received(:new).once
+
+      call_tool(paged_server, 'domain_clusters', min_size: 2)
+      call_tool(paged_server, 'domain_clusters', min_size: 1, types: ['model'])
+      expect(Woods::GraphAnalyzer).to have_received(:new).exactly(3).times
+    end
+
+    it 'renders paging and omitted members in Markdown' do
+      text = response_text(call_tool(markdown_server, 'domain_clusters', min_size: 1, limit: 2))
+
+      expect(text).to include('Showing 2 of 30 domains')
+      expect(text).to include('### Big (60 units)')
+      expect(text).to include('10 more members not shown')
+      expect(text).to include('More matches: yes')
+    end
+
+    it 'renders paging and omitted members in plain text' do
+      text = response_text(call_tool(plain_server, 'domain_clusters', min_size: 1, limit: 2))
+
+      expect(text).to include('Showing 2 of 30 domains')
+      expect(text).to include('Big (60 units)')
+      expect(text).to include('10 more members not shown')
+      expect(text).to include('More matches: yes')
+    end
+  end
+
   describe 'tool: pagerank' do
     it 'returns ranked nodes with scores' do
       response = call_tool(server, 'pagerank')

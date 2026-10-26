@@ -79,6 +79,8 @@ module Woods
       # `via`; `limit` and `offset` only page what those leave (B-183).
       DEFAULT_TRAVERSAL_LIMIT = 50
       DEFAULT_GRAPH_ANALYSIS_LIMIT = 20
+      DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
+      DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
       class << self
         # Build a configured MCP::Server with all tools and resources.
@@ -763,10 +765,17 @@ module Woods
         def define_domain_clusters_tool(server, reader, respond, renderer)
           coerce = method(:coerce_array)
           coerce_int = method(:coerce_integer)
+          cap_members = method(:cap_cluster_members)
+          default_limit = method(:domain_clusters_default_limit)
+          default_member_limit = method(:domain_clusters_default_member_limit)
           server.define_tool(
             name: 'domain_clusters',
             description: 'Group code units into semantic domains by namespace and graph connectivity. ' \
                          'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \
+                         'Clusters come largest first and are paged: `limit` clusters per call ' \
+                         "(default: #{domain_clusters_default_limit}), `offset` to continue, and each cluster lists at most " \
+                         "`member_limit` members (default: #{domain_clusters_default_member_limit}) with `members_omitted` " \
+                         'counting the rest. Check `completeness.has_more` before treating the answer as every domain. ' \
                          'Useful for understanding architectural domains and blast radius.',
             input_schema: {
               properties: {
@@ -777,20 +786,61 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Filter to these unit types (default: all). Example: ["model", "service", "job"]'
+                },
+                limit: {
+                  type: 'integer',
+                  description: "Maximum clusters to return (default: #{domain_clusters_default_limit})"
+                },
+                offset: { type: 'integer', description: 'Skip this many clusters (default: 0)' },
+                member_limit: {
+                  type: 'integer',
+                  description: "Maximum members listed per cluster (default: #{domain_clusters_default_member_limit}). " \
+                               'Raise it to read the rest of a large cluster.'
                 }
               }
             }
-          ) do |server_context:, min_size: nil, types: nil|
+          ) do |server_context:, min_size: nil, types: nil, limit: nil, offset: nil, member_limit: nil|
             min_size = coerce_int.call(min_size) || 3
             types = coerce.call(types)
+            limit = coerce_int.call(limit) || default_limit.call
+            offset = coerce_int.call(offset) || 0
+            member_limit = coerce_int.call(member_limit) || default_member_limit.call
 
-            graph = reader.dependency_graph
-            analyzer = Woods::GraphAnalyzer.new(graph)
+            all = reader.domain_clusters(min_size: min_size, types: types)
+            page = all.drop(offset).first(limit).map do |cluster|
+              cap_members.call(cluster, member_limit)
+            end
 
-            clusters = analyzer.domain_clusters(min_size: min_size, types: types)
-
-            respond.call(renderer.render(:domain_clusters, { clusters: clusters, total: clusters.size }))
+            respond.call(
+              renderer.render(
+                :domain_clusters,
+                { clusters: page, total: all.size, offset: offset, limit: limit,
+                  completeness: SearchResults.page(total: all.size, offset: offset, returned: page.size) }
+              )
+            )
           end
+        end
+
+        def domain_clusters_default_limit
+          positive_env_integer('WOODS_DOMAIN_CLUSTERS_LIMIT', DEFAULT_DOMAIN_CLUSTERS_LIMIT)
+        end
+
+        def domain_clusters_default_member_limit
+          positive_env_integer('WOODS_DOMAIN_CLUSTERS_MEMBER_LIMIT', DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT)
+        end
+
+        def positive_env_integer(name, default)
+          value = ENV.fetch(name, '').to_s.strip.to_i
+          value.positive? ? value : default
+        end
+
+        # A copy of the cluster listing at most +member_limit+ members. The
+        # count of the rest rides in +members_omitted+, absent when none are cut.
+        def cap_cluster_members(cluster, member_limit)
+          members = cluster[:members]
+          return cluster if members.size <= member_limit
+
+          cluster.merge(members: members.first(member_limit), members_omitted: members.size - member_limit)
         end
 
         def define_pagerank_tool(server, reader, respond, renderer)

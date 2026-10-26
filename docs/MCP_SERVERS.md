@@ -180,7 +180,7 @@ The Index Server defines 31 schemas across core and conditional capabilities. Th
 | `framework` | Inspect relevant Rails or installed gem source |
 | `recent_changes` | Find indexed units changed recently |
 | `graph_analysis` | Structural reports: orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, undeclared package edges |
-| `domain_clusters` | Discover connected domains in the graph |
+| `domain_clusters` | Discover connected domains in the graph, paged with `limit`, `offset`, and `member_limit` |
 | `pagerank` | Find structurally central units |
 | `reload` | Reload a newly published generation without restarting the client |
 | `codebase_retrieve` | Natural-language retrieval with embeddings or explicit lexical mode over extraction output |
@@ -258,6 +258,21 @@ pages. For example, offset 20 with limit 5 over 25 published orphans shows
 page does not mean the section has no findings. These totals describe the
 published report arrays, which can themselves be bounded during extraction;
 they do not establish complete source-reference coverage.
+
+### Domain cluster pages
+
+`domain_clusters` returns clusters largest first, ties broken by name, so the
+order is stable for a given generation. `limit` (default 20) and `offset` page
+the clusters. `member_limit` (default 50) caps the members listed per cluster;
+a cluster cut by it carries `members_omitted`, and `member_count` stays the true
+size. Raise `member_limit` to read the rest of a large cluster.
+
+`total` is the number of clusters after `types` and `min_size`. The shared
+`completeness` object reports `total_matches` and `has_more`; the last page
+reports `has_more: false`. `WOODS_DOMAIN_CLUSTERS_LIMIT` and
+`WOODS_DOMAIN_CLUSTERS_MEMBER_LIMIT` change the defaults. The server computes
+clusters once per published generation and exact `min_size` and `types`, so
+paging does not recompute them.
 
 ### Search completeness
 

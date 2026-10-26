@@ -225,6 +225,7 @@ module Woods
           lines << '## Domain Clusters'
           lines << ''
           lines << "#{total} domains detected."
+          lines << domain_page_line(data, clusters.size, total)
           lines << ''
 
           clusters.each do |cluster|
@@ -247,13 +248,13 @@ module Woods
             entry_points = cluster[:entry_points] || cluster['entry_points'] || []
             lines << "**Entry points:** #{entry_points.first(10).join(', ')}" if entry_points.any?
 
-            # Members (show first 15)
             members = cluster[:members] || cluster['members'] || []
             if members.any?
               lines << ''
               lines << '**Members:**'
-              members.first(15).each { |m| lines << "- #{m}" }
-              lines << "- _... and #{members.size - 15} more_" if members.size > 15
+              members.each { |m| lines << "- #{m}" }
+              omitted = cluster[:members_omitted] || cluster['members_omitted'] || 0
+              lines << "- _... #{omitted} more members not shown_" if omitted.positive?
             end
 
             # Boundary edges (show first 10)
@@ -272,6 +273,7 @@ module Woods
             lines << ''
           end
 
+          lines.concat(search_completeness_lines(data))
           lines.join("\n").rstrip
         end
 
