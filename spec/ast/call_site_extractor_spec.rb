@@ -9,7 +9,7 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
 
   let(:parser) { Woods::Ast::Parser.new }
 
-  describe '#extract' do
+  shared_examples 'call extraction' do
     it 'extracts basic method calls' do
       source = <<~RUBY
         def create
@@ -144,6 +144,31 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
         line: an_instance_of(Integer),
         block: a_value
       )
+    end
+
+    it 'records nested receiver and argument calls exactly once' do
+      root = parser.parse('Client.build(Options.prepare).execute(Payload.encode(Value.fetch))')
+
+      calls = extractor.extract(root)
+
+      expect(calls.map { |call| call[:method_name] }).to contain_exactly(
+        'build', 'prepare', 'execute', 'encode', 'fetch'
+      )
+      expect(calls.find { |call| call[:method_name] == 'execute' }[:receiver]).to eq('Client.build')
+    end
+  end
+
+  describe '#extract' do
+    context 'with Prism' do
+      before { allow(parser).to receive(:prism_available?).and_return(true) }
+
+      include_examples 'call extraction'
+    end
+
+    context 'with the alternate parser adapter' do
+      before { allow(parser).to receive(:prism_available?).and_return(false) }
+
+      include_examples 'call extraction'
     end
   end
 end

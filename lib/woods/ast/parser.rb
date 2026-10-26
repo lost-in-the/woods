@@ -590,9 +590,13 @@ module Woods
           receiver_text = parser_node.children[0] ? extract_parser_receiver_text(parser_node.children[0], source) : nil
           method_name = parser_node.children[1].to_s
           args = parser_node.children[2..].compact.map { |a| extract_parser_source_text(a, source) }
+          children = [parser_node.children[0], *parser_node.children[2..]].filter_map do |child|
+            converted = convert_parser_node(child, source)
+            converted if converted.is_a?(Node)
+          end
           Node.new(
             type: :send,
-            children: [],
+            children: children,
             line: parser_node.loc.line,
             end_line: parser_node.loc.expression&.last_line,
             message_line: (parser_node.loc.selector || parser_node.loc.dot)&.line,
