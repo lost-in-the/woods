@@ -176,7 +176,12 @@ RSpec.describe 'Index MCP tool contracts' do
                              'sections' => array_contract(1_000, 10_000)
                            }),
       'notion_sync' => contract(:notion, {}, exact_data({
-                                                          'synced' => true, 'data_models' => 2, 'columns' => 4, 'errors' => []
+                                                          'synced' => true, 'data_models' => 2, 'columns' => 4,
+                                                          'completeness' => {
+                                                            'status' => 'complete', 'reason' => 'exhausted',
+                                                            'has_more' => false, 'total_errors' => 0
+                                                          },
+                                                          'errors' => []
                                                         })),
       'pagerank' => contract(:always, {}, exact_data({
                                                        'total_nodes' => 3,
@@ -1549,5 +1554,62 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(result.dig('structuredContent', 'text')).to eq(result.dig('content', 0, 'text'))
     expect(result.dig('structuredContent', 'data')).to be_a(Hash)
     expect { schema.validate_result(result.fetch('structuredContent')) }.not_to raise_error
+  end
+
+  describe 'notion_sync outcome reporting' do
+    let(:notion_data) { call_tool(full_server, 'notion_sync', {}).dig('result', 'structuredContent', 'data') }
+    let(:sync_stats) { { data_models: 2, columns: 4, skipped: 0, errors: [] } }
+    let(:notion_exporter) { double(sync_all: sync_stats) }
+
+    it 'reports a clean run as complete and exhausted' do
+      expect(notion_data).to include('synced' => true, 'errors' => [])
+      expect(notion_data['completeness']).to eq(
+        'status' => 'complete', 'reason' => 'exhausted', 'has_more' => false, 'total_errors' => 0
+      )
+      expect(notion_data).not_to include('partial', 'hint')
+    end
+
+    context 'when some pages synced and some failed' do
+      let(:sync_stats) { { data_models: 1, columns: 0, skipped: 0, errors: ['Post: boom'], error_count: 1 } }
+
+      it 'reports partial with the error total, the partial flag and a hint' do
+        expect(notion_data).to include('synced' => true, 'partial' => true, 'errors' => ['Post: boom'])
+        expect(notion_data['hint']).to be_a(String)
+        expect(notion_data['completeness']).to eq(
+          'status' => 'partial', 'reason' => 'page_errors', 'has_more' => false, 'total_errors' => 1
+        )
+      end
+    end
+
+    context 'when every page failed' do
+      let(:sync_stats) { { data_models: 0, columns: 0, skipped: 0, errors: %w[Post-401 User-401], error_count: 2 } }
+
+      it 'reports failed with reason nothing_synced and does not claim synced' do
+        expect(notion_data).to include('synced' => false, 'partial' => true)
+        expect(notion_data['hint']).to be_a(String)
+        expect(notion_data['completeness']).to eq(
+          'status' => 'failed', 'reason' => 'nothing_synced', 'has_more' => false, 'total_errors' => 2
+        )
+      end
+    end
+
+    context 'when only unchanged pages were skipped alongside errors' do
+      let(:sync_stats) { { data_models: 0, columns: 0, skipped: 3, errors: ['Post: boom'], error_count: 1 } }
+
+      it 'reports page_errors because the skipped pages are already in Notion' do
+        expect(notion_data).to include('synced' => true)
+        expect(notion_data['completeness']).to include('reason' => 'page_errors')
+      end
+    end
+
+    context 'when the exporter reports more than ten errors' do
+      let(:errors) { Array.new(101) { |i| "Unit#{i}: boom" } }
+      let(:sync_stats) { { data_models: 1, columns: 0, skipped: 0, errors: errors, error_count: 150 } }
+
+      it 'keeps the total, caps the list at ten and flags has_more' do
+        expect(notion_data['errors']).to eq(errors.first(10))
+        expect(notion_data['completeness']).to include('total_errors' => 150, 'has_more' => true)
+      end
+    end
   end
 end

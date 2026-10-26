@@ -2148,12 +2148,25 @@ module Woods
             exporter = Woods::Notion::Exporter.new(index_dir: index_dir, reader: reader)
             stats = exporter.sync_all
 
-            respond.call(JSON.pretty_generate({
-                                                synced: true,
-                                                data_models: stats[:data_models],
-                                                columns: stats[:columns],
-                                                errors: stats[:errors].first(10)
-                                              }))
+            errors = stats[:errors]
+            listed = errors.first(10)
+            landed = stats[:data_models].to_i + stats[:columns].to_i + stats[:skipped].to_i
+            completeness = SearchResults.sync_outcome(
+              error_count: stats[:error_count] || errors.size, listed: listed.size, landed: landed
+            )
+            result = {
+              synced: completeness[:reason] != 'nothing_synced',
+              data_models: stats[:data_models],
+              columns: stats[:columns],
+              completeness: completeness,
+              errors: listed
+            }
+            if completeness[:status] != 'complete'
+              result[:partial] = true
+              result[:hint] = 'Fix the listed errors and re-run notion_sync; pages that synced are kept.'
+            end
+
+            respond.call(JSON.pretty_generate(result))
           rescue StandardError => e
             respond_err.call(
               "Notion sync failed: #{e.message}",

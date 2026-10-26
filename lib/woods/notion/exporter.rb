@@ -94,7 +94,7 @@ module Woods
       # against an unchanged index issues zero API calls (see class docs).
       #
       # @return [Hash] { data_models: Integer, columns: Integer,
-      #   skipped: Integer, errors: Array<String> }
+      #   skipped: Integer, errors: Array<String>, error_count: Integer }
       def sync_all
         with_prepared_index do
           model_stats = @database_ids[:data_models] ? sync_data_models : empty_stats
@@ -107,7 +107,8 @@ module Woods
             data_models: model_stats[:synced],
             columns: column_stats[:synced],
             skipped: model_stats[:skipped] + column_stats[:skipped],
-            errors: cap_errors(all_errors)
+            errors: cap_errors(all_errors),
+            error_count: all_errors.size
           }
         end
       end
