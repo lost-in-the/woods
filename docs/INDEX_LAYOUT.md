@@ -515,8 +515,22 @@ This protocol protects against cooperating retention only. It does not protect
 against `woods:clean`, manual deletion, index replacement, or a filesystem that
 does not coordinate `flock` across its clients. Stop writers/cleanup and read an
 immutable snapshot if that protection is unavailable. Flat indexes (including
-full-extraction fallback when a payload cannot be created) have individually
-replaced files, not multi-file atomicity; read/copy them only with writers stopped.
+the opt-in `WOODS_ALLOW_FLAT_FALLBACK=1` full-extraction fallback) have
+individually replaced files, not multi-file atomicity; read/copy them only with
+writers stopped.
+
+### Payload directory failure
+
+A full extraction that cannot create its payload directory (permissions, free
+space, a broken mount) raises `Woods::ExtractionError`. The published generation
+does not change, so readers keep serving the last good index. Earlier versions
+warned and wrote the index flat into the output root, which replaces files one
+at a time and is not atomic.
+
+Set `WOODS_ALLOW_FLAT_FALLBACK=1` to restore the flat fallback. Woods then logs
+a warning saying the publish is not atomic. Incremental runs and refreshes never
+use the fallback over a payload-born index, with or without the flag. Existing
+flat indexes stay readable.
 
 ### Persistent retention pins
 

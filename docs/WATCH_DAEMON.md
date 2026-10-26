@@ -809,9 +809,11 @@ reader leaves no stale lease. A skipped directory can temporarily exceed
 The protocol relies on the same filesystem advisory-lock support as Woods'
 pipeline coordination.
 
-A **full** extraction (`Extractor#extract_all`) degrades to a flat publish if
-it can't open a fresh payload directory, the write set is the whole app, so a
-flat publish is still a complete index. An **incremental** run
+A **full** extraction (`Extractor#extract_all`) that can't open a fresh
+payload directory fails closed: it raises `Woods::ExtractionError` and the last
+good generation stays published. `WOODS_ALLOW_FLAT_FALLBACK=1` opts back into a
+flat publish, which is a complete index (the write set is the whole app) but not
+an atomic one. An **incremental** run
 (`extract_changed` / `refresh`) writes only the units it touched, so there is
 no complete flat index it could fall back to: over a payload-born index it
 raises `Woods::ExtractionError` instead of publishing a corrupt-looking
