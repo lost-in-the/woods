@@ -80,6 +80,7 @@ Contract records that read as maintainer reference rather than guides:
 
 - [Incremental extraction](INCREMENTAL_EXTRACTION.md): the incremental/full equivalence contract and dispatch inventory.
 - [Watch daemon](WATCH_DAEMON.md): the resident daemon's design contract (the user-facing entry point is the task table above).
+- [Extractor run state](EXTRACTOR_RUN_STATE.md): who sets and resets each `Woods::Extractor` instance variable across full, incremental and refresh runs.
 
 The release flow, the version states `main` moves through, and the tag and dispatch runbook live in [CONTRIBUTING.md](../CONTRIBUTING.md#release-flow).
 
