@@ -43,6 +43,15 @@ module Woods
         app/sidekiq
       ].freeze
 
+      # A run can hand in a {SourceReferences::MemoCollector}, so a file
+      # another extractor also reads is parsed once per run.
+      attr_writer :collector
+
+      # @return [#call] the parser for every file this extractor reads
+      def collector
+        @collector ||= SourceReferences::Collector.new
+      end
+
       def initialize
         @directories = JOB_DIRECTORIES.map { |d| Rails.root.join(d) }
                                       .select(&:directory?)
@@ -290,7 +299,7 @@ module Woods
       # @param class_name [String]
       # @return [String]
       def lexical_source(source, class_name)
-        declarations = SourceReferences::Collector.new.call(source).fetch('declarations', [])
+        declarations = collector.call(source).fetch('declarations', [])
         classes = declarations.select { |declaration| declaration['kind'] == 'class' }
         declaration = classes.find { |candidate| candidate['owner'] == class_name }
         return source unless declaration && declaration['enclosing_nesting'].intersect?(classes.map { |c| c['owner'] })

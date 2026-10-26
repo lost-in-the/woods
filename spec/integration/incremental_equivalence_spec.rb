@@ -1769,7 +1769,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         write_storage_host(include_storage: included)
         Woods::Extractor.new(output_dir: index).extract_changed([host])
         types = type_index(index)
-        expect(types.fetch(included ? 'concern' : 'lib')).to include('OwnershipStorage')
+        expect(types.fetch(included ? 'concern' : 'lib', [])).to include('OwnershipStorage')
         expect(types.fetch(included ? 'lib' : 'concern', [])).not_to include('OwnershipStorage')
         expect(differences(index, full_extraction)).to be_empty
       end
@@ -1780,7 +1780,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       summary = 'app/models/ownership_summary.rb'
       body = ->(extra) { "class OwnershipSummary < OwnershipBaseSerializer\n  def call = #{extra}\nend\n" }
       index = run_sequence([
-                             -> { load app_path(write_file(summary, body.call(1))) && summary },
+                             -> { (load app_path(write_file(summary, body.call(1)))) && summary },
                              -> { write_file(summary, body.call(2)) }
                            ])
 
@@ -1806,7 +1806,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         RUBY
       end
       index = run_sequence([
-                             -> { load app_path(write_file(path, body.call('one'))) && path },
+                             -> { (load app_path(write_file(path, body.call('one')))) && path },
                              -> { write_file(path, body.call('two')) }
                            ])
 
