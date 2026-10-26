@@ -1,1 +1,1 @@
-An invalid byte in a source file no longer disables the source line map for the whole unit. The byte affects only its own line.
+- An invalid byte in a source file no longer disables the source line map for the whole unit. The byte now affects only its own line, and the rest of the unit keeps real file line numbers.

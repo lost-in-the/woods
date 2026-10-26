@@ -171,7 +171,7 @@ RSpec.describe Woods::SourceLineMap do
 
     it 'keeps the map when one line of the file holds an invalid byte' do
       File.binwrite(path, original.sub('# frozen', "# caf\xE9 frozen").b)
-      unit.source_code = composite.sub("# frozen", "# caf\uFFFD frozen")
+      unit.source_code = composite.sub('# frozen', "# caf\uFFFD frozen")
 
       described_class.record(unit)
 
