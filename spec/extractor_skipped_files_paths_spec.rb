@@ -43,8 +43,11 @@ RSpec.describe 'Extractor skipped files report input' do
 
   it 'builds the full run report from the graph paths, which include secondary contributor files' do
     built = nil
-    skipped = instance_double(Woods::SkippedFiles, build: { 'total' => 0, 'counts' => {}, 'files' => [] })
-    allow(skipped).to receive(:build) { |paths| built = paths.to_a; { 'total' => 0, 'counts' => {}, 'files' => [] } }
+    skipped = instance_double(Woods::SkippedFiles)
+    allow(skipped).to receive(:build) do |paths|
+      built = paths.to_a
+      { 'total' => 0, 'counts' => {}, 'files' => [] }
+    end
     allow(Woods::SkippedFiles).to receive(:new).and_return(skipped)
     allow(Woods::SkippedFiles).to receive(:write)
 
