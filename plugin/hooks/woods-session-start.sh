@@ -100,12 +100,14 @@ rake="${WOODS_HOOK_RAKE:-bundle exec rake}"
 runner=$!
 ( sleep 10; kill -TERM -- "-$runner" 2>/dev/null; sleep 1; kill -KILL -- "-$runner" 2>/dev/null ) >/dev/null 2>&1 &
 timer=$!
+# Not a tracked job: bash prints "Terminated" for a tracked job it reaps
+# between commands, which would reach the hook's stderr.
+disown "$timer" 2>/dev/null || true
 wait "$runner" 2>/dev/null
 result=$?
 kill -KILL -- "-$runner" 2>/dev/null || true
 runner=""
 kill -TERM -- "-$timer" 2>/dev/null || true
-wait "$timer" 2>/dev/null || true
 timer=""
 set +m
 if [ "$result" -ne 0 ]; then
