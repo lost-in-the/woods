@@ -21,6 +21,7 @@ require_relative 'parallel_rspec'
 
 ROOT = ParallelRspec::ROOT
 REPORT_DIR = File.expand_path(ENV.fetch('WOODS_PARALLEL_REPORT_DIR', File.join(ROOT, 'tmp', 'parallel')))
+COVERAGE_DIR = File.expand_path(ENV.fetch('WOODS_COVERAGE_DIR', File.join(ROOT, 'coverage')))
 
 def update_timings(report_path)
   timings = ParallelRspec.timings_from(report_path)
@@ -101,10 +102,10 @@ def collate_coverage
   code = <<~RUBY
     require 'simplecov'
     require 'simplecov_profile'
-    SimpleCov.collate(Dir['coverage/.resultset.json'], &SimpleCovProfile::CONFIG)
+    SimpleCov.collate(Dir[File.join(ARGV.fetch(0), '.resultset.json')], &SimpleCovProfile::CONFIG)
   RUBY
-  env = { 'TEST_ENV_NUMBER' => nil }
-  system(env, RbConfig.ruby, '-I', File.join(ROOT, 'spec'), '-e', code, chdir: ROOT)
+  env = { 'TEST_ENV_NUMBER' => nil, 'WOODS_COVERAGE_DIR' => COVERAGE_DIR }
+  system(env, RbConfig.ruby, '-I', File.join(ROOT, 'spec'), '-e', code, COVERAGE_DIR, chdir: ROOT)
 end
 
 if ARGV.first == '--update-timings'

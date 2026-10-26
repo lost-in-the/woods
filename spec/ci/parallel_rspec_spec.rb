@@ -97,3 +97,36 @@ RSpec.describe ParallelRspec do
     end
   end
 end
+
+RSpec.describe 'script/parallel-rspec coverage collation' do
+  let(:script) { File.expand_path('../../script/parallel-rspec', __dir__) }
+
+  def run_covered(dir, ci_value:)
+    %w[one_spec.rb two_spec.rb].each do |name|
+      File.write(File.join(dir, name), "require 'spec_helper'\nRSpec.describe('#{name}') { it('runs') {} }\n")
+    end
+    env = { 'WOODS_PARALLEL_PROCESSES' => '2', 'WOODS_PARALLEL_REPORT_DIR' => File.join(dir, 'report'),
+            'WOODS_COVERAGE_DIR' => File.join(dir, 'coverage'), 'COVERAGE' => '1', 'CI' => ci_value }
+    Open3.capture2e(env, RbConfig.ruby, script, File.join(dir, 'one_spec.rb'), File.join(dir, 'two_spec.rb'))
+  end
+
+  it 'merges one resultset per process into a single report' do
+    Dir.mktmpdir do |dir|
+      output, status = run_covered(dir, ci_value: nil)
+
+      expect(status).to be_success, output
+      resultset = JSON.parse(File.read(File.join(dir, 'coverage', '.resultset.json')))
+      expect(resultset.keys.join(' ')).to include('rspec-1').and include('rspec-2')
+      expect(File).to exist(File.join(dir, 'coverage', 'index.html'))
+    end
+  end
+
+  it 'applies the coverage floor once, after merging, instead of once per process' do
+    Dir.mktmpdir do |dir|
+      output, status = run_covered(dir, ci_value: 'true')
+
+      expect(status).not_to be_success
+      expect(output.scan('is below the expected minimum coverage').size).to eq(1)
+    end
+  end
+end
