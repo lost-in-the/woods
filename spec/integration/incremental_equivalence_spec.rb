@@ -2648,13 +2648,36 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .to eq(%w[ledger_books/_account_head.html.erb posts/_account_head.html.erb])
     end
 
-    # The controller stays loaded for the rest of the process, so its file
-    # joins the pristine tree and the runtime keeps agreeing with the tree.
-    after do
-      controller = app_path('app/controllers/ledger_books_controller.rb')
-      next unless File.exist?(controller)
+    it 'follows a view directory gaining its mailer' do
+      write_file('app/views/ledger_notice_mailer/statement.html.erb', "<p>statement</p>\n")
 
-      FileUtils.cp(controller, File.join(@pristine_root, 'app/controllers/ledger_books_controller.rb'))
+      index = run_sequence([
+                             lambda {
+                               write_file('app/mailers/ledger_notice_mailer.rb', <<~RUBY)
+                                 class LedgerNoticeMailer < ActionMailer::Base
+                                   def statement; end
+                                 end
+                               RUBY
+                               load app_path('app/mailers/ledger_notice_mailer.rb')
+                               'app/mailers/ledger_notice_mailer.rb'
+                             }
+                           ])
+
+      identifier = 'ledger_notice_mailer/statement.html.erb'
+      template = unit_snapshot(index).values.find { |unit| unit['identifier'] == identifier }
+      expect(template['dependencies']).to include(a_hash_including('target' => 'LedgerNoticeMailer',
+                                                                   'via' => 'view_render'))
+    end
+
+    # The controller and mailer stay loaded for the rest of the process, so
+    # their files join the pristine tree and the runtime keeps agreeing with it.
+    after do
+      %w[app/controllers/ledger_books_controller.rb app/mailers/ledger_notice_mailer.rb].each do |relative|
+        next unless File.exist?(app_path(relative))
+
+        FileUtils.mkdir_p(File.dirname(File.join(@pristine_root, relative)))
+        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
+      end
     end
   end
 
@@ -3698,6 +3721,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       )
       expect(differences(index, full_extraction)).to be_empty
       expect(unit_of(index, 'lib', 'WidgetGenerator')).to be_nil
+    end
+
+    it 'reports the same skipped files for a library split across files, through edits' do
+      main = 'lib/ledger_split.rb'
+      secondary = 'lib/ledger_split/version.rb'
+
+      index = run_sequence([
+                             -> { write_file(main, "module LedgerSplit\n  ONE = 1\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '1'\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '2'\nend\n") }
+                           ])
+
+      expect(read_json(index, 'skipped_files.json').fetch('files').map { |entry| entry['path'] })
+        .not_to include(main, secondary)
     end
 
     describe 'route files' do
