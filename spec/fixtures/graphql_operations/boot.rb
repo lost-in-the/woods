@@ -162,11 +162,12 @@ Dir.mktmpdir('woods_graphql_operations') do |root|
   # The mutation's other dependents are the schema types that wire it
   # (`field ..., mutation:`), never another document.
   assert_fact(report, 'dependents of a mutation list the client document that calls it') do
-    dependent = ->(identifier) { { 'type' => 'graphql_operation', 'identifier' => identifier } }
+    dependent = ->(entry, identifier) { entry['type'] == 'graphql_operation' && entry['identifier'] == identifier }
     mutation_dependents = reader.find_unit('Mutations::CreateWidget')['dependents']
-    mutation_dependents.include?(dependent.call('gql:CreateWidget')) &&
-      (mutation_dependents - [dependent.call('gql:CreateWidget')]).all? { |entry| entry['type'] == 'graphql_type' } &&
-      reader.find_unit('Types::WidgetType')['dependents'].include?(dependent.call('gql:WidgetFields'))
+    mutation_dependents.any? { |entry| dependent.call(entry, 'gql:CreateWidget') } &&
+      mutation_dependents.reject { |entry| dependent.call(entry, 'gql:CreateWidget') }
+                         .all? { |entry| entry['type'] == 'graphql_type' } &&
+      reader.find_unit('Types::WidgetType')['dependents'].any? { |entry| dependent.call(entry, 'gql:WidgetFields') }
   end
 
   compare = lambda do |label|
