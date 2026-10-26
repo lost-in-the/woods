@@ -176,11 +176,22 @@ module Woods
 
         keys = connection.foreign_keys(name).map do |key|
           { from_table: key.from_table.to_s, to_table: key.to_table.to_s, column: key.column.to_s,
-            primary_key: key.primary_key&.to_s, name: key.name&.to_s }
+            primary_key: key.primary_key&.to_s, name: key.name&.to_s }.merge(referential_actions(key))
         end
         keys.sort_by { |key| [key[:column], key[:to_table], key[:name].to_s] }
       rescue NotImplementedError
         []
+      end
+
+      # Only what the adapter reports: a definition without the readers (old
+      # Rails, a limited adapter) contributes no keys, and a reader answering
+      # nil means no action was declared.
+      #
+      # @return [Hash{Symbol => String, nil}]
+      def referential_actions(key)
+        %i[on_delete on_update].each_with_object({}) do |action, facts|
+          facts[action] = key.public_send(action)&.to_s if key.respond_to?(action)
+        end
       end
 
       # @return [String, Array<String>, nil]

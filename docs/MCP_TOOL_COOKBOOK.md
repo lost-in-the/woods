@@ -567,7 +567,7 @@ Every flow continues across async hops: a `perform_later` into the job's `perfor
 | `kind` | Draws | `depth` | Budget |
 |---|---|---|---|
 | `neighbourhood` | the typed edges around the unit as a `flowchart LR`, each labelled with its mechanism (`direction`: both, dependents or dependencies; `types` and `via` filter) | graph hops, 1 to 3, default 1 | 150 units |
-| `schema` | a model's table and its associations as an `erDiagram` | association hops from the model's table, 1 to 3, default 1 | 40 tables |
+| `schema` | a model's table and its associations, or a `database_table` unit's published foreign keys (outgoing and incoming), as an `erDiagram` | association hops from the model's table, 1 to 3, default 1 | 40 tables |
 | `lifecycle` | a model event's callback chain as a `sequenceDiagram` (`event`: create, update or destroy) | 0 is the event's own chain (default); 1 and 2 follow its async hops (`perform_later`, `deliver_later`) into the jobs and mailers they reach, from flow data assembled over the published units | 150 participants and messages |
 | `impact` | the change impact report's flowchart for the unit as a planned change | reverse dependency hops of the report, 0 to 10, default 2 | the report renderer's 60 nodes and 120 edges |
 

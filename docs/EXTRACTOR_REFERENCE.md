@@ -1346,6 +1346,7 @@ namespace.
 **Key details:**
 - Identifier: `table:<name>`. With more than one connected database it is `table:<database>.<name>`
 - `metadata`: `columns` (name, type, SQL type, null, `has_default`, and `default_digest`: 16 hex characters of SHA-256 over the default and its function, `null` without one, so a moved default shows in a range report's `column_changes` while default values are still not recorded, #824), `indexes`, `foreign_keys`, `primary_key`, `database`, `model`, `models`, `model_less`
+- Each `foreign_keys` entry is `{ from_table, to_table, column, primary_key, name }` plus `on_delete` and `on_update` when the connection reports them: a lowercase string (`cascade`, `nullify`, `restrict`) or `null` when none was declared. An adapter or Rails version whose foreign key definitions lack the readers leaves both keys out; an absent key means unknown, never a default action
 - `model` is the Active Record class that owns the table, or nil. Inheritance roots own a table; subclasses share it. `model_less: true` marks a table no model owns: a legacy table, another application's table, a join or backup table
 - `schema_migrations` and `ar_internal_metadata` are skipped. Views are not tables and get no unit here
 - Edges: table → table for each foreign key (`via: :foreign_key`). Inbound: model → table (`via: :table`), migration → table (`via: :migrates`), view → table (`via: :view_source`), external consumer → table (`via: :reads_table`, `via: :writes_table`)

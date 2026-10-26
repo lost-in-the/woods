@@ -18,9 +18,9 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
     double("Index(#{name})", name: name, columns: columns, unique: unique)
   end
 
-  def foreign_key(from, to, column, name: nil, primary_key: 'id')
+  def foreign_key(from, to, column, name: nil, primary_key: 'id', **actions)
     double("ForeignKey(#{from}->#{to})", from_table: from, to_table: to, column: column, name: name,
-                                         primary_key: primary_key)
+                                         primary_key: primary_key, **actions)
   end
 
   # A pool whose connection answers schema questions from plain hashes.
@@ -164,6 +164,44 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
          { from_table: 'ledger_entries', to_table: 'widgets', column: 'widget_id', primary_key: 'id',
            name: 'fk_rails_1' }]
       )
+    end
+
+    context 'when the adapter reports referential actions' do
+      let(:schema) do
+        {
+          'widgets' => { columns: [] },
+          'ledger_entries' => {
+            columns: [],
+            foreign_keys: [foreign_key('ledger_entries', 'widgets', 'widget_id', on_delete: :cascade, on_update: nil),
+                           foreign_key('ledger_entries', 'widgets', 'other_id', on_delete: :nullify,
+                                                                                on_update: :restrict)]
+          }
+        }
+      end
+
+      it 'publishes them as strings, nil when none was declared' do
+        keys = unit('table:ledger_entries').metadata[:foreign_keys]
+
+        expect(keys.map { |key| key.slice(:column, :on_delete, :on_update) }).to eq(
+          [{ column: 'other_id', on_delete: 'nullify', on_update: 'restrict' },
+           { column: 'widget_id', on_delete: 'cascade', on_update: nil }]
+        )
+      end
+
+      it 'keeps them when the schema is replayed from a published unit' do
+        live = units
+        cache = described_class.schema_cache_from(live.map { |u| JSON.parse(JSON.generate(u.to_h)) })
+        cached = described_class.new(table_catalog: catalog_for(schema, models: { 'widgets' => ['Widget'] }),
+                                     schema_cache: cache).extract_all
+
+        expect(cached.map(&:metadata)).to eq(live.map(&:metadata))
+      end
+    end
+
+    it 'omits the actions when the adapter does not report them, never guessing a default' do
+      keys = unit('table:ledger_entries').metadata[:foreign_keys]
+
+      expect(keys.flat_map(&:keys).uniq).not_to include(:on_delete, :on_update)
     end
 
     it 'links foreign keys to live table units only, never to itself' do

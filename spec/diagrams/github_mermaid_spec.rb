@@ -82,6 +82,25 @@ RSpec.describe 'Diagram texts parse with the Mermaid GitHub renders', :github_me
     expect(failures).to be_empty, failures.join("\n")
   end
 
+  it 'parses the schema of a table with outgoing and incoming foreign keys' do
+    tables = [['users', []], ['posts', [%w[users author_id]]], ['comments', [%w[posts post_id], %w[users user_id]]]]
+    units = tables.map do |name, keys|
+      foreign_keys = keys.map { |to, column| { 'from_table' => name, 'to_table' => to, 'column' => column } }
+      { 'identifier' => "table:#{name}", 'type' => 'database_table', 'file_path' => nil, 'source_code' => '',
+        'metadata' => { 'table_name' => name, 'foreign_keys' => foreign_keys } }
+    end
+    edges = tables.flat_map { |name, keys| keys.map { |to, _| ["table:#{name}", 'foreign_key', "table:#{to}"] } }
+    Dir.mktmpdir('woods-diagrams-fk') do |root|
+      DiagramIndex.write(root, units: units, edges: edges)
+      reader = Woods::MCP::IndexReader.new(root)
+      list = %w[table:posts table:users].product((1..3).to_a).map do |id, depth|
+        ['schema', "#{id} #{depth}", Woods::Diagrams.build(reader, kind: 'schema', identifier: id, depth: depth).text]
+      end
+      results = parse_all(list)['results']
+      expect(results.values.map { |r| [r['ok'], r['detected']] }.uniq).to eq([[true, 'er']])
+    end
+  end
+
   it 'still rejects a broken text, so a pass means something' do
     results = parse_all([['x', 'broken', "sequenceDiagram\n  A->>"]])['results']
     expect(results.dig('broken', 'ok')).to be(false)
