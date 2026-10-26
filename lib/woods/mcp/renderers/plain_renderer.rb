@@ -175,6 +175,38 @@ module Woods
           lines.join("\n").rstrip
         end
 
+        def render_domain_clusters(data, **)
+          clusters = fetch_key(data, :clusters) || []
+          total = fetch_key(data, :total) || clusters.size
+          lines = ['Domain Clusters', DIVIDER, domain_page_line(data, clusters.size, total), '']
+
+          clusters.each do |cluster|
+            lines << "#{fetch_key(cluster, :name)} (#{fetch_key(cluster, :member_count, 0)} units)"
+            hub = fetch_key(cluster, :hub)
+            lines << "  hub: #{hub}" if hub
+            types = fetch_key(cluster, :types)
+            if types.is_a?(Hash) && types.any?
+              lines << "  types: #{types.sort_by { |_, n| -n }.map { |type, n| "#{n} #{type}" }.join(', ')}"
+            end
+            entry_points = fetch_key(cluster, :entry_points) || []
+            lines << "  entry points: #{entry_points.join(', ')}" if entry_points.any?
+            omitted_entries = fetch_key(cluster, :entry_points_omitted, 0)
+            lines << "  ... #{omitted_entries} more entry points not shown" if omitted_entries.positive?
+            (fetch_key(cluster, :members) || []).each { |m| lines << "  #{m}" }
+            omitted = fetch_key(cluster, :members_omitted, 0)
+            lines << "  ... #{omitted} more members not shown" if omitted.positive?
+            (fetch_key(cluster, :boundary_edges) || []).each do |edge|
+              lines << "  boundary: #{fetch_key(edge, :from)} -> #{fetch_key(edge, :to)} (#{fetch_key(edge, :via)})"
+            end
+            omitted_edges = fetch_key(cluster, :boundary_edges_omitted, 0)
+            lines << "  ... #{omitted_edges} more boundary connections not shown" if omitted_edges.positive?
+            lines << ''
+          end
+
+          lines.concat(search_completeness_lines(data))
+          lines.join("\n").rstrip
+        end
+
         def render_pagerank(data, **)
           lines = []
           lines << "PageRank Scores (ranking #{fetch_key(data, :total_nodes)} graph nodes)"

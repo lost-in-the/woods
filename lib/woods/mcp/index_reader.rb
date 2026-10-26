@@ -8,6 +8,7 @@ require 'pathname'
 require 'set'
 
 require_relative '../generation'
+require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
@@ -77,6 +78,7 @@ module Woods
         end
 
         @unit_cache = {}
+        @domain_clusters_cache = {}
         @unit_cache_signatures = {}
         @unit_cache_order = []
         @identifier_map = nil
@@ -297,6 +299,7 @@ module Woods
         end
         @identifier_map = nil
         @index_cache = {}
+        @domain_clusters_cache = {}
         @index_identifier_sets = {}
         @scope_corpus = nil
         @manifest = nil
@@ -368,6 +371,24 @@ module Woods
       def dependency_graph
         ensure_fresh!
         @dependency_graph ||= Woods::DependencyGraph.from_h(raw_graph_data)
+      end
+
+      # Domain clusters for the pinned generation, computed once per exact
+      # +min_size+ and +types+. Paging parameters are applied by the caller.
+      #
+      # @param min_size [Integer]
+      # @param types [Array<String>, nil]
+      # @return [Array<Hash>] clusters, largest first
+      def domain_clusters(min_size:, types: nil)
+        key = [generation_identity, min_size, types&.map(&:to_s)]
+        cached = @cache_mutex.synchronize { @domain_clusters_cache[key] }
+        return cached if cached
+
+        clusters = Woods::GraphAnalyzer.new(dependency_graph).domain_clusters(min_size: min_size, types: types)
+        @cache_mutex.synchronize do
+          @domain_clusters_cache.shift while @domain_clusters_cache.size >= DOMAIN_CLUSTERS_CACHE_SIZE
+          @domain_clusters_cache[key] = clusters
+        end
       end
 
       # @return [Hash] Parsed graph_analysis.json
@@ -545,6 +566,7 @@ module Woods
       # Default maximum number of unit files to load during phase-2 search.
       # Override with WOODS_SEARCH_MAX_SCAN env var.
       DEFAULT_SEARCH_MAX_SCAN = 500
+      DOMAIN_CLUSTERS_CACHE_SIZE = 8
 
       # Wall-clock budget for a single match against the user-supplied search
       # pattern (audit P5). The query is compiled as a raw Ruby regex; a
