@@ -1,0 +1,1 @@
+- Publish foreign-key referential actions on `database_table` units. Each `foreign_keys` entry carries `on_delete` and `on_update` as lowercase strings, or `null` when none was declared. An adapter whose foreign key definitions do not report them leaves the keys out rather than guessing a default.
