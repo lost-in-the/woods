@@ -23,7 +23,8 @@ RSpec.describe 'Extractor run state across reused entry points' do
 
   full_resets = shared_resets.merge(
     results: :hash, extractors: :hash, package_resolver: :scalar, incremental_extractors: :hash,
-    source_collector: :scalar, persisted_index_stats: :hash, graph_sha: :scalar, flow_failures: :array
+    source_collector: :scalar, persisted_index_stats: :hash, graph_sha: :scalar, flow_failures: :array,
+    symlinked_root: :scalar, symlinked_dirs: :hash
   ).freeze
 
   incremental_resets = shared_resets.merge(
@@ -32,7 +33,8 @@ RSpec.describe 'Extractor run state across reused entry points' do
     library_replacement_touched: :set, identity_claims: :hash, flow_scope: :set,
     previous_flow_index_entries: :hash, incremental_extractors: :hash, source_collector: :scalar,
     hybrid_discovery_keys: :set, active_record_names: :set, package_resolver: :scalar,
-    persisted_index_stats: :hash, graph_sha: :scalar, flow_failures: :array
+    persisted_index_stats: :hash, graph_sha: :scalar, flow_failures: :array,
+    symlinked_root: :scalar, symlinked_dirs: :hash
   ).freeze
 
   let(:sentinel) { '__stale_from_previous_run__' }

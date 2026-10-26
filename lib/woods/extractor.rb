@@ -528,6 +528,8 @@ module Woods
       @source_collector = nil
       @persisted_index_stats = nil
       @graph_sha = nil
+      @symlinked_root = nil
+      @symlinked_dirs = nil
       profile_phase('payload seed') { begin_payload! }
 
       # Eager load once — all extractors need loaded classes for introspection.
@@ -982,6 +984,8 @@ module Woods
       @package_resolver = nil
       @persisted_index_stats = nil
       @graph_sha = nil
+      @symlinked_root = nil
+      @symlinked_dirs = nil
     end
 
     # Write the graph and the derived artifacts after an incremental run.

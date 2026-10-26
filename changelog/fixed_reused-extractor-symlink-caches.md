@@ -1,0 +1,1 @@
+- A reused Extractor no longer keeps the previous run's answer to "is this directory a symlink". A directory that became a symlink between runs now resolves to both spellings of its paths, as a fresh instance does.
