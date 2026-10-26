@@ -169,6 +169,15 @@ RSpec.describe Woods::SourceLineMap do
       expect(unit.metadata).not_to have_key(:source_line_map)
     end
 
+    it 'keeps the map when one line of the file holds an invalid byte' do
+      File.binwrite(path, original.sub('# frozen', "# caf\xE9 frozen").b)
+      unit.source_code = composite.sub("# frozen", "# caf\uFFFD frozen")
+
+      described_class.record(unit)
+
+      expect(unit.metadata[:source_line_map]).not_to be_nil
+    end
+
     it 'reads a file holding multibyte characters under a US-ASCII default' do
       File.write(path, original.sub('# frozen', '# ✓ frozen'))
       unit.source_code = composite.sub('# frozen', '# ✓ frozen')

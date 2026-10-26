@@ -115,11 +115,13 @@ module Woods
       after.zero? ? nil : map[after - 1]
     end
 
-    # @return [String, nil] the file's bytes, or nil when it cannot be read
+    # @return [String, nil] the file's content scrubbed as SourceFile.read
+    #   does, so an invalid byte changes only its own line; nil when it cannot
+    #   be read
     def read(path)
       return nil unless path.is_a?(String) && File.file?(path)
 
-      File.binread(path)
+      File.binread(path).force_encoding(Encoding::UTF_8).scrub
     rescue SystemCallError
       nil
     end
