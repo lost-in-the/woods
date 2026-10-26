@@ -29,7 +29,7 @@ RSpec.describe 'woods_status with an unusable generation pointer' do
     'malformed JSON' => '{not json',
     'a non-object body' => '[]',
     'a non-integer number' => '{"number":"one","token":"t"}',
-    'a payload path with a NUL byte' => "{\"number\":1,\"token\":\"t\",\"payload\":\"a\\u0000b\"}"
+    'a payload path with a NUL byte' => '{"number":1,"token":"t","payload":"a\\u0000b"}'
   }.each do |label, body|
     context "with #{label}" do
       before { File.write(File.join(root, 'generation.json'), body) }
