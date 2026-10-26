@@ -213,4 +213,16 @@ RSpec.describe 'Incremental extraction configuration drift' do
       expect(written_manifest).not_to have_key('extraction_config')
     end
   end
+
+  %w[incremental refresh].each do |operation|
+    it "does not keep a prior full run's results when preparing a #{operation} run" do
+      baseline
+      stale = Woods::ExtractedUnit.new(type: :model, identifier: 'Stale', file_path: nil)
+      extractor.instance_variable_set(:@results, { model: [stale] })
+
+      extractor.send(:prepare_incremental_run, operation: operation)
+
+      expect(extractor.instance_variable_get(:@results)).to eq({})
+    end
+  end
 end

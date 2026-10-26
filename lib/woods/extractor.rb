@@ -961,6 +961,7 @@ module Woods
       ModelNameCache.reset!
       profile_phase('eager load') { safe_eager_load! }
 
+      @results = {}
       @dependents_dirty = Set.new
       @incremental_written = {}
       @retained_units = Set.new
