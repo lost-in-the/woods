@@ -2149,21 +2149,24 @@ module Woods
             stats = exporter.sync_all
 
             errors = stats[:errors]
-            error_count = stats[:error_count] || errors.size
+            listed = errors.first(10)
             landed = stats[:data_models].to_i + stats[:columns].to_i + stats[:skipped].to_i
-            status = if error_count.zero? then 'complete'
-                     elsif landed.positive? then 'partial'
-                     else 'failed'
-                     end
+            completeness = SearchResults.sync_outcome(
+              error_count: stats[:error_count] || errors.size, listed: listed.size, landed: landed
+            )
+            result = {
+              synced: completeness[:reason] != 'nothing_synced',
+              data_models: stats[:data_models],
+              columns: stats[:columns],
+              completeness: completeness,
+              errors: listed
+            }
+            if completeness[:status] != 'complete'
+              result[:partial] = true
+              result[:hint] = 'Fix the listed errors and re-run notion_sync; pages that synced are kept.'
+            end
 
-            respond.call(JSON.pretty_generate({
-                                                synced: status != 'failed',
-                                                status: status,
-                                                data_models: stats[:data_models],
-                                                columns: stats[:columns],
-                                                error_count: error_count,
-                                                errors: errors.first(10)
-                                              }))
+            respond.call(JSON.pretty_generate(result))
           rescue StandardError => e
             respond_err.call(
               "Notion sync failed: #{e.message}",
