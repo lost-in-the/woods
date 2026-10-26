@@ -35,6 +35,16 @@
       "allowedVersions": "< 1.0"
     },
     {
+      "description": "fastembed (bench/evaluation, Python capture only) declares huggingface-hub < 2.0. Hold the hub below 2 until a fastembed release allows 2.x, then lift this rule and bump both together.",
+      "matchDatasources": [
+        "pypi"
+      ],
+      "matchPackageNames": [
+        "huggingface-hub"
+      ],
+      "allowedVersions": "< 2.0"
+    },
+    {
       "description": "ruby/setup-ruby v1 is a moving branch, not a tag. Resolve its pinned SHA from that exact branch while keeping digest updates enabled.",
       "matchManagers": [
         "github-actions"
