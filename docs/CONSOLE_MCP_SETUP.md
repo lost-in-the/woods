@@ -247,7 +247,7 @@ For an MCP client that supports Streamable HTTP:
 }
 ```
 
-For production or staging, use HTTPS in addition to the mandatory bearer token.
+For staging, use HTTPS in addition to the mandatory bearer token. The Console is a development/staging capability and production use is at your own risk (see [Limits of the Console protections](../SECURITY.md#limits-of-the-console-protections)).
 
 ### What happens under the hood
 
@@ -269,11 +269,10 @@ Each request gets its own database connection from the connection pool. `SafeCon
 
 ### Security note
 
-The HTTP endpoint grants read access to live database data. In production environments:
+The HTTP endpoint grants read access to live database data. Mount it only in `development` and `staging`, and keep it off in production (see [Limits of the Console protections](../SECURITY.md#limits-of-the-console-protections)). Where you do mount it:
 
 - Restrict the path to internal networks or authenticated users
 - Use `console_redacted_columns` to redact sensitive fields (see [Configuration Options](#configuration-options))
-- Consider mounting only in `development` and `staging` environments
 
 ---
 
@@ -494,9 +493,9 @@ Woods.configure do |config|
 
   # Layer 2. Content-shape credential scanner. Walks the final response tree
   # and replaces credential-shaped substrings (Stripe sk_*, AWS AKIA*, GCP
-  # private keys, GitHub ghp_*, generic high-entropy tokens) with "[REDACTED]".
-  # Runs regardless of column naming, so it catches leaks that column-based
-  # redaction alone would miss. Default: [] (every pattern active).
+  # private keys, GitHub ghp_*, and other known credential formats) with "[REDACTED]".
+  # Runs regardless of column naming, so it can catch some leaks that column-based
+  # redaction alone would miss. It matches known formats only, not arbitrary secrets. Default: [] (every pattern active).
   #
   # Accepts a list of pattern symbols to skip. Useful when a rule produces
   # false positives in your data. Pass the :all sentinel to disable the
