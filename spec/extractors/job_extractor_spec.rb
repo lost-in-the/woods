@@ -1094,6 +1094,41 @@ RSpec.describe Woods::Extractors::JobExtractor do
       end
     end
 
+    context 'with a job nested in another class\'s file' do
+      def units_across_families
+        described_class.new.extract_all
+      end
+
+      before do
+        declare('app/models/job_fixture/account_update.rb', <<~RUBY)
+          class AccountUpdate
+            def finish
+              ClearMetadataJob.perform_async(1)
+              SendReceiptJob.perform_async(1)
+            end
+
+            class ClearMetadataJob
+              include Sidekiq::Job
+              def perform(id) = id
+            end
+          end
+
+          class SendReceiptJob
+            include Sidekiq::Job
+          end
+        RUBY
+      end
+
+      it 'takes its source and edges from its own lexical range' do
+        unit = units_across_families.find { |candidate| candidate.identifier == 'JobFixture::AccountUpdate::ClearMetadataJob' }
+
+        expect(unit.source_code).not_to include('def finish')
+        expect(unit.source_code).to include('def perform')
+        expect(unit.dependencies.select { |dep| dep[:via] == :job_enqueue }).to be_empty
+        expect(unit.metadata[:enqueues_jobs]).to be_empty
+      end
+    end
+
     context 'with a worker a class macro generates' do
       def declare_generator(root = 'lib')
         declare("#{root}/job_fixture/async_dispatch.rb", <<~RUBY)
