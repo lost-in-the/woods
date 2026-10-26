@@ -1,0 +1,2 @@
+- Run the CI unit suite as four parallel rspec processes through `script/parallel-rspec`, each with its own `TEST_ENV_NUMBER`, temporary directory, log and JSON report. Files are split by recorded timings in `script/parallel_rspec_timings.json`, and `--update-timings` rewrites that file from an rspec JSON report.
+- Load the real `EmbeddedExecutor` before two Console specs stub it, so they no longer remove it for later examples when they run before anything else has loaded it.

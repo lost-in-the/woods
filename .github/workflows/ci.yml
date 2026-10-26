@@ -55,7 +55,7 @@ jobs:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
       - name: Run tests
-        run: bundle exec rake spec
+        run: bundle exec ruby script/parallel-rspec
 
   # Exact advertised direct runtime floors, without the development Gemfile.
   minimum-dependencies:
