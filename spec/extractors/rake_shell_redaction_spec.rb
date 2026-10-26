@@ -150,10 +150,17 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
   end
 
   describe 'on adversarial input' do
+    # The budget is CPU time of this thread: a wall-clock limit also counts the
+    # time other parallel rspec processes take the core, which fails a linear
+    # scan on a loaded runner. The wall-clock timeout stays as a backstop that
+    # stops a runaway scan from hanging the suite.
     around do |example|
       previous = Regexp.respond_to?(:timeout) ? Regexp.timeout : nil
       Regexp.timeout = 1 if Regexp.respond_to?(:timeout=)
-      Timeout.timeout(5) { example.run }
+      cpu_start = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
+      Timeout.timeout(60) { example.run }
+      cpu_seconds = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - cpu_start
+      raise "adversarial input took #{cpu_seconds.round(2)}s of CPU, budget 5s" if cpu_seconds > 5
     ensure
       Regexp.timeout = previous if Regexp.respond_to?(:timeout=)
     end
