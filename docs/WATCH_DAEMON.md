@@ -739,6 +739,7 @@ party) behaves exactly as it always did.
     "generation_updated_at": "2026-07-27T04:55:12Z",
     "retention_pins": [40],              // woods:pin[N]; null + retention_pins_error when unreadable
     "git_sha_matches_head": true,
+    "history": { "state": "current", "published_sha": "9f1c2ab", "head_sha": "9f1c2ab" },
     "working_tree_dirty": true,           // git_sha_matches_head only sees committed HEAD
     "working_tree_fingerprint": "3f9a2c81ad3e4b7c",
     "staleness_seconds": 12
@@ -749,6 +750,19 @@ party) behaves exactly as it always did.
     "generation": 41
   } }
 ```
+
+`history.state` is `current`, `stale` or `unknown`. It compares the HEAD
+recorded in the published manifest with the live HEAD, resolved through the same
+worktree-aware Git path as extraction (including `WOODS_GIT_DIR`). A commit with
+no source change leaves `source_freshness` current but marks history `stale`,
+because Git-derived facts (recent commits, churn, authorship) were captured at the
+older HEAD. `unknown` carries a `reason` (`published_sha_missing`,
+`published_sha_unknown`, `head_unresolved`) and is never reported as stale. A baked
+`GIT_SHA` build arg is not a live HEAD, so a directory without a resolvable
+repository is `unknown`. Run `woods:incremental` or `woods:extract` to refresh it.
+The check resolves HEAD from the index directory, so an output directory outside
+the application repository reports the HEAD of whatever repository contains it, or
+`unknown`.
 
 `working_tree_dirty` closes a real hole: an agent forty uncommitted edits deep
 was told the index matched HEAD while every answer described the tree before

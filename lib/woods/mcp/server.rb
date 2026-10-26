@@ -11,6 +11,7 @@ require 'uri'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../generation_pins'
+require_relative '../git_provenance'
 require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../watch/supervision_status'
@@ -2351,11 +2352,35 @@ module Woods
 
           manifest_sha = manifest && manifest['git_sha']
           head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
+          base[:history] = history_fields(manifest_sha, head_sha)
           return base unless head_sha
 
           base[:head_git_sha] = head_sha
           base[:git_sha_matches_head] = (manifest_sha == head_sha)
           base
+        end
+
+        # Whether the Git-derived facts in the published index describe the
+        # live HEAD. A HEAD move with no working-tree change leaves
+        # +source_freshness+ current while history (blame, churn, recent
+        # commits) is behind, so this is reported on its own.
+        #
+        # +state+ is +current+, +stale+ or +unknown+. Unknown is never stale:
+        # a manifest without a usable sha, or a directory Git cannot resolve,
+        # cannot be compared.
+        #
+        # @return [Hash]
+        def history_fields(published_sha, head_sha)
+          if published_sha.nil? || published_sha.to_s.empty?
+            return { state: 'unknown', reason: 'published_sha_missing' }
+          end
+          if published_sha == Woods::GitProvenance::UNKNOWN
+            return { state: 'unknown', reason: 'published_sha_unknown', published_sha: published_sha }
+          end
+          return { state: 'unknown', reason: 'head_unresolved', published_sha: published_sha } unless head_sha
+          return { state: 'current', published_sha: published_sha, head_sha: head_sha } if published_sha == head_sha
+
+          { state: 'stale', reason: 'head_moved', published_sha: published_sha, head_sha: head_sha }
         end
 
         # The generation the index is published at.
@@ -2527,30 +2552,23 @@ module Woods
           fields
         end
 
-        # Resolve the current HEAD SHA for the git repo containing +index_dir+.
-        # Returns nil when git is unavailable or +index_dir+ is not in a repo —
-        # callers treat nil as "can't compare" rather than "mismatch".
+        # Resolve the current HEAD SHA for the git repo containing +index_dir+,
+        # through {Woods::GitProvenance} so a linked worktree and
+        # +WOODS_GIT_DIR+ resolve as they do for extraction. Returns nil when
+        # git is unavailable or +index_dir+ is not in a repo; callers treat nil
+        # as "can't compare" rather than "mismatch".
         #
-        # capture3 keeps git's stderr out of the MCP stdio transport — clients
-        # that parse stderr for protocol framing can't tolerate stray lines —
-        # *and* out of the SHA. capture2e folded them together, so a warning on
-        # an otherwise successful `rev-parse` (a stale `index.lock` notice, a
-        # `core.fsmonitor` complaint) was concatenated into the value this
-        # method returns and compared against the manifest as if it were a SHA.
-        # Same hazard as {#resolve_working_tree_status}, one probe over.
+        # GitProvenance captures stderr separately, so a warning on an
+        # otherwise successful +rev-parse+ (a stale +index.lock+ notice, a
+        # +core.fsmonitor+ complaint) never lands in the value compared against
+        # the manifest, and never reaches the MCP stdio transport.
         def resolve_head_sha(index_dir)
           return nil unless index_dir
 
           dir = index_dir.to_s
           return nil unless File.directory?(dir)
 
-          output, _stderr, status = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
-          status.success? ? output.strip : nil
-        rescue Errno::ENOENT, Errno::EACCES
-          # git not installed or not executable on this host — equivalent to
-          # "can't compare". Any other exception is a genuine bug and should
-          # propagate.
-          nil
+          Woods::GitProvenance.new(root: dir).head_sha
         end
 
         # Assemble the +features+ sub-hash of woods_status, preferring the
