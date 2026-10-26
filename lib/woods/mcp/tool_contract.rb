@@ -22,6 +22,7 @@ module Woods
         'depth' => [0, 20],
         'limit' => [1, 1_000],
         'min_size' => [1, 100_000],
+        'member_limit' => [1, 10_000],
         'offset' => [0, 1_000_000],
         'score' => [1, 5]
       }.freeze

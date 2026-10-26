@@ -70,6 +70,24 @@ RSpec.describe Woods::GitProvenance do
     end
   end
 
+  describe '#head_sha' do
+    it 'returns the live HEAD of a checkout' do
+      Dir.mktmpdir do |dir|
+        init_repo(dir)
+
+        expect(described_class.new(root: dir, env: {}).head_sha).to eq(run(dir, 'git', 'rev-parse', 'HEAD'))
+      end
+    end
+
+    it 'ignores a baked GIT_SHA when git cannot resolve the tree' do
+      Dir.mktmpdir do |dir|
+        File.write(File.join(dir, '.git'), "gitdir: /nonexistent/host/path/.git/worktrees/wt\n")
+
+        expect(described_class.new(root: dir, env: { 'GIT_SHA' => 'deadbeef' }).head_sha).to be_nil
+      end
+    end
+  end
+
   describe '#branch / #sha in a linked worktree (.git is a file)' do
     it 'resolves the worktree branch/sha when the git dir is reachable' do
       Dir.mktmpdir do |parent|

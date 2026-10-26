@@ -3226,23 +3226,7 @@ RSpec.describe Woods::Extractor do
       expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
     end
 
-    # Existing behavior, pinned: a full run's write set is complete, so
-    # degrading to flat still produces a correct manifest and unit set — it
-    # is only the incremental paths above that cannot make this safe.
-    it 'still publishes a complete flat index on full extraction when payload creation fails' do
-      require 'woods'
-      require 'active_support'
-      require 'active_support/isolated_execution_state'
-      require 'active_support/core_ext/time'
-      require 'active_support/core_ext/string/inflections'
-      original_config = Woods.configuration
-      Woods.configuration = Woods::Configuration.new
-      Woods.configuration.concurrent_extraction = false
-      allow(Time).to receive(:current).and_return(Time.now)
-      allow(Rails).to receive(:version).and_return('8.0.0')
-      allow(extractor).to receive(:safe_eager_load!)
-      allow(extractor).to receive(:git_available?).and_return(false)
-
+    def stub_single_model_extractors
       unit = Woods::ExtractedUnit.new(type: :model, identifier: 'User', file_path: 'app/models/user.rb')
       unit.source_code = 'class User; end'
       fake_models_class = Class.new { define_method(:extract_all) { [unit] } }
@@ -3253,23 +3237,85 @@ RSpec.describe Woods::Extractor do
       end
       stub_const('Woods::Extractor::EXTRACTORS',
                  { models: fake_models_class, rails_source: fake_empty_class })
+    end
 
-      store = extractor.instance_variable_get(:@payload_store)
-      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+    def require_full_extraction_dependencies
+      require 'woods'
+      require 'active_support'
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
+      require 'active_support/core_ext/string/inflections'
+    end
 
-      extractor.extract_all
+    def deny_payload_creation
+      allow(extractor.instance_variable_get(:@payload_store)).to receive(:create).and_raise(Errno::EACCES, 'denied')
+    end
 
-      filename = extractor.send(:collision_safe_filename, 'User')
-      expect(File.exist?(File.join(output_dir, 'models', filename))).to be(true)
-      expect(File.exist?(File.join(output_dir, 'models', '_index.json'))).to be(true)
+    def stub_full_extraction_with_denied_payload
+      require_full_extraction_dependencies
+      original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = false
+      allow(Time).to receive(:current).and_return(Time.now)
+      allow(Rails).to receive(:version).and_return('8.0.0')
+      allow(extractor).to receive_messages(safe_eager_load!: nil, git_available?: false)
+      stub_single_model_extractors
+      deny_payload_creation
+      original_config
+    end
 
-      generation_data = JSON.parse(File.read(File.join(output_dir, 'generation.json')))
-      expect(generation_data).not_to have_key('payload')
+    it 'fails a full extraction closed when payload creation is refused' do
+      original_config = stub_full_extraction_with_denied_payload
+      publish_payload_born_generation
 
-      manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
-      expect(manifest['total_units']).to eq(1)
+      expect { extractor.extract_all }
+        .to raise_error(Woods::ExtractionError, /WOODS_ALLOW_FLAT_FALLBACK/)
 
-      Woods.configuration = original_config
+      expect(Woods::Generation.new(output_dir: output_dir).current.number).to eq(1)
+      expect(File.exist?(File.join(output_dir, 'models'))).to be(false)
+    ensure
+      Woods.configuration = original_config if original_config
+    end
+
+    context 'with WOODS_ALLOW_FLAT_FALLBACK=1' do
+      around do |example|
+        original = ENV.fetch('WOODS_ALLOW_FLAT_FALLBACK', nil)
+        ENV['WOODS_ALLOW_FLAT_FALLBACK'] = '1'
+        example.run
+      ensure
+        original.nil? ? ENV.delete('WOODS_ALLOW_FLAT_FALLBACK') : ENV['WOODS_ALLOW_FLAT_FALLBACK'] = original
+      end
+
+      it 'publishes a complete flat index on full extraction and warns' do
+        original_config = stub_full_extraction_with_denied_payload
+        logger = instance_double(Logger, info: nil, debug: nil, error: nil)
+        allow(Rails).to receive(:logger).and_return(logger)
+        expect(logger).to receive(:warn).with(/WOODS_ALLOW_FLAT_FALLBACK.*not atomic/).at_least(:once)
+
+        extractor.extract_all
+
+        filename = extractor.send(:collision_safe_filename, 'User')
+        expect(File.exist?(File.join(output_dir, 'models', filename))).to be(true)
+        expect(File.exist?(File.join(output_dir, 'models', '_index.json'))).to be(true)
+
+        generation_data = JSON.parse(File.read(File.join(output_dir, 'generation.json')))
+        expect(generation_data).not_to have_key('payload')
+
+        manifest = JSON.parse(File.read(File.join(output_dir, 'manifest.json')))
+        expect(manifest['total_units']).to eq(1)
+      ensure
+        Woods.configuration = original_config if original_config
+      end
+
+      it 'still aborts an incremental run over a payload-born index' do
+        require 'woods'
+        publish_payload_born_generation
+        store = extractor.instance_variable_get(:@payload_store)
+        allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+
+        expect { extractor.extract_changed(['app/models/user.rb']) }
+          .to raise_error(Woods::ExtractionError, /payload/i)
+      end
     end
   end
 

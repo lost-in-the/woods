@@ -1,0 +1,137 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Runs the unit suite as several rspec processes and fails if any of them does.
+#
+#   script/parallel-rspec [spec paths...]        # default: spec/
+#   script/parallel-rspec --update-timings tmp/rspec.json
+#
+# Files are split into balanced groups from script/parallel_rspec_timings.json
+# (seconds per file; --update-timings rewrites it from an rspec JSON report).
+# Each process gets its own TEST_ENV_NUMBER, TMPDIR, log and JSON report, so no
+# two of them share a scratch path. With COVERAGE set, every process stores a
+# SimpleCov resultset and this script collates them once, where the coverage
+# gate runs.
+require 'fileutils'
+require 'json'
+require 'rbconfig'
+require 'tmpdir'
+
+require_relative 'parallel_rspec'
+
+ROOT = ParallelRspec::ROOT
+REPORT_DIR = File.expand_path(ENV.fetch('WOODS_PARALLEL_REPORT_DIR', File.join(ROOT, 'tmp', 'parallel')))
+COVERAGE_DIR = File.expand_path(ENV.fetch('WOODS_COVERAGE_DIR', File.join(ROOT, 'coverage')))
+
+def update_timings(report_path)
+  timings = ParallelRspec.timings_from(report_path)
+  File.write(ParallelRspec::TIMINGS_PATH, "#{JSON.pretty_generate(timings)}\n")
+  puts "Wrote #{timings.size} file timings to #{ParallelRspec::TIMINGS_PATH}"
+end
+
+def shard_command(index, files)
+  report = File.join(REPORT_DIR, "rspec-#{index}.json")
+  [RbConfig.ruby, File.join(ROOT, 'bin', 'rspec'), '--options', File::NULL, '--require', 'spec_helper',
+   '--format', 'progress', '--format', 'json', '--out', report, *files]
+end
+
+def start_shards(groups, tmp_base)
+  groups.each_with_index.map do |files, offset|
+    index = offset + 1
+    tmpdir = File.join(tmp_base, index.to_s)
+    FileUtils.mkdir_p(tmpdir)
+    env = { 'TEST_ENV_NUMBER' => index.to_s, 'TMPDIR' => tmpdir }
+    log = File.join(REPORT_DIR, "rspec-#{index}.log")
+    pid = Process.spawn(env, *shard_command(index, files), chdir: ROOT, in: File::NULL, out: log, err: %i[child out])
+    { index: index, pid: pid, log: log, files: files, started: Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+  end
+end
+
+def wait_for(shards)
+  pending = shards.dup
+  last_beat = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  until pending.empty?
+    pid, status = Process.wait2(-1, Process::WNOHANG)
+    if pid
+      shard = pending.find { |candidate| candidate[:pid] == pid }
+      next unless shard
+
+      shard[:status] = status
+      shard[:seconds] = Process.clock_gettime(Process::CLOCK_MONOTONIC) - shard[:started]
+      pending.delete(shard)
+    else
+      sleep 0.5
+      now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      next unless now - last_beat >= 60
+
+      last_beat = now
+      puts "still running: shard #{pending.map { |shard| shard[:index] }.join(', ')}"
+    end
+  end
+end
+
+def read_report(shard)
+  path = File.join(REPORT_DIR, "rspec-#{shard[:index]}.json")
+  File.exist?(path) ? JSON.parse(File.read(path)) : nil
+end
+
+def print_shard(shard)
+  group = ENV.fetch('GITHUB_ACTIONS', nil)
+  verdict = shard[:status].success? ? 'passed' : 'FAILED'
+  puts "::group::shard #{shard[:index]} #{verdict} (#{shard[:files].size} files, #{shard[:seconds].round}s)" if group
+  puts "== shard #{shard[:index]} #{verdict} (#{shard[:files].size} files, #{shard[:seconds].round}s)" unless group
+  puts File.read(shard[:log])
+  puts '::endgroup::' if group
+end
+
+# Merges the per-shard reports into test_results.json in the report directory (summary and failures).
+def write_merged_report(shards)
+  reports = shards.filter_map { |shard| read_report(shard) }
+  summary = %w[example_count failure_count pending_count errors_outside_of_examples_count].to_h do |key|
+    [key, reports.sum { |report| report.fetch('summary').fetch(key) }]
+  end
+  failures = reports.flat_map { |report| report.fetch('examples').select { |example| example['status'] == 'failed' } }
+  summary_line = "#{summary['example_count']} examples, #{summary['failure_count']} failures, " \
+                 "#{summary['pending_count']} pending"
+  File.write(File.join(REPORT_DIR, 'test_results.json'),
+             JSON.pretty_generate('summary' => summary, 'summary_line' => summary_line, 'failures' => failures))
+  summary_line
+end
+
+def collate_coverage
+  code = <<~RUBY
+    require 'simplecov'
+    require 'simplecov_profile'
+    SimpleCov.collate(Dir[File.join(ARGV.fetch(0), '.resultset.json')], &SimpleCovProfile::CONFIG)
+  RUBY
+  env = { 'TEST_ENV_NUMBER' => nil, 'WOODS_COVERAGE_DIR' => COVERAGE_DIR }
+  system(env, RbConfig.ruby, '-I', File.join(ROOT, 'spec'), '-e', code, COVERAGE_DIR, chdir: ROOT)
+end
+
+if ARGV.first == '--update-timings'
+  update_timings(ARGV.fetch(1))
+  exit
+end
+
+count = Integer(ENV.fetch('WOODS_PARALLEL_PROCESSES', '4'))
+timings = File.exist?(ParallelRspec::TIMINGS_PATH) ? JSON.parse(File.read(ParallelRspec::TIMINGS_PATH)) : {}
+groups = ParallelRspec.split(ParallelRspec.spec_files(ARGV), timings, count)
+abort 'no spec files found' if groups.empty?
+
+FileUtils.rm_rf(REPORT_DIR)
+FileUtils.mkdir_p(REPORT_DIR)
+FileUtils.rm_rf(File.join(ROOT, 'coverage')) if ENV['COVERAGE']
+tmp_base = Dir.mktmpdir('woods-parallel')
+begin
+  puts "Running #{groups.sum(&:size)} spec files in #{groups.size} processes"
+  shards = start_shards(groups, tmp_base)
+  wait_for(shards)
+ensure
+  FileUtils.remove_entry(tmp_base) if tmp_base && File.exist?(tmp_base)
+end
+
+shards.each { |shard| print_shard(shard) }
+puts write_merged_report(shards)
+shard_failed = shards.any? { |shard| !shard[:status].success? }
+coverage_failed = ENV.fetch('COVERAGE', nil) && !collate_coverage
+exit(shard_failed || coverage_failed ? 1 : 0)

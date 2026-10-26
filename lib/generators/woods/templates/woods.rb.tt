@@ -162,6 +162,11 @@ Woods.configure do |config|
   # access via the rake task or Docker exec path; SqlValidator still applies).
   # config.console_embedded_read_tools = false
 
+  # Row caps for console_sql: rows returned without a `limit`, and the ceiling
+  # applied to a requested `limit`.
+  # config.console_sql_default_limit = 100
+  # config.console_sql_max_limit = 1_000
+
   # ── Caching ─────────────────────────────────────────────────────────────
 
   # Cache embedding and retrieval responses to reduce API cost.

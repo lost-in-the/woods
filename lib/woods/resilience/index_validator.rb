@@ -10,6 +10,7 @@ require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../published_index'
 require_relative 'graph_invariant_validator'
+require_relative 'incremental_readiness'
 require_relative 'index_validator/graph_checks'
 require_relative '../source_inputs/manifest'
 
@@ -50,7 +51,11 @@ module Woods
       #   @return [Array<String>] non-fatal issues (e.g., stale files)
       # @!attribute [r] errors
       #   @return [Array<String>] fatal integrity issues
-      ValidationReport = Struct.new(:valid?, :warnings, :errors, keyword_init: true)
+      # @!attribute [r] incremental
+      #   @return [IncrementalReadiness::Result, nil] whether the index can take
+      #     an incremental run; separate from validity, so an older index stays
+      #     valid while reporting it needs a full extraction
+      ValidationReport = Struct.new(:valid?, :warnings, :errors, :incremental, keyword_init: true)
 
       # The shared unit-type-directory contract, loadable without Rails:
       # exactly the directories extraction publishes unit types into,
@@ -100,7 +105,8 @@ module Woods
           validate_against_manifest(warnings, errors)
         end
 
-        ValidationReport.new(valid?: errors.empty?, warnings: warnings, errors: errors)
+        ValidationReport.new(valid?: errors.empty?, warnings: warnings, errors: errors,
+                             incremental: IncrementalReadiness.new(index_dir: @index_dir).call)
       rescue IOError, SystemCallError, ArgumentError, JSON::ParserError, Woods::PublishedIndex::CorruptPointerError => e
         errors << "Cannot read published index: #{e.class}: #{e.message}"
         ValidationReport.new(valid?: false, warnings: warnings, errors: errors)

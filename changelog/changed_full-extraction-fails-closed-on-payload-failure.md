@@ -1,0 +1,1 @@
+- Behaviour change: a full extraction that cannot open a new payload directory now raises `Woods::ExtractionError` and leaves the published generation unchanged, instead of warning and writing the index flat into the output root (which is not atomic). Set `WOODS_ALLOW_FLAT_FALLBACK=1` to restore the flat fallback; it logs a warning when used.

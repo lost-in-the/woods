@@ -33,6 +33,30 @@ module Woods
         { status: status, reason: reason, has_more: error_count > listed, total_errors: error_count }
       end
 
+      # Completeness for an offset/limit page over a fully known list: the total
+      # is exact, so only the unreturned tail decides +has_more+.
+      #
+      # @param total [Integer] size of the whole list
+      # @param offset [Integer] items skipped
+      # @param returned [Integer] items on this page
+      # @return [Hash] completeness evidence, same keys as {#response}
+      def self.page(total:, offset:, returned:)
+        more = offset + returned < total
+        { status: more ? 'partial' : 'complete', reason: more ? 'result_limit' : 'exhausted',
+          has_more: more, total_matches: total, matched_lower_bound: total }
+      end
+
+      # Same completeness keys as {#response}, for a row-capped result set that
+      # fetched one lookahead row. +has_more+ is true only when that extra row arrived.
+      #
+      # @param returned [Integer] rows handed to the caller
+      # @param has_more [Boolean] whether a row beyond the cap exists
+      # @return [Hash] completeness evidence
+      def self.row_limit_outcome(returned:, has_more:)
+        { status: has_more ? 'partial' : 'complete', reason: has_more ? 'result_limit' : 'exhausted',
+          has_more: has_more, total_matches: has_more ? nil : returned, matched_lower_bound: returned }
+      end
+
       def initialize(limit:)
         @limit = limit
         @matches = []

@@ -131,6 +131,8 @@ module Woods
         #   {key_column:, value_column:, sensitive_keys: []}. See SafeContext for semantics.
         # @param connection [Object, nil] Database connection for adapter detection
         # @param read_tools_enabled [Boolean] Enable sql/query tools in embedded mode (default: false)
+        # @param sql_default_limit [Integer, nil] Rows console_sql returns with no limit (nil = executor default)
+        # @param sql_max_limit [Integer, nil] Ceiling applied to a requested console_sql limit (nil = executor default)
         # @param unsafe_eval_confirmation [Confirmation, nil] Retained for API compatibility;
         #   no supported mode registers console_eval.
         # @param unsafe_eval_audit_log_path [String, Pathname, nil] Retained for API compatibility.
@@ -140,7 +142,8 @@ module Woods
                            read_tools_enabled: false, model_tables: {},
                            model_reflections: {},
                            unsafe_eval_confirmation: nil,
-                           unsafe_eval_audit_log_path: nil)
+                           unsafe_eval_audit_log_path: nil,
+                           sql_default_limit: nil, sql_max_limit: nil)
           require_relative 'embedded_executor'
           enforce_unsafe_eval_contract!(
             legacy_options_present: unsafe_eval_confirmation || unsafe_eval_audit_log_path
@@ -157,7 +160,8 @@ module Woods
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_ctx,
             connection: connection, read_tools_enabled: read_tools_enabled,
-            table_gate: ctx&.table_gate
+            table_gate: ctx&.table_gate,
+            sql_default_limit: sql_default_limit, sql_max_limit: sql_max_limit
           )
 
           mode = read_tools_enabled ? :embedded_read : :embedded

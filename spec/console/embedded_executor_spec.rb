@@ -1174,7 +1174,7 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                           })
 
           expect(connection).to have_received(:select_all).with(
-            a_string_matching(/LIMIT 5/)
+            a_string_matching(/LIMIT 6/)
           )
         end
 
@@ -1387,7 +1387,8 @@ RSpec.describe Woods::Console::EmbeddedExecutor do
                                               })
 
         expect(response['ok']).to be true
-        expect(connection).to have_received(:select_all).with('SELECT email FROM users WHERE id = 1')
+        expect(connection).to have_received(:select_all)
+          .with("SELECT * FROM (\nSELECT email FROM users WHERE id = 1\n) AS _limited LIMIT 101")
       end
 
       it 'refuses a redacted column as a console_aggregate column' do

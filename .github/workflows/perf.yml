@@ -5,7 +5,8 @@ name: Performance
 # shared CI runners (see spec/spec_helper.rb and the spec's own header). This
 # workflow is the dedicated opt-in that header anticipates: dispatch it
 # manually when a change touches a measured path, and the nightly cron keeps a
-# standing baseline.
+# standing baseline. It also owns the elapsed-time budgets of the complexity
+# specs (spec/support/wall_clock_budget.rb), which the unit jobs only report.
 on:
   workflow_dispatch:
   schedule:
@@ -36,3 +37,5 @@ jobs:
           bundler-cache: true
       - name: Run performance specs
         run: bundle exec rspec --tag perf spec/performance
+      - name: Run elapsed-time budget specs
+        run: bundle exec rspec $(grep -rl WallClockBudget spec --include='*_spec.rb')

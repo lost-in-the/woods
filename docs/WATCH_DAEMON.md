@@ -739,6 +739,8 @@ party) behaves exactly as it always did.
     "generation_updated_at": "2026-07-27T04:55:12Z",
     "retention_pins": [40],              // woods:pin[N]; null + retention_pins_error when unreadable
     "git_sha_matches_head": true,
+    "history": { "state": "current", "published_sha": "9f1c2ab", "head_sha": "9f1c2ab" },
+    "incremental": { "ready": true, "status": "ready" },  // or "needs full extraction (<reason>)"
     "working_tree_dirty": true,           // git_sha_matches_head only sees committed HEAD
     "working_tree_fingerprint": "3f9a2c81ad3e4b7c",
     "staleness_seconds": 12
@@ -749,6 +751,26 @@ party) behaves exactly as it always did.
     "generation": 41
   } }
 ```
+
+`history.state` is `current`, `stale` or `unknown`. It compares the HEAD
+recorded in the published manifest with the live HEAD, resolved through the same
+worktree-aware Git path as extraction (including `WOODS_GIT_DIR`). A commit with
+no source change leaves `source_freshness` current but marks history `stale`,
+because Git-derived facts (recent commits, churn, authorship) were captured at the
+older HEAD. `unknown` carries a `reason` (`published_sha_missing`,
+`published_sha_unknown`, `root_not_recorded`, `root_unreachable`, `head_unresolved`) and is never reported as stale. A baked
+`GIT_SHA` build arg is not a live HEAD, so a directory without a resolvable
+repository is `unknown`. Run `woods:incremental` or `woods:extract` to refresh it.
+The live HEAD is read from the application root the generation recorded when it
+captured source inputs, never from the repository that happens to enclose the
+index directory. A generation with no recorded root reports `unknown` with reason
+`root_not_recorded`. A recorded root this process cannot reach (for example a
+container path) reports `root_unreachable`.
+
+`incremental` says whether the index can take an incremental run, which is a
+different question from whether it is readable. An older index stays usable by
+every read tool while reporting `needs full extraction (<reason>)`; see
+[incremental readiness](INCREMENTAL_EXTRACTION.md#incremental-readiness).
 
 `working_tree_dirty` closes a real hole: an agent forty uncommitted edits deep
 was told the index matched HEAD while every answer described the tree before
@@ -809,9 +831,11 @@ reader leaves no stale lease. A skipped directory can temporarily exceed
 The protocol relies on the same filesystem advisory-lock support as Woods'
 pipeline coordination.
 
-A **full** extraction (`Extractor#extract_all`) degrades to a flat publish if
-it can't open a fresh payload directory, the write set is the whole app, so a
-flat publish is still a complete index. An **incremental** run
+A **full** extraction (`Extractor#extract_all`) that can't open a fresh
+payload directory fails closed: it raises `Woods::ExtractionError` and the last
+good generation stays published. `WOODS_ALLOW_FLAT_FALLBACK=1` opts back into a
+flat publish, which is a complete index (the write set is the whole app) but not
+an atomic one. An **incremental** run
 (`extract_changed` / `refresh`) writes only the units it touched, so there is
 no complete flat index it could fall back to: over a payload-born index it
 raises `Woods::ExtractionError` instead of publishing a corrupt-looking
