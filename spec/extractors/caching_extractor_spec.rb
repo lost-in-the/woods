@@ -967,6 +967,32 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       ERB
     end
 
+    it 'does not read a receiver call or a Ruby method named cache as a fragment cache' do
+      unit = extract('app/models/ledger.rb', <<~RUBY)
+        class Ledger
+          def refresh = ActiveRecord::Base.cache do
+            compute
+          end
+
+          def memo = connection.cache(:x) { compute }
+
+          def cache(key, &block) = store(key, &block)
+
+          def total
+            cache do
+              compute
+            end
+          end
+        end
+      RUBY
+
+      expect(unit).to be_nil
+    end
+
+    it 'does not read a receiver call as a fragment cache in a view' do
+      expect(extract('app/views/widgets/index.html.erb', "<% ActiveRecord::Base.cache do %>\n<% end %>\n")).to be_nil
+    end
+
     it 'ignores a HAML silent comment and its indented block' do
       expect(types('app/views/widgets/index.html.haml', <<~HAML)).to eq([:fragment])
         -# cache @old do
