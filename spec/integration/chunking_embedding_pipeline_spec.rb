@@ -152,6 +152,11 @@ RSpec.describe 'Chunking → Embedding → Storage pipeline', :integration do
       query_vec = provider.embed('controller action index show create update')
       results = vector_store.search(query_vec, limit: 10, filters: { type: 'controller' })
 
+      controller_identifiers = units.select { |u| u.type == :controller }.map(&:identifier)
+      expect(controller_identifiers).not_to be_empty
+      expect(results).not_to be_empty
+      expect(results.map { |r| r.metadata[:identifier] }.uniq).to match_array(controller_identifiers)
+
       results.each do |result|
         expect(result.metadata[:type]).to eq('controller')
       end
