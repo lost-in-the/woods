@@ -711,8 +711,10 @@ module Woods
 
     # Merge clusters smaller than min_size into their most-connected neighbor.
     def merge_small_clusters(clusters, min_size)
+      unmergeable = Set.new
+
       loop do
-        small = clusters.select { |_, c| c[:members].size < min_size }
+        small = clusters.select { |n, c| c[:members].size < min_size && !unmergeable.include?(n) }
         break if small.empty?
 
         # Merge the smallest cluster first
@@ -721,7 +723,10 @@ module Woods
         # Find which other cluster this one connects to most
         target = find_merge_target(cluster, clusters, name)
 
-        break unless target
+        unless target
+          unmergeable << name
+          next
+        end
 
         clusters[target][:members].concat(cluster[:members])
         cluster[:members].each { |id| clusters[target][:member_set].add(id) }
