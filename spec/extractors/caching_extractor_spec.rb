@@ -939,6 +939,26 @@ RSpec.describe Woods::Extractors::CachingExtractor do
       expect(extract('app/views/widgets/index.html.erb', "<% # cache @widgets do %>\n")).to be_nil
     end
 
+    it 'ignores a Ruby comment line inside a multi-line ERB code tag' do
+      expect(types('app/views/widgets/index.html.erb', <<~ERB)).to eq([:fragment])
+        <%
+          # cache @old do
+          total = @widgets.size
+          # cache @older do
+        %>
+        <% cache [@widget, 'v1'] do %>
+        <% end %>
+      ERB
+    end
+
+    it 'keeps code that follows a comment line inside a multi-line ERB tag' do
+      expect(types('app/views/widgets/index.html.erb', <<~ERB)).to eq([:fragment])
+        <% # note
+          cache @widget do %>
+        <% end %>
+      ERB
+    end
+
     it 'keeps a real ERB call next to a commented one' do
       expect(types('app/views/widgets/index.html.erb', <<~ERB)).to eq([:fragment])
         <%# cache @old do %>
