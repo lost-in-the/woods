@@ -259,6 +259,8 @@ module Woods
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),
           read_tools_enabled: resolve_deferred(@embedded_read_tools),
+          sql_default_limit: config&.console_sql_default_limit,
+          sql_max_limit: config&.console_sql_max_limit,
           model_tables: introspection[:tables],
           model_reflections: introspection[:reflections],
           unsafe_eval_confirmation: @unsafe_eval_confirmation,

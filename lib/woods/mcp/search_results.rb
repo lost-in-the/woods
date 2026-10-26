@@ -33,6 +33,17 @@ module Woods
         { status: status, reason: reason, has_more: error_count > listed, total_errors: error_count }
       end
 
+      # Same completeness keys as {#response}, for a row-capped result set that
+      # fetched one lookahead row. +has_more+ is true only when that extra row arrived.
+      #
+      # @param returned [Integer] rows handed to the caller
+      # @param has_more [Boolean] whether a row beyond the cap exists
+      # @return [Hash] completeness evidence
+      def self.row_limit_outcome(returned:, has_more:)
+        { status: has_more ? 'partial' : 'complete', reason: has_more ? 'result_limit' : 'exhausted',
+          has_more: has_more, total_matches: has_more ? nil : returned, matched_lower_bound: returned }
+      end
+
       def initialize(limit:)
         @limit = limit
         @matches = []
