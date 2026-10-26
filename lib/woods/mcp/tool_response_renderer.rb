@@ -95,6 +95,12 @@ module Woods
           "(total unknown: #{fetch_key(data, :partial_reason)})."
       end
 
+      def domain_page_line(data, shown, total)
+        offset = fetch_key(data, :offset, 0)
+        position = offset.positive? ? " from offset #{offset}" : ''
+        "Showing #{shown} of #{total} domains#{position}."
+      end
+
       def search_completeness_lines(data)
         evidence = fetch_key(data, :completeness)
         return [] unless evidence.is_a?(Hash)

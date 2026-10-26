@@ -1,0 +1,1 @@
+- Enforce the elapsed-time budgets of the complexity specs only when `WOODS_RUN_PERF_SPECS` is set, which the performance workflow does for every spec that includes `WallClockBudget`. Elsewhere the block still runs and an overrun is reported on stderr instead of failing, so shared runners and parallel processes no longer fail the unit jobs on timing noise.

@@ -333,7 +333,8 @@ RSpec.describe 'woods_status tool' do
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do
       stub_git_head(head: manifest_sha)
-      reader = double('reader', manifest: { 'git_sha' => manifest_sha, 'extracted_at' => nil, 'counts' => {} })
+      reader = double('reader', manifest: { 'git_sha' => manifest_sha, 'extracted_at' => nil, 'counts' => {} },
+                                source_freshness: { 'recorded_root' => '/tmp' })
 
       status = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: '/tmp')
 
@@ -344,7 +345,8 @@ RSpec.describe 'woods_status tool' do
 
     it 'reports git_sha_matches_head=false when HEAD has moved past manifest.git_sha' do
       stub_git_head(head: head_sha)
-      reader = double('reader', manifest: { 'git_sha' => manifest_sha, 'extracted_at' => nil, 'counts' => {} })
+      reader = double('reader', manifest: { 'git_sha' => manifest_sha, 'extracted_at' => nil, 'counts' => {} },
+                                source_freshness: { 'recorded_root' => '/tmp' })
 
       status = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: '/tmp')
 

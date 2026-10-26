@@ -10,18 +10,25 @@ require 'woods/mcp/index_reader'
 
 RSpec.describe Woods::GemMapper do
   let(:root) { File.expand_path('..', __dir__) }
-  let(:output_dir) { Dir.mktmpdir('woods_self_map') }
 
-  after { FileUtils.rm_rf(output_dir) }
+  # Mapping the whole checkout takes seconds, so the read-only examples share one map.
+  before(:all) do
+    @shared_output_dir = Dir.mktmpdir('woods_self_map')
+    @shared_result = described_class.new(root: File.expand_path('..', __dir__), output_dir: @shared_output_dir).map!
+  end
+
+  after(:all) { FileUtils.rm_rf(@shared_output_dir) }
+
+  def output_dir
+    @shared_output_dir
+  end
 
   def payload_dir
     Woods::Generation.new(output_dir: output_dir).payload_dir
   end
 
   it 'publishes a complete, MCP-readable static source generation' do
-    result = described_class.new(root: root, output_dir: output_dir).map!
-
-    expect(result).to include(status: :published, generation: 1)
+    expect(@shared_result).to include(status: :published, generation: 1)
     expect(payload_dir.join('manifest.json')).to be_file
     expect(payload_dir.join('ruby_classes', '_index.json')).to be_file
     expect(payload_dir.join('ruby_modules', '_index.json')).to be_file
@@ -40,8 +47,6 @@ RSpec.describe Woods::GemMapper do
   end
 
   it 'preserves source-map types for MCP filtering' do
-    described_class.new(root: root, output_dir: output_dir).map!
-
     unit = Woods::MCP::IndexReader.new(output_dir).find_unit('Woods::RubyAnalyzer')
     expect(unit).to include('type' => 'ruby_module')
     expect(reader = Woods::MCP::IndexReader.new(output_dir)).to be_a(Woods::MCP::IndexReader)
@@ -50,15 +55,12 @@ RSpec.describe Woods::GemMapper do
   end
 
   it 'names each unit type in its type index' do
-    described_class.new(root: root, output_dir: output_dir).map!
-
     entries = JSON.parse(payload_dir.join('ruby_modules', '_index.json').read)
     expect(entries).to all(include('type' => 'ruby_module'))
   end
 
   it 'skips an unchanged tree without advancing the generation' do
     mapper = described_class.new(root: root, output_dir: output_dir)
-    mapper.map!
     original_manifest = File.binread(payload_dir.join('manifest.json'))
 
     expect(mapper.map!).to include(status: :skipped, generation: 1)
@@ -66,22 +68,23 @@ RSpec.describe Woods::GemMapper do
   end
 
   it 'writes only repository-relative source paths' do
-    described_class.new(root: root, output_dir: output_dir).map!
-
     entries = Dir[payload_dir.join('ruby_*', '_index.json').to_s].flat_map { |path| JSON.parse(File.read(path)) }
     expect(entries.map { |entry| entry['file_path'] }).to all(satisfy { |path| !path.start_with?('/') })
     expect(entries.map { |entry| entry['file_path'] }).to include('lib/tasks/woods.rake', 'exe/woods-mcp')
   end
 
   it 'records its writer version when loaded as a standalone mapper (#323)' do
+    standalone_dir = Dir.mktmpdir('woods_self_map_standalone')
     script = <<~RUBY
       require 'woods/gem_mapper'
       Woods::GemMapper.new(root: ARGV[0], output_dir: ARGV[1]).map!
       payload = Woods::Generation.new(output_dir: ARGV[1]).payload_dir
       puts JSON.parse(File.read(payload.join('manifest.json'))).fetch('woods_version')
     RUBY
-    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, root, output_dir)
+    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, root, standalone_dir)
     expect(status).to be_success, err
     expect(out.strip).to eq(Woods::VERSION)
+  ensure
+    FileUtils.rm_rf(standalone_dir)
   end
 end

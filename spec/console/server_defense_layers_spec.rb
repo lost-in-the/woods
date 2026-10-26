@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'woods'
 require 'woods/console/server'
+require 'woods/console/embedded_executor'
 
 # End-to-end wiring check for the Console defense-in-depth stack.
 #

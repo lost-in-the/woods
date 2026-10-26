@@ -91,7 +91,8 @@ module Woods
         if source_reference_identities.any? { |type, identifier| source_reference_node?(type, identifier) }
           raise RebuildRequired,
                 'Source-reference baseline is missing or incompatible. Run bin/rails woods:extract once for a full ' \
-                'extraction; the previous published generation remains active.'
+                'extraction; the previous published generation remains active. ' \
+                'woods:validate reports incremental readiness.'
         end
         @source_reference_baseline = { 'version' => Cache::VERSION, 'callers' => source_reference_policy.to_h,
                                        'files' => {}, 'owners' => [] }

@@ -72,6 +72,7 @@ require_relative 'method_table'
 require_relative 'callback_sites'
 require_relative 'change_set'
 require_relative 'generation'
+require_relative 'resilience/incremental_readiness'
 require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
@@ -1159,11 +1160,13 @@ module Woods
     # incremental run patches — sees the previous generation, exactly as it
     # did when the index was flat.
     #
-    # A failure here degrades to the flat layout rather than failing the run
-    # — but only when a flat publish can actually be complete. A full
-    # extraction's write set is every unit in the app, so a flat publish from
-    # it is a whole index; the next successful run restores the payload
-    # boundary. `strict:` opts out of that degrade for {#extract_changed} and
+    # A failure here fails the run closed: the last good generation stays
+    # published. `WOODS_ALLOW_FLAT_FALLBACK=1` opts a full extraction back into
+    # publishing flat, which is only sound when a flat publish can actually be
+    # complete. A full extraction's write set is every unit in the app, so a
+    # flat publish from it is a whole index (though not an atomic one); the
+    # next successful run restores the payload boundary. `strict:` refuses
+    # that degrade even with the flag, for {#extract_changed} and
     # {#refresh}, whose write set is only the units they touched: over a
     # payload-born index (`marker.payload` set), the flat root holds nothing
     # newer than the last time this index was flat — possibly nothing at all
@@ -1176,10 +1179,11 @@ module Woods
     # over a raised run, so readers keep serving the last good index.
     #
     # @param strict [Boolean] raise instead of degrading to a flat publish
-    #   when the published generation names a payload
+    #   when the published generation names a payload, flag or not
     # @return [void]
-    # @raise [Woods::ExtractionError] when `strict` and a payload-born index's
-    #   payload directory could not be opened for this run
+    # @raise [Woods::ExtractionError] when the payload directory could not be
+    #   opened and flat fallback is not allowed, or when `strict` and a
+    #   payload-born index's payload directory could not be opened
     def begin_payload!(strict: false)
       @publication_error = nil
       marker = Generation.new(output_dir: @output_dir).current
@@ -1200,11 +1204,37 @@ module Woods
         MSG
       end
 
+      raise_payload_open_failure(e, marker) unless flat_fallback_allowed?
+
       Rails.logger.warn(
-        "[Woods] Could not open a payload directory (#{e.class}: #{e.message}) — publishing flat"
+        "[Woods] Could not open a payload directory (#{e.class}: #{e.message}). WOODS_ALLOW_FLAT_FALLBACK=1 is " \
+        'set, so this full extraction publishes flat into the output root. That publish is not atomic: ' \
+        'readers can see a mix of old and new files while it runs.'
       )
       @payload_dir = nil
       @payload_generation = nil
+    end
+
+    # @return [Boolean] whether a full extraction may publish flat when no payload directory opens
+    def flat_fallback_allowed?
+      ENV.fetch('WOODS_ALLOW_FLAT_FALLBACK', nil) == '1'
+    end
+
+    # A full extraction that cannot open a payload directory fails closed.
+    # Publishing flat replaces files in the output root one by one, so readers
+    # would see a mix of generations; the last good generation stays published
+    # instead.
+    #
+    # @raise [Woods::ExtractionError] always
+    def raise_payload_open_failure(error, marker)
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        Could not open a payload directory for this full extraction
+        (#{error.class}: #{error.message}). Generation #{marker&.number} stays
+        published. Fix the underlying filesystem issue (permissions, free
+        space, a broken mount) and run again. To publish a flat index into
+        the output root anyway, accepting that the publish is not atomic, set
+        WOODS_ALLOW_FLAT_FALLBACK=1.
+      MSG
     end
 
     # Readers retain legacy compatibility, but partial writers cannot migrate
@@ -1213,25 +1243,12 @@ module Woods
     #
     # @return [Hash, nil] the published manifest, nil when there is none
     def ensure_supported_incremental_writer!
-      generation = Generation.new(output_dir: @output_dir)
-      directory = generation.payload_dir
-      manifest_path = directory.join('manifest.json')
-      return unless manifest_path.file?
-
-      if directory == generation.root
-        raise Woods::ExtractionError,
-              "Cannot incrementally update a legacy flat index under #{@output_dir}; run a full woods:extract first"
-      end
-
-      manifest = JSON.parse(AtomicFile.read(manifest_path))
-      writer = manifest.fetch('woods_version', nil)
-      return manifest if writer.nil? || Gem::Version.new(writer).segments.first >= 2
+      check = Resilience::IncrementalReadiness.check_writer(Generation.new(output_dir: @output_dir))
+      return check.manifest unless check.problem
 
       raise Woods::ExtractionError,
-            "Cannot incrementally update an index written by Woods #{writer}; run a full woods:extract first"
-    rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
-      raise Woods::ExtractionError,
-            "Cannot verify the baseline manifest writer (#{e.class}); run a full woods:extract first"
+            "Cannot incrementally update #{check.problem}; run a full woods:extract first " \
+            '(woods:validate reports incremental readiness)'
     end
 
     # The baseline's extraction fingerprint, once this run's configuration is

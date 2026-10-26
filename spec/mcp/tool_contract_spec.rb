@@ -109,11 +109,20 @@ RSpec.describe 'Index MCP tool contracts' do
                                }),
       'domain_clusters' => contract(:always, {}, exact_data({
                                                               'clusters' => [{ 'name' => 'Billing', 'member_count' => 2,
-                                                                               'hub' => 'PaymentService' }],
-                                                              'total' => 1
+                                                                               'hub' => 'PaymentService',
+                                                                               'members' => %w[Invoice PaymentService] }],
+                                                              'total' => 1, 'offset' => 0, 'limit' => 20,
+                                                              'completeness' => {
+                                                                'status' => 'complete', 'reason' => 'exhausted',
+                                                                'has_more' => false, 'total_matches' => 1,
+                                                                'matched_lower_bound' => 1
+                                                              }
                                                             }), properties: {
                                                               'min_size' => integer_contract(1, 100_000),
-                                                              'types' => array_contract(1_000, 10_000)
+                                                              'types' => array_contract(1_000, 10_000),
+                                                              'limit' => integer_contract(1, 1_000),
+                                                              'offset' => integer_contract(0, 1_000_000),
+                                                              'member_limit' => integer_contract(1, 10_000)
                                                             }),
       'framework' => contract(:always, { 'keyword' => 'ActiveRecord' }, exact_data({
                                                                                      'keyword' => 'ActiveRecord', 'result_count' => 1,
@@ -496,7 +505,8 @@ RSpec.describe 'Index MCP tool contracts' do
     allow(Woods::Feedback::GapDetector).to receive(:new)
       .and_return(double(detect: [{ kind: 'missing_unit', count: 1 }]))
     allow(Woods::GraphAnalyzer).to receive(:new).and_return(
-      double(domain_clusters: [{ name: 'Billing', member_count: 2, hub: 'PaymentService' }])
+      double(domain_clusters: [{ name: 'Billing', member_count: 2, hub: 'PaymentService',
+                                 members: %w[Invoice PaymentService] }])
     )
     allow(Woods::Notion::Exporter).to receive(:new)
       .and_return(notion_exporter)
@@ -845,8 +855,32 @@ RSpec.describe 'Index MCP tool contracts' do
     end
   end
 
-  def boundary_assertions
+  def assert_domain_clusters_limit(data, value, _name)
+    expect(data['limit']).to eq(value)
+    expect(data['clusters'].size).to eq(1)
+    expect(data['completeness']['has_more']).to be(false)
+  end
+
+  def assert_domain_clusters_offset(data, value, _name)
+    expect(data['offset']).to eq(value)
+    expect(data['total']).to eq(1)
+    expect(data['clusters'].size).to eq(value.zero? ? 1 : 0)
+  end
+
+  def assert_domain_clusters_member_limit(data, value, _name)
+    expect(data['clusters'].first['members']).to eq(%w[Invoice PaymentService].first(value))
+  end
+
+  def domain_clusters_boundary_assertions
     {
+      %w[domain_clusters limit] => :assert_domain_clusters_limit,
+      %w[domain_clusters offset] => :assert_domain_clusters_offset,
+      %w[domain_clusters member_limit] => :assert_domain_clusters_member_limit
+    }
+  end
+
+  def boundary_assertions
+    domain_clusters_boundary_assertions.merge(
       %w[dependencies max_nodes] => :assert_traversal_node_budget,
       %w[dependents max_nodes] => :assert_traversal_node_budget,
       %w[dependencies max_edges] => :assert_traversal_edge_budget,
@@ -865,7 +899,7 @@ RSpec.describe 'Index MCP tool contracts' do
       %w[lookup budget] => :assert_lookup_evidence_budget,
       %w[trace_flow depth] => :assert_trace_depth,
       %w[diagram depth] => :assert_diagram_depth
-    }
+    )
   end
 
   def assert_lookup_evidence_budget(data, value, _name)

@@ -1009,6 +1009,26 @@ cache or delete it to bypass the check. The preceding generation remains active.
 The watcher preserves failed batches but does not automatically repair this
 baseline: establish the full baseline before resuming incremental maintenance.
 
+### Incremental readiness
+
+`woods:validate` answers whether a reader can use the index, so an older index
+keeps passing it. It also prints a separate line, `Incremental: ready` or
+`Incremental: needs full extraction (<reason>)`, and `woods_status` reports the
+same as `index.incremental` (`{ready:, status:}`). Reasons include a legacy flat
+layout, a 1.x writer, an unreadable manifest, and a missing, malformed or
+incompatible `source_references.json`. The cache is read through the same
+reader the writer uses. A malformed cache stays reader-valid and reports not
+ready; restoring the bytes reports ready again.
+
+Readiness covers the baseline on disk. Refusals that depend on the live
+configuration or current source bytes (a changed extraction fingerprint or
+`source_reference_callers`, an unverifiable source file) are still decided by
+the run, which refuses before publishing and leaves the active generation in
+place. The refusal messages point back to `woods:validate`. `woods_status`
+memoizes the result per served generation (dropped on reload), so the cache is
+parsed once per generation. Restoring cache bytes inside one generation shows up
+after the next reload or generation change.
+
 The development constant-span writer uses cache format 7. It requires validated
 line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that

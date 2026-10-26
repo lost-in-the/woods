@@ -11,6 +11,8 @@ require 'uri'
 require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../generation_pins'
+require_relative '../git_provenance'
+require_relative '../resilience/incremental_readiness'
 require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../watch/supervision_status'
@@ -79,6 +81,8 @@ module Woods
       # `via`; `limit` and `offset` only page what those leave (B-183).
       DEFAULT_TRAVERSAL_LIMIT = 50
       DEFAULT_GRAPH_ANALYSIS_LIMIT = 20
+      DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
+      DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
       class << self
         # Build a configured MCP::Server with all tools and resources.
@@ -763,10 +767,17 @@ module Woods
         def define_domain_clusters_tool(server, reader, respond, renderer)
           coerce = method(:coerce_array)
           coerce_int = method(:coerce_integer)
+          cap_members = method(:cap_cluster_members)
+          default_limit = method(:domain_clusters_default_limit)
+          default_member_limit = method(:domain_clusters_default_member_limit)
           server.define_tool(
             name: 'domain_clusters',
             description: 'Group code units into semantic domains by namespace and graph connectivity. ' \
                          'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \
+                         'Clusters come largest first and are paged: `limit` clusters per call ' \
+                         "(default: #{domain_clusters_default_limit}), `offset` to continue, and each cluster lists at most " \
+                         "`member_limit` members, entry points and boundary edges (default: #{domain_clusters_default_member_limit}) " \
+                         'with `members_omitted`, `entry_points_omitted` and `boundary_edges_omitted` counting the rest. Check `completeness.has_more` before treating the answer as every domain. ' \
                          'Useful for understanding architectural domains and blast radius.',
             input_schema: {
               properties: {
@@ -777,19 +788,66 @@ module Woods
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Filter to these unit types (default: all). Example: ["model", "service", "job"]'
+                },
+                limit: {
+                  type: 'integer',
+                  description: "Maximum clusters to return (default: #{domain_clusters_default_limit})"
+                },
+                offset: { type: 'integer', description: 'Skip this many clusters (default: 0)' },
+                member_limit: {
+                  type: 'integer',
+                  description: "Maximum members, entry points and boundary edges listed per cluster (default: #{domain_clusters_default_member_limit}). " \
+                               'Raise it to read the rest of a large cluster.'
                 }
               }
             }
-          ) do |server_context:, min_size: nil, types: nil|
+          ) do |server_context:, min_size: nil, types: nil, limit: nil, offset: nil, member_limit: nil|
             min_size = coerce_int.call(min_size) || 3
             types = coerce.call(types)
+            limit = coerce_int.call(limit) || default_limit.call
+            offset = coerce_int.call(offset) || 0
+            member_limit = coerce_int.call(member_limit) || default_member_limit.call
 
-            graph = reader.dependency_graph
-            analyzer = Woods::GraphAnalyzer.new(graph)
+            all = reader.domain_clusters(min_size: min_size, types: types)
+            page = all.drop(offset).first(limit).map do |cluster|
+              cap_members.call(cluster, member_limit)
+            end
 
-            clusters = analyzer.domain_clusters(min_size: min_size, types: types)
+            respond.call(
+              renderer.render(
+                :domain_clusters,
+                { clusters: page, total: all.size, offset: offset, limit: limit,
+                  completeness: SearchResults.page(total: all.size, offset: offset, returned: page.size) }
+              )
+            )
+          end
+        end
 
-            respond.call(renderer.render(:domain_clusters, { clusters: clusters, total: clusters.size }))
+        def domain_clusters_default_limit
+          positive_env_integer('WOODS_DOMAIN_CLUSTERS_LIMIT', DEFAULT_DOMAIN_CLUSTERS_LIMIT)
+        end
+
+        def domain_clusters_default_member_limit
+          positive_env_integer('WOODS_DOMAIN_CLUSTERS_MEMBER_LIMIT', DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT)
+        end
+
+        def positive_env_integer(name, default)
+          value = ENV.fetch(name, '').to_s.strip.to_i
+          value.positive? ? value : default
+        end
+
+        CLUSTER_CAPPED_LISTS = %i[members entry_points boundary_edges].freeze
+        private_constant :CLUSTER_CAPPED_LISTS
+
+        # A copy of the cluster listing at most +member_limit+ members, entry
+        # points and boundary edges. Each cut list gets a +<list>_omitted+
+        # count; lists that fit carry no marker.
+        def cap_cluster_members(cluster, member_limit)
+          CLUSTER_CAPPED_LISTS.reduce(cluster) do |capped, key|
+            list = capped[key]
+            next capped if list.nil? || list.size <= member_limit
+
+            capped.merge(key => list.first(member_limit), "#{key}_omitted": list.size - member_limit)
           end
         end
 
@@ -2350,12 +2408,56 @@ module Woods
           base.merge!(working_tree_fields(index_dir))
 
           manifest_sha = manifest && manifest['git_sha']
-          head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
+          root = recorded_source_root(base[:source_freshness])
+          head_sha = manifest_sha ? resolve_head_sha(root) : nil
+          base[:history] = history_fields(manifest_sha, head_sha, root)
+          base[:incremental] = incremental_fields(index_dir, reader)
           return base unless head_sha
 
           base[:head_git_sha] = head_sha
           base[:git_sha_matches_head] = (manifest_sha == head_sha)
           base
+        end
+
+        # Whether the published index can take an incremental run, separately
+        # from whether it is readable: an older index still serves every tool
+        # while `woods:incremental` would refuse it. Omitted without an index
+        # directory.
+        #
+        # @return [Hash, nil] `{ready:, status:}`, status being `ready` or
+        #   `needs full extraction (<reason>)`
+        def incremental_fields(index_dir, reader = nil)
+          return unless index_dir
+
+          result = if reader.respond_to?(:incremental_readiness)
+                     reader.incremental_readiness
+                   else
+                     Woods::Resilience::IncrementalReadiness.new(index_dir: index_dir).call
+                   end
+          { ready: result.ready?, status: result.to_s }
+        end
+
+        # Whether the Git-derived facts in the published index describe the
+        # live HEAD. A HEAD move with no working-tree change leaves
+        # +source_freshness+ current while history (blame, churn, recent
+        # commits) is behind, so this is reported on its own.
+        #
+        # +state+ is +current+, +stale+ or +unknown+. Unknown is never stale:
+        # a manifest without a usable sha, or a directory Git cannot resolve,
+        # cannot be compared.
+        #
+        # @return [Hash]
+        def history_fields(published_sha, head_sha, root)
+          if published_sha.nil? || published_sha.to_s.empty?
+            return { state: 'unknown', reason: 'published_sha_missing' }
+          end
+          if published_sha == Woods::GitProvenance::UNKNOWN
+            return { state: 'unknown', reason: 'published_sha_unknown', published_sha: published_sha }
+          end
+          return { state: 'unknown', reason: unresolved_reason(root), published_sha: published_sha } unless head_sha
+          return { state: 'current', published_sha: published_sha, head_sha: head_sha } if published_sha == head_sha
+
+          { state: 'stale', reason: 'head_moved', published_sha: published_sha, head_sha: head_sha }
         end
 
         # The generation the index is published at.
@@ -2527,30 +2629,36 @@ module Woods
           fields
         end
 
-        # Resolve the current HEAD SHA for the git repo containing +index_dir+.
-        # Returns nil when git is unavailable or +index_dir+ is not in a repo —
-        # callers treat nil as "can't compare" rather than "mismatch".
+        # The application root the generation recorded when it captured source
+        # inputs. It is the only root whose repository describes the index: the
+        # index directory may sit inside an unrelated checkout.
         #
-        # capture3 keeps git's stderr out of the MCP stdio transport — clients
-        # that parse stderr for protocol framing can't tolerate stray lines —
-        # *and* out of the SHA. capture2e folded them together, so a warning on
-        # an otherwise successful `rev-parse` (a stale `index.lock` notice, a
-        # `core.fsmonitor` complaint) was concatenated into the value this
-        # method returns and compared against the manifest as if it were a SHA.
-        # Same hazard as {#resolve_working_tree_status}, one probe over.
-        def resolve_head_sha(index_dir)
-          return nil unless index_dir
+        # @return [String, nil]
+        def recorded_source_root(freshness)
+          root = freshness.is_a?(Hash) ? freshness['recorded_root'] : nil
+          root.is_a?(String) && !root.empty? ? root : nil
+        end
 
-          dir = index_dir.to_s
-          return nil unless File.directory?(dir)
+        def unresolved_reason(root)
+          return 'root_not_recorded' unless root
 
-          output, _stderr, status = Open3.capture3('git', '-C', dir, 'rev-parse', 'HEAD')
-          status.success? ? output.strip : nil
-        rescue Errno::ENOENT, Errno::EACCES
-          # git not installed or not executable on this host — equivalent to
-          # "can't compare". Any other exception is a genuine bug and should
-          # propagate.
-          nil
+          File.directory?(root) ? 'head_unresolved' : 'root_unreachable'
+        end
+
+        # Resolve the live HEAD SHA of the repository at the recorded
+        # application +root+, through {Woods::GitProvenance} so a linked
+        # worktree and +WOODS_GIT_DIR+ resolve as they do for extraction.
+        # Returns nil when no root was recorded, it is not reachable from this
+        # process, or git cannot resolve it; callers treat nil as "can't
+        # compare" rather than "mismatch".
+        #
+        # GitProvenance captures stderr separately, so a warning on an
+        # otherwise successful +rev-parse+ never lands in the value compared
+        # against the manifest, and never reaches the MCP stdio transport.
+        def resolve_head_sha(root)
+          return nil unless root && File.directory?(root)
+
+          Woods::GitProvenance.new(root: root).head_sha
         end
 
         # Assemble the +features+ sub-hash of woods_status, preferring the
