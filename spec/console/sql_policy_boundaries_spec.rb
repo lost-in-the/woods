@@ -51,7 +51,7 @@ RSpec.describe 'Console SQL policy boundaries' do
     allow(connection).to receive(:select_all) do |executed_sql|
       expect(executor).to have_received(:validate_sql_policy!).with(submitted_sql)
       expect(executor).to have_received(:validate_sql_policy!).with(executed_sql)
-      expect(executed_sql).to end_with('AS _limited LIMIT 5')
+      expect(executed_sql).to end_with('AS _limited LIMIT 6')
       double(columns: ['id'], rows: [[1]], column_types: { 'id' => double(type: :integer) })
     end
     expect(request(submitted_sql, limit: 5)['ok']).to be true
@@ -59,7 +59,7 @@ RSpec.describe 'Console SQL policy boundaries' do
 
   it 'keeps trailing line comments inside the limited subquery' do
     expect(request('SELECT id FROM users -- note', limit: 5)['ok']).to be true
-    expect(connection).to have_received(:select_all).with(/-- note\n\) AS _limited LIMIT 5\z/)
+    expect(connection).to have_received(:select_all).with(/-- note\n\) AS _limited LIMIT 6\z/)
   end
 
   it 'keeps directly selected protected columns available with a limit' do
@@ -165,7 +165,7 @@ RSpec.describe 'Console SQL policy boundaries' do
     allow(connection).to receive(:adapter_name).and_return('Mysql2')
     sql = 'SELECT p.id FROM preferences p STRAIGHT_JOIN users ON users.id = p.id'
     expect(request(sql)).to include('ok' => true)
-    expect(connection).to have_received(:select_all).with(sql)
+    expect(connection).to have_received(:select_all).with("SELECT * FROM (\n#{sql}\n) AS _limited LIMIT 101")
   end
 
   %w[PostgreSQL SQLite Mysql2].each do |adapter|
@@ -226,13 +226,13 @@ RSpec.describe 'Console SQL policy boundaries' do
       it 'keeps column projections available across an unaliased join' do
         sql = 'SELECT p.id FROM preferences p JOIN users ON users.id = p.id ORDER BY p.id'
         expect(request(sql)).to include('ok' => true)
-        expect(connection).to have_received(:select_all).with(sql)
+        expect(connection).to have_received(:select_all).with("SELECT * FROM (\n#{sql}\n) AS _limited LIMIT 101")
       end
 
       it 'keeps column projections available with an unaliased USING join' do
         sql = 'SELECT p.id FROM preferences p JOIN users USING (id)'
         expect(request(sql)).to include('ok' => true)
-        expect(connection).to have_received(:select_all).with(sql)
+        expect(connection).to have_received(:select_all).with("SELECT * FROM (\n#{sql}\n) AS _limited LIMIT 101")
       end
 
       it 'still refuses an unaliased joined relation used as a whole-row value' do
