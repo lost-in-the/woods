@@ -27,6 +27,14 @@ module Woods
       # A whole string literal shaped like a host name, read in a file that
       # calls host!, since host! may read it from data.
       HOST_STRING = /(?:"([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)"|'([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)')/i
+      # Last labels a test host ends in. A dotted literal that ends otherwise
+      # (`order.created`, `app.errors.title`) is a key or event name.
+      HOST_TLD = /\A(?:test|example|invalid|localhost|local|internal|com|net|org|edu|gov|io|dev|app|info|biz|me|co|xyz|
+                       uk|us|ca|de|fr|au|nz|jp)\z/ix
+      # A factory or model call earlier on the line: its `subdomain:` is an
+      # attribute of the record, not a request host.
+      RECORD_CALL = /\b(?:create|create!|create_list|build|build_list|build_stubbed|attributes_for|new|find_by|where)\b
+                     [^\n]*\z/x
       FILE_EXTENSION = /\.(?:rb|erb|json|csv|txt|png|jpe?g|gif|svg|webp|pdf|ya?ml|xml|html?|zip|gz|js|css|md|log)\z/i
       CAPYBARA_SPEC = /
         (?<![\w:@$])visit[ \t(]|\.visit[ \t(]
@@ -137,7 +145,7 @@ module Woods
         return [] unless source.match?(HOST_CALL)
 
         source.scan(HOST_STRING).map { |captures| captures.compact.first }
-              .select { |host| host.split('.').last.match?(/\A[a-z]+\z/i) && !host.match?(FILE_EXTENSION) }
+              .select { |host| host.split('.').last.match?(HOST_TLD) && !host.match?(FILE_EXTENSION) }
       end
 
       # An interpolated host or subdomain anywhere makes the file's subdomain
@@ -147,9 +155,21 @@ module Woods
       end
 
       def named(source)
-        values = source.scan(OPTION)
+        values = options(source)
         values += source.scan(helper_pattern) if helper_pattern
         values.map { |captures| captures.compact.first }
+      end
+
+      # `subdomain:` options, leaving out those given to a record call.
+      def options(source)
+        found = []
+        source.scan(OPTION) do
+          match = Regexp.last_match
+          line_start = source.rindex("\n", match.begin(0) - 1) if match.begin(0).positive?
+          before = source[(line_start ? line_start + 1 : 0)...match.begin(0)]
+          found << match.captures unless before.match?(RECORD_CALL)
+        end
+        found
       end
 
       def helper_pattern
