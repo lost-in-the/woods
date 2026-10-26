@@ -163,6 +163,19 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
       expect(metadata[:key_paths_truncated]).to be(true)
     end
 
+    it 'keeps top-level keys and environments when the walk spends its visit budget' do
+      stub_const("#{described_class}::MAX_VISITS", 30)
+      rows = (1..100).map { |n| "  row#{n}: #{n}\n" }.join
+      create_file('config/settings.yml', "data:\n#{rows}production:\n  pool: 5\ntest:\n  pool: 1\n")
+
+      metadata = unit_for('config/settings.yml').metadata
+
+      expect(metadata[:key_paths_truncated]).to be(true)
+      expect(metadata[:top_level_keys]).to eq(%w[data production test])
+      expect(metadata[:environments]).to eq(%w[production test])
+      expect(metadata[:environment_keys]).to eq('production' => %w[pool], 'test' => %w[pool])
+    end
+
     it 'does not read a file over the size limit' do
       path = create_file('config/settings.yml', "a: 1\n")
       allow(File).to receive(:size).and_call_original
@@ -292,6 +305,29 @@ RSpec.describe Woods::Extractors::ConfigFileExtractor do
 
     context 'with config.config_file_values enabled' do
       let(:store_values) { true }
+
+      it 'publishes the override, not the merged default, for a key set after a merge key' do
+        create_file('config/database.yml', <<~YAML)
+          default: &default
+            pool: 5
+            adapter: postgresql
+          production:
+            <<: *default
+            pool: 20
+        YAML
+
+        unit = unit_for('config/database.yml')
+
+        expect(unit.source_code).to include('production.pool = 20', 'production.adapter = postgresql')
+        expect(unit.source_code).not_to include('production.pool = 5')
+        expect(unit.metadata[:key_paths].count('production.pool')).to eq(1)
+      end
+
+      it 'publishes the override for a key set before a merge key' do
+        create_file('config/database.yml', "default: &default\n  pool: 5\nproduction:\n  pool: 20\n  <<: *default\n")
+
+        expect(unit_for('config/database.yml').source_code).to include('production.pool = 20')
+      end
 
       it 'stores scalar values but never one under a credential-named key' do
         create_file('config/settings.yml', <<~YAML)
