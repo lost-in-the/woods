@@ -1,0 +1,1 @@
+- A large YAML file no longer loses `top_level_keys` and `environments` in its `config_file` unit once the key walk spends its visit budget. The top-level and environment pass now has a budget of its own.
