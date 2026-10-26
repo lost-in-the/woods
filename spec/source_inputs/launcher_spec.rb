@@ -122,6 +122,24 @@ RSpec.describe Woods::SourceInputs::Launcher do
     FileUtils.rm_rf(File.dirname(alias_root)) if alias_root
   end
 
+  it 'keeps the in-tree path of a symlinked source, whether its target is inside or outside the root' do
+    outside = Dir.mktmpdir('woods-launcher-outside')
+    FileUtils.mkdir_p(File.join(@app, 'app/models'))
+    FileUtils.mkdir_p(File.join(@app, 'lib'))
+    File.write(File.join(@app, 'lib/real.rb'), 'class Real; end')
+    File.write(File.join(outside, 'shared.rb'), 'class Shared; end')
+    File.symlink(File.join(@app, 'lib/real.rb'), File.join(@app, 'app/models/real.rb'))
+    File.symlink(File.join(outside, 'shared.rb'), File.join(@app, 'app/models/shared.rb'))
+
+    expect(run_launcher('incremental', 'app/models/real.rb', File.join(@app, 'app/models/shared.rb'))).to eq(0)
+    task = child.fetch('arguments').fetch(0)
+    batch = JSON.parse(Base64.strict_decode64(task[/\Awoods:hook_refresh\[(.*)\]\z/, 1]))
+    expect(batch.fetch('events').map { |event| event.fetch('path') })
+      .to eq(%w[app/models/real.rb app/models/shared.rb])
+  ensure
+    FileUtils.rm_rf(outside) if outside
+  end
+
   it 'preserves a JSON incremental path and restart escalation through the hook task' do
     expect(run_launcher('incremental', "app/services/a,b c\nd.rb")).to eq(0)
     record = child
