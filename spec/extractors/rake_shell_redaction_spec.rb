@@ -150,60 +150,93 @@ RSpec.describe Woods::Extractors::RakeShellRedaction do
   end
 
   describe 'on adversarial input' do
-    # The budget is CPU time of this thread: a wall-clock limit also counts the
-    # time other parallel rspec processes take the core, which fails a linear
-    # scan on a loaded runner. The wall-clock timeout stays as a backstop that
-    # stops a runaway scan from hanging the suite.
+    # What these examples guard is that the scan stays linear. An absolute
+    # time budget cannot tell that apart from a slow runner (SimpleCov line
+    # instrumentation alone adds seconds), so each example builds its input at
+    # a tenth of its size and at full size and compares thread CPU time:
+    # linear growth is about 10x, quadratic about 100x. The wall-clock timeout
+    # is only a backstop against a scan that never returns.
+    let(:max_growth) { 25 }
+    let(:cpu_floor) { 0.05 }
+
+    def cpu_time
+      started = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
+      result = yield
+      [Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - started, result]
+    end
+
+    # @yield [count] builds the input for +count+ repetitions and returns what redact returned
+    # @return the result of the full-size run
+    def at_scale(full)
+      small = Array.new(3) { cpu_time { yield(full / 10) }.first }.min
+      large, result = cpu_time { yield(full) }
+      growth = large / [small, cpu_floor].max
+      expect(growth).to be < max_growth,
+                        "10x input took #{growth.round(1)}x the CPU (#{small.round(3)}s -> #{large.round(3)}s)"
+      result
+    end
+
     around do |example|
       previous = Regexp.respond_to?(:timeout) ? Regexp.timeout : nil
       Regexp.timeout = 1 if Regexp.respond_to?(:timeout=)
-      cpu_start = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID)
       Timeout.timeout(60) { example.run }
-      cpu_seconds = Process.clock_gettime(Process::CLOCK_THREAD_CPUTIME_ID) - cpu_start
-      raise "adversarial input took #{cpu_seconds.round(2)}s of CPU, budget 5s" if cpu_seconds > 5
     ensure
       Regexp.timeout = previous if Regexp.respond_to?(:timeout=)
     end
 
     it 'redacts 50,000 assignments in one line' do
-      expect(redact('PASSWORD=Wd8kq2Lm9x ' * 50_000).scan('[REDACTED]').size).to eq(50_000)
+      redacted = at_scale(50_000) { |count| redact('PASSWORD=Wd8kq2Lm9x ' * count) }
+
+      expect(redacted.scan('[REDACTED]').size).to eq(50_000)
     end
 
     it 'passes over 10,000 near-matches of every rule' do
-      line = 'PASSWORD Bearer -u --password= ?token &key= X-Api-Key Authorization: ' * 10_000
+      redacted = at_scale(10_000) do |count|
+        redact('PASSWORD Bearer -u --password= ?token &key= X-Api-Key Authorization: ' * count)
+      end
 
-      expect(redact(line)).to be_a(String)
+      expect(redacted).to be_a(String)
     end
 
     it 'reads one 50,000-character token' do
-      expect(redact("PGPASSWORD=#{'a1' * 25_000}")).to eq('PGPASSWORD=[REDACTED]')
+      redacted = at_scale(25_000) { |count| redact("PGPASSWORD=#{'a1' * count}") }
+
+      expect(redacted).to eq('PGPASSWORD=[REDACTED]')
     end
 
     it 'reads a value wrapped in 50,000 quotes on each side' do
-      quotes = "'" * 50_000
-
-      redacted = redact("PGPASSWORD=#{quotes}Wd8kq2Lm9x#{quotes}")
+      redacted = at_scale(50_000) do |count|
+        quotes = "'" * count
+        redact("PGPASSWORD=#{quotes}Wd8kq2Lm9x#{quotes}")
+      end
 
       expect(redacted).to include('[REDACTED]')
       expect(redacted).not_to include('Wd8kq2Lm9x')
     end
 
     it 'reads 50,000 quoted arguments and an unterminated quote' do
-      line = %('{"password":"Wd8kq2Lm9x"}' "a b" -phunter2 ) * 50_000
+      redacted = at_scale(50_000) do |count|
+        redact("mysql #{%('{"password":"Wd8kq2Lm9x"}' "a b" -phunter2 ) * count}\"unterminated")
+      end
 
-      expect(redact("mysql #{line}\"unterminated")).not_to include('Wd8kq2Lm9x', 'hunter2')
+      expect(redacted).not_to include('Wd8kq2Lm9x', 'hunter2')
     end
 
     it 'reads quotes nested 50,000 deep' do
-      line = "#{'"\'' * 25_000}PGPASSWORD=hunter2#{'\'"' * 25_000}"
+      redacted = at_scale(25_000) do |count|
+        redact("#{'"\'' * count}PGPASSWORD=hunter2#{'\'"' * count}")
+      end
 
-      expect(redact(line)).to be_a(String)
+      expect(redacted).to be_a(String)
     end
 
     it 'reads a token of 50,000 query parameters' do
-      query = Array.new(50_000) { |i| "p#{i}=v" }.join('&')
+      redacted = at_scale(50_000) do |count|
+        query = Array.new(count) { |i| "p#{i}=v" }.join('&')
+        redact("curl https://api.example.test/x?#{query}&token=Wd8kq2Lm9x")
+      end
 
-      expect(redact("curl https://api.example.test/x?#{query}&token=Wd8kq2Lm9x")).to end_with('&token=[REDACTED]')
+      expect(redacted).to end_with('&token=[REDACTED]')
     end
   end
 end
