@@ -128,6 +128,8 @@ server = Woods::Console::Server.build_embedded(
   redacted_columns: redacted_columns,
   redacted_key_values: redacted_key_values,
   read_tools_enabled: read_tools_enabled,
+  sql_default_limit: config.console_sql_default_limit,
+  sql_max_limit: config.console_sql_max_limit,
   model_tables: model_tables,
   model_reflections: model_reflections
 )
