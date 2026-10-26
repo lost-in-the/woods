@@ -98,6 +98,16 @@ def write_merged_report(shards)
   summary_line
 end
 
+# Names of the shards whose SimpleCov resultset is not in the shared file. A merge that silently
+# leaves a process out reports a lower number than the code earned.
+def missing_coverage(shards)
+  path = File.join(COVERAGE_DIR, '.resultset.json')
+  stored = File.exist?(path) ? JSON.parse(File.read(path)).keys : []
+  shards.map { |shard| "rspec-#{shard[:index]}" } - stored
+rescue JSON::ParserError
+  shards.map { |shard| "rspec-#{shard[:index]}" }
+end
+
 def collate_coverage
   code = <<~RUBY
     require 'simplecov'
@@ -120,7 +130,7 @@ abort 'no spec files found' if groups.empty?
 
 FileUtils.rm_rf(REPORT_DIR)
 FileUtils.mkdir_p(REPORT_DIR)
-FileUtils.rm_rf(File.join(ROOT, 'coverage')) if ENV['COVERAGE']
+FileUtils.rm_rf(COVERAGE_DIR) if ENV['COVERAGE']
 tmp_base = Dir.mktmpdir('woods-parallel')
 begin
   puts "Running #{groups.sum(&:size)} spec files in #{groups.size} processes"
@@ -133,5 +143,7 @@ end
 shards.each { |shard| print_shard(shard) }
 puts write_merged_report(shards)
 shard_failed = shards.any? { |shard| !shard[:status].success? }
-coverage_failed = ENV.fetch('COVERAGE', nil) && !collate_coverage
+missing = ENV['COVERAGE'] ? missing_coverage(shards) : []
+warn "coverage resultset is missing #{missing.join(', ')}; refusing to report a partial merge" unless missing.empty?
+coverage_failed = ENV.fetch('COVERAGE', nil) && (!missing.empty? || !collate_coverage)
 exit(shard_failed || coverage_failed ? 1 : 0)

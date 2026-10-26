@@ -336,12 +336,14 @@ module Woods
 
         # @return [Hash] structural metadata for the walked documents
         def metadata
+          truncated = @truncated
           root = resolve(@roots.first)
-          top = top_level_pairs.map { |name, _| name }.uniq
+          @top_pairs = fresh_budget { top_level_pairs }
+          top = @top_pairs.map { |name, _| name }.uniq
           environments = top & ENVIRONMENT_NAMES
           { root_type: root_type(root), top_level_keys: top, environments: environments,
             environment_keys: environment_keys(environments), key_paths: @paths,
-            key_paths_truncated: @truncated, entry_count: root.is_a?(Psych::Nodes::Sequence) ? root.children.size : 0 }
+            key_paths_truncated: truncated, entry_count: root.is_a?(Psych::Nodes::Sequence) ? root.children.size : 0 }
         end
 
         private
@@ -373,12 +375,18 @@ module Woods
         end
 
         def environment_keys(environments)
-          sections = top_level_pairs
           environments.to_h do |environment|
-            node = resolve(sections.find { |name, _| name == environment }&.last)
-            keys = node.is_a?(Psych::Nodes::Mapping) ? catch(:budget) { pairs(node, []) } || [] : []
+            node = resolve(@top_pairs.find { |name, _| name == environment }&.last)
+            keys = node.is_a?(Psych::Nodes::Mapping) ? fresh_budget { catch(:budget) { pairs(node, []) } || [] } : []
             [environment, keys.map(&:first).uniq]
           end
+        end
+
+        # The metadata pass reads each mapping under a budget of its own, so a
+        # walk that spent its visits does not empty the top-level keys.
+        def fresh_budget
+          @visits = 0
+          yield
         end
 
         def walk_root(root)
@@ -431,13 +439,19 @@ module Woods
 
         # A mapping's entries as [published key name, value node], with merge
         # keys (`<<`) replaced in place by the entries they pull in.
+        # An explicit key wins over a merged one wherever it sits; among merged
+        # sources the first wins.
         def pairs(node, trail)
-          node.children.each_slice(2).flat_map do |key, value|
+          entries = {}
+          node.children.each_slice(2) do |key, value|
             visit!
-            next merged_pairs(value, trail) if merge_key?(key)
-
-            [[key_name(key), value]]
+            if merge_key?(key)
+              merged_pairs(value, trail).each { |name, inherited| entries[name] ||= inherited }
+            else
+              entries[key.is_a?(Psych::Nodes::Scalar) ? key_name(key) : Object.new] = value
+            end
           end
+          entries.map { |name, value| [name.is_a?(String) ? name : '[complex]', value] }
         end
 
         def merge_key?(key)
