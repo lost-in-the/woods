@@ -92,6 +92,26 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'unclaimed Ruby under app/ (#67
     expect(identifiers).to eq([])
   end
 
+  it 'skips a descendant of an application serializer base and keeps its plain neighbours' do
+    load_source('app/serializers/sweep_fixture/base_serializer.rb', <<~RUBY)
+      class SweepFixture::BaseSerializer
+        def call = nil
+      end
+    RUBY
+    load_source('app/views/sweep_fixture/order_view.rb', <<~RUBY)
+      class SweepFixture::OrderView < SweepFixture::BaseSerializer
+        def call = nil
+      end
+    RUBY
+    load_source('app/views/sweep_fixture/order_helper.rb', <<~RUBY)
+      class SweepFixture::OrderHelper
+        def call = nil
+      end
+    RUBY
+    expect(identifiers).not_to include('SweepFixture::OrderView')
+    expect(identifiers).to include('SweepFixture::OrderHelper')
+  end
+
   it 'skips classes a class-discovered extractor owns while keeping their plain neighbours' do
     stub_const('ActionController::Base', Class.new)
     stub_const('Phlex::HTML', Class.new)

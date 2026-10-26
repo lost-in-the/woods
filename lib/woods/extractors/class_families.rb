@@ -40,17 +40,21 @@ module Woods
       module_function
 
       # The loaded base classes, resolved once so a run can reuse them for
-      # every class it asks about.
+      # every class it asks about. Serializer bases the application defines
+      # (a class under `app/serializers` that descends from no framework base)
+      # count with the framework ones, as the serializer extractor admits their
+      # descendants.
       #
       # @param lookup [SourceReferences::RuntimeLookup]
       # @return [Array<Array(Symbol, Module)>] extractor key and base, in check order
       def resolve_bases(lookup = SourceReferences::RuntimeLookup.new)
-        BASES.flat_map do |key, names|
+        framework = BASES.flat_map do |key, names|
           names.filter_map do |name|
             base = lookup.call("::#{name}")[:value]
             [key, base] if lookup.module_object?(base)
           end
         end
+        framework + SerializerExtractor.new.send(:application_bases).map { |base| [:serializers, base] }
       end
 
       # @param klass [Class] a loaded application class
