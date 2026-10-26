@@ -512,6 +512,8 @@ module Woods
     def extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       setup_output_directory
+      @results = {}
+      @extractors = {}
       profile_phase('source capture') { begin_source_inputs('full') }
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
@@ -959,6 +961,7 @@ module Woods
       ModelNameCache.reset!
       profile_phase('eager load') { safe_eager_load! }
 
+      @results = {}
       @dependents_dirty = Set.new
       @incremental_written = {}
       @retained_units = Set.new
