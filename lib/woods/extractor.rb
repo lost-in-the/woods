@@ -639,7 +639,7 @@ module Woods
         write_graph_analysis
       end
       profile_phase('skipped files') do
-        write_skipped_files(@results.values.flatten.map(&:file_path), flow_failures: Array(@flow_failures))
+        write_skipped_files(@dependency_graph.registered_paths, flow_failures: Array(@flow_failures))
       end
       profile_phase('commit table') { refresh_commit_table(full: true) }
       profile_phase('manifest and summary') do
@@ -2842,9 +2842,10 @@ module Woods
     end
 
     # Swept Ruby files that produced no unit, with reasons. A pure function of
-    # the tree and the unit paths, so both extraction modes write the same bytes.
+    # the tree and the graph's registered paths, so both extraction modes write
+    # the same bytes.
     #
-    # @param unit_paths [Enumerable<String, nil>] every unit file_path
+    # @param unit_paths [Enumerable<String, nil>] every path the graph registers, including secondary contributors
     # @return [void]
     # @param flow_failures [Array<Hash>] best-effort flow failures (W-14)
     def write_skipped_files(unit_paths, flow_failures: [])
