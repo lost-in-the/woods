@@ -56,6 +56,8 @@ flowchart TD
 | `@payload_generation` | `begin_payload!` | `begin_payload!` (nil when it degrades to flat); `initialize` | `write_source_inputs`, `publish_generation` | per-run |
 | `@payload_dir` | `begin_payload!` | `begin_payload!`; `initialize` | `payload_dir` and every writer | per-run |
 | `@flow_failures` | `extract_all` (before flows), `precompute_flows`, `finalize_incremental_run` | `extract_all`; `finalize_incremental_run` (before any read) | skipped-files writer, flow refresh | per-run |
+| `@symlinked_root` | `symlinked_root?` | `extract_all`, `prepare_incremental_run` | `crosses_symlink?`, from `path_spellings` | per-run |
+| `@symlinked_dirs` | `symlinked_dir_below?` | `extract_all`, `prepare_incremental_run` | `crosses_symlink?`, from `path_spellings` | per-run |
 
 Reset in `prepare_incremental_run` only. `extract_all` never resets them, and no full-path code reads them, so a value left by an earlier incremental run is stale but inert. Add a reset to `extract_all` before adding any full-path read.
 
@@ -109,15 +111,6 @@ Notes:
 | `@git_available` | `git_available?` (memo) | never | git enrichment | per-instance |
 
 `@git_available` is a documented accepted limit: git becoming available mid-process is not detected.
-
-## Per-instance memos that are not reset (carry-over)
-
-| ivar | set in | reset in | read by | scope |
-|---|---|---|---|---|
-| `@symlinked_root` | `symlinked_root?` | never | `crosses_symlink?`, from `path_spellings` | per-instance |
-| `@symlinked_dirs` | `symlinked_dir_below?` | never | `crosses_symlink?`, from `path_spellings` | per-instance |
-
-These cache filesystem facts (is this directory a symlink) for the life of the instance. `path_spellings` runs on the full path (`extract_owner_fallbacks`) and on the incremental PORO paths. A directory that turns into a symlink between two runs of the same instance keeps its cached `false`, so a reused instance and a fresh one return different spellings for the same path. The guard spec does not assert these reset, because that is a behavior change and not a documentation task. A follow-up PR resets both at the start of each run.
 
 ## Adding an ivar
 
