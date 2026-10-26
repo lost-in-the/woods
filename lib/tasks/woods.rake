@@ -371,6 +371,8 @@ namespace :woods do
     skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
     puts "INFO:\n  #{skipped}" if skipped
 
+    puts "Incremental: #{report.incremental}" if report.incremental
+
     if errors.empty? && warnings.empty?
       puts '✓ Index is valid.'
     elsif errors.empty?

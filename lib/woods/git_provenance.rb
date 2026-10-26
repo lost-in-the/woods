@@ -62,6 +62,16 @@ module Woods
       fallback('GIT_SHA')
     end
 
+    # The commit Git resolves HEAD to right now, with no build-arg fallback.
+    # A baked +GIT_SHA+ describes the image, not the live tree, so comparing a
+    # published sha against it could never report that history moved.
+    #
+    # @return [String, nil] the live HEAD sha, or nil when Git cannot resolve it
+    def head_sha
+      from_git = rev_parse('HEAD')
+      present?(from_git) ? from_git : nil
+    end
+
     # @return [Hash{Symbol => String}] +{ git_branch:, git_sha: }+ for the manifest
     def to_h
       { git_branch: branch, git_sha: sha }

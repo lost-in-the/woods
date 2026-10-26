@@ -10,6 +10,7 @@ require 'set'
 require_relative '../generation'
 require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
+require_relative '../resilience/incremental_readiness'
 require_relative 'search_results'
 require_relative '../retrieval/scope'
 require_relative '../retrieval/scope_corpus'
@@ -303,6 +304,7 @@ module Woods
         @index_identifier_sets = {}
         @scope_corpus = nil
         @manifest = nil
+        @incremental_readiness = nil
         @summary = nil
         @dependency_graph = nil
         @graph_analysis = nil
@@ -339,6 +341,16 @@ module Woods
           SourceInputs::Status.new(output_dir: @index_dir, payload_dir: current_payload_dir,
                                    generation: @payload_dir ? @loaded_generation : 0, mode: mode).call
         end
+      end
+
+      # Whether the served generation can take an incremental run. Memoized
+      # with the other per-generation reads: the cache check parses a file of
+      # up to 64 MiB, and {#reload!} drops the result when the generation moves.
+      #
+      # @return [Woods::Resilience::IncrementalReadiness::Result]
+      def incremental_readiness
+        ensure_fresh!
+        @incremental_readiness ||= Resilience::IncrementalReadiness.new(index_dir: @index_dir).call
       end
 
       # @return [Hash] Parsed manifest.json

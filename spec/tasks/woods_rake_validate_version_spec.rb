@@ -35,6 +35,7 @@ RSpec.describe 'woods:validate writer-version warnings (#323)' do
       expect(status).to be_success, "#{out}\n#{err}"
       expect(out).to include("Index last published by Woods #{writer}", 'Run a full woods:extract',
                              'Index is valid with 1 warning(s)')
+      expect(out).to match(/^Incremental: needs full extraction \(a legacy flat index/)
     end
   end
 end
