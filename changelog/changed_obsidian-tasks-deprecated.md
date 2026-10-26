@@ -1,0 +1,1 @@
+- `woods:obsidian` and `woods:vault` are deprecated in favour of `woods:markdown` with `WOODS_MARKDOWN_OBSIDIAN=1`. They still export the Obsidian flavor to `<output>/obsidian_vault`, print one deprecation line per process, and will be removed in the next minor release.

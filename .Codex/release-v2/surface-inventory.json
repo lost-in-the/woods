@@ -122,6 +122,8 @@
     "notion_api_token=",
     "notion_database_ids",
     "notion_database_ids=",
+    "notion_export_column_defaults",
+    "notion_export_column_defaults=",
     "output_dir",
     "output_dir=",
     "precompute_flows",
@@ -383,6 +385,13 @@
       "arguments": [],
       "prerequisites": [
         "stats"
+      ]
+    },
+    {
+      "name": "woods:markdown",
+      "arguments": [],
+      "prerequisites": [
+        "environment"
       ]
     },
     {
@@ -1132,7 +1141,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 164,
+    "configuration_attributes": 166,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,
@@ -1143,7 +1152,7 @@
     "index_mcp_tools": 31,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 41,
+    "rake_tasks": 42,
     "tasks_methods": 7,
     "unit_types": 47
   },
@@ -1232,6 +1241,7 @@
         "count": 11
       }
     ],
+    "docs/MARKDOWN_EXPORT.md": [],
     "docs/MCP_HTTP_TRANSPORT.md": [],
     "docs/MCP_SERVERS.md": [
       {

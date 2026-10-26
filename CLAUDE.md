@@ -41,7 +41,8 @@ bundle exec rake "woods:diagram[kind,id]" # Mermaid for one unit (neighbourhood,
 bundle exec rake woods:console           # Embedded Console MCP server (stdio)
 bundle exec rake woods:notion_sync       # Sync models/columns to Notion
 bundle exec rake woods:unblocked_sync    # Sync to an Unblocked collection
-bundle exec rake woods:obsidian          # Export to an Obsidian vault (alias: woods:vault)
+bundle exec rake woods:markdown          # Export plain Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)
+bundle exec rake woods:obsidian          # Deprecated alias of the Obsidian flavor (alias: woods:vault)
 bundle exec rake woods:generate_token    # Random bearer token for woods-mcp-http
 # Woods-themed aliases: woods:scan (extract), woods:tend (incremental), woods:look (stats),
 # woods:vet (validate), woods:clear (clean), woods:nest (embed), woods:hone (embed_incremental),

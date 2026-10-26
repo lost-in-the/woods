@@ -1483,9 +1483,11 @@ After correcting the layout, run a full extraction to refresh retained metadata.
 | `UNBLOCKED_DAILY_BUDGET` | `1000` | Per-run call cap for `woods:unblocked_sync`. |
 | `UNBLOCKED_FORCE_FULL_SYNC` | unset | Set to `"1"` to re-push every Unblocked document, ignoring the unchanged-hash skip. |
 | `UNBLOCKED_FORCE_PURGE` | unset | Set to `"1"` to bypass the Unblocked 30%-deletion guard. |
-| `WOODS_OBSIDIAN_VAULT` | `<output_dir>/obsidian_vault` | Vault output path for `woods:obsidian`. |
-| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the exported vault. |
-| `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Bypass the Obsidian 30%-deletion guard on the stale-note sweep. |
+| `WOODS_MARKDOWN_DIR` | `<output_dir>/markdown` | Output folder for `woods:markdown`. |
+| `WOODS_MARKDOWN_OBSIDIAN` | `false` | Write the Obsidian flavor (wikilinks, tags, `.obsidian/` config). |
+| `WOODS_MARKDOWN_INCLUDE_FRAMEWORK`, `WOODS_MARKDOWN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the export. |
+| `WOODS_MARKDOWN_FORCE_PURGE` | unset | Bypass the 30%-deletion guard on the stale-note sweep. |
+| `WOODS_OBSIDIAN_VAULT`, `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE`, `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Legacy names, read when the matching `WOODS_MARKDOWN_*` variable is unset. `WOODS_OBSIDIAN_VAULT` defaults the deprecated `woods:obsidian` task to `<output_dir>/obsidian_vault`. |
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 
