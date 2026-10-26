@@ -1,0 +1,1 @@
+- An incremental run now resolves a controller's `unresolved_renders` entry when the component it names is created outside the component directories. Any Ruby edit re-extracts the controllers that still hold an unresolved render, and only those, so the result matches a full run without re-running every controller.

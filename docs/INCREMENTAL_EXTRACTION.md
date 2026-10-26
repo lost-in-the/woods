@@ -314,7 +314,9 @@ step before it.
    Ruby edit would cost more than the bounded blast radius saves. A component
    defined outside those directories, or an alias defined elsewhere, retargets
    a controller's edge when the controller file changes or on a full
-   extraction. Only units whose output changed are rewritten. The same
+   extraction. The exception is a render that resolved to nothing: a
+   controller holding one re-runs on any Ruby edit, so a component created
+   outside those directories still resolves it. Only units whose output changed are rewritten. The same
    reload requirement applies: a constant the process has not loaded, or has not
    unloaded, resolves as that process sees it. View components also re-run when
    a sidecar template changes (a template with a Ruby file of the same name

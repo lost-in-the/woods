@@ -2973,6 +2973,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/controllers/rt_desk_controller.rb
         app/controllers/rt_lamp_controller.rb
         app/components/rt_lamp/shade_component.rb
+        app/controllers/rt_yard_controller.rb
+        app/services/rt_yard/tile_component.rb
       ]
     end
 
@@ -3068,6 +3070,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            ])
 
       expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
+    end
+
+    it 'retargets an unchanged controller when the component it renders is created outside the component directories' do
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_yard_controller.rb', <<~RUBY)
+                                 class RtYardController < ApplicationController
+                                   def show
+                                     render RtYard::TileComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/services/rt_yard/tile_component.rb', <<~RUBY)
+                                 module RtYard
+                                   class TileComponent < ApplicationComponent
+                                     def call = "tile"
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtYardController')).to eq([%w[RtYard::TileComponent], []])
     end
 
     it 'summarises unresolved renders and action facts on the graph node, full and incremental alike (#837)' do

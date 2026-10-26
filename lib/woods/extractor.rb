@@ -709,6 +709,7 @@ module Woods
         @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
       end
       @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids)
+      affected_ids |= render_retarget_ids(change_set) unless @hybrid_discovery_keys.include?(:controllers)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
@@ -3337,6 +3338,22 @@ module Woods
       # edge when the controller file changes or on a full extraction.
       keys.add(:controllers) if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) }
       keys
+    end
+
+    # A controller's render that named no component can only gain a target when
+    # a component appears, and a component can be defined in any Ruby file. The
+    # controllers that still hold an unresolved render are few, so any Ruby edit
+    # re-extracts just those, rather than every controller as a component
+    # directory edit does.
+    #
+    # @param change_set [ChangeSet]
+    # @return [Array<String>] controller identifiers with an unresolved render
+    def render_retarget_ids(change_set)
+      return [] unless change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
+
+      @dependency_graph.units_of_type(:controller).select do |id|
+        @dependency_graph.node(id, type: :controller)&.dig(:unresolved_render_count).to_i.positive?
+      end
     end
 
     # A view component's render edges are read from its sidecar templates too,
