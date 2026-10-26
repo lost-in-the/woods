@@ -695,9 +695,16 @@ namespace :woods do
     load File.expand_path('../../exe/woods-console', __dir__)
   end
 
-  desc 'Sync extraction data to Notion databases (Data Models + Columns)'
+  desc 'Deprecated: use woods:markdown. Sync extraction data to Notion databases (Data Models + Columns)'
   task notion_sync: :environment do
+    require 'woods/deprecation'
     require 'woods/notion/exporter'
+
+    Woods::Deprecation.warn_once(
+      :notion_sync,
+      'woods:notion_sync (and woods:send) is deprecated and will be removed in the next minor release. ' \
+      'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+    )
 
     config = Woods.configuration
     # A non-blank env var takes precedence over the configured value; a blank
@@ -741,12 +748,19 @@ namespace :woods do
     end
   end
 
-  desc 'Send findings from the field — sync to Notion (alias for notion_sync)'
+  desc 'Deprecated: use woods:markdown (alias for notion_sync)'
   task send: :notion_sync
 
-  desc 'Sync extraction data to Unblocked collection (Documents API)'
+  desc 'Deprecated: use woods:markdown. Sync extraction data to Unblocked collection (Documents API)'
   task unblocked_sync: :environment do
+    require 'woods/deprecation'
     require 'woods/unblocked/exporter'
+
+    Woods::Deprecation.warn_once(
+      :unblocked_sync,
+      'woods:unblocked_sync (and woods:relay) is deprecated and will be removed in the next minor release. ' \
+      'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+    )
 
     config = Woods.configuration
     config.unblocked_api_token = ENV.fetch('UNBLOCKED_API_TOKEN', nil) || config.unblocked_api_token
@@ -830,7 +844,7 @@ namespace :woods do
     exit 1 if stats[:complete] == false && stats[:errors].empty?
   end
 
-  desc 'Relay findings to Unblocked (alias for unblocked_sync)'
+  desc 'Deprecated: use woods:markdown (alias for unblocked_sync)'
   task relay: :unblocked_sync
 
   desc 'Export extraction data as a folder of Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)'

@@ -9,6 +9,7 @@ require 'time'
 require 'set'
 require 'uri'
 require_relative '../atomic_file'
+require_relative '../deprecation'
 require_relative '../generation'
 require_relative '../generation_pins'
 require_relative '../tasks'
@@ -2111,13 +2112,19 @@ module Woods
         def define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
           server.define_tool(
             name: 'notion_sync',
-            description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
+            description: 'Deprecated: use the Markdown export (woods:markdown). ' \
+                         'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
                          'Requires notion_api_token and notion_database_ids to be configured.',
             input_schema: {
               type: 'object',
               properties: {}
             }
           ) do |server_context:|
+            Woods::Deprecation.warn_once(
+              :notion_sync_tool,
+              'The notion_sync MCP tool is deprecated and will be removed in the next minor release. ' \
+              'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+            )
             config = Woods.configuration
             # Mirror notion_wired? (which gates registration) and the
             # Exporter via the shared resolver: a non-blank NOTION_API_TOKEN

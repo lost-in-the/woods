@@ -1,6 +1,6 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (31-tool index server, 15 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Notion + Obsidian export, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (31-tool index server, 15 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Markdown export (plain or Obsidian flavor) and deprecated Notion + Unblocked sync, and evaluation harness.
 
 ## Commands
 
@@ -39,8 +39,8 @@ bundle exec rake "woods:evaluate:baseline[grep]" # Score a naive baseline for co
 bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
 bundle exec rake "woods:diagram[kind,id]" # Mermaid for one unit (neighbourhood, schema, lifecycle, impact)
 bundle exec rake woods:console           # Embedded Console MCP server (stdio)
-bundle exec rake woods:notion_sync       # Sync models/columns to Notion
-bundle exec rake woods:unblocked_sync    # Sync to an Unblocked collection
+bundle exec rake woods:notion_sync       # Deprecated: sync models/columns to Notion (use woods:markdown)
+bundle exec rake woods:unblocked_sync    # Deprecated: sync to an Unblocked collection (use woods:markdown)
 bundle exec rake woods:markdown          # Export plain Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)
 bundle exec rake woods:obsidian          # Deprecated alias of the Obsidian flavor (alias: woods:vault)
 bundle exec rake woods:generate_token    # Random bearer token for woods-mcp-http
