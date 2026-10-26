@@ -4,6 +4,7 @@ require 'set'
 require 'active_support/core_ext/object/blank'
 require 'active_support/core_ext/string/inflections'
 require_relative 'builder'
+require_relative 'schema_foreign_keys'
 
 module Woods
   module Diagrams
@@ -11,7 +12,10 @@ module Woods
     # model metadata. Depth 1 is the table and one hop of associations (the
     # Schema tab of Woods Map); each further depth adds the associations of
     # the models the previous hop reached. `through` associations are left
-    # out (their join is drawn by its own associations). An association's far
+    # out (their join is drawn by its own associations). A table unit draws
+    # its published foreign keys instead, outgoing and, where the generation
+    # carries reverse edges, incoming; the table holding the key is the many
+    # side. An association's far
     # table is the target model's published table, else Rails' default for
     # the class name. Entities are quoted, so `audit.logs` and `audit_logs`
     # stay apart.
@@ -66,16 +70,22 @@ module Woods
         frontier = [@unit]
         visited = Set[[@unit['identifier'], @unit['type']]]
         (1..@depth).each do |level|
-          frontier = frontier.flat_map do |model|
-            associations(model).filter_map do |assoc|
-              line = relationship(model, assoc)
+          frontier = frontier.flat_map do |node|
+            hops(node, visited).filter_map do |line, following|
               result << line if level == 1 || drawn.add?(line.first)
               drawn << line.first
-              next_model(assoc, visited)
+              following
             end
           end
         end
         result
+      end
+
+      # @return [Array<Array(Array, Hash, nil)>] [line, unit the hop reaches] per relationship of the unit
+      def hops(node, visited)
+        return SchemaForeignKeys.new(@source).hops(node, visited) if node['type'] == 'database_table'
+
+        associations(node).map { |assoc| [relationship(node, assoc), next_model(assoc, visited)] }
       end
 
       def relationship(model, assoc)

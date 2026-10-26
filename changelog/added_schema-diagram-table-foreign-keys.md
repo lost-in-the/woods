@@ -1,0 +1,1 @@
+- The `schema` diagram draws a `database_table` unit's foreign keys: its own and, when the generation carries reverse edges, the keys of other tables that point at it, with the table holding the key on the many side. Depth and the table budget work as for a model; a model's diagram is unchanged.
