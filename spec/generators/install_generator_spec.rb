@@ -170,6 +170,21 @@ RSpec.describe 'Install generator' do
     expect(written_files).to be_empty
   end
 
+  it 'preserves existing application migrations during default and pretend installs' do
+    migration = File.join(@root, 'db/migrate/20200101000000_create_woods_tables.rb')
+    FileUtils.mkdir_p(File.dirname(migration))
+    existing_source = "# An existing host application migration\n"
+    File.write(migration, existing_source)
+
+    [[], ['--pretend'], []].each do |arguments|
+      _, stderr, status = generate(*arguments)
+
+      expect(status.success?).to be(true), stderr
+      expect(File.read(migration)).to eq(existing_source)
+      expect(written_files).to eq(['config/initializers/woods.rb', 'db/migrate/20200101000000_create_woods_tables.rb'])
+    end
+  end
+
   it 'refuses --legacy-migration before writing anything when Active Record is not available' do
     skip 'Active Record is in this bundle; the refusal needs a railties-only bundle' if active_record_in_bundle?
 
