@@ -2318,6 +2318,30 @@ module Woods
           reader.with_pinned_generation do
             build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           end
+        rescue Woods::Generation::InvalidMarker => e
+          degraded_status(e, retriever, index_dir, bootstrap_state)
+        end
+
+        # The bounded report for a published generation marker that cannot
+        # identify a generation. Nothing is read from the index (no payload is
+        # guessed from directory order), so every other tool keeps refusing
+        # while this one says what to do.
+        def degraded_status(error, retriever, index_dir, bootstrap_state)
+          {
+            ready: false,
+            server: { name: 'woods', version: Woods::VERSION, index_dir: index_dir.to_s,
+                      update: Woods::UpdateCheck.status_hash },
+            index: {
+              state: 'unusable_publication',
+              error_code: 'corrupt_artifact',
+              diagnostic: "#{error.message}. Run woods:validate, then restore or rebuild the index.",
+              counts: {},
+              history: { state: 'unknown', reason: 'publication_unusable' },
+              incremental: { ready: false, status: 'needs full extraction (published generation marker is unusable)' }
+            },
+            retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
+            bootstrap: bootstrap_state&.to_h
+          }
         end
 
         def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
