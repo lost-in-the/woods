@@ -89,6 +89,33 @@ RSpec.describe Woods::Extractors::SharedUtilityMethods do
     it 'returns false for a node_modules path' do
       expect(utility.app_source?('/app/node_modules/some-package/index.rb', app_root)).to be false
     end
+
+    context 'with a bundle installed under the application root' do
+      before do
+        allow(Gem).to receive(:path).and_return(['/app/tmp/bundle/ruby/3.3.0', '/usr/lib/ruby/gems'])
+        allow(Bundler).to receive(:bundle_path).and_return(Pathname.new('/app/.bundle/ruby/3.3.0'))
+      end
+
+      it 'returns false for a gem under the Bundler path' do
+        path = '/app/.bundle/ruby/3.3.0/gems/activejob-7.1.0/lib/active_job/base.rb'
+        expect(utility.app_source?(path, app_root)).to be false
+      end
+
+      it 'returns false for a gem under a RubyGems path inside the root' do
+        path = '/app/tmp/bundle/ruby/3.3.0/gems/sidekiq-7.0.0/lib/sidekiq/job.rb'
+        expect(utility.app_source?(path, app_root)).to be false
+      end
+
+      it 'keeps application source and in-root path gems' do
+        expect(utility.app_source?('/app/app/jobs/import_job.rb', app_root)).to be true
+        expect(utility.app_source?('/app/engines/billing/app/jobs/bill_job.rb', app_root)).to be true
+      end
+
+      it 'does not exclude an application that lives inside a gem path' do
+        allow(Gem).to receive(:path).and_return(['/app'])
+        expect(utility.app_source?('/app/app/jobs/import_job.rb', app_root)).to be true
+      end
+    end
   end
 
   describe 'application source containment' do
