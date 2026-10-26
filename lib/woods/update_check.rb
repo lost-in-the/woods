@@ -43,8 +43,6 @@ module Woods
     # Upper bound on one background probe, covering stalls the per-socket
     # timeouts do not (for example DNS resolution).
     REFRESH_TIMEOUT = HTTP_TIMEOUT * 3
-    REFRESH_LOCK = Mutex.new
-    private_constant :REFRESH_LOCK
 
     module_function
 
@@ -96,31 +94,6 @@ module Woods
       cached_status_hash(current: current, **opts)
     end
 
-    # Wait for an outstanding background probe, if any.
-    #
-    # @param timeout [Numeric, nil] seconds to wait; nil waits for completion
-    # @return [void]
-    def await_refresh(timeout: nil)
-      thread = REFRESH_LOCK.synchronize { @refresh_thread }
-      thread&.join(timeout)
-      nil
-    end
-
-    # Stop an outstanding background probe. Waits up to +timeout+ for it to
-    # finish, then kills it. Safe to call when nothing is running.
-    #
-    # @param timeout [Numeric] seconds to let the probe finish
-    # @return [void]
-    def shutdown(timeout: 0)
-      thread = REFRESH_LOCK.synchronize { @refresh_thread }
-      return unless thread
-
-      thread.kill unless thread.join(timeout)
-      thread.join
-      REFRESH_LOCK.synchronize { @refresh_thread = nil if @refresh_thread.equal?(thread) }
-      nil
-    end
-
     # Version-aware replacement for the MCP layer's bare "Tool not found"
     # message. Cache-only — it never triggers a network fetch, since it runs on
     # an error path that must stay cheap.
@@ -148,33 +121,6 @@ module Woods
         update_available: info[:update_available],
         checked: checked
       }
-    end
-
-    def cached_status_hash(current:, cache_path: default_cache_path, ttl: CACHE_TTL, now: Time.now,
-                           fetcher: method(:fetch_latest_version))
-      return status_payload(result(current, nil)) if disabled?
-
-      entry = read_cache(cache_path)
-      fresh = entry && fresh_entry?(entry, ttl, now)
-      payload = status_payload(result(current, entry && entry['latest']))
-      return payload if fresh
-
-      start_refresh(cache_path, now, fetcher)
-      payload.merge(pending: true)
-    end
-
-    # Start one background probe unless one is already running.
-    def start_refresh(cache_path, now, fetcher)
-      REFRESH_LOCK.synchronize do
-        next if @refresh_thread&.alive?
-
-        @refresh_thread = Thread.new do
-          Thread.current.report_on_exception = false
-          Timeout.timeout(REFRESH_TIMEOUT) { refresh(cache_path, now, fetcher) }
-        rescue Timeout::Error
-          write_cache(cache_path, nil, now)
-        end
-      end
     end
 
     def disabled?
@@ -288,3 +234,5 @@ module Woods
     end
   end
 end
+
+require_relative 'update_check/background_refresh'
