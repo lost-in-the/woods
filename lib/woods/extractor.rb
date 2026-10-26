@@ -829,7 +829,7 @@ module Woods
       end
 
       touched.merge(reconcile_model_table_edges(affected_types)) if known.include?(:database_tables)
-      touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns]).any?
+      touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns libs]).any?
       raise_on_handled_extraction_failure!
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
