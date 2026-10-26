@@ -1,0 +1,1 @@
+- A small domain cluster with no edges to any other cluster no longer stops small-cluster merging. Other under-size clusters still merge into their most-connected neighbor, and the isolated one is left as it is.

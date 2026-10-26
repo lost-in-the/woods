@@ -559,6 +559,23 @@ RSpec.describe Woods::GraphAnalyzer do
       expect(order_cluster[:members]).to include('Checkout')
     end
 
+    it 'still merges a small cluster into its neighbor when a smaller cluster is isolated' do
+      graph.register(make_unit(type: :model, identifier: 'Alpha::One'))
+      graph.register(make_unit(type: :model, identifier: 'Beta::One',
+                               dependencies: [{ type: :model, target: 'Gamma::One' }]))
+      graph.register(make_unit(type: :model, identifier: 'Beta::Two'))
+      graph.register(make_unit(type: :model, identifier: 'Gamma::One'))
+      graph.register(make_unit(type: :model, identifier: 'Gamma::Two'))
+      graph.register(make_unit(type: :model, identifier: 'Gamma::Three'))
+
+      clusters = analyzer.domain_clusters(min_size: 3)
+
+      expect(clusters.map { |c| c[:name] }).to contain_exactly('Alpha', 'Gamma')
+      expect(clusters.find { |c| c[:name] == 'Alpha' }[:members]).to eq(['Alpha::One'])
+      expect(clusters.find { |c| c[:name] == 'Gamma' }[:members])
+        .to contain_exactly('Beta::One', 'Beta::Two', 'Gamma::One', 'Gamma::Two', 'Gamma::Three')
+    end
+
     it 'filters by types when specified' do
       graph.register(make_unit(type: :model, identifier: 'Order::Item'))
       graph.register(make_unit(type: :service, identifier: 'Order::Sync'))
