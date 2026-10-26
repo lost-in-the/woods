@@ -1,0 +1,1 @@
+- `codebase_retrieve` now reports a blank (whitespace-only) or oversized query as a typed `unsupported_argument` error naming the `query` argument, the same way it reports an invalid scope, instead of failing with a generic internal tool error.

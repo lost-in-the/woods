@@ -125,6 +125,41 @@ RSpec.describe 'Published scoped discovery and retrieval' do
     end
   end
 
+  describe 'codebase_retrieve query validation' do
+    let(:limit) { Woods::Retriever::MAX_QUERY_BYTES }
+
+    before { publish('Invoice', package: 'packs/billing') }
+
+    it 'still rejects an empty query as an invalid argument' do
+      response = call_tool('codebase_retrieve', query: '')
+      expect(response[:isError]).to be(true)
+      expect(response[:_meta]).to include(error_code: 'invalid_arguments')
+    end
+
+    ['   ', "\n\t "].each do |blank|
+      it "returns a typed invalid-argument error for the blank query #{blank.inspect}" do
+        response = call_tool('codebase_retrieve', query: blank)
+        expect(response[:isError]).to be(true)
+        expect(response[:_meta]).to include(error_code: 'unsupported_argument', tool: 'codebase_retrieve',
+                                            argument: 'query')
+        expect(response[:content].first[:text]).to include('query cannot be blank')
+      end
+    end
+
+    it 'accepts a query exactly at the byte limit' do
+      response = call_tool('codebase_retrieve', query: 'a' * limit)
+      expect(response[:isError]).to be_falsey
+    end
+
+    it 'returns a typed invalid-argument error for a query one byte over the limit' do
+      response = call_tool('codebase_retrieve', query: 'a' * (limit + 1))
+      expect(response[:isError]).to be(true)
+      expect(response[:_meta]).to include(error_code: 'unsupported_argument', tool: 'codebase_retrieve',
+                                          argument: 'query')
+      expect(response[:content].first[:text]).to include("query exceeds max size of #{limit} bytes")
+    end
+  end
+
   it 'returns a protocol error for unknown search types in both scope modes' do
     publish('Invoice', package: 'packs/billing')
     [{}, { packages: ['packs/billing'] }].each do |scope|
