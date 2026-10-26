@@ -442,7 +442,7 @@ an already loaded model object.
 | Tool | Description |
 |------|-------------|
 | `console_eval` | Inventory schema only; not registered by supported modes |
-| `console_sql` | Execute read-only SQL, `SELECT` and `WITH...SELECT` only |
+| `console_sql` | Execute read-only SQL, `SELECT` and `WITH...SELECT` only; returns at most 100 rows by default (see [row cap](#console_sql-row-cap)) |
 | `console_query` | Enhanced query builder with joins, grouping, and HAVING |
 
 `console_sql` and `console_query` register with `embedded_read_tools: true`.
@@ -673,7 +673,7 @@ Redaction is shape-aware and covers every tool that returns row data:
 | ------------------------------------- | --------------------------------------------------------- | --------------------- |
 | `console_find`                        | `{record: Hash}`                                          | Redacted column keys are replaced inside the nested record |
 | `console_sample`, `console_recent`    | `{records: [Hash, ...]}`                                  | Each record hash is redacted |
-| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}`          | Positional, rows are redacted by matching the `columns` header |
+| `console_sql`, `console_query`        | `{columns: [...], rows: [[...], ...], count: N}` (`console_sql` adds `completeness`) | Positional, rows are redacted by matching the `columns` header |
 | `console_pluck`                       | `{columns: [...], values: [[...], ...]}` or `{values: [...]}` for a single column | Positional, multi-column rows and flat single-column arrays both covered |
 | `console_count`, `console_aggregate`, `console_association_count`, `console_schema` | No row data | Nothing to redact |
 
@@ -752,6 +752,28 @@ these controls, in order:
 4. `CredentialScanner` + column/EAV redaction scrub results.
 
 Keep the flag off when the host requires a narrower database capability.
+
+### `console_sql` row cap
+
+`console_sql` caps its result so a bare `SELECT` cannot put a whole table in the agent's context.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `console_sql_default_limit` | `100` | Rows returned when the call passes no `limit` |
+| `console_sql_max_limit` | `1000` | Ceiling applied to a requested `limit` (a larger request is clamped, not refused) |
+
+```ruby
+Woods.configure do |config|
+  config.console_sql_default_limit = 250
+  config.console_sql_max_limit     = 2_000
+end
+```
+
+- The statement is wrapped as a subquery and asks for one row more than the cap. That extra row is never returned. Its arrival sets `completeness.has_more` to `true` (`status: "partial"`, `reason: "result_limit"`).
+- Otherwise `completeness` reads `status: "complete"`, `has_more: false`, with the row count in `total_matches`.
+- `EXPLAIN` is not wrapped and is not capped. It still rejects an explicit `limit`.
+- The tool schema still rejects a `limit` above 10000, whatever the host maximum.
+- The row cap does not bound CPU or I/O. The [statement timeout](#statement-timeout) is unchanged.
 
 ---
 

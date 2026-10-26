@@ -45,6 +45,10 @@
     "console_redacted_columns=",
     "console_redacted_key_values",
     "console_redacted_key_values=",
+    "console_sql_default_limit",
+    "console_sql_default_limit=",
+    "console_sql_max_limit",
+    "console_sql_max_limit=",
     "console_unsafe_eval_audit_log_path",
     "console_unsafe_eval_audit_log_path=",
     "console_unsafe_eval_confirmation",
@@ -1132,7 +1136,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 164,
+    "configuration_attributes": 168,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

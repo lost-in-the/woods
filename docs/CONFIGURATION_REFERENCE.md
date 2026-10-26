@@ -1302,6 +1302,8 @@ deployment guide including defense layers.
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | Shared guard/SDK allowlist (included in Woods 2.1). Exact cross-origin entries include the port; portless entries also permit same-authority traffic. Include the actual browser origin and non-loopback endpoint authority. Restart after changes. |
 | `console_mcp_path` | String | `/mcp/console` | URL path captured when Rack middleware mounts. Set a custom path in `config/application.rb` before Railtie initialization, then restart. |
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
+| `console_sql_default_limit` | Integer | `100` | Rows `console_sql` returns when the caller passes no `limit`. |
+| `console_sql_max_limit` | Integer | `1000` | Ceiling applied to a requested `console_sql` `limit`. The tool schema still rejects a `limit` above 10000. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
 | `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
