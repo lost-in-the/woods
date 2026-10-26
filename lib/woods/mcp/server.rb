@@ -2330,7 +2330,7 @@ module Woods
           {
             ready: false,
             server: { name: 'woods', version: Woods::VERSION, index_dir: index_dir.to_s,
-                      update: Woods::UpdateCheck.status_hash },
+                      update: Woods::UpdateCheck.status_hash(background: true) },
             index: {
               state: 'unusable_publication',
               error_code: 'corrupt_artifact',
@@ -2360,7 +2360,7 @@ module Woods
               name: 'woods',
               version: Woods::VERSION,
               index_dir: index_dir.to_s,
-              update: Woods::UpdateCheck.status_hash
+              update: Woods::UpdateCheck.status_hash(background: true)
             },
             index: index_section(manifest, extracted_at, staleness, index_dir, reader, source_check),
             watch: watch_section(index_dir),

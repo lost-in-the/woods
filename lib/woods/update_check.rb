@@ -2,6 +2,7 @@
 
 require 'json'
 require 'time'
+require 'timeout'
 require 'tmpdir'
 require_relative 'version'
 require_relative 'atomic_file'
@@ -39,6 +40,11 @@ module Woods
     FAILURE_TTL = 60 * 60
     # Open/read timeout for the (best-effort) network probe, in seconds.
     HTTP_TIMEOUT = 1.5
+    # Upper bound on one background probe, covering stalls the per-socket
+    # timeouts do not (for example DNS resolution).
+    REFRESH_TIMEOUT = HTTP_TIMEOUT * 3
+    REFRESH_LOCK = Mutex.new
+    private_constant :REFRESH_LOCK
 
     module_function
 
@@ -76,16 +82,43 @@ module Woods
     # is false and +latest_version+ is nil: the payload never names a latest
     # version it did not check.
     #
-    # @return [Hash] +{ current_version:, latest_version:, update_available:, checked: }+
-    def status_hash(current: Woods::VERSION, **opts)
-      r = check(current: current, **opts)
-      checked = !r[:latest].nil?
-      {
-        current_version: r[:current],
-        latest_version: checked ? newest_known_version(r[:current], r[:latest]) : nil,
-        update_available: r[:update_available],
-        checked: checked
-      }
+    # With +background: true+ the call never waits on the network. A fresh
+    # cache entry is used as is. Otherwise the last cached answer (if any) is
+    # reported, a single background probe refreshes the cache, and the hash
+    # carries +pending: true+ until that probe has landed.
+    #
+    # @param background [Boolean] answer from cache and probe in the background
+    # @return [Hash] +{ current_version:, latest_version:, update_available:, checked: }+,
+    #   plus +pending: true+ while a background probe is outstanding
+    def status_hash(current: Woods::VERSION, background: false, **opts)
+      return status_payload(check(current: current, **opts)) unless background
+
+      cached_status_hash(current: current, **opts)
+    end
+
+    # Wait for an outstanding background probe, if any.
+    #
+    # @param timeout [Numeric, nil] seconds to wait; nil waits for completion
+    # @return [void]
+    def await_refresh(timeout: nil)
+      thread = REFRESH_LOCK.synchronize { @refresh_thread }
+      thread&.join(timeout)
+      nil
+    end
+
+    # Stop an outstanding background probe. Waits up to +timeout+ for it to
+    # finish, then kills it. Safe to call when nothing is running.
+    #
+    # @param timeout [Numeric] seconds to let the probe finish
+    # @return [void]
+    def shutdown(timeout: 0)
+      thread = REFRESH_LOCK.synchronize { @refresh_thread }
+      return unless thread
+
+      thread.kill unless thread.join(timeout)
+      thread.join
+      REFRESH_LOCK.synchronize { @refresh_thread = nil if @refresh_thread.equal?(thread) }
+      nil
     end
 
     # Version-aware replacement for the MCP layer's bare "Tool not found"
@@ -106,6 +139,43 @@ module Woods
     end
 
     # --- internals -----------------------------------------------------------
+
+    def status_payload(info)
+      checked = !info[:latest].nil?
+      {
+        current_version: info[:current],
+        latest_version: checked ? newest_known_version(info[:current], info[:latest]) : nil,
+        update_available: info[:update_available],
+        checked: checked
+      }
+    end
+
+    def cached_status_hash(current:, cache_path: default_cache_path, ttl: CACHE_TTL, now: Time.now,
+                           fetcher: method(:fetch_latest_version))
+      return status_payload(result(current, nil)) if disabled?
+
+      entry = read_cache(cache_path)
+      fresh = entry && fresh_entry?(entry, ttl, now)
+      payload = status_payload(result(current, entry && entry['latest']))
+      return payload if fresh
+
+      start_refresh(cache_path, now, fetcher)
+      payload.merge(pending: true)
+    end
+
+    # Start one background probe unless one is already running.
+    def start_refresh(cache_path, now, fetcher)
+      REFRESH_LOCK.synchronize do
+        next if @refresh_thread&.alive?
+
+        @refresh_thread = Thread.new do
+          Thread.current.report_on_exception = false
+          Timeout.timeout(REFRESH_TIMEOUT) { refresh(cache_path, now, fetcher) }
+        rescue Timeout::Error
+          write_cache(cache_path, nil, now)
+        end
+      end
+    end
 
     def disabled?
       ENV['WOODS_NO_UPDATE_CHECK'] == '1'
