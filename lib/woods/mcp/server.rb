@@ -1086,6 +1086,8 @@ module Woods
                 )
               rescue Retrieval::Scope::InvalidScopeError => e
                 next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'scope')
+              rescue Woods::InvalidQueryError => e
+                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'query')
               rescue Woods::Retriever::StoreError => e
                 # M8: a metadata-store failure mid-query must not surface as
                 # a raw raise through the tool boundary (or as the misleading
