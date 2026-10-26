@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'woods'
 require 'woods/console/server'
+require 'woods/console/embedded_executor'
 
 # Fixture-driven end-to-end leak scenarios for the Console MCP defense stack.
 #

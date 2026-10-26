@@ -106,6 +106,10 @@ bin/rspec spec/path/to/spec.rb
 # Unit/contract suite (booted-app and live-backend lanes excluded)
 bin/rake spec
 
+# The same suite as four parallel processes, as CI runs it
+# (WOODS_PARALLEL_PROCESSES changes the count; failures land in tmp/parallel/test_results.json)
+bundle exec ruby script/parallel-rspec
+
 # Style
 bin/rubocop
 ```
