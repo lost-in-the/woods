@@ -3532,6 +3532,28 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  describe 'incremental dependents projection' do
+    it 'writes the edge kind into a refreshed dependents list' do
+      extractor.send(:begin_payload!)
+      target = Woods::ExtractedUnit.new(type: :model, identifier: 'Order', file_path: nil)
+      caller_unit = Woods::ExtractedUnit.new(type: :graphql_type, identifier: 'Types::OrderType', file_path: nil)
+      caller_unit.dependencies = [{ type: :model, target: 'Order', via: :type_reference },
+                                  { type: :model, target: 'Order', via: :code_reference }]
+      [target, caller_unit].each { |unit| extractor.dependency_graph.register(unit) }
+      dir = extractor.send(:payload_dir).join('models')
+      FileUtils.mkdir_p(dir.to_s)
+      path = dir.join(extractor.send(:collision_safe_filename, 'Order'))
+      File.write(path, JSON.generate(identifier: 'Order', type: 'model', dependents: [], metadata: {}))
+
+      extractor.send(:rewrite_unit_json_of_type, 'Order', :model, nil, refresh_dependents: true, git_data: nil)
+
+      expect(JSON.parse(File.read(path))['dependents']).to eq(
+        [{ 'type' => 'graphql_type', 'identifier' => 'Types::OrderType', 'via' => 'code_reference' },
+         { 'type' => 'graphql_type', 'identifier' => 'Types::OrderType', 'via' => 'type_reference' }]
+      )
+    end
+  end
+
   describe 'deterministic per-type _index.json' do
     def build_unit(identifier)
       Woods::ExtractedUnit.new(type: :job, identifier: identifier, file_path: "app/jobs/#{identifier.downcase}.rb")

@@ -4438,8 +4438,10 @@ module Woods
       before = JSON.generate(data)
 
       if refresh_dependents
-        data['dependents'] = @dependency_graph.dependents_detail(identifier)
-                                              .map { |d| { 'type' => d[:type].to_s, 'identifier' => d[:identifier] } }
+        detail = @dependency_graph.dependents_detail(identifier)
+        data['dependents'] = detail.map do |d|
+          { 'type' => d[:type].to_s, 'identifier' => d[:identifier], 'via' => d[:via]&.to_s }
+        end
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
