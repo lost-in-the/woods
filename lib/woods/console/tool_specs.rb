@@ -658,13 +658,16 @@ module Woods
             'Requires embedded_read_tools: true on the rack middleware, or ' \
             'config.console_embedded_read_tools = true for the stdio server ' \
             '(see docs/CONSOLE_MCP_SETUP.md).',
+            'Returns at most 100 rows by default (a requested limit is capped at 1000; hosts can change ' \
+            'both). The result carries a completeness object whose has_more says whether more rows exist. ' \
+            'EXPLAIN statements are not row-capped and reject limit.',
             'Use console_query instead when you want ActiveRecord query builder rather than raw SQL.'
           ].join(' '),
           properties: {
             sql: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN,
                    description: 'SQL query (SELECT or WITH...SELECT only)' },
             limit: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: 10_000,
-                     description: 'Max rows returned (default unlimited, max 10000)' }
+                     description: 'Max rows returned (default 100, capped at 1000 unless the host raises it)' }
           },
           required: ['sql'],
           tier: 4,

@@ -82,7 +82,8 @@ RSpec.describe 'console_sql dialect-aware validation through the dispatch pipeli
     response = call_console_sql(server, mysql_escaped_apostrophe)
 
     expect(response.error?).to be_falsey, response_text(response)
-    expect(conn).to have_received(:select_all).with(mysql_escaped_apostrophe)
+    expect(conn).to have_received(:select_all)
+      .with("SELECT * FROM (\n#{mysql_escaped_apostrophe}\n) AS _limited LIMIT 101")
   end
 
   it 'still refuses a genuine row-lock clause on a MySQL host' do

@@ -2,6 +2,7 @@
 
 require 'timeout'
 
+require_relative '../mcp/search_results'
 require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
@@ -38,6 +39,9 @@ module Woods
 
       DEFAULT_EVAL_TIMEOUT = 10
 
+      DEFAULT_SQL_ROW_LIMIT = 100
+      MAX_SQL_ROW_LIMIT = 1_000
+
       SQL_RELATION_BOUNDARIES = %w[
         ON USING WHERE JOIN INNER LEFT RIGHT FULL CROSS NATURAL
         GROUP ORDER HAVING LIMIT OFFSET UNION INTERSECT EXCEPT WINDOW FOR
@@ -65,9 +69,13 @@ module Woods
       #   five-control eval path (guard + confirmation + SafeContext + timeout +
       #   audit). When false, `console_eval` returns the hard `eval_disabled`
       #   refusal as before.
+      # @param sql_default_limit [Integer, nil] Rows `console_sql` returns when the caller
+      #   passes no `limit`
+      # @param sql_max_limit [Integer, nil] Ceiling applied to a requested `limit`
       def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false, # rubocop:disable Metrics/ParameterLists
                      table_gate: nil, eval_guard: nil, confirmation: nil, audit_logger: nil,
-                     unsafe_eval_enabled: false)
+                     unsafe_eval_enabled: false, sql_default_limit: nil,
+                     sql_max_limit: nil)
         @model_validator = model_validator
         @safe_context = safe_context
         @connection = connection
@@ -77,6 +85,8 @@ module Woods
         @confirmation = confirmation
         @audit_logger = audit_logger
         @unsafe_eval_enabled = unsafe_eval_enabled
+        @sql_default_limit = sql_default_limit || DEFAULT_SQL_ROW_LIMIT
+        @sql_max_limit = sql_max_limit || MAX_SQL_ROW_LIMIT
       end
 
       # Execute a tool request and return a response hash.
@@ -879,14 +889,34 @@ module Woods
                                  'Resubmit without limit.'
         end
 
-        query_sql = limit ? "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{limit}" : sql
-        validate_sql_policy!(query_sql) if limit
+        return run_unwrapped_sql(sql) if explain_statement?(sql)
+
+        run_capped_sql(sql, [limit || @sql_default_limit, @sql_max_limit].min)
+      rescue SqlValidationError => e
+        raise ValidationError, e.message
+      end
+
+      def run_capped_sql(sql, cap)
+        # One lookahead row distinguishes "exactly cap rows" from "more exist".
+        query_sql = "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{cap + 1}"
+        validate_sql_policy!(query_sql)
         result = active_connection.select_all(query_sql)
         validate_sql_result_types!(result)
 
+        rows = result.rows.first(cap)
+        { 'columns' => result.columns, 'rows' => rows, 'count' => rows.size,
+          'completeness' => sql_completeness(rows.size, result.rows.size > cap) }
+      end
+
+      def run_unwrapped_sql(sql)
+        result = active_connection.select_all(sql)
+        validate_sql_result_types!(result)
+
         { 'columns' => result.columns, 'rows' => result.rows, 'count' => result.rows.size }
-      rescue SqlValidationError => e
-        raise ValidationError, e.message
+      end
+
+      def sql_completeness(returned, has_more)
+        MCP::SearchResults.row_limit_outcome(returned: returned, has_more: has_more).transform_keys(&:to_s)
       end
 
       def require_sql_dialect!
