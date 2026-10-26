@@ -129,4 +129,33 @@ RSpec.describe 'script/parallel-rspec coverage collation' do
       expect(output.scan('is below the expected minimum coverage').size).to eq(1)
     end
   end
+
+  it 'fails instead of reporting a merge that is missing a process' do
+    Dir.mktmpdir do |dir|
+      File.write(File.join(dir, 'one_spec.rb'), <<~RUBY)
+        require 'spec_helper'
+        RSpec.describe('one_spec.rb') { it('never stores its result') { SimpleCov.at_exit {} } }
+      RUBY
+      File.write(File.join(dir, 'two_spec.rb'), "require 'spec_helper'\nRSpec.describe('two') { it('runs') {} }\n")
+      env = { 'WOODS_PARALLEL_PROCESSES' => '2', 'WOODS_PARALLEL_REPORT_DIR' => File.join(dir, 'report'),
+              'WOODS_COVERAGE_DIR' => File.join(dir, 'coverage'), 'COVERAGE' => '1', 'CI' => nil }
+
+      output, status = Open3.capture2e(env, RbConfig.ruby, script, File.join(dir, 'one_spec.rb'),
+                                       File.join(dir, 'two_spec.rb'))
+
+      expect(status).not_to be_success
+      expect(output).to include('coverage resultset is missing rspec-1')
+    end
+  end
+
+  it 'clears only the coverage directory it was given' do
+    sentinel = File.join(File.expand_path('../..', __dir__), 'coverage', ".sentinel-#{Process.pid}")
+    FileUtils.mkdir_p(File.dirname(sentinel))
+    File.write(sentinel, '')
+    Dir.mktmpdir { |dir| run_covered(dir, ci_value: nil) }
+
+    expect(File).to exist(sentinel)
+  ensure
+    FileUtils.rm_f(sentinel)
+  end
 end

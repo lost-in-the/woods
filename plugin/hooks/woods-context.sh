@@ -29,10 +29,12 @@ capture_response() {
   runner=$!
   ( sleep "$deadline_seconds"; kill -KILL -- "-$runner" 2>/dev/null ) >/dev/null 2>&1 &
   timer=$!
+  # Not a tracked job: bash prints "Terminated" for a tracked job it reaps
+  # between commands, which would reach the hook's stderr.
+  disown "$timer" 2>/dev/null || true
   wait "$runner" 2>/dev/null
   status=$?
   cleanup
-  wait "$timer" 2>/dev/null || true
   runner=""; timer=""
   # Carry the producer status in-band: Bash 3.2 cannot wait on this
   # process-substitution PID. Cleanup finishes before the final status frame.

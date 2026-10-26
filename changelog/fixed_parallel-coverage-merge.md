@@ -1,0 +1,1 @@
+- `script/parallel-rspec` with `COVERAGE` set now clears the coverage directory it reports into, not always `coverage/` under the checkout, and fails when a process's result is missing from the merge instead of reporting a partial total.
