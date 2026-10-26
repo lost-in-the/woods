@@ -12,6 +12,7 @@ require_relative '../atomic_file'
 require_relative '../generation'
 require_relative '../generation_pins'
 require_relative '../git_provenance'
+require_relative '../resilience/incremental_readiness'
 require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../watch/supervision_status'
@@ -2353,11 +2354,26 @@ module Woods
           manifest_sha = manifest && manifest['git_sha']
           head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
           base[:history] = history_fields(manifest_sha, head_sha)
+          base[:incremental] = incremental_fields(index_dir)
           return base unless head_sha
 
           base[:head_git_sha] = head_sha
           base[:git_sha_matches_head] = (manifest_sha == head_sha)
           base
+        end
+
+        # Whether the published index can take an incremental run, separately
+        # from whether it is readable: an older index still serves every tool
+        # while `woods:incremental` would refuse it. Omitted without an index
+        # directory.
+        #
+        # @return [Hash, nil] `{ready:, status:}`, status being `ready` or
+        #   `needs full extraction (<reason>)`
+        def incremental_fields(index_dir)
+          return unless index_dir
+
+          result = Woods::Resilience::IncrementalReadiness.new(index_dir: index_dir).call
+          { ready: result.ready?, status: result.to_s }
         end
 
         # Whether the Git-derived facts in the published index describe the

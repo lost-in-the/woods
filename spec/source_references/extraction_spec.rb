@@ -289,6 +289,25 @@ RSpec.describe 'Source-reference extraction integration' do
       Dir.children(File.join(@output, 'payloads')).sort
     end
 
+    it 'is reported as not ready beforehand, and ready again once the cache is restored' do
+      previous = full
+      cache_path = previous.payload_dir.join(Woods::SourceReferences::Cache::FILE_NAME)
+      good = File.binread(cache_path)
+      previous.payload_dir.join('manifest.json').write(JSON.generate('woods_version' => Woods::VERSION))
+      expect(Woods::Resilience::IncrementalReadiness.new(index_dir: @output).call).to be_ready
+
+      File.write(cache_path, 'not json')
+      token = Woods::Generation.new(output_dir: @output).current.token
+
+      expect(Woods::Resilience::IncrementalReadiness.new(index_dir: @output).call.to_s)
+        .to match(/\Aneeds full extraction \(.*source reference cache/)
+      expect { incremental }.to raise_error(Woods::SourceReferences::RebuildRequired, /woods:validate/)
+      expect(Woods::Generation.new(output_dir: @output).current.token).to eq(token)
+
+      File.binwrite(cache_path, good)
+      expect(Woods::Resilience::IncrementalReadiness.new(index_dir: @output).call).to be_ready
+    end
+
     it 'removes the seeded payload when the baseline cache is an older format' do
       previous = full
       active = payload_names

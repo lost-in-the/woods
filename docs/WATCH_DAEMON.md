@@ -740,6 +740,7 @@ party) behaves exactly as it always did.
     "retention_pins": [40],              // woods:pin[N]; null + retention_pins_error when unreadable
     "git_sha_matches_head": true,
     "history": { "state": "current", "published_sha": "9f1c2ab", "head_sha": "9f1c2ab" },
+    "incremental": { "ready": true, "status": "ready" },  // or "needs full extraction (<reason>)"
     "working_tree_dirty": true,           // git_sha_matches_head only sees committed HEAD
     "working_tree_fingerprint": "3f9a2c81ad3e4b7c",
     "staleness_seconds": 12
@@ -763,6 +764,11 @@ repository is `unknown`. Run `woods:incremental` or `woods:extract` to refresh i
 The check resolves HEAD from the index directory, so an output directory outside
 the application repository reports the HEAD of whatever repository contains it, or
 `unknown`.
+
+`incremental` says whether the index can take an incremental run, which is a
+different question from whether it is readable. An older index stays usable by
+every read tool while reporting `needs full extraction (<reason>)`; see
+[incremental readiness](INCREMENTAL_EXTRACTION.md#incremental-readiness).
 
 `working_tree_dirty` closes a real hole: an agent forty uncommitted edits deep
 was told the index matched HEAD while every answer described the tree before

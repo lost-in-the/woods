@@ -72,6 +72,7 @@ require_relative 'method_table'
 require_relative 'callback_sites'
 require_relative 'change_set'
 require_relative 'generation'
+require_relative 'resilience/incremental_readiness'
 require_relative 'path_dispatcher'
 require_relative 'source_inputs/session'
 require_relative 'source_references/extraction'
@@ -1238,25 +1239,12 @@ module Woods
     #
     # @return [Hash, nil] the published manifest, nil when there is none
     def ensure_supported_incremental_writer!
-      generation = Generation.new(output_dir: @output_dir)
-      directory = generation.payload_dir
-      manifest_path = directory.join('manifest.json')
-      return unless manifest_path.file?
-
-      if directory == generation.root
-        raise Woods::ExtractionError,
-              "Cannot incrementally update a legacy flat index under #{@output_dir}; run a full woods:extract first"
-      end
-
-      manifest = JSON.parse(AtomicFile.read(manifest_path))
-      writer = manifest.fetch('woods_version', nil)
-      return manifest if writer.nil? || Gem::Version.new(writer).segments.first >= 2
+      check = Resilience::IncrementalReadiness.check_writer(Generation.new(output_dir: @output_dir))
+      return check.manifest unless check.problem
 
       raise Woods::ExtractionError,
-            "Cannot incrementally update an index written by Woods #{writer}; run a full woods:extract first"
-    rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
-      raise Woods::ExtractionError,
-            "Cannot verify the baseline manifest writer (#{e.class}); run a full woods:extract first"
+            "Cannot incrementally update #{check.problem}; run a full woods:extract first " \
+            '(woods:validate reports incremental readiness)'
     end
 
     # The baseline's extraction fingerprint, once this run's configuration is
