@@ -40,6 +40,10 @@ module Woods
     # whose identifiers are the factory names.
     CONSTANT_RECEIVER = /\A(?:::)?[A-Z]\w*+(?:::[A-Z]\w*+)*+\z/
 
+    # `Const.new` as a call target is an instance of Const, so it names the
+    # same unit as the bare constant.
+    INSTANCE_CALL_SUFFIX = '.new'
+
     # Unit types that exist only for the test suite. Application code never
     # calls one, so they are never flow callees.
     SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
@@ -554,6 +558,7 @@ module Woods
     #   `{ ambiguous: true, candidates: }` marker when several namespaces
     #   share +target+'s short name; or nil when nothing resolves
     def compute_resolved_target(target)
+      target = target.delete_suffix(INSTANCE_CALL_SUFFIX)
       return nil unless target.match?(CONSTANT_RECEIVER)
 
       # Tier 1: Graph-wide lookup

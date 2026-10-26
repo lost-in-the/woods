@@ -1127,4 +1127,44 @@ RSpec.describe Woods::FlowAssembler do
       expect(assembler.instance_variable_get(:@unit_cache).size).to eq(cap)
     end
   end
+
+  describe 'instance-call receivers (Const.new.method)' do
+    def flow_for(controller_source, graph_nodes)
+      write_unit('JobsController', source_code: controller_source)
+      graph_nodes.each do |id, source|
+        write_unit(id, source_code: source, type: 'service')
+      end
+      allow(graph).to receive(:node_exists?) { |name| graph_nodes.key?(name) }
+      allow(graph).to receive(:find_all_by_suffix).and_return([])
+      described_class.new(graph: graph, extracted_dir: extracted_dir).assemble('JobsController#create')
+    end
+
+    it 'expands a service reached through Const.new' do
+      flow = flow_for(
+        "class JobsController\n  def create\n    Runner.new.run(job)\n  end\nend\n",
+        'Runner' => "class Runner\n  def run(job)\n    Gateway.charge(job)\n  end\nend\n"
+      )
+
+      expect(flow.steps.map { |s| s[:unit] }).to eq(['JobsController#create', 'Runner'])
+      expect(flow.steps[1][:operations].map { |op| op[:method] }).to include('charge')
+    end
+
+    it 'expands a namespaced service reached through Ns::Const.new' do
+      flow = flow_for(
+        "class JobsController\n  def create\n    Billing::Runner.new.run(job)\n  end\nend\n",
+        'Billing::Runner' => "class Billing::Runner\n  def run(job)\n    Gateway.charge(job)\n  end\nend\n"
+      )
+
+      expect(flow.steps.map { |s| s[:unit] }).to eq(['JobsController#create', 'Billing::Runner'])
+    end
+
+    it 'does not resolve a lowercase receiver ending in .new' do
+      flow = flow_for(
+        "class JobsController\n  def create\n    runner.new.run(job)\n  end\nend\n",
+        'Runner' => "class Runner\n  def run(job)\n  end\nend\n"
+      )
+
+      expect(flow.steps.map { |s| s[:unit] }).to eq(['JobsController#create'])
+    end
+  end
 end

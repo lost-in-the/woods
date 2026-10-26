@@ -259,6 +259,10 @@ RSpec.describe 'Flow Analysis Pipeline', :integration do
       # Controller step should have operations
       controller_ops = flow.steps[0][:operations]
       expect(controller_ops).not_to be_empty
+
+      service_step = flow.steps.find { |step| step[:unit] == 'PaymentProcessor' }
+      expect(service_step).not_to be_nil
+      expect(service_step[:operations].map { |op| [op[:target], op[:method]] }).to include(%w[Gateway charge])
     end
 
     it 'produces a valid FlowDocument that serializes to hash and markdown' do
