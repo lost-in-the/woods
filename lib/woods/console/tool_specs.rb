@@ -653,7 +653,8 @@ module Woods
           name: 'console_sql',
           description: [
             'Execute read-only SQL against the live database (SELECT/WITH...SELECT only).',
-            'SqlValidator blocks all DML/DDL. Every query runs inside a rolled-back transaction — no writes persist.',
+            'SqlValidator blocks all DML/DDL. Every query runs in a rolled-back transaction on its own ' \
+            'database connection; callbacks, other connections and external effects are not rolled back.',
             'Requires embedded_read_tools: true on the rack middleware, or ' \
             'config.console_embedded_read_tools = true for the stdio server ' \
             '(see docs/CONSOLE_MCP_SETUP.md).',

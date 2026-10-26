@@ -61,9 +61,9 @@ module Woods
     #    in SqlValidator::FORBIDDEN_KEYWORDS.
     #
     # 2. SafeContext rollback — every request (including console_query) runs inside
-    #    a database transaction that is always rolled back on completion. Even if a
-    #    query somehow mutated state (e.g. a function with side effects), the rollback
-    #    ensures nothing persists.
+    #    a database transaction on its own connection that is always rolled back on
+    #    completion. Database changes made on that connection are discarded; callbacks,
+    #    other connections and external effects are not rolled back.
     #
     # 3. Per-request connection pooling — each HTTP request draws a connection from
     #    ActiveRecord::Base's pool and returns it after the response. No shared

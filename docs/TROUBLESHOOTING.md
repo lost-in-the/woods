@@ -724,7 +724,7 @@ bundle exec rake woods:console 2>/dev/null
 
 **Symptom:** `console_count` or `console_sample` times out with an error mentioning statement timeout.
 
-**Cause:** The default statement timeout is 5000ms (5 seconds). Large tables without a scope condition can exceed this.
+**Cause:** Where the adapter supports it, Woods attempts a 5000ms (5 seconds) statement timeout. Large tables without a scope condition can exceed it. SQLite has no supported per-statement timeout; see the [adapter table](CONSOLE_MCP_SETUP.md#statement-timeout).
 
 **Fix:** Add scope conditions to narrow the result set:
 
