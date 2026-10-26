@@ -1311,6 +1311,12 @@ deployment guide including defense layers.
 | `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 | `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 
+## Notion export
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `notion_export_column_defaults` | Boolean | `false` | Send raw column default values to the Notion Columns database. Off by default: Notion receives `Has default` only. Values sent under the opt-in are credential-scanned and any match is redacted. |
+
 ## Environment variables
 
 These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block, most exist so the MCP servers, rake tasks, and exporters can self-configure or override config without an initializer edit.

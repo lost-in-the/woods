@@ -91,7 +91,7 @@ Create two databases in your Notion workspace with these exact property names an
 | Table | Relation (→ Data Models database) |
 | Data Type | Select (options: string, integer, bigint, boolean, datetime, text, decimal, float, date, binary, json, jsonb) |
 | Nullable | Checkbox |
-| Default Value | Text |
+| Default Value | Text (`Has default` unless `notion_export_column_defaults` is on; see below) |
 | Validation Rules | Text |
 
 ### 3. Share Databases with Integration
@@ -114,6 +114,14 @@ Woods.configure do |config|
   }
 end
 ```
+
+Column default values are not sent to Notion by default. The Default Value property says `Has default`, plus the digest where the column carries one. To send the values, opt in:
+
+```ruby
+config.notion_export_column_defaults = true
+```
+
+Values sent under the opt-in pass through the credential scanner, and any match is replaced with `[REDACTED]`.
 
 Or via environment variables:
 
