@@ -60,4 +60,35 @@ RSpec.describe 'woods_status incremental readiness' do
     expect(status[:index][:incremental][:status]).to match(/needs full extraction \(.*legacy flat index/)
     expect(status[:ready]).to be(true)
   end
+
+  describe 'per-generation memoization' do
+    it 'parses the reference cache once for two status calls on one generation, and again after a new one' do
+      Dir.mktmpdir do |root|
+        build_index(root)
+        reader = Woods::MCP::IndexReader.new(root)
+        allow(Woods::SourceReferences::Cache).to receive(:read).and_call_original
+
+        2.times { Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: root) }
+        expect(Woods::SourceReferences::Cache).to have_received(:read).once
+
+        Woods::Generation.new(output_dir: root).bump!(reason: 'incremental', payload: Woods::PayloadStore.name_for(1))
+        Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: root)
+        expect(Woods::SourceReferences::Cache).to have_received(:read).twice
+      end
+    end
+
+    it 'drops the memo on reload!' do
+      Dir.mktmpdir do |root|
+        build_index(root)
+        reader = Woods::MCP::IndexReader.new(root)
+        allow(Woods::SourceReferences::Cache).to receive(:read).and_call_original
+
+        reader.incremental_readiness
+        reader.reload!
+        reader.incremental_readiness
+
+        expect(Woods::SourceReferences::Cache).to have_received(:read).twice
+      end
+    end
+  end
 end

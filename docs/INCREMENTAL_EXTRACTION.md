@@ -1024,9 +1024,10 @@ Readiness covers the baseline on disk. Refusals that depend on the live
 configuration or current source bytes (a changed extraction fingerprint or
 `source_reference_callers`, an unverifiable source file) are still decided by
 the run, which refuses before publishing and leaves the active generation in
-place. The refusal messages point back to `woods:validate`. `woods_status` reads
-the cache on each call, so on a very large index its first call costs a cache
-parse.
+place. The refusal messages point back to `woods:validate`. `woods_status`
+memoizes the result per served generation (dropped on reload), so the cache is
+parsed once per generation. Restoring cache bytes inside one generation shows up
+after the next reload or generation change.
 
 The development constant-span writer uses cache format 7. It requires validated
 line, byte column and byte length for every candidate, and records the
