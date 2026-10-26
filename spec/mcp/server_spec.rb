@@ -726,6 +726,60 @@ RSpec.describe Woods::MCP::Server do
     end
   end
 
+  describe 'tool: domain_clusters entry point and boundary caps' do
+    let(:edge_dir) { Dir.mktmpdir('woods-cluster-edges') }
+    let(:edge_server) { described_class.build(index_dir: edge_dir, response_format: :json) }
+    let(:markdown_edge_server) { described_class.build(index_dir: edge_dir, response_format: :markdown) }
+
+    before do
+      File.write(File.join(edge_dir, 'manifest.json'), JSON.pretty_generate(total_units: 0))
+      nodes = {}
+      edges = {}
+      reverse = Hash.new { |h, k| h[k] = [] }
+      6.times { |i| nodes["Core::Unit#{i}"] = { 'type' => 'model' } }
+      12.times do |i|
+        ctl = "Web#{i.to_s.rjust(2, '0')}::Ctl"
+        nodes[ctl] = { 'type' => 'controller' }
+        edges[ctl] = [{ 'target' => 'Core::Unit0', 'via' => 'code_reference' }]
+        reverse['Core::Unit0'] << ctl
+      end
+      File.write(File.join(edge_dir, 'dependency_graph.json'),
+                 JSON.pretty_generate(nodes: nodes, edges: edges, reverse: reverse))
+    end
+
+    after { FileUtils.remove_entry(edge_dir) if File.directory?(edge_dir) }
+
+    def core_cluster(server, **args)
+      data = parse_response(call_tool(server, 'domain_clusters', min_size: 1, **args))
+      data['clusters'].find { |c| c['name'] == 'Core' }
+    end
+
+    it 'lists every entry point and boundary edge when they fit under member_limit' do
+      core = core_cluster(edge_server, member_limit: 50)
+
+      expect(core['entry_points'].size).to eq(12)
+      expect(core['boundary_edges'].size).to eq(12)
+      expect(core).not_to have_key('entry_points_omitted')
+      expect(core).not_to have_key('boundary_edges_omitted')
+    end
+
+    it 'caps entry points and boundary edges with member_limit and counts what was left out' do
+      core = core_cluster(edge_server, member_limit: 5)
+
+      expect(core['entry_points'].size).to eq(5)
+      expect(core['entry_points_omitted']).to eq(7)
+      expect(core['boundary_edges'].size).to eq(5)
+      expect(core['boundary_edges_omitted']).to eq(7)
+    end
+
+    it 'shows the omitted counts in Markdown' do
+      text = response_text(call_tool(markdown_edge_server, 'domain_clusters', min_size: 1, member_limit: 5))
+
+      expect(text).to include('7 more entry points not shown')
+      expect(text).to include('7 more boundary connections not shown')
+    end
+  end
+
   describe 'tool: pagerank' do
     it 'returns ranked nodes with scores' do
       response = call_tool(server, 'pagerank')

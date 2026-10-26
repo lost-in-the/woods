@@ -190,12 +190,16 @@ module Woods
             end
             entry_points = fetch_key(cluster, :entry_points) || []
             lines << "  entry points: #{entry_points.join(', ')}" if entry_points.any?
+            omitted_entries = fetch_key(cluster, :entry_points_omitted, 0)
+            lines << "  ... #{omitted_entries} more entry points not shown" if omitted_entries.positive?
             (fetch_key(cluster, :members) || []).each { |m| lines << "  #{m}" }
             omitted = fetch_key(cluster, :members_omitted, 0)
             lines << "  ... #{omitted} more members not shown" if omitted.positive?
             (fetch_key(cluster, :boundary_edges) || []).each do |edge|
               lines << "  boundary: #{fetch_key(edge, :from)} -> #{fetch_key(edge, :to)} (#{fetch_key(edge, :via)})"
             end
+            omitted_edges = fetch_key(cluster, :boundary_edges_omitted, 0)
+            lines << "  ... #{omitted_edges} more boundary connections not shown" if omitted_edges.positive?
             lines << ''
           end
 

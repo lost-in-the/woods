@@ -263,8 +263,8 @@ they do not establish complete source-reference coverage.
 
 `domain_clusters` returns clusters largest first, ties broken by name, so the
 order is stable for a given generation. `limit` (default 20) and `offset` page
-the clusters. `member_limit` (default 50) caps the members listed per cluster;
-a cluster cut by it carries `members_omitted`, and `member_count` stays the true
+the clusters. `member_limit` (default 50) caps the members, entry points and boundary edges listed per cluster;
+a list cut by it carries `members_omitted`, `entry_points_omitted` or `boundary_edges_omitted`, and `member_count` stays the true
 size. Raise `member_limit` to read the rest of a large cluster.
 
 `total` is the number of clusters after `types` and `min_size`. The shared

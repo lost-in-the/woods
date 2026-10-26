@@ -246,7 +246,11 @@ module Woods
 
             # Entry points
             entry_points = cluster[:entry_points] || cluster['entry_points'] || []
-            lines << "**Entry points:** #{entry_points.first(10).join(', ')}" if entry_points.any?
+            if entry_points.any?
+              omitted = cluster[:entry_points_omitted] || cluster['entry_points_omitted'] || 0
+              suffix = omitted.positive? ? ", _... #{omitted} more entry points not shown_" : ''
+              lines << "**Entry points:** #{entry_points.join(', ')}#{suffix}"
+            end
 
             members = cluster[:members] || cluster['members'] || []
             if members.any?
@@ -257,17 +261,18 @@ module Woods
               lines << "- _... #{omitted} more members not shown_" if omitted.positive?
             end
 
-            # Boundary edges (show first 10)
             boundaries = cluster[:boundary_edges] || cluster['boundary_edges'] || []
             if boundaries.any?
               lines << ''
               lines << '**Boundary connections:**'
-              boundaries.first(10).each do |edge|
+              boundaries.each do |edge|
                 from = edge[:from] || edge['from']
                 to = edge[:to] || edge['to']
                 via = edge[:via] || edge['via']
                 lines << "- #{from} → #{to} (#{via})"
               end
+              omitted = cluster[:boundary_edges_omitted] || cluster['boundary_edges_omitted'] || 0
+              lines << "- _... #{omitted} more boundary connections not shown_" if omitted.positive?
             end
 
             lines << ''

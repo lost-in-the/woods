@@ -774,8 +774,8 @@ module Woods
                          'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \
                          'Clusters come largest first and are paged: `limit` clusters per call ' \
                          "(default: #{domain_clusters_default_limit}), `offset` to continue, and each cluster lists at most " \
-                         "`member_limit` members (default: #{domain_clusters_default_member_limit}) with `members_omitted` " \
-                         'counting the rest. Check `completeness.has_more` before treating the answer as every domain. ' \
+                         "`member_limit` members, entry points and boundary edges (default: #{domain_clusters_default_member_limit}) " \
+                         'with `members_omitted`, `entry_points_omitted` and `boundary_edges_omitted` counting the rest. Check `completeness.has_more` before treating the answer as every domain. ' \
                          'Useful for understanding architectural domains and blast radius.',
             input_schema: {
               properties: {
@@ -794,7 +794,7 @@ module Woods
                 offset: { type: 'integer', description: 'Skip this many clusters (default: 0)' },
                 member_limit: {
                   type: 'integer',
-                  description: "Maximum members listed per cluster (default: #{domain_clusters_default_member_limit}). " \
+                  description: "Maximum members, entry points and boundary edges listed per cluster (default: #{domain_clusters_default_member_limit}). " \
                                'Raise it to read the rest of a large cluster.'
                 }
               }
@@ -834,13 +834,19 @@ module Woods
           value.positive? ? value : default
         end
 
-        # A copy of the cluster listing at most +member_limit+ members. The
-        # count of the rest rides in +members_omitted+, absent when none are cut.
-        def cap_cluster_members(cluster, member_limit)
-          members = cluster[:members]
-          return cluster if members.size <= member_limit
+        CLUSTER_CAPPED_LISTS = %i[members entry_points boundary_edges].freeze
+        private_constant :CLUSTER_CAPPED_LISTS
 
-          cluster.merge(members: members.first(member_limit), members_omitted: members.size - member_limit)
+        # A copy of the cluster listing at most +member_limit+ members, entry
+        # points and boundary edges. Each cut list gets a +<list>_omitted+
+        # count; lists that fit carry no marker.
+        def cap_cluster_members(cluster, member_limit)
+          CLUSTER_CAPPED_LISTS.reduce(cluster) do |capped, key|
+            list = capped[key]
+            next capped if list.nil? || list.size <= member_limit
+
+            capped.merge(key => list.first(member_limit), "#{key}_omitted": list.size - member_limit)
+          end
         end
 
         def define_pagerank_tool(server, reader, respond, renderer)
