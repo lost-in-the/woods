@@ -1,0 +1,1 @@
+- A full extraction on a reused `Woods::Extractor` instance no longer carries over the previous run's results. An extractor the configuration had since disabled, such as `rails_source` after turning off `include_framework_sources`, no longer has its earlier units written into the new index.

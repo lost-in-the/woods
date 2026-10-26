@@ -1624,6 +1624,48 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  describe 'reusing one instance across full extractions' do
+    let(:unit) do
+      Woods::ExtractedUnit.new(type: :rails_source, identifier: 'ActiveRecord::Base', file_path: nil)
+    end
+    let(:fake_extractor_class) do
+      framework_unit = unit
+      Class.new do
+        define_method(:extract_all) { [framework_unit] }
+      end
+    end
+
+    before do
+      require 'woods'
+      require 'active_support/isolated_execution_state'
+      require 'active_support/core_ext/time'
+      @original_config = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      Woods.configuration.concurrent_extraction = false
+      stub_const('Woods::Extractor::EXTRACTORS', { rails_source: fake_extractor_class })
+      %i[setup_output_directory safe_eager_load! deduplicate_results resolve_dependents
+         enrich_with_git_data normalize_file_paths write_dependency_graph write_graph_analysis
+         write_manifest write_structural_summary capture_snapshot log_summary
+         write_results].each do |phase|
+        allow(extractor).to receive(phase)
+      end
+      allow(Woods::ModelNameCache).to receive(:reset!)
+      allow(Woods::GraphAnalyzer).to receive(:new).and_return(double('GraphAnalyzer', analyze: {}))
+    end
+
+    after { Woods.configuration = @original_config }
+
+    it 'drops units of an extractor the configuration has since disabled, and restores them when re-enabled' do
+      expect(extractor.extract_all).to have_key(:rails_source)
+
+      Woods.configuration.include_framework_sources = false
+      expect(extractor.extract_all).not_to have_key(:rails_source)
+
+      Woods.configuration.include_framework_sources = true
+      expect(extractor.extract_all[:rails_source]).to eq([unit])
+    end
+  end
+
   # ── extract_all orphan sweep (#177) ──────────────────────────────────
 
   # A full extraction never wipes the output directory, so extracting into a
