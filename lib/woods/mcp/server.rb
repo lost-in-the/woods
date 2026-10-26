@@ -2148,11 +2148,21 @@ module Woods
             exporter = Woods::Notion::Exporter.new(index_dir: index_dir, reader: reader)
             stats = exporter.sync_all
 
+            errors = stats[:errors]
+            error_count = stats[:error_count] || errors.size
+            landed = stats[:data_models].to_i + stats[:columns].to_i + stats[:skipped].to_i
+            status = if error_count.zero? then 'complete'
+                     elsif landed.positive? then 'partial'
+                     else 'failed'
+                     end
+
             respond.call(JSON.pretty_generate({
-                                                synced: true,
+                                                synced: status != 'failed',
+                                                status: status,
                                                 data_models: stats[:data_models],
                                                 columns: stats[:columns],
-                                                errors: stats[:errors].first(10)
+                                                error_count: error_count,
+                                                errors: errors.first(10)
                                               }))
           rescue StandardError => e
             respond_err.call(

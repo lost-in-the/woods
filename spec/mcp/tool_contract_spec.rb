@@ -176,7 +176,8 @@ RSpec.describe 'Index MCP tool contracts' do
                              'sections' => array_contract(1_000, 10_000)
                            }),
       'notion_sync' => contract(:notion, {}, exact_data({
-                                                          'synced' => true, 'data_models' => 2, 'columns' => 4, 'errors' => []
+                                                          'synced' => true, 'status' => 'complete', 'data_models' => 2, 'columns' => 4,
+                                                          'error_count' => 0, 'errors' => []
                                                         })),
       'pagerank' => contract(:always, {}, exact_data({
                                                        'total_nodes' => 3,
@@ -1549,5 +1550,50 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(result.dig('structuredContent', 'text')).to eq(result.dig('content', 0, 'text'))
     expect(result.dig('structuredContent', 'data')).to be_a(Hash)
     expect { schema.validate_result(result.fetch('structuredContent')) }.not_to raise_error
+  end
+
+  describe 'notion_sync outcome reporting' do
+    let(:notion_data) { call_tool(full_server, 'notion_sync', {}).dig('result', 'structuredContent', 'data') }
+    let(:sync_stats) { { data_models: 2, columns: 4, skipped: 0, errors: [] } }
+    let(:notion_exporter) { double(sync_all: sync_stats) }
+
+    it 'reports a clean run as complete' do
+      expect(notion_data).to include('status' => 'complete', 'synced' => true, 'error_count' => 0, 'errors' => [])
+    end
+
+    context 'when some pages synced and some failed' do
+      let(:sync_stats) { { data_models: 1, columns: 0, skipped: 0, errors: ['Post: boom'], error_count: 1 } }
+
+      it 'reports partial with the error total' do
+        expect(notion_data).to include('status' => 'partial', 'synced' => true, 'error_count' => 1,
+                                       'errors' => ['Post: boom'])
+      end
+    end
+
+    context 'when every page failed' do
+      let(:sync_stats) { { data_models: 0, columns: 0, skipped: 0, errors: %w[Post-401 User-401], error_count: 2 } }
+
+      it 'reports failed and does not claim synced' do
+        expect(notion_data).to include('status' => 'failed', 'synced' => false, 'error_count' => 2)
+      end
+    end
+
+    context 'when only unchanged pages were skipped alongside errors' do
+      let(:sync_stats) { { data_models: 0, columns: 0, skipped: 3, errors: ['Post: boom'], error_count: 1 } }
+
+      it 'reports partial because the skipped pages are already in Notion' do
+        expect(notion_data).to include('status' => 'partial')
+      end
+    end
+
+    context 'when the exporter reports more than ten errors' do
+      let(:errors) { Array.new(101) { |i| "Unit#{i}: boom" } }
+      let(:sync_stats) { { data_models: 1, columns: 0, skipped: 0, errors: errors, error_count: 150 } }
+
+      it 'keeps the total and caps the listed errors at ten' do
+        expect(notion_data['error_count']).to eq(150)
+        expect(notion_data['errors']).to eq(errors.first(10))
+      end
+    end
   end
 end
