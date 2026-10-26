@@ -14,7 +14,7 @@ agent-facing operational map.
 
 | File | Role |
 |------|------|
-| `client.rb` | Net::HTTP REST client. `put_document` (upsert by URI), `delete_document`, `list_documents`/`all_documents` (paginated, no body returned), `create_collection`/`list_collections`. Raises `ApiError < Woods::Error` carrying the HTTP `status`. |
+| `client.rb` | Net::HTTP REST client. `put_document` (upsert by URI), `delete_document`, `list_documents`/`all_documents` (paginated, no body returned), `create_collection`. There is no `list_collections`. Raises `ApiError < Woods::Error` carrying the HTTP `status`. |
 | `document_builder.rb` | Unit JSON → `{title:, body:, uri:}` Markdown. **Every rendered collection is sorted** — body bytes must be a function of content, not input order, because the exporter hashes them. Credential-scrubs bodies (fails closed to empty string). |
 | `exporter.rb` | Orchestrates the sync. Skip-if-unchanged via manifest hash, reconcile-on-empty-manifest, orphan purge with safety guards. |
 | `sync_manifest.rb` | JSON at `<output_dir>/unblocked_sync_manifest.json`: `uri → {hash, document_id}`. Atomic save; discards itself on collection-id mismatch or corrupt file (degrades to full re-push). |
@@ -43,8 +43,16 @@ agent-facing operational map.
 - **Delete:** manifest URIs absent from the current run's full unit set
   (partial-sync types track ALL existing units, so a poro falling out of the
   top-100 is *not* a deletion).
-- **Reconcile:** empty manifest → one paginated `all_documents` sweep seeds
-  `document_id`s (hash stays nil → full re-push, but orphan purge still works).
+- **Inventory:** every run (not a dry run) first calls
+  `all_documents(collection_id: nil)` for the whole remote inventory. A short
+  page is not proof of completion, and a malformed page or repeated cursor
+  raises before any write. A URI already in another collection is refused.
+- **Receipts:** a manifest entry is deletion authority only when it records a
+  successful push (non-nil hash, `owned`). A missing manifest re-pushes current
+  documents and records fresh receipts. It does not adopt unrelated remote
+  documents for deletion, so old remote documents are not purged. Entries with
+  a nil `document_id` are resolved from the inventory before a purge, and a
+  delete needs the remote id and collection to match the receipt.
 
 ### Purge safety rails (both intentional — do not "fix")
 
@@ -69,7 +77,9 @@ agent-facing operational map.
 | Symptom | Likely cause |
 |---------|--------------|
 | Everything re-pushes every run | Manifest not persisted between CI runs (cache restore missing), OR a `DocumentBuilder` change altered all bodies, OR nondeterministic body output (unsorted collection — check any new `build_*` method) |
-| `0 synced, N skipped`, but docs stale in Unblocked | Hash matched stale manifest from another checkout — delete the manifest to force reconcile |
+| `0 synced, N skipped`, but docs stale in Unblocked | Hash matched a stale manifest from another checkout. Restore the right manifest, or run once with `UNBLOCKED_FORCE_FULL_SYNC=1` to re-push. Deleting the manifest also re-pushes, but forfeits deletion receipts for earlier documents |
+| `Unblocked manifest needs recovery: ...` (or a `discarding sync manifest` warning) | Manifest is unparseable, unreadable, an unsupported schema version, malformed, or written for a different collection. Sync refuses before any remote change. Restore a known-good copy from the CI cache. Force flags do not bypass it |
+| `cleanup incomplete: legacy owned documents remain` | A v1 manifest receipt has no repo/ref scope. Set `UNBLOCKED_MIGRATE_FROM_REF` to the known source ref (preview with `UNBLOCKED_DRY_RUN=1`), or clean up manually. `UNBLOCKED_FORCE_PURGE` does not help |
 | A few units re-push every warm run; manifest entry count < synced | Multiple units share one `file_path` (nested/namespaced classes, several classes per `.rb`). `build_uri_index` disambiguates them (`?unit=` suffix on all but the lexically-first identifier) — if it regresses, those units collide on one URI again |
 | A unit's document is missing from the collection (only one of N co-located classes present) | Same file-sharing collision overwriting on a shared URI — `build_uri_index` is the fix |
 | `WARNING: refusing to delete X of Y documents` | Partial index — sync against full extraction output. Or an *intentional* large removal (type dropped from FULL_SYNC_TYPES, `unblocked_repo_url` change, big deletion): re-run once with `UNBLOCKED_FORCE_PURGE=1` |

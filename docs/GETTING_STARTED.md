@@ -6,7 +6,7 @@ This guide takes a Rails application from no Woods installation to a validated i
 
 Woods 2.0 requires Ruby 3.0 or later, Rails 6.0 through 8.x, a Rails environment that can boot and connect to its database, and Bundler. An MCP-capable client is only needed when an agent will query the result.
 
-The install generator adds an initializer plus a legacy compatibility migration for older/custom integrations. Shipped v2 paths do not use that migration's application tables; a new default install removes it without running it. Extraction boots Rails and writes a generated index under `tmp/woods/` by default; it does not read rows from your application's business tables.
+The install generator writes an initializer and nothing else. Shipped v2 paths do not use the legacy `woods_units`, `woods_edges`, and `woods_embeddings` application tables, so the legacy migration is written only with `--legacy-migration` (see step 2). Extraction boots Rails and writes a generated index under `tmp/woods/` by default; it does not read rows from your application's business tables.
 
 If an agent will perform the installation, use the safety and handoff checklist in [Agent setup](AGENT_SETUP.md).
 

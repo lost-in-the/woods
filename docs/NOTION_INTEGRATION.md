@@ -30,7 +30,7 @@ Sync is incremental. A **sync manifest** (`<output_dir>/notion_sync_manifest.jso
 
 - **skips** a page whose built content hash is unchanged (zero API calls),
 - **updates** only pages whose content actually changed, via the cached page id,
-- **self-heals** the cached id if the page was deleted or archived behind it (one lookup, then a normal create).
+- **self-heals** the cached id if the page was deleted or archived behind it (the update fails, then a normal create). This happens only when a page's content changed, because that is the only time the cached id is used. A page deleted in Notion while nothing changed locally stays skipped (zero calls) and is not recreated. Run with `WOODS_NOTION_FORCE=1` to re-check every page by title and recreate missing ones.
 
 Manifest entries for models/columns that vanished from the current extraction are pruned, but **no Notion page is ever deleted** by the sync, there is no delete path. A renamed or removed model just leaves its old page in Notion untouched.
 
