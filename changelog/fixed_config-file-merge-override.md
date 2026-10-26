@@ -1,0 +1,1 @@
+- With `config.config_file_values = true`, a key set beside a YAML merge key (`<<: *default`) now publishes its own value instead of the merged default, whichever side of the merge key it sits on. The merged default no longer adds a second entry for the same key.

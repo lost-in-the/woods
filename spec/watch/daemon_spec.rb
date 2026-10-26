@@ -528,6 +528,8 @@ RSpec.describe Woods::Watch::Daemon do
 
     it 'keeps touching the lock while the retried extraction is in flight' do
       touch('config/locales/en.yml')
+      touches = Queue.new
+      allow(lock).to receive(:touch) { touches << true }
       daemon = build(lock: lock, extractor_factory: -> { blocking_extractor })
       daemon.send(:carry_forward, Woods::ChangeSet.new(paths: ['config/locales/en.yml'], root: root))
       allow(daemon).to receive(:heartbeat_tick).and_return(0.01)
@@ -535,11 +537,12 @@ RSpec.describe Woods::Watch::Daemon do
       heartbeat = daemon.send(:start_heartbeat)
       begin
         Timeout.timeout(5) { sleep(0.01) until extraction_gate[:in_flight] }
-        # Several heartbeat ticks' worth of wall time with the extraction
-        # parked. A heartbeat that is itself inside the extraction cannot touch.
-        sleep(0.2)
+        # A second touch after the extraction parked proves the heartbeat is not
+        # inside it. Waiting on the count, not a fixed sleep, keeps a starved
+        # runner from failing it.
+        Timeout.timeout(30) { sleep(0.01) until touches.size >= 2 }
 
-        expect(lock).to have_received(:touch).at_least(:twice)
+        expect(extraction_gate[:released]).to be(false)
       ensure
         extraction_gate[:released] = true
         daemon.stop
