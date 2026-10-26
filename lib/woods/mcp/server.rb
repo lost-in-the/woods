@@ -2352,9 +2352,10 @@ module Woods
           base.merge!(working_tree_fields(index_dir))
 
           manifest_sha = manifest && manifest['git_sha']
-          head_sha = manifest_sha ? resolve_head_sha(index_dir) : nil
-          base[:history] = history_fields(manifest_sha, head_sha)
-          base[:incremental] = incremental_fields(index_dir)
+          root = recorded_source_root(base[:source_freshness])
+          head_sha = manifest_sha ? resolve_head_sha(root) : nil
+          base[:history] = history_fields(manifest_sha, head_sha, root)
+          base[:incremental] = incremental_fields(index_dir, reader)
           return base unless head_sha
 
           base[:head_git_sha] = head_sha
@@ -2369,10 +2370,14 @@ module Woods
         #
         # @return [Hash, nil] `{ready:, status:}`, status being `ready` or
         #   `needs full extraction (<reason>)`
-        def incremental_fields(index_dir)
+        def incremental_fields(index_dir, reader = nil)
           return unless index_dir
 
-          result = Woods::Resilience::IncrementalReadiness.new(index_dir: index_dir).call
+          result = if reader.respond_to?(:incremental_readiness)
+                     reader.incremental_readiness
+                   else
+                     Woods::Resilience::IncrementalReadiness.new(index_dir: index_dir).call
+                   end
           { ready: result.ready?, status: result.to_s }
         end
 
@@ -2386,14 +2391,14 @@ module Woods
         # cannot be compared.
         #
         # @return [Hash]
-        def history_fields(published_sha, head_sha)
+        def history_fields(published_sha, head_sha, root)
           if published_sha.nil? || published_sha.to_s.empty?
             return { state: 'unknown', reason: 'published_sha_missing' }
           end
           if published_sha == Woods::GitProvenance::UNKNOWN
             return { state: 'unknown', reason: 'published_sha_unknown', published_sha: published_sha }
           end
-          return { state: 'unknown', reason: 'head_unresolved', published_sha: published_sha } unless head_sha
+          return { state: 'unknown', reason: unresolved_reason(root), published_sha: published_sha } unless head_sha
           return { state: 'current', published_sha: published_sha, head_sha: head_sha } if published_sha == head_sha
 
           { state: 'stale', reason: 'head_moved', published_sha: published_sha, head_sha: head_sha }
@@ -2568,23 +2573,36 @@ module Woods
           fields
         end
 
-        # Resolve the current HEAD SHA for the git repo containing +index_dir+,
-        # through {Woods::GitProvenance} so a linked worktree and
-        # +WOODS_GIT_DIR+ resolve as they do for extraction. Returns nil when
-        # git is unavailable or +index_dir+ is not in a repo; callers treat nil
-        # as "can't compare" rather than "mismatch".
+        # The application root the generation recorded when it captured source
+        # inputs. It is the only root whose repository describes the index: the
+        # index directory may sit inside an unrelated checkout.
+        #
+        # @return [String, nil]
+        def recorded_source_root(freshness)
+          root = freshness.is_a?(Hash) ? freshness['recorded_root'] : nil
+          root.is_a?(String) && !root.empty? ? root : nil
+        end
+
+        def unresolved_reason(root)
+          return 'root_not_recorded' unless root
+
+          File.directory?(root) ? 'head_unresolved' : 'root_unreachable'
+        end
+
+        # Resolve the live HEAD SHA of the repository at the recorded
+        # application +root+, through {Woods::GitProvenance} so a linked
+        # worktree and +WOODS_GIT_DIR+ resolve as they do for extraction.
+        # Returns nil when no root was recorded, it is not reachable from this
+        # process, or git cannot resolve it; callers treat nil as "can't
+        # compare" rather than "mismatch".
         #
         # GitProvenance captures stderr separately, so a warning on an
-        # otherwise successful +rev-parse+ (a stale +index.lock+ notice, a
-        # +core.fsmonitor+ complaint) never lands in the value compared against
-        # the manifest, and never reaches the MCP stdio transport.
-        def resolve_head_sha(index_dir)
-          return nil unless index_dir
+        # otherwise successful +rev-parse+ never lands in the value compared
+        # against the manifest, and never reaches the MCP stdio transport.
+        def resolve_head_sha(root)
+          return nil unless root && File.directory?(root)
 
-          dir = index_dir.to_s
-          return nil unless File.directory?(dir)
-
-          Woods::GitProvenance.new(root: dir).head_sha
+          Woods::GitProvenance.new(root: root).head_sha
         end
 
         # Assemble the +features+ sub-hash of woods_status, preferring the

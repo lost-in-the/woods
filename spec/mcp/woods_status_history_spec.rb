@@ -35,11 +35,12 @@ RSpec.describe 'woods_status git history staleness' do
     git(dir, 'commit', '--quiet', '--allow-empty', '-m', 'no source change')
   end
 
-  def history_for(index_dir, published_sha, source_state: 'current')
+  def history_for(index_dir, published_sha, source_state: 'current', root: :enclosing)
     FileUtils.mkdir_p(index_dir)
+    root = File.expand_path('../..', index_dir) if root == :enclosing
     manifest = { 'git_sha' => published_sha, 'extracted_at' => nil, 'counts' => {} }
-    reader = double('reader', manifest: manifest,
-                              source_freshness: { 'state' => source_state, 'complete' => true })
+    freshness = { 'state' => source_state, 'complete' => true, 'recorded_root' => root }
+    reader = double('reader', manifest: manifest, source_freshness: freshness)
     Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: index_dir)[:index]
   end
 
@@ -134,6 +135,36 @@ RSpec.describe 'woods_status git history staleness' do
       allow(ENV).to receive(:[]).with('WOODS_GIT_DIR').and_return(File.join(repo, '.git'))
 
       expect(history_for(File.join(parent, 'elsewhere'), published)[:history]).to include(state: 'stale')
+    end
+  end
+
+  it 'never reports the repository that merely encloses the index directory' do
+    Dir.mktmpdir do |parent|
+      other = File.join(parent, 'other')
+      app = File.join(parent, 'app')
+      init_repo(other)
+      init_repo(app)
+      published = git(app, 'rev-parse', 'HEAD')
+      empty_commit(other)
+      index_dir = File.join(other, 'tmp', 'woods')
+
+      index = history_for(index_dir, published, root: app)
+      expect(index[:history]).to include(state: 'current', head_sha: published)
+      expect(index[:head_git_sha]).to eq(published)
+
+      unrecorded = history_for(index_dir, published, root: nil)
+      expect(unrecorded[:history]).to eq(state: 'unknown', reason: 'root_not_recorded', published_sha: published)
+      expect(unrecorded).not_to have_key(:head_git_sha)
+    end
+  end
+
+  it 'is unknown when the recorded root is not reachable from this process' do
+    Dir.mktmpdir do |repo|
+      init_repo(repo)
+      index = history_for(File.join(repo, 'tmp', 'woods'), git(repo, 'rev-parse', 'HEAD'), root: '/container/app')
+
+      expect(index[:history]).to include(state: 'unknown', reason: 'root_unreachable')
+      expect(index).not_to have_key(:git_sha_matches_head)
     end
   end
 

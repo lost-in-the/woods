@@ -758,12 +758,14 @@ worktree-aware Git path as extraction (including `WOODS_GIT_DIR`). A commit with
 no source change leaves `source_freshness` current but marks history `stale`,
 because Git-derived facts (recent commits, churn, authorship) were captured at the
 older HEAD. `unknown` carries a `reason` (`published_sha_missing`,
-`published_sha_unknown`, `head_unresolved`) and is never reported as stale. A baked
+`published_sha_unknown`, `root_not_recorded`, `root_unreachable`, `head_unresolved`) and is never reported as stale. A baked
 `GIT_SHA` build arg is not a live HEAD, so a directory without a resolvable
 repository is `unknown`. Run `woods:incremental` or `woods:extract` to refresh it.
-The check resolves HEAD from the index directory, so an output directory outside
-the application repository reports the HEAD of whatever repository contains it, or
-`unknown`.
+The live HEAD is read from the application root the generation recorded when it
+captured source inputs, never from the repository that happens to enclose the
+index directory. A generation with no recorded root reports `unknown` with reason
+`root_not_recorded`. A recorded root this process cannot reach (for example a
+container path) reports `root_unreachable`.
 
 `incremental` says whether the index can take an incremental run, which is a
 different question from whether it is readable. An older index stays usable by
