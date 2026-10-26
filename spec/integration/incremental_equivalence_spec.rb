@@ -2649,6 +2649,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     it 'follows a view directory gaining its mailer' do
+      created_directory = !File.directory?(app_path('app/mailers'))
       write_file('app/views/ledger_notice_mailer/statement.html.erb', "<p>statement</p>\n")
 
       index = run_sequence([
@@ -2667,17 +2668,22 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       template = unit_snapshot(index).values.find { |unit| unit['identifier'] == identifier }
       expect(template['dependencies']).to include(a_hash_including('target' => 'LedgerNoticeMailer',
                                                                    'via' => 'view_render'))
+    ensure
+      # A directory created after Rails boot is not managed by Zeitwerk, and
+      # the fixture mailer must not join later examples' inventories.
+      Object.send(:remove_const, :LedgerNoticeMailer) if Object.const_defined?(:LedgerNoticeMailer, false)
+      FileUtils.rm_f(app_path('app/mailers/ledger_notice_mailer.rb'))
+      directory = app_path('app/mailers')
+      Dir.rmdir(directory) if created_directory && File.directory?(directory) && Dir.empty?(directory)
     end
 
-    # The controller and mailer stay loaded for the rest of the process, so
-    # their files join the pristine tree and the runtime keeps agreeing with it.
+    # The controller stays loaded for the rest of the process, so its file
+    # joins the pristine tree and the runtime keeps agreeing with the tree.
     after do
-      %w[app/controllers/ledger_books_controller.rb app/mailers/ledger_notice_mailer.rb].each do |relative|
-        next unless File.exist?(app_path(relative))
+      controller = app_path('app/controllers/ledger_books_controller.rb')
+      next unless File.exist?(controller)
 
-        FileUtils.mkdir_p(File.dirname(File.join(@pristine_root, relative)))
-        FileUtils.cp(app_path(relative), File.join(@pristine_root, relative))
-      end
+      FileUtils.cp(controller, File.join(@pristine_root, 'app/controllers/ledger_books_controller.rb'))
     end
   end
 

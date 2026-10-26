@@ -1504,7 +1504,8 @@ module Woods
 
     # Load classes from each extraction-relevant app/ subdirectory individually.
     # Uses Zeitwerk's eager_load_dir when available (Rails 7.1+/Zeitwerk 2.6+),
-    # otherwise falls back to Dir.glob + require.
+    # otherwise falls back to Dir.glob + require. A directory created after boot
+    # is not managed by the loader and is skipped with a warning.
     def eager_load_extraction_directories
       loader = Rails.autoloaders.main
 
@@ -1522,7 +1523,7 @@ module Woods
               Rails.logger.warn "[Woods] Skipped #{file}: #{e.message}"
             end
           end
-        rescue NameError, LoadError => e
+        rescue NameError, LoadError, *(defined?(Zeitwerk::Error) ? [Zeitwerk::Error] : []) => e
           Rails.logger.warn "[Woods] Failed to eager load app/#{subdir}/: #{e.message}"
         end
       end

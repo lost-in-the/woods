@@ -1,0 +1,1 @@
+- Per-directory eager loading now skips a directory the autoloader does not manage, such as `app/mailers` created after boot, with a warning. It used to abort the run with a `Zeitwerk::Error` once the full eager load had hit a `NameError`.
