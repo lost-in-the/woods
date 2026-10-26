@@ -79,7 +79,7 @@ RSpec.describe Woods::Resilience::IncrementalReadiness do
 
   it 'needs a full extraction for a cache with a duplicate JSON key' do
     build_index
-    cache_path.binwrite(cache_path.binread.sub('{', '{"version":7,'))
+    cache_path.binwrite(%({"version":7,#{cache_path.binread.delete_prefix('{')}))
 
     expect(readiness).not_to be_ready
   end
