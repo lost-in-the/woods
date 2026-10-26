@@ -339,6 +339,21 @@ Damaged index-wide artifacts, such as a manifest or type index, remain
 `has_more`, `total_matches`, and `matched_lower_bound`; no successful empty
 result is substituted. Inspect `woods_status` and run `woods:validate`.
 
+### Notion sync completeness
+
+`notion_sync` reports its outcome in the same `completeness` shape as search,
+with one addition: `status: "failed"`, which search never emits.
+`total_errors` is the uncapped error count, and `errors` lists at most ten.
+
+| `reason` | `status` | `has_more` | `synced` |
+|---|---|---|---|
+| `exhausted` | `complete` | `false` | `true` |
+| `page_errors` (some pages written or already current) | `partial` | `true` when `total_errors` exceeds the listed errors | `true` |
+| `nothing_synced` | `failed` | same as above | `false` |
+
+Non-complete runs also set `partial: true` and a `hint`. The result is JSON
+only; no Markdown or plain rendering exists for this tool.
+
 ### Dependency graph coverage
 
 `dependencies` and `dependents` return relationships recorded in the published

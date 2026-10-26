@@ -16,8 +16,8 @@ module Woods
           total_matches: nil, matched_lower_bound: nil }
       end
 
-      # Same completeness keys and status vocabulary as {#response}, for a
-      # bounded sync report. +has_more+ is true when listed errors are fewer
+      # Same completeness keys as {#response}, for a bounded sync report.
+      # Adds +failed+ (nothing landed), which search never emits. +has_more+ is true when listed errors are fewer
       # than the total, and the total sits inside the hash like +total_matches+.
       #
       # @param error_count [Integer] uncapped number of errors
@@ -29,8 +29,8 @@ module Woods
                  elsif landed.positive? then 'page_errors'
                  else 'nothing_synced'
                  end
-        { status: error_count.zero? ? 'complete' : 'partial', reason: reason,
-          has_more: error_count > listed, total_errors: error_count }
+        status = { 'exhausted' => 'complete', 'page_errors' => 'partial', 'nothing_synced' => 'failed' }.fetch(reason)
+        { status: status, reason: reason, has_more: error_count > listed, total_errors: error_count }
       end
 
       def initialize(limit:)

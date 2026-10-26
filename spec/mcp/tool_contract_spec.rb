@@ -1584,10 +1584,12 @@ RSpec.describe 'Index MCP tool contracts' do
     context 'when every page failed' do
       let(:sync_stats) { { data_models: 0, columns: 0, skipped: 0, errors: %w[Post-401 User-401], error_count: 2 } }
 
-      it 'reports nothing_synced and does not claim synced' do
+      it 'reports failed with reason nothing_synced and does not claim synced' do
         expect(notion_data).to include('synced' => false, 'partial' => true)
-        expect(notion_data['completeness']).to include('status' => 'partial', 'reason' => 'nothing_synced',
-                                                       'total_errors' => 2)
+        expect(notion_data['hint']).to be_a(String)
+        expect(notion_data['completeness']).to eq(
+          'status' => 'failed', 'reason' => 'nothing_synced', 'has_more' => false, 'total_errors' => 2
+        )
       end
     end
 
