@@ -159,7 +159,8 @@ module Woods
       end
 
       # The Ruby in every template that sits beside the component file or in
-      # its sidecar directory, for each registered view engine. A component
+      # its sidecar directory, variants and extra templates included, for each
+      # registered view engine. A component
       # renders its children there as often as in its class, and those renders
       # belong to the component unit.
       #
@@ -174,12 +175,18 @@ module Woods
         end
       end
 
-      # @return [Array<String>] existing templates this engine handles
+      # Every template this engine handles that belongs to the component: a
+      # sibling named for it (`<name>.html.erb`, a variant such as
+      # `<name>.html+phone.erb`) and any file directly in its sidecar
+      # directory (`<name>/<name>.html.erb`, `<name>/extra.html.erb`).
+      #
+      # @return [Array<String>] existing template paths, sorted
       def sidecar_paths(base, engine)
-        candidates = engine.extensions.flat_map do |extension|
-          ["#{base}#{extension}", File.join(base, "#{File.basename(base)}#{extension}")]
-        end
-        candidates.uniq.select { |path| File.exist?(path) }
+        suffixes = engine.extensions.map { |extension| extension[/\.[^.]+\z/] }.uniq
+        directory = File.dirname(base)
+        candidates = Dir.glob("#{File.basename(base)}.*", base: directory).map { |name| File.join(directory, name) } +
+                     Dir.glob('*', base: base).map { |name| File.join(base, name) }
+        candidates.select { |path| suffixes.any? { |suffix| path.end_with?(suffix) } && File.file?(path) }.uniq.sort
       end
 
       def sidecar_engines

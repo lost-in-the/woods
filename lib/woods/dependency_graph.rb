@@ -44,10 +44,13 @@ module Woods
     # `metadata.unresolved_renders` lists, and the actions its
     # `metadata.action_facts` covers (#837), so a reader opens only the units
     # that have something to report.
+    # git_sources: how many of a multi-source unit's files have Git facts. Such
+    # a unit keeps its facts per source, so `commit_count` stays unset on the
+    # node and this is what coverage reads.
     NODE_ATTRIBUTE_KEYS = %i[
       database table foreign_key_tables package enforce_dependencies commit_count change_frequency kind source_paths
       actions inherited_gem_actions action_missing route_action container lines loc unresolved_render_count
-      fact_actions
+      fact_actions git_sources
     ].freeze
 
     # The node summaries this writer publishes for every unit (#837), listed
@@ -442,6 +445,15 @@ module Woods
       type ? nodes[type] : primary_of(nodes)
     end
 
+    # Every node, in no particular order.
+    #
+    # @yieldparam identifier [String]
+    # @yieldparam node [Hash] the live node; callers must not mutate it
+    # @return [void]
+    def each_node
+      @nodes.each { |identifier, by_type| by_type.each_value { |node| yield identifier, node } }
+    end
+
     # Every node registered under an identifier, sorted by type.
     #
     # One entry for all but the handful of identifiers a codebase reuses
@@ -607,26 +619,27 @@ module Woods
     end
 
     # Dependents of a unit in the shape {Extractor#resolve_dependents} writes
-    # into unit JSON: `{ type:, identifier: }` per *edge*, not per source.
+    # into unit JSON: `{ type:, identifier:, via: }` per *edge*, not per source.
     #
     # Multiplicity is preserved deliberately — a source that references the
     # same target twice (say once as `:belongs_to` and once as
     # `:code_reference`) contributes two entries in a full extraction, so
     # reconstructing this list incrementally has to do the same or the two
     # paths produce different unit JSON. Entries are sorted by identifier,
-    # then type, the order {ExtractedUnit#to_h} serializes a full
+    # then type, then via, the order {ExtractedUnit#to_h} serializes a full
     # extraction's dependents in, so neither depends on registration order.
     #
     # @param identifier [String] Unit identifier
-    # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
+    # @return [Array<Hash>] `{ type: Symbol, identifier: String, via: Symbol, nil }` entries
     def dependents_detail(identifier)
       entries = (@reverse[identifier] || []).flat_map do |source|
         sorted_nodes(@nodes[source] || {}).flat_map do |type, node|
-          edge_count = Array(@edges[source]&.[](type)).count { |e| e[:target] == identifier }
-          Array.new(edge_count) { { type: node[:type], identifier: source } }
+          Array(@edges[source]&.[](type)).filter_map do |edge|
+            { type: node[:type], identifier: source, via: edge[:via] } if edge[:target] == identifier
+          end
         end
       end
-      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s] }
+      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s, entry[:via].to_s] }
     end
 
     # Get all units of a specific type
@@ -853,7 +866,11 @@ module Woods
     end
 
     # Every physical source of a unit assembled from several files: a library
-    # unit's contributors, or each file that defines or enhances a rake task.
+    # unit's contributors, each file that defines or enhances a rake task, or a
+    # view component and its sidecar template. A rake task and a component name
+    # their extra files in metadata and carry no byte ranges: the template text
+    # is not part of the published component source, so a contributor record,
+    # which must hash-match published bytes, cannot describe it.
     #
     # @param unit [ExtractedUnit]
     # @param metadata [Hash]
@@ -863,6 +880,8 @@ module Woods
                 SourceContributors.paths(unit)
               elsif unit.type == :rake_task
                 [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              elsif unit.type == :view_component
+                [unit.file_path, metadata[:sidecar_template]].compact
               elsif unit.type == :doc
                 document_paths(unit, metadata)
               else
@@ -1224,7 +1243,7 @@ module Woods
       case key
       when :source_paths, :foreign_key_tables, :actions, :inherited_gem_actions, :fact_actions
         Array(value).map(&:to_s).uniq.sort
-      when :commit_count, :lines, :loc, :unresolved_render_count then value.to_i
+      when :commit_count, :lines, :loc, :unresolved_render_count, :git_sources then value.to_i
       when :enforce_dependencies then [true, false].include?(value) ? value : value.to_s
       when :action_missing then value == true
       else value.to_s

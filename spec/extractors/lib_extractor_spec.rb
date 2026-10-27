@@ -9,6 +9,7 @@ require 'woods/model_name_cache'
 require 'woods/extractors/shared_utility_methods'
 require 'woods/extractors/shared_dependency_scanner'
 require 'woods/extractors/lib_extractor'
+require 'woods/extractors/concern_extractor'
 
 RSpec.describe Woods::Extractors::LibExtractor do
   include_context 'extractor setup'
@@ -19,6 +20,35 @@ RSpec.describe Woods::Extractors::LibExtractor do
     it 'handles missing lib directory gracefully' do
       extractor = described_class.new
       expect(extractor.extract_all).to eq([])
+    end
+  end
+
+  describe 'a module a live model includes' do
+    let(:model) { Class.new }
+    let(:mixin) { Module.new }
+    let!(:path) { create_file('lib/storage/s3_client.rb', "module Storage::S3Client\n  def upload; end\nend\n") }
+
+    before do
+      create_file('lib/storage/plain_helper.rb', "module Storage::PlainHelper\n  def help; end\nend\n")
+      stub_const('Storage', Module.new)
+      stub_const('Storage::S3Client', mixin)
+      stub_const('ActiveRecord::Base', double('ActiveRecord::Base', descendants: [model]))
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('Storage::S3Client').and_return([path, 1])
+    end
+
+    it 'is left to the concern extractor and keeps its plain siblings' do
+      model.include(mixin)
+      extractor = described_class.new
+
+      expect(extractor.extract_all.map(&:identifier)).to eq(['Storage::PlainHelper'])
+      expect(extractor.extract_lib_file(path)).to be_nil
+      expect(Woods::Extractors::ConcernExtractor.new.extract_all.map(&:identifier)).to eq(['Storage::S3Client'])
+    end
+
+    it 'is a lib unit while no model includes it' do
+      expect(described_class.new.extract_all.map(&:identifier)).to contain_exactly('Storage::S3Client',
+                                                                                   'Storage::PlainHelper')
     end
   end
 

@@ -1,0 +1,215 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Runs the CI gates that need no GitHub, so a push confirms instead of discovers.
+#
+#   script/ci-local --setup              # one time: install the bundles
+#   script/ci-local                      # lint, unit (with coverage), booted rows
+#   script/ci-local --only lint|unit|booted
+#   script/ci-local --skip-booted        # quick run
+#   script/ci-local --full               # booted rows at 60 ops, seeds 1,2,3
+#
+# Gates mirror .github/workflows/ci.yml and stop at the first failure:
+#   lint    Ruby 3.3, base Gemfile: surface inventory + rubocop (the `lint` job)
+#   unit    Ruby 3.3, base Gemfile: retrieval gate + COVERAGE script/parallel-rspec
+#   booted  Ruby 4.0 / Rails 8.1 and Ruby 3.0 / Rails 6.0: the `rails-matrix`
+#           steps, one rspec process per CI step
+#
+# Rubies come from mise (`mise install ruby@3.0 ruby@3.3 ruby@4.0`) and are
+# selected per command with `mise exec`; global mise config is never touched.
+# Bundles install under $WOODS_CI_LOCAL_BUNDLE (default ~/.cache/woods-ci-local/bundle),
+# outside the repo and off /tmp.
+# A missing Ruby aborts with the install command; Ruby 3.0 needs
+# `MISE_RUBY_COMPILE=1 mise install ruby@3.0` (mise has no precompiled 3.0).
+#
+# Not covered here: the Rails 7.2-only fixture bundles (serializers,
+# state_machines, components), the other Ruby/Rails rows, live backends,
+# the MCP transport job and the Node Inspector.
+require 'fileutils'
+require 'optparse'
+require 'shellwords'
+
+ROOT = File.expand_path('..', __dir__)
+BUNDLE_ROOT = ENV.fetch('WOODS_CI_LOCAL_BUNDLE', File.join(Dir.home, '.cache', 'woods-ci-local', 'bundle'))
+
+# Booted steps, in ci.yml order. Each entry is one rspec process (a step that
+# lists several files in CI runs them together there, so it does here too).
+BOOTED_STEPS = [
+  %w[spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb
+     spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb],
+  %w[spec/integration/declaration_identity_spec.rb],
+  %w[spec/integration/console_credential_rotation_spec.rb],
+  %w[spec/integration/session_controller_identity_spec.rb],
+  %w[spec/integration/multi_database_extraction_spec.rb],
+  %w[spec/integration/hook_refresh_spec.rb],
+  %w[spec/integration/source_input_drift_spec.rb spec/integration/source_output_spec.rb
+     spec/integration/source_manifest_capacity_spec.rb],
+  %w[spec/console/transport_boot_spec.rb],
+  %w[spec/console/stdio_e2e_spec.rb],
+  %w[spec/console/collection_redaction_spec.rb],
+  %w[spec/console/association_count_runtime_spec.rb],
+  %w[spec/console/http_eager_load_failure_spec.rb],
+  :incremental_equivalence,
+  %w[spec/extractors/flow_incremental_spec.rb],
+  %w[spec/integration/watch_daemon_spec.rb],
+  %w[spec/generators/install_generator_spec.rb],
+  %w[spec/integration/watch_startup_spec.rb spec/integration/managed_watch_spec.rb],
+  %w[spec/integration/console_sqlite_policy_spec.rb],
+  %w[spec/integration/console_typed_eav_policy_spec.rb],
+  %w[spec/integration/console_sqlite_keyword_functions_spec.rb],
+  %w[spec/integration/console_resolved_relation_policy_spec.rb],
+  %w[spec/integration/console_credential_serialization_spec.rb],
+  %w[spec/integration/multi_worktree_spec.rb],
+  %w[spec/integration/inflected_naming_spec.rb],
+  %w[spec/integration/assigned_value_classes_spec.rb]
+].freeze
+
+BOOTED_ROWS = [
+  { ruby: '4.0', rails: '8.1' },
+  { ruby: '3.0', rails: '6.0' }
+].freeze
+
+# A runnable unit of work: a label, an environment, and an argv.
+Step = Struct.new(:label, :ruby, :env, :argv)
+
+def options
+  opts = { only: nil, skip_booted: false, full: false, setup: false, match: nil }
+  OptionParser.new do |o|
+    o.banner = 'Usage: script/ci-local [--setup] [--only lint|unit|booted] [--skip-booted] [--full] [--match TEXT]'
+    o.on('--only GATE', %w[lint unit booted], 'Run one gate: lint, unit or booted') { |v| opts[:only] = v }
+    o.on('--skip-booted', 'Skip the booted Rails rows') { opts[:skip_booted] = true }
+    o.on('--full', 'Booted rows at 60 operations, seeds 1,2,3 (cheap default: 8 operations, seed 1)') do
+      opts[:full] = true
+    end
+    o.on('--match TEXT', 'Booted gate: run only steps whose spec paths contain TEXT') { |v| opts[:match] = v }
+    o.on('--setup', 'Install the bundles for every gate, then exit') { opts[:setup] = true }
+  end.parse!
+  opts
+end
+
+# Confirms the mise Ruby exists. Falling back to another Ruby would test the wrong row.
+def resolve_ruby(version)
+  @rubies[version] ||= begin
+    installed = system('mise', 'where', "ruby@#{version}", out: File::NULL, err: File::NULL)
+    abort "ruby@#{version} is not installed. Run: mise install ruby@#{version}" unless installed
+    version
+  end
+end
+
+def bundle_env(ruby_version, gemfile = nil)
+  label = [ruby_version, gemfile && File.basename(gemfile, '.gemfile')].compact.join('-')
+  # GEM_HOME rather than BUNDLE_PATH: specs spawn child processes with BUNDLE_* scrubbed,
+  # and those still need to find the gems.
+  home = File.join(BUNDLE_ROOT, label)
+  env = { 'GEM_HOME' => home, 'GEM_PATH' => home }
+  env['BUNDLE_GEMFILE'] = File.join(ROOT, gemfile) if gemfile
+  env
+end
+
+def wrap(step)
+  ['mise', 'exec', "ruby@#{resolve_ruby(step.ruby)}", '--', *step.argv]
+end
+
+def run_step(step)
+  puts "\n$ #{step.label}"
+  started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  ok = system(step.env, *wrap(step), chdir: ROOT)
+  [ok, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started]
+end
+
+def lint_steps
+  env = bundle_env('3.3')
+  [Step.new('release_v2:verify_surface_inventory', '3.3', env,
+            %w[bundle exec rake release_v2:verify_surface_inventory]),
+   Step.new('rubocop', '3.3', env, %w[bundle exec rubocop])]
+end
+
+# GIT_CONFIG_GLOBAL is blanked so fixture repos in specs don't reach for a signing agent
+# (a developer's global commit.gpgsign); CI runners have no such config.
+def unit_steps
+  env = bundle_env('3.3')
+  [Step.new('retrieval quality gate', '3.3', env, %w[bundle exec ruby -Ilib bench/evaluation/runner.rb]),
+   Step.new('script/parallel-rspec (COVERAGE)', '3.3',
+            env.merge('CI' => 'true', 'COVERAGE' => 'true', 'GIT_CONFIG_GLOBAL' => File::NULL),
+            %w[bundle exec ruby script/parallel-rspec])]
+end
+
+def selected_steps(match)
+  BOOTED_STEPS.select { |files| match.nil? || files.inspect.include?(match) }
+end
+
+def booted_steps(full, match = nil)
+  ops, seeds = full ? ['60', '1,2,3'] : %w[8 1]
+  BOOTED_ROWS.flat_map do |row|
+    gemfile = "gemfiles/rails_#{row[:rails]}.gemfile"
+    env = bundle_env(row[:ruby], gemfile).merge('WOODS_RUN_BOOTED_APP' => '1')
+    selected_steps(match).map do |files|
+      step_env = env
+      if files == :incremental_equivalence
+        files = %w[spec/integration/incremental_equivalence_spec.rb]
+        step_env = env.merge('WOODS_DIFF_OPS' => ops, 'WOODS_DIFF_SEEDS' => seeds)
+      end
+      Step.new("[ruby #{row[:ruby]} / rails #{row[:rails]}] rspec #{files.join(' ')}", row[:ruby], step_env,
+               %w[bundle exec rspec] + files)
+    end
+  end
+end
+
+def setup_steps
+  # The shared lock can pin tokenizers to its source variant, which needs Rust.
+  # Re-resolving adds the precompiled x86_64-linux variant (Gemfile.lock is gitignored).
+  base = bundle_env('3.3')
+  [Step.new('bundle lock --update tokenizers (ruby 3.3)', '3.3', base, %w[bundle lock --update tokenizers]),
+   *[['3.3', nil], ['4.0', 'gemfiles/rails_8.1.gemfile'], ['3.0', 'gemfiles/rails_6.0.gemfile']].map do |ruby, gemfile|
+     Step.new("bundle install (ruby #{ruby}#{gemfile && ", #{gemfile}"})", ruby, bundle_env(ruby, gemfile),
+              %w[bundle install])
+   end]
+end
+
+def gates(opts)
+  chosen = opts[:only] ? [opts[:only]] : %w[lint unit booted]
+  chosen -= ['booted'] if opts[:skip_booted]
+  chosen.map do |name|
+    steps = case name
+            when 'lint' then lint_steps
+            when 'unit' then unit_steps
+            else booted_steps(opts[:full], opts[:match])
+            end
+    [name, steps]
+  end
+end
+
+def summary(results, failed_at)
+  puts "\n== ci-local summary"
+  results.each do |name, seconds, status|
+    puts format('  %-8<name>s %<status>-7s %<time>s', name: name, status: status, time: duration(seconds))
+  end
+  puts failed_at ? "\nFAILED at: #{failed_at}" : "\nAll gates passed (not a GitHub run; see the header for gaps)."
+end
+
+def duration(seconds)
+  seconds >= 60 ? format('%<m>dm%<s>02ds', m: seconds / 60, s: seconds % 60) : format('%.1fs', seconds)
+end
+
+@rubies = {}
+opts = options
+steps_to_run = opts[:setup] ? [['setup', setup_steps]] : gates(opts)
+results = []
+failed_at = nil
+
+steps_to_run.each do |name, steps|
+  gate_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+  steps.each do |step|
+    ok, = run_step(step)
+    next if ok
+
+    failed_at = "#{name}: #{step.label}"
+    break
+  end
+  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - gate_started
+  results << [name, elapsed, failed_at ? 'FAILED' : 'passed']
+  break if failed_at
+end
+
+summary(results, failed_at)
+exit(failed_at ? 1 : 0)

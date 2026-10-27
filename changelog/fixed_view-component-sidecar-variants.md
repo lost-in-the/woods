@@ -1,0 +1,1 @@
+- A view component now reads every sidecar template for its `render` edges: variants such as `card_component.html+phone.erb`, and any template file in the sidecar directory, not only `<name>.<ext>` and `<name>/<name>.<ext>`.

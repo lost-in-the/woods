@@ -87,7 +87,7 @@ eviction; disabling both can retain them indefinitely. See
 | `woods:incremental` exits 1 over a git range it cannot resolve | An unresolvable base ref used to read as "nothing changed" and exit 0 | Fetch the base ref, set `CHANGED_FILES`, or accept the stand-down a live watch daemon provides |
 | `woods:embed`, `woods:embed_incremental`, and `woods:notion_sync` exit 1 on reported errors | CI jobs that were green while every unit or page failed now fail | Read the printed errors, fix the cause, re-run; completed work is durable |
 | The Index MCP `reload` tool needs write access to the index directory | A read-only index mount can serve structural reads but cannot reload in place | Grant write access, or restart the MCP process after publishing |
-| `config.extractors` and `config.add_gem` warn as unimplemented | Old config may imply filtering that never occurred | Remove or comment the settings; do not rely on them |
+| `config.extractors` is deprecated; `config.add_gem` warns as unimplemented | Old config may imply filtering that never occurred. `config.extractors` is removed in Woods 3.0 | Remove or comment the settings; do not rely on them |
 | Legacy `config.log_level=` removed | The old no-op assignment raises `NoMethodError` | Remove it; configure the application logger instead |
 | Legacy unsafe-eval opt-in removed | `WOODS_CONSOLE_UNSAFE_EVAL=true`, an enabled `console_unsafe_eval_enabled`, or legacy confirmation/audit options refuse Console server construction | Remove these settings; use supported read tools or the application’s normal console for deliberate code execution |
 | New watch, refresh, and evaluation tasks | New operational options become available | Optional; no migration action |
@@ -233,7 +233,7 @@ Pay particular attention to:
 - the configured embedding model/dimension;
 - `console_mcp_enabled`, `console_mcp_http_enabled`, the HTTP `console_mcp_token` secret source, allowed origins, path, and embedded read-tool flags;
 - snapshot, session, Notion, Obsidian, and Unblocked settings;
-- old `config.extractors` or `config.add_gem` calls, which are not implemented selectors;
+- old `config.extractors` (deprecated) or `config.add_gem` calls, which are not implemented selectors;
 - removed `config.log_level=` and unsafe-eval settings;
 - early middleware configuration: a custom `console_mcp_path` and session tracer
   setup belong in `config/application.rb`, before Railtie initializers run. See

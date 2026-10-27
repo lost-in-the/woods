@@ -1,0 +1,1 @@
+- A callback's `services_called` and `mailers_triggered` are now resolved in the method's lexical scope, as `jobs_enqueued` already was, so each name agrees with the model's own dependency edge to that class.

@@ -24,6 +24,7 @@
 require 'digest'
 require 'json'
 require_relative 'woods/version'
+require_relative 'woods/deprecation'
 # Configuration's `component_paths` default lives with the discovery it feeds.
 require_relative 'woods/extractors/component_discovery'
 require_relative 'woods/graphql_document_paths'
@@ -138,7 +139,7 @@ module Woods
 
   class Configuration # rubocop:disable Metrics/ClassLength
     # The set every full extraction always runs, regardless of `extractors=`.
-    # See the {#extractors=} YARD note: this knob does not gate extraction.
+    # The deprecated {#extractors=} knob does not gate extraction.
     DEFAULT_EXTRACTORS = %i[models controllers services components view_components jobs mailers graphql
                             serializers managers policies validators rails_source].freeze
 
@@ -368,9 +369,11 @@ module Woods
       @similarity_threshold = float_val
     end
 
-    # Accepted for forward compatibility. Extraction always runs all 34
-    # extractors; this array is not consulted anywhere in the extraction
-    # path. Setting it to anything other than {DEFAULT_EXTRACTORS} warns.
+    # Deprecated and inert: extraction always runs every registered
+    # extractor, and nothing in the extraction path reads this array. Reads
+    # and writes keep working until the option is removed in Woods 3.0.
+    # An explicit assignment (default list included) warns once per process;
+    # the default set at construction never does.
     #
     # @param value [Array<Symbol>] List of extractor names
     # @raise [ConfigurationError] if value is not an Array of Symbols
@@ -379,11 +382,11 @@ module Woods
         raise ConfigurationError, "extractors must be an Array of Symbols, got #{value.inspect}"
       end
 
-      if value.sort_by(&:to_s) != DEFAULT_EXTRACTORS.sort_by(&:to_s)
-        warn 'config.extractors is accepted for forward compatibility but extractor selection is not ' \
-             'implemented; all extractors run.'
-      end
-
+      Deprecation.warn_once(
+        :config_extractors,
+        'config.extractors is deprecated and has no effect: every extractor always runs. ' \
+        'Remove the assignment from your Woods initializer; the option will be removed in Woods 3.0.'
+      )
       @extractors = value
     end
 

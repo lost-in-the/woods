@@ -20,6 +20,32 @@ RSpec.describe Woods::Extractors::TableCatalog do
     klass
   end
 
+  describe '#ownership_facts' do
+    let(:primary) { pool_double('primary', %w[widgets ledger_entries]) }
+
+    it 'maps each table identifier to its owning models' do
+      catalog = described_class.from_runtime(connection_classes: [model_double('Widget', 'widgets', primary)])
+
+      expect(catalog.ownership_facts).to eq('table:ledger_entries' => [], 'table:widgets' => ['Widget'])
+    end
+
+    it 'changes when ownership moves' do
+      owned = described_class.from_runtime(connection_classes: [model_double('Widget', 'widgets', primary)])
+      moved = described_class.from_runtime(connection_classes: [model_double('Widget', 'ledger_entries', primary)])
+
+      expect(moved.ownership_facts).not_to eq(owned.ownership_facts)
+    end
+
+    it 'changes every identifier once a second database is connected' do
+      billing = pool_double('billing', %w[widgets])
+      single = described_class.from_runtime(connection_classes: [model_double('Widget', 'widgets', primary)])
+      pair = described_class.from_runtime(connection_classes: [model_double('Widget', 'widgets', primary),
+                                                               model_double('Bill', 'widgets', billing)])
+
+      expect(pair.ownership_facts.keys & single.ownership_facts.keys).to be_empty
+    end
+  end
+
   describe '.from_runtime' do
     let(:primary) { pool_double('primary', %w[widgets ledger_entries schema_migrations ar_internal_metadata]) }
 

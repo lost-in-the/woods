@@ -115,6 +115,11 @@ RSpec.describe Woods::PathDispatcher do
       expect(Woods::Extractor::EXTRACTOR_KEY_TO_TYPES.fetch(:routes)).to eq(%i[route route_file])
     end
 
+    it 're-runs view templates wholesale when a mailer or controller that may own a view directory changes' do
+      expect(dispatcher.whole_app_keys_for('app/mailers/user_mailer.rb')).to include(:view_templates)
+      expect(dispatcher.whole_app_keys_for('app/controllers/users_controller.rb')).to include(:view_templates)
+    end
+
     it 'matches migrations only at the top level of db/migrate' do
       expect(keys_for('db/migrate/20240101000000_create_posts.rb')).to eq([:migrations])
       expect(keys_for('db/migrate/archive/20200101000000_old.rb')).to be_empty

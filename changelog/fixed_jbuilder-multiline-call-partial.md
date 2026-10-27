@@ -1,0 +1,1 @@
+- A jbuilder `json.array!` or other `json.*` call whose arguments start on the line after an open parenthesis now keeps its `partial:` edge. Statements continue while a parenthesis is open, as well as after a trailing comma.

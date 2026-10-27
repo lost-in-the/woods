@@ -104,6 +104,12 @@ module Woods
       metadata.delete('git')
     end
 
+    # @param unit [ExtractedUnit, Hash]
+    # @return [Integer] how many source files carry Git facts
+    def git_source_count(unit)
+      records(unit).count { |record| record['git'] }
+    end
+
     # @param value [Object, Hash]
     # @param key [Symbol]
     # @return [Object]

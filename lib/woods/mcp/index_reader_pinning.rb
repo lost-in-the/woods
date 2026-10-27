@@ -64,8 +64,15 @@ module Woods
       module Dispatch
         private
 
+        # The reader this call reads: the worktree it was routed to, else the
+        # one the server was built with.
+        def pinned_index_reader
+          router = @woods_worktree_router
+          router ? router.current_reader : @woods_index_reader
+        end
+
         def call_tool(request, **kwargs)
-          reader = @woods_index_reader
+          reader = pinned_index_reader
           tool_names = @woods_index_reader_tool_names
           return super unless reader && tool_names&.include?(request[:name])
 
@@ -84,7 +91,7 @@ module Woods
         end
 
         def read_resource_contents(request, **kwargs)
-          reader = @woods_index_reader
+          reader = pinned_index_reader
           return super unless reader
 
           reader.with_pinned_generation { super }

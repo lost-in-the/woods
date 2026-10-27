@@ -10,6 +10,7 @@ require_relative 'method_effects'
 require_relative 'job_ancestry'
 require_relative 'job_resilience'
 require_relative '../source_references/runtime_lookup'
+require_relative '../source_references/collector'
 
 module Woods
   module Extractors
@@ -41,6 +42,15 @@ module Woods
         app/workers
         app/sidekiq
       ].freeze
+
+      # A run can hand in a {SourceReferences::MemoCollector}, so a file
+      # another extractor also reads is parsed once per run.
+      attr_writer :collector
+
+      # @return [#call] the parser for every file this extractor reads
+      def collector
+        @collector ||= SourceReferences::Collector.new
+      end
 
       def initialize
         @directories = JOB_DIRECTORIES.map { |d| Rails.root.join(d) }
@@ -143,6 +153,7 @@ module Woods
 
         file_path = source_file_for(job_class)
         source = file_path && File.exist?(file_path) ? SourceFile.read(file_path) : ''
+        source = lexical_source(source, job_class.name)
 
         unit = ExtractedUnit.new(
           type: :job,
@@ -278,6 +289,22 @@ module Woods
         return :sidekiq if JobAncestry.sidekiq_modules.any? { |mod| job_class.include?(mod) }
 
         :active_job if defined?(ActiveJob::Base) && job_class < ActiveJob::Base
+      end
+
+      # A class nested in another class's body is read from its own lexical
+      # range, so it takes none of the enclosing class's method bodies. Any
+      # other class keeps the whole file.
+      #
+      # @param source [String] the definition file
+      # @param class_name [String]
+      # @return [String]
+      def lexical_source(source, class_name)
+        declarations = collector.call(source).fetch('declarations', [])
+        classes = declarations.select { |declaration| declaration['kind'] == 'class' }
+        declaration = classes.find { |candidate| candidate['owner'] == class_name }
+        return source unless declaration && (declaration['enclosing_nesting'] & classes.map { |c| c['owner'] }).any?
+
+        source.lines[(declaration['line'] - 1)...declaration['end_line']].join
       end
 
       # Locate the source file for a job class (class-discovery path only).

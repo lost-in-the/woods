@@ -48,6 +48,7 @@ RSpec.describe Woods::Extractors::MethodEffects do
 
     it 'records each effect family under the method name' do
       expect(recorded['refund!']).to eq(
+        analysis_status: 'analyzed',
         jobs_enqueued: ['RefundJob'],
         mail_sent: ['ReceiptMailer'],
         services_called: ['TallyService'],
@@ -59,6 +60,27 @@ RSpec.describe Woods::Extractors::MethodEffects do
 
     it 'omits a method with no effects' do
       expect(recorded.keys).to eq(['refund!'])
+    end
+  end
+
+  describe 'analysis status' do
+    it 'marks a method with effects analyzed' do
+      expect(effects(ledger_source, column_names: %w[status balance])['refund!'][:analysis_status]).to eq('analyzed')
+    end
+
+    it 'keeps an analyzed method with no effects out of the map' do
+      source = "class Ledger\n  def refund!\n    RefundJob.perform_later\n  end\n\n  def quiet\n    1\n  end\nend\n"
+      expect(effects(source).keys).to eq(['refund!'])
+    end
+
+    it 'lists a method whose text cannot be read as source_unavailable, so empty is not read as none' do
+      allow_any_instance_of(Woods::Extractors::CallbackAnalyzer).to receive(:method_effects).and_return(nil)
+      recorded = effects("class Ledger\n  def refund!\n    RefundJob.perform_later\n  end\nend\n")
+
+      expect(recorded['refund!']).to eq(
+        analysis_status: 'source_unavailable', jobs_enqueued: [], mail_sent: [], services_called: [],
+        columns_written: [], events_published: [], external_calls: []
+      )
     end
   end
 
@@ -457,8 +479,8 @@ RSpec.describe Woods::Extractors::MethodEffects do
 
       expect(effects(source)).to eq(
         'refund!' => {
-          jobs_enqueued: ['DirectJob'], mail_sent: [], services_called: [], columns_written: [],
-          events_published: [], external_calls: [],
+          analysis_status: 'analyzed', jobs_enqueued: ['DirectJob'], mail_sent: [], services_called: [],
+          columns_written: [], events_published: [], external_calls: [],
           via_method: {
             'log_it' => { services_called: ['AuditService'] },
             'notify' => { mail_sent: ['ReceiptMailer'] }

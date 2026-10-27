@@ -32,8 +32,8 @@ Woods.configure do |config|
 
   # ── Extractors ──────────────────────────────────────────────────────────
 
-  # All built-in extractors run. `config.extractors` is accepted for forward
-  # compatibility but does not select a subset; non-default values warn.
+  # All built-in extractors always run. `config.extractors` is deprecated, has
+  # no effect, and will be removed in Woods 3.0: do not set it.
 
   # Include Rails / gem source in the index (increases extraction time).
   # config.include_framework_sources = true

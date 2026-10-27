@@ -104,14 +104,15 @@ module Woods
 
     private
 
-    # Dependents sorted by identifier, then type: the order
+    # Dependents sorted by identifier, type, then via: the order
     # {DependencyGraph#dependents_detail} rebuilds them in on an incremental
     # run, so the unit JSON does not depend on extractor or unit order.
     #
     # @return [Array<Hash>]
     def sorted_dependents
       Array(dependents).sort_by do |entry|
-        [(entry[:identifier] || entry['identifier']).to_s, (entry[:type] || entry['type']).to_s]
+        [(entry[:identifier] || entry['identifier']).to_s, (entry[:type] || entry['type']).to_s,
+         (entry[:via] || entry['via']).to_s]
       end
     end
   end

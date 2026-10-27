@@ -1,0 +1,1 @@
+- Verified constant reference spans for a module passed to a receiverless `include`, `extend` or `prepend` (also inside `included do` blocks) gain `mixin` naming that call, so a reader can tell a module inclusion from a call. `kind` stays `constant`. The reference cache moves to format 8: run one full extraction before the next incremental one.

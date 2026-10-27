@@ -68,7 +68,7 @@ RSpec.describe Woods::DependencyGraph do
       restored.remove('First', type: :service)
 
       expect(restored.dependents_of('http_api', via: :code_reference)).to eq(['First'])
-      expect(restored.dependents_detail('http_api')).to eq([{ type: :job, identifier: 'First' }])
+      expect(restored.dependents_detail('http_api')).to eq([{ type: :job, identifier: 'First', via: :code_reference }])
       restored.remove('First', type: :job)
       expect(restored.to_h[:reverse]).to be_empty
       expect(restored.dependents_of('http_api', via: :code_reference)).to be_empty
@@ -886,6 +886,33 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe 'a view component with a sidecar template' do
+    before { allow(described_class).to receive(:graph_root).and_return('/app') }
+
+    def component_unit(metadata)
+      unit = make_unit(type: :view_component, identifier: 'ShelfComponent',
+                       file_path: '/app/app/components/shelf_component.rb')
+      unit.metadata = metadata
+      unit
+    end
+
+    it 'maps the template to the component and lists both files as its sources' do
+      graph.register(component_unit(sidecar_template: 'app/components/shelf_component.html.erb'))
+
+      template = '/app/app/components/shelf_component.html.erb'
+      expect(graph.units_for_path(template)).to eq([['ShelfComponent', :view_component]])
+      expect(graph.affected_by([template])).to eq(['ShelfComponent'])
+      expect(graph.to_h[:nodes]['ShelfComponent'][:source_paths])
+        .to match_array(%w[app/components/shelf_component.rb app/components/shelf_component.html.erb])
+    end
+
+    it 'keeps a component without a template on its file_path alone' do
+      graph.register(component_unit(sidecar_template: nil))
+
+      expect(graph.to_h[:nodes]['ShelfComponent']).not_to have_key(:source_paths)
+    end
+  end
+
   describe '#remove' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))
@@ -945,7 +972,7 @@ RSpec.describe Woods::DependencyGraph do
         make_unit(type: :service, identifier: 'Signup', dependencies: [{ target: 'User', via: :code_reference }])
       )
 
-      expect(graph.dependents_detail('User')).to eq([{ type: :service, identifier: 'Signup' }])
+      expect(graph.dependents_detail('User')).to eq([{ type: :service, identifier: 'Signup', via: :code_reference }])
     end
 
     it 'preserves multiplicity when one unit references a target twice' do
@@ -974,9 +1001,11 @@ RSpec.describe Woods::DependencyGraph do
       forward = described_class.new.tap { |built| units.each { |unit| built.register(unit) } }
       backward = described_class.new.tap { |built| units.reverse_each { |unit| built.register(unit) } }
 
-      expect(forward.dependents_detail('Ledger')).to eq([{ type: :job, identifier: 'Audit' },
-                                                         { type: :service, identifier: 'Shipment' },
-                                                         { type: :model, identifier: 'Widget' }])
+      expect(forward.dependents_detail('Ledger')).to eq(
+        [{ type: :job, identifier: 'Audit', via: :code_reference },
+         { type: :service, identifier: 'Shipment', via: :code_reference },
+         { type: :model, identifier: 'Widget', via: :belongs_to }]
+      )
       expect(backward.dependents_detail('Ledger')).to eq(forward.dependents_detail('Ledger'))
       expect(JSON.generate(backward.to_h)).to eq(JSON.generate(forward.to_h))
     end

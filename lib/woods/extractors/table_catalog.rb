@@ -171,6 +171,16 @@ module Woods
       # @return [Array<Table>] every table, sorted by identifier
       attr_reader :tables
 
+      # The facts a table unit and its consumers read off the catalog: which
+      # tables exist (identifiers carry the database name once several pools
+      # exist) and which models own each. Two catalogs with equal facts yield
+      # equal table, migration, view and consumer units.
+      #
+      # @return [Hash{String => Array<String>}] table identifier => owning model names
+      def ownership_facts
+        @tables.to_h { |table| [table.identifier, Array(table.models)] }
+      end
+
       # Tables with this name, one per database that has it.
       #
       # @param name [String]
