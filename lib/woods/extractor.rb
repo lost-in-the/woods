@@ -4211,8 +4211,9 @@ module Woods
     end
 
     # A deleted sidecar template is not the end of its view component: the
-    # component's Ruby file still defines it, and the component is re-extracted
-    # without the template.
+    # component's Ruby file still defines it. The template is registered under
+    # the component, so a path-keyed prune would otherwise find the component.
+    # Hybrid discovery re-extracts the component without the template.
     #
     # @return [Boolean]
     def sidecar_of_surviving_component?(identifier, type, vanished)
