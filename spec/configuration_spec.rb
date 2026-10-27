@@ -260,7 +260,8 @@ RSpec.describe Woods::Configuration do
 
   describe '#extractors=' do
     it 'accepts an array of symbols' do
-      config.extractors = %i[models controllers]
+      Woods::Deprecation.reset!
+      expect { config.extractors = %i[models controllers] }.to output(/DEPRECATED/).to_stderr
       expect(config.extractors).to eq(%i[models controllers])
     end
 
@@ -290,7 +291,7 @@ RSpec.describe Woods::Configuration do
       end
 
       it 'warns only once per process' do
-        config.extractors = %i[models]
+        silence_stderr { config.extractors = %i[models] }
 
         expect { config.extractors = %i[controllers] }.not_to output.to_stderr
       end
