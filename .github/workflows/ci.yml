@@ -36,26 +36,25 @@ jobs:
     name: Unit specs (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
         include:
           - { ruby-version: '3.0', puma: '~> 6.0' }
           - { ruby-version: '3.1', puma: '~> 6.0' }
           - { ruby-version: '3.2', puma: '~> 7.0' }
-          - { ruby-version: '3.3', puma: '~> 8.0' }
           - { ruby-version: '3.4', puma: '~> 8.0' }
           - { ruby-version: '4.0', puma: '~> 8.0' }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
-    steps:
+    steps: &unit-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Ruby ${{ matrix.ruby-version }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
-      # The Ruby 3.3 row also owns coverage and the retrieval-quality gate
-      # (the `coverage` job below only reports this row's outcome).
+      # Ruby 3.3 owns coverage and the retrieval-quality gate. Its independent
+      # job keeps these gates running when another Ruby row fails.
       - name: Gate captured real-model retrieval quality
         if: ${{ matrix.ruby-version == '3.3' }}
         run: bundle exec ruby -Ilib bench/evaluation/runner.rb
@@ -86,6 +85,19 @@ jobs:
           path: tmp/retrieval-evaluation.json
           if-no-files-found: error
           retention-days: 7
+
+  # Coverage and retrieval quality must finish even if another Ruby row fails.
+  test-required:
+    name: Unit specs (Ruby ${{ matrix.ruby-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ruby-version: '3.3', puma: '~> 8.0' }
+    env:
+      WOODS_PUMA_REQ: ${{ matrix.puma }}
+    steps: *unit-steps
 
   # Exact advertised direct runtime floors, without the development Gemfile.
   minimum-dependencies:
@@ -119,7 +131,8 @@ jobs:
   # can't share a process with it (hence the :booted_app tag + the solo run here).
   # Pairs are explicit to exclude invalid Ruby x Rails combinations (e.g. Rails
   # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 and 8.1 need >= 3.2).
-  # Every pair runs every integration file on every PR. The randomized
+  # Every pair is scheduled on every PR; failures can cancel sibling rows.
+  # The Rails 7.2 fixture contracts run independently. The randomized
   # incremental-equivalence depth is full on the oldest, baseline, and newest
   # representative pairs, and smoke-depth on the other PR rows. Merged-main and
   # version-tag runs override every row back to the full 60-operation/3-seed
@@ -128,14 +141,13 @@ jobs:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
         include:
           - { ruby: '3.0', rails: '6.0', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
           - { ruby: '3.0', rails: '6.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
           - { ruby: '3.1', rails: '7.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
           - { ruby: '3.2', rails: '7.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '3.3', rails: '7.2', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
           - { ruby: '3.3', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
           - { ruby: '3.4', rails: '8.1', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
           - { ruby: '4.0', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
@@ -143,7 +155,7 @@ jobs:
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
-    steps:
+    steps: &rails-steps
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Ruby ${{ matrix.ruby }} (Rails ${{ matrix.rails }})
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
@@ -281,6 +293,20 @@ jobs:
         env:
           BUNDLE_GEMFILE: gemfiles/components.gemfile
         run: bundle exec rspec spec/integration/component_ownership_spec.rb
+
+  # Optional fixture bundles must finish even if another Rails row fails.
+  rails-required:
+    name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { ruby: '3.3', rails: '7.2', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
+    env:
+      BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
+      WOODS_RUN_BOOTED_APP: '1'
+    steps: *rails-steps
 
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
@@ -457,21 +483,24 @@ jobs:
           WOODS_RUN_GITHUB_MERMAID: '1'
         run: bundle exec rspec spec/diagrams/github_mermaid_spec.rb
 
-  # Coverage runs inside the Ruby 3.3 row of `test` (one suite run instead of
-  # two). This job keeps the `coverage` check name that the release validator,
+  # Coverage runs inside `test-required`, without another suite run.
+  # This job keeps the `coverage` check name that the release validator,
   # the maintenance rulesets and release_profile.rb require, and fails when
-  # `test` does.
+  # either unit job does.
   coverage:
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, test-required]
     if: ${{ !cancelled() }}
     steps:
       - name: Require the unit specs, including the Ruby 3.3 coverage row
         env:
           TEST_RESULT: ${{ needs.test.result }}
+          REQUIRED_RESULT: ${{ needs.test-required.result }}
         run: |
-          echo "unit specs: ${TEST_RESULT}"
+          set -e
+          echo "unit specs: ${TEST_RESULT}; required row: ${REQUIRED_RESULT}"
           test "${TEST_RESULT}" = success
+          test "${REQUIRED_RESULT}" = success
 
   security:
     runs-on: ubuntu-latest
