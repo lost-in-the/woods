@@ -2039,7 +2039,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'counts a lib module a model includes once in the manifest and the graph' do
+    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there' do
       load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
       host = write_storage_host(include_storage: true)
       index = full_extraction
@@ -2048,12 +2048,14 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         unless included
           write_storage_host(include_storage: false)
           Woods::Extractor.new(output_dir: index).extract_changed([host])
+          expect(differences(index, full_extraction)).to be_empty
         end
 
         graph = read_json(index, 'dependency_graph.json')
         published = graph.fetch('type_index').values.sum(&:size)
         expect(read_json(index, 'manifest.json').fetch('total_units')).to eq(published)
         expect(graph.fetch('stats').fetch('node_count')).to eq(published)
+        expect(graph.fetch('stats').fetch('edge_count')).to eq(graph.fetch('edges').values.sum(&:size))
         owners = graph.fetch('type_index').select { |_, ids| ids.include?('OwnershipStorage') }.keys
         expect(owners).to eq([included ? 'concern' : 'lib'])
       end
