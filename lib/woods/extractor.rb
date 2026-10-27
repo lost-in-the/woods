@@ -515,6 +515,7 @@ module Woods
     # @return [Hash] Results keyed by extractor type
     def extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
+      reset_git_capture
       setup_output_directory
       @results = {}
       @extractors = {}
@@ -954,6 +955,7 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run(operation: 'incremental')
+      reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
       profile_phase('source capture') { begin_source_inputs(operation) }
@@ -974,7 +976,6 @@ module Woods
       @retained_units = Set.new
       @git_recheck = Set.new
       @git_refreshed = Set.new
-      @git_history_failed = false
       @changed_source_paths = nil
       @reference_additions = nil
       @library_replacement_touched = nil
@@ -1021,7 +1022,10 @@ module Woods
     # @return [void]
     def finalize_incremental_run(touched, reason: 'incremental')
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
-      profile_phase('graph write') { write_dependency_graph }
+      profile_phase('graph write') do
+        backfill_git_source_counts
+        write_dependency_graph
+      end
       # A skip reason can change while no unit does (a namespace-only file
       # turns into a parse error), so a changed report alone warrants a publish.
       # A payload without one predates the report and gains it on its next
@@ -2211,7 +2215,25 @@ module Woods
       return unless SourceContributors.multiple?(unit)
 
       count = SourceContributors.git_source_count(unit)
-      @dependency_graph.annotate(unit.identifier, type: unit.type, git_sources: count.positive? ? count : nil)
+      @dependency_graph.annotate(unit.identifier, type: unit.type, git_sources: count)
+    end
+
+    # Pre-summary writers kept contributor facts only in unit JSON. Migrate
+    # their retained library nodes before publishing known coverage. An
+    # explicit zero distinguishes counted-but-unavailable from not yet read.
+    # Once a verified count is published, subsequent publications need no
+    # extra unit reads. Unreadable metadata remains unknown and can be retried.
+    #
+    # @return [void]
+    def backfill_git_source_counts
+      @dependency_graph.each_node do |identifier, node|
+        next unless node[:type] == :lib && node[:source_paths]&.size.to_i > 1 && !node.key?(:git_sources)
+
+        unit = read_published_unit(identifier, :lib)
+        next unless SourceContributors.multiple?(unit)
+
+        @dependency_graph.annotate(identifier, type: :lib, git_sources: SourceContributors.git_source_count(unit))
+      end
     end
 
     # The one constructor for the analyzer both extraction paths use.
@@ -2510,6 +2532,37 @@ module Woods
       git_availability.fetch(:available)
     end
 
+    # Git availability and the captured revision belong to one extraction,
+    # including when a caller reuses this Extractor instance.
+    #
+    # @return [void]
+    def reset_git_capture
+      @git_availability = nil
+      @git_capture_head = nil
+      @git_capture_branch = GitProvenance::UNKNOWN
+      @git_capture_resolved = false
+      @git_history_failed = false
+    end
+
+    # Resolve once before reading history. Later commits must not relabel
+    # already-read facts, or put the commit table on a different revision.
+    #
+    # @return [String, nil] full commit SHA, without environment fallback
+    def git_capture_head
+      return @git_capture_head if @git_capture_resolved
+
+      @git_capture_resolved = true
+      # Resolve the named ref itself, so a checkout between these commands
+      # cannot pair the old branch name with the new branch's commit.
+      ref = run_git('symbolic-ref', '--quiet', 'HEAD')
+      revision = ref.empty? ? 'HEAD' : ref
+      head = run_git('rev-parse', '--verify', "#{revision}^{commit}")
+      return unless head.match?(GitLog::SHA)
+
+      @git_capture_branch = ref.start_with?('refs/heads/') ? ref.delete_prefix('refs/heads/') : GitProvenance::UNKNOWN
+      @git_capture_head = head
+    end
+
     # Whether this run's git calls can produce facts, and when they cannot, a
     # stable reason for the published {GitEnrichmentSummary}.
     #
@@ -2623,10 +2676,16 @@ module Woods
     def batch_git_data(file_paths)
       return {} if file_paths.empty?
 
+      head = git_capture_head
+      unless head
+        @git_history_failed = true
+        return {}
+      end
+
       relative_paths = file_paths.map { |path| normalize_file_path(path) }.uniq
       recent_after = Time.current - 90.days
       raw = GitHistory.new(root: Rails.root, logger: Rails.logger, recent_limit: recent_commit_limit)
-                      .read(relative_paths, recent_after: recent_after)
+                      .read(relative_paths, recent_after: recent_after, revision: head)
       unless raw
         @git_history_failed = true
         return {}
@@ -2683,8 +2742,8 @@ module Woods
     def commit_table_for_run(published, full:)
       return nil unless git_available?
 
-      head = run_git('rev-parse', '--verify', 'HEAD^{commit}')
-      return nil unless head.match?(GitLog::SHA)
+      head = git_capture_head
+      return nil unless head
 
       paths = commit_table_paths
       builder = GitCommitTable.new(root: Rails.root, logger: Rails.logger, settings: GitCommitTable.settings)
@@ -2926,7 +2985,11 @@ module Woods
       # pointing at the real git dir; when that dir is unreachable (e.g. an
       # unmounted host path inside a container) this resolves to "unknown"
       # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
-      provenance = GitProvenance.new(root: Rails.root).to_h
+      provenance = if @git_capture_head
+                     { git_sha: @git_capture_head, git_branch: @git_capture_branch }
+                   else
+                     GitProvenance.new(root: Rails.root).to_h
+                   end
 
       # Incremental runs never populate @results — deriving counts from
       # memory would clobber a good manifest with zeros. Recompute from the
@@ -2989,7 +3052,7 @@ module Woods
       availability = git_availability
       failed = availability[:available] && @git_history_failed
       availability = { available: false, reason: 'history_read_failed' } if failed
-      head = availability[:available] ? run_git('rev-parse', '--verify', 'HEAD^{commit}') : nil
+      head = availability[:available] ? git_capture_head : nil
 
       GitEnrichmentSummary.build(graph: @dependency_graph, root: Rails.root.to_s, availability: availability,
                                  refreshed: refreshed, head_sha: head&.match?(GitLog::SHA) ? head : nil)
@@ -4639,11 +4702,11 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      if git_data && SourceContributors.multiple?(data)
+      if git_data && !git_data.empty? && SourceContributors.multiple?(data)
         SourceContributors.annotate_git(data, git_data)
         sources = SourceContributors.git_source_count(data)
         @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil,
-                                               git_sources: sources.positive? ? sources : nil)
+                                               git_sources: sources)
         note_git_refreshed(identifier, type) if sources.positive?
       elsif git
         (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))

@@ -1517,7 +1517,15 @@ A source archive without a repository remains quiet.
 
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths
-are retained. Commit counts and contributors describe **HEAD-reachable touched-path
+are retained. Woods resolves a commit SHA before the walk and uses it for that
+run's history, commit table, manifest `git_sha`, and `git_enrichment.head_sha`.
+The manifest branch is captured with that revision. A failed capture remains
+unavailable for that run, even if Git access recovers before publication.
+Later commits are picked up on the next run, including when an extractor
+instance is reused. Retained unit facts remain identified as retained rather
+than newly verified at that SHA.
+
+Commit counts and contributors describe **HEAD-reachable touched-path
 events**, independent of which other paths are requested:
 
 - A root commit compares with an empty tree; a normal commit compares with its parent.
