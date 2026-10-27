@@ -181,7 +181,7 @@ module Woods
                   :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
                   :console_unsafe_eval_confirmation, :console_unsafe_eval_audit_log_path,
-                  :notion_api_token, :notion_database_ids,
+                  :notion_api_token, :notion_database_ids, :notion_export_column_defaults,
                   :unblocked_api_token, :unblocked_collection_id, :unblocked_repo_url,
                   :cache_store, :cache_options,
                   :dump_retention_count, :component_paths
@@ -253,6 +253,7 @@ module Woods
       @console_unsafe_eval_audit_log_path = nil
       @notion_api_token = nil
       @notion_database_ids = {}
+      @notion_export_column_defaults = false
       @unblocked_api_token = nil
       @unblocked_collection_id = nil
       @unblocked_repo_url = nil

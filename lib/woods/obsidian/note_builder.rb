@@ -33,8 +33,11 @@ module Woods
       # @param analysis [Hash, nil] parsed graph_analysis.json (hubs/cycles/orphans/bridges) or nil
       # @param include_source [Boolean] embed scrubbed source code
       # @param scanner [#scan, nil] credential scanner (required when include_source)
+      # @param obsidian [Boolean] Obsidian flavor: wikilinks, tags and aliases in the
+      #   frontmatter, and callouts. False renders plain Markdown with relative links.
       def initialize(name_mapper:, nodes:, pagerank: {}, analysis: nil, include_source: false, scanner: nil,
-                     identifiers: {}, ambiguous_identifiers: Set.new)
+                     identifiers: {}, ambiguous_identifiers: Set.new, obsidian: true)
+        @obsidian = obsidian
         @identifiers = identifiers
         @ambiguous_identifiers = ambiguous_identifiers
         @mapper = name_mapper
@@ -60,9 +63,9 @@ module Woods
           heading(id, unit),
           meta_line(unit),
           callout(id, used_by),
-          depends_section(depends_on),
-          used_by_section(used_by),
-          associations_section(unit),
+          depends_section(id, depends_on),
+          used_by_section(id, used_by),
+          associations_section(id, unit),
           schema_section(unit),
           source_section(unit)
         ].compact
@@ -84,8 +87,8 @@ module Woods
           'pagerank' => pagerank_for(id),
           'dependency_count' => depends_on.size,
           'dependent_count' => used_by.size,
-          'tags' => tags_for(id, unit),
-          'aliases' => [@identifiers.fetch(id, id)]
+          'tags' => (tags_for(id, unit) if @obsidian),
+          'aliases' => ([@identifiers.fetch(id, id)] if @obsidian)
         }.compact
         "#{fm.to_yaml}---"
       end
@@ -136,17 +139,33 @@ module Woods
         if @hubs.include?(analysis_identifier(id))
           pr = pagerank_for(id)
           suffix = pr ? " (PageRank #{format('%.4f', pr)})" : ''
-          "> [!warning] Hub — high blast radius\n> #{used_by.size} units depend on this#{suffix}."
+          "> #{callout_title('Hub — high blast radius')}\n> #{used_by.size} units depend on this#{suffix}."
         elsif @cycle_members.include?(analysis_identifier(id))
-          "> [!warning] Part of a dependency cycle\n> This unit participates in a circular dependency."
+          "> #{callout_title('Part of a dependency cycle')}\n> This unit participates in a circular dependency."
         end
       end
 
-      def depends_section(depends_on)
+      def callout_title(title)
+        @obsidian ? "[!warning] #{title}" : "**#{title}**"
+      end
+
+      def link(target, from)
+        return @mapper.wikilink(target) if @obsidian
+
+        @mapper.markdown_link(target, from: @mapper.path_for(from))
+      end
+
+      def link_for_identifier(identifier, from)
+        return @mapper.wikilink_for_identifier(identifier) if @obsidian
+
+        @mapper.markdown_link_for_identifier(identifier, from: @mapper.path_for(from))
+      end
+
+      def depends_section(id, depends_on)
         rows = depends_on.filter_map do |dep|
           target = dep[:target] || dep['target']
           via = dep[:via] || dep['via']
-          link = @mapper.wikilink(target)
+          link = link(target, id)
           next unless link
 
           [target.to_s, via.to_s, "- #{link}#{" — *#{via}*" if via}"]
@@ -157,13 +176,13 @@ module Woods
         (['## Depends on'] + lines).join("\n")
       end
 
-      def used_by_section(used_by)
+      def used_by_section(id, used_by)
         return nil if used_by.empty?
 
         shown = used_by.sort.first(USED_BY_DISPLAY_CAP)
         lines = ["## Used by (#{used_by.size})"]
         shown.group_by { |sid| @nodes.dig(sid, 'type') || 'other' }.sort.each do |type, sids|
-          links = sids.sort.filter_map { |sid| @mapper.wikilink(sid) }
+          links = sids.sort.filter_map { |sid| link(sid, id) }
           lines << "**#{pluralize(type)}:** #{links.join(', ')}" unless links.empty?
         end
         more = used_by.size - shown.size
@@ -171,7 +190,7 @@ module Woods
         lines.join("\n")
       end
 
-      def associations_section(unit)
+      def associations_section(id, unit)
         return nil unless unit['type'] == 'model'
 
         by_type = Woods::Export::UnitFacts.new(unit).associations_by_type
@@ -179,18 +198,18 @@ module Woods
 
         lines = ['## Associations']
         ASSOCIATION_ORDER.each do |macro|
-          rendered = render_associations(by_type[macro])
+          rendered = render_associations(id, by_type[macro])
           lines << "**#{macro}:** #{rendered.join(', ')}" unless rendered.empty?
         end
         lines.size > 1 ? lines.join("\n") : nil
       end
 
       # +items+ are UnitFacts association entries: { target:, dependent: }.
-      def render_associations(items)
+      def render_associations(id, items)
         return [] unless items
 
         items.filter_map do |assoc|
-          link = @mapper.wikilink_for_identifier(assoc[:target])
+          link = link_for_identifier(assoc[:target], id)
           next unless link
 
           assoc[:dependent] ? "#{link} (dependent: #{assoc[:dependent]})" : link
