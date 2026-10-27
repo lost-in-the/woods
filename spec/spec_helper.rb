@@ -106,4 +106,6 @@ RSpec.configure do |config|
     allow(Woods::UpdateCheck).to receive(:default_cache_path).and_return(cache)
     allow(Woods::UpdateCheck).to receive(:fetch_latest_version).and_return(nil)
   end
+
+  config.after { Woods::UpdateCheck.shutdown }
 end

@@ -1,0 +1,1 @@
+- Caching extraction no longer reports `ActiveRecord::Base.cache do`, another receiver call named `cache`, or an app method named `cache` in a controller or model as fragment caching. Fragment caching is read from view templates only, and only for a call with no receiver.

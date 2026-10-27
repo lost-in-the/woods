@@ -1,5 +1,9 @@
 # Obsidian Integration
 
+> The generic [Markdown export](MARKDOWN_EXPORT.md) (`woods:markdown`) is the supported export path.
+> This guide covers its Obsidian flavor (`WOODS_MARKDOWN_OBSIDIAN=1`). `woods:obsidian` and
+> `woods:vault` are deprecated aliases and will be removed in the next minor release.
+
 Export Woods extraction artifacts to a self-contained [Obsidian](https://obsidian.md) vault, a
 folder of interlinked Markdown notes, one per extracted unit. The vault is designed to be read two
 ways at once:
@@ -19,11 +23,11 @@ token, no network call, and no rate limit. An Obsidian vault is just a folder.
 # 1. Extract (produces tmp/woods/ with the dependency graph + per-unit JSON)
 bundle exec rake woods:extract
 
-# 2. Generate the vault (defaults to tmp/woods/obsidian_vault/)
-bundle exec rake woods:obsidian
+# 2. Generate the vault (defaults to tmp/woods/markdown/)
+WOODS_MARKDOWN_OBSIDIAN=1 bundle exec rake woods:markdown
 ```
 
-Then in Obsidian: **Open folder as vault** → point it at `tmp/woods/obsidian_vault`. For the full
+Then in Obsidian: **Open folder as vault** → point it at `tmp/woods/markdown`. For the full
 experience (graph colors, Bases, link format) open the generated folder *as its own vault* rather than
 nesting it inside an existing one, a nested folder inherits the host vault's config and ignores the
 shipped `.obsidian/` settings.
@@ -139,13 +143,16 @@ credential):
 | Env var | Default | Effect |
 |---|---|---|
 | `WOODS_OUTPUT` | `config.output_dir` (`tmp/woods`) | extraction directory to read from |
-| `WOODS_OBSIDIAN_VAULT` | `<output>/obsidian_vault` | where to write the vault |
-| `WOODS_OBSIDIAN_INCLUDE_SOURCE` | off | embed each unit's source code (credential-scrubbed) in its note |
-| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK` | off | include `rails_source` and readable `gem_source` units (large; off by default) |
-| `WOODS_OBSIDIAN_FORCE_PURGE` | off | bypass the 30% mass-deletion guard during the stale-note sweep |
+| `WOODS_MARKDOWN_OBSIDIAN` | off | write the Obsidian flavor (always on for the deprecated `woods:obsidian`) |
+| `WOODS_MARKDOWN_DIR` | `<output>/markdown` | where to write the vault |
+| `WOODS_MARKDOWN_INCLUDE_SOURCE` | off | embed each unit's source code (credential-scrubbed) in its note |
+| `WOODS_MARKDOWN_INCLUDE_FRAMEWORK` | off | include `rails_source` and readable `gem_source` units (large; off by default) |
+| `WOODS_MARKDOWN_FORCE_PURGE` | off | bypass the 30% mass-deletion guard during the stale-note sweep |
+
+The legacy `WOODS_OBSIDIAN_*` names are read when the `WOODS_MARKDOWN_*` name is unset.
 
 ```bash
-WOODS_OBSIDIAN_VAULT=~/notes/myapp-code WOODS_OBSIDIAN_INCLUDE_SOURCE=1 bundle exec rake woods:obsidian
+WOODS_MARKDOWN_OBSIDIAN=1 WOODS_MARKDOWN_DIR=~/notes/myapp-code WOODS_MARKDOWN_INCLUDE_SOURCE=1 bundle exec rake woods:markdown
 ```
 
 Or call the exporter directly:
@@ -155,7 +162,7 @@ require 'woods/obsidian/vault_exporter'
 
 Woods::Obsidian::VaultExporter.new(
   index_dir: 'tmp/woods',
-  vault_path: 'tmp/woods/obsidian_vault',
+  vault_path: 'tmp/woods/markdown',
   include_source: false,
   include_framework: false
 ).export_all
@@ -171,7 +178,7 @@ notes, so unchanged units never show up in a git diff.
 Before writing, Woods renders the output and checks **every destination**. An existing note or index
 must carry `woods_managed: true`; a `.woods-vault` sentinel alone never authorizes replacing your
 notes or settings. Conflicts stop the export before any writes or sweep, appear in `errors`, and make
-`woods:obsidian` exit nonzero. `WOODS_OBSIDIAN_FORCE_PURGE` does not bypass ownership checks.
+`woods:markdown` exit nonzero. `WOODS_MARKDOWN_FORCE_PURGE` does not bypass ownership checks.
 Child symlinks, directories in place of files, and special files are refused.
 
 Generated machine assets are tracked by SHA-256 in `_woods/ownership.json`: the three sidecar JSON
@@ -197,7 +204,7 @@ your code propagate. Several guards make the sweep safe to point at a real vault
 - It only runs against a directory carrying the `.woods-vault` sentinel (written by Woods on first run).
 - It only deletes notes with the `woods_managed: true` marker, your own notes are never touched.
 - It refuses to delete more than 30% of managed notes at once (the signature of a partial extraction)
-  unless `WOODS_OBSIDIAN_FORCE_PURGE=1` is set.
+  unless `WOODS_MARKDOWN_FORCE_PURGE=1` is set.
 - It resolves symlinks and confirms every deletion target is inside the vault root.
 - It is skipped entirely if any candidate unit is unreadable or returns a mismatched identity,
   or any note failed to write. `force_purge` does not bypass this incomplete-export guard.

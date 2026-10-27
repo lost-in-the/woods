@@ -23,7 +23,8 @@ module Woods
     # - `.rb`, `.jbuilder`: Ruby `#` comments, `=begin`/`=end`, and heredoc
     #   text, via Prism
     # - `.erb`: `<%# ... %>` tags, and a Ruby comment opening a code tag
-    #   (`<% # ... %>`) up to the tag end or line end
+    #   (`<% # ... %>`) up to the tag end or line end, and a line inside a
+    #   code tag that starts with `#`
     # - `.haml`: `-#` silent comments with their indented block, and
     #   `- # ...` Ruby comment lines
     #
@@ -31,9 +32,18 @@ module Woods
     module CommentBlanking
       module_function
 
+      ERB_TAG_OPEN = /<%/
+      ERB_TAG_OPEN_SIZE = 2
+      ERB_TAG_CLOSE = /%>/
+      ERB_TAG_CLOSE_SIZE = 2
+
       # A Ruby comment opening an ERB tag: `<%#` (to the tag end) or
       # `<%` then blanks then `#` (to the tag end or line end).
-      ERB_COMMENT = /<%-?([ \t]*)#/
+      ERB_COMMENT_START = /-?([ \t]*)#/
+
+      # A `#` comment that is the first thing on a line inside a code tag,
+      # to the line end.
+      ERB_COMMENT_LINE = /(?<=\n)[ \t]*\K#(?!\{)[^\n]*/
 
       # Heredoc tags whose body is Ruby.
       RUBY_HEREDOC_TAGS = %w[RUBY RB].freeze
@@ -126,15 +136,36 @@ module Woods
       def erb_comments(source)
         scanner = StringScanner.new(source)
         ranges = []
-        while scanner.skip_until(ERB_COMMENT)
-          start = scanner.pos - scanner.matched_size
-          tag_comment = scanner[1].empty? && !scanner.matched.start_with?('<%-')
-          finish = source.bytesize
-          finish = scanner.pos - scanner.matched_size if scanner.skip_until(tag_comment ? /%>/ : /%>|\n/)
-          ranges << (start...finish)
-          scanner.pos = finish
+        while scanner.skip_until(ERB_TAG_OPEN)
+          tag_start = scanner.pos - ERB_TAG_OPEN_SIZE
+          rest = scanner.check_until(ERB_TAG_CLOSE)
+          tag_end = rest ? scanner.pos + rest.bytesize - ERB_TAG_CLOSE_SIZE : source.bytesize
+          if scanner.skip(ERB_COMMENT_START)
+            tag_comment = scanner[1].empty? && !scanner.matched.start_with?('-')
+            finish = tag_end
+            unless tag_comment
+              line = scanner.check_until(/\n/)
+              finish = [finish, scanner.pos + line.bytesize - 1].min if line
+            end
+            ranges << (tag_start...finish)
+            scanner.pos = finish
+          end
+          ranges.concat(comment_lines(source, scanner.pos, tag_end))
+          scanner.pos = tag_end
         end
         ranges
+      end
+
+      # The `#` comment on each line of a code tag that starts with it, from
+      # `from` up to the tag end.
+      #
+      # @return [Array<Range>] Byte ranges
+      def comment_lines(source, from, tag_end)
+        body = source.byteslice(from, tag_end - from).b
+        body.to_enum(:scan, ERB_COMMENT_LINE).map do
+          match = Regexp.last_match
+          (from + match.begin(0))...(from + match.end(0))
+        end
       end
 
       # A `-#` block is its line plus every following line that is blank or
@@ -173,7 +204,7 @@ module Woods
         end
         blanked << source.byteslice(position, source.bytesize - position)
       end
-      private_class_method :ruby_prose, :heredoc_text, :prose_heredoc?, :byte_range, :erb_comments, :haml_comments, :splice
+      private_class_method :ruby_prose, :heredoc_text, :prose_heredoc?, :byte_range, :erb_comments, :comment_lines, :haml_comments, :splice
     end
   end
 end

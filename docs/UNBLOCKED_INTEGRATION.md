@@ -1,5 +1,9 @@
 # Unblocked Integration
 
+> **Deprecated.** Unblocked sync (`woods:unblocked_sync` and `woods:relay`) is deprecated and will be
+> removed in the next minor release. Use the [Markdown export](MARKDOWN_EXPORT.md) (`woods:markdown`)
+> and sync the folder wherever you need. These commands warn once per process.
+
 Woods can sync extraction data to [Unblocked](https://getunblocked.com) via its
 Documents API. This gives Unblocked's automated code review and Q&A tools
 structural codebase context, associations, blast radius, entry points, side
