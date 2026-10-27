@@ -3781,7 +3781,8 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
-      keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
+      table_triggered = keys.include?(:database_tables)
+      keys = table_rerun_keys(keys, change_set) if table_triggered
       if keys.include?(:js_modules) && Extractors::JsModuleRegistry.names_changed?(@published_js_names)
         keys += JS_NAME_CONSUMER_EXTRACTORS
       end
@@ -3795,8 +3796,50 @@ module Woods
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
       end
-      touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
+      touched.merge(reconcile_model_table_edges(affected_types)) if table_triggered
       touched
+    end
+
+    # Which of the table family a trigger re-runs.
+    #
+    # A schema dump or migration can change anything, so the whole family
+    # re-runs. A model edit can only change which tables exist (a `connects_to`
+    # moves every identifier) and which models own them, and the live catalog
+    # says whether it did: when it equals what the published table units
+    # record, the table units and everything resolving names through the
+    # catalog are what a full extraction would write again, and nothing re-runs.
+    # Declared consumers read table identifiers only, never owners, so an
+    # ownership move alone leaves them out.
+    #
+    # @param keys [Set<Symbol>] triggered extractor keys, including :database_tables
+    # @param change_set [ChangeSet]
+    # @return [Set<Symbol>] the keys to re-run
+    def table_rerun_keys(keys, change_set)
+      table_family = keys + TABLE_CONSUMER_EXTRACTORS
+      schema = Extractors::DatabaseTableExtractor
+      return table_family if change_set.relative_paths.any? { |path| schema.schema_trigger_path?(path) }
+
+      published = published_table_ownership
+      return table_family unless published
+
+      current = Extractors::TableCatalog.from_runtime.ownership_facts
+      return keys - [:database_tables] if current == published
+      return table_family if current.keys.sort != published.keys.sort
+
+      keys + (TABLE_CONSUMER_EXTRACTORS - [:external_consumers])
+    rescue StandardError => e
+      # An unreadable catalog or index re-runs everything, as before.
+      Rails.logger.warn "[Woods] Table ownership comparison failed (#{e.class}): #{e.message}"
+      table_family
+    end
+
+    # @return [Hash{String => Array<String>}, nil] table identifier => owning
+    #   models as the published table units record them; nil when unreadable
+    def published_table_ownership
+      units = published_table_units
+      return nil unless units
+
+      units.to_h { |unit| [unit['identifier'], Array(unit.dig('metadata', 'models'))] }
     end
 
     # A model edit re-runs the table extractor for ownership: which model owns
@@ -3813,15 +3856,22 @@ module Woods
       extractor = extractor_for(:database_tables)
       return unless extractor.is_a?(Extractors::DatabaseTableExtractor)
 
-      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
-      return unless directory.directory?
+      units = published_table_units
+      return unless units
 
-      units = directory.children.sort.filter_map do |file|
+      extractor.schema_cache = Extractors::DatabaseTableExtractor.schema_cache_from(units)
+    end
+
+    # @return [Array<Hash>, nil] the published table units, string-keyed; nil
+    #   when there are none or one is unreadable
+    def published_table_units
+      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
+      return nil unless directory.directory?
+
+      directory.children.sort.filter_map do |file|
         JSON.parse(AtomicFile.read(file)) if file.extname == '.json' && file.basename.to_s != '_index.json'
       end
-      extractor.schema_cache = Extractors::DatabaseTableExtractor.schema_cache_from(units)
     rescue JSON::ParserError, SystemCallError, EncodingError
-      # An unreadable published unit leaves the cache unset: every table is read live.
       nil
     end
 
