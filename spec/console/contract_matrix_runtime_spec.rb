@@ -72,7 +72,7 @@ module ConsoleContractMatrixRuntime
       schema_case(:scope_type, { model: 'Post', scope: [] }, 'type', '/scope'),
       execution_case(
         :unknown_model, { model: 'Missing' },
-        'Unknown model: Missing. Available: Comment, Post'
+        'Unknown model: Missing. No close match among 2 known models.'
       )
     ],
     'console_sample' => [
@@ -84,7 +84,7 @@ module ConsoleContractMatrixRuntime
       schema_case(:column_pattern, { model: 'Post', columns: ['bad key'] }, 'pattern', '/columns/0'),
       execution_case(
         :unknown_column, { model: 'Post', columns: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ],
     'console_find' => [
@@ -98,11 +98,11 @@ module ConsoleContractMatrixRuntime
       schema_case(:column_pattern, { model: 'Post', columns: ['bad key'] }, 'pattern', '/columns/0'),
       execution_case(
         :unknown_lookup_column, { model: 'Post', by: { 'missing' => 1 } },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_output_column, { model: 'Post', id: 1, columns: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ],
     'console_pluck' => [
@@ -116,7 +116,7 @@ module ConsoleContractMatrixRuntime
       schema_case(:distinct_type, { model: 'Post', columns: ['id'], distinct: 'false' }, 'type', '/distinct'),
       execution_case(
         :unknown_column, { model: 'Post', columns: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ],
     'console_aggregate' => [
@@ -127,7 +127,7 @@ module ConsoleContractMatrixRuntime
       schema_case(:column_coupling, { model: 'Post', function: 'sum' }, 'required', ''),
       execution_case(
         :unknown_column, { model: 'Post', function: 'sum', column: 'missing' },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ],
     'console_association_count' => [
@@ -154,7 +154,7 @@ module ConsoleContractMatrixRuntime
       schema_case(:include_indexes_type, { model: 'Post', include_indexes: 'true' }, 'type', '/include_indexes'),
       execution_case(
         :unknown_model, { model: 'Missing' },
-        'Unknown model: Missing. Available: Comment, Post'
+        'Unknown model: Missing. No close match among 2 known models.'
       )
     ],
     'console_recent' => [
@@ -170,11 +170,11 @@ module ConsoleContractMatrixRuntime
       schema_case(:column_pattern, { model: 'Post', columns: ['bad key'] }, 'pattern', '/columns/0'),
       execution_case(
         :unknown_order_column, { model: 'Post', order_by: 'missing' },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_output_column, { model: 'Post', columns: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ],
     'console_status' => [
@@ -290,11 +290,11 @@ module ConsoleContractMatrixRuntime
       schema_case(:limit_maximum, { model: 'Post', select: ['id'], limit: 10_001 }, 'maximum', '/limit'),
       execution_case(
         :unknown_model, { model: 'Missing', select: ['id'] },
-        'Unknown model: Missing. Available: Comment, Post'
+        'Unknown model: Missing. No close match among 2 known models.'
       ),
       execution_case(
         :unknown_select_column, { model: 'Post', select: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_join, { model: 'Post', select: ['id'], joins: ['missing'] },
@@ -302,19 +302,19 @@ module ConsoleContractMatrixRuntime
       ),
       execution_case(
         :unknown_group_column, { model: 'Post', select: ['id'], group_by: ['missing'] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_having_column, { model: 'Post', select: ['id'], having: { 'missing' => 1 } },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_order_column, { model: 'Post', select: ['id'], order: { 'missing' => 'asc' } },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       ),
       execution_case(
         :unknown_scope_column, { model: 'Post', select: ['id'], scope: ['missing = ?', 1] },
-        "Unknown column 'missing' on Post. Available: created_at, id, status, title, updated_at"
+        "Unknown column 'missing' on Post. No close match among 5 known columns."
       )
     ]
   }.transform_values(&:freeze).freeze
@@ -567,7 +567,7 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
         end
 
         arguments = base.merge(model: 'Missing')
-        expected_message = 'Unknown model: Missing. Available: Comment, Post'
+        expected_message = 'Unknown model: Missing. No close match among 2 known models.'
         expect(schema_errors(server, name, arguments)).to be_empty, name
         [execute_direct(name, arguments), execute_after_schema(name, arguments)].each do |execution|
           expect(execution).to include(
@@ -707,8 +707,8 @@ RSpec.describe 'Console MCP contract matrix runtime', :booted_app do
         expect(tool_error(tools_call(server, name, malformed))).to eq(schema_message), name
 
         unknown = base.merge(scope: { 'missing' => 1 })
-        available = validator.columns_for(scope_model).join(', ')
-        expected_message = "Unknown column 'missing' on #{scope_model}. Available: #{available}"
+        known = validator.columns_for(scope_model).size
+        expected_message = "Unknown column 'missing' on #{scope_model}. No close match among #{known} known columns."
         expect(schema_errors(server, name, unknown)).to be_empty, name
         expect(execute_direct(name, unknown)).to include(
           'ok' => false, 'error_type' => 'validation', 'error' => expected_message
