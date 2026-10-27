@@ -12,6 +12,7 @@ require_relative '../atomic_file'
 require_relative '../deprecation'
 require_relative '../generation'
 require_relative '../generation_pins'
+require_relative '../git_enrichment_summary'
 require_relative '../git_provenance'
 require_relative '../resilience/incremental_readiness'
 require_relative '../tasks'
@@ -2289,6 +2290,8 @@ module Woods
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / not_configured / failed + reason), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
+                         'index.git_enrichment says whether Git facts are trustworthy: state (available, degraded, ' \
+                         'unavailable, unknown), a stable reason, coverage by unit and refreshed versus retained facts. ' \
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \
                          'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
@@ -2367,6 +2370,7 @@ module Woods
               diagnostic: "#{error.message}. Run woods:validate, then restore or rebuild the index.",
               counts: {},
               history: { state: 'unknown', reason: 'publication_unusable' },
+              git_enrichment: { state: 'unknown', reason: 'publication_unusable' },
               incremental: { ready: false, status: 'needs full extraction (published generation marker is unusable)' }
             },
             retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
@@ -2496,6 +2500,7 @@ module Woods
           root = recorded_source_root(base[:source_freshness])
           head_sha = manifest_sha ? resolve_head_sha(root) : nil
           base[:history] = history_fields(manifest_sha, head_sha, root)
+          base[:git_enrichment] = Woods::GitEnrichmentSummary.from_manifest(manifest)
           base[:incremental] = incremental_fields(index_dir, reader)
           return base unless head_sha
 
