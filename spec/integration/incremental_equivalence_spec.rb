@@ -3067,6 +3067,100 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     after { FileUtils.rm_rf([app_path('.git'), app_path('.git.held')]) }
 
+    it 'counts retained contributor facts when upgrading a graph written before Git summaries' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      coverage = summary(index_dir).fetch('coverage')
+
+      # Older writers kept contributor Git facts in the unit, but neither
+      # git_sources on the graph nor git_enrichment on the manifest.
+      graph_path = File.join(payload_dir(index_dir), 'dependency_graph.json')
+      graph = read_json(index_dir, 'dependency_graph.json')
+      graph.fetch('nodes').each_value { |node| node.delete('git_sources') }
+      File.write(graph_path, JSON.generate(graph))
+      manifest = read_json(index_dir, 'manifest.json').except('git_enrichment')
+      File.write(File.join(payload_dir(index_dir), 'manifest.json'), JSON.generate(manifest))
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect(touched).not_to include('SharedLibrary')
+      expect(summary(index_dir)).to include('state' => 'available')
+      expect(summary(index_dir).fetch('coverage')).to eq(coverage)
+      expect(summary(index_dir).dig('capture', 'retained')).to be_positive
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'backfills an explicit zero for retained contributors without history' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      make_git_unreachable
+      index_dir = full_extraction
+      graph = read_json(index_dir, 'dependency_graph.json')
+      graph.fetch('nodes').fetch('SharedLibrary').delete('git_sources')
+      File.write(File.join(payload_dir(index_dir), 'dependency_graph.json'), JSON.generate(graph))
+      restore_git
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      extractor = Woods::Extractor.new(output_dir: index_dir)
+      extractor.extract_changed([path])
+
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+      expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'units_missing_facts')
+      expect(summary(index_dir).dig('capture', 'retained')).to eq(0)
+      expect(extractor).not_to receive(:read_published_unit).with('SharedLibrary', :lib)
+      extractor.send(:backfill_git_source_counts)
+    end
+
+    %i[full incremental].each do |mode|
+      %i[before after].each do |timing|
+        it "pins #{mode} Git facts and provenance when HEAD moves #{timing} the history walk" do
+          index_dir = full_extraction
+          original_head = summary(index_dir).fetch('head_sha')
+          extractor = Woods::Extractor.new(output_dir: index_dir)
+          path = 'app/services/ledger_service.rb'
+          write_file(path, "#{service_source('LedgerService')}# edited\n") if mode == :incremental
+          moved = false
+          advance_head = lambda do
+            source = File.read(app_path(path))
+            write_file(path, "#{source}# intermediate commit\n")
+            git_in_app('commit', '-am', 'change during extraction')
+            write_file(path, source)
+            git_in_app('commit', '-am', 'restore identical source bytes')
+          end
+          allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |method, *args, **kwargs|
+            unless moved
+              moved = true
+              advance_head.call if timing == :before
+              result = method.call(*args, **kwargs)
+              advance_head.call if timing == :after
+              next result
+            end
+            method.call(*args, **kwargs)
+          end
+
+          mode == :full ? extractor.extract_all : extractor.extract_changed([path])
+
+          expect(moved).to be(true)
+          expect(summary(index_dir)).to include('state' => 'available', 'head_sha' => original_head)
+          expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git', 'commit_count')).to eq(1)
+          expect(read_json(index_dir, 'git_commits.json').fetch('head')).to eq(original_head)
+          expect(read_json(index_dir, 'manifest.json').fetch('git_sha')).to eq(original_head)
+
+          # A second publication on this same instance must resolve the new
+          # HEAD rather than reusing the previous run's captured revision.
+          extractor.extract_all
+          expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git', 'commit_count')).to eq(3)
+          expect(summary(index_dir).fetch('head_sha')).not_to eq(original_head)
+          expect(differences(index_dir, full_extraction)).to be_empty
+        end
+      end
+    end
+
     it 'publishes the same account from an incremental run as from a full extraction' do
       index_dir = full_extraction
       expect(summary(index_dir)).to include('state' => 'available', 'reason' => nil)
