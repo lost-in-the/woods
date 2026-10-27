@@ -44,7 +44,30 @@ Replace both paths with the intended Rails worktree. Preserve other server entri
 
 For Docker, use the [container-first setup](DOCKER_SETUP.md#default-run-it-through-the-application-container). Select the intended Compose project and service, and verify that its mounted application directory is the worktree you mean to index. `docker compose exec` targets an existing container; running the command from a different checkout does not change that container's mounts. The index path must be visible inside that container.
 
-Keep a separate output directory for each checkout when you need checkout-specific answers. If you intentionally point at another checkout's index, Woods serves that published content; registration alone does not make it describe the current worktree.
+Keep a separate output directory for each checkout when you need checkout-specific answers; one server can answer for all of a repository's worktrees when callers pass [`root`](#one-server-several-worktrees-root). If you intentionally point at another checkout's index, Woods serves that published content; registration alone does not make it describe the current worktree.
+
+## One server, several worktrees (`root`)
+
+A session whose subagents each edit a different worktree cannot give each one its own server: subagents inherit the parent's Woods tools. Instead, pass `root` on the call. These tools accept it: `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `trace_flow`, `diagram` and `woods_status`.
+
+```json
+{ "name": "lookup", "arguments": { "identifier": "Post", "root": "/absolute/path/to/worktree" } }
+```
+
+How routing works:
+
+- **Allowlist.** `root` must be a linked worktree of the repository the server's own index describes, as listed by `git worktree list` (read through the same worktree-aware Git command as extraction). Git is asked on every routed call, so a worktree created after the server started is accepted and a removed one is not.
+- **Which repository.** The checkout the served index recorded as its source root. For an index without one, the checkout that contains the index directory.
+- **Where the index is.** The worktree's index sits at the same path relative to the worktree root as the served index sits relative to its own root (`tmp/woods` by default). If the served index lives outside its checkout, every `root` is refused.
+- **Pinned generation.** The server keeps one cached reader per worktree. Each call is pinned to one generation of the reader it was routed to, and the answer carries that worktree's generation.
+- **Refusals.** A path outside the allowlist, a relative path or a non-string is `invalid_params` with `argument: "root"` and `accepted_roots` in `_meta`. A listed worktree with no published index is `not_found` with `argument: "root"`.
+- **No inference.** Without `root` the call is served from the index the server was started with, exactly as before. The caller's working directory is never consulted.
+
+`woods_status` lists the worktrees it can route to under `worktrees`: each with `root`, `index_dir`, `default`, `state` (`indexed`, `unextracted` or `missing`), `generation`, `git_branch`, `git_sha` and `watch` (the watch daemon's state, pid and host). With `root`, the rest of the report describes that worktree's index. The `retriever`, `bootstrap` and `features` sections still describe the server.
+
+`codebase_retrieve`, the pipeline, feedback and snapshot tools, `reload` and the MCP resources are bound to the served index and take no `root`.
+
+**For subagents:** give each subagent the absolute path of the worktree it edits and tell it to pass that as `root` on every Woods call. Run `woods:extract` (or `woods:incremental` under a watch daemon) in that worktree first, then check `woods_status` for its entry. A subagent that omits `root` is answered from the parent's index, with no warning.
 
 ## Plugin-provided servers
 
