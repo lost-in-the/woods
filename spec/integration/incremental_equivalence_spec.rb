@@ -3112,9 +3112,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
       expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'units_missing_facts')
       expect(summary(index_dir).dig('capture', 'retained')).to eq(0)
+      write_file(path, "#{service_source('LedgerService')}# edited again\n")
       next_extractor = Woods::Extractor.new(output_dir: index_dir)
       expect(next_extractor).not_to receive(:read_published_unit).with('SharedLibrary', :lib)
-      next_extractor.extract_changed([path])
+      expect(next_extractor.extract_changed([path])).to include('LedgerService')
       expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
     end
 
