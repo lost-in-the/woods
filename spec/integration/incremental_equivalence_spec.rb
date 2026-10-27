@@ -170,6 +170,34 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Rails.application.reload_routes!
   end
 
+  it 'preserves incremental equivalence and the full-run snapshot when snapshots are enabled' do
+    previous_snapshots = Woods.configuration.enable_snapshots
+    previous_sha = ENV.fetch('GIT_SHA', nil)
+    Woods.configuration.enable_snapshots = true
+    ENV['GIT_SHA'] = 'a' * 40
+    index = full_extraction
+    connection = SQLite3::Database.new(File.join(index, 'woods.sqlite3'))
+    connection.results_as_hash = true
+    store = Woods::Temporal::SnapshotStore.new(connection: connection)
+    snapshot = store.find(ENV.fetch('GIT_SHA'))
+    expect(snapshot).not_to be_nil
+    expect(store.unit_history('Post').first).to include(unit_type: 'model')
+
+    changed = write_file('app/services/snapshot_probe_service.rb', <<~RUBY)
+      class SnapshotProbeService
+        def call = 'ready'
+      end
+    RUBY
+    Woods::Extractor.new(output_dir: index).extract_changed([changed])
+
+    expect(store.find(ENV.fetch('GIT_SHA'))).to eq(snapshot)
+    expect(differences(index, full_extraction)).to be_empty
+  ensure
+    connection&.close
+    Woods.configuration.enable_snapshots = previous_snapshots
+    previous_sha.nil? ? ENV.delete('GIT_SHA') : ENV['GIT_SHA'] = previous_sha
+  end
+
   it 'tracks nested model mixins through body and callback edits' do
     model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
       class PinnedRecord < ApplicationRecord
