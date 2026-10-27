@@ -900,12 +900,35 @@ module Woods
         # One lookahead row distinguishes "exactly cap rows" from "more exist".
         query_sql = "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{cap + 1}"
         validate_sql_policy!(query_sql)
-        result = active_connection.select_all(query_sql)
+        result = select_capped_sql(query_sql)
         validate_sql_result_types!(result)
 
         rows = result.rows.first(cap)
         { 'columns' => result.columns, 'rows' => rows, 'count' => rows.size,
           'completeness' => sql_completeness(rows.size, result.rows.size > cap) }
+      end
+
+      # MySQL and MariaDB require unique column names in a derived table, so
+      # the row-cap wrapper cannot run a statement whose output repeats a name
+      # (`SELECT *` over a join of tables that share `id`, or one column
+      # selected twice). The adapter reports that as an execution error, which
+      # the client sees as a sanitized server-side failure. Name the cause and
+      # the remedy instead. Other adapters accept repeated names.
+      def select_capped_sql(query_sql)
+        active_connection.select_all(query_sql)
+      rescue StandardError => e
+        raise unless sql_dialect == :mysql && duplicate_output_name_error?(e)
+
+        raise ValidationError, 'Rejected: the row cap wraps console_sql in a derived table, which MySQL ' \
+                               'and MariaDB require to have unique output column names, and this ' \
+                               'statement repeats one. Alias the repeated columns or list them instead of ' \
+                               'SELECT *.'
+      end
+
+      # MySQL error 1060 (`ER_DUP_FIELDNAME`), as mysql2 and Trilogy surface it
+      # through Active Record. The column name is left out of the response.
+      def duplicate_output_name_error?(error)
+        [error, error.cause].compact.any? { |candidate| candidate.message.to_s.include?('Duplicate column name') }
       end
 
       def run_unwrapped_sql(sql)

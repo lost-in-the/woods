@@ -347,6 +347,32 @@ RSpec.describe 'Console SQL policy boundaries' do
     expect(response['error']).to include('EAV value column')
   end
 
+  context 'with MySQL derived-table column names' do
+    before { allow(connection).to receive(:adapter_name).and_return('Mysql2') }
+
+    it 'names the cause when the row-cap wrapper refuses repeated output names' do
+      allow(connection).to receive(:select_all).and_raise(StandardError, "Mysql2::Error: Duplicate column name 'id'")
+      result = request('SELECT * FROM users a JOIN users b ON a.id = b.id')
+      expect(result).to include('ok' => false, 'error_type' => 'validation')
+      expect(result['error']).to include('unique output column names', 'Alias the repeated columns')
+      expect(result['error']).not_to include("'id'")
+    end
+
+    it 'keeps other adapter errors sanitized' do
+      allow(connection).to receive(:select_all).and_raise(StandardError, "Mysql2::Error: Unknown column 'u.nope'")
+      result = request('SELECT u.nope FROM users u')
+      expect(result).to include('ok' => false, 'error_type' => 'execution')
+      expect(result['error']).not_to include('nope')
+    end
+  end
+
+  it 'keeps a duplicate-name adapter error sanitized outside the MySQL family' do
+    allow(connection).to receive(:select_all).and_raise(StandardError, "PG::Error: Duplicate column name 'id'")
+    result = request('SELECT * FROM users a JOIN users b ON a.id = b.id')
+    expect(result).to include('ok' => false, 'error_type' => 'execution')
+    expect(result['error']).not_to include('Duplicate column name')
+  end
+
   context 'with Trilogy' do
     before { allow(connection).to receive(:adapter_name).and_return('Trilogy') }
 
