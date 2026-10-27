@@ -3441,7 +3441,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/services/rt_yard/tile_component.rb
         app/components/rt_card.rb
         app/components/rt_scope/page_component.rb
-        app/services/rt_scope/rt_card.rb
+        app/components/rt_tile.rb
+        app/components/rt_deck/page_component.rb
+        app/services/rt_deck/rt_tile.rb
         app/components/rt_scope/rt_card.rb
         app/controllers/rt_scope/things_controller.rb
         app/components/rt_kit_lib.rb
@@ -3680,31 +3682,34 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     describe 'an edit that touches a constant a render resolves (#728)' do
+      # Its own names: earlier examples leave RtScope::ThingsController, which
+      # renders RtCard, in the pristine tree, and a component defined outside the
+      # component directories retargets a controller only on a full extraction.
       it 'retargets a component when a namespaced class now shadows the one its render reached' do
         index = run_sequence([
                                lambda do
-                                 [write_and_load('app/components/rt_card.rb',
-                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
-                                  write_and_load('app/components/rt_scope/page_component.rb', <<~RUBY)]
-                                    module RtScope
+                                 [write_and_load('app/components/rt_tile.rb',
+                                                 "class RtTile < ApplicationComponent\n  def call = 'tile'\nend\n"),
+                                  write_and_load('app/components/rt_deck/page_component.rb', <<~RUBY)]
+                                    module RtDeck
                                       class PageComponent < ApplicationComponent
-                                        def call = render(RtCard.new)
+                                        def call = render(RtTile.new)
                                       end
                                     end
                                   RUBY
                                end,
                                lambda do
-                                 write_and_load('app/services/rt_scope/rt_card.rb', <<~RUBY)
-                                   module RtScope
-                                     class RtCard < ApplicationComponent
-                                       def call = 'scoped card'
+                                 write_and_load('app/services/rt_deck/rt_tile.rb', <<~RUBY)
+                                   module RtDeck
+                                     class RtTile < ApplicationComponent
+                                       def call = 'scoped tile'
                                      end
                                    end
                                  RUBY
                                end
                              ])
 
-        expect(render_edges(index, 'RtScope::PageComponent')).to eq([%w[RtScope::RtCard], []])
+        expect(render_edges(index, 'RtDeck::PageComponent')).to eq([%w[RtDeck::RtTile], []])
       end
 
       it 'retargets a controller when a component in a component directory now shadows its render' do
@@ -3767,9 +3772,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       it 're-runs the renderers when the edit cannot be read as constant definitions' do
         index = run_sequence([
                                lambda do
-                                 write_and_load('app/components/rt_card.rb',
-                                                "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n")
-                                 write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")
+                                 [write_and_load('app/components/rt_card.rb',
+                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
+                                  write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")]
                                end,
                                lambda do
                                  write_and_load('app/services/rt_ledger.rb',
