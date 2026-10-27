@@ -1604,11 +1604,10 @@ Resolution needs the whole index, so it runs as a post-pass after every extracto
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
-`config.extractors`. The array is accepted for forward compatibility: setting
-it to anything other than its default value emits a warning and has no
-effect on which extractors run or what the retrieval pipeline sees.
-Extractor selection is a documented future knob, not a shipped feature.
+You can't. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+`config.extractors`. The option is deprecated and will be removed in Woods 3.0:
+assigning it warns once and has no effect on which extractors run or what the
+retrieval pipeline sees. No selection feature is planned.
 
 `config.add_gem` is in the same state: accepted with a warning, not read by
 `RailsSourceExtractor`. There is no shipped way to widen the framework path list.

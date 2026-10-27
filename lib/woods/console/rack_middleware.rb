@@ -254,7 +254,7 @@ module Woods
         config = Woods.configuration
         introspection = build_model_introspection
         Server.build_embedded(
-          model_validator: ModelValidator.new(registry: introspection[:registry], table_names: introspection[:tables]),
+          model_validator: build_model_validator(introspection, config),
           safe_context: SafeContext.new(pool: ActiveRecord::Base.connection_pool),
           redacted_columns: Array(config&.console_redacted_columns),
           redacted_key_values: Array(config&.console_redacted_key_values),
@@ -265,6 +265,18 @@ module Woods
           model_reflections: introspection[:reflections],
           unsafe_eval_confirmation: @unsafe_eval_confirmation,
           unsafe_eval_audit_log_path: @unsafe_eval_audit_log_path
+        )
+      end
+
+      # Blocked tables and redacted columns stay out of unknown-name suggestions.
+      def build_model_validator(introspection, config)
+        key_values = Array(config&.console_redacted_key_values)
+        ModelValidator.new(
+          registry: introspection[:registry],
+          table_names: introspection[:tables],
+          hidden_tables: Array(config&.console_blocked_tables),
+          hidden_columns: Array(config&.console_redacted_columns) +
+                          key_values.flat_map { |pattern| [pattern['key_column'], pattern['value_column']].compact }
         )
       end
 
