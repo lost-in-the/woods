@@ -7,6 +7,19 @@ RSpec.describe Woods::Ast::Parser do
   subject(:parser) { described_class.new }
 
   describe '#parse' do
+    it 'normalizes an implicit-it block supplied by a parser-compatible builder' do
+      require 'parser/current'
+      source = 'items.each { process }'
+      raw = Parser::CurrentRuby.parse(source)
+      implicit_block = raw.updated(:itblock, [raw.children[0], :it, raw.children[2]])
+
+      node = parser.send(:convert_parser_node, implicit_block, source)
+
+      expect(node.type).to eq(:block)
+      expect(node.children.first.method_name).to eq('each')
+      expect(node.children.last.method_name).to eq('process')
+    end
+
     it 'parses valid Ruby source' do
       root = parser.parse('x = 1')
 
