@@ -1,0 +1,1 @@
+- Clarify that incremental families skipped after their relevant facts compare equal retain their prior source identities even when their published units equal a full extraction.
