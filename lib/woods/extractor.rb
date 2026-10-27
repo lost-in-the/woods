@@ -3345,16 +3345,11 @@ module Woods
                            .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
              end
       keys.add(:view_components) if paths.any? { |path| sidecar_template?(path) }
-      # A controller's render edges are resolved the same way, but every
-      # controller re-running on every Ruby edit would cost more than the
-      # bounded blast radius saves. Controllers re-run when a file that can
-      # define a component changes a constant they resolve; a component defined
-      # outside the component directories, or an alias defined elsewhere,
-      # retargets a controller's edge when the controller file changes or on a
-      # full extraction.
-      if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) } && scope.controllers?
-        keys.add(:controllers)
-      end
+      # Controller render targets use the same constant lookup, including
+      # components and aliases defined outside component directories. Keep the
+      # touched-constant check so unrelated readable Ruby edits stay narrow;
+      # unreadable edits conservatively refresh the family.
+      keys.add(:controllers) if scope.controllers?
       keys
     end
 

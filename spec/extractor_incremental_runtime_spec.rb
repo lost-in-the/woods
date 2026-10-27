@@ -20,18 +20,18 @@ RSpec.describe 'incremental runtime inputs' do
   let(:extractor) { Woods::Extractor.new(output_dir: @root.join('index')) }
 
   describe 'hybrid runtime refresh selection' do
-    it 'refreshes the hybrid and runtime-resolved families after changing a path outside app/' do
+    it 'refreshes the hybrid, runtime-resolved and controller families after changing a path outside app/' do
       changes = Woods::ChangeSet.new(paths: ['lib/runtime_settings.rb'], root: @root)
       expect(extractor.send(:hybrid_discovery_keys, changes, []))
-        .to eq(Set[:jobs, :serializers, :components, :view_components])
+        .to eq(Set[:jobs, :serializers, :components, :view_components, :controllers])
     end
 
-    it 'refreshes the hybrid and runtime-resolved families after an app/ edit it cannot read as constants' do
+    it 'refreshes hybrid, runtime-resolved and controller families for an unreadable app/ constant edit' do
       FileUtils.mkdir_p(@root.join('app/models'))
       File.write(@root.join('app/models/queue_settings.rb'), "Object.const_set(:QUEUE, 'critical')\n")
       changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
       expect(extractor.send(:hybrid_discovery_keys, changes, []))
-        .to eq(Set[:jobs, :serializers, :components, :view_components])
+        .to eq(Set[:jobs, :serializers, :components, :view_components, :controllers])
     end
 
     it 'refreshes only the hybrid families after an app/ edit that touches no constant a render resolves' do
@@ -53,6 +53,28 @@ RSpec.describe 'incremental runtime inputs' do
       FileUtils.mkdir_p(@root.join('app/components/shelf'))
       File.write(@root.join('app/components/shelf/row_component.rb'), "class Shelf::RowComponent\n  def a = 1\nend\n")
       changes = Woods::ChangeSet.new(paths: ['app/components/shelf/row_component.rb'], root: @root)
+
+      expect(extractor.send(:hybrid_discovery_keys, changes, [])).not_to include(:controllers)
+    end
+
+    it 'refreshes controllers when a service file changes a constant their render resolves' do
+      FileUtils.mkdir_p(@root.join('app/services/shelf'))
+      File.write(@root.join('app/services/shelf/row_component.rb'), "class Shelf::RowComponent; end\n")
+      controller = { 'dependencies' => [{ 'target' => 'RowComponent', 'via' => 'render' }] }
+      allow(extractor).to receive(:published_units_of).and_call_original
+      allow(extractor).to receive(:published_units_of).with(:controller).and_return([controller])
+      changes = Woods::ChangeSet.new(paths: ['app/services/shelf/row_component.rb'], root: @root)
+
+      expect(extractor.send(:hybrid_discovery_keys, changes, [])).to include(:controllers)
+    end
+
+    it 'leaves controllers alone when an unrelated service class is added' do
+      FileUtils.mkdir_p(@root.join('app/services'))
+      File.write(@root.join('app/services/unrelated_ledger.rb'), "class UnrelatedLedger; end\n")
+      controller = { 'dependencies' => [{ 'target' => 'RowComponent', 'via' => 'render' }] }
+      allow(extractor).to receive(:published_units_of).and_call_original
+      allow(extractor).to receive(:published_units_of).with(:controller).and_return([controller])
+      changes = Woods::ChangeSet.new(paths: ['app/services/unrelated_ledger.rb'], root: @root)
 
       expect(extractor.send(:hybrid_discovery_keys, changes, [])).not_to include(:controllers)
     end

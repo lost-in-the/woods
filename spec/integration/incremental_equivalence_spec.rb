@@ -3379,6 +3379,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/rt_base.rb
         app/components/rt_ancestry/page_component.rb
         app/services/rt_ledger.rb
+        app/components/service_shadow_card.rb
+        app/components/service_shadow_scope/page_component.rb
+        app/controllers/service_shadow_scope/things_controller.rb
+        app/services/service_shadow_scope/service_shadow_card.rb
       ]
     end
 
@@ -3610,6 +3614,45 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     describe 'an edit that touches a constant a render resolves (#728)' do
+      it 'retargets resolved controller and component renders when a service-file constant shadows their target' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/service_shadow_card.rb', <<~RUBY),
+                                   class ServiceShadowCard < ApplicationComponent
+                                     def call = 'root card'
+                                   end
+                                 RUBY
+                                  write_and_load('app/components/service_shadow_scope/page_component.rb', <<~RUBY),
+                                    module ServiceShadowScope
+                                      class PageComponent < ApplicationComponent
+                                        def call = render(ServiceShadowCard.new)
+                                      end
+                                    end
+                                  RUBY
+                                  write_and_load('app/controllers/service_shadow_scope/things_controller.rb', <<~RUBY)]
+                                    module ServiceShadowScope
+                                      class ThingsController < ApplicationController
+                                        def show = render(ServiceShadowCard.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/services/service_shadow_scope/service_shadow_card.rb', <<~RUBY)
+                                   module ServiceShadowScope
+                                     class ServiceShadowCard < ApplicationComponent
+                                       def call = 'scoped card'
+                                     end
+                                   end
+                                 RUBY
+                               end
+                             ])
+
+        %w[ServiceShadowScope::ThingsController ServiceShadowScope::PageComponent].each do |identifier|
+          expect(render_edges(index, identifier)).to eq([%w[ServiceShadowScope::ServiceShadowCard], []])
+        end
+      end
+
       it 'retargets a component when a namespaced class now shadows the one its render reached' do
         index = run_sequence([
                                lambda do
