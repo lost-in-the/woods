@@ -232,6 +232,33 @@ SQLite 3.53.2, PostgreSQL 16.15, and MySQL 26.7.0.
 Accepted crash/eviction limits are documented in the
 [configuration reference](docs/CONFIGURATION_REFERENCE.md#solid-cache-session-retention-and-compatibility).
 
+## Before you push
+
+`script/ci-local` runs the GitHub-free CI gates locally, so CI confirms instead of discovering. It stops at the first failure and prints per-gate durations.
+
+```bash
+script/ci-local                 # lint, unit with coverage, booted Rails rows
+script/ci-local --skip-booted   # quick run
+script/ci-local --only booted   # after an extraction change
+script/ci-local --full          # booted rows at 60 operations, seeds 1,2,3
+script/ci-local --only booted --match incremental_equivalence   # one booted step
+```
+
+- **lint:** surface inventory and RuboCop on Ruby 3.3.
+- **unit:** the retrieval-quality gate, then `script/parallel-rspec` with coverage on Ruby 3.3.
+- **booted:** the `rails-matrix` steps for Ruby 4.0 / Rails 8.1 and Ruby 3.0 / Rails 6.0, with the same step grouping as `ci.yml`.
+- **not covered:** the Rails 7.2 fixture bundles, the other matrix rows, live backends and the MCP transport job.
+
+One-time setup (the host base Gemfile has no Rails, so the booted rows need their own gemfiles and Rubies):
+
+```bash
+mise install ruby@3.3 ruby@4.0
+MISE_RUBY_COMPILE=1 RUBY_CFLAGS="-O3 -std=gnu17" mise install ruby@3.0   # no precompiled 3.0; -std=gnu17 is for GCC 15
+script/ci-local --setup
+```
+
+Bundles install under `${WOODS_CI_LOCAL_BUNDLE:-~/.cache/woods-ci-local/bundle}`. Rubies are chosen per command with `mise exec`, so global mise config is untouched.
+
 ## Keep public surfaces synchronized
 
 A pull request is incomplete when behavior and user guidance disagree.
