@@ -399,6 +399,19 @@ counts facts carried over from an earlier extraction. Fileless and
 dependency-owned units are excluded from the eligible count. A full extraction
 with working Git repairs a degraded index.
 
+Multi-source libraries count once when at least one contributor has Git facts.
+Incremental publication fills missing graph coverage counts from retained unit
+metadata, including indexes written before the summary existed. Those facts
+remain `retained`; reading their metadata does not refresh their history.
+An unavailable history read also preserves facts on unchanged retained
+libraries. Re-extracted libraries lose their old facts when Git cannot refresh
+them, so retained facts cannot mask a source change.
+
+`head_sha` names the commit pinned before this run's history read. The commit
+table and manifest `git_sha` use the same captured revision. A commit made during
+extraction is reflected by the next run; advancing HEAD does not relabel facts
+already read in this run. See [Git enrichment history](CONFIGURATION_REFERENCE.md#git-enrichment-history).
+
 ### Git directory mounts for linked worktrees
 
 `WOODS_GIT_DIR` is passed directly to Git's `--git-dir`. It selects that

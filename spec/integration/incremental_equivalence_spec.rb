@@ -3116,6 +3116,146 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     after { FileUtils.rm_rf([app_path('.git'), app_path('.git.held')]) }
 
+    it 'counts retained contributor facts when upgrading a graph written before Git summaries' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      coverage = summary(index_dir).fetch('coverage')
+
+      # Older writers kept contributor Git facts in the unit, but neither
+      # git_sources on the graph nor git_enrichment on the manifest.
+      graph_path = File.join(payload_dir(index_dir), 'dependency_graph.json')
+      graph = read_json(index_dir, 'dependency_graph.json')
+      graph.fetch('nodes').each_value { |node| node.delete('git_sources') }
+      File.write(graph_path, JSON.generate(graph))
+      manifest = read_json(index_dir, 'manifest.json').except('git_enrichment')
+      File.write(File.join(payload_dir(index_dir), 'manifest.json'), JSON.generate(manifest))
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect(touched).not_to include('SharedLibrary')
+      expect(summary(index_dir)).to include('state' => 'available')
+      expect(summary(index_dir).fetch('coverage')).to eq(coverage)
+      expect(summary(index_dir).dig('capture', 'retained')).to be_positive
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(2)
+      expect(differences(index_dir, full_extraction)).to be_empty
+    end
+
+    it 'backfills an explicit zero for retained contributors without history' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      make_git_unreachable
+      index_dir = full_extraction
+      graph = read_json(index_dir, 'dependency_graph.json')
+      graph.fetch('nodes').fetch('SharedLibrary').delete('git_sources')
+      File.write(File.join(payload_dir(index_dir), 'dependency_graph.json'), JSON.generate(graph))
+      restore_git
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      extractor = Woods::Extractor.new(output_dir: index_dir)
+      extractor.extract_changed([path])
+
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+      expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'units_missing_facts')
+      expect(summary(index_dir).dig('capture', 'retained')).to eq(0)
+      write_file(path, "#{service_source('LedgerService')}# edited again\n")
+      next_extractor = Woods::Extractor.new(output_dir: index_dir)
+      expect(next_extractor).not_to receive(:read_published_unit).with('SharedLibrary', :lib)
+      expect(next_extractor.extract_changed([path])).to include('LedgerService')
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+    end
+
+    it 'keeps retained contributor facts when Git fails, but drops them when the library source changes' do
+      path = write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      coverage = summary(index_dir).fetch('coverage')
+      make_git_unreachable
+
+      Woods::Extractor.new(output_dir: index_dir).refresh(:libs)
+
+      expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'head_unresolvable')
+      expect(summary(index_dir).fetch('coverage')).to eq(coverage)
+      expect(summary(index_dir).fetch('capture')).to eq('refreshed' => 0, 'retained' => coverage.fetch('with_facts'))
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(2)
+
+      write_file(path, "module SharedLibrary\n  ONE = :changed\nend\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+      expect(summary(index_dir).dig('coverage', 'history_unavailable')).to be_positive
+      expect(summary(index_dir).dig('capture', 'refreshed')).to eq(0)
+    end
+
+    it 'keeps the captured branch with its SHA when a checkout happens during extraction' do
+      index_dir = full_extraction
+      manifest = read_json(index_dir, 'manifest.json')
+      # A fully variadic wrapper preserves keyword forwarding on Ruby 3.0/3.1.
+      allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |*args, **kwargs|
+        method = args.shift
+        result = method.call(*args, **kwargs)
+        git_in_app('checkout', '-b', 'after-capture')
+        git_in_app('commit', '--allow-empty', '-m', 'new branch commit')
+        result
+      end
+
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      expect(read_json(index_dir, 'manifest.json').slice('git_sha', 'git_branch'))
+        .to eq(manifest.slice('git_sha', 'git_branch'))
+    end
+
+    %i[full incremental].each do |mode|
+      %i[before after].each do |timing|
+        it "pins #{mode} Git facts and provenance when HEAD moves #{timing} the history walk" do
+          index_dir = full_extraction
+          original_head = summary(index_dir).fetch('head_sha')
+          extractor = Woods::Extractor.new(output_dir: index_dir)
+          path = 'app/services/ledger_service.rb'
+          write_file(path, "#{service_source('LedgerService')}# edited\n") if mode == :incremental
+          moved = false
+          advance_head = lambda do
+            source = File.read(app_path(path))
+            write_file(path, "#{source}# intermediate commit\n")
+            git_in_app('commit', '-am', 'change during extraction')
+            write_file(path, source)
+            git_in_app('commit', '-am', 'restore identical source bytes')
+          end
+          allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |*args, **kwargs|
+            method = args.shift
+            unless moved
+              moved = true
+              advance_head.call if timing == :before
+              result = method.call(*args, **kwargs)
+              advance_head.call if timing == :after
+              next result
+            end
+            method.call(*args, **kwargs)
+          end
+
+          mode == :full ? extractor.extract_all : extractor.extract_changed([path])
+
+          expect(moved).to be(true)
+          expect(summary(index_dir)).to include('state' => 'available', 'head_sha' => original_head)
+          expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git', 'commit_count')).to eq(1)
+          expect(read_json(index_dir, 'git_commits.json').fetch('head')).to eq(original_head)
+          expect(read_json(index_dir, 'manifest.json').fetch('git_sha')).to eq(original_head)
+
+          # A second publication on this same instance must resolve the new
+          # HEAD rather than reusing the previous run's captured revision.
+          extractor.extract_all
+          expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git', 'commit_count')).to eq(3)
+          expect(summary(index_dir).fetch('head_sha')).not_to eq(original_head)
+          expect(differences(index_dir, full_extraction)).to be_empty
+        end
+      end
+    end
+
     it 'publishes the same account from an incremental run as from a full extraction' do
       index_dir = full_extraction
       expect(summary(index_dir)).to include('state' => 'available', 'reason' => nil)
@@ -3638,6 +3778,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/service_shadow_scope/page_component.rb
         app/controllers/service_shadow_scope/things_controller.rb
         app/services/service_shadow_scope/service_shadow_card.rb
+        app/components/flow_shadow_card.rb
+        app/controllers/flow_shadow/things_controller.rb
+        app/services/flow_shadow/flow_shadow_card.rb
+        app/components/render_alias_original_card.rb
+        app/components/render_alias_alternate_card.rb
+        app/controllers/render_alias_scope/things_controller.rb
+        lib/render_alias_scope.rb
       ]
     end
 
@@ -3869,6 +4016,94 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     describe 'an edit that touches a constant a render resolves (#728)' do
+      describe 'with flow precomputation enabled' do
+        around do |example|
+          previous = Woods.configuration.precompute_flows
+          Woods.configuration.precompute_flows = true
+          example.run
+        ensure
+          Woods.configuration.precompute_flows = previous
+        end
+
+        it 'keeps flows equivalent when a service-file constant shadows a controller render target' do
+          write_and_load('app/components/flow_shadow_card.rb', <<~RUBY)
+            class FlowShadowCard < ApplicationComponent
+              def call = 'root card'
+            end
+          RUBY
+          write_and_load('app/controllers/flow_shadow/things_controller.rb', <<~RUBY)
+            module FlowShadow
+              class ThingsController < ApplicationController
+                def show = render(FlowShadowCard.new)
+              end
+            end
+          RUBY
+          index = full_extraction
+          expect(render_edges(index, 'FlowShadow::ThingsController')).to eq([%w[FlowShadowCard], []])
+          flows = flow_snapshot(index)
+          flow_file = File.basename(flows.fetch('flow_index.json').fetch('FlowShadow::ThingsController#show'))
+          original_flow = flows.fetch(flow_file)
+          expect(original_flow.fetch('steps').flat_map { |step| step.fetch('operations') })
+            .to include(hash_including('type' => 'response', 'render_method' => 'render'))
+
+          path = write_and_load('app/services/flow_shadow/flow_shadow_card.rb', <<~RUBY)
+            module FlowShadow
+              class FlowShadowCard < ApplicationComponent
+                def call = 'scoped card'
+              end
+            end
+          RUBY
+          Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+          edges = read_json(index, 'dependency_graph.json').fetch('edges').fetch('FlowShadow::ThingsController')
+          expect(edges.select { |edge| edge['via'] == 'render' }.map { |edge| edge.fetch('target') })
+            .to eq(%w[FlowShadow::FlowShadowCard])
+          expect(render_edges(index, 'FlowShadow::ThingsController')).to eq([%w[FlowShadow::FlowShadowCard], []])
+          # A response operation records the render method and status, not
+          # the component target, so retargeting leaves this flow unchanged.
+          expect(flow_snapshot(index).fetch(flow_file)).to eq(original_flow)
+          expect(differences(index, full_extraction)).to be_empty
+        end
+      end
+
+      it 'retargets a library render alias whose spelling differs from its canonical component name' do
+        write_and_load('app/components/render_alias_original_card.rb', <<~RUBY)
+          class RenderAliasOriginalCard < ApplicationComponent
+            def call = 'original'
+          end
+        RUBY
+        write_and_load('app/components/render_alias_alternate_card.rb', <<~RUBY)
+          class RenderAliasAlternateCard < ApplicationComponent
+            def call = 'alternate'
+          end
+        RUBY
+        path = write_and_load('lib/render_alias_scope.rb', <<~RUBY)
+          module RenderAliasScope
+            Badge = ::RenderAliasOriginalCard
+          end
+        RUBY
+        write_and_load('app/controllers/render_alias_scope/things_controller.rb', <<~RUBY)
+          module RenderAliasScope
+            class ThingsController < ApplicationController
+              def show = render(Badge.new)
+            end
+          end
+        RUBY
+        index = full_extraction
+        expect(render_edges(index, 'RenderAliasScope::ThingsController')).to eq([%w[RenderAliasOriginalCard], []])
+
+        RenderAliasScope.send(:remove_const, :Badge)
+        write_and_load(path, <<~RUBY)
+          module RenderAliasScope
+            Badge = ::RenderAliasAlternateCard
+          end
+        RUBY
+        Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+        expect(render_edges(index, 'RenderAliasScope::ThingsController')).to eq([%w[RenderAliasAlternateCard], []])
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
       it 'retargets resolved controller and component renders when a service-file constant shadows their target' do
         index = run_sequence([
                                lambda do
@@ -5202,6 +5437,25 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       example.run
     ensure
       Woods.configuration.precompute_flows = false
+    end
+
+    it 'keeps alternate-parser call trees equivalent as nested enqueues change' do
+      allow_any_instance_of(Woods::Ast::Parser).to receive(:prism_available?).and_return(false)
+      path = 'app/controllers/things_controller.rb'
+      run_sequence(%w[perform_later perform_now].map do |method|
+        lambda {
+          write_file(path, <<~RUBY)
+            class ThingsController < ApplicationController
+              def index
+                'k'.then(PublishPostJob.#{method}(1))
+                Post&.find(1)
+              end
+            end
+          RUBY
+          load app_path(path)
+          path
+        }
+      end)
     end
 
     it 'keeps flow artifacts equivalent to a full extraction as controllers change' do

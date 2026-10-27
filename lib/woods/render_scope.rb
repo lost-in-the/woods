@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
+require 'pathname'
+
 require_relative 'extractors/constant_footprint'
+require_relative 'extractors/render_call_scan'
 require_relative 'source_contributors'
 
 module Woods
@@ -24,8 +27,8 @@ module Woods
   # recorded it. A part of a file no unit holds is read as new, which can only
   # make an edit look larger.
   class RenderScope
-    # Paths outside an `app/` directory (lib, config, vendored code) define
-    # constants the published units do not hold, so an edit there is unreadable.
+    # Component-family refresh keeps its conservative fallback outside app/.
+    # Controllers can narrow library edits with a retained source baseline.
     APP_PATH = %r{(?:\A|/)app/}
     EMPTY = Extractors::ConstantFootprint::Result.new(definitions: {}, opaque: false)
 
@@ -44,46 +47,59 @@ module Woods
 
     # @return [Boolean] whether Phlex and ViewComponent edges can have moved
     def components?
-      reaches?(%i[component view_component])
-    end
-
-    # @return [Boolean] whether controller render edges can have moved
-    def controllers?
-      reaches?(%i[controller])
-    end
-
-    private
-
-    def reaches?(types)
-      touched = touched_names
+      touched = touched_constants(app_only: true)&.to_set { |name| name.split('::').last }
       return true if touched.nil?
-      return false if touched.empty?
 
-      !touched.disjoint?(resolved_names(types))
+      !touched.empty? && !touched.disjoint?(resolved_names(%i[component view_component]))
     rescue StandardError, ScriptError
       true
     end
 
-    # @return [Set<String>, nil] nil when an edit cannot be read
-    def touched_names
-      return @touched_names if defined?(@touched_names)
+    # Select published controllers individually. Ancestors retain qualified
+    # names: Importers::Base cannot change ActionController::Base's lookup.
+    # Unreadable source or unit payloads retain the conservative fallback.
+    # @param ancestors_of [#call] (controller identifier) => qualified ancestor names
+    # @return [Array<String>] controllers whose render lookup may have changed
+    def controller_ids(ancestors_of:)
+      ids = @graph.units_of_type(:controller)
+      touched = touched_constants(app_only: false)
+      return ids if touched.nil?
+      return [] if touched.empty?
 
-      @touched_names = compute_touched_names
+      leaves = touched.to_set { |name| name.split('::').last }
+      ids.select { |id| controller_reached?(id, touched, leaves, ancestors_of) }
+    rescue StandardError, ScriptError
+      ids
     end
 
-    def compute_touched_names
-      paths = @change_set.absolute_paths.select { |path| path.end_with?('.rb') }
-      paths.each_with_object(Set.new) do |path, touched|
-        return nil unless @change_set.relativize(path).match?(APP_PATH)
+    private
 
-        names = Extractors::ConstantFootprint.touched_names(footprint_before(path), footprint_after(path),
-                                                            existing: method(:defined_before?))
+    def touched_constants(app_only:)
+      @change_set.absolute_paths.select { |path| path.end_with?('.rb') }.each_with_object(Set.new) do |path, touched|
+        return nil unless readable_path?(path, app_only)
+
+        names = Extractors::ConstantFootprint.touched_constants(*footprints(path), existing: method(:defined_before?))
         return nil if names.nil?
 
         touched.merge(names)
       end
-    rescue StandardError, ScriptError
-      nil
+    end
+
+    # A missing library baseline could hide a removed constant.
+    def readable_path?(path, app_only)
+      relative = @change_set.relativize(path)
+      return relative.match?(APP_PATH) if app_only
+
+      !Pathname.new(relative).absolute? && (relative.match?(APP_PATH) || sources_before(path).any?)
+    end
+
+    def controller_reached?(id, touched, leaves, ancestors_of)
+      unit = @read_unit.call(id, :controller)
+      return true unless unit
+      return true unless leaves.disjoint?(name_segments(unit_names(unit)))
+      return true if Extractors::RenderCallScan.may_render_constants?(unit['source_code'], names: leaves)
+
+      ancestors_of.call(id).any? { |name| touched.include?(name) || touched.include?(name.split('::').last) }
     end
 
     # A name the units of the graph before the edit are nested under (or are).
@@ -95,19 +111,21 @@ module Woods
       @namespaces.include?(name)
     end
 
-    def footprint_after(path)
-      return EMPTY unless File.file?(path)
-
-      Extractors::ConstantFootprint.call(File.binread(path).force_encoding(Encoding::UTF_8))
+    def footprints(path)
+      @footprints ||= {}
+      @footprints[path] ||= [
+        sources_before(path).map { |source| Extractors::ConstantFootprint.call(source) }
+                            .reduce(EMPTY) { |sum, print| merge(sum, print) },
+        File.file?(path) ? Extractors::ConstantFootprint.call(File.binread(path).force_encoding('UTF-8')) : EMPTY
+      ]
     end
 
-    def footprint_before(path)
-      relative = @change_set.relativize(path)
-      sources = @graph.units_for_path(path).filter_map do |identifier, type|
+    def sources_before(path)
+      @sources_before ||= {}
+      @sources_before[path] ||= @graph.units_for_path(path).filter_map do |identifier, type|
         unit = @read_unit.call(identifier, type)
-        unit && source_of(unit, relative)
+        unit && source_of(unit, @change_set.relativize(path))
       end
-      sources.map { |source| Extractors::ConstantFootprint.call(source) }.reduce(EMPTY) { |sum, print| merge(sum, print) }
     end
 
     # The part of a unit's published source that came from one file.
@@ -131,8 +149,11 @@ module Woods
     # Every name segment the family's units resolved or failed to resolve,
     # and every ancestor of its classes.
     def resolved_names(types)
-      names = @units_of.call(types).flat_map { |unit| unit_names(unit) }
-      names.concat(Array(@ancestor_names.call(types)))
+      units = @units_of.call(types)
+      name_segments(units.flat_map { |unit| unit_names(unit) } + Array(@ancestor_names.call(types)))
+    end
+
+    def name_segments(names)
       names.flat_map { |name| name.to_s.split('::') }.reject(&:empty?).to_set
     end
 

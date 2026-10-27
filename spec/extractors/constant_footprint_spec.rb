@@ -18,6 +18,14 @@ RSpec.describe Woods::Extractors::ConstantFootprint do
     expect(touched('class A; end', 'class B; end')).to eq(Set['A', 'B'])
   end
 
+  it 'retains qualified touched constants for ancestry matching without changing leaf names' do
+    before = described_class.call('class Importers::Base; end')
+    after = described_class.call('class Importers::Base; include Fancy; end')
+
+    expect(described_class.touched_constants(before, after)).to eq(Set['Importers::Base'])
+    expect(described_class.touched_names(before, after)).to eq(Set['Base'])
+  end
+
   it 'does not count a namespace that was already defined being plainly reopened' do
     before = described_class.call('')
     after = described_class.call("module Billing\n  class Card; end\nend")
