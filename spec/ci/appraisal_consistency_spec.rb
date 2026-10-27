@@ -32,8 +32,10 @@ RSpec.describe 'Rails compatibility matrix' do
     names = files.map { |file| File.basename(file, '.gemfile').tr('_', '-') }
     expect(names.sort).to eq(appraisals.keys.sort)
 
-    workflow = YAML.load_file(File.join(root, '.github/workflows/ci.yml'))
-    matrix = workflow.fetch('jobs').fetch('rails-matrix').fetch('strategy').fetch('matrix').fetch('include')
+    workflow = YAML.safe_load_file(File.join(root, '.github/workflows/ci.yml'), aliases: true)
+    matrix = %w[rails-matrix rails-required].flat_map do |id|
+      workflow.fetch('jobs').fetch(id).fetch('strategy').fetch('matrix').fetch('include')
+    end
     expect(matrix.map { |row| "rails-#{row.fetch('rails')}" }.uniq.sort).to eq(appraisals.keys.sort)
 
     files.each do |file|

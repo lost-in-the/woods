@@ -17,6 +17,27 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
   end
 
   describe '#extract' do
+    [true, false].each do |prism|
+      context "with #{prism ? 'Prism' : 'the alternate parser adapter'}" do
+        before { allow(parser).to receive(:prism_available?).and_return(prism) }
+
+        it 'extracts nested async arguments on literal receivers' do
+          source = <<~RUBY
+            def call
+              'k'.then(ExportJob.perform_later(1))
+              1.then(ExportJob.perform_later(2))
+            end
+          RUBY
+
+          operations = extract_method_ops(source, 'call')
+
+          expect(operations.map { |op| [op[:type], op[:target], op[:method], op[:args_hint]] }).to eq(
+            [[:async, 'ExportJob', 'perform_later', ['1']], [:async, 'ExportJob', 'perform_later', ['2']]]
+          )
+        end
+      end
+    end
+
     it 'extracts method calls in source order' do
       source = <<~RUBY
         def create
