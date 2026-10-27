@@ -36,7 +36,7 @@ jobs:
     name: Unit specs (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - { ruby-version: '3.0', puma: '~> 6.0' }
@@ -128,7 +128,7 @@ jobs:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
+      fail-fast: true
       matrix:
         include:
           - { ruby: '3.0', rails: '6.0', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
