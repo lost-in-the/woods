@@ -156,6 +156,28 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
       )
       expect(calls.find { |call| call[:method_name] == 'execute' }[:receiver]).to eq('Client.build')
     end
+
+    it 'records safe navigation calls and their receiver chains exactly once' do
+      calls = extractor.extract(parser.parse('user&.update(Foo.bar)&.finish'))
+
+      expect(calls.map { |call| call[:method_name] }).to contain_exactly('user', 'update', 'bar', 'finish')
+      expect(calls.find { |call| call[:method_name] == 'finish' }[:receiver]).to eq('user.update')
+    end
+
+    it 'normalizes numbered blocks as block-passing calls' do
+      calls = extractor.extract(parser.parse('items.each { process(_1) }'))
+
+      expect(calls.map { |call| call[:method_name] }).to contain_exactly('items', 'each', 'process')
+      expect(calls.find { |call| call[:method_name] == 'each' }).to include(arguments: [], block: true)
+    end
+
+    it 'keeps block-pass arguments separate from ordinary arguments' do
+      calls = extractor.extract(parser.parse('items.each(Options.prepare, &:process)'))
+
+      expect(calls.map { |call| call[:method_name] }).to contain_exactly('items', 'each', 'prepare')
+      expect(calls.find { |call| call[:method_name] == 'each' })
+        .to include(arguments: ['Options.prepare'], block: false)
+    end
   end
 
   describe '#extract' do
@@ -169,6 +191,13 @@ RSpec.describe Woods::Ast::CallSiteExtractor do
       before { allow(parser).to receive(:prism_available?).and_return(false) }
 
       include_examples 'call extraction'
+
+      it 'retains calls inside block-pass expressions' do
+        calls = extractor.extract(parser.parse('items.each(&Factory.build)'))
+
+        expect(calls.map { |call| call[:method_name] }).to contain_exactly('items', 'each', 'build')
+        expect(calls.find { |call| call[:method_name] == 'each' }[:arguments]).to eq([])
+      end
     end
   end
 end

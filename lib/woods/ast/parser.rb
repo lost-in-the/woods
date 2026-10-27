@@ -586,12 +586,16 @@ module Woods
             end_byte: original_byte_offset(source, parser_node.loc.expression.last_line,
                                            parser_node.loc.expression.last_column)
           )
-        when :send
+        when :send, :csend
           receiver_text = parser_node.children[0] ? extract_parser_receiver_text(parser_node.children[0], source) : nil
           method_name = parser_node.children[1].to_s
-          args = parser_node.children[2..].compact.map { |a| extract_parser_source_text(a, source) }
-          children = [parser_node.children[0], *parser_node.children[2..]].filter_map do |child|
-            converted = convert_parser_node(child, source)
+          arguments = parser_node.children[2..].compact
+          args = arguments.reject { |child| child.type == :block_pass }.map do |argument|
+            extract_parser_source_text(argument, source)
+          end
+          receiver_node = convert_parser_node(parser_node.children[0], source)
+          children = [receiver_node].compact + arguments.filter_map do |argument|
+            converted = convert_parser_node(argument, source)
             converted if converted.is_a?(Node)
           end
           Node.new(
@@ -604,7 +608,7 @@ module Woods
             method_name: method_name,
             arguments: args
           )
-        when :block
+        when :block, :numblock, :itblock
           send_child = convert_parser_node(parser_node.children[0], source)
           body = parser_node.children[2] ? convert_parser_node(parser_node.children[2], source) : nil
           Node.new(
@@ -694,7 +698,7 @@ module Woods
           'self'
         when :const
           extract_parser_const_name(node)
-        when :send
+        when :send, :csend
           recv = node.children[0] ? extract_parser_receiver_text(node.children[0], source) : nil
           [recv, node.children[1].to_s].compact.join('.')
         when :lvar, :ivar

@@ -5113,6 +5113,25 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Woods.configuration.precompute_flows = false
     end
 
+    it 'keeps alternate-parser call trees equivalent as nested enqueues change' do
+      allow_any_instance_of(Woods::Ast::Parser).to receive(:prism_available?).and_return(false)
+      path = 'app/controllers/things_controller.rb'
+      run_sequence(%w[perform_later perform_now].map do |method|
+        lambda {
+          write_file(path, <<~RUBY)
+            class ThingsController < ApplicationController
+              def index
+                'k'.then(PublishPostJob.#{method}(1))
+                Post&.find(1)
+              end
+            end
+          RUBY
+          load app_path(path)
+          path
+        }
+      end)
+    end
+
     it 'keeps flow artifacts equivalent to a full extraction as controllers change' do
       run_sequence([
                      lambda {
