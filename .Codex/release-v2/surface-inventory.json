@@ -461,6 +461,15 @@
       ]
     },
     {
+      "name": "woods:seed",
+      "arguments": [
+        "from"
+      ],
+      "prerequisites": [
+        "environment"
+      ]
+    },
+    {
       "name": "woods:self_analyze",
       "arguments": [],
       "prerequisites": []
@@ -1156,7 +1165,7 @@
     "index_mcp_tools": 31,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 42,
+    "rake_tasks": 43,
     "tasks_methods": 7,
     "unit_types": 47
   },

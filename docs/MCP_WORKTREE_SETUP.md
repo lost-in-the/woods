@@ -69,6 +69,26 @@ How routing works:
 
 **For subagents:** give each subagent the absolute path of the worktree it edits and tell it to pass that as `root` on every Woods call. Run `woods:extract` (or `woods:incremental` under a watch daemon) in that worktree first, then check `woods_status` for its entry. A subagent that omits `root` is answered from the parent's index, with no warning.
 
+## Seed a new worktree's index
+
+A full extraction boots Rails and runs every extractor, which is the main cost of giving a short-lived worktree its own index. `woods:seed` starts the new index from a copy of another checkout's published index and then runs an incremental update for what differs:
+
+```bash
+cd /path/to/new/worktree
+bundle exec rake "woods:seed[/path/to/main/checkout/tmp/woods]"
+```
+
+What it does:
+
+1. **Verifies the seed.** The seed must be written by this Woods version and be incremental-ready. It must record a commit that exists in the new worktree's repository. Its own checkout must still be on that commit, with no uncommitted changes, and still match the source it indexed. It must carry its source identity key.
+2. **Builds beside the target.** The copy and the incremental run happen in `<output>.seed-<pid>`. The only thing that makes the index visible is the final rename of `generation.json` into the output directory, so a reader never sees a half-seeded index. A crash leaves no published generation.
+3. **Rewrites what names the checkout.** `git_branch` and `git_sha` in the manifest, and the recorded source root in `source_inputs.json`, now describe the new worktree. The generation number restarts at 1.
+4. **Updates incrementally.** The change set is `git diff <seed commit>` against the working tree (committed and uncommitted tracked changes) plus untracked files. Ignored files are not in it.
+
+If any check fails, or a changed path needs a fresh Rails boot (`Gemfile.lock`, an initializer, `db/schema.rb`), or the extraction configuration differs, or the incremental run raises, the task runs a full extraction instead and prints the reason. It does nothing when the output directory already has a published index, and it stands down while a watch daemon maintains that directory.
+
+Embedding dumps and other operational state are not copied; run `woods:embed` in the new worktree if you need them. After seeding, start the [watch daemon](WATCH_DAEMON.md#multiple-worktrees) there as usual, or pass [`root`](#one-server-several-worktrees-root) to a shared server.
+
 ## Plugin-provided servers
 
 An enabled plugin can supply MCP server definitions, but installing a plugin does not establish that a Woods server is connected to the intended checkout. Availability depends on the plugin's configuration, enabled scope, and the client's tool restrictions. Check `/mcp` rather than assuming a fixed path under `~/.claude/plugins/` or global availability.

@@ -1285,6 +1285,221 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # A new worktree's index starts as a copy of another checkout's published
+  # generation and is brought up to date incrementally (#854). The booted
+  # process has one Rails.root, so the "other checkout" is a clone of the app at
+  # the seed commit whose index is the baseline's with its recorded root pointed
+  # at that clone.
+  describe 'seeding a worktree index (#854)' do
+    require 'woods/worktree_seed'
+
+    def seed_git(dir, *args)
+      env = { 'GIT_AUTHOR_NAME' => 'Seed Spec', 'GIT_AUTHOR_EMAIL' => 'seed@example.invalid',
+              'GIT_COMMITTER_NAME' => 'Seed Spec', 'GIT_COMMITTER_EMAIL' => 'seed@example.invalid' }
+      out, err, status = Open3.capture3(env, *Woods::GitCommand.argv(dir, '-c', 'commit.gpgsign=false', *args))
+      raise err unless status.success?
+
+      out.strip
+    end
+
+    def seed_json(index, name)
+      JSON.parse(File.read(Woods::Generation.new(output_dir: index).payload_dir.join(name)))
+    end
+
+    def change_seed_json(index, name, changes)
+      path = Woods::Generation.new(output_dir: index).payload_dir.join(name)
+      File.write(path, JSON.generate(JSON.parse(File.read(path)).merge(changes)))
+    end
+
+    def scratch_dir(label)
+      Dir.mktmpdir("woods_seed_#{label}").tap { |dir| (@scratch_dirs ||= []) << dir }
+    end
+
+    # The seed: a full extraction at the app's first commit, recorded as made in
+    # a clone of the app (the checkout that owns the seed).
+    def seed_baseline
+      seed_git(@app_root, 'init', '--quiet', '-b', 'main')
+      QuietGit.configure(@app_root)
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Seed commit')
+      source_checkout = scratch_dir('checkout')
+      FileUtils.rm_rf(source_checkout)
+      seed_git(@app_root, 'clone', '--quiet', '--no-hardlinks', @app_root, source_checkout)
+      seed = full_extraction
+      change_seed_json(seed, 'source_inputs.json', 'root' => File.realpath(source_checkout))
+      seed
+    end
+
+    def seed_into(seed, extractor: nil)
+      target = File.join(scratch_dir('target'), 'woods')
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root, extractor: extractor).call
+      [result, target]
+    end
+
+    def move_worktree_on
+      write_file('app/services/committed_service.rb', service_source('CommittedService', dependency: 'Post'))
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Add a service')
+      write_file('app/services/uncommitted_service.rb', service_source('UncommittedService', dependency: 'Comment'))
+      File.write(app_path('app/services/svc_0_service.rb'), "#{service_source('Svc0Service')}\n# edited\n")
+      seed_git(@app_root, 'add', 'app/services/svc_0_service.rb')
+      delete_file('app/jobs/doomed_job.rb')
+      write_file('docs/untracked_note.md', "# Note\n\nSee `CommittedService`.\n")
+    end
+
+    after { FileUtils.rm_rf(app_path('.git')) }
+
+    it 'equals a full extraction of the worktree after committed, staged, deleted and untracked changes' do
+      write_file('app/services/svc_0_service.rb', service_source('Svc0Service'))
+      write_file('app/jobs/doomed_job.rb', "class DoomedJob\n  def perform; end\nend\n")
+      seed = seed_baseline
+      move_worktree_on
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(result.changed).to include('app/services/committed_service.rb', 'app/services/uncommitted_service.rb',
+                                        'app/jobs/doomed_job.rb', 'docs/untracked_note.md')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'describes the new worktree, not the checkout the seed came from' do
+      seed = seed_baseline
+      source_sha = seed_json(seed, 'manifest.json')['git_sha']
+      write_file('app/services/committed_service.rb', service_source('CommittedService'))
+      seed_git(@app_root, 'checkout', '--quiet', '-b', 'agent-work')
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Agent change')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      payload = Woods::Generation.new(output_dir: target).payload_dir
+      manifest = JSON.parse(File.read(payload.join('manifest.json')))
+      expect(manifest['git_branch']).to eq('agent-work')
+      expect(manifest['git_sha']).to eq(seed_git(@app_root, 'rev-parse', 'HEAD'))
+      expect(manifest['git_sha']).not_to eq(source_sha)
+      expect(JSON.parse(File.read(payload.join('source_inputs.json')))['root']).to eq(File.realpath(@app_root))
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'is equivalent to a full extraction when nothing but HEAD moved' do
+      seed = seed_baseline
+      seed_git(@app_root, 'commit', '-q', '--allow-empty', '-m', 'Empty')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'rewrites provenance even when the worktree has nothing to update' do
+      seed = seed_baseline
+      seed_git(@app_root, 'checkout', '--quiet', '-b', 'idle-worktree')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(result.changed).to be_empty
+      payload = Woods::Generation.new(output_dir: target).payload_dir
+      expect(JSON.parse(File.read(payload.join('manifest.json')))['git_branch']).to eq('idle-worktree')
+      expect(JSON.parse(File.read(payload.join('source_inputs.json')))['root']).to eq(File.realpath(@app_root))
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'publishes nothing in the output directory until the incremental run has finished' do
+      seed = seed_baseline
+      move_worktree_on
+      target = File.join(scratch_dir('target'), 'woods')
+      observed = []
+      watching = Class.new(Woods::Extractor) do
+        define_method(:extract_changed) do |paths|
+          observed << [File.exist?(File.join(target, 'generation.json')), Dir.glob("#{target}*")]
+          super(paths)
+        end
+      end
+
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root, extractor: watching).call
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(observed.size).to eq(1)
+      expect(observed.first.first).to be(false)
+      expect(Dir.glob("#{target}.seed-*")).to be_empty
+      expect(Woods::Generation.new(output_dir: target).current.number).to be_positive
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'falls back to a full extraction when the incremental run fails, leaving no partial index' do
+      seed = seed_baseline
+      move_worktree_on
+      failing = Class.new(Woods::Extractor) do
+        define_method(:extract_changed) { |_paths| raise Woods::ExtractionError, 'induced failure' }
+      end
+
+      result, target = seed_into(seed, extractor: failing)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('induced failure')
+      expect(Dir.glob("#{target}.seed-*")).to be_empty
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    {
+      'a seed written by another Woods version' => [/written by Woods 1\.0\.0/, { 'woods_version' => '1.0.0' }],
+      'a seed that records no commit' => [/records no commit/, { 'git_sha' => 'unknown' }]
+    }.each do |label, (reason, manifest_change)|
+      it "falls back to a full extraction for #{label}" do
+        seed = seed_baseline
+        change_seed_json(seed, 'manifest.json', manifest_change)
+        move_worktree_on
+
+        result, target = seed_into(seed)
+
+        expect(result.mode).to eq(:full)
+        expect(result.reason).to match(reason)
+        expect(differences(target, full_extraction)).to be_empty
+      end
+    end
+
+    it 'falls back to a full extraction when the seed checkout has uncommitted changes' do
+      seed = seed_baseline
+      checkout = seed_json(seed, 'source_inputs.json')['root']
+      File.write(File.join(checkout, 'app/services/dirty_service.rb'), service_source('DirtyService'))
+      move_worktree_on
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('uncommitted changes')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'falls back to a full extraction when a changed file needs a fresh Rails boot' do
+      seed = seed_baseline
+      write_file('config/initializers/seed_probe.rb', "# probe\n")
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Add an initializer')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('config/initializers/seed_probe.rb')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'does not seed over an index that is already published' do
+      seed = seed_baseline
+      target = File.join(scratch_dir('target'), 'woods')
+      Woods::Extractor.new(output_dir: target).extract_all
+      before = Woods::Generation.new(output_dir: target).current
+
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root).call
+
+      expect(result.mode).to eq(:skipped)
+      expect(Woods::Generation.new(output_dir: target).current).to eq(before)
+    end
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)
