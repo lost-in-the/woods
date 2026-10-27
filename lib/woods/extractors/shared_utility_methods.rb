@@ -46,7 +46,8 @@ module Woods
       end
 
       # Check whether a path points to application source (under app_root, but
-      # not inside vendor/ or node_modules/ directories).
+      # not inside vendor/ or node_modules/ directories or a gem install
+      # directory, wherever the bundle lives).
       #
       # In Docker environments where Rails.root is `/app`, a naive
       # `start_with?(app_root)` also matches vendor bundle paths like
@@ -63,7 +64,22 @@ module Woods
         return false unless absolute.start_with?(prefix)
 
         relative = absolute.delete_prefix(prefix)
-        relative.split(File::SEPARATOR).none? { |part| %w[vendor node_modules].include?(part) }
+        return false if relative.split(File::SEPARATOR).any? { |part| %w[vendor node_modules].include?(part) }
+
+        gem_install_roots.none? { |root| root.start_with?(prefix) && root != prefix && absolute.start_with?(root) }
+      end
+
+      # Directories gems are installed into, as absolute paths with a trailing
+      # separator. A bundle configured under the application root (`.bundle`,
+      # `tmp/bundle`) puts framework source below the root prefix.
+      #
+      # @return [Array<String>]
+      def gem_install_roots
+        roots = Gem.path.dup
+        roots << Bundler.bundle_path.to_s if defined?(Bundler) && Bundler.respond_to?(:bundle_path)
+        roots.uniq.map { |root| File.expand_path(root).delete_suffix(File::SEPARATOR) + File::SEPARATOR }
+      rescue StandardError
+        []
       end
 
       # Whether a resolved source belongs to this application and is a file.

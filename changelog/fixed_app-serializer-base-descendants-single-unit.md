@@ -1,0 +1,1 @@
+- A class that descends from an application-defined serializer base (a class under `app/serializers` or `app/blueprinters` that has no framework serializer ancestor) is now published as one `serializer` unit. Placed in a path the unclaimed-Ruby sweep covers, it was also published as a `poro` unit. Incremental runs prune the duplicate the same way a full run omits it.

@@ -209,6 +209,113 @@ RSpec.describe Woods::UpdateCheck do
     end
   end
 
+  describe '.status_hash without waiting (background: true)' do
+    after { described_class.shutdown }
+
+    def background(fetcher, **opts)
+      described_class.status_hash(current: '1.5.0', cache_path: cache_path, now: now, fetcher: fetcher,
+                                  background: true, **opts)
+    end
+
+    def gated_fetcher(gate, calls = nil)
+      lambda do |_url|
+        calls&.push(:call)
+        gate.pop
+        '1.6.0'
+      end
+    end
+
+    it 'answers pending at once instead of waiting for the probe' do
+      gate = Queue.new
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+      hash = background(gated_fetcher(gate))
+
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 0.5
+      expect(hash).to eq(current_version: '1.5.0', latest_version: nil, update_available: false,
+                         checked: false, pending: true)
+      gate << :go
+    end
+
+    it 'reports the learned version without a pending marker once the probe has finished' do
+      background(->(_url) { '1.6.0' })
+      described_class.await_refresh
+
+      expect(background(->(_url) { raise 'cached' })).to eq(
+        current_version: '1.5.0', latest_version: '1.6.0', update_available: true, checked: true
+      )
+    end
+
+    it 'starts one probe for concurrent callers' do
+      gate = Queue.new
+      calls = Queue.new
+      fetcher = gated_fetcher(gate, calls)
+
+      results = Array.new(8) { Thread.new { background(fetcher) } }.map(&:value)
+      gate << :go
+      described_class.await_refresh
+
+      expect(results).to all(include(pending: true))
+      expect(calls.size).to eq(1)
+    end
+
+    it 'serves the stale cached answer, flagged pending, while an expired entry refreshes' do
+      described_class.check(current: '1.5.0', cache_path: cache_path, now: now, fetcher: ->(_url) { '1.6.0' })
+      gate = Queue.new
+      later = now + described_class::CACHE_TTL + 1
+
+      stale = background(gated_fetcher(gate), now: later)
+      expect(stale).to include(latest_version: '1.6.0', update_available: true, checked: true, pending: true)
+
+      gate << :go
+      described_class.await_refresh
+      expect(JSON.parse(File.read(cache_path))['checked_at']).to eq(later.to_i)
+    end
+
+    it 'caches a failed probe so later calls neither wait nor re-probe' do
+      calls = Queue.new
+      failing = lambda do |_url|
+        calls.push(:call)
+        raise SocketError, 'offline'
+      end
+
+      background(failing)
+      described_class.await_refresh
+      again = background(failing)
+
+      expect(again).to include(checked: false)
+      expect(again).not_to have_key(:pending)
+      expect(calls.size).to eq(1)
+    end
+
+    it 'never probes when update checks are disabled' do
+      allow(ENV).to receive(:[]).with('WOODS_NO_UPDATE_CHECK').and_return('1')
+
+      hash = background(->(_url) { raise 'the probe must not run' })
+
+      expect(hash).to eq(current_version: '1.5.0', latest_version: nil, update_available: false, checked: false)
+    end
+
+    it 'bounds a probe that hangs and records it as a failed probe' do
+      stub_const('Woods::UpdateCheck::REFRESH_TIMEOUT', 0.05)
+
+      background(->(_url) { sleep })
+      described_class.await_refresh
+
+      expect(JSON.parse(File.read(cache_path))).to include('latest' => nil)
+      expect(background(->(_url) { raise 'cached' })).not_to have_key(:pending)
+    end
+
+    it 'stops the background thread on shutdown without leaking it' do
+      before_count = Thread.list.size
+      background(->(_url) { sleep })
+
+      described_class.shutdown(timeout: 0.05)
+
+      expect(Thread.list.size).to eq(before_count)
+    end
+  end
+
   describe '.tool_not_found_message' do
     it 'names the tool and the installed version and advises updating' do
       described_class.check(current: '1.5.0', cache_path: cache_path, now: now, fetcher: ->(_url) { '1.6.0' })

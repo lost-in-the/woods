@@ -36,6 +36,50 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
   end
 
   describe '#map' do
+    describe 'column default values' do
+      let(:secret_column) do
+        { 'name' => 'api_key', 'type' => 'string', 'null' => true,
+          'default' => "sk_live_#{'a1B2' * 6}" }
+      end
+
+      def default_text(properties)
+        properties['Default Value'][:rich_text].first[:text][:content]
+      end
+
+      it 'never sends the raw default by default' do
+        expect(default_text(mapper.map(integer_column))).to eq('Has default')
+        expect(default_text(mapper.map(secret_column))).to eq('Has default')
+      end
+
+      it 'appends the published digest when the column carries one' do
+        column = integer_column.merge('default_digest' => 'abcdef0123456789')
+        expect(default_text(mapper.map(column))).to eq('Has default (digest abcdef0123456789)')
+      end
+
+      it 'treats a false default as present' do
+        column = { 'name' => 'flag', 'type' => 'boolean', 'null' => false, 'default' => 'false' }
+        expect(default_text(mapper.map(column))).to eq('Has default')
+      end
+
+      context 'with include_defaults: true' do
+        subject(:mapper) { described_class.new(include_defaults: true) }
+
+        it 'sends the value' do
+          expect(default_text(mapper.map(integer_column))).to eq('0')
+        end
+
+        it 'redacts credential-shaped values' do
+          text = default_text(mapper.map(secret_column))
+          expect(text).not_to include('sk_live_')
+          expect(text).to include('[REDACTED]')
+        end
+
+        it 'sends an empty string when there is no default' do
+          expect(default_text(mapper.map(string_column))).to eq('')
+        end
+      end
+    end
+
     context 'with a string column with validations' do
       let(:result) do
         mapper.map(string_column, model_identifier: 'User', validations: validations)
@@ -53,7 +97,7 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
         expect(result['Nullable']).to eq({ checkbox: false })
       end
 
-      it 'sets Default Value when nil' do
+      it 'leaves Default Value empty when the column has no default' do
         expect(result['Default Value'][:rich_text].first[:text][:content]).to eq('')
       end
 
@@ -82,8 +126,8 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
         expect(result['Nullable']).to eq({ checkbox: true })
       end
 
-      it 'sets Default Value' do
-        expect(result['Default Value'][:rich_text].first[:text][:content]).to eq('0')
+      it 'reports that a default exists without sending its value' do
+        expect(result['Default Value'][:rich_text].first[:text][:content]).to eq('Has default')
       end
 
       it 'matches numericality validation' do
@@ -101,8 +145,8 @@ RSpec.describe Woods::Notion::Mappers::ColumnMapper do
         expect(result['Data Type']).to eq({ select: { name: 'boolean' } })
       end
 
-      it 'sets Default Value' do
-        expect(result['Default Value'][:rich_text].first[:text][:content]).to eq('true')
+      it 'reports that a default exists without sending its value' do
+        expect(result['Default Value'][:rich_text].first[:text][:content]).to eq('Has default')
       end
     end
 

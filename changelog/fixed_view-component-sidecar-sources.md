@@ -1,0 +1,1 @@
+- A view component's sidecar template now appears in the dependency graph's `file_map` and in the component's `source_paths`, so blast-radius and change-impact tools see a template edit as a change to the component. The component keeps its Ruby file as its primary path. Editing or deleting the template refreshes the component and leaves it published.

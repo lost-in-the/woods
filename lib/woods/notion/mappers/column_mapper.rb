@@ -17,6 +17,12 @@ module Woods
       class ColumnMapper
         include Shared
 
+        # @param include_defaults [Boolean] Send column default values (credential-scanned).
+        #   Off by default: Notion then receives only that a default exists.
+        def initialize(include_defaults: false)
+          @include_defaults = include_defaults
+        end
+
         # Map a single column to Notion Columns page properties.
         #
         # The page title is qualified as "<table>.<column>" (e.g. "users.id")
@@ -46,7 +52,7 @@ module Woods
             'Column Name' => { title: [{ text: { content: qualified_title(column['name'], table_name) } }] },
             'Data Type' => { select: { name: column['type'] } },
             'Nullable' => { checkbox: column['null'] == true },
-            'Default Value' => rich_text_property(column['default'].to_s),
+            'Default Value' => rich_text_property(default_text(column)),
             'Validation Rules' => rich_text_property(format_validation_rules(column['name'], validations))
           }
 
@@ -57,6 +63,36 @@ module Woods
         end
 
         private
+
+        # @return [String]
+        def default_text(column)
+          return redact_default(column['default']) if @include_defaults
+
+          return '' if column['default'].nil?
+
+          digest = column['default_digest']
+          digest ? "Has default (digest #{digest})" : 'Has default'
+        end
+
+        # Credential-scan an opted-in default value. Fails closed to an empty string.
+        #
+        # @return [String]
+        def redact_default(value)
+          text = value.to_s
+          return text if text.empty?
+
+          redacted, _counts = scanner.scan(text)
+          redacted
+        rescue StandardError
+          ''
+        end
+
+        def scanner
+          @scanner ||= begin
+            require 'woods/console/credential_scanner'
+            Woods::Console::CredentialScanner.new
+          end
+        end
 
         # Build the column page title, qualified by table when known.
         #

@@ -604,7 +604,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'requires a full rebuild of format 6 before either public incremental writer can advance' do
+    it 'requires a full rebuild of format 7 before either public incremental writer can advance' do
       caller_path = write_file('app/models/reference_upgrade_caller.rb', <<~RUBY)
         class ReferenceUpgradeCaller
           def call
@@ -618,9 +618,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       token = generation.current.token
       cache_path = generation.payload_dir.join('source_references.json')
       cache = read_json(index, 'source_references.json')
-      expect(cache.fetch('version')).to eq(7)
-      cache['version'] = 6
-      cache.fetch('files').each_value { |file| file.fetch('analysis').delete('macros') }
+      expect(cache.fetch('version')).to eq(8)
+      cache['version'] = 7
       File.binwrite(cache_path, JSON.generate(cache))
       previous_cache = File.binread(cache_path)
       previous_units = unit_snapshot(index)
@@ -634,7 +633,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
 
       Woods::Extractor.new(output_dir: index).extract_all
-      expect(read_json(index, 'source_references.json').fetch('version')).to eq(7)
+      expect(read_json(index, 'source_references.json').fetch('version')).to eq(8)
       Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
       expect(differences(index, full_extraction)).to be_empty
     ensure
@@ -727,6 +726,54 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index, full_extraction)).to be_empty
     ensure
       Object.send(:remove_const, :LaterCardQuote) if Object.const_defined?(:LaterCardQuote, false)
+    end
+  end
+
+  describe 'a view component sidecar template (#740)' do
+    let(:component_path) { 'app/components/sidecar_shelf_component.rb' }
+    let(:template_path) { 'app/components/sidecar_shelf_component.html.erb' }
+
+    # The booted app does not load view_component, so the example supplies a
+    # base the extractor recognises and removes it afterwards.
+    before do
+      view_component = Module.new
+      view_component.const_set(:Base, Class.new)
+      stub_const('ViewComponent', view_component)
+    end
+
+    after { Object.send(:remove_const, :SidecarShelfComponent) if Object.const_defined?(:SidecarShelfComponent, false) }
+
+    def component_unit(index)
+      require 'woods/mcp/index_reader'
+      Woods::MCP::IndexReader.new(index).find_unit('SidecarShelfComponent', type: 'view_component')
+    end
+
+    def file_map(index)
+      read_json(index, 'dependency_graph.json').fetch('file_map')
+    end
+
+    def write_component(template_text)
+      load app_path(write_file(component_path, "class SidecarShelfComponent < ViewComponent::Base\nend\n"))
+      write_file(template_path, template_text)
+    end
+
+    it 'lists the template with the component and tracks its edit and deletion' do
+      write_component("<div>one</div>\n")
+      index = full_extraction
+      expect(component_unit(index)).to include('metadata' => hash_including('sidecar_template' => template_path))
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+
+      write_file(template_path, "<div>two</div>\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
+
+      delete_file(template_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(component_unit(index).fetch('metadata')).to include('sidecar_template' => nil)
+      expect(file_map(index)).not_to have_key(template_path)
+      expect(file_map(index).fetch(component_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
     end
   end
 
@@ -1285,6 +1332,221 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # A new worktree's index starts as a copy of another checkout's published
+  # generation and is brought up to date incrementally (#854). The booted
+  # process has one Rails.root, so the "other checkout" is a clone of the app at
+  # the seed commit whose index is the baseline's with its recorded root pointed
+  # at that clone.
+  describe 'seeding a worktree index (#854)' do
+    require 'woods/worktree_seed'
+
+    def seed_git(dir, *args)
+      env = { 'GIT_AUTHOR_NAME' => 'Seed Spec', 'GIT_AUTHOR_EMAIL' => 'seed@example.invalid',
+              'GIT_COMMITTER_NAME' => 'Seed Spec', 'GIT_COMMITTER_EMAIL' => 'seed@example.invalid' }
+      out, err, status = Open3.capture3(env, *Woods::GitCommand.argv(dir, '-c', 'commit.gpgsign=false', *args))
+      raise err unless status.success?
+
+      out.strip
+    end
+
+    def seed_json(index, name)
+      JSON.parse(File.read(Woods::Generation.new(output_dir: index).payload_dir.join(name)))
+    end
+
+    def change_seed_json(index, name, changes)
+      path = Woods::Generation.new(output_dir: index).payload_dir.join(name)
+      File.write(path, JSON.generate(JSON.parse(File.read(path)).merge(changes)))
+    end
+
+    def scratch_dir(label)
+      Dir.mktmpdir("woods_seed_#{label}").tap { |dir| (@scratch_dirs ||= []) << dir }
+    end
+
+    # The seed: a full extraction at the app's first commit, recorded as made in
+    # a clone of the app (the checkout that owns the seed).
+    def seed_baseline
+      seed_git(@app_root, 'init', '--quiet', '-b', 'main')
+      QuietGit.configure(@app_root)
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Seed commit')
+      source_checkout = scratch_dir('checkout')
+      FileUtils.rm_rf(source_checkout)
+      seed_git(@app_root, 'clone', '--quiet', '--no-hardlinks', @app_root, source_checkout)
+      seed = full_extraction
+      change_seed_json(seed, 'source_inputs.json', 'root' => File.realpath(source_checkout))
+      seed
+    end
+
+    def seed_into(seed, extractor: nil)
+      target = File.join(scratch_dir('target'), 'woods')
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root, extractor: extractor).call
+      [result, target]
+    end
+
+    def move_worktree_on
+      write_file('app/services/committed_service.rb', service_source('CommittedService', dependency: 'Post'))
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Add a service')
+      write_file('app/services/uncommitted_service.rb', service_source('UncommittedService', dependency: 'Comment'))
+      File.write(app_path('app/services/svc_0_service.rb'), "#{service_source('Svc0Service')}\n# edited\n")
+      seed_git(@app_root, 'add', 'app/services/svc_0_service.rb')
+      delete_file('app/jobs/doomed_job.rb')
+      write_file('docs/untracked_note.md', "# Note\n\nSee `CommittedService`.\n")
+    end
+
+    after { FileUtils.rm_rf(app_path('.git')) }
+
+    it 'equals a full extraction of the worktree after committed, staged, deleted and untracked changes' do
+      write_file('app/services/svc_0_service.rb', service_source('Svc0Service'))
+      write_file('app/jobs/doomed_job.rb', "class DoomedJob\n  def perform; end\nend\n")
+      seed = seed_baseline
+      move_worktree_on
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(result.changed).to include('app/services/committed_service.rb', 'app/services/uncommitted_service.rb',
+                                        'app/jobs/doomed_job.rb', 'docs/untracked_note.md')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'describes the new worktree, not the checkout the seed came from' do
+      seed = seed_baseline
+      source_sha = seed_json(seed, 'manifest.json')['git_sha']
+      write_file('app/services/committed_service.rb', service_source('CommittedService'))
+      seed_git(@app_root, 'checkout', '--quiet', '-b', 'agent-work')
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Agent change')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      payload = Woods::Generation.new(output_dir: target).payload_dir
+      manifest = JSON.parse(File.read(payload.join('manifest.json')))
+      expect(manifest['git_branch']).to eq('agent-work')
+      expect(manifest['git_sha']).to eq(seed_git(@app_root, 'rev-parse', 'HEAD'))
+      expect(manifest['git_sha']).not_to eq(source_sha)
+      expect(JSON.parse(File.read(payload.join('source_inputs.json')))['root']).to eq(File.realpath(@app_root))
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'is equivalent to a full extraction when nothing but HEAD moved' do
+      seed = seed_baseline
+      seed_git(@app_root, 'commit', '-q', '--allow-empty', '-m', 'Empty')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'rewrites provenance even when the worktree has nothing to update' do
+      seed = seed_baseline
+      seed_git(@app_root, 'checkout', '--quiet', '-b', 'idle-worktree')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(result.changed).to be_empty
+      payload = Woods::Generation.new(output_dir: target).payload_dir
+      expect(JSON.parse(File.read(payload.join('manifest.json')))['git_branch']).to eq('idle-worktree')
+      expect(JSON.parse(File.read(payload.join('source_inputs.json')))['root']).to eq(File.realpath(@app_root))
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'publishes nothing in the output directory until the incremental run has finished' do
+      seed = seed_baseline
+      move_worktree_on
+      target = File.join(scratch_dir('target'), 'woods')
+      observed = []
+      watching = Class.new(Woods::Extractor) do
+        define_method(:extract_changed) do |paths|
+          observed << [File.exist?(File.join(target, 'generation.json')), Dir.glob("#{target}*")]
+          super(paths)
+        end
+      end
+
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root, extractor: watching).call
+
+      expect(result.mode).to eq(:seeded), result.reason.to_s
+      expect(observed.size).to eq(1)
+      expect(observed.first.first).to be(false)
+      expect(Dir.glob("#{target}.seed-*")).to be_empty
+      expect(Woods::Generation.new(output_dir: target).current.number).to be_positive
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'falls back to a full extraction when the incremental run fails, leaving no partial index' do
+      seed = seed_baseline
+      move_worktree_on
+      failing = Class.new(Woods::Extractor) do
+        define_method(:extract_changed) { |_paths| raise Woods::ExtractionError, 'induced failure' }
+      end
+
+      result, target = seed_into(seed, extractor: failing)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('induced failure')
+      expect(Dir.glob("#{target}.seed-*")).to be_empty
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    {
+      'a seed written by another Woods version' => [/written by Woods 1\.0\.0/, { 'woods_version' => '1.0.0' }],
+      'a seed that records no commit' => [/records no commit/, { 'git_sha' => 'unknown' }]
+    }.each do |label, (reason, manifest_change)|
+      it "falls back to a full extraction for #{label}" do
+        seed = seed_baseline
+        change_seed_json(seed, 'manifest.json', manifest_change)
+        move_worktree_on
+
+        result, target = seed_into(seed)
+
+        expect(result.mode).to eq(:full)
+        expect(result.reason).to match(reason)
+        expect(differences(target, full_extraction)).to be_empty
+      end
+    end
+
+    it 'falls back to a full extraction when the seed checkout has uncommitted changes' do
+      seed = seed_baseline
+      checkout = seed_json(seed, 'source_inputs.json')['root']
+      File.write(File.join(checkout, 'app/services/dirty_service.rb'), service_source('DirtyService'))
+      move_worktree_on
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('uncommitted changes')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'falls back to a full extraction when a changed file needs a fresh Rails boot' do
+      seed = seed_baseline
+      write_file('config/initializers/seed_probe.rb', "# probe\n")
+      seed_git(@app_root, 'add', '.')
+      seed_git(@app_root, 'commit', '-qm', 'Add an initializer')
+
+      result, target = seed_into(seed)
+
+      expect(result.mode).to eq(:full)
+      expect(result.reason).to include('config/initializers/seed_probe.rb')
+      expect(differences(target, full_extraction)).to be_empty
+    end
+
+    it 'does not seed over an index that is already published' do
+      seed = seed_baseline
+      target = File.join(scratch_dir('target'), 'woods')
+      Woods::Extractor.new(output_dir: target).extract_all
+      before = Woods::Generation.new(output_dir: target).current
+
+      result = Woods::WorktreeSeed.new(source_dir: seed, output_dir: target, root: @app_root).call
+
+      expect(result.mode).to eq(:skipped)
+      expect(Woods::Generation.new(output_dir: target).current).to eq(before)
+    end
+  end
+
   # ── Operation vocabulary ─────────────────────────────────────────────────
 
   def service_source(name, dependency: nil)
@@ -1725,6 +1987,125 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'one unit per class' do
+    def remove_constants(*names)
+      names.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) }
+    end
+
+    def type_index(index)
+      read_json(index, 'dependency_graph.json').fetch('type_index')
+    end
+
+    def unit_edges(index, type, identifier)
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      Dir[File.join(payload, type, '*.json')].filter_map do |path|
+        document = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        document.fetch('dependencies') if document.is_a?(Hash) && document['identifier'] == identifier
+      end.first
+    end
+
+    after do
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipStorage, :OwnershipHost, :OwnershipBaseSerializer, :OwnershipSummary,
+                       :OwnershipAccount)
+    end
+
+    def write_storage_host(include_storage:)
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipHost)
+      path = write_file('app/models/ownership_host.rb', <<~RUBY)
+        class OwnershipHost < ApplicationRecord
+          self.table_name = 'posts'
+          #{'include OwnershipStorage' if include_storage}
+        end
+      RUBY
+      load app_path(path)
+      path
+    end
+
+    it 'publishes a lib module a model includes as a concern only, as the include comes and goes' do
+      load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
+      host = write_storage_host(include_storage: false)
+      index = full_extraction
+      expect(type_index(index).fetch('lib')).to include('OwnershipStorage')
+
+      [true, false].each do |included|
+        write_storage_host(include_storage: included)
+        Woods::Extractor.new(output_dir: index).extract_changed([host])
+        types = type_index(index)
+        expect(types.fetch(included ? 'concern' : 'lib', [])).to include('OwnershipStorage')
+        expect(types.fetch(included ? 'lib' : 'concern', [])).not_to include('OwnershipStorage')
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there' do
+      load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
+      host = write_storage_host(include_storage: true)
+      index = full_extraction
+
+      [true, false].each do |included|
+        unless included
+          write_storage_host(include_storage: false)
+          Woods::Extractor.new(output_dir: index).extract_changed([host])
+          expect(differences(index, full_extraction)).to be_empty
+        end
+
+        graph = read_json(index, 'dependency_graph.json')
+        published = graph.fetch('type_index').values.sum(&:size)
+        expect(read_json(index, 'manifest.json').fetch('total_units')).to eq(published)
+        expect(graph.fetch('stats').fetch('node_count')).to eq(published)
+        # Other examples leave identifiers published under two types; their
+        # second node and its edges are under `variants`.
+        variants = graph.fetch('variants', [])
+        edges = graph.fetch('edges').values.sum(&:size) + variants.sum { |variant| variant.fetch('edges').size }
+        expect(graph.fetch('stats').fetch('edge_count')).to eq(edges)
+        expect(variants.map { |variant| variant.fetch('identifier') }).not_to include('OwnershipStorage')
+        owners = graph.fetch('type_index').select { |_, ids| ids.include?('OwnershipStorage') }.keys
+        expect(owners).to eq([included ? 'concern' : 'lib'])
+      end
+    end
+
+    it 'publishes a descendant of an application serializer base as a serializer only' do
+      load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
+      summary = 'app/models/ownership_summary.rb'
+      body = ->(extra) { "class OwnershipSummary < OwnershipBaseSerializer\n  def call = #{extra}\nend\n" }
+      index = run_sequence([
+                             -> { (load app_path(write_file(summary, body.call(1)))) && summary },
+                             -> { write_file(summary, body.call(2)) }
+                           ])
+
+      types = type_index(index)
+      expect(types.fetch('serializer')).to include('OwnershipSummary')
+      expect(types.fetch('poro', [])).not_to include('OwnershipSummary')
+    end
+
+    it 'gives a nested job only the edges written in its own class body' do
+      path = 'app/models/ownership_account.rb'
+      body = lambda do |note|
+        <<~RUBY
+          class OwnershipAccount
+            def finish
+              PublishPostJob.perform_later(1) # #{note}
+              Post.where(id: 1)
+            end
+
+            class OwnershipClearJob < ApplicationJob
+              def perform(id) = id
+            end
+          end
+        RUBY
+      end
+      index = run_sequence([
+                             -> { (load app_path(write_file(path, body.call('one')))) && path },
+                             -> { write_file(path, body.call('two')) }
+                           ])
+
+      edges = unit_edges(index, 'jobs', 'OwnershipAccount::OwnershipClearJob')
+      expect(edges.map { |edge| edge['target'] }).not_to include('PublishPostJob', 'Post')
+    end
+  end
+
   describe 'method effects (#680)' do
     def unit_document(dir, type, identifier)
       payload = Woods::Generation.new(output_dir: dir).payload_dir
@@ -1785,6 +2166,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       document = unit_document(index, 'services', 'LedgerService')
       expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(document.fetch('metadata').fetch('method_effects').values.map { |entry| entry['analysis_status'] })
+        .to all(eq('analyzed'))
       expect(edge_identities(document)).to eq(edge_identities(document).uniq)
       expect(document.fetch('dependencies'))
         .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')
@@ -1834,6 +2217,63 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file('app/models/post.rb', post_model)
 
       expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
+  describe 'mixin tags on constant references (#871)' do
+    def unit_document(dir, type, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit.is_a?(Hash) && unit['identifier'] == identifier }
+    end
+
+    def mixins(document)
+      document.dig('metadata', 'references').map { |span| span.values_at('target', 'mixin', 'kind', 'confidence') }
+    end
+
+    it 'follows an include, extend and prepend as they are added, moved into an included block and removed' do
+      host = 'app/models/mixin_tag_host.rb'
+      concern = 'app/models/mixin_tag_concern.rb'
+      load app_path(write_file('app/models/mixin_tag_shared.rb', "module MixinTagShared\n  def shared = 1\nend\n"))
+      host_body = lambda do |lines|
+        mixins = lines.map { |line| "  #{line}\n" }.join
+        "class MixinTagHost\n#{mixins}\n  def build\n    MixinTagShared.name\n  end\nend\n"
+      end
+      concern_body = lambda do |mixin|
+        ['module MixinTagConcern', '  extend ActiveSupport::Concern', '', '  included do',
+         "    #{mixin} MixinTagShared", '  end', "end\n"].join("\n")
+      end
+      write = lambda do |path, body|
+        load app_path(write_file(path, body))
+        path
+      end
+      tagged = lambda do |index, identifier|
+        document = unit_document(index, 'poros', identifier) || unit_document(index, 'models', identifier)
+        document.dig('metadata', 'references').map { |span| span.values_at('mixin', 'method', 'kind', 'confidence') }
+      end
+      index = run_sequence(
+        [
+          -> { write.call(concern, concern_body.call('include')) },
+          -> { write.call(host, host_body.call(['include MixinTagConcern'])) },
+          -> { write.call(host, host_body.call(['extend MixinTagShared', 'prepend MixinTagShared'])) },
+          -> { write.call(concern, concern_body.call('extend')) },
+          -> { write.call(host, host_body.call([])) }
+        ]
+      )
+
+      expect(tagged.call(index, 'MixinTagConcern')).to eq([['extend', nil, 'constant', 'verified']])
+      expect(tagged.call(index, 'MixinTagHost')).to eq([[nil, 'name', 'constant', 'verified']])
+      write.call(host, host_body.call(['prepend MixinTagShared']))
+      Woods::Extractor.new(output_dir: index).extract_changed([host])
+      expect(tagged.call(index, 'MixinTagHost'))
+        .to eq([['prepend', nil, 'constant', 'verified'], [nil, 'name', 'constant', 'verified']])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      %i[MixinTagHost MixinTagConcern MixinTagShared].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
     end
   end
 
@@ -2517,7 +2957,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       expect(touched).not_to include('SignatureJob')
       expect(job_unit(index_dir, 'SignatureJob').fetch('dependents'))
-        .to include('type' => 'service', 'identifier' => 'LedgerDispatchService')
+        .to include(a_hash_including('type' => 'service', 'identifier' => 'LedgerDispatchService'))
       expect(differences(index_dir, full_extraction)).to be_empty
     end
 
@@ -2584,6 +3024,135 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'git enrichment summary' do
+    def summary(index_dir)
+      read_json(index_dir, 'manifest.json').fetch('git_enrichment')
+    end
+
+    def git_in_app(*args)
+      output, status = Open3.capture2e({ 'GIT_CONFIG_GLOBAL' => File::NULL }, 'git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    def service_unit(index_dir, identifier)
+      Dir[File.join(payload_dir(index_dir), 'services', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == identifier }
+    end
+
+    # The linked-worktree failure from the field: `.git` is a pointer file to
+    # a directory this process cannot reach.
+    def make_git_unreachable
+      FileUtils.mv(app_path('.git'), app_path('.git.held'))
+      File.write(app_path('.git'), "gitdir: #{app_path('not-mounted/.git/worktrees/wt')}\n")
+    end
+
+    def restore_git
+      FileUtils.rm_f(app_path('.git'))
+      FileUtils.mv(app_path('.git.held'), app_path('.git'))
+    end
+
+    before do
+      %w[Ledger Audit].each do |name|
+        write_file("app/services/#{name.downcase}_service.rb", service_source("#{name}Service"))
+      end
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('config', 'commit.gpgsign', 'false')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+    end
+
+    after { FileUtils.rm_rf([app_path('.git'), app_path('.git.held')]) }
+
+    it 'publishes the same account from an incremental run as from a full extraction' do
+      index_dir = full_extraction
+      expect(summary(index_dir)).to include('state' => 'available', 'reason' => nil)
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to be_positive
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      git_in_app('commit', '-am', 'edit ledger')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(summary(index_dir)['state']).to eq('available')
+      expect(summary(index_dir).fetch('capture')).to include('retained' => be_positive)
+    end
+
+    it 'marks a cycle that lost Git as degraded, keeps the rest published, and is repaired by a full run' do
+      index_dir = full_extraction
+      healthy = summary(index_dir)
+
+      make_git_unreachable
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      degraded = summary(index_dir)
+      expect(degraded).to include('state' => 'degraded', 'reason' => 'head_unresolvable', 'head_sha' => nil)
+      expect(degraded.fetch('coverage')).to include('eligible_units' => healthy.dig('coverage', 'eligible_units'),
+                                                    'history_unavailable' => be_positive)
+      expect(degraded.fetch('capture')).to include('refreshed' => 0, 'retained' => be_positive)
+      expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git')).to be_nil
+      expect(service_unit(index_dir, 'AuditService').dig('metadata', 'git', 'commit_count')).to eq(1)
+
+      restore_git
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+      expect(summary(index_dir)).to eq(healthy.merge('capture' => summary(index_dir)['capture']))
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+
+      2.times do |round|
+        write_file(path, "#{service_source('LedgerService')}# cycle #{round}\n")
+        Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+        found = differences(index_dir, full_extraction)
+        expect(found).to be_empty, "diverged after cycle #{round}:\n#{found.join("\n")}"
+        expect(summary(index_dir)['state']).to eq('available')
+      end
+    end
+
+    it 'reports a source archive without Git as unavailable and still publishes' do
+      FileUtils.rm_rf(app_path('.git'))
+      index_dir = full_extraction
+
+      expect(summary(index_dir)).to include('state' => 'unavailable', 'reason' => 'no_repository')
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to eq(0)
+      expect(read_json(index_dir, 'manifest.json').fetch('total_units')).to be_positive
+    end
+
+    it 'counts a unit assembled from several source files once, and keeps it equal across a source edit' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      version = write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      sources = lambda do |dir|
+        JSON.parse(File.read(File.join(payload_dir(dir), 'dependency_graph.json'))).dig('nodes', 'SharedLibrary')
+      end
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+
+      write_file(version, "module SharedLibrary\n  VERSION = '2'\nend\n")
+      git_in_app('commit', '-am', 'bump')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([version])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+      expect(summary(index_dir)).to include('state' => 'available')
+    end
+
+    it 'counts a file with no commits in the history window as facts' do
+      index_dir = full_extraction
+      untracked = write_file('app/services/fresh_service.rb', service_source('FreshService'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([untracked])
+
+      expect(service_unit(index_dir, 'FreshService').dig('metadata', 'git', 'commit_count')).to eq(0)
+      expect(summary(index_dir)).to include('state' => 'available')
+    end
+  end
+
   describe 'caller-dependent partials' do
     def navigation_unit(index)
       payload = Woods::Generation.new(output_dir: index).payload_dir
@@ -2646,6 +3215,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(render_targets(index)).to eq([])
       expect(navigation_unit(index).dig('metadata', 'unresolved_partials', 0, 'candidates'))
         .to eq(%w[ledger_books/_account_head.html.erb posts/_account_head.html.erb])
+    end
+
+    it 'follows a view directory gaining its mailer' do
+      created_directory = !File.directory?(app_path('app/mailers'))
+      write_file('app/views/ledger_notice_mailer/statement.html.erb', "<p>statement</p>\n")
+
+      index = run_sequence([
+                             lambda {
+                               write_file('app/mailers/ledger_notice_mailer.rb', <<~RUBY)
+                                 class LedgerNoticeMailer < ActionMailer::Base
+                                   def statement; end
+                                 end
+                               RUBY
+                               load app_path('app/mailers/ledger_notice_mailer.rb')
+                               'app/mailers/ledger_notice_mailer.rb'
+                             }
+                           ])
+
+      identifier = 'ledger_notice_mailer/statement.html.erb'
+      template = unit_snapshot(index).values.find { |unit| unit['identifier'] == identifier }
+      expect(template['dependencies']).to include(a_hash_including('target' => 'LedgerNoticeMailer',
+                                                                   'via' => 'view_render'))
+    ensure
+      # A directory created after Rails boot is not managed by Zeitwerk, and
+      # the fixture mailer must not join later examples' inventories.
+      Object.send(:remove_const, :LedgerNoticeMailer) if Object.const_defined?(:LedgerNoticeMailer, false)
+      FileUtils.rm_f(app_path('app/mailers/ledger_notice_mailer.rb'))
+      directory = app_path('app/mailers')
+      Dir.rmdir(directory) if created_directory && File.directory?(directory) && Dir.empty?(directory)
     end
 
     # The controller stays loaded for the rest of the process, so its file
@@ -2973,6 +3571,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/controllers/rt_desk_controller.rb
         app/controllers/rt_lamp_controller.rb
         app/components/rt_lamp/shade_component.rb
+        app/controllers/rt_yard_controller.rb
+        app/services/rt_yard/tile_component.rb
+        app/components/rt_card.rb
+        app/components/rt_scope/page_component.rb
+        app/components/rt_tile.rb
+        app/components/rt_deck/page_component.rb
+        app/services/rt_deck/rt_tile.rb
+        app/components/rt_scope/rt_card.rb
+        app/controllers/rt_scope/things_controller.rb
+        app/components/rt_kit_lib.rb
+        app/components/rt_kit_lib/widget.rb
+        app/components/rt_base.rb
+        app/components/rt_ancestry/page_component.rb
+        app/services/rt_ledger.rb
       ]
     end
 
@@ -3070,6 +3682,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
     end
 
+    it 'retargets an unchanged controller when the component it renders is created outside the component directories' do
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_yard_controller.rb', <<~RUBY)
+                                 class RtYardController < ApplicationController
+                                   def show
+                                     render RtYard::TileComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/services/rt_yard/tile_component.rb', <<~RUBY)
+                                 module RtYard
+                                   class TileComponent < ApplicationComponent
+                                     def call = "tile"
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtYardController')).to eq([%w[RtYard::TileComponent], []])
+    end
+
     it 'summarises unresolved renders and action facts on the graph node, full and incremental alike (#837)' do
       node = ->(index) { read_json(index, 'dependency_graph.json').fetch('nodes').fetch('RtLampController') }
       index = run_sequence([
@@ -3097,6 +3734,196 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Woods::Extractor.new(output_dir: index).extract_changed([component])
       expect(node.call(index)).not_to have_key('unresolved_render_count')
       expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # Extractor classes whose wholesale `extract_all` ran inside the block.
+    def wholesale_reruns(*extractors)
+      ran = []
+      extractors.each do |klass|
+        allow_any_instance_of(klass).to receive(:extract_all).and_wrap_original do |original, *args|
+          ran << klass
+          original.call(*args)
+        end
+      end
+      yield
+      ran
+    end
+
+    let(:render_families) do
+      [Woods::Extractors::PhlexExtractor, Woods::Extractors::ViewComponentExtractor,
+       Woods::Extractors::ControllerExtractor]
+    end
+
+    describe 'an edit that touches no constant a render resolves (#728)' do
+      def render_baseline
+        write_and_load('app/components/rt_card.rb', "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n")
+        write_and_load('app/components/rt_scope/page_component.rb', <<~RUBY)
+          module RtScope
+            class PageComponent < ApplicationComponent
+              def call = render(RtCard.new)
+            end
+          end
+        RUBY
+        write_and_load('app/controllers/rt_scope/things_controller.rb', <<~RUBY)
+          module RtScope
+            class ThingsController < ApplicationController
+              def show = render(RtCard.new)
+            end
+          end
+        RUBY
+        write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")
+        full_extraction
+      end
+
+      it 'leaves components and controllers alone when a service body changes' do
+        index = render_baseline
+        write_file('app/services/rt_ledger.rb', "class RtLedger\n  def total = 2\n\n  def other = 3\nend\n")
+
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/services/rt_ledger.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'leaves controllers alone when a component body changes, and still re-extracts that component' do
+        index = render_baseline
+        write_file('app/components/rt_card.rb',
+                   "class RtCard < ApplicationComponent\n  def call = 'card, edited'\nend\n")
+
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/components/rt_card.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+        expect(unit_snapshot(index).values.find { |unit| unit['identifier'] == 'RtCard' }['source_code'])
+          .to include('card, edited')
+      end
+
+      it 'does not mistake an unrelated new class for one a render resolves' do
+        index = render_baseline
+        path = write_and_load('app/services/rt_scope/rt_ledger_entry.rb',
+                              "module RtScope\n  class RtLedgerEntry; end\nend\n")
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed([path])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    describe 'an edit that touches a constant a render resolves (#728)' do
+      # Its own names: earlier examples leave RtScope::ThingsController, which
+      # renders RtCard, in the pristine tree, and a component defined outside the
+      # component directories retargets a controller only on a full extraction.
+      it 'retargets a component when a namespaced class now shadows the one its render reached' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_tile.rb',
+                                                 "class RtTile < ApplicationComponent\n  def call = 'tile'\nend\n"),
+                                  write_and_load('app/components/rt_deck/page_component.rb', <<~RUBY)]
+                                    module RtDeck
+                                      class PageComponent < ApplicationComponent
+                                        def call = render(RtTile.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/services/rt_deck/rt_tile.rb', <<~RUBY)
+                                   module RtDeck
+                                     class RtTile < ApplicationComponent
+                                       def call = 'scoped tile'
+                                     end
+                                   end
+                                 RUBY
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtDeck::PageComponent')).to eq([%w[RtDeck::RtTile], []])
+      end
+
+      it 'retargets a controller when a component in a component directory now shadows its render' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_card.rb',
+                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
+                                  write_and_load('app/controllers/rt_scope/things_controller.rb', <<~RUBY)]
+                                    module RtScope
+                                      class ThingsController < ApplicationController
+                                        def show = render(RtCard.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/components/rt_scope/rt_card.rb', <<~RUBY)
+                                   module RtScope
+                                     class RtCard < ApplicationComponent
+                                       def call = 'scoped card'
+                                     end
+                                   end
+                                 RUBY
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtScope::ThingsController')).to eq([%w[RtScope::RtCard], []])
+      end
+
+      it 'retargets a component when a base class it inherits gains the module that supplies its render' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_kit_lib.rb', "module RtKitLib\nend\n"),
+                                  write_and_load('app/components/rt_kit_lib/widget.rb', <<~RUBY),
+                                    module RtKitLib
+                                      class Widget < ApplicationComponent
+                                        def call = 'widget'
+                                      end
+                                    end
+                                  RUBY
+                                  write_and_load('app/components/rt_base.rb',
+                                                 "class RtBase < ApplicationComponent\nend\n"),
+                                  write_and_load('app/components/rt_ancestry/page_component.rb', <<~RUBY)]
+                                    module RtAncestry
+                                      class PageComponent < RtBase
+                                        def call = render(Widget.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/components/rt_base.rb',
+                                                "class RtBase < ApplicationComponent\n  include RtKitLib\nend\n")
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtAncestry::PageComponent')).to eq([%w[RtKitLib::Widget], []])
+      end
+
+      it 're-runs the renderers when the edit cannot be read as constant definitions' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_card.rb',
+                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
+                                  write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")]
+                               end,
+                               lambda do
+                                 write_and_load('app/services/rt_ledger.rb',
+                                                "class RtLedger\n  Object.const_set(:RtDynamic, 1)\nend\n")
+                               end
+                             ])
+
+        ran = wholesale_reruns(*render_families) do
+          write_file('app/services/rt_ledger.rb', "class RtLedger\n  Object.const_set(:RtDynamic, 2)\nend\n")
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/services/rt_ledger.rb'])
+        end
+
+        expect(ran).to include(Woods::Extractors::PhlexExtractor)
+        expect(differences(index, full_extraction)).to be_empty
+      end
     end
   end
 
@@ -3673,6 +4500,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(unit_of(index, 'lib', 'WidgetGenerator')).to be_nil
     end
 
+    it 'reports the same skipped files for a library split across files, through edits' do
+      main = 'lib/ledger_split.rb'
+      secondary = 'lib/ledger_split/version.rb'
+
+      index = run_sequence([
+                             -> { write_file(main, "module LedgerSplit\n  ONE = 1\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '1'\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '2'\nend\n") }
+                           ])
+
+      expect(read_json(index, 'skipped_files.json').fetch('files').map { |entry| entry['path'] })
+        .not_to include(main, secondary)
+    end
+
     describe 'route files' do
       # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1.
       before do
@@ -4029,7 +4870,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                                 'job_type' => 'active_job')
       expect(unit.fetch('source_code')).to end_with("\n  async_method :sync_now\n")
       expect(unit.fetch('source_code')).not_to include('Class.new')
-      expect(unit.fetch('dependents')).to include('type' => 'service', 'identifier' => 'LedgerSyncCaller')
+      expect(unit.fetch('dependents'))
+        .to include(a_hash_including('type' => 'service', 'identifier' => 'LedgerSyncCaller'))
       expect(differences(index, full_extraction)).to be_empty
     end
 
@@ -4476,7 +5318,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       expect(posts['metadata']).to include('model' => posts_owner(index), 'model_less' => false, 'primary_key' => 'id')
       expect(posts['metadata']['columns'].map { |column| column['name'] }).to include('id', 'title', 'status')
-      expect(posts['dependents']).to include({ 'type' => 'model', 'identifier' => 'Post' })
+      expect(posts['dependents']).to include(a_hash_including('type' => 'model', 'identifier' => 'Post'))
       expect(audit['metadata']).to include('model' => nil, 'model_less' => true)
       expect(edges(unit_json(index, 'models', 'Post'), 'table')).to eq(['table:posts'])
       expect(unit_snapshot(index).keys.grep(%r{\Adatabase_tables/})).not_to include(a_string_matching(/schema_migr/))
@@ -4586,6 +5428,106 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    # Extractor classes whose wholesale `extract_all` ran inside the block.
+    def wholesale_reruns(*extractors)
+      ran = []
+      extractors.each do |klass|
+        allow_any_instance_of(klass).to receive(:extract_all).and_wrap_original do |original, *args|
+          ran << klass
+          original.call(*args)
+        end
+      end
+      yield
+      ran
+    end
+
+    describe 'a model edit that moves no table ownership' do
+      it 'leaves the table units and everything resolving them alone' do
+        write_file('db/migrate/20240307000000_create_audit_rows.rb',
+                   migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+        write_file('db/views/post_titles_v01.sql', 'SELECT id, title FROM posts')
+        connection.create_table(:audit_rows) { |t| t.string :note }
+        index = full_extraction
+        original = File.read(app_path('app/models/post.rb'))
+        write_file('app/models/post.rb', "#{original}\n# a comment-only edit\n")
+
+        ran = wholesale_reruns(Woods::Extractors::DatabaseTableExtractor, Woods::Extractors::MigrationExtractor,
+                               Woods::Extractors::DatabaseViewExtractor,
+                               Woods::Extractors::ExternalConsumerExtractor) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/models/post.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+        expect(edges(unit_json(index, 'migrations', 'CreateAuditRows'), 'migrates')).to eq(['table:audit_rows'])
+      end
+    end
+
+    describe 'a model edit that moves table ownership' do
+      before { %i[parcel_slots parcel_bins].each { |table| connection.create_table(table) { |t| t.string :note } } }
+
+      # `ParcelShift` stays in ActiveRecord::Base.descendants for the rest of
+      # the process, so its file joins the pristine state.
+      after do
+        %i[parcel_slots parcel_bins].each { |table| connection.drop_table(table, if_exists: true) }
+        FileUtils.cp(app_path('app/models/parcel_shift.rb'), File.join(@pristine_root, 'app/models/parcel_shift.rb'))
+      end
+
+      def shift_model(table: 'parcel_slots', abstract: false)
+        write_file('app/models/parcel_shift.rb', <<~RUBY)
+          class ParcelShift < ApplicationRecord
+            self.table_name = '#{table}'
+            self.abstract_class = #{abstract}
+          end
+        RUBY
+        load app_path('app/models/parcel_shift.rb')
+        'app/models/parcel_shift.rb'
+      end
+
+      it 're-runs the tables and what resolves owners, but not declared consumers, when only an owner moves' do
+        write_file('db/migrate/20240309000000_touch_parcel_slots.rb',
+                   migration('TouchParcelSlots', 'add_column(:parcel_slots, :extra, :string)'))
+        shift_model
+        index = full_extraction
+        shift_model(table: 'parcel_bins')
+
+        ran = wholesale_reruns(Woods::Extractors::DatabaseTableExtractor, Woods::Extractors::MigrationExtractor,
+                               Woods::Extractors::DatabaseViewExtractor,
+                               Woods::Extractors::ExternalConsumerExtractor) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/models/parcel_shift.rb'])
+        end
+
+        expect(ran).to contain_exactly(Woods::Extractors::DatabaseTableExtractor,
+                                       Woods::Extractors::MigrationExtractor, Woods::Extractors::DatabaseViewExtractor)
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'follows a model onto another table and in and out of abstraction, ownership edges included' do
+        %w[parcel_slots parcel_bins].each_with_index do |table, number|
+          write_file("db/migrate/2024030800000#{number}_touch_#{table}.rb",
+                     migration("Touch#{table.camelize}", "add_column(:#{table}, :extra, :string)"))
+        end
+        write_file('db/views/parcel_slots_v01.sql', 'SELECT id FROM parcel_slots')
+        owners = lambda do |index, table|
+          unit_json(index, 'database_tables', "table:#{table}")['metadata']['models']
+        end
+
+        index = run_sequence(
+          [
+            -> { shift_model },
+            -> { shift_model(table: 'parcel_bins') },
+            -> { shift_model(table: 'parcel_bins', abstract: true) },
+            -> { shift_model(table: 'parcel_slots') }
+          ]
+        )
+
+        expect(owners.call(index, 'parcel_slots')).to eq(['ParcelShift'])
+        expect(owners.call(index, 'parcel_bins')).to eq([])
+        expect(edges(unit_json(index, 'migrations', 'TouchParcelSlots'), 'table_name')).to eq(['ParcelShift'])
+        expect(edges(unit_json(index, 'database_views', 'parcel_slots'), 'table_name')).to eq(['ParcelShift'])
+      end
+    end
+
     it 'gives an unchanged view an edge when its source table appears' do
       index = run_sequence(
         [
@@ -4649,7 +5591,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         expect(edges(unit_json(index, 'external_consumers', 'external:reporting'), 'reads_table'))
           .to eq(%w[table:comments table:posts])
         expect(unit_json(index, 'database_tables', 'table:posts')['dependents'])
-          .to include({ 'type' => 'external_consumer', 'identifier' => 'external:storefront' })
+          .to include(a_hash_including('type' => 'external_consumer', 'identifier' => 'external:storefront'))
 
         delete_file(declared)
         Woods::Extractor.new(output_dir: index).extract_changed([declared])
@@ -4712,6 +5654,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     def edges(dir, type_dir, identifier, via)
       published_unit(dir, type_dir, identifier)['dependencies']
         .select { |dep| dep['via'] == via }.map { |dep| dep['target'] }
+    end
+
+    it 'follows example labels and line extents as RSpec and Minitest files are edited, added and removed (#870)' do
+      rspec = 'spec/models/example_table_spec.rb'
+      minitest = 'test/models/example_table_test.rb'
+      focused = [
+        'RSpec.describe Post do', "  fit 'first' do", '  end', '', "  context 'inner' do",
+        "    it 'second' do", '    end', '  end', 'end', ''
+      ].join("\n")
+      suite = lambda do |*methods|
+        (['class ExampleTableTest < ActiveSupport::TestCase'] + methods + ['end', '']).join("\n")
+      end
+      index = run_sequence(
+        [
+          -> { write_file(rspec, "RSpec.describe Post do\n  it 'first' do\n  end\nend\n") },
+          -> { write_file(rspec, focused) },
+          -> { write_file(rspec, focused.sub("it 'second'", "it \"second \#{1}\"")) },
+          -> { write_file(minitest, suite.call("  test 'one' do", '  end', '', '  def test_two', '  end')) },
+          -> { write_file(minitest, suite.call('  def test_two', '  end')) },
+          -> { delete_file(rspec) }
+        ]
+      )
+
+      expect(published_unit(index, 'test_mappings', rspec)).to be_nil
+      table = published_unit(index, 'test_mappings', minitest).dig('metadata', 'examples')
+      expect(table.map { |entry| entry.values_at('kind', 'name', 'line', 'end_line') })
+        .to eq([['group', 'ExampleTableTest', 1, 4], ['example', 'test_two', 2, 3]])
     end
 
     it 'follows a shared example through creation, rename and deletion of its support file' do

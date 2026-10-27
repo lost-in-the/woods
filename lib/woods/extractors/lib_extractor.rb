@@ -12,6 +12,7 @@ require_relative 'assigned_value_discovery'
 require_relative '../source_contributors'
 require_relative '../source_references/registry'
 require_relative 'class_declarations'
+require_relative 'concern_extractor'
 
 module Woods
   module Extractors
@@ -100,6 +101,20 @@ module Woods
         aggregate(group) || raise(Woods::ExtractionError, "Ambiguous library owner: #{group.first[:unit].identifier}")
       end
 
+      # Identifiers of the concern units live model inclusions produce. A
+      # module a model includes is a concern wherever it lives, as it is for
+      # the PORO sweep, so lib publishes no second unit under its identifier.
+      #
+      # @return [Set<String>]
+      def claimed_identifiers
+        @claimed_identifiers ||= begin
+          concerns = ConcernExtractor.new
+          concerns.runtime_model_mixins.keys.flat_map do |path|
+            Array(concerns.extract_model_mixin_file(path)).map(&:identifier)
+          end.to_set
+        end
+      end
+
       private
 
       def library_groups
@@ -118,7 +133,10 @@ module Woods
             raise Woods::ExtractionError, 'Cannot establish the complete library contributor set after a source failure'
           end
 
-          entries.group_by { |entry| entry[:unit].identifier }.values
+          claimed = claimed_identifiers
+          entries.group_by { |entry| entry[:unit].identifier }.values.reject do |group|
+            claimed.include?(group.first[:unit].identifier)
+          end
         end
       end
 

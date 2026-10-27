@@ -185,21 +185,25 @@ module Woods
         absolute.delete_prefix("#{@root}/")
       end
 
-      # The physical form of an incremental path argument, so a path named
-      # through the same alias as --root still resolves under the physical
-      # root. A deleted path has no realpath of its own: resolve its deepest
-      # existing ancestor and keep the missing tail as given.
+      # The in-tree form of an incremental path argument. A path under the
+      # physical root keeps its own spelling, so a symlinked source is
+      # dispatched under the name the application loads it by. A path named
+      # through an alias of the root has only that alias prefix replaced. A
+      # deleted path needs no existing target: the deepest existing ancestor
+      # that is the root decides.
       def physical_path(absolute)
-        missing = []
-        existing = absolute
-        until File.exist?(existing)
-          parent = File.dirname(existing)
-          raise ArgumentError, 'incremental paths must be inside the application root' if parent == existing
+        return absolute if absolute.start_with?("#{@root}/")
 
-          missing.unshift(File.basename(existing))
-          existing = parent
+        prefix = absolute
+        loop do
+          parent = File.dirname(prefix)
+          raise ArgumentError, 'incremental paths must be inside the application root' if parent == prefix
+
+          prefix = parent
+          next unless File.exist?(prefix) && File.realpath(prefix) == @root
+
+          return absolute.sub(prefix, @root)
         end
-        File.join(File.realpath(existing), *missing)
       end
 
       def run_child(environment, task)

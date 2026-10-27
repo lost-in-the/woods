@@ -1,0 +1,1 @@
+- Notion sync (`woods:notion_sync`, `woods:send` and the `notion_sync` MCP tool) and Unblocked sync (`woods:unblocked_sync`, `woods:relay` and the unblocked-sync skill) are deprecated and will be removed in the next minor release. They behave as before and print one deprecation line per process pointing at `woods:markdown`. Their guides now open with a deprecation notice.

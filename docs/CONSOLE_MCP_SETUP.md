@@ -856,6 +856,13 @@ Validation runs **once**, inside the executor, with the dialect of the live adap
 
 Before any query runs, the model name is checked against the registry built from `ActiveRecord::Base.descendants`. Unrecognized model names raise `ValidationError` without touching the database. Column names are validated against the model's `column_names` before pluck, aggregate, and recent operations.
 
+An unknown model or column refusal does not list the registry. It names at most 5 near matches, ordered by closeness and then name, and always ends with the known count:
+
+- `Unknown model: Usr. Did you mean: User? (412 known models)`
+- `Unknown column 'foo' on User. No close match among 14 known columns.`
+
+Models on `console_blocked_tables` and columns on `console_redacted_columns` or `console_redacted_key_values` are never suggested and are not counted. The refusal itself, and every table and column authorization check, is unchanged.
+
 For `console_query`, a schema-qualified column reference such as `orders.total` is validated for **ownership**: the table side is gated through `TableGate` (a blocked table is refused) and the column must actually exist on that table, so a blocked-table column cannot be smuggled through `select`, `order`, or `having`. Bare columns validate against the active model.
 
 Scope hashes accept Ransack-style predicate suffixes (`_eq`, `_not_eq`, `_gt`, `_gteq`, `_lt`, `_lteq`, `_in`, `_not_in`, `_null`, `_not_null`, `_present`, `_blank`, `_matches`), see the [cookbook](MCP_TOOL_COOKBOOK.md#scope-predicates) for the full table. Every column name in a suffixed key is validated before an Arel predicate is built, so SQL injection via column names is not possible.

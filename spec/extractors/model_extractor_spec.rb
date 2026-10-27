@@ -544,6 +544,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       method_double = double('Method', source_location: ['/app/app/models/invoice.rb', 10])
       model = double('Model', name: 'Invoice', instance_methods: [:foo], methods: [])
       allow(model).to receive(:instance_method).with(:foo).and_return(method_double)
+      allow(File).to receive(:exist?).and_call_original
       allow(File).to receive(:exist?).with('/app/app/models/invoice.rb').and_return(false)
       allow(Object).to receive(:respond_to?).and_call_original
       allow(Object).to receive(:respond_to?).with(:const_source_location).and_return(false)

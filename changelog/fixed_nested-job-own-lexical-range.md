@@ -1,0 +1,1 @@
+- A job class nested inside another class's file no longer inherits the enclosing class's edges. Its source, enqueue edges and data dependencies now come only from the lines of its own class body, so it no longer shows a job enqueuing itself or a data dependency written in the enclosing class's methods. The enclosing class keeps its own edges.

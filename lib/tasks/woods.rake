@@ -8,6 +8,7 @@
 # Usage:
 #   bundle exec rake woods:extract          # Full extraction
 #   bundle exec rake woods:incremental      # Changed files only
+#   bundle exec rake "woods:seed[DIR]"      # Seed a worktree index from another checkout
 #   bundle exec rake woods:extract_framework # Rails/gem sources only
 #   bundle exec rake woods:validate          # Validate index integrity
 #   bundle exec rake woods:stats             # Show index statistics
@@ -51,6 +52,7 @@ namespace :woods do
     puts "  Total: #{results.values.sum(&:size)} units"
     skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
     puts "  #{skipped}" if skipped
+    puts "  #{Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)}"
     puts
     puts "Output written to: #{output_dir}"
   end
@@ -113,6 +115,39 @@ namespace :woods do
 
     puts
     puts "Re-extracted #{affected.size} affected units."
+    puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
+  end
+
+  desc 'Seed this worktree\'s index from another checkout\'s published index, then update it incrementally'
+  task :seed, [:from] => :environment do |_task, args|
+    require 'woods/worktree_seed'
+
+    source = args[:from]
+    if source.nil? || source.empty?
+      puts 'Usage: rake "woods:seed[/path/to/other/checkout/tmp/woods]"'
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+
+    unless Woods::RakeHelpers.woods_daemon_coverage(output_dir) == :none
+      puts 'A watch daemon is maintaining this index, so it is not seeded over.'
+      exit 0
+    end
+
+    puts "Seeding #{output_dir} from #{source}..."
+    result = Woods::RakeHelpers.woods_with_extraction_lock(output_dir) do
+      Woods::WorktreeSeed.new(source_dir: source, output_dir: output_dir, root: Rails.root).call
+    end
+
+    case result.mode
+    when :seeded
+      puts "Seeded and brought up to date with #{result.changed.size} changed paths."
+    when :skipped
+      puts "Nothing to do: #{result.reason}."
+    else
+      puts "Seed not usable (#{result.reason}); ran a full extraction instead."
+    end
   end
 
   desc 'Consume an encoded hook refresh batch (internal plugin transport)'
@@ -407,6 +442,7 @@ namespace :woods do
   desc 'Show index statistics'
   task stats: :environment do
     require 'woods/payload_store'
+    require 'woods/git_enrichment_summary'
 
     output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
@@ -428,6 +464,7 @@ namespace :woods do
     puts "  Ruby version:  #{manifest['ruby_version'] || 'unknown'}"
     puts "  Git SHA:       #{manifest['git_sha'] || 'unknown'}"
     puts "  Git branch:    #{manifest['git_branch'] || 'unknown'}"
+    puts "  #{Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(manifest))}"
     puts "  Persistent pins: #{pins.empty? ? 'none' : pins.join(', ')}"
     puts
 
@@ -697,9 +734,16 @@ namespace :woods do
     load File.expand_path('../../exe/woods-console', __dir__)
   end
 
-  desc 'Sync extraction data to Notion databases (Data Models + Columns)'
+  desc 'Deprecated: use woods:markdown. Sync extraction data to Notion databases (Data Models + Columns)'
   task notion_sync: :environment do
+    require 'woods/deprecation'
     require 'woods/notion/exporter'
+
+    Woods::Deprecation.warn_once(
+      :notion_sync,
+      'woods:notion_sync (and woods:send) is deprecated and will be removed in the next minor release. ' \
+      'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+    )
 
     config = Woods.configuration
     # A non-blank env var takes precedence over the configured value; a blank
@@ -743,12 +787,19 @@ namespace :woods do
     end
   end
 
-  desc 'Send findings from the field — sync to Notion (alias for notion_sync)'
+  desc 'Deprecated: use woods:markdown (alias for notion_sync)'
   task send: :notion_sync
 
-  desc 'Sync extraction data to Unblocked collection (Documents API)'
+  desc 'Deprecated: use woods:markdown. Sync extraction data to Unblocked collection (Documents API)'
   task unblocked_sync: :environment do
+    require 'woods/deprecation'
     require 'woods/unblocked/exporter'
+
+    Woods::Deprecation.warn_once(
+      :unblocked_sync,
+      'woods:unblocked_sync (and woods:relay) is deprecated and will be removed in the next minor release. ' \
+      'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+    )
 
     config = Woods.configuration
     config.unblocked_api_token = ENV.fetch('UNBLOCKED_API_TOKEN', nil) || config.unblocked_api_token
@@ -832,55 +883,26 @@ namespace :woods do
     exit 1 if stats[:complete] == false && stats[:errors].empty?
   end
 
-  desc 'Relay findings to Unblocked (alias for unblocked_sync)'
+  desc 'Deprecated: use woods:markdown (alias for unblocked_sync)'
   task relay: :unblocked_sync
 
-  desc 'Export extraction data to a self-contained Obsidian vault'
-  task obsidian: :environment do
-    require 'woods/obsidian/vault_exporter'
-
-    config = Woods.configuration
-    output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
-    vault_path = ENV.fetch('WOODS_OBSIDIAN_VAULT', File.join(output_dir.to_s, 'obsidian_vault'))
-    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
-    env_flag = ->(name) { %w[1 true yes].include?(ENV.fetch(name, '').strip.downcase) }
-
-    puts 'Exporting extraction data to an Obsidian vault...'
-    puts "  Output dir: #{output_dir}"
-    puts "  Vault:      #{vault_path}"
-    puts
-
-    begin
-      exporter = Woods::Obsidian::VaultExporter.new(
-        index_dir: output_dir,
-        vault_path: vault_path,
-        include_source: env_flag.call('WOODS_OBSIDIAN_INCLUDE_SOURCE'),
-        include_framework: env_flag.call('WOODS_OBSIDIAN_INCLUDE_FRAMEWORK'),
-        force_purge: env_flag.call('WOODS_OBSIDIAN_FORCE_PURGE')
-      )
-      stats = exporter.export_all
-    rescue Woods::Obsidian::ExportError => e
-      puts "ERROR: #{e.message}"
-      exit 1
-    end
-
-    puts 'Export complete!'
-    puts "  Notes:    #{stats[:exported]}"
-    puts "  Indexes:  #{stats[:indexes]}"
-    puts "  Swept:    #{stats[:swept]}"
-    puts "  Skipped:  #{stats[:skipped]}"
-    puts
-    puts "Open it in Obsidian: 'Open folder as vault' -> #{vault_path}"
-
-    if stats[:errors].any?
-      puts "  Errors:   #{stats[:errors].size}"
-      stats[:errors].first(5).each { |e| puts "    - #{e}" }
-      puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
-      exit 1
-    end
+  desc 'Export extraction data as a folder of Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)'
+  task markdown: :environment do
+    Woods::RakeHelpers.woods_markdown_export(obsidian: false, default_dir: 'markdown')
   end
 
-  desc 'Render the codebase as an Obsidian vault (alias for obsidian)'
+  desc 'Deprecated: use woods:markdown. Exports an Obsidian vault'
+  task obsidian: :environment do
+    require 'woods/deprecation'
+    Woods::Deprecation.warn_once(
+      :markdown_export_aliases,
+      'woods:obsidian and woods:vault are deprecated and will be removed in the next minor release. ' \
+      'Use woods:markdown (set WOODS_MARKDOWN_OBSIDIAN=1 for the Obsidian flavor).'
+    )
+    Woods::RakeHelpers.woods_markdown_export(obsidian: true, default_dir: 'obsidian_vault')
+  end
+
+  desc 'Deprecated: use woods:markdown (alias for obsidian)'
   task vault: :obsidian
 
   desc 'Generate a random bearer token for woods-mcp-http (WOODS_MCP_HTTP_TOKEN)'

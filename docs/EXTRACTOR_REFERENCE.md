@@ -160,6 +160,10 @@ ancestor's; a filter inherited from another controller's source, a proc, a
   never "no methods".
 - `instance_methods` and `class_methods` are unchanged.
 - Superclass methods are not inlined.
+A verified span for a module mixed in by a receiverless `include`, `extend` or
+`prepend` also carries `mixin` with that call's name (#871), including inside
+`included do` blocks. `kind` and `confidence` are unchanged; see
+[the layout](INDEX_LAYOUT.md#constant-reference-spans).
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;
@@ -205,6 +209,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```json
 "method_effects": {
   "refund!": {
+    "analysis_status": "analyzed",
     "jobs_enqueued": ["RefundJob"],
     "mail_sent": [],
     "services_called": [],
@@ -217,6 +222,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```
 
 - **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Status.** `analysis_status` is the callback field of the same name: `analyzed` (the method's text was scanned) or `source_unavailable` (its text could not be read, so the job, mail, service and column families are empty because nothing was looked at, not because nothing was found). A method is never `unsupported`: it always has a definition. An `analyzed` method with no effects is still left out of the map; a `source_unavailable` one is listed. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
 - **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
 - **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
 - **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
@@ -305,6 +311,7 @@ publish the same values.
 - Reads Rails' per-event callback chains (`_save_callbacks`, `_create_callbacks`, and the other lifecycle events), preserving each chain's order and each entry's `kind`, filter and conditions. The public `type` combines kind and event, such as `before_save` or `after_create`; Rails' separate `before_commit` event is reported as `before_commit`, not `before_before_commit`. `callback_count` equals the emitted callback list's length. The list includes framework-registered callbacks; it is runtime metadata, not an application-only filter or a cross-event execution trace. Regenerate the index after upgrading to pick up corrected callback metadata.
 - Proc/lambda filters, including Rails-generated association callbacks, use stable source-site labels in both metadata and callback chunks: `#<Proc app/models/post.rb:12>` (or `lambda`). App paths are relative to `Rails.root`; external paths are retained and native procs use `native`. Rails 6's numeric filter identity is resolved through `raw_filter`. These labels describe location and callable kind, not captured closure state; callbacks are never executed. Model condition labels retain their existing format.
 - Default callback-object representations omit process addresses: an instance becomes `#<CleanupCallback>`, an anonymous class becomes `#<Class>`, and its instance becomes `#<#<Class>>`. Anonymous namespace prefixes are normalized too (for example, `#<Module>::CleanupCallback`). Named classes and custom `to_s` labels retain their text. These labels do not distinguish arbitrary object state; separate registered callbacks remain separate entries even when their descriptive labels match. Controller object-filter formatting is unchanged.
+- Each callback also carries `analysis_status`, saying whether its empty `side_effects` mean "none found" or "not read": `analyzed` (the method was found and scanned), `unsupported` (no method definition to read: a proc, a lambda, or a method the source does not define) or `source_unavailable` (the method was found but its text could not be read). The last two carry the same empty `side_effects` shape as before. Jobs, services and mailers in `side_effects` are named in the method's lexical scope, as the unit's dependency edges are. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
 - Direct Proc/lambda validation option values (for example inclusion/exclusion membership or message callables) use the same stable kind/source-site labels without execution. Validation order and duplicates, condition formats (`if`, `unless`, `on`), and non-Proc values are unchanged. Nested arrays/hashes are not recursively normalized, and labels do not serialize captured closure state. Run a full extraction after upgrading to refresh retained validation metadata; the stored schema is unchanged.
 - Callback side-effects are analyzed via `CallbackAnalyzer`: detects columns written (`self.col =`), jobs enqueued (`perform_later`), and services called
 - A callback's `on:` scope (W-5, #755) is published as `conditions.on` (`["create"]`, `["create", "update"]`), read from the lambda Rails generates for `after_commit ..., on:` and `before_validation ..., on:` without calling it. Those generated lambdas are no longer listed under `conditions.if`; an application's own `if:` lambda stays there. `trace_flow` reads this scope for model event entries (see the MCP cookbook)
@@ -1445,6 +1452,7 @@ namespace.
 - Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-shaped string is checked against the application's rake tasks. A task name (`'ledger:rebuild_balances'`) becomes `subject_class` with a `:test_coverage` edge to that `rake_task` unit. A namespace (`'ledger'`) is recorded as `metadata[:rake_namespace]` with one edge per `ledger:*` task. Anything else is a description with no edge
 - `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`:system`/`:request` on the first group decides, else `:unit`
 - Records test count (`it`, `specify`, `example`, `scenario`; `test "..."` and `def test_` for Minitest) and whether RSpec or Minitest is detected
+- Publishes `metadata.examples`: every group and example with its label, 1-based line extent and `focus`/`skip`/`pending` markers, by static parsing of the file (#870). A label is named only where the source states it; interpolated, variable or missing labels are `null` and marked `dynamic`. See [the layout](INDEX_LAYOUT.md#test-examples)
 - These directories are outside `app/` so no eager loading is needed
 
 **Test support edges.** References to test support resolve by name to the `test_support` unit that defines them. A name no support file defines yields no edge; the names as written stay in metadata.
@@ -1596,11 +1604,10 @@ Resolution needs the whole index, so it runs as a post-pass after every extracto
 
 ## How do I enable or disable extractors?
 
-You can't, today. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
-`config.extractors`. The array is accepted for forward compatibility: setting
-it to anything other than its default value emits a warning and has no
-effect on which extractors run or what the retrieval pipeline sees.
-Extractor selection is a documented future knob, not a shipped feature.
+You can't. All 42 extractors always run during a full extraction, there is no opt-in/opt-out mechanism and nothing in the extraction path reads
+`config.extractors`. The option is deprecated and will be removed in Woods 3.0:
+assigning it warns once and has no effect on which extractors run or what the
+retrieval pipeline sees. No selection feature is planned.
 
 `config.add_gem` is in the same state: accepted with a warning, not read by
 `RailsSourceExtractor`. There is no shipped way to widen the framework path list.

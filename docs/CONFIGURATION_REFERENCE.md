@@ -53,9 +53,9 @@ end
 
 ### CI-only extraction (skip framework sources)
 
-`config.extractors` cannot select a subset of extractors, it's accepted for
-forward compatibility only (see [Extractors](#extractors) below). To speed up
-CI, skip the one extractor that's actually optional instead:
+`config.extractors` is deprecated and cannot select a subset of extractors
+(see [Extractors](#extractors) below). To speed up CI, skip the one extractor
+that's actually optional instead:
 
 ```ruby
 Woods.configure do |config|
@@ -108,7 +108,7 @@ Columns:
 | Option | Type | Default | Role | Description |
 |--------|------|---------|------|-------------|
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | deprecated, inert | Does not select which extractors run. Assigning it warns once; removed in Woods 3.0. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
 | `max_context_tokens` | Integer | `8000` | user-settable | Default context-assembly token budget captured when a retriever is built; per-call budget overrides it |
@@ -700,21 +700,26 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 
 ## Extractors
 
-`config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 42 extractors always run during a full extraction,
-regardless of what this array holds, nothing in the extraction path reads
-it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
-config). Setting `extractors` to anything other than its default value emits
-a warning:
+`config.extractors` is **deprecated** and has no effect. All 42 extractors
+always run during a full extraction, regardless of what this array holds.
+Nothing in the extraction path reads it (`Woods::Extractor::EXTRACTORS` is a
+frozen constant, not derived from config). Full, incremental, refresh and watch
+runs cover the same extractors whatever the option holds.
+
+- Reading and assigning it keep working until it is removed in Woods 3.0.
+- An explicit assignment, default list included, prints one deprecation
+  warning per process. Woods' own defaults and a normal boot never do.
+- Remove the line from your initializer. Nothing replaces it, and there is no
+  plan for extractor selection.
 
 ```ruby
 config.extractors = %i[models controllers services]
-# => warns: "config.extractors is accepted for forward compatibility but
-#    extractor selection is not implemented; all extractors run."
+# => [woods] DEPRECATED: config.extractors is deprecated and has no effect: every
+#    extractor always runs. Remove the assignment from your Woods initializer;
+#    the option will be removed in Woods 3.0.
 ```
 
-The array exists for forward compatibility with a future selection knob.
-Leave it at its default. The full list of what always runs:
+The full list of what always runs:
 
 | Symbol | Extractor | What it adds |
 |--------|-----------|-------------|
@@ -1313,6 +1318,12 @@ deployment guide including defense layers.
 | `console_unsafe_eval_confirmation` | `Confirmation` | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 | `console_unsafe_eval_audit_log_path` | String/Pathname | `nil` | Legacy option retained for compatibility; passing it fails closed. |
 
+## Notion export
+
+| Key | Type | Default | Description |
+|---|---|---|---|
+| `notion_export_column_defaults` | Boolean | `false` | Send raw column default values to the Notion Columns database. Off by default: Notion receives `Has default` only. Values sent under the opt-in are credential-scanned and any match is redacted. |
+
 ## Environment variables
 
 These variables are read by the gem and its MCP servers at runtime. They complement (not replace) the configure block, most exist so the MCP servers, rake tasks, and exporters can self-configure or override config without an initializer edit.
@@ -1482,9 +1493,11 @@ After correcting the layout, run a full extraction to refresh retained metadata.
 | `UNBLOCKED_DAILY_BUDGET` | `1000` | Per-run call cap for `woods:unblocked_sync`. |
 | `UNBLOCKED_FORCE_FULL_SYNC` | unset | Set to `"1"` to re-push every Unblocked document, ignoring the unchanged-hash skip. |
 | `UNBLOCKED_FORCE_PURGE` | unset | Set to `"1"` to bypass the Unblocked 30%-deletion guard. |
-| `WOODS_OBSIDIAN_VAULT` | `<output_dir>/obsidian_vault` | Vault output path for `woods:obsidian`. |
-| `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the exported vault. |
-| `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Bypass the Obsidian 30%-deletion guard on the stale-note sweep. |
+| `WOODS_MARKDOWN_DIR` | `<output_dir>/markdown` | Output folder for `woods:markdown`. |
+| `WOODS_MARKDOWN_OBSIDIAN` | `false` | Write the Obsidian flavor (wikilinks, tags, `.obsidian/` config). |
+| `WOODS_MARKDOWN_INCLUDE_FRAMEWORK`, `WOODS_MARKDOWN_INCLUDE_SOURCE` | `false` | Include framework units / full source in the export. |
+| `WOODS_MARKDOWN_FORCE_PURGE` | unset | Bypass the 30%-deletion guard on the stale-note sweep. |
+| `WOODS_OBSIDIAN_VAULT`, `WOODS_OBSIDIAN_INCLUDE_FRAMEWORK`, `WOODS_OBSIDIAN_INCLUDE_SOURCE`, `WOODS_OBSIDIAN_FORCE_PURGE` | unset | Legacy names, read when the matching `WOODS_MARKDOWN_*` variable is unset. `WOODS_OBSIDIAN_VAULT` defaults the deprecated `woods:obsidian` task to `<output_dir>/obsidian_vault`. |
 
 The `woods-mcp` bootstrapper emits a one-line STDERR banner at startup indicating whether semantic search is enabled and which provider is active. If no key/instance is found, pattern search still works and `codebase_retrieve` surfaces an actionable fix message.
 

@@ -40,6 +40,12 @@ module Woods
         ]
       ).freeze
 
+      # Diagnostic tools that must still answer when the published generation
+      # marker is unusable. They stay pinned like every other reader tool, but
+      # an unusable marker reaches their handler, which reports it as a degraded
+      # status instead of refusing the request.
+      DIAGNOSTIC_TOOL_NAMES = Set.new(%w[woods_status]).freeze
+
       class << self
         # @param server [MCP::Server]
         # @param reader [Woods::MCP::IndexReader]
@@ -58,13 +64,22 @@ module Woods
       module Dispatch
         private
 
+        # The reader this call reads: the worktree it was routed to, else the
+        # one the server was built with.
+        def pinned_index_reader
+          router = @woods_worktree_router
+          router ? router.current_reader : @woods_index_reader
+        end
+
         def call_tool(request, **kwargs)
-          reader = @woods_index_reader
+          reader = pinned_index_reader
           tool_names = @woods_index_reader_tool_names
           return super unless reader && tool_names&.include?(request[:name])
 
           reader.with_pinned_generation { super }
         rescue Woods::Generation::InvalidMarker
+          return super if DIAGNOSTIC_TOOL_NAMES.include?(request[:name])
+
           message = 'Published generation marker is unavailable or malformed; run woods:validate and restore or rebuild the index.'
           meta = { error_code: :corrupt_artifact, tool: request[:name] }
           meta[:completeness] = SearchResults.unavailable if request[:name] == 'search'
@@ -76,7 +91,7 @@ module Woods
         end
 
         def read_resource_contents(request, **kwargs)
-          reader = @woods_index_reader
+          reader = pinned_index_reader
           return super unless reader
 
           reader.with_pinned_generation { super }

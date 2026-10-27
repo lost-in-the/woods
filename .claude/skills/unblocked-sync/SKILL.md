@@ -1,9 +1,13 @@
 ---
 name: unblocked-sync
-description: Setup, operation, and debugging of the Unblocked integration — collection creation, incremental sync, the sync manifest, escape hatches, live API quirks, and smoke testing. Use when working on lib/woods/unblocked/, the woods:unblocked_sync rake task, sync CI wiring, or when a sync misbehaves (everything re-pushes, deletes refused, budget exhausted, 400s from the API).
+description: DEPRECATED (use the Markdown export, woods:markdown). Setup, operation, and debugging of the Unblocked integration — collection creation, incremental sync, the sync manifest, escape hatches, live API quirks, and smoke testing. Use when working on lib/woods/unblocked/, the woods:unblocked_sync rake task, sync CI wiring, or when a sync misbehaves (everything re-pushes, deletes refused, budget exhausted, 400s from the API).
 ---
 
 # Unblocked Sync
+
+> **Deprecated.** Unblocked sync is deprecated and will be removed in the next minor release. Use the
+> Markdown export (`woods:markdown`, `docs/MARKDOWN_EXPORT.md`) and sync the folder wherever you need.
+> The sync tasks warn once per process. Keep this skill for maintaining the existing integration only.
 
 Woods pushes condensed Markdown profiles of extracted units to an
 [Unblocked](https://getunblocked.com) collection via its Documents API.

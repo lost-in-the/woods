@@ -1,0 +1,1 @@
+- `woods_status` now answers a bounded, degraded report when `generation.json` is malformed or has an invalid shape, instead of the generic corrupt-artifact refusal. The report sets `ready: false`, `index.state: unusable_publication` and an `index.diagnostic` that points at `woods:validate`. No payload is guessed, and every other tool keeps refusing an unusable publication.

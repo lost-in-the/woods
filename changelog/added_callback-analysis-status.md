@@ -1,0 +1,1 @@
+- Model callbacks gain an `analysis_status` of `analyzed`, `unsupported` or `source_unavailable`, so an empty `side_effects` no longer reads the same whether the method was scanned or could not be. Existing keys are unchanged.

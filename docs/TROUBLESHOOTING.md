@@ -241,7 +241,7 @@ ls app/decorators/ app/state_machines/ 2>/dev/null
 ls tmp/woods/decorators/ tmp/woods/state_machines/ 2>/dev/null
 ```
 
-Note: `config.extractors` does not control anything today, it's accepted for forward compatibility only and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
+Note: `config.extractors` is deprecated (removed in Woods 3.0). It does not control anything and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
 
 ---
 
@@ -380,6 +380,24 @@ known"; they never mean "brand new".
 **Fix:** Restore access to both the worktree-specific Git directory and the
 shared objects and refs using the mount layouts below, then run a full
 `woods:extract` to replace retained metadata.
+
+### Checking whether Git facts can be trusted
+
+Structural readiness does not prove history is available. Each generation's
+manifest carries a `git_enrichment` summary, shown by `woods_status`
+(`index.git_enrichment`), `woods:stats` and the extraction task output.
+
+| State | Meaning |
+|---|---|
+| `available` | Git worked and every eligible unit has facts |
+| `degraded` | Some eligible units have facts and some do not (for example Git failed during an incremental run and earlier facts were retained) |
+| `unavailable` | No eligible unit has facts (`no_repository`, `head_unresolvable`, `shallow_repository`, `history_read_failed`, `git_executable_missing`) |
+| `unknown` | The manifest predates the summary |
+
+`capture.refreshed` counts facts read in this publication; `capture.retained`
+counts facts carried over from an earlier extraction. Fileless and
+dependency-owned units are excluded from the eligible count. A full extraction
+with working Git repairs a degraded index.
 
 ### Git directory mounts for linked worktrees
 
