@@ -4935,6 +4935,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .select { |dep| dep['via'] == via }.map { |dep| dep['target'] }
     end
 
+    it 'follows example labels and line extents as RSpec and Minitest files are edited, added and removed (#870)' do
+      rspec = 'spec/models/example_table_spec.rb'
+      minitest = 'test/models/example_table_test.rb'
+      focused = [
+        'RSpec.describe Post do', "  fit 'first' do", '  end', '', "  context 'inner' do",
+        "    it 'second' do", '    end', '  end', 'end', ''
+      ].join("\n")
+      suite = lambda do |*methods|
+        (['class ExampleTableTest < ActiveSupport::TestCase'] + methods + ['end', '']).join("\n")
+      end
+      index = run_sequence(
+        [
+          -> { write_file(rspec, "RSpec.describe Post do\n  it 'first' do\n  end\nend\n") },
+          -> { write_file(rspec, focused) },
+          -> { write_file(rspec, focused.sub("it 'second'", "it \"second \#{1}\"")) },
+          -> { write_file(minitest, suite.call("  test 'one' do", '  end', '', '  def test_two', '  end')) },
+          -> { write_file(minitest, suite.call('  def test_two', '  end')) },
+          -> { delete_file(rspec) }
+        ]
+      )
+
+      expect(published_unit(index, 'test_mappings', rspec)).to be_nil
+      table = published_unit(index, 'test_mappings', minitest).dig('metadata', 'examples')
+      expect(table.map { |entry| entry.values_at('kind', 'name', 'line', 'end_line') })
+        .to eq([['group', 'ExampleTableTest', 1, 4], ['example', 'test_two', 2, 3]])
+    end
+
     it 'follows a shared example through creation, rename and deletion of its support file' do
       spec = 'spec/models/widget_behavior_spec.rb'
       write_file(spec, "RSpec.describe Post do\n  it_behaves_like 'an accessible page'\nend\n")

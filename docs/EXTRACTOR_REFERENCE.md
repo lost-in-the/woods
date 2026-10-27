@@ -1452,6 +1452,7 @@ namespace.
 - Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-shaped string is checked against the application's rake tasks. A task name (`'ledger:rebuild_balances'`) becomes `subject_class` with a `:test_coverage` edge to that `rake_task` unit. A namespace (`'ledger'`) is recorded as `metadata[:rake_namespace]` with one edge per `ledger:*` task. Anything else is a description with no edge
 - `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`:system`/`:request` on the first group decides, else `:unit`
 - Records test count (`it`, `specify`, `example`, `scenario`; `test "..."` and `def test_` for Minitest) and whether RSpec or Minitest is detected
+- Publishes `metadata.examples`: every group and example with its label, 1-based line extent and `focus`/`skip`/`pending` markers, by static parsing of the file (#870). A label is named only where the source states it; interpolated, variable or missing labels are `null` and marked `dynamic`. See [the layout](INDEX_LAYOUT.md#test-examples)
 - These directories are outside `app/` so no eager loading is needed
 
 **Test support edges.** References to test support resolve by name to the `test_support` unit that defines them. A name no support file defines yields no edge; the names as written stay in metadata.
