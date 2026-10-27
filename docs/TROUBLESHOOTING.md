@@ -381,24 +381,6 @@ known"; they never mean "brand new".
 shared objects and refs using the mount layouts below, then run a full
 `woods:extract` to replace retained metadata.
 
-### Checking whether Git facts can be trusted
-
-Structural readiness does not prove history is available. Each generation's
-manifest carries a `git_enrichment` summary, shown by `woods_status`
-(`index.git_enrichment`), `woods:stats` and the extraction task output.
-
-| State | Meaning |
-|---|---|
-| `available` | Git worked and every eligible unit has facts |
-| `degraded` | Some eligible units have facts and some do not (for example Git failed during an incremental run and earlier facts were retained) |
-| `unavailable` | No eligible unit has facts (`no_repository`, `head_unresolvable`, `shallow_repository`, `history_read_failed`, `git_executable_missing`) |
-| `unknown` | The manifest predates the summary |
-
-`capture.refreshed` counts facts read in this publication; `capture.retained`
-counts facts carried over from an earlier extraction. Fileless and
-dependency-owned units are excluded from the eligible count. A full extraction
-with working Git repairs a degraded index.
-
 ### Git directory mounts for linked worktrees
 
 `WOODS_GIT_DIR` is passed directly to Git's `--git-dir`. It selects that

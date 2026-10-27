@@ -260,19 +260,6 @@ module Woods
       "Skipped files: #{report.fetch('total')} (#{counts}); see #{Woods::SkippedFiles::FILENAME}"
     end
 
-    # One line saying whether the published Git facts can be trusted.
-    #
-    # @param output_dir [Pathname, String] index directory
-    # @return [String] `unknown` for a manifest written before the summary
-    def woods_git_enrichment_summary(output_dir)
-      require 'woods/git_enrichment_summary'
-      path = woods_payload_dir(output_dir).join('manifest.json')
-      manifest = path.exist? ? JSON.parse(Woods::AtomicFile.read(path)) : nil
-      Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(manifest))
-    rescue JSON::ParserError
-      Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(nil))
-    end
-
     # @param output_dir [Pathname, String] index directory
     # @param wait [Numeric, nil] seconds to wait for the lock (default: the
     #   shared writer wait; injectable so a spec need not sit out the window)

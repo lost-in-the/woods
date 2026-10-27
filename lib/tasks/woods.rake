@@ -52,7 +52,6 @@ namespace :woods do
     puts "  Total: #{results.values.sum(&:size)} units"
     skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
     puts "  #{skipped}" if skipped
-    puts "  #{Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)}"
     puts
     puts "Output written to: #{output_dir}"
   end
@@ -115,7 +114,6 @@ namespace :woods do
 
     puts
     puts "Re-extracted #{affected.size} affected units."
-    puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
   end
 
   desc 'Seed this worktree\'s index from another checkout\'s published index, then update it incrementally'
@@ -442,7 +440,6 @@ namespace :woods do
   desc 'Show index statistics'
   task stats: :environment do
     require 'woods/payload_store'
-    require 'woods/git_enrichment_summary'
 
     output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
@@ -464,7 +461,6 @@ namespace :woods do
     puts "  Ruby version:  #{manifest['ruby_version'] || 'unknown'}"
     puts "  Git SHA:       #{manifest['git_sha'] || 'unknown'}"
     puts "  Git branch:    #{manifest['git_branch'] || 'unknown'}"
-    puts "  #{Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(manifest))}"
     puts "  Persistent pins: #{pins.empty? ? 'none' : pins.join(', ')}"
     puts
 
