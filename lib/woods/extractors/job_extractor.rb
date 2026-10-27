@@ -302,7 +302,7 @@ module Woods
         declarations = collector.call(source).fetch('declarations', [])
         classes = declarations.select { |declaration| declaration['kind'] == 'class' }
         declaration = classes.find { |candidate| candidate['owner'] == class_name }
-        return source unless declaration && declaration['enclosing_nesting'].intersect?(classes.map { |c| c['owner'] })
+        return source unless declaration && (declaration['enclosing_nesting'] & classes.map { |c| c['owner'] }).any?
 
         source.lines[(declaration['line'] - 1)...declaration['end_line']].join
       end

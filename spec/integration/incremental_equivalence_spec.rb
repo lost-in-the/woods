@@ -1743,11 +1743,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     after do
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
       remove_constants(:OwnershipStorage, :OwnershipHost, :OwnershipBaseSerializer, :OwnershipSummary,
                        :OwnershipAccount)
     end
 
     def write_storage_host(include_storage:)
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
       remove_constants(:OwnershipHost)
       path = write_file('app/models/ownership_host.rb', <<~RUBY)
         class OwnershipHost < ApplicationRecord
