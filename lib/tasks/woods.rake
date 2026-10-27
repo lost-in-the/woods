@@ -120,16 +120,16 @@ namespace :woods do
   task :seed, [:from] => :environment do |_task, args|
     require 'woods/worktree_seed'
 
-    source = args[:from] || ENV.fetch('WOODS_SEED_FROM', nil)
+    source = args[:from]
     if source.nil? || source.empty?
-      puts 'Usage: rake "woods:seed[/path/to/other/checkout/tmp/woods]"  (or set WOODS_SEED_FROM)'
+      puts 'Usage: rake "woods:seed[/path/to/other/checkout/tmp/woods]"'
       exit 1
     end
 
     output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
 
     unless Woods::RakeHelpers.woods_daemon_coverage(output_dir) == :none
-      puts 'A watch daemon is maintaining this index — not seeding over it.'
+      puts 'A watch daemon is maintaining this index, so it is not seeded over.'
       exit 0
     end
 

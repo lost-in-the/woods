@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'open3'
 require 'pathname'
@@ -45,6 +46,7 @@ module Woods
         manifest = JSON.parse(AtomicFile.read(payload.join('manifest.json')))
         verify_writer(manifest)
         verify_commit(manifest['git_sha'])
+        verify_boot_inputs(manifest)
         verify_source_checkout(manifest['git_sha'])
         raise Unverifiable, 'the seed has no source identity key' unless key_path.file?
 
@@ -74,6 +76,30 @@ module Woods
 
         _out, _err, status = Open3.capture3(*GitCommand.argv(@root, 'cat-file', '-e', "#{sha}^{commit}"))
         raise Unverifiable, "this repository does not have the seed's commit #{sha[0, 12]}" unless status.success?
+      end
+
+      # Gitignored boot inputs never show in a git diff, so compare the digests
+      # the manifest recorded with this worktree's files (same formulas as the
+      # extractor's manifest).
+      def verify_boot_inputs(manifest)
+        { 'gemfile_lock_sha' => gemfile_lock_digest, 'schema_sha' => schema_digest }.each do |key, current|
+          next if manifest[key] == current
+
+          raise Unverifiable, "#{key.delete_suffix('_sha')} differs from the seed's, so its boot inputs differ"
+        end
+      end
+
+      def gemfile_lock_digest
+        path = @root.join('Gemfile.lock')
+        path.exist? ? Digest::SHA256.file(path).hexdigest : nil
+      end
+
+      def schema_digest
+        %w[db/schema.rb db/structure.sql].each do |name|
+          path = @root.join(name)
+          return Digest::SHA256.file(path).hexdigest if path.exist?
+        end
+        nil
       end
 
       def verify_source_checkout(sha)

@@ -80,7 +80,7 @@ bundle exec rake "woods:seed[/path/to/main/checkout/tmp/woods]"
 
 What it does:
 
-1. **Verifies the seed.** The seed must be written by this Woods version and be incremental-ready. It must record a commit that exists in the new worktree's repository. Its own checkout must still be on that commit, with no uncommitted changes, and still match the source it indexed. It must carry its source identity key.
+1. **Verifies the seed.** The seed must be written by this Woods version and be incremental-ready. It must record a commit that exists in the new worktree's repository. Its own checkout must still be on that commit, with no uncommitted changes, and still match the source it indexed. It must carry its source identity key. The `Gemfile.lock` and schema digests it recorded must equal this worktree's, because a gitignored boot input never shows in a git diff.
 2. **Builds beside the target.** The copy and the incremental run happen in `<output>.seed-<pid>`. The only thing that makes the index visible is the final rename of `generation.json` into the output directory, so a reader never sees a half-seeded index. A crash leaves no published generation.
 3. **Rewrites what names the checkout.** `git_branch` and `git_sha` in the manifest, and the recorded source root in `source_inputs.json`, now describe the new worktree. The generation number restarts at 1.
 4. **Updates incrementally.** The change set is `git diff <seed commit>` against the working tree (committed and uncommitted tracked changes) plus untracked files. Ignored files are not in it.
