@@ -2648,6 +2648,35 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .to eq(%w[ledger_books/_account_head.html.erb posts/_account_head.html.erb])
     end
 
+    it 'follows a view directory gaining its mailer' do
+      created_directory = !File.directory?(app_path('app/mailers'))
+      write_file('app/views/ledger_notice_mailer/statement.html.erb', "<p>statement</p>\n")
+
+      index = run_sequence([
+                             lambda {
+                               write_file('app/mailers/ledger_notice_mailer.rb', <<~RUBY)
+                                 class LedgerNoticeMailer < ActionMailer::Base
+                                   def statement; end
+                                 end
+                               RUBY
+                               load app_path('app/mailers/ledger_notice_mailer.rb')
+                               'app/mailers/ledger_notice_mailer.rb'
+                             }
+                           ])
+
+      identifier = 'ledger_notice_mailer/statement.html.erb'
+      template = unit_snapshot(index).values.find { |unit| unit['identifier'] == identifier }
+      expect(template['dependencies']).to include(a_hash_including('target' => 'LedgerNoticeMailer',
+                                                                   'via' => 'view_render'))
+    ensure
+      # A directory created after Rails boot is not managed by Zeitwerk, and
+      # the fixture mailer must not join later examples' inventories.
+      Object.send(:remove_const, :LedgerNoticeMailer) if Object.const_defined?(:LedgerNoticeMailer, false)
+      FileUtils.rm_f(app_path('app/mailers/ledger_notice_mailer.rb'))
+      directory = app_path('app/mailers')
+      Dir.rmdir(directory) if created_directory && File.directory?(directory) && Dir.empty?(directory)
+    end
+
     # The controller stays loaded for the rest of the process, so its file
     # joins the pristine tree and the runtime keeps agreeing with the tree.
     after do
@@ -2973,6 +3002,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/controllers/rt_desk_controller.rb
         app/controllers/rt_lamp_controller.rb
         app/components/rt_lamp/shade_component.rb
+        app/controllers/rt_yard_controller.rb
+        app/services/rt_yard/tile_component.rb
       ]
     end
 
@@ -3068,6 +3099,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                            ])
 
       expect(render_edges(index, 'RtDeskController')).to eq([%w[RtDesk::CardComponent], []])
+    end
+
+    it 'retargets an unchanged controller when the component it renders is created outside the component directories' do
+      index = run_sequence([
+                             lambda do
+                               write_and_load('app/controllers/rt_yard_controller.rb', <<~RUBY)
+                                 class RtYardController < ApplicationController
+                                   def show
+                                     render RtYard::TileComponent.new
+                                   end
+                                 end
+                               RUBY
+                             end,
+                             lambda do
+                               write_and_load('app/services/rt_yard/tile_component.rb', <<~RUBY)
+                                 module RtYard
+                                   class TileComponent < ApplicationComponent
+                                     def call = "tile"
+                                   end
+                                 end
+                               RUBY
+                             end
+                           ])
+
+      expect(render_edges(index, 'RtYardController')).to eq([%w[RtYard::TileComponent], []])
     end
 
     it 'summarises unresolved renders and action facts on the graph node, full and incremental alike (#837)' do
@@ -3671,6 +3727,20 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       )
       expect(differences(index, full_extraction)).to be_empty
       expect(unit_of(index, 'lib', 'WidgetGenerator')).to be_nil
+    end
+
+    it 'reports the same skipped files for a library split across files, through edits' do
+      main = 'lib/ledger_split.rb'
+      secondary = 'lib/ledger_split/version.rb'
+
+      index = run_sequence([
+                             -> { write_file(main, "module LedgerSplit\n  ONE = 1\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '1'\nend\n") },
+                             -> { write_file(secondary, "module LedgerSplit\n  VERSION = '2'\nend\n") }
+                           ])
+
+      expect(read_json(index, 'skipped_files.json').fetch('files').map { |entry| entry['path'] })
+        .not_to include(main, secondary)
     end
 
     describe 'route files' do

@@ -1,0 +1,1 @@
+- A full run now builds `skipped_files.json` from the same path set an incremental run uses, the dependency graph's registered paths. A secondary file of a multi-file library unit is no longer listed as skipped by a full run while an incremental run omits it.

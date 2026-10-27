@@ -1,0 +1,1 @@
+- `woods-extract incremental` keeps a symlinked source under its in-tree path instead of resolving it to the symlink target, so the source is dispatched like any other instead of being dropped or refused. A path named through an alias of the root still resolves under the physical root.

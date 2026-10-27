@@ -184,6 +184,18 @@ RSpec.describe Woods::Extractor do
         # Should not raise — error in models/ doesn't block controllers/
         expect { extractor.send(:eager_load_extraction_directories) }.not_to raise_error
       end
+
+      it 'skips a directory the loader does not manage and continues' do
+        stub_const('Zeitwerk::Error', Class.new(StandardError)) unless defined?(Zeitwerk::Error)
+        FileUtils.mkdir_p(File.join(tmpdir, 'app', 'models'))
+        FileUtils.mkdir_p(File.join(tmpdir, 'app', 'controllers'))
+
+        allow(loader).to receive(:eager_load_dir).with(File.join(tmpdir, 'app', 'models'))
+                                                 .and_raise(Zeitwerk::Error, 'I do not manage app/models')
+        expect(loader).to receive(:eager_load_dir).with(File.join(tmpdir, 'app', 'controllers'))
+
+        expect { extractor.send(:eager_load_extraction_directories) }.not_to raise_error
+      end
     end
 
     context 'with Zeitwerk 2.5 (no eager_load_dir)' do
