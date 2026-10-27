@@ -56,10 +56,23 @@ RSpec.describe 'woods_status tool' do
       expect(status[:index]).to include(woods_version: nil)
     end
 
-    it 'embeds an update sub-hash that names no latest version it never learned' do
-      # spec_helper stubs the network fetch to nil, so a hermetic run learns no
-      # published version: latest_version is unknown, not the installed one.
+    it 'reports the update check as pending on the first call, without waiting for the probe' do
+      gate = Queue.new
+      allow(Woods::UpdateCheck).to receive(:fetch_latest_version) { gate.pop }
+
       expect(status[:server][:update]).to eq(
+        current_version: Woods::VERSION, latest_version: nil, update_available: false, checked: false, pending: true
+      )
+      gate << nil
+      Woods::UpdateCheck.await_refresh
+    end
+
+    it 'names no latest version it never learned once the probe has failed' do
+      status
+      Woods::UpdateCheck.await_refresh
+      again = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: fixture_dir)
+
+      expect(again[:server][:update]).to eq(
         current_version: Woods::VERSION,
         latest_version: nil,
         update_available: false,
@@ -67,9 +80,11 @@ RSpec.describe 'woods_status tool' do
       )
     end
 
-    it 'reports update_available=true when a newer version is published' do
+    it 'reports update_available=true once the probe has learned a newer version' do
       allow(Woods::UpdateCheck).to receive(:fetch_latest_version).and_return('999.0.0')
 
+      status
+      Woods::UpdateCheck.await_refresh
       s = Woods::MCP::Server.build_status(reader: reader, retriever: nil, index_dir: fixture_dir)
       expect(s[:server][:update]).to include(
         current_version: Woods::VERSION,
