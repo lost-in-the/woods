@@ -241,7 +241,7 @@ ls app/decorators/ app/state_machines/ 2>/dev/null
 ls tmp/woods/decorators/ tmp/woods/state_machines/ 2>/dev/null
 ```
 
-Note: `config.extractors` does not control anything today, it's accepted for forward compatibility only and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
+Note: `config.extractors` is deprecated (removed in Woods 3.0). It does not control anything and is not consulted by extraction or retrieval. See [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md) for what each extractor looks for.
 
 ---
 

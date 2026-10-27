@@ -56,6 +56,29 @@ RSpec.describe Woods::Console::RackMiddleware do
     end
   end
 
+  describe 'unknown-name suggestions' do
+    let(:config) do
+      Woods::Configuration.new.tap do |c|
+        c.console_blocked_tables = %w[identities]
+        c.console_redacted_columns = %w[ssn]
+        c.console_redacted_key_values = [{ 'key_column' => 'name', 'value_column' => 'secret_value', 'patterns' => [] }]
+      end
+    end
+    let(:introspection) do
+      { registry: { 'Identity' => %w[id], 'Person' => %w[id ssn name secret_value nick] },
+        tables: { 'Identity' => 'identities', 'Person' => 'people' } }
+    end
+
+    it 'hides blocked tables and redacted columns from refusals' do
+      validator = middleware.send(:build_model_validator, introspection, config)
+
+      expect { validator.validate_model!('Identit') }
+        .to raise_error(Woods::Console::ValidationError, /No close match among 1 known model\./)
+      expect { validator.validate_column!('Person', 'ssm') }
+        .to raise_error(Woods::Console::ValidationError, /No close match among 2 known columns\./)
+    end
+  end
+
   describe '#build_model_introspection' do
     let(:logger) { instance_double(Woods::Observability::StructuredLogger) }
     let(:bad_model) do

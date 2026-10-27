@@ -499,9 +499,9 @@ The packaged Index Server's `woods_status` tool reports a single-call health sna
 
 Not today. `Woods::Extractor::EXTRACTORS` is a frozen constant listing the 34
 built-in extractor classes, and nothing in the extraction path consults
-`config.extractors` to add to that list. `config.extractors` exists only for
-forward compatibility, setting it to anything other than the default warns
-and has no effect on which extractors run. If you need a custom extractor
+`config.extractors` to add to that list. `config.extractors` is deprecated
+(removed in Woods 3.0): assigning it warns and has no effect on which
+extractors run. If you need a custom extractor
 today, the extractor interface (`initialize` + `extract_all` returning
 `Array<ExtractedUnit>`) is stable and documented in
 [EXTRACTOR_REFERENCE.md](EXTRACTOR_REFERENCE.md), but wiring one in requires
@@ -511,7 +511,7 @@ patching `EXTRACTORS` directly (a gem fork or monkeypatch), not a config call.
 
 ### How do I exclude sensitive directories from extraction?
 
-`config.extractors` cannot remove an extractor from the run, see above.
+`config.extractors` is deprecated and cannot remove an extractor from the run, see above.
 Exclude a directory from eager loading instead:
 
 ```ruby

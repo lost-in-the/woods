@@ -53,9 +53,9 @@ end
 
 ### CI-only extraction (skip framework sources)
 
-`config.extractors` cannot select a subset of extractors, it's accepted for
-forward compatibility only (see [Extractors](#extractors) below). To speed up
-CI, skip the one extractor that's actually optional instead:
+`config.extractors` is deprecated and cannot select a subset of extractors
+(see [Extractors](#extractors) below). To speed up CI, skip the one extractor
+that's actually optional instead:
 
 ```ruby
 Woods.configure do |config|
@@ -108,7 +108,7 @@ Columns:
 | Option | Type | Default | Role | Description |
 |--------|------|---------|------|-------------|
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | deprecated, inert | Does not select which extractors run. Assigning it warns once; removed in Woods 3.0. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
 | `max_context_tokens` | Integer | `8000` | user-settable | Default context-assembly token budget captured when a retriever is built; per-call budget overrides it |
@@ -700,21 +700,26 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 
 ## Extractors
 
-`config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 42 extractors always run during a full extraction,
-regardless of what this array holds, nothing in the extraction path reads
-it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
-config). Setting `extractors` to anything other than its default value emits
-a warning:
+`config.extractors` is **deprecated** and has no effect. All 42 extractors
+always run during a full extraction, regardless of what this array holds.
+Nothing in the extraction path reads it (`Woods::Extractor::EXTRACTORS` is a
+frozen constant, not derived from config). Full, incremental, refresh and watch
+runs cover the same extractors whatever the option holds.
+
+- Reading and assigning it keep working until it is removed in Woods 3.0.
+- An explicit assignment, default list included, prints one deprecation
+  warning per process. Woods' own defaults and a normal boot never do.
+- Remove the line from your initializer. Nothing replaces it, and there is no
+  plan for extractor selection.
 
 ```ruby
 config.extractors = %i[models controllers services]
-# => warns: "config.extractors is accepted for forward compatibility but
-#    extractor selection is not implemented; all extractors run."
+# => [woods] DEPRECATED: config.extractors is deprecated and has no effect: every
+#    extractor always runs. Remove the assignment from your Woods initializer;
+#    the option will be removed in Woods 3.0.
 ```
 
-The array exists for forward compatibility with a future selection knob.
-Leave it at its default. The full list of what always runs:
+The full list of what always runs:
 
 | Symbol | Extractor | What it adds |
 |--------|-----------|-------------|
