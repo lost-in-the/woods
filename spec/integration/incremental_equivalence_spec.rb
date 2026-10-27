@@ -3112,8 +3112,50 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
       expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'units_missing_facts')
       expect(summary(index_dir).dig('capture', 'retained')).to eq(0)
-      expect(extractor).not_to receive(:read_published_unit).with('SharedLibrary', :lib)
-      extractor.send(:backfill_git_source_counts)
+      next_extractor = Woods::Extractor.new(output_dir: index_dir)
+      expect(next_extractor).not_to receive(:read_published_unit).with('SharedLibrary', :lib)
+      next_extractor.extract_changed([path])
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+    end
+
+    it 'keeps retained contributor facts when Git fails, but drops them when the library source changes' do
+      path = write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      coverage = summary(index_dir).fetch('coverage')
+      make_git_unreachable
+
+      Woods::Extractor.new(output_dir: index_dir).refresh(:libs)
+
+      expect(summary(index_dir)).to include('state' => 'degraded', 'reason' => 'head_unresolvable')
+      expect(summary(index_dir).fetch('coverage')).to eq(coverage)
+      expect(summary(index_dir).fetch('capture')).to eq('refreshed' => 0, 'retained' => coverage.fetch('with_facts'))
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(2)
+
+      write_file(path, "module SharedLibrary\n  ONE = :changed\nend\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      expect(read_json(index_dir, 'dependency_graph.json').dig('nodes', 'SharedLibrary', 'git_sources')).to eq(0)
+      expect(summary(index_dir).dig('coverage', 'history_unavailable')).to be_positive
+      expect(summary(index_dir).dig('capture', 'refreshed')).to eq(0)
+    end
+
+    it 'keeps the captured branch with its SHA when a checkout happens during extraction' do
+      index_dir = full_extraction
+      manifest = read_json(index_dir, 'manifest.json')
+      allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |method, *args, **kwargs|
+        result = method.call(*args, **kwargs)
+        git_in_app('checkout', '-b', 'after-capture')
+        git_in_app('commit', '--allow-empty', '-m', 'new branch commit')
+        result
+      end
+
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+
+      expect(read_json(index_dir, 'manifest.json').slice('git_sha', 'git_branch'))
+        .to eq(manifest.slice('git_sha', 'git_branch'))
     end
 
     %i[full incremental].each do |mode|

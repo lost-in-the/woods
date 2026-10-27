@@ -491,6 +491,8 @@ Multi-source library nodes carry `git_sources`, the number of contributors
 with Git facts. Zero means the contributors were counted but none had facts;
 an absent field in an older graph is unknown. Incremental publication backfills
 this count from retained unit JSON without refreshing or re-dating those facts.
+Unreadable unit metadata is retried on a later publication rather than assigned
+a verified zero.
 The manifest counts the library once when `git_sources` is positive; see
 [Git trust diagnostics](TROUBLESHOOTING.md#checking-whether-git-facts-can-be-trusted).
 

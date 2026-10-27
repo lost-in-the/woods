@@ -403,6 +403,9 @@ Multi-source libraries count once when at least one contributor has Git facts.
 Incremental publication fills missing graph coverage counts from retained unit
 metadata, including indexes written before the summary existed. Those facts
 remain `retained`; reading their metadata does not refresh their history.
+An unavailable history read also preserves facts on unchanged retained
+libraries. Re-extracted libraries lose their old facts when Git cannot refresh
+them, so retained facts cannot mask a source change.
 
 `head_sha` names the commit pinned before this run's history read. The commit
 table and manifest `git_sha` use the same captured revision. A commit made during

@@ -2220,8 +2220,9 @@ module Woods
 
     # Pre-summary writers kept contributor facts only in unit JSON. Migrate
     # their retained library nodes before publishing known coverage. An
-    # explicit zero distinguishes counted-but-unavailable from not yet read,
-    # so subsequent publications need no extra unit reads.
+    # explicit zero distinguishes counted-but-unavailable from not yet read.
+    # Once a verified count is published, subsequent publications need no
+    # extra unit reads. Unreadable metadata remains unknown and can be retried.
     #
     # @return [void]
     def backfill_git_source_counts
@@ -2538,6 +2539,8 @@ module Woods
     def reset_git_capture
       @git_availability = nil
       @git_capture_head = nil
+      @git_capture_branch = GitProvenance::UNKNOWN
+      @git_capture_resolved = false
       @git_history_failed = false
     end
 
@@ -2546,10 +2549,18 @@ module Woods
     #
     # @return [String, nil] full commit SHA, without environment fallback
     def git_capture_head
-      @git_capture_head ||= begin
-        head = run_git('rev-parse', '--verify', 'HEAD^{commit}')
-        head if head.match?(GitLog::SHA)
-      end
+      return @git_capture_head if @git_capture_resolved
+
+      @git_capture_resolved = true
+      # Resolve the named ref itself, so a checkout between these commands
+      # cannot pair the old branch name with the new branch's commit.
+      ref = run_git('symbolic-ref', '--quiet', 'HEAD')
+      revision = ref.empty? ? 'HEAD' : ref
+      head = run_git('rev-parse', '--verify', "#{revision}^{commit}")
+      return unless head.match?(GitLog::SHA)
+
+      @git_capture_branch = ref.start_with?('refs/heads/') ? ref.delete_prefix('refs/heads/') : GitProvenance::UNKNOWN
+      @git_capture_head = head
     end
 
     # Whether this run's git calls can produce facts, and when they cannot, a
@@ -2974,8 +2985,11 @@ module Woods
       # pointing at the real git dir; when that dir is unreachable (e.g. an
       # unmounted host path inside a container) this resolves to "unknown"
       # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
-      provenance = GitProvenance.new(root: Rails.root).to_h
-      provenance[:git_sha] = @git_capture_head if @git_capture_head
+      provenance = if @git_capture_head
+                     { git_sha: @git_capture_head, git_branch: @git_capture_branch }
+                   else
+                     GitProvenance.new(root: Rails.root).to_h
+                   end
 
       # Incremental runs never populate @results — deriving counts from
       # memory would clobber a good manifest with zeros. Recompute from the
@@ -4693,7 +4707,7 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      if git_data && SourceContributors.multiple?(data)
+      if git_data && !git_data.empty? && SourceContributors.multiple?(data)
         SourceContributors.annotate_git(data, git_data)
         sources = SourceContributors.git_source_count(data)
         @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil,
