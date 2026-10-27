@@ -656,6 +656,12 @@ RSpec.describe 'Index MCP tool contracts' do
     { 'type' => 'integer', 'minimum' => minimum, 'maximum' => maximum }
   end
 
+  # The read tools that accept a worktree `root` (docs/MCP_WORKTREE_SETUP.md).
+  def root_tools
+    %w[lookup search dependencies dependents structure graph_analysis domain_clusters pagerank framework
+       recent_changes trace_flow diagram woods_status]
+  end
+
   def string_contract(minimum_length, maximum_length)
     { 'type' => 'string', 'minLength' => minimum_length, 'maxLength' => maximum_length }.compact
   end
@@ -1362,10 +1368,11 @@ RSpec.describe 'Index MCP tool contracts' do
       listed_tools(full_server).each do |tool|
         expected = contract_oracle.fetch(tool.fetch('name'))
         schema = tool.fetch('inputSchema')
+        properties = expected.fetch(:properties)
+        properties = properties.merge('root' => string_contract(nil, 10_000)) if root_tools.include?(tool.fetch('name'))
         expect(schema.fetch('required', [])).to eq(expected.fetch(:required)), tool.fetch('name')
-        expect(schema.fetch('properties').keys)
-          .to contain_exactly(*expected.fetch(:properties).keys), tool.fetch('name')
-        expected.fetch(:properties).each do |name, property|
+        expect(schema.fetch('properties').keys).to contain_exactly(*properties.keys), tool.fetch('name')
+        properties.each do |name, property|
           expect(projected_schema(schema.fetch('properties').fetch(name), property))
             .to eq(property), "#{tool.fetch('name')}.#{name}"
         end

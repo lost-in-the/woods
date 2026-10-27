@@ -8,6 +8,7 @@
 # Usage:
 #   bundle exec rake woods:extract          # Full extraction
 #   bundle exec rake woods:incremental      # Changed files only
+#   bundle exec rake "woods:seed[DIR]"      # Seed a worktree index from another checkout
 #   bundle exec rake woods:extract_framework # Rails/gem sources only
 #   bundle exec rake woods:validate          # Validate index integrity
 #   bundle exec rake woods:stats             # Show index statistics
@@ -113,6 +114,38 @@ namespace :woods do
 
     puts
     puts "Re-extracted #{affected.size} affected units."
+  end
+
+  desc 'Seed this worktree\'s index from another checkout\'s published index, then update it incrementally'
+  task :seed, [:from] => :environment do |_task, args|
+    require 'woods/worktree_seed'
+
+    source = args[:from]
+    if source.nil? || source.empty?
+      puts 'Usage: rake "woods:seed[/path/to/other/checkout/tmp/woods]"'
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+
+    unless Woods::RakeHelpers.woods_daemon_coverage(output_dir) == :none
+      puts 'A watch daemon is maintaining this index, so it is not seeded over.'
+      exit 0
+    end
+
+    puts "Seeding #{output_dir} from #{source}..."
+    result = Woods::RakeHelpers.woods_with_extraction_lock(output_dir) do
+      Woods::WorktreeSeed.new(source_dir: source, output_dir: output_dir, root: Rails.root).call
+    end
+
+    case result.mode
+    when :seeded
+      puts "Seeded and brought up to date with #{result.changed.size} changed paths."
+    when :skipped
+      puts "Nothing to do: #{result.reason}."
+    else
+      puts "Seed not usable (#{result.reason}); ran a full extraction instead."
+    end
   end
 
   desc 'Consume an encoded hook refresh batch (internal plugin transport)'
