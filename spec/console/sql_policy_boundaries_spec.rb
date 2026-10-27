@@ -358,6 +358,22 @@ RSpec.describe 'Console SQL policy boundaries' do
       expect(result['error']).not_to include("'id'")
     end
 
+    it 'recognizes the duplicate-name error by its server error number inside a wrapped cause' do
+      driver_error_class = Class.new(StandardError) do
+        def error_number
+          1060
+        end
+      end
+      allow(connection).to receive(:select_all) do
+        raise driver_error_class, 'duplicate field in derived table'
+      rescue StandardError
+        raise StandardError, 'statement failed'
+      end
+      result = request('SELECT * FROM users a JOIN users b ON a.id = b.id')
+      expect(result).to include('ok' => false, 'error_type' => 'validation')
+      expect(result['error']).to include('unique output column names')
+    end
+
     it 'keeps other adapter errors sanitized' do
       allow(connection).to receive(:select_all).and_raise(StandardError, "Mysql2::Error: Unknown column 'u.nope'")
       result = request('SELECT u.nope FROM users u')

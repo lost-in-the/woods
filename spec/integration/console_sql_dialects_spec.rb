@@ -55,12 +55,16 @@ RSpec.describe 'Console SQL against real database dialects', :live_backends do
 
   # The row cap wraps every statement in a derived table. MySQL and MariaDB
   # require unique column names there; PostgreSQL returns repeated names as
-  # the inner statement produced them.
+  # the inner statement produced them. The join is between the two fixture
+  # tables (both carry `id` and `name`), not a self-join: the fixture tables
+  # are temporary, and MySQL cannot reopen a temporary table within one
+  # statement, which would fail earlier for an unrelated reason.
   it 'refuses repeated output names on MySQL with a message naming the row-cap cause' do
     with_policy_server('WOODS_MYSQL_URL') do |server|
-      users = WoodsConsoleOutputPolicyContract::TABLES[0]
+      users, preferences = WoodsConsoleOutputPolicyContract::TABLES
       result = WoodsConsoleOutputPolicyContract.assert_request!(
-        server, 'console_sql', { sql: "SELECT * FROM #{users} a JOIN #{users} b ON a.id = b.id" }, refused: true
+        server, 'console_sql',
+        { sql: "SELECT * FROM #{users} u JOIN #{preferences} p ON p.user_id = u.id" }, refused: true
       )
       expect(result.to_json).to include('unique output column names')
     end
