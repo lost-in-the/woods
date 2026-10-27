@@ -267,7 +267,7 @@ RSpec.describe 'Source-reference extraction integration' do
     expect(graph.node('RefIntegrationCaller', type: :poro)).to include(attributes)
     expect(graph.node('RefIntegrationCaller', type: :poro)[:file_path]).to eq(File.join(@root, 'app/models/caller.rb'))
     expect(extractor.instance_variable_get(:@incremental_written).keys).to eq(['RefIntegrationTarget'])
-    expected_dependents = [{ 'type' => 'poro', 'identifier' => 'RefIntegrationCaller' }]
+    expected_dependents = [{ 'type' => 'poro', 'identifier' => 'RefIntegrationCaller', 'via' => 'code_reference' }]
     expect(read_unit(extractor, 'RefIntegrationTarget')['dependents']).to eq(expected_dependents)
     expect(read_unit(previous, 'RefIntegrationCaller')).to eq(before)
   end
