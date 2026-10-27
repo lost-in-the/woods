@@ -15,6 +15,7 @@ require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'extracted_form'
 require_relative 'dependency_graph'
+require_relative 'render_scope'
 require_relative 'container_attribution'
 require_relative 'source_size'
 require_relative 'extraction_identities'
@@ -3327,10 +3328,15 @@ module Woods
     # recorded graph edges (for example, queue_as Settings::QUEUE). A Ruby edit
     # therefore refreshes both complete hybrid inventories after Rails reload.
     # Non-Ruby batches retain the narrower pre-change graph selection.
+    #
+    # Component edges are resolved against the loaded constant tables, so they
+    # re-run with a Ruby edit only when {RenderScope} finds the edit touched a
+    # constant they resolve (or cannot read the edit).
     def hybrid_discovery_keys(change_set, affected_ids)
       paths = change_set.absolute_paths
+      scope = render_scope(change_set)
       keys = if paths.any? { |path| path.end_with?('.rb') }
-               (HYBRID_DISCOVERY_EXTRACTORS + RUNTIME_RESOLVED_EXTRACTORS).to_set
+               HYBRID_DISCOVERY_EXTRACTORS.to_set.merge(scope.components? ? RUNTIME_RESOLVED_EXTRACTORS : [])
              else
                affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
                            .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
@@ -3340,11 +3346,61 @@ module Woods
       # A controller's render edges are resolved the same way, but every
       # controller re-running on every Ruby edit would cost more than the
       # bounded blast radius saves. Controllers re-run when a file that can
-      # define a component changes; a component defined outside the component
-      # directories, or an alias defined elsewhere, retargets a controller's
-      # edge when the controller file changes or on a full extraction.
-      keys.add(:controllers) if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) }
+      # define a component changes a constant they resolve; a component defined
+      # outside the component directories, or an alias defined elsewhere,
+      # retargets a controller's edge when the controller file changes or on a
+      # full extraction.
+      if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) } && scope.controllers?
+        keys.add(:controllers)
+      end
       keys
+    end
+
+    # @param change_set [ChangeSet]
+    # @return [RenderScope]
+    def render_scope(change_set)
+      RenderScope.new(
+        change_set: change_set, graph: @dependency_graph,
+        read_unit: ->(identifier, type) { read_published_unit(identifier, type) },
+        units_of: ->(types) { types.flat_map { |type| published_units_of(type) } },
+        ancestor_names: ->(types) { family_ancestor_names(types) }
+      )
+    end
+
+    # @return [Hash, nil] the published unit, nil when absent or unreadable
+    def read_published_unit(identifier, type)
+      key = TYPE_TO_EXTRACTOR_KEY[type]
+      return nil unless key
+
+      path = payload_dir.join(key.to_s, collision_safe_filename(identifier))
+      File.exist?(path) ? JSON.parse(AtomicFile.read(path)) : nil
+    rescue JSON::ParserError, SystemCallError, EncodingError
+      nil
+    end
+
+    # @return [Array<Hash>] every published unit of a type
+    # @raise [JSON::ParserError, SystemCallError] when one cannot be read
+    def published_units_of(type)
+      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(type).to_s)
+      return [] unless directory.directory?
+
+      directory.children.sort.filter_map do |file|
+        next unless file.extname == '.json' && file.basename.to_s != '_index.json'
+
+        data = JSON.parse(AtomicFile.read(file))
+        data if data['type'].to_s == type.to_s
+      end
+    end
+
+    # Names of the ancestors of the classes the families discover, since a
+    # constant resolves through them.
+    def family_ancestor_names(types)
+      types.flat_map do |type|
+        extractor = extractor_for(TYPE_TO_EXTRACTOR_KEY.fetch(type))
+        next [] unless extractor.respond_to?(:discoverable_classes)
+
+        extractor.discoverable_classes.flat_map { |klass| klass.ancestors.filter_map(&:name) }
+      end.uniq
     end
 
     # A controller's render that named no component can only gain a target when

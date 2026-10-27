@@ -303,15 +303,26 @@ step before it.
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 
-   Components and view components re-run with them on a Ruby edit. A `render`
+   Components and view components re-run with them on a Ruby edit only when
+   the edit touched a constant they resolve. `RenderScope` reads the
+   constants a file defines from its syntax tree before and after the edit
+   (the file before is recovered from the published units that hold it), and
+   compares the touched names with the names the families resolved (render and
+   slot targets, unresolved and external names) and the ancestors of their
+   classes. A method body edit, or a new class nothing renders, re-runs
+   neither family. An edit it cannot read re-runs them: a path outside an
+   `app/` directory, a syntax error, `const_set`, `autoload`, or a method named
+   like a constant (a Kit method). A part of a file that no published unit
+   holds is read as new, which can only make an edit look larger. A render
    edge names the component the running app would reach, resolved against the
    loaded constant tables (lexical scope, included Phlex Kits, top level), so
    creating `Billing::V2::TierGrid` retargets an unchanged
    `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
    edge leads there. Controllers resolve their render edges the same way but
    re-run only when a Ruby file under a component directory
-   (`component_paths`) changes, since every controller re-running on every
-   Ruby edit would cost more than the bounded blast radius saves. A component
+   (`component_paths`) touches a constant a controller resolves, since every
+   controller re-running on every Ruby edit would cost more than the bounded
+   blast radius saves. A component
    defined outside those directories, or an alias defined elsewhere, retargets
    a controller's edge when the controller file changes or on a full
    extraction. The exception is a render that resolved to nothing: a
