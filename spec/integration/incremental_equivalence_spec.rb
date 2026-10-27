@@ -3146,7 +3146,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     it 'keeps the captured branch with its SHA when a checkout happens during extraction' do
       index_dir = full_extraction
       manifest = read_json(index_dir, 'manifest.json')
-      allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |method, *args, **kwargs|
+      # A fully variadic wrapper preserves keyword forwarding on Ruby 3.0/3.1.
+      allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |*args, **kwargs|
+        method = args.shift
         result = method.call(*args, **kwargs)
         git_in_app('checkout', '-b', 'after-capture')
         git_in_app('commit', '--allow-empty', '-m', 'new branch commit')
@@ -3175,7 +3177,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
             write_file(path, source)
             git_in_app('commit', '-am', 'restore identical source bytes')
           end
-          allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |method, *args, **kwargs|
+          allow_any_instance_of(Woods::GitHistory).to receive(:read).and_wrap_original do |*args, **kwargs|
+            method = args.shift
             unless moved
               moved = true
               advance_head.call if timing == :before
