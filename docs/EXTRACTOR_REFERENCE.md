@@ -160,6 +160,10 @@ ancestor's; a filter inherited from another controller's source, a proc, a
   never "no methods".
 - `instance_methods` and `class_methods` are unchanged.
 - Superclass methods are not inlined.
+A verified span for a module mixed in by a receiverless `include`, `extend` or
+`prepend` also carries `mixin` with that call's name (#871), including inside
+`included do` blocks. `kind` and `confidence` are unchanged; see
+[the layout](INDEX_LAYOUT.md#constant-reference-spans).
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;

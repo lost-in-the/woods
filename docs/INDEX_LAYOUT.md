@@ -213,8 +213,31 @@ predates the field. Controller filter entries carry the same `declaration`
 (#820) beside their file-relative `line` and `file`, for filters this unit's own
 source declares.
 
-The generation-local internal reference cache is format 7 for this writer;
-format 6 and earlier require a full baseline rebuild before incremental writes.
+A verified span for a module mixed in carries `mixin` (#871), set to the
+receiverless call that mixed it in:
+
+```json
+{"line": 3, "column": 10, "length": 6, "target": "Auditable", "target_type": "concern", "kind": "constant", "confidence": "verified", "mixin": "include"}
+```
+
+- `mixin` is `include`, `extend` or `prepend`. `kind` stays `constant`, so a
+  reader that filters on `kind: constant` and `confidence: verified` still
+  receives these spans. Use `mixin` to tell a module inclusion from a call.
+- It tags a constant written directly as an argument: `include A, B::C`,
+  `extend ::D`, `prepend(E)`. Each constant of a multi-argument call is tagged.
+- It also tags the call inside an `included do` or `class << self` block and
+  inside a method body. Any receiverless `include`, `extend` or `prepend` counts.
+- Not tagged: a call with a receiver (`Other.include X`, `self.include X`,
+  `singleton_class.prepend X`), and a constant that is only part of an argument
+  expression (`include Wrapper.new`). Those keep their ordinary span.
+- Only `verified` spans carry it. `static` and `ambiguous` spans do not.
+- The key is absent on every other span, never `null`. Readers must ignore it
+  when they do not know it, and accept older indexes without it.
+- Like `method`, it records syntax. It does not prove that the module exists at
+  runtime or that the call ran.
+
+The generation-local internal reference cache is format 8 for this writer;
+format 7 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)

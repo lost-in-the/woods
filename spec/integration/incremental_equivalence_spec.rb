@@ -604,7 +604,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'requires a full rebuild of format 6 before either public incremental writer can advance' do
+    it 'requires a full rebuild of format 7 before either public incremental writer can advance' do
       caller_path = write_file('app/models/reference_upgrade_caller.rb', <<~RUBY)
         class ReferenceUpgradeCaller
           def call
@@ -618,9 +618,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       token = generation.current.token
       cache_path = generation.payload_dir.join('source_references.json')
       cache = read_json(index, 'source_references.json')
-      expect(cache.fetch('version')).to eq(7)
-      cache['version'] = 6
-      cache.fetch('files').each_value { |file| file.fetch('analysis').delete('macros') }
+      expect(cache.fetch('version')).to eq(8)
+      cache['version'] = 7
       File.binwrite(cache_path, JSON.generate(cache))
       previous_cache = File.binread(cache_path)
       previous_units = unit_snapshot(index)
@@ -634,7 +633,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
 
       Woods::Extractor.new(output_dir: index).extract_all
-      expect(read_json(index, 'source_references.json').fetch('version')).to eq(7)
+      expect(read_json(index, 'source_references.json').fetch('version')).to eq(8)
       Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
       expect(differences(index, full_extraction)).to be_empty
     ensure
@@ -1926,6 +1925,63 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_file('app/models/post.rb', post_model)
 
       expect(differences(full_extraction, full_extraction)).to be_empty
+    end
+  end
+
+  describe 'mixin tags on constant references (#871)' do
+    def unit_document(dir, type, identifier)
+      payload = Woods::Generation.new(output_dir: dir).payload_dir
+      Dir[File.join(payload, type, '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+        .find { |unit| unit.is_a?(Hash) && unit['identifier'] == identifier }
+    end
+
+    def mixins(document)
+      document.dig('metadata', 'references').map { |span| span.values_at('target', 'mixin', 'kind', 'confidence') }
+    end
+
+    it 'follows an include, extend and prepend as they are added, moved into an included block and removed' do
+      host = 'app/models/mixin_tag_host.rb'
+      concern = 'app/models/mixin_tag_concern.rb'
+      load app_path(write_file('app/models/mixin_tag_shared.rb', "module MixinTagShared\n  def shared = 1\nend\n"))
+      host_body = lambda do |lines|
+        mixins = lines.map { |line| "  #{line}\n" }.join
+        "class MixinTagHost\n#{mixins}\n  def build\n    MixinTagShared.name\n  end\nend\n"
+      end
+      concern_body = lambda do |mixin|
+        ['module MixinTagConcern', '  extend ActiveSupport::Concern', '', '  included do',
+         "    #{mixin} MixinTagShared", '  end', "end\n"].join("\n")
+      end
+      write = lambda do |path, body|
+        load app_path(write_file(path, body))
+        path
+      end
+      tagged = lambda do |index, identifier|
+        document = unit_document(index, 'poros', identifier) || unit_document(index, 'models', identifier)
+        document.dig('metadata', 'references').map { |span| span.values_at('mixin', 'method', 'kind', 'confidence') }
+      end
+      index = run_sequence(
+        [
+          -> { write.call(concern, concern_body.call('include')) },
+          -> { write.call(host, host_body.call(['include MixinTagConcern'])) },
+          -> { write.call(host, host_body.call(['extend MixinTagShared', 'prepend MixinTagShared'])) },
+          -> { write.call(concern, concern_body.call('extend')) },
+          -> { write.call(host, host_body.call([])) }
+        ]
+      )
+
+      expect(tagged.call(index, 'MixinTagConcern')).to eq([['extend', nil, 'constant', 'verified']])
+      expect(tagged.call(index, 'MixinTagHost')).to eq([[nil, 'name', 'constant', 'verified']])
+      write.call(host, host_body.call(['prepend MixinTagShared']))
+      Woods::Extractor.new(output_dir: index).extract_changed([host])
+      expect(tagged.call(index, 'MixinTagHost'))
+        .to eq([['prepend', nil, 'constant', 'verified'], [nil, 'name', 'constant', 'verified']])
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      %i[MixinTagHost MixinTagConcern MixinTagShared].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
     end
   end
 
