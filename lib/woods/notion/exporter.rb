@@ -82,6 +82,7 @@ module Woods
         raise ConfigurationError, 'notion_api_token is required for Notion export' unless api_token
 
         @database_ids = config.notion_database_ids || {}
+        @include_column_defaults = column_defaults_opt_in?(config)
         @client = client || Client.new(api_token: api_token)
         @reader = reader || build_reader(index_dir)
         @typed_reader = Export::TypedReader.new(@reader)
@@ -362,7 +363,7 @@ module Woods
       # @param current_keys [Array<String>] Sink for this run's column titles
       # @return [Hash] { synced: Integer, skipped: Integer, errors: Array<String> }
       def sync_table_columns(group, database_id, current_keys)
-        mapper = Mappers::ColumnMapper.new
+        mapper = Mappers::ColumnMapper.new(include_defaults: @include_column_defaults)
         stats = { synced: 0, skipped: 0, errors: [] }
         owners = group[:owners].join(', ')
 
@@ -375,6 +376,11 @@ module Woods
         end
 
         stats
+      end
+
+      # @return [Boolean] true only when the host explicitly set the opt-in to true
+      def column_defaults_opt_in?(config)
+        config.respond_to?(:notion_export_column_defaults) && config.notion_export_column_defaults == true
       end
 
       # Sync one physical column's page.

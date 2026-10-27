@@ -1,0 +1,1 @@
+- A Ruby `#` comment on its own line inside a multi-line ERB code tag is now blanked like a `<%#` comment, so a commented-out cache call or render there no longer counts as a call or an edge.

@@ -63,9 +63,10 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Exports and integrations
 
-- [Notion integration](NOTION_INTEGRATION.md)
-- [Obsidian integration](OBSIDIAN_INTEGRATION.md)
-- [Unblocked integration](UNBLOCKED_INTEGRATION.md)
+- [Markdown export](MARKDOWN_EXPORT.md): the supported export path (`woods:markdown`)
+- [Obsidian flavor of the Markdown export](OBSIDIAN_INTEGRATION.md)
+- [Notion integration](NOTION_INTEGRATION.md) (deprecated)
+- [Unblocked integration](UNBLOCKED_INTEGRATION.md) (deprecated)
 
 ## Maintainer material
 

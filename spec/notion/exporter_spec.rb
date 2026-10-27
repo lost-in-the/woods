@@ -236,6 +236,38 @@ RSpec.describe Woods::Notion::Exporter do
       expect(stats[:columns]).to eq(3)
     end
 
+    context 'with a column that has a default' do
+      include_context 'with an in-memory Notion page registry'
+
+      let(:model_units) do
+        [{ 'identifier' => 'User', 'type' => 'model', 'file_path' => 'app/models/user.rb',
+           'source_code' => 'class User < ApplicationRecord; end',
+           'metadata' => { 'table_name' => 'users', 'column_count' => 1, 'associations' => [],
+                           'validations' => [], 'callbacks' => [], 'scopes' => [],
+                           'columns' => [{ 'name' => 'role', 'type' => 'string', 'null' => false,
+                                           'default' => 'member' }] },
+           'dependencies' => [] }]
+      end
+
+      def synced_default(exporter_under_test)
+        exporter_under_test.sync_all
+        page = pages_in('db-columns-uuid').first
+        page[:properties]['Default Value'][:rich_text].first[:text][:content]
+      end
+
+      it 'does not send the default value unless the host opts in' do
+        expect(synced_default(exporter)).to eq('Has default')
+      end
+
+      it 'sends the default value when notion_export_column_defaults is true' do
+        opted_in = double('Configuration', notion_api_token: 'secret_test_token',
+                                           notion_database_ids: config.notion_database_ids,
+                                           notion_export_column_defaults: true)
+        opted_exporter = described_class.new(index_dir: index_dir, config: opted_in, client: client, reader: reader)
+        expect(synced_default(opted_exporter)).to eq('member')
+      end
+    end
+
     it 'reports nothing skipped on a cold manifest' do
       stats = exporter.sync_all
       expect(stats[:skipped]).to eq(0)

@@ -69,6 +69,59 @@ module Woods
       exit 1
     end
 
+    # Run the Markdown export for +woods:markdown+ and its deprecated Obsidian aliases.
+    #
+    # Each setting reads its +WOODS_MARKDOWN_*+ variable first, then the legacy
+    # +WOODS_OBSIDIAN_*+ one, so existing automation keeps working.
+    #
+    # @param obsidian [Boolean] write the Obsidian flavor (wikilinks, tags, +.obsidian/+ config)
+    # @param default_dir [String] folder under the output dir when no path variable is set
+    # @return [void]
+    def woods_markdown_export(obsidian:, default_dir:)
+      require 'woods/obsidian/vault_exporter'
+
+      output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+      target = ENV['WOODS_MARKDOWN_DIR'] || ENV.fetch('WOODS_OBSIDIAN_VAULT', nil) ||
+               File.join(output_dir.to_s, default_dir)
+      obsidian ||= woods_markdown_flag?('OBSIDIAN')
+
+      puts "Exporting extraction data to #{obsidian ? 'an Obsidian-flavored' : 'a'} Markdown folder..."
+      puts "  Output dir: #{output_dir}", "  Target:     #{target}", ''
+      stats = woods_markdown_run(output_dir, target, obsidian)
+      woods_markdown_report(stats, target, obsidian)
+    end
+
+    # Truthy set, so FLAG=false / FLAG=0 disables rather than silently enabling.
+    def woods_markdown_flag?(name)
+      value = ENV.fetch("WOODS_MARKDOWN_#{name}") { ENV.fetch("WOODS_OBSIDIAN_#{name}", '') }
+      %w[1 true yes].include?(value.strip.downcase)
+    end
+
+    def woods_markdown_run(output_dir, target, obsidian)
+      Woods::Obsidian::VaultExporter.new(
+        index_dir: output_dir, vault_path: target, obsidian: obsidian,
+        include_source: woods_markdown_flag?('INCLUDE_SOURCE'),
+        include_framework: woods_markdown_flag?('INCLUDE_FRAMEWORK'),
+        force_purge: woods_markdown_flag?('FORCE_PURGE')
+      ).export_all
+    rescue Woods::Obsidian::ExportError => e
+      puts "ERROR: #{e.message}"
+      exit 1
+    end
+
+    def woods_markdown_report(stats, target, obsidian)
+      puts 'Export complete!'
+      puts "  Notes:    #{stats[:exported]}", "  Indexes:  #{stats[:indexes]}"
+      puts "  Swept:    #{stats[:swept]}", "  Skipped:  #{stats[:skipped]}", ''
+      puts(obsidian ? "Open it in Obsidian: 'Open folder as vault' -> #{target}" : "Markdown written to #{target}")
+      return unless stats[:errors].any?
+
+      puts "  Errors:   #{stats[:errors].size}"
+      stats[:errors].first(5).each { |e| puts "    - #{e}" }
+      puts "    ... and #{stats[:errors].size - 5} more" if stats[:errors].size > 5
+      exit 1
+    end
+
     def woods_with_extraction_lock(output_dir, wait: nil, raise_on_timeout: false, &block)
       require 'woods/source_inputs/handoff'
       if ENV[Woods::SourceInputs::Handoff::ENV_KEY]

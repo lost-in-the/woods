@@ -1,0 +1,1 @@
+- The Puma watch integration spec no longer times out intermittently under parallel CI. Puma 8 can wedge its own graceful shutdown when a stop or restart arrives as a signal, with no Woods code involved. The spec now triggers stop, restart and phased restart through Puma's control app, and bounds a stuck worker with `worker_shutdown_timeout`. Assertions are unchanged. (#883)
