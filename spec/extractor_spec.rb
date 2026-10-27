@@ -727,6 +727,8 @@ RSpec.describe Woods::Extractor do
   # ── batch_git_data ───────────────────────────────────────────────────
 
   describe '#batch_git_data' do
+    before { allow(extractor).to receive(:git_capture_head).and_return('a' * 40) }
+
     it 'returns empty hash for empty input' do
       expect(extractor.send(:batch_git_data, [])).to eq({})
     end
@@ -737,7 +739,7 @@ RSpec.describe Woods::Extractor do
       file_paths = relative_paths.flat_map { |path| [File.join(tmpdir, path)] * 2 }
       reader = instance_double(Woods::GitHistory)
       allow(Woods::GitHistory).to receive(:new).and_return(reader)
-      expect(reader).to receive(:read).once.with(relative_paths, recent_after: kind_of(Time))
+      expect(reader).to receive(:read).once.with(relative_paths, recent_after: kind_of(Time), revision: 'a' * 40)
                                       .and_return(relative_paths.to_h { |path| [path, {}] })
 
       result = extractor.send(:batch_git_data, file_paths)

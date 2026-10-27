@@ -37,6 +37,9 @@ RSpec.describe Woods::Extractor, 'commit table' do
   end
 
   def refresh(full:)
+    # Each call represents a new extraction run, whose entry point clears
+    # the previous capture before resolving the table's inputs.
+    extractor.send(:reset_git_capture)
     extractor.send(:refresh_commit_table, full: full)
   end
 
