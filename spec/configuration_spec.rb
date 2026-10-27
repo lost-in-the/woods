@@ -276,17 +276,69 @@ RSpec.describe Woods::Configuration do
       expect { config.extractors = [:models, 'controllers'] }.to raise_error(Woods::ConfigurationError)
     end
 
-    it 'warns that extractor selection is not implemented when set to a non-default value' do
-      expect { config.extractors = %i[models controllers] }
-        .to output(/extractor selection is not implemented/).to_stderr
-    end
+    context 'deprecation' do
+      before { Woods::Deprecation.reset! }
 
-    it 'does not warn when set to the default list, reordered' do
-      expect { config.extractors = Woods::Configuration::DEFAULT_EXTRACTORS.reverse }.not_to output.to_stderr
+      it 'warns once that the option is deprecated and removed in the next major' do
+        expect { config.extractors = %i[models controllers] }
+          .to output(/DEPRECATED: config\.extractors .*no effect.*removed in Woods 3\.0/).to_stderr
+      end
+
+      it 'warns for an explicit assignment of the default list too' do
+        expect { config.extractors = Woods::Configuration::DEFAULT_EXTRACTORS.reverse }
+          .to output(/DEPRECATED: config\.extractors/).to_stderr
+      end
+
+      it 'warns only once per process' do
+        config.extractors = %i[models]
+
+        expect { config.extractors = %i[controllers] }.not_to output.to_stderr
+      end
+
+      it 'does not warn when the value is rejected' do
+        expect { expect { config.extractors = :models }.to raise_error(Woods::ConfigurationError) }
+          .not_to output.to_stderr
+      end
+
+      it 'does not warn when reading the option' do
+        expect { config.extractors }.not_to output.to_stderr
+      end
+
+      it 'keeps reads and writes working' do
+        silence_stderr { config.extractors = %i[models] }
+
+        expect(config.extractors).to eq(%i[models])
+      end
+
+      it 'does not change which extractors a full extraction runs' do
+        require 'woods/extractor'
+        before_keys = Woods::Extractor::EXTRACTORS.keys
+
+        silence_stderr { config.extractors = %i[models] }
+
+        expect(Woods::Extractor::EXTRACTORS.keys).to eq(before_keys)
+        expect(before_keys.size).to be > 1
+      end
+
+      def silence_stderr
+        original = $stderr
+        $stderr = StringIO.new
+        yield
+      ensure
+        $stderr = original
+      end
     end
 
     it 'does not warn on initialize (the default assignment bypasses the setter)' do
+      Woods::Deprecation.reset!
+
       expect { described_class.new }.not_to output.to_stderr
+    end
+
+    it 'does not warn from Woods.configure when the block leaves extractors alone' do
+      Woods::Deprecation.reset!
+
+      expect { Woods.configure { |c| c.pretty_json = false } }.not_to output.to_stderr
     end
   end
 
