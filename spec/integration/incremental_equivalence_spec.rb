@@ -1876,6 +1876,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       document = unit_document(index, 'services', 'LedgerService')
       expect(document.dig('metadata', 'method_effects').keys).to eq(%w[post_all retry_all sign])
+      expect(document.fetch('metadata').fetch('method_effects').values.map { |entry| entry['analysis_status'] })
+        .to all(eq('analyzed'))
       expect(edge_identities(document)).to eq(edge_identities(document).uniq)
       expect(document.fetch('dependencies'))
         .to include('type' => 'service', 'target' => 'SignatureService', 'via' => 'code_reference', 'through' => 'sign')

@@ -209,6 +209,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```json
 "method_effects": {
   "refund!": {
+    "analysis_status": "analyzed",
     "jobs_enqueued": ["RefundJob"],
     "mail_sent": [],
     "services_called": [],
@@ -221,6 +222,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```
 
 - **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Status.** `analysis_status` is the callback field of the same name: `analyzed` (the method's text was scanned) or `source_unavailable` (its text could not be read, so the job, mail, service and column families are empty because nothing was looked at, not because nothing was found). A method is never `unsupported`: it always has a definition. An `analyzed` method with no effects is still left out of the map; a `source_unavailable` one is listed. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
 - **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
 - **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
 - **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.

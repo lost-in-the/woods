@@ -613,8 +613,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
       expect(unit.metadata[:actions]).to eq(['index'])
       expect(unit.metadata[:method_effects]).to eq(
         'self.warm_cache' => {
-          jobs_enqueued: ['WarmLedgerJob'], mail_sent: [], services_called: [], columns_written: [],
-          events_published: [], external_calls: []
+          analysis_status: 'analyzed', jobs_enqueued: ['WarmLedgerJob'], mail_sent: [], services_called: [],
+          columns_written: [], events_published: [], external_calls: []
         }
       )
     end
