@@ -2949,6 +2949,135 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'git enrichment summary' do
+    def summary(index_dir)
+      read_json(index_dir, 'manifest.json').fetch('git_enrichment')
+    end
+
+    def git_in_app(*args)
+      output, status = Open3.capture2e({ 'GIT_CONFIG_GLOBAL' => File::NULL }, 'git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    def service_unit(index_dir, identifier)
+      Dir[File.join(payload_dir(index_dir), 'services', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == identifier }
+    end
+
+    # The linked-worktree failure from the field: `.git` is a pointer file to
+    # a directory this process cannot reach.
+    def make_git_unreachable
+      FileUtils.mv(app_path('.git'), app_path('.git.held'))
+      File.write(app_path('.git'), "gitdir: #{app_path('not-mounted/.git/worktrees/wt')}\n")
+    end
+
+    def restore_git
+      FileUtils.rm_f(app_path('.git'))
+      FileUtils.mv(app_path('.git.held'), app_path('.git'))
+    end
+
+    before do
+      %w[Ledger Audit].each do |name|
+        write_file("app/services/#{name.downcase}_service.rb", service_source("#{name}Service"))
+      end
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('config', 'commit.gpgsign', 'false')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+    end
+
+    after { FileUtils.rm_rf([app_path('.git'), app_path('.git.held')]) }
+
+    it 'publishes the same account from an incremental run as from a full extraction' do
+      index_dir = full_extraction
+      expect(summary(index_dir)).to include('state' => 'available', 'reason' => nil)
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to be_positive
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      git_in_app('commit', '-am', 'edit ledger')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(summary(index_dir)['state']).to eq('available')
+      expect(summary(index_dir).fetch('capture')).to include('retained' => be_positive)
+    end
+
+    it 'marks a cycle that lost Git as degraded, keeps the rest published, and is repaired by a full run' do
+      index_dir = full_extraction
+      healthy = summary(index_dir)
+
+      make_git_unreachable
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      degraded = summary(index_dir)
+      expect(degraded).to include('state' => 'degraded', 'reason' => 'head_unresolvable', 'head_sha' => nil)
+      expect(degraded.fetch('coverage')).to include('eligible_units' => healthy.dig('coverage', 'eligible_units'),
+                                                    'history_unavailable' => be_positive)
+      expect(degraded.fetch('capture')).to include('refreshed' => 0, 'retained' => be_positive)
+      expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git')).to be_nil
+      expect(service_unit(index_dir, 'AuditService').dig('metadata', 'git', 'commit_count')).to eq(1)
+
+      restore_git
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+      expect(summary(index_dir)).to eq(healthy.merge('capture' => summary(index_dir)['capture']))
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+
+      2.times do |round|
+        write_file(path, "#{service_source('LedgerService')}# cycle #{round}\n")
+        Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+        found = differences(index_dir, full_extraction)
+        expect(found).to be_empty, "diverged after cycle #{round}:\n#{found.join("\n")}"
+        expect(summary(index_dir)['state']).to eq('available')
+      end
+    end
+
+    it 'reports a source archive without Git as unavailable and still publishes' do
+      FileUtils.rm_rf(app_path('.git'))
+      index_dir = full_extraction
+
+      expect(summary(index_dir)).to include('state' => 'unavailable', 'reason' => 'no_repository')
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to eq(0)
+      expect(read_json(index_dir, 'manifest.json').fetch('total_units')).to be_positive
+    end
+
+    it 'counts a unit assembled from several source files once, and keeps it equal across a source edit' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      version = write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      sources = lambda do |dir|
+        JSON.parse(File.read(File.join(payload_dir(dir), 'dependency_graph.json'))).dig('nodes', 'SharedLibrary')
+      end
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+
+      write_file(version, "module SharedLibrary\n  VERSION = '2'\nend\n")
+      git_in_app('commit', '-am', 'bump')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([version])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+      expect(summary(index_dir)).to include('state' => 'available')
+    end
+
+    it 'counts a file with no commits in the history window as facts' do
+      index_dir = full_extraction
+      untracked = write_file('app/services/fresh_service.rb', service_source('FreshService'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([untracked])
+
+      expect(service_unit(index_dir, 'FreshService').dig('metadata', 'git', 'commit_count')).to eq(0)
+      expect(summary(index_dir)).to include('state' => 'available')
+    end
+  end
+
   describe 'caller-dependent partials' do
     def navigation_unit(index)
       payload = Woods::Generation.new(output_dir: index).payload_dir
