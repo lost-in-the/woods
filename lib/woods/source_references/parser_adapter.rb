@@ -59,6 +59,11 @@ module Woods
         candidate if candidate&.type == :const
       end
 
+      # @return [Array<Parser::AST::Node>] the arguments written directly in the call
+      def arguments(node)
+        node.children.drop(2).grep(::Parser::AST::Node)
+      end
+
       def children(node)
         nodes = case node.type
                 when :casgn then [node.children[2]]

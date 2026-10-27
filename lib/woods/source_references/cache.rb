@@ -46,7 +46,7 @@ module Woods
       # Analysis record groups and the validator of each record.
       CHECKS = { 'declarations' => :declaration!, 'references' => :reference!, 'skipped' => :skipped!,
                  'macros' => :macro! }.freeze
-      VERSION = 7
+      VERSION = 8
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -167,13 +167,14 @@ module Woods
         end
 
         def reference!(record)
-          shape!(record, %w[owner name nesting line column length], %w[singleton_depth method])
+          shape!(record, %w[owner name nesting line column length], %w[singleton_depth method mixin])
           lexical_record!(record)
           require!(record['column'].instance_of?(Integer) && record['column'].between?(0, MAX_LINE),
                    'invalid source column')
           require!(record['length'].instance_of?(Integer) && record['length'].between?(1, MAX_LINE),
                    'invalid source length')
           require!(Selector.valid?(record['method']), 'invalid method selector') if record.key?('method')
+          require!(Collector::MIXIN_CALLS.include?(record['mixin']), 'invalid mixin') if record.key?('mixin')
         end
 
         def macro!(record)

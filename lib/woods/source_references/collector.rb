@@ -13,7 +13,7 @@ module Woods
     # Lexical nesting is innermost first and preserves compact namespace syntax.
     # References/declarations inside class << self carry singleton_depth; resolving
     # them requires the singleton constant table, not ordinary owner lookup.
-    class Collector
+    class Collector # rubocop:disable Metrics/ClassLength -- one visitor owns declaration, reference and call-site handling
       HANDLERS = { declaration: :declaration, value_class: :value_class, constant: :reference,
                    singleton: :singleton, method: :method_body, call: :call_site }.freeze
       include Macros
@@ -35,6 +35,7 @@ module Woods
       # @param source [String] original Ruby source
       # @return [Hash] declarations, references, skipped records and parse_error
       def call(source)
+        @mixins = {}.compare_by_identity
         @result = { 'declarations' => [], 'references' => [], 'skipped' => [], 'macros' => [], 'parse_error' => nil }
         root, error = @adapter.parse(source)
         @result['parse_error'] = error
@@ -95,6 +96,7 @@ module Woods
       end
 
       def reference(node, nesting, singleton_depth, selector = nil)
+        mixin = @mixins.delete(node)
         name = @adapter.constant_name(node)
         return skip(node, 'dynamic_constant_path', nesting) unless name
         return skip(node, 'unowned_reference', nesting) if nesting.empty?
@@ -102,11 +104,13 @@ module Woods
         record = { 'owner' => nesting.first, 'nesting' => nesting, 'name' => name, **@adapter.position(node) }
         record['singleton_depth'] = singleton_depth if singleton_depth.positive?
         record['method'] = selector if selector
+        record['mixin'] = mixin if mixin
         @result['references'] << record
       end
 
       def call_site(node, nesting, singleton_depth)
         macro(node, nesting) if singleton_depth.zero? && nesting.any?
+        mark_mixins(node)
         receiver = @adapter.constant_receiver(node)
         return visit_children(node, nesting, singleton_depth) unless receiver
 

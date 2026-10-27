@@ -176,7 +176,7 @@ module Woods
           edge = { 'type' => result.fetch('type'), 'target' => result.fetch('target'), 'via' => 'code_reference' }
           next unless @policy.permits?(unit['type'], edge['type'].to_sym)
 
-          span = reference.slice('line', 'column', 'length', 'method').merge(
+          span = reference.slice('line', 'column', 'length', 'method', 'mixin').merge(
             'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
             'kind' => 'constant', 'confidence' => 'verified'
           )

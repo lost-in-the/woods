@@ -160,6 +160,10 @@ ancestor's; a filter inherited from another controller's source, a proc, a
   never "no methods".
 - `instance_methods` and `class_methods` are unchanged.
 - Superclass methods are not inlined.
+A verified span for a module mixed in by a receiverless `include`, `extend` or
+`prepend` also carries `mixin` with that call's name (#871), including inside
+`included do` blocks. `kind` and `confidence` are unchanged; see
+[the layout](INDEX_LAYOUT.md#constant-reference-spans).
 The bounded #756 addition publishes optional `method` evidence only for the
 immediate syntactic selector on an admitted constant receiver. Bare/argument
 constants omit the key. The constant span and typed target stay unchanged;
@@ -205,6 +209,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```json
 "method_effects": {
   "refund!": {
+    "analysis_status": "analyzed",
     "jobs_enqueued": ["RefundJob"],
     "mail_sent": [],
     "services_called": [],
@@ -217,6 +222,7 @@ Model, service, job, PORO, manager, mailer and controller units record what each
 ```
 
 - **Keys.** Instance methods by name, class methods as `self.name`, in source order. Only methods with at least one effect are listed; a unit with none has no `method_effects` key.
+- **Status.** `analysis_status` is the callback field of the same name: `analyzed` (the method's text was scanned) or `source_unavailable` (its text could not be read, so the job, mail, service and column families are empty because nothing was looked at, not because nothing was found). A method is never `unsupported`: it always has a definition. An `analyzed` method with no effects is still left out of the map; a `source_unavailable` one is listed. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
 - **Families.** Jobs, mailers and services are the classes the unit's edges already name, resolved in the method's lexical scope. `columns_written` is checked against the model's columns, so it is empty outside models. `events_published` lists literal `ActiveSupport::Notifications` names and, in a class that includes Wisper, broadcast symbols. `external_calls` names the HTTP client (`Faraday`, `HTTParty`, `Net::HTTP`, `RestClient`).
 - **`via_method`.** Effects of same-class methods the method calls (receiverless, `self.` or `self.class.`), up to three calls away, each under the method whose body holds them. Private methods appear here, never as top-level keys.
 - **Controllers.** Actions are skipped: request flows describe them. Other public methods are recorded.
@@ -1446,6 +1452,7 @@ namespace.
 - Under `spec/tasks/`, `spec/lib/tasks/`, or `test/lib/tasks/`, a task-shaped string is checked against the application's rake tasks. A task name (`'ledger:rebuild_balances'`) becomes `subject_class` with a `:test_coverage` edge to that `rake_task` unit. A namespace (`'ledger'`) is recorded as `metadata[:rake_namespace]` with one edge per `ledger:*` task. Anything else is a description with no edge
 - `test_type` comes from the directory (`:model`, `:controller`, `:request`, `:system`, `:feature`); elsewhere a `feature` block or `type: :feature`/`:system`/`:request` on the first group decides, else `:unit`
 - Records test count (`it`, `specify`, `example`, `scenario`; `test "..."` and `def test_` for Minitest) and whether RSpec or Minitest is detected
+- Publishes `metadata.examples`: every group and example with its label, 1-based line extent and `focus`/`skip`/`pending` markers, by static parsing of the file (#870). A label is named only where the source states it; interpolated, variable or missing labels are `null` and marked `dynamic`. See [the layout](INDEX_LAYOUT.md#test-examples)
 - These directories are outside `app/` so no eager loading is needed
 
 **Test support edges.** References to test support resolve by name to the `test_support` unit that defines them. A name no support file defines yields no edge; the names as written stay in metadata.

@@ -13,6 +13,10 @@ RSpec.describe Woods::SourceReferences::Collector do
         collector.call(source).fetch('references')
       end
 
+      def names_of(records)
+        records.map { |record| record.fetch('name') }
+      end
+
       def names(source)
         references(source).map { |reference| reference.fetch('name') }
       end
@@ -51,6 +55,60 @@ RSpec.describe Woods::SourceReferences::Collector do
           expect(records.first).to include('name' => 'Target', 'method' => selector)
           expect(records.drop(1)).to all(satisfy { |record| !record.key?('method') })
         end
+      end
+
+      it 'tags a constant mixed in by include, extend or prepend, wherever it appears in the class body' do
+        records = references(<<~SOURCE)
+          class Caller
+            include Alpha, Beta::Gamma
+            extend ::Delta
+            prepend(Epsilon)
+            included do
+              extend ClassMethods
+              include Zeta
+            end
+            class << self
+              extend Eta
+            end
+            def later
+              include Theta
+            end
+          end
+        SOURCE
+        tagged = records.select { |record| record.key?('mixin') }.map { |record| record.values_at('name', 'mixin') }
+        expect(tagged).to eq([%w[Alpha include], %w[Beta::Gamma include], %w[::Delta extend],
+                              %w[Epsilon prepend], %w[ClassMethods extend], %w[Zeta include],
+                              %w[Eta extend], %w[Theta include]])
+      end
+
+      it 'tags only a constant passed directly to a receiverless mixin call' do
+        records = references(<<~SOURCE)
+          class Caller
+            include Wrapper.new(Argument)
+            extend Mod.build
+            Other.include Third
+            self.include Fourth
+            singleton_class.prepend Fifth
+            include Plain if Condition
+            register(Sixth)
+          end
+        SOURCE
+        expect(records.select { |record| record.key?('mixin') }.map { |record| record.values_at('name', 'mixin') })
+          .to eq([%w[Plain include]])
+        expect(names_of(records)).to include('Wrapper', 'Argument', 'Mod', 'Third', 'Fourth')
+      end
+
+      it 'leaves other constant reads, selectors and their keys unchanged' do
+        records = references(<<~SOURCE)
+          class Caller
+            include Mixed
+            Target.call(Mixed)
+          end
+        SOURCE
+        expect(records.map { |record| record.slice('name', 'method', 'mixin') }).to eq(
+          [{ 'name' => 'Mixed', 'mixin' => 'include' }, { 'name' => 'Target', 'method' => 'call' },
+           { 'name' => 'Mixed' }]
+        )
       end
 
       it 'does not infer a constant receiver from a group with preceding expressions' do
