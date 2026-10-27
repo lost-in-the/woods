@@ -24,6 +24,7 @@ require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
 require_relative 'git_enrichment_summary'
+require_relative 'temporal/snapshot_unit_facts'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -3134,17 +3135,7 @@ module Woods
       store = build_snapshot_store
       return unless store
 
-      unit_hashes = @results.values.flat_map do |units|
-        units.map do |unit|
-          {
-            'identifier' => unit.identifier,
-            'type' => unit.type.to_s,
-            'source_hash' => Digest::SHA256.hexdigest(unit.source_code.to_s),
-            'metadata_hash' => Digest::SHA256.hexdigest(unit.metadata.to_json),
-            'dependencies_hash' => Digest::SHA256.hexdigest(unit.dependencies.to_json)
-          }
-        end
-      end
+      unit_hashes = Temporal::SnapshotUnitFacts.build(unit_groups: @results.values)
 
       store.capture(manifest, unit_hashes)
       Rails.logger.info "[Woods] Snapshot captured for #{manifest['git_sha'][0..7]}"
