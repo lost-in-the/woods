@@ -2055,7 +2055,12 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         published = graph.fetch('type_index').values.sum(&:size)
         expect(read_json(index, 'manifest.json').fetch('total_units')).to eq(published)
         expect(graph.fetch('stats').fetch('node_count')).to eq(published)
-        expect(graph.fetch('stats').fetch('edge_count')).to eq(graph.fetch('edges').values.sum(&:size))
+        # Other examples leave identifiers published under two types; their
+        # second node and its edges are under `variants`.
+        variants = graph.fetch('variants', [])
+        edges = graph.fetch('edges').values.sum(&:size) + variants.sum { |variant| variant.fetch('edges').size }
+        expect(graph.fetch('stats').fetch('edge_count')).to eq(edges)
+        expect(variants.map { |variant| variant.fetch('identifier') }).not_to include('OwnershipStorage')
         owners = graph.fetch('type_index').select { |_, ids| ids.include?('OwnershipStorage') }.keys
         expect(owners).to eq([included ? 'concern' : 'lib'])
       end
