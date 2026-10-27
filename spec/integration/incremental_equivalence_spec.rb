@@ -3498,6 +3498,16 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/rt_lamp/shade_component.rb
         app/controllers/rt_yard_controller.rb
         app/services/rt_yard/tile_component.rb
+        app/components/rt_card.rb
+        app/components/rt_scope/page_component.rb
+        app/services/rt_scope/rt_card.rb
+        app/components/rt_scope/rt_card.rb
+        app/controllers/rt_scope/things_controller.rb
+        app/components/rt_kit_lib.rb
+        app/components/rt_kit_lib/widget.rb
+        app/components/rt_base.rb
+        app/components/rt_ancestry/page_component.rb
+        app/services/rt_ledger.rb
       ]
     end
 
@@ -3647,6 +3657,193 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Woods::Extractor.new(output_dir: index).extract_changed([component])
       expect(node.call(index)).not_to have_key('unresolved_render_count')
       expect(differences(index, full_extraction)).to be_empty
+    end
+
+    # Extractor classes whose wholesale `extract_all` ran inside the block.
+    def wholesale_reruns(*extractors)
+      ran = []
+      extractors.each do |klass|
+        allow_any_instance_of(klass).to receive(:extract_all).and_wrap_original do |original, *args|
+          ran << klass
+          original.call(*args)
+        end
+      end
+      yield
+      ran
+    end
+
+    let(:render_families) do
+      [Woods::Extractors::PhlexExtractor, Woods::Extractors::ViewComponentExtractor,
+       Woods::Extractors::ControllerExtractor]
+    end
+
+    describe 'an edit that touches no constant a render resolves (#728)' do
+      def render_baseline
+        write_and_load('app/components/rt_card.rb', "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n")
+        write_and_load('app/components/rt_scope/page_component.rb', <<~RUBY)
+          module RtScope
+            class PageComponent < ApplicationComponent
+              def call = render(RtCard.new)
+            end
+          end
+        RUBY
+        write_and_load('app/controllers/rt_scope/things_controller.rb', <<~RUBY)
+          module RtScope
+            class ThingsController < ApplicationController
+              def show = render(RtCard.new)
+            end
+          end
+        RUBY
+        write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")
+        full_extraction
+      end
+
+      it 'leaves components and controllers alone when a service body changes' do
+        index = render_baseline
+        write_file('app/services/rt_ledger.rb', "class RtLedger\n  def total = 2\n\n  def other = 3\nend\n")
+
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/services/rt_ledger.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'leaves controllers alone when a component body changes, and still re-extracts that component' do
+        index = render_baseline
+        write_file('app/components/rt_card.rb',
+                   "class RtCard < ApplicationComponent\n  def call = 'card, edited'\nend\n")
+
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/components/rt_card.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+        expect(unit_snapshot(index).values.find { |unit| unit['identifier'] == 'RtCard' }['source_code'])
+          .to include('card, edited')
+      end
+
+      it 'does not mistake an unrelated new class for one a render resolves' do
+        index = render_baseline
+        path = write_and_load('app/services/rt_scope/rt_ledger_entry.rb',
+                              "module RtScope\n  class RtLedgerEntry; end\nend\n")
+        ran = wholesale_reruns(*render_families) do
+          Woods::Extractor.new(output_dir: index).extract_changed([path])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    describe 'an edit that touches a constant a render resolves (#728)' do
+      it 'retargets a component when a namespaced class now shadows the one its render reached' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_card.rb',
+                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
+                                  write_and_load('app/components/rt_scope/page_component.rb', <<~RUBY)]
+                                    module RtScope
+                                      class PageComponent < ApplicationComponent
+                                        def call = render(RtCard.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/services/rt_scope/rt_card.rb', <<~RUBY)
+                                   module RtScope
+                                     class RtCard < ApplicationComponent
+                                       def call = 'scoped card'
+                                     end
+                                   end
+                                 RUBY
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtScope::PageComponent')).to eq([%w[RtScope::RtCard], []])
+      end
+
+      it 'retargets a controller when a component in a component directory now shadows its render' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_card.rb',
+                                                 "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n"),
+                                  write_and_load('app/controllers/rt_scope/things_controller.rb', <<~RUBY)]
+                                    module RtScope
+                                      class ThingsController < ApplicationController
+                                        def show = render(RtCard.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/components/rt_scope/rt_card.rb', <<~RUBY)
+                                   module RtScope
+                                     class RtCard < ApplicationComponent
+                                       def call = 'scoped card'
+                                     end
+                                   end
+                                 RUBY
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtScope::ThingsController')).to eq([%w[RtScope::RtCard], []])
+      end
+
+      it 'retargets a component when a base class it inherits gains the module that supplies its render' do
+        index = run_sequence([
+                               lambda do
+                                 [write_and_load('app/components/rt_kit_lib.rb', "module RtKitLib\nend\n"),
+                                  write_and_load('app/components/rt_kit_lib/widget.rb', <<~RUBY),
+                                    module RtKitLib
+                                      class Widget < ApplicationComponent
+                                        def call = 'widget'
+                                      end
+                                    end
+                                  RUBY
+                                  write_and_load('app/components/rt_base.rb',
+                                                 "class RtBase < ApplicationComponent\nend\n"),
+                                  write_and_load('app/components/rt_ancestry/page_component.rb', <<~RUBY)]
+                                    module RtAncestry
+                                      class PageComponent < RtBase
+                                        def call = render(Widget.new)
+                                      end
+                                    end
+                                  RUBY
+                               end,
+                               lambda do
+                                 write_and_load('app/components/rt_base.rb',
+                                                "class RtBase < ApplicationComponent\n  include RtKitLib\nend\n")
+                               end
+                             ])
+
+        expect(render_edges(index, 'RtAncestry::PageComponent')).to eq([%w[RtKitLib::Widget], []])
+      end
+
+      it 're-runs the renderers when the edit cannot be read as constant definitions' do
+        index = run_sequence([
+                               lambda do
+                                 write_and_load('app/components/rt_card.rb',
+                                                "class RtCard < ApplicationComponent\n  def call = 'card'\nend\n")
+                                 write_and_load('app/services/rt_ledger.rb', "class RtLedger\n  def total = 1\nend\n")
+                               end,
+                               lambda do
+                                 write_and_load('app/services/rt_ledger.rb',
+                                                "class RtLedger\n  Object.const_set(:RtDynamic, 1)\nend\n")
+                               end
+                             ])
+
+        ran = wholesale_reruns(*render_families) do
+          write_file('app/services/rt_ledger.rb', "class RtLedger\n  Object.const_set(:RtDynamic, 2)\nend\n")
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/services/rt_ledger.rb'])
+        end
+
+        expect(ran).to include(Woods::Extractors::PhlexExtractor)
+        expect(differences(index, full_extraction)).to be_empty
+      end
     end
   end
 
@@ -5148,6 +5345,106 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         )
 
         expect(edges(unit_json(index, 'models', 'ParcelNote'), 'table')).to eq([])
+      end
+    end
+
+    # Extractor classes whose wholesale `extract_all` ran inside the block.
+    def wholesale_reruns(*extractors)
+      ran = []
+      extractors.each do |klass|
+        allow_any_instance_of(klass).to receive(:extract_all).and_wrap_original do |original, *args|
+          ran << klass
+          original.call(*args)
+        end
+      end
+      yield
+      ran
+    end
+
+    describe 'a model edit that moves no table ownership' do
+      it 'leaves the table units and everything resolving them alone' do
+        write_file('db/migrate/20240307000000_create_audit_rows.rb',
+                   migration('CreateAuditRows', 'create_table(:audit_rows) { |t| t.string :note }'))
+        write_file('db/views/post_titles_v01.sql', 'SELECT id, title FROM posts')
+        connection.create_table(:audit_rows) { |t| t.string :note }
+        index = full_extraction
+        original = File.read(app_path('app/models/post.rb'))
+        write_file('app/models/post.rb', "#{original}\n# a comment-only edit\n")
+
+        ran = wholesale_reruns(Woods::Extractors::DatabaseTableExtractor, Woods::Extractors::MigrationExtractor,
+                               Woods::Extractors::DatabaseViewExtractor,
+                               Woods::Extractors::ExternalConsumerExtractor) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/models/post.rb'])
+        end
+
+        expect(ran).to be_empty
+        expect(differences(index, full_extraction)).to be_empty
+        expect(edges(unit_json(index, 'migrations', 'CreateAuditRows'), 'migrates')).to eq(['table:audit_rows'])
+      end
+    end
+
+    describe 'a model edit that moves table ownership' do
+      before { %i[parcel_slots parcel_bins].each { |table| connection.create_table(table) { |t| t.string :note } } }
+
+      # `ParcelShift` stays in ActiveRecord::Base.descendants for the rest of
+      # the process, so its file joins the pristine state.
+      after do
+        %i[parcel_slots parcel_bins].each { |table| connection.drop_table(table, if_exists: true) }
+        FileUtils.cp(app_path('app/models/parcel_shift.rb'), File.join(@pristine_root, 'app/models/parcel_shift.rb'))
+      end
+
+      def shift_model(table: 'parcel_slots', abstract: false)
+        write_file('app/models/parcel_shift.rb', <<~RUBY)
+          class ParcelShift < ApplicationRecord
+            self.table_name = '#{table}'
+            self.abstract_class = #{abstract}
+          end
+        RUBY
+        load app_path('app/models/parcel_shift.rb')
+        'app/models/parcel_shift.rb'
+      end
+
+      it 're-runs the tables and what resolves owners, but not declared consumers, when only an owner moves' do
+        write_file('db/migrate/20240309000000_touch_parcel_slots.rb',
+                   migration('TouchParcelSlots', 'add_column(:parcel_slots, :extra, :string)'))
+        shift_model
+        index = full_extraction
+        shift_model(table: 'parcel_bins')
+
+        ran = wholesale_reruns(Woods::Extractors::DatabaseTableExtractor, Woods::Extractors::MigrationExtractor,
+                               Woods::Extractors::DatabaseViewExtractor,
+                               Woods::Extractors::ExternalConsumerExtractor) do
+          Woods::Extractor.new(output_dir: index).extract_changed(['app/models/parcel_shift.rb'])
+        end
+
+        expect(ran).to contain_exactly(Woods::Extractors::DatabaseTableExtractor,
+                                       Woods::Extractors::MigrationExtractor, Woods::Extractors::DatabaseViewExtractor)
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'follows a model onto another table and in and out of abstraction, ownership edges included' do
+        %w[parcel_slots parcel_bins].each_with_index do |table, number|
+          write_file("db/migrate/2024030800000#{number}_touch_#{table}.rb",
+                     migration("Touch#{table.camelize}", "add_column(:#{table}, :extra, :string)"))
+        end
+        write_file('db/views/parcel_slots_v01.sql', 'SELECT id FROM parcel_slots')
+        owners = lambda do |index, table|
+          unit_json(index, 'database_tables', "table:#{table}")['metadata']['models']
+        end
+
+        index = run_sequence(
+          [
+            -> { shift_model },
+            -> { shift_model(table: 'parcel_bins') },
+            -> { shift_model(table: 'parcel_bins', abstract: true) },
+            -> { shift_model(table: 'parcel_slots') }
+          ]
+        )
+
+        expect(owners.call(index, 'parcel_slots')).to eq(['ParcelShift'])
+        expect(owners.call(index, 'parcel_bins')).to eq([])
+        expect(edges(unit_json(index, 'migrations', 'TouchParcelSlots'), 'table_name')).to eq(['ParcelShift'])
+        expect(edges(unit_json(index, 'database_views', 'parcel_slots'), 'table_name')).to eq(['ParcelShift'])
       end
     end
 
