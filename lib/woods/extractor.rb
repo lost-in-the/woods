@@ -1002,15 +1002,12 @@ module Woods
     # The manifest is rewritten only when the run actually changed something.
     # `staleness_seconds` is derived from the manifest timestamp, so touching
     # it after a no-op run reports the index as freshly synced when nothing
-    # was re-read — the misleading half of #164 gap 4. The graph write itself
-    # is unconditional, but on a no-op run it is inert, not meaningful: under
-    # payloads it lands in this run's not-yet-published directory, and a
-    # no-op run returns below before {#publish_generation}, so nothing ever
-    # points at what it just wrote — the next run's {PayloadStore#create}
-    # empties that same (unbumped-generation-numbered) directory before
-    # writing into it again. The graph's content is unchanged on a no-op run
-    # regardless (no touched units, no new edges), so nothing is lost; it is
-    # the write itself, not the recomputation, that goes nowhere.
+    # was re-read — the misleading half of #164 gap 4. A staged payload's
+    # graph is written only when this run will publish; no reader sees an
+    # abandoned stage. Retained Git coverage is still backfilled before the
+    # decision, without becoming a new publication trigger. Runs already known
+    # to publish and legacy flat mode keep their graph-before-report/table
+    # write and error order.
     #
     # No `capture_snapshot` here: snapshots must hash the FULL unit set, and
     # incremental runs only hold changed units in memory — capturing would
@@ -1024,9 +1021,12 @@ module Woods
     # @return [void]
     def finalize_incremental_run(touched, reason: 'incremental')
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
-      profile_phase('graph write') do
+      # Coverage migration still runs before the publication decision. Only
+      # the disposable staged graph write can wait until a publish is needed.
+      defer_graph_write = !@payload_dir.nil? && touched.empty? && !withdrew_flows
+      profile_phase(defer_graph_write ? 'git coverage backfill' : 'graph write') do
         backfill_git_source_counts
-        write_dependency_graph
+        write_dependency_graph unless defer_graph_write
       end
       # A skip reason can change while no unit does (a namespace-only file
       # turns into a parse error), so a changed report alone warrants a publish.
@@ -1046,6 +1046,7 @@ module Woods
         return
       end
 
+      profile_phase('graph write') { write_dependency_graph } if defer_graph_write
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
       skipped = SkippedFiles.with_flow_failures(tree_skipped, @flow_failures)

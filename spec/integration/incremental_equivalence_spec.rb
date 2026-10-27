@@ -6819,4 +6819,58 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   def camelize(base)
     base.split('_').map(&:capitalize).join
   end
+
+  context 'staged payload finalizer preserves no-op publication cycles' do
+    %i[incremental refresh].each do |mode|
+      it "keeps payload no-ops inert around a publishing service edit through #{mode}" do
+        name = 'FinalizerNoopCycleService'
+        path = write_file('app/services/finalizer_noop_cycle_service.rb', service_source(name))
+        load app_path(path)
+        index = full_extraction
+        generation = Woods::Generation.new(output_dir: index)
+        expect(generation.current.payload).not_to be_nil
+        runner = Woods::Extractor.new(output_dir: index)
+        allow(runner).to receive(:finalize_incremental_run).and_call_original
+        allow(runner).to receive(:write_dependency_graph).and_call_original
+        run = lambda do
+          touched = mode == :refresh ? runner.refresh(:services).fetch(:touched) : runner.extract_changed([path])
+          runner.raise_on_publication_failure!
+          touched
+        end
+        published_bytes = lambda do
+          root = Pathname.new(payload_dir(index))
+          files = Dir.glob(root.join('**/*'), File::FNM_DOTMATCH).select { |file| File.file?(file) }
+          artifacts = files.sort.to_h do |file|
+            [Pathname.new(file).relative_path_from(root).to_s, File.binread(file)]
+          end
+          { artifacts: artifacts, generation: File.binread(generation.path) }
+        end
+
+        before_noop = published_bytes.call
+        expect(run.call).to be_empty
+        expect(runner).to have_received(:finalize_incremental_run).once
+        expect(published_bytes.call).to eq(before_noop)
+        expect(differences(index, full_extraction)).to be_empty
+        expect(runner).not_to have_received(:write_dependency_graph)
+
+        before_publish = generation.current.number
+        write_file(path, service_source(name, dependency: 'Post'))
+        load app_path(path)
+        expect(run.call).to include(name)
+        expect(runner).to have_received(:finalize_incremental_run).twice
+        expect(runner).to have_received(:write_dependency_graph).once
+        expect(generation.current.number).to eq(before_publish + 1)
+        expect(differences(index, full_extraction)).to be_empty
+
+        before_second_noop = published_bytes.call
+        expect(run.call).to be_empty
+        expect(runner).to have_received(:finalize_incremental_run).exactly(3).times
+        expect(runner).to have_received(:write_dependency_graph).once
+        expect(published_bytes.call).to eq(before_second_noop)
+        expect(differences(index, full_extraction)).to be_empty
+      ensure
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+  end
 end
