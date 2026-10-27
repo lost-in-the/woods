@@ -28,11 +28,14 @@ module Woods
       @recent_limit = recent_limit
     end
 
+    # @param revision [String] commit to walk; a resolved SHA pins the capture
     # @return [Hash, nil] raw per-path aggregates, or nil on any incomplete read
-    def read(paths, recent_after:)
+    def read(paths, recent_after:, revision: 'HEAD')
       requested = paths.to_h { |path| [@log.repository_prefix + path.b, path] }
       result = paths.to_h { |path| [path, {}] }
-      @log.stream(format: FORMAT, since: '365 days ago') { |stdout| parse(stdout, requested, result, recent_after) }
+      @log.stream(format: FORMAT, since: '365 days ago', revision: revision) do |stdout|
+        parse(stdout, requested, result, recent_after)
+      end
       result
     rescue StandardError => e
       @logger.warn('[Woods] Git enrichment omitted: history could not be read completely. ' \

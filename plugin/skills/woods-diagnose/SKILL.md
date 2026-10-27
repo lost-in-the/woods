@@ -321,6 +321,15 @@ structural `ready` do not certify history availability. After repairing Git,
 run full extraction; see the
 [missing-executable diagnostic](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/TROUBLESHOOTING.md#git-executable-is-missing-from-the-extraction-environment).
 
+For builds with `index.git_enrichment`, inspect its coverage and refreshed versus
+retained counts separately from structural readiness. Builds containing #903
+backfill retained library coverage from older indexes and pin
+the history, commit table and manifest to one capture SHA. Check the installed
+revision before relying on the repair; earlier builds can undercount retained
+multi-source facts or label a capture with a later HEAD. A full extraction with
+working Git repairs coverage. See the
+[Git trust diagnostics](https://github.com/lost-in-the/woods/blob/6390a4862cb872df953e89b4338a4d34f0efa56e/docs/TROUBLESHOOTING.md#checking-whether-git-facts-can-be-trusted).
+
 For linked-worktree provenance/history mismatches, check the installed version's
 `WOODS_GIT_DIR` support and compare the selected branch and exact SHA inside the
 extraction environment. Mount the complete shared `.git` at its original path

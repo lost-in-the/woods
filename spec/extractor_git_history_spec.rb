@@ -62,6 +62,40 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     expect(incremental.fetch('sample.rb')).to eq(unit.metadata[:git])
   end
 
+  it 'keeps a failed capture unresolved until the next extraction run' do
+    head = git('rev-parse', 'HEAD')
+    allow(extractor).to receive(:run_git).and_call_original
+    allow(extractor).to receive(:run_git).with('symbolic-ref', '--quiet', 'HEAD').and_return('')
+    allow(extractor).to receive(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').and_return('', head)
+
+    expect(extractor.send(:batch_git_data, [path])).to eq({})
+    expect(extractor.send(:commit_table_for_run, nil, full: true)).to be_nil
+    expect(extractor).to have_received(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').once
+    expect(extractor.send(:git_enrichment_summary, refreshed: :all))
+      .to include('state' => 'unavailable', 'reason' => 'history_read_failed', 'head_sha' => nil)
+
+    extractor.send(:reset_git_capture)
+    expect(metadata[:commit_count]).to eq(1)
+    expect(extractor).to have_received(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').twice
+  end
+
+  it 'walks the captured named ref when HEAD changes between capture commands' do
+    head = git('rev-parse', 'HEAD')
+    moved = false
+    allow(extractor).to receive(:run_git).and_call_original
+    allow(extractor).to receive(:run_git).with('symbolic-ref', '--quiet', 'HEAD').and_wrap_original do |method, *args|
+      ref = method.call(*args)
+      git('checkout', '-qb', 'after-capture')
+      commit('later branch commit')
+      moved = true
+      ref
+    end
+
+    expect(metadata[:commit_count]).to eq(1)
+    expect(moved).to be(true)
+    expect(extractor.send(:git_enrichment_summary, refreshed: :all).fetch('head_sha')).to eq(head)
+  end
+
   it 'applies the full path exclusions to incremental git enrichment across typed collisions' do
     external = root.parent.join("#{root.basename}-external.rb")
     paths = [root.join('vendor/bundle/gem.rb'), root.join('node_modules/package.js'), external]
