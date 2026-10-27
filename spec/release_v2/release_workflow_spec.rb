@@ -32,7 +32,9 @@ RSpec.describe 'release workflow contract' do
 
   it 'keeps full incremental-equivalence depth on representative PR rows and every candidate build' do
     rails_job = ci.fetch('jobs').fetch('rails-matrix')
-    rows = rails_job.dig('strategy', 'matrix', 'include')
+    rows = %w[rails-matrix rails-required].flat_map do |id|
+      ci.fetch('jobs').fetch(id).dig('strategy', 'matrix', 'include')
+    end
     harness = steps(rails_job).find { |step| step['name'] == 'Run incremental equivalence harness' }
     full_rows = rows.select do |row|
       row['pr_diff_ops'] == '60' && row['pr_diff_seeds'] == '1,2,3'

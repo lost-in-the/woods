@@ -26,7 +26,7 @@ RSpec.describe 'Minimum runtime dependency contract' do
   end
 
   it 'runs the installed-artifact probe independently of the development bundle on the Ruby floor' do
-    workflow = YAML.load_file(File.join(root, '.github/workflows/ci.yml'))
+    workflow = YAML.safe_load_file(File.join(root, '.github/workflows/ci.yml'), aliases: true)
     job = workflow.fetch('jobs').fetch('minimum-dependencies')
     setup = job.fetch('steps').find { |step| step['uses'].to_s.start_with?('ruby/setup-ruby@') }.fetch('with')
     expect(setup).to include('ruby-version' => '3.0', 'bundler' => '2.5.23')
