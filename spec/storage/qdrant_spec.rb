@@ -830,6 +830,22 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       end.not_to raise_error
     end
 
+    it 'rejects a bracketed IPv6 loopback literal by default' do
+      expect do
+        described_class.new(url: 'http://[::1]:6333', collection: 'x')
+      end.to raise_error(ArgumentError, %r{private/loopback host})
+    end
+
+    it 'connects a permitted bracketed IPv6 literal by its address' do
+      response = instance_double(Net::HTTPSuccess, code: '200', body: '{"result":{"count":1}}')
+      allow(response).to receive(:is_a?).with(Net::HTTPSuccess).and_return(true)
+      allow(http).to receive(:request).and_return(response)
+
+      described_class.new(url: 'http://[::1]:6333', collection: 'x', allow_private_hosts: true).count
+
+      expect(Net::HTTP).to have_received(:new).with('::1', 6333)
+    end
+
     it 'permits an ordinary public hostname' do
       expect do
         described_class.new(url: 'https://qdrant.example.com:6333', collection: 'x')

@@ -73,6 +73,20 @@ RSpec.describe Woods::MCP::ProviderProbe do
       end
     end
 
+    context 'when the Ollama host is a bracketed IPv6 literal' do
+      let(:ollama_provider) do
+        Woods::Embedding::Provider::Ollama.new(host: 'http://[::1]:11434', model: 'nomic-embed-text')
+      end
+
+      it 'connects to the address without the brackets' do
+        response = instance_double(Net::HTTPOK)
+        allow(response).to receive(:is_a?).with(Net::HTTPServerError).and_return(false)
+        stub_net_http('::1', 11_434, response)
+
+        expect(described_class.reachable!(ollama_provider)).to be(ollama_provider)
+      end
+    end
+
     context 'when Ollama connection is refused' do
       it 'raises ProviderUnreachable with url and reason: "connection_refused"' do
         stub_net_http_raise('ollama.internal', 11_434, Errno::ECONNREFUSED)
