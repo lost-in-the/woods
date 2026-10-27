@@ -74,12 +74,17 @@ RSpec.describe 'Held-open MCP generation corruption' do
       File.binwrite(marker_path, bad)
       2.times do
         { 'lookup' => { identifier: 'Post' }, 'search' => { query: 'Post' },
-          'woods_status' => {}, 'trace_flow' => { entry_point: 'PostsController#show' } }.each do |name, args|
+          'trace_flow' => { entry_point: 'PostsController#show' } }.each do |name, args|
           response = tool(name, args)
           expect(response.dig('result', 'isError')).to be(true), response.inspect
           expect(response.dig('result', '_meta', 'error_code')).to eq('corrupt_artifact')
           expect(response.to_s).not_to include('NoMethodError', 'TypeError', 'backtrace')
         end
+        status = tool('woods_status')
+        expect(status.dig('result', 'isError')).to be(false), status.inspect
+        report = JSON.parse(status.dig('result', 'content', 0, 'text'))
+        expect(report).to include('ready' => false)
+        expect(report['index']).to include('state' => 'unusable_publication', 'error_code' => 'corrupt_artifact')
         %w[codebase://manifest codebase://graph codebase://unit/Post codebase://type/model].each do |uri|
           response = request('resources/read', uri: uri)
           expect(response.dig('error', 'data')).to include('error_code' => 'corrupt_artifact', 'uri' => uri)
@@ -87,6 +92,8 @@ RSpec.describe 'Held-open MCP generation corruption' do
       end
       File.binwrite(marker_path, original)
       expect(tool('lookup', identifier: 'Post').dig('result', 'isError')).not_to be(true)
+      healthy = JSON.parse(tool('woods_status').dig('result', 'content', 0, 'text'))
+      expect(healthy['index']).not_to include('state' => 'unusable_publication')
       expect(request('resources/read', uri: 'codebase://manifest').dig('result', 'contents')).not_to be_empty
     end
   end

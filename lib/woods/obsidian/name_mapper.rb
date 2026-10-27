@@ -2,6 +2,7 @@
 
 require 'set'
 require 'digest'
+require 'pathname'
 
 module Woods
   module Obsidian
@@ -75,6 +76,27 @@ module Woods
         return nil if @ambiguous_identifiers.include?(identifier)
 
         wikilink(@reference_keys[identifier])
+      end
+
+      # Plain Markdown counterpart of {#wikilink}: a link relative to the note it
+      # appears in, so the folder opens anywhere without an Obsidian vault.
+      #
+      # @param id [String]
+      # @param from [String, nil] vault-relative path of the note holding the link
+      # @return [String, nil] "[User](../models/User.md)" or nil if unknown
+      def markdown_link(id, from:)
+        entry = @map[id]
+        return nil unless entry
+
+        base = Pathname.new(File.dirname(from.to_s))
+        "[#{entry[:alias]}](#{Pathname.new(entry[:path]).relative_path_from(base)})"
+      end
+
+      # Plain Markdown counterpart of {#wikilink_for_identifier}.
+      def markdown_link_for_identifier(identifier, from:)
+        return nil if @ambiguous_identifiers.include?(identifier)
+
+        markdown_link(@reference_keys[identifier], from: from)
       end
 
       # @return [Hash{String=>String}] inverse path -> id map (sorted)

@@ -9,6 +9,7 @@ require 'time'
 require 'set'
 require 'uri'
 require_relative '../atomic_file'
+require_relative '../deprecation'
 require_relative '../generation'
 require_relative '../generation_pins'
 require_relative '../git_provenance'
@@ -2169,13 +2170,19 @@ module Woods
         def define_notion_sync_tool(server, reader, index_dir, respond, respond_err)
           server.define_tool(
             name: 'notion_sync',
-            description: 'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
+            description: 'Deprecated: use the Markdown export (woods:markdown). ' \
+                         'Sync extracted codebase data (Data Models + Columns) to Notion databases. ' \
                          'Requires notion_api_token and notion_database_ids to be configured.',
             input_schema: {
               type: 'object',
               properties: {}
             }
           ) do |server_context:|
+            Woods::Deprecation.warn_once(
+              :notion_sync_tool,
+              'The notion_sync MCP tool is deprecated and will be removed in the next minor release. ' \
+              'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
+            )
             config = Woods.configuration
             # Mirror notion_wired? (which gates registration) and the
             # Exporter via the shared resolver: a non-blank NOTION_API_TOKEN
@@ -2318,6 +2325,30 @@ module Woods
           reader.with_pinned_generation do
             build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           end
+        rescue Woods::Generation::InvalidMarker => e
+          degraded_status(e, retriever, index_dir, bootstrap_state)
+        end
+
+        # The bounded report for a published generation marker that cannot
+        # identify a generation. Nothing is read from the index (no payload is
+        # guessed from directory order), so every other tool keeps refusing
+        # while this one says what to do.
+        def degraded_status(error, retriever, index_dir, bootstrap_state)
+          {
+            ready: false,
+            server: { name: 'woods', version: Woods::VERSION, index_dir: index_dir.to_s,
+                      update: Woods::UpdateCheck.status_hash(background: true) },
+            index: {
+              state: 'unusable_publication',
+              error_code: 'corrupt_artifact',
+              diagnostic: "#{error.message}. Run woods:validate, then restore or rebuild the index.",
+              counts: {},
+              history: { state: 'unknown', reason: 'publication_unusable' },
+              incremental: { ready: false, status: 'needs full extraction (published generation marker is unusable)' }
+            },
+            retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
+            bootstrap: bootstrap_state&.to_h
+          }
         end
 
         def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
@@ -2336,7 +2367,7 @@ module Woods
               name: 'woods',
               version: Woods::VERSION,
               index_dir: index_dir.to_s,
-              update: Woods::UpdateCheck.status_hash
+              update: Woods::UpdateCheck.status_hash(background: true)
             },
             index: index_section(manifest, extracted_at, staleness, index_dir, reader, source_check),
             watch: watch_section(index_dir),
