@@ -1725,6 +1725,98 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'one unit per class' do
+    def remove_constants(*names)
+      names.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) }
+    end
+
+    def type_index(index)
+      read_json(index, 'dependency_graph.json').fetch('type_index')
+    end
+
+    def unit_edges(index, type, identifier)
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      Dir[File.join(payload, type, '*.json')].filter_map do |path|
+        document = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        document.fetch('dependencies') if document.is_a?(Hash) && document['identifier'] == identifier
+      end.first
+    end
+
+    after do
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipStorage, :OwnershipHost, :OwnershipBaseSerializer, :OwnershipSummary,
+                       :OwnershipAccount)
+    end
+
+    def write_storage_host(include_storage:)
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipHost)
+      path = write_file('app/models/ownership_host.rb', <<~RUBY)
+        class OwnershipHost < ApplicationRecord
+          self.table_name = 'posts'
+          #{'include OwnershipStorage' if include_storage}
+        end
+      RUBY
+      load app_path(path)
+      path
+    end
+
+    it 'publishes a lib module a model includes as a concern only, as the include comes and goes' do
+      load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
+      host = write_storage_host(include_storage: false)
+      index = full_extraction
+      expect(type_index(index).fetch('lib')).to include('OwnershipStorage')
+
+      [true, false].each do |included|
+        write_storage_host(include_storage: included)
+        Woods::Extractor.new(output_dir: index).extract_changed([host])
+        types = type_index(index)
+        expect(types.fetch(included ? 'concern' : 'lib', [])).to include('OwnershipStorage')
+        expect(types.fetch(included ? 'lib' : 'concern', [])).not_to include('OwnershipStorage')
+        expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'publishes a descendant of an application serializer base as a serializer only' do
+      load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
+      summary = 'app/models/ownership_summary.rb'
+      body = ->(extra) { "class OwnershipSummary < OwnershipBaseSerializer\n  def call = #{extra}\nend\n" }
+      index = run_sequence([
+                             -> { (load app_path(write_file(summary, body.call(1)))) && summary },
+                             -> { write_file(summary, body.call(2)) }
+                           ])
+
+      types = type_index(index)
+      expect(types.fetch('serializer')).to include('OwnershipSummary')
+      expect(types.fetch('poro', [])).not_to include('OwnershipSummary')
+    end
+
+    it 'gives a nested job only the edges written in its own class body' do
+      path = 'app/models/ownership_account.rb'
+      body = lambda do |note|
+        <<~RUBY
+          class OwnershipAccount
+            def finish
+              PublishPostJob.perform_later(1) # #{note}
+              Post.where(id: 1)
+            end
+
+            class OwnershipClearJob < ApplicationJob
+              def perform(id) = id
+            end
+          end
+        RUBY
+      end
+      index = run_sequence([
+                             -> { (load app_path(write_file(path, body.call('one')))) && path },
+                             -> { write_file(path, body.call('two')) }
+                           ])
+
+      edges = unit_edges(index, 'jobs', 'OwnershipAccount::OwnershipClearJob')
+      expect(edges.map { |edge| edge['target'] }).not_to include('PublishPostJob', 'Post')
+    end
+  end
+
   describe 'method effects (#680)' do
     def unit_document(dir, type, identifier)
       payload = Woods::Generation.new(output_dir: dir).payload_dir

@@ -18,6 +18,7 @@ module Woods
       added = newly_claimed_concerns(concerns, live, known)
       touched = register_and_write(:concerns, added, affected_types)
       touched.merge(remove_claimed_standalone_modules(live_names, affected_types))
+      touched.merge(remove_claimed_lib_modules(affected_types))
       touched.merge(remove_unclaimed_concerns(concerns, known - live_names, affected_types)) if @eager_load_complete
       touched.merge(add_standalone_modules(affected_types))
     end
@@ -44,9 +45,34 @@ module Woods
       stale.each_with_object(Set.new) do |identifier, touched|
         path = @dependency_graph.node(identifier, type: :concern)[:file_path]
         next if concerns.conventional_concern_path?(path)
+        next unless remove_unit(identifier, affected_types, type: :concern)
 
-        touched.add(identifier) if remove_unit(identifier, affected_types, type: :concern)
+        touched.add(identifier)
+        touched.merge(restore_lib_module(path, affected_types))
       end
+    end
+
+    # A module under lib/ that a model now includes is a concern only; its lib
+    # unit goes, as a full extraction would not publish it.
+    def remove_claimed_lib_modules(affected_types)
+      libs = extractor_for(:libs)
+      return Set.new unless libs.respond_to?(:claimed_identifiers)
+
+      libs.claimed_identifiers.each_with_object(Set.new) do |identifier, touched|
+        touched.add(identifier) if remove_unit(identifier, affected_types, type: :lib)
+      end
+    end
+
+    # The inverse: when the last model drops a lib module, its lib unit returns.
+    def restore_lib_module(path, affected_types)
+      libs = extractor_for(:libs)
+      return Set.new unless libs.respond_to?(:extract_lib_file)
+
+      absolute = File.expand_path(path, Rails.root.to_s)
+      return Set.new unless absolute.start_with?("#{Rails.root.join(Extractors::LibExtractor::LIB_DIRECTORY)}/")
+
+      unit = checked_extraction(:libs, libs) { libs.extract_lib_file(absolute) }
+      register_and_write(:libs, [unit].compact, affected_types)
     end
 
     def runtime_model_mixin_file?(extractor, type, path)
