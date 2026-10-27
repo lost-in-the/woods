@@ -1,0 +1,1 @@
+- Test units gain `metadata.examples`: each RSpec and Minitest group and example with its label, 1-based line extent and `focus`, `skip` or `pending` marker, read by static parsing. A label is named only where the source states it; dynamic labels are `null` and marked `dynamic`. Nothing runs.

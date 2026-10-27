@@ -70,6 +70,24 @@ RSpec.describe Woods::SourceReferences::Pass do
       .to include('name' => 'Missing', 'method' => 'call')
   end
 
+  it 'tags a verified include, extend or prepend of a constant, without changing the edge or the kind' do
+    sources['app/models/ref_caller.rb'] =
+      'class RefCaller; include RefTarget; extend RefTarget; prepend RefTarget; RefTarget.new; end'
+    result = run_pass
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
+    records = result.references.fetch(%w[poro RefCaller])
+    expect(records.map { |record| record.values_at('mixin', 'method') })
+      .to eq([['include', nil], ['extend', nil], ['prepend', nil], [nil, 'new']])
+    expect(records).to all(include('kind' => 'constant', 'confidence' => 'verified'))
+  end
+
+  it 'does not tag a static span, which is not a verified reference' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; class << self; include RefTarget; end; end'
+    records = run_pass.references.fetch(%w[poro RefCaller])
+    expect(records).to contain_exactly(hash_including('confidence' => 'static'))
+    expect(records.first).not_to have_key('mixin')
+  end
+
   it 'publishes a static span for an indexed constant that runtime lookup cannot see, and no edge' do
     sources['app/models/ref_caller.rb'] = 'class RefCaller; class << self; def build; RefTarget.create; end; end; end'
     result = run_pass

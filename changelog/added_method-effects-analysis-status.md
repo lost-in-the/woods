@@ -1,0 +1,1 @@
+- Each `method_effects` entry gains `analysis_status` (`analyzed` or `source_unavailable`), as callbacks have, so an empty entry can be told from a method whose text could not be read. A `source_unavailable` method is now listed. Existing keys are unchanged.

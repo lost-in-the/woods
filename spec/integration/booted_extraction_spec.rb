@@ -166,8 +166,8 @@ RSpec.describe 'Booted-app extraction', :booted_app do
 
     expect(metadata.fetch('method_effects')).to eq(
       'normalize_title' => {
-        'jobs_enqueued' => [], 'mail_sent' => [], 'services_called' => [], 'columns_written' => ['title'],
-        'events_published' => [], 'external_calls' => []
+        'analysis_status' => 'analyzed', 'jobs_enqueued' => [], 'mail_sent' => [], 'services_called' => [],
+        'columns_written' => ['title'], 'events_published' => [], 'external_calls' => []
       }
     )
     expect(metadata).not_to have_key('method_effects_truncated')

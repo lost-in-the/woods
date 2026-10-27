@@ -14,10 +14,17 @@ module Woods
     # method body of the unit's class, in the unit's own file, and records:
     #
     #   metadata[:method_effects]["refund!"] = {
+    #     analysis_status: "analyzed",
     #     jobs_enqueued: [...], mail_sent: [...], services_called: [...],
     #     columns_written: [...], events_published: [...], external_calls: [...],
     #     via_method: { "notify" => { mail_sent: [...] } }
     #   }
+    #
+    # +analysis_status+ is the callback field of the same name
+    # ({CallbackAnalyzer::ANALYZED}). A method whose text cannot be read is
+    # listed as +source_unavailable+ with empty job, mail, service and column
+    # families, so an empty entry is not mistaken for "none found". An
+    # analyzed method with no effects stays out of the map.
     #
     # +via_method+ lists the effects of methods of the same class the method
     # calls, up to {MAX_DEPTH} calls away, each under the name of the method
@@ -124,9 +131,10 @@ module Woods
         entries = keys.filter_map do |key|
           direct = direct_effects(key)
           via = reached[key]
-          next if empty?(direct) && via.empty?
+          status = analysis_status(key)
+          next if status == CallbackAnalyzer::ANALYZED && empty?(direct) && via.empty?
 
-          entry = direct.dup
+          entry = { analysis_status: status }.merge(direct)
           entry[:via_method] = via unless via.empty?
           [key, entry]
         end
@@ -200,6 +208,14 @@ module Woods
         analysis(key)[:effects]
       end
 
+      # @return [String] ANALYZED, or SOURCE_UNAVAILABLE when the method's
+      #   text could not be read and its empty effects mean "not looked at".
+      #   A method always has a definition to read, so UNSUPPORTED never
+      #   applies here.
+      def analysis_status(key)
+        analysis(key)[:analysis_status]
+      end
+
       # @return [Array<String>] keys of the same-class methods +key+ calls
       def calls_of(key)
         analysis(key)[:calls]
@@ -210,9 +226,11 @@ module Woods
       end
 
       def analyze(definition)
-        scanned = @analyzer.method_effects(definition.node) || {}
+        read = @analyzer.method_effects(definition.node)
+        scanned = read || {}
         sends = method_sends(definition.node)
         {
+          analysis_status: read ? CallbackAnalyzer::ANALYZED : CallbackAnalyzer::SOURCE_UNAVAILABLE,
           effects: {
             jobs_enqueued: scanned[:jobs_enqueued] || [],
             mail_sent: scanned[:mailers_triggered] || [],

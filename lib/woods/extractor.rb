@@ -60,6 +60,7 @@ require_relative 'extractors/js_module_extractor'
 require_relative 'extractors/doc_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
+require_relative 'extractors/test_examples'
 require_relative 'extractors/test_mapping_extractor'
 require_relative 'extractors/test_support_extractor'
 require_relative 'extractors/poro_extractor'
@@ -2459,6 +2460,7 @@ module Woods
           SourceLineMap.record(unit, root: root)
           MethodTable.record(unit)
           CallbackSites.record(unit)
+          Extractors::TestExamples.record(unit)
           unit.file_path = normalize_file_path(unit.file_path)
         end
       end
@@ -4301,6 +4303,7 @@ module Woods
         SourceLineMap.record(unit, root: Rails.root.to_s)
         MethodTable.record(unit)
         CallbackSites.record(unit)
+        Extractors::TestExamples.record(unit)
         next if unchanged_registered_unit?(type_dir, unit)
 
         affected_types&.add(extractor_key)

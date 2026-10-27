@@ -1045,19 +1045,20 @@ memoizes the result per served generation (dropped on reload), so the cache is
 parsed once per generation. Restoring cache bytes inside one generation shows up
 after the next reload or generation change.
 
-The development constant-span writer uses cache format 7. It requires validated
+The development constant-span writer uses cache format 8. It requires validated
 line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
 produced its edges. It also retains optional syntactic method selectors on
 constant receiver candidates, including unresolved ones. Format 7 adds the
 class-body declaration macros (associations, callbacks, scopes) with the
-position of each literal symbol argument. A format 6 or earlier
+position of each literal symbol argument. Format 8 adds the `mixin` tag on
+constants passed to a receiverless `include`, `extend` or `prepend`. A format 7 or earlier
 cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
-Unchanged source identities otherwise reuse cached analysis; accepting format 6
-would leave those callers without declaration evidence. Missing optional fields in
-a format 7 record are valid but do not prove semantic completeness: bare reads
+Unchanged source identities otherwise reuse cached analysis; accepting format 7
+would leave those callers without mixin tags. Missing optional fields in
+a format 8 record are valid but do not prove semantic completeness: bare reads
 have no selector, and contract tests establish expected presence on receivers.
 Updating only a reader does not enrich an existing generation.
 
