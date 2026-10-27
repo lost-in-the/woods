@@ -185,7 +185,7 @@ module Woods
       # @api private
       def self.http_get!(base_url, path, open_timeout:, read_timeout:, use_ssl:)
         uri = URI.parse(base_url)
-        http = Net::HTTP.new(uri.host, uri.port)
+        http = Net::HTTP.new(uri.hostname, uri.port)
         http.open_timeout = open_timeout
         http.read_timeout = read_timeout
         http.use_ssl = use_ssl

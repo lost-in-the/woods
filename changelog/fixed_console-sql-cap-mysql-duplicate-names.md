@@ -1,0 +1,1 @@
+- `console_sql` on MySQL and MariaDB refuses a statement whose output repeats a column name with a message naming the cause and the remedy. The row cap wraps the statement in a derived table, which those servers require to have unique column names, so `SELECT *` over a join of tables sharing `id` failed as a generic execution error.

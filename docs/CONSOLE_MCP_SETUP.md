@@ -771,6 +771,7 @@ end
 
 - The statement is wrapped as a subquery and asks for one row more than the cap. That extra row is never returned. Its arrival sets `completeness.has_more` to `true` (`status: "partial"`, `reason: "result_limit"`).
 - Otherwise `completeness` reads `status: "complete"`, `has_more: false`, with the row count in `total_matches`.
+- MySQL and MariaDB require unique column names in that subquery. A statement whose output repeats a name (`SELECT *` over a join of tables that share `id` or `created_at`, or one column selected twice) is refused with a message naming the cause. Alias the repeated columns or list them explicitly. PostgreSQL and SQLite accept such statements.
 - `EXPLAIN` is not wrapped and is not capped. It still rejects an explicit `limit`.
 - The tool schema still rejects a `limit` above 10000, whatever the host maximum.
 - The row cap does not bound CPU or I/O. The [statement timeout](#statement-timeout) is unchanged.

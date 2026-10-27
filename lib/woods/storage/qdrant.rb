@@ -687,7 +687,7 @@ module Woods
         def http_client
           return @http_client if @http_client&.started?
 
-          http = Net::HTTP.new(@uri.host, @uri.port)
+          http = Net::HTTP.new(@uri.hostname, @uri.port)
           http.use_ssl = @uri.scheme == 'https'
           http.open_timeout = 10
           http.read_timeout = 30

@@ -41,6 +41,8 @@ module Woods
 
       DEFAULT_SQL_ROW_LIMIT = 100
       MAX_SQL_ROW_LIMIT = 1_000
+      # MySQL `ER_DUP_FIELDNAME`: a derived table whose output repeats a name.
+      DUPLICATE_COLUMN_NAME_ERROR = 1060
 
       SQL_RELATION_BOUNDARIES = %w[
         ON USING WHERE JOIN INNER LEFT RIGHT FULL CROSS NATURAL
@@ -900,12 +902,62 @@ module Woods
         # One lookahead row distinguishes "exactly cap rows" from "more exist".
         query_sql = "SELECT * FROM (\n#{sql}\n) AS _limited LIMIT #{cap + 1}"
         validate_sql_policy!(query_sql)
-        result = active_connection.select_all(query_sql)
+        result = select_capped_sql(query_sql)
         validate_sql_result_types!(result)
 
         rows = result.rows.first(cap)
         { 'columns' => result.columns, 'rows' => rows, 'count' => rows.size,
           'completeness' => sql_completeness(rows.size, result.rows.size > cap) }
+      end
+
+      # MySQL and MariaDB require unique column names in a derived table, so
+      # the row-cap wrapper cannot run a statement whose output repeats a name
+      # (`SELECT *` over a join of tables that share `id`, or one column
+      # selected twice). The adapter reports that as an execution error, which
+      # the client sees as a sanitized server-side failure. Name the cause and
+      # the remedy instead. Other adapters accept repeated names.
+      def select_capped_sql(query_sql)
+        active_connection.select_all(query_sql)
+      rescue StandardError => e
+        raise unless sql_dialect == :mysql && duplicate_output_name_error?(e)
+
+        raise ValidationError, 'Rejected: the row cap wraps console_sql in a derived table, which MySQL ' \
+                               'and MariaDB require to have unique output column names, and this ' \
+                               'statement repeats one. Alias the repeated columns or list them instead of ' \
+                               'SELECT *.'
+      end
+
+      # MySQL error 1060 (`ER_DUP_FIELDNAME`). mysql2 exposes the server error
+      # number as `error_number` and Trilogy as `error_code`; Active Record
+      # wraps the driver error, so the whole cause chain is read. The message
+      # text is the fallback for a driver that exposes neither, and the column
+      # name is left out of the response either way.
+      def duplicate_output_name_error?(error)
+        error_chain(error).any? do |candidate|
+          mysql_error_number(candidate) == DUPLICATE_COLUMN_NAME_ERROR ||
+            candidate.message.to_s.include?('Duplicate column name')
+        end
+      end
+
+      def error_chain(error)
+        chain = []
+        while error && !chain.include?(error)
+          chain << error
+          error = error.cause
+        end
+        chain
+      end
+
+      def mysql_error_number(error)
+        %i[error_number error_code].each do |reader|
+          next unless error.respond_to?(reader)
+
+          value = error.public_send(reader)
+          return value.to_i if value.is_a?(Integer) || value.is_a?(String)
+        end
+        nil
+      rescue StandardError
+        nil
       end
 
       def run_unwrapped_sql(sql)
