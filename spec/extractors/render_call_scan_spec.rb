@@ -9,6 +9,41 @@ RSpec.describe Woods::Extractors::RenderCallScan do
     described_class.call(source).map { |candidate| [candidate.kind, candidate.name, candidate.nesting] }
   end
 
+  describe '.may_render_constants?' do
+    it 'matches alias spellings and namespace segments as written' do
+      source = 'def show; render Shipping::Badge.new; end'
+
+      expect(described_class.may_render_constants?(source, names: %w[Badge])).to be(true)
+      expect(described_class.may_render_constants?(source, names: %w[Shipping])).to be(true)
+      expect(described_class.may_render_constants?(source, names: %w[OtherCard])).to be(false)
+    end
+
+    it 'rejects comment, string and capitalized method decoys after the text prefilter' do
+      source = <<~RUBY
+        # render Badge.new
+        def show
+          text = 'Badge'
+          Badge()
+          render OtherCard.new
+        end
+      RUBY
+
+      expect(described_class.may_render_constants?(source, names: %w[Badge])).to be(false)
+    end
+
+    it 'avoids parsing a controller that contains none of the touched names' do
+      expect(Prism).not_to receive(:parse)
+
+      expect(described_class.may_render_constants?('def show; render Card.new; end', names: %w[Badge])).to be(false)
+    end
+
+    it 'keeps ambiguous published source eligible instead of excluding its controller' do
+      expect(described_class.may_render_constants?('def show; render Badge.new', names: %w[Badge])).to be(true)
+      allow(Prism).to receive(:parse).and_raise(SystemStackError)
+      expect(described_class.may_render_constants?('render Badge.new', names: %w[Badge])).to be(true)
+    end
+  end
+
   it 'reports a rendered constant with the lexical nesting of its call site' do
     source = <<~RUBY
       module Billing

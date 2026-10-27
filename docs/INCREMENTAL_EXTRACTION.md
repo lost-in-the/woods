@@ -318,16 +318,20 @@ step before it.
    loaded constant tables (lexical scope, included Phlex Kits, top level), so
    creating `Billing::V2::TierGrid` retargets an unchanged
    `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
-   edge leads there. Controllers resolve their render edges the same way but
-   re-run only when a Ruby file under a component directory
-   (`component_paths`) touches a constant a controller resolves, since every
-   controller re-running on every Ruby edit would cost more than the bounded
-   blast radius saves. A component
-   defined outside those directories, or an alias defined elsewhere, retargets
-   a controller's edge when the controller file changes or on a full
-   extraction. The exception is a render that resolved to nothing: a
-   controller holding one re-runs on any Ruby edit, so a component created
-   outside those directories still resolves it. Only units whose output changed are rewritten. The same
+   edge leads there. Controllers resolve their render edges the same way:
+   a Ruby edit that touches a constant a controller resolves refreshes that
+   controller, including a component or alias defined in a service file or
+   another directory outside `component_paths`. Selection also checks render
+   constants as written, since an alias can name a different component class.
+   Ancestor matching uses qualified
+   names, so `Importers::Base` does not match `ActionController::Base`. Readable
+   `lib/` edits use their published previous source to narrow selection too.
+   An unrelated readable edit leaves other controllers untouched; an opaque
+   edit or a `lib/` edit without a recorded baseline conservatively refreshes
+   every controller.
+   A controller holding an unresolved render still re-runs on any Ruby edit,
+   so a component created elsewhere can resolve it. Only units whose output
+   changed are rewritten. The same
    reload requirement applies: a constant the process has not loaded, or has not
    unloaded, resolves as that process sees it. View components also re-run when
    a sidecar template changes (a template with a Ruby file of the same name

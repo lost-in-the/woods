@@ -72,6 +72,12 @@ module Woods
       # @param existing [#call] (qualified name) => whether the constant was defined before the edit
       # @return [Set<String>, nil] segment names; nil when either side is opaque
       def self.touched_names(before, after, existing: ->(_name) { false })
+        touched_constants(before, after, existing: existing)&.to_set { |name| name.split('::').last }
+      end
+
+      # Qualified names keep unrelated ancestors with the same leaf distinct.
+      # @return [Set<String>, nil] nil when either footprint is opaque
+      def self.touched_constants(before, after, existing: ->(_name) { false })
         return nil if before.opaque || after.opaque
 
         (before.definitions.keys | after.definitions.keys).each_with_object(Set.new) do |name, touched|
@@ -79,7 +85,7 @@ module Woods
           next if before.definitions[name] == prints
           next if name.empty? || (before.definitions[name].nil? && reopening?(prints) && existing.call(name))
 
-          touched.add(name.split('::').last)
+          touched.add(name)
         end
       end
 

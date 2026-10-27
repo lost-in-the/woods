@@ -20,13 +20,13 @@ RSpec.describe 'incremental runtime inputs' do
   let(:extractor) { Woods::Extractor.new(output_dir: @root.join('index')) }
 
   describe 'hybrid runtime refresh selection' do
-    it 'refreshes the hybrid and runtime-resolved families after changing a path outside app/' do
+    it 'refreshes hybrid and component families after changing a path outside app/' do
       changes = Woods::ChangeSet.new(paths: ['lib/runtime_settings.rb'], root: @root)
       expect(extractor.send(:hybrid_discovery_keys, changes, []))
         .to eq(Set[:jobs, :serializers, :components, :view_components])
     end
 
-    it 'refreshes the hybrid and runtime-resolved families after an app/ edit it cannot read as constants' do
+    it 'refreshes hybrid and component families for an unreadable app/ constant edit' do
       FileUtils.mkdir_p(@root.join('app/models'))
       File.write(@root.join('app/models/queue_settings.rb'), "Object.const_set(:QUEUE, 'critical')\n")
       changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
@@ -39,22 +39,6 @@ RSpec.describe 'incremental runtime inputs' do
       File.write(@root.join('app/models/queue_settings.rb'), "class QueueSettings\n  QUEUE = 'critical'\nend\n")
       changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
       expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
-    end
-
-    it 'refreshes controllers as well when a Ruby file under a component directory cannot be read as constants' do
-      FileUtils.mkdir_p(@root.join('app/components/shelf'))
-      File.write(@root.join('app/components/shelf/row_component.rb'), "Object.const_set(:Row, Class.new)\n")
-      changes = Woods::ChangeSet.new(paths: ['app/components/shelf/row_component.rb'], root: @root)
-
-      expect(extractor.send(:hybrid_discovery_keys, changes, [])).to include(:controllers)
-    end
-
-    it 'leaves controllers alone when a component file defines no constant a controller resolves' do
-      FileUtils.mkdir_p(@root.join('app/components/shelf'))
-      File.write(@root.join('app/components/shelf/row_component.rb'), "class Shelf::RowComponent\n  def a = 1\nend\n")
-      changes = Woods::ChangeSet.new(paths: ['app/components/shelf/row_component.rb'], root: @root)
-
-      expect(extractor.send(:hybrid_discovery_keys, changes, [])).not_to include(:controllers)
     end
 
     %w[
