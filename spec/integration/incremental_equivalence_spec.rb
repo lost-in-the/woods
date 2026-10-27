@@ -2517,7 +2517,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       expect(touched).not_to include('SignatureJob')
       expect(job_unit(index_dir, 'SignatureJob').fetch('dependents'))
-        .to include('type' => 'service', 'identifier' => 'LedgerDispatchService')
+        .to include(a_hash_including('type' => 'service', 'identifier' => 'LedgerDispatchService'))
       expect(differences(index_dir, full_extraction)).to be_empty
     end
 
@@ -4099,7 +4099,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                                 'job_type' => 'active_job')
       expect(unit.fetch('source_code')).to end_with("\n  async_method :sync_now\n")
       expect(unit.fetch('source_code')).not_to include('Class.new')
-      expect(unit.fetch('dependents')).to include('type' => 'service', 'identifier' => 'LedgerSyncCaller')
+      expect(unit.fetch('dependents'))
+        .to include(a_hash_including('type' => 'service', 'identifier' => 'LedgerSyncCaller'))
       expect(differences(index, full_extraction)).to be_empty
     end
 
@@ -4546,7 +4547,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       expect(posts['metadata']).to include('model' => posts_owner(index), 'model_less' => false, 'primary_key' => 'id')
       expect(posts['metadata']['columns'].map { |column| column['name'] }).to include('id', 'title', 'status')
-      expect(posts['dependents']).to include({ 'type' => 'model', 'identifier' => 'Post' })
+      expect(posts['dependents']).to include(a_hash_including('type' => 'model', 'identifier' => 'Post'))
       expect(audit['metadata']).to include('model' => nil, 'model_less' => true)
       expect(edges(unit_json(index, 'models', 'Post'), 'table')).to eq(['table:posts'])
       expect(unit_snapshot(index).keys.grep(%r{\Adatabase_tables/})).not_to include(a_string_matching(/schema_migr/))
@@ -4719,7 +4720,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         expect(edges(unit_json(index, 'external_consumers', 'external:reporting'), 'reads_table'))
           .to eq(%w[table:comments table:posts])
         expect(unit_json(index, 'database_tables', 'table:posts')['dependents'])
-          .to include({ 'type' => 'external_consumer', 'identifier' => 'external:storefront' })
+          .to include(a_hash_including('type' => 'external_consumer', 'identifier' => 'external:storefront'))
 
         delete_file(declared)
         Woods::Extractor.new(output_dir: index).extract_changed([declared])

@@ -607,26 +607,27 @@ module Woods
     end
 
     # Dependents of a unit in the shape {Extractor#resolve_dependents} writes
-    # into unit JSON: `{ type:, identifier: }` per *edge*, not per source.
+    # into unit JSON: `{ type:, identifier:, via: }` per *edge*, not per source.
     #
     # Multiplicity is preserved deliberately — a source that references the
     # same target twice (say once as `:belongs_to` and once as
     # `:code_reference`) contributes two entries in a full extraction, so
     # reconstructing this list incrementally has to do the same or the two
     # paths produce different unit JSON. Entries are sorted by identifier,
-    # then type, the order {ExtractedUnit#to_h} serializes a full
+    # then type, then via, the order {ExtractedUnit#to_h} serializes a full
     # extraction's dependents in, so neither depends on registration order.
     #
     # @param identifier [String] Unit identifier
-    # @return [Array<Hash>] `{ type: Symbol, identifier: String }` entries
+    # @return [Array<Hash>] `{ type: Symbol, identifier: String, via: Symbol, nil }` entries
     def dependents_detail(identifier)
       entries = (@reverse[identifier] || []).flat_map do |source|
         sorted_nodes(@nodes[source] || {}).flat_map do |type, node|
-          edge_count = Array(@edges[source]&.[](type)).count { |e| e[:target] == identifier }
-          Array.new(edge_count) { { type: node[:type], identifier: source } }
+          Array(@edges[source]&.[](type)).filter_map do |edge|
+            { type: node[:type], identifier: source, via: edge[:via] } if edge[:target] == identifier
+          end
         end
       end
-      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s] }
+      entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s, entry[:via].to_s] }
     end
 
     # Get all units of a specific type

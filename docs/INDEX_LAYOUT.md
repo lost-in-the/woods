@@ -91,6 +91,15 @@ reimplementing filename normalization, scan JSON files in a needed type director
 identifier can exist in multiple types. The full unit fields are documented in
 [Extractor reference](EXTRACTOR_REFERENCE.md#extractedunit-field-reference).
 
+A unit's `dependents` array holds one entry per incoming edge:
+`{ "identifier", "type", "via" }`, sorted by identifier, type, then `via`. The
+same caller appears once for each edge kind that reaches the unit (for example
+`type_reference` and `code_reference`), and `via` tells the rows apart. `via` is
+`null` when the edge kind is unknown. Older indexes omit `via`; readers that
+only use `identifier` and `type` keep working. Entries within one `_index.json`
+are sorted by `identifier`, so repeat extractions of the same tree publish the
+same bytes.
+
 The graph's `nodes`, typed variants, forward/reverse relationships and relationship
 metadata belong to the graph format; preserve them when transporting the index.
 Extractor directories can contain multiple unit types: `graphql/` contains
