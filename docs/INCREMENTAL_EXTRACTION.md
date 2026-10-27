@@ -319,10 +319,16 @@ step before it.
    creating `Billing::V2::TierGrid` retargets an unchanged
    `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
    edge leads there. Controllers resolve their render edges the same way:
-   a Ruby edit that touches a constant a controller resolves refreshes the
-   controller family, including a component or alias defined in a service file
-   or another directory outside `component_paths`. An unrelated readable edit
-   keeps the family untouched; an unreadable edit conservatively refreshes it.
+   a Ruby edit that touches a constant a controller resolves refreshes that
+   controller, including a component or alias defined in a service file or
+   another directory outside `component_paths`. Selection also checks render
+   constants as written, since an alias can name a different component class.
+   Ancestor matching uses qualified
+   names, so `Importers::Base` does not match `ActionController::Base`. Readable
+   `lib/` edits use their published previous source to narrow selection too.
+   An unrelated readable edit leaves other controllers untouched; an opaque
+   edit or a `lib/` edit without a recorded baseline conservatively refreshes
+   every controller.
    A controller holding an unresolved render still re-runs on any Ruby edit,
    so a component created elsewhere can resolve it. Only units whose output
    changed are rewritten. The same

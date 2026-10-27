@@ -3729,6 +3729,13 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         app/components/service_shadow_scope/page_component.rb
         app/controllers/service_shadow_scope/things_controller.rb
         app/services/service_shadow_scope/service_shadow_card.rb
+        app/components/flow_shadow_card.rb
+        app/controllers/flow_shadow/things_controller.rb
+        app/services/flow_shadow/flow_shadow_card.rb
+        app/components/render_alias_original_card.rb
+        app/components/render_alias_alternate_card.rb
+        app/controllers/render_alias_scope/things_controller.rb
+        lib/render_alias_scope.rb
       ]
     end
 
@@ -3960,6 +3967,94 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     describe 'an edit that touches a constant a render resolves (#728)' do
+      describe 'with flow precomputation enabled' do
+        around do |example|
+          previous = Woods.configuration.precompute_flows
+          Woods.configuration.precompute_flows = true
+          example.run
+        ensure
+          Woods.configuration.precompute_flows = previous
+        end
+
+        it 'keeps flows equivalent when a service-file constant shadows a controller render target' do
+          write_and_load('app/components/flow_shadow_card.rb', <<~RUBY)
+            class FlowShadowCard < ApplicationComponent
+              def call = 'root card'
+            end
+          RUBY
+          write_and_load('app/controllers/flow_shadow/things_controller.rb', <<~RUBY)
+            module FlowShadow
+              class ThingsController < ApplicationController
+                def show = render(FlowShadowCard.new)
+              end
+            end
+          RUBY
+          index = full_extraction
+          expect(render_edges(index, 'FlowShadow::ThingsController')).to eq([%w[FlowShadowCard], []])
+          flows = flow_snapshot(index)
+          flow_file = File.basename(flows.fetch('flow_index.json').fetch('FlowShadow::ThingsController#show'))
+          original_flow = flows.fetch(flow_file)
+          expect(original_flow.fetch('steps').flat_map { |step| step.fetch('operations') })
+            .to include(hash_including('type' => 'response', 'render_method' => 'render'))
+
+          path = write_and_load('app/services/flow_shadow/flow_shadow_card.rb', <<~RUBY)
+            module FlowShadow
+              class FlowShadowCard < ApplicationComponent
+                def call = 'scoped card'
+              end
+            end
+          RUBY
+          Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+          edges = read_json(index, 'dependency_graph.json').fetch('edges').fetch('FlowShadow::ThingsController')
+          expect(edges.select { |edge| edge['via'] == 'render' }.map { |edge| edge.fetch('target') })
+            .to eq(%w[FlowShadow::FlowShadowCard])
+          expect(render_edges(index, 'FlowShadow::ThingsController')).to eq([%w[FlowShadow::FlowShadowCard], []])
+          # A response operation records the render method and status, not
+          # the component target, so retargeting leaves this flow unchanged.
+          expect(flow_snapshot(index).fetch(flow_file)).to eq(original_flow)
+          expect(differences(index, full_extraction)).to be_empty
+        end
+      end
+
+      it 'retargets a library render alias whose spelling differs from its canonical component name' do
+        write_and_load('app/components/render_alias_original_card.rb', <<~RUBY)
+          class RenderAliasOriginalCard < ApplicationComponent
+            def call = 'original'
+          end
+        RUBY
+        write_and_load('app/components/render_alias_alternate_card.rb', <<~RUBY)
+          class RenderAliasAlternateCard < ApplicationComponent
+            def call = 'alternate'
+          end
+        RUBY
+        path = write_and_load('lib/render_alias_scope.rb', <<~RUBY)
+          module RenderAliasScope
+            Badge = ::RenderAliasOriginalCard
+          end
+        RUBY
+        write_and_load('app/controllers/render_alias_scope/things_controller.rb', <<~RUBY)
+          module RenderAliasScope
+            class ThingsController < ApplicationController
+              def show = render(Badge.new)
+            end
+          end
+        RUBY
+        index = full_extraction
+        expect(render_edges(index, 'RenderAliasScope::ThingsController')).to eq([%w[RenderAliasOriginalCard], []])
+
+        RenderAliasScope.send(:remove_const, :Badge)
+        write_and_load(path, <<~RUBY)
+          module RenderAliasScope
+            Badge = ::RenderAliasAlternateCard
+          end
+        RUBY
+        Woods::Extractor.new(output_dir: index).extract_changed([path])
+
+        expect(render_edges(index, 'RenderAliasScope::ThingsController')).to eq([%w[RenderAliasAlternateCard], []])
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
       it 'retargets resolved controller and component renders when a service-file constant shadows their target' do
         index = run_sequence([
                                lambda do
