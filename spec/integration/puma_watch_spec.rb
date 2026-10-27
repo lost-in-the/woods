@@ -46,6 +46,12 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
       bind #{"unix://#{@root}/puma.sock".inspect}
       threads 0, 2
       workers 0
+      # Puma's own signal handler can wedge its graceful shutdown (see #control_puma),
+      # so the examples trigger stop and restart through the control app.
+      activate_control_app #{"unix://#{@root}/control.sock".inspect}, no_token: true
+      # Workers receive TERM as a real signal and hit the same wedge, so let
+      # the master KILL a stuck one well inside the spec's own stop timeout.
+      worker_shutdown_timeout 3
       #{configuration}
       app ->(_env) { [200, { 'content-type' => 'text/plain' }, [Process.pid.to_s]] }
       #{guarded ? Woods::Watch::Installation::Templates.directive('puma') : 'plugin :woods'}
@@ -66,6 +72,29 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
 
   def log_path
     File.join(@root, 'puma.log')
+  end
+
+  # Run a Puma master command (stop, restart, phased-restart) from the control
+  # app's own thread. The same command sent as TERM, USR2 or USR1 runs in a
+  # trap on the master's main thread. Puma 8 writes its wake-up byte to an
+  # internal pipe from that trap, and its server thread can close the pipe
+  # while the trap is still inside the write. Ruby 3.3, 3.4 and 4.0 then leave
+  # both sides waiting forever, so the master never logs "Restarting" or exits.
+  # This happens under CPU contention with no Woods plugin loaded, so it
+  # cannot be fixed here; the hooks under test fire the same either way.
+  #
+  # @return [Boolean] false when the control app did not answer, for example
+  #   after the master was killed while a forked child still holds its socket
+  def control_puma(command)
+    Timeout.timeout(5) do
+      UNIXSocket.open(File.join(@root, 'control.sock')) do |client|
+        client.write("GET /#{command} HTTP/1.0\r\n\r\n")
+        client.read
+      end
+    end
+    true
+  rescue Errno::ECONNREFUSED, Errno::ENOENT, Errno::ECONNRESET, Errno::EPIPE, Timeout::Error
+    false
   end
 
   def request
@@ -107,7 +136,7 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
   def stop_server(signal = 'TERM')
     return unless @server
 
-    Process.kill(signal, @server)
+    Process.kill(signal, @server) unless signal == 'TERM' && control_puma('stop')
     Timeout.timeout(15) { Process.waitpid(@server) }
   rescue Errno::ESRCH, Errno::ECHILD
     nil
@@ -226,7 +255,7 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
     CONFIG
     wait_until { launches.size == 1 && File.readlines(File.join(@root, 'workers')).size >= 2 }
     child_pid = launches.first.fetch('pid')
-    Process.kill('USR1', @server)
+    expect(control_puma('phased-restart')).to be(true)
     wait_until { File.readlines(File.join(@root, 'workers')).size >= 4 }
     expect(request).to include('200 OK')
     expect(launches.map { |entry| entry.fetch('pid') }).to eq([child_pid])
@@ -239,7 +268,7 @@ RSpec.describe 'Puma-managed watcher lifecycle' do
     wait_until { launches.size == 1 }
     first_pid = launches.first.fetch('pid')
     master_pid = @server
-    Process.kill('USR2', @server)
+    expect(control_puma('restart')).to be(true)
     wait_until { launches.size == 2 && request.include?('200 OK') }
     expect(@server).to eq(master_pid)
     expect(running?(first_pid)).to be(false)

@@ -50,6 +50,9 @@ module Woods
         # `json.*` call.
         RUNTIME_PARTIAL_OPTION = /\bpartial:\s*+#{RUNTIME_EXPRESSION}/
 
+        # A quoted string on one line, dropped before counting parentheses.
+        QUOTED_TEXT = /"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'/
+
         # @see Base#name
         def name
           ENGINE_NAME
@@ -110,6 +113,26 @@ module Woods
         # @see Erb#partial_extension
         def partial_extension
           '.json.jbuilder'
+        end
+
+        # Source lines joined into statements: a line continues on the next
+        # while it ends in a comma or leaves a parenthesis open, so a call
+        # laid out over several lines is one statement. Quoted text is not
+        # counted, and an unmatched close never goes below zero.
+        #
+        # @param source [String]
+        # @return [Array<String>]
+        def statements(source)
+          joined = []
+          depth = 0
+          continued = false
+          source.each_line do |line|
+            continued || depth.positive? ? joined.last << line : joined << line.dup
+            code = line.gsub(QUOTED_TEXT, '')
+            depth = [depth + code.count('(') - code.count(')'), 0].max
+            continued = line.rstrip.end_with?(',')
+          end
+          joined
         end
 
         # Each statement's text from its first `json.*` call onward.

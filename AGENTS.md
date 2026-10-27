@@ -35,6 +35,7 @@ bin/setup
 bin/rspec spec/path/to/spec.rb
 bin/rake spec
 bin/rubocop
+script/ci-local   # before every push; see CONTRIBUTING.md "Before you push"
 ```
 
 ## Map Woods itself before broad investigation

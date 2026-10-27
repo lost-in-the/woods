@@ -1,5 +1,9 @@
 # Notion Integration
 
+> **Deprecated.** Notion sync (`woods:notion_sync`, `woods:send` and the `notion_sync` MCP tool) is
+> deprecated and will be removed in the next minor release. Use the [Markdown export](MARKDOWN_EXPORT.md)
+> (`woods:markdown`) and sync the folder wherever you need. These commands warn once per process.
+
 Sync your Rails application's data model documentation to Notion databases, making schema, associations, validations, callbacks, and column-level detail accessible to non-technical stakeholders without GitHub access.
 
 ## What Gets Synced
@@ -91,7 +95,7 @@ Create two databases in your Notion workspace with these exact property names an
 | Table | Relation (→ Data Models database) |
 | Data Type | Select (options: string, integer, bigint, boolean, datetime, text, decimal, float, date, binary, json, jsonb) |
 | Nullable | Checkbox |
-| Default Value | Text |
+| Default Value | Text (`Has default` unless `notion_export_column_defaults` is on; see below) |
 | Validation Rules | Text |
 
 ### 3. Share Databases with Integration
@@ -114,6 +118,14 @@ Woods.configure do |config|
   }
 end
 ```
+
+Column default values are not sent to Notion by default. The Default Value property says `Has default`, plus the digest where the column carries one. To send the values, opt in:
+
+```ruby
+config.notion_export_column_defaults = true
+```
+
+Values sent under the opt-in pass through the credential scanner, and any match is replaced with `[REDACTED]`.
 
 Or via environment variables:
 

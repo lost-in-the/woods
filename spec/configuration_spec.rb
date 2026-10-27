@@ -70,6 +70,10 @@ RSpec.describe Woods::Configuration do
       expect(config.console_mcp_enabled).to eq(false)
     end
 
+    it 'sets notion_export_column_defaults to false' do
+      expect(config.notion_export_column_defaults).to eq(false)
+    end
+
     it 'sets console_embedded_read_tools to false' do
       expect(config.console_embedded_read_tools).to eq(false)
     end

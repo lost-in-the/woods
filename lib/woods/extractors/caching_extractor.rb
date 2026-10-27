@@ -67,7 +67,7 @@ module Woods
         # backslash pair is a token outside strings too: an escape honored
         # only inside a string merges states. An unbounded `.*?` rescanned
         # the rest of the line from every `cache` (polynomial on Ruby < 3.2).
-        fragment: /\bcache(?:_if|_unless)?\s++(?:\\.|"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'|(?!\bcache(?:_if|_unless)?\s)[^\n"'\\])*?\bdo\b|\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/,
+        fragment: /(?<![.:])\bcache(?:_if|_unless)?\s++(?:\\.|"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'|(?!\bcache(?:_if|_unless)?\s)[^\n"'\\])*?\bdo\b|(?<![.:])\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/,
         # A bare key method inside the arguments of a call matched above is
         # skipped (see #extract_cache_calls).
         cache_key: /\bcache_key(?:_with_version)?\b/,
@@ -118,7 +118,8 @@ module Woods
         code = CommentBlanking.blank(source, file_path)
         store_calls = File.extname(file_path.to_s) == '.rb' ? CacheStoreCalls.find(code) : []
 
-        return nil unless cache_usage?(code) || store_calls.any?
+        patterns = cache_patterns(file_path)
+        return nil unless cache_usage?(code, patterns) || store_calls.any?
 
         file_type ||= infer_file_type(file_path)
         identifier = relative_path(file_path)
@@ -131,7 +132,7 @@ module Woods
 
         unit.namespace   = nil
         unit.source_code = annotate_source(source, identifier, file_type)
-        unit.metadata    = extract_metadata(source, code, file_type, store_calls)
+        unit.metadata    = extract_metadata(source, code, file_type, store_calls, patterns)
         unit.dependencies = extract_dependencies(source)
 
         unit
@@ -150,8 +151,20 @@ module Woods
       #
       # @param source [String] Ruby or ERB source
       # @return [Boolean]
-      def cache_usage?(source)
-        CACHE_PATTERNS.values.any? { |pattern| source.match?(pattern) }
+      def cache_usage?(source, patterns = CACHE_PATTERNS)
+        patterns.values.any? { |pattern| source.match?(pattern) }
+      end
+
+      # The patterns that apply to a file. Fragment caching is a view helper,
+      # so a bare `cache` call in a Ruby file is Active Record query caching
+      # or an app method, not a fragment cache.
+      #
+      # @param file_path [String]
+      # @return [Hash{Symbol => Regexp}]
+      def cache_patterns(file_path)
+        return CACHE_PATTERNS unless File.extname(file_path.to_s) == '.rb'
+
+        CACHE_PATTERNS.except(:fragment)
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -186,12 +199,13 @@ module Woods
       # @param code [String] Source with comments blanked, for cache calls
       # @param file_type [Symbol] :controller, :model, or :view
       # @param store_calls [Array<Hash>] Custom store calls, from {CacheStoreCalls.find}
+      # @param patterns [Hash{Symbol => Regexp}] From {#cache_patterns}
       # @return [Hash] Caching metadata
-      def extract_metadata(source, code, file_type, store_calls = [])
-        cache_calls = extract_cache_calls(code, store_calls)
+      def extract_metadata(source, code, file_type, store_calls = [], patterns = CACHE_PATTERNS)
+        cache_calls = extract_cache_calls(code, store_calls, patterns)
         {
           cache_calls: cache_calls,
-          cache_strategy: infer_cache_strategy(code, cache_calls),
+          cache_strategy: infer_cache_strategy(code, cache_calls, patterns),
           file_type: file_type,
           loc: source.lines.count { |l| l.strip.length.positive? && !l.strip.start_with?('#') }
         }
@@ -218,9 +232,10 @@ module Woods
       #
       # @param source [String] Source code
       # @param store_calls [Array<Hash>] Custom store calls, from {CacheStoreCalls.find}
+      # @param patterns [Hash{Symbol => Regexp}] From {#cache_patterns}
       # @return [Array<Hash>] Cache call descriptors
-      def extract_cache_calls(source, store_calls = [])
-        key_patterns, call_patterns = CACHE_PATTERNS.partition { |type, _| KEY_METHOD_TYPES.include?(type) }
+      def extract_cache_calls(source, store_calls = [], patterns = CACHE_PATTERNS)
+        key_patterns, call_patterns = patterns.partition { |type, _| KEY_METHOD_TYPES.include?(type) }
         calls = []
         argument_ranges = []
 
@@ -326,10 +341,11 @@ module Woods
       #
       # @param source [String] Source code
       # @param cache_calls [Array<Hash>] Extracted cache calls
+      # @param patterns [Hash{Symbol => Regexp}] From {#cache_patterns}
       # @return [Symbol] :fragment, :action, :low_level, or :mixed
-      def infer_cache_strategy(source, cache_calls)
-        has_action    = source.match?(CACHE_PATTERNS[:caches_action])
-        has_fragment  = source.match?(CACHE_PATTERNS[:fragment])
+      def infer_cache_strategy(source, cache_calls, patterns = CACHE_PATTERNS)
+        has_action    = source.match?(patterns[:caches_action])
+        has_fragment  = patterns.key?(:fragment) && source.match?(patterns[:fragment])
         has_low_level = source.match?(/Rails\.cache\.(?:fetch|read|write)/) || cache_calls.any? { |call| call.key?(:store) }
 
         active_strategies = [has_action, has_fragment, has_low_level].count(true)
