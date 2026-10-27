@@ -654,6 +654,17 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       let(:render_targets) { unit.dependencies.select { |d| d[:via] == :render }.map { |d| d[:target] } }
 
       before do
+        allow(Dir).to receive(:glob).and_wrap_original do |original, pattern, *args, **options|
+          directory = options[:base]
+          next original.call(pattern, *args, **options) unless directory
+
+          file_system.keys.select { |path| File.dirname(path) == directory.to_s }
+                     .map { |path| File.basename(path) }
+                     .select { |name| File.fnmatch(pattern, name) }
+        end
+      end
+
+      before do
         stub_const('Ledger::NoteComponent', Class.new(ViewComponent::Base))
         file_system['/rails/app/components/ledger/note_component.rb'] = ''
       end
@@ -672,6 +683,36 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
           "%section\n  = render Ledger::NoteComponent.new(text: 'a')\n"
 
         expect(render_targets).to include('Ledger::NoteComponent')
+      end
+
+      context 'with variants and extra templates' do
+        it 'reads a variant template beside the component' do
+          file_system['/rails/app/components/ledger/page_component.html+phone.erb'] =
+            '<%= render Ledger::NoteComponent.new(text: "a") %>'
+
+          expect(render_targets).to include('Ledger::NoteComponent')
+        end
+
+        it 'reads a variant template in the sidecar directory' do
+          file_system['/rails/app/components/ledger/page_component/page_component.html+phone.haml'] =
+            "= render Ledger::NoteComponent.new(text: 'a')\n"
+
+          expect(render_targets).to include('Ledger::NoteComponent')
+        end
+
+        it 'reads an extra template in the sidecar directory' do
+          file_system['/rails/app/components/ledger/page_component/note.html.erb'] =
+            '<%= render Ledger::NoteComponent.new(text: "a") %>'
+
+          expect(render_targets).to include('Ledger::NoteComponent')
+        end
+
+        it 'does not read a template that belongs to another component' do
+          file_system['/rails/app/components/ledger/page_component_extra.html.erb'] =
+            '<%= render Ledger::NoteComponent.new(text: "a") %>'
+
+          expect(render_targets).not_to include('Ledger::NoteComponent')
+        end
       end
 
       it 'records a template render that names no component' do
