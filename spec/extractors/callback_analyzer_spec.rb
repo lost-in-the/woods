@@ -288,6 +288,90 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
     end
   end
 
+  describe 'class nesting for services and mailers' do
+    let(:source) do
+      <<~RUBY
+        module Fleet
+          class Shipment
+            def notify
+              BillingService.call(self)
+              CarrierMailer.dispatched(self).deliver_later
+            end
+          end
+        end
+      RUBY
+    end
+
+    def effects_for(source)
+      build_analyzer(source).analyze(make_callback(filter: 'notify'))[:side_effects]
+    end
+
+    before do
+      stub_const('Fleet', Module.new)
+      stub_const('Fleet::Shipment', Class.new)
+    end
+
+    it 'names the service nested in the model class' do
+      stub_const('Fleet::Shipment::BillingService', Class.new)
+
+      expect(effects_for(source)[:services_called]).to eq(['Fleet::Shipment::BillingService'])
+    end
+
+    it 'looks outward through the enclosing module for a service' do
+      stub_const('Fleet::BillingService', Class.new)
+
+      expect(effects_for(source)[:services_called]).to eq(['Fleet::BillingService'])
+    end
+
+    it 'names the mailer nested in the model class' do
+      stub_const('Fleet::Shipment::CarrierMailer', Class.new)
+
+      expect(effects_for(source)[:mailers_triggered]).to eq(['Fleet::Shipment::CarrierMailer'])
+    end
+
+    it 'looks outward through the enclosing module for a mailer' do
+      stub_const('Fleet::CarrierMailer', Class.new)
+
+      expect(effects_for(source)[:mailers_triggered]).to eq(['Fleet::CarrierMailer'])
+    end
+
+    it 'keeps the written names when no candidate is loaded' do
+      expect(effects_for(source)).to include(services_called: ['BillingService'], mailers_triggered: ['CarrierMailer'])
+    end
+  end
+
+  describe 'analysis status' do
+    it 'marks a callback whose method was read as analyzed, with or without effects' do
+      source = "class User\n  def quiet\n    1\n  end\nend\n"
+      result = build_analyzer(source).analyze(make_callback(filter: 'quiet'))
+
+      expect(result[:analysis_status]).to eq('analyzed')
+    end
+
+    it 'marks a proc callback unsupported' do
+      source = "class User\n  before_save -> { 1 }\nend\n"
+      result = build_analyzer(source).analyze(make_callback(filter: '#<Proc:0x00007f>'))
+
+      expect(result[:analysis_status]).to eq('unsupported')
+    end
+
+    it 'marks a method the source does not define unsupported' do
+      result = build_analyzer("class User\nend\n").analyze(make_callback(filter: 'missing'))
+
+      expect(result[:analysis_status]).to eq('unsupported')
+    end
+
+    it 'marks a method whose text cannot be read source_unavailable' do
+      analyzer = build_analyzer("class User\n  def quiet\n  end\nend\n")
+      allow(analyzer).to receive(:method_source_from_node).and_return(nil)
+
+      result = analyzer.analyze(make_callback(filter: 'quiet'))
+
+      expect(result[:analysis_status]).to eq('source_unavailable')
+      expect(result[:side_effects][:jobs_enqueued]).to eq([])
+    end
+  end
+
   # ── Service call detection ─────────────────────────────────────
 
   describe 'service call detection' do
@@ -660,11 +744,11 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       )
     end
 
-    it 'leaves callback analysis naming services and mailers as written' do
+    it 'names services and mailers in the method’s scope in callback analysis too' do
       effects = build_analyzer(source).analyze(make_callback(filter: 'post'))[:side_effects]
 
-      expect(effects[:services_called]).to eq(['TallyService'])
-      expect(effects[:mailers_triggered]).to eq(['ReceiptMailer'])
+      expect(effects[:services_called]).to eq(['Billing::TallyService'])
+      expect(effects[:mailers_triggered]).to eq(['Billing::ReceiptMailer'])
     end
   end
 end

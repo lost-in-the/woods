@@ -37,6 +37,14 @@ module Woods
       # Async enqueue methods that indicate a job is being dispatched.
       ASYNC_METHODS = ReferencePatterns::ENQUEUE_METHODS
 
+      # Values of +analysis_status+. An empty +side_effects+ with ANALYZED
+      # means no effects were found; the other two mean none were looked for.
+      ANALYZED = 'analyzed'
+      # No method definition to read: a proc, a lambda, or a method the source does not define.
+      UNSUPPORTED = 'unsupported'
+      # The method was found but its text could not be read.
+      SOURCE_UNAVAILABLE = 'source_unavailable'
+
       # Assignment to a column through +self+: plain, conditional (`||=`,
       # `&&=`), or arithmetic (`+=`, `-=`, `*=`, `/=`). `self.token ||=
       # SecureRandom.uuid` in a before_create is arguably the most common
@@ -88,26 +96,30 @@ module Woods
       #
       # Finds the callback's method body in the source, scans it for
       # side effects, and returns the original callback hash with an
-      # added :side_effects key.
+      # added :side_effects key and an :analysis_status of ANALYZED,
+      # UNSUPPORTED or SOURCE_UNAVAILABLE.
       #
       # @param callback_hash [Hash] Callback metadata from ModelExtractor:
       #   { type:, filter:, kind:, conditions: }
-      # @return [Hash] The callback hash with an added :side_effects key
+      # @return [Hash] The callback hash with added :side_effects and
+      #   :analysis_status keys
       def analyze(callback_hash)
         filter = callback_hash[:filter].to_s
         method_node = find_method_node(filter)
 
-        return callback_hash.merge(side_effects: empty_side_effects) if method_node.nil?
+        return unanalyzed(callback_hash, UNSUPPORTED) if method_node.nil?
 
         method_source = scannable_source(method_source_from_node(method_node))
-        return callback_hash.merge(side_effects: empty_side_effects) if method_source.nil?
+        return unanalyzed(callback_hash, SOURCE_UNAVAILABLE) if method_source.nil?
 
+        nesting = nesting_for(method_node)
         callback_hash.merge(
+          analysis_status: ANALYZED,
           side_effects: {
             columns_written: detect_columns_written(method_source),
-            jobs_enqueued: detect_jobs_enqueued(method_source, nesting_for(method_node)),
-            services_called: detect_services_called(method_source),
-            mailers_triggered: detect_mailers_triggered(method_source),
+            jobs_enqueued: detect_jobs_enqueued(method_source, nesting),
+            services_called: detect_services_called(method_source, nesting),
+            mailers_triggered: detect_mailers_triggered(method_source, nesting),
             database_reads: detect_database_reads(method_source),
             operations: extract_operations(method_node)
           }
@@ -394,6 +406,15 @@ module Woods
         return [nil, nil] unless segment && segment[:file]
 
         [line - segment[:start] + 1, segment[:file]]
+      end
+
+      # The callback with empty side effects and the reason none were read.
+      #
+      # @param callback_hash [Hash]
+      # @param status [String] UNSUPPORTED or SOURCE_UNAVAILABLE
+      # @return [Hash]
+      def unanalyzed(callback_hash, status)
+        callback_hash.merge(analysis_status: status, side_effects: empty_side_effects)
       end
 
       # Return an empty side-effects structure.
