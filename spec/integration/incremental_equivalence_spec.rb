@@ -729,6 +729,54 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'a view component sidecar template (#740)' do
+    let(:component_path) { 'app/components/sidecar_shelf_component.rb' }
+    let(:template_path) { 'app/components/sidecar_shelf_component.html.erb' }
+
+    # The booted app does not load view_component, so the example supplies a
+    # base the extractor recognises and removes it afterwards.
+    before do
+      view_component = Module.new
+      view_component.const_set(:Base, Class.new)
+      stub_const('ViewComponent', view_component)
+    end
+
+    after { Object.send(:remove_const, :SidecarShelfComponent) if Object.const_defined?(:SidecarShelfComponent, false) }
+
+    def component_unit(index)
+      require 'woods/mcp/index_reader'
+      Woods::MCP::IndexReader.new(index).find_unit('SidecarShelfComponent', type: 'view_component')
+    end
+
+    def file_map(index)
+      read_json(index, 'dependency_graph.json').fetch('file_map')
+    end
+
+    def write_component(template_text)
+      load app_path(write_file(component_path, "class SidecarShelfComponent < ViewComponent::Base\nend\n"))
+      write_file(template_path, template_text)
+    end
+
+    it 'lists the template with the component and tracks its edit and deletion' do
+      write_component("<div>one</div>\n")
+      index = full_extraction
+      expect(component_unit(index)).to include('metadata' => hash_including('sidecar_template' => template_path))
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+
+      write_file(template_path, "<div>two</div>\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
+
+      delete_file(template_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(component_unit(index).fetch('metadata')).to include('sidecar_template' => nil)
+      expect(file_map(index)).not_to have_key(template_path)
+      expect(file_map(index).fetch(component_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   describe 'standalone application modules (#552)' do
     def write_module_bundle
       path = write_file('app/models/ownership_bundle.rb', <<~RUBY)
@@ -1988,6 +2036,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         expect(types.fetch(included ? 'concern' : 'lib', [])).to include('OwnershipStorage')
         expect(types.fetch(included ? 'lib' : 'concern', [])).not_to include('OwnershipStorage')
         expect(differences(index, full_extraction)).to be_empty
+      end
+    end
+
+    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there' do
+      load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
+      host = write_storage_host(include_storage: true)
+      index = full_extraction
+
+      [true, false].each do |included|
+        unless included
+          write_storage_host(include_storage: false)
+          Woods::Extractor.new(output_dir: index).extract_changed([host])
+          expect(differences(index, full_extraction)).to be_empty
+        end
+
+        graph = read_json(index, 'dependency_graph.json')
+        published = graph.fetch('type_index').values.sum(&:size)
+        expect(read_json(index, 'manifest.json').fetch('total_units')).to eq(published)
+        expect(graph.fetch('stats').fetch('node_count')).to eq(published)
+        # Other examples leave identifiers published under two types; their
+        # second node and its edges are under `variants`.
+        variants = graph.fetch('variants', [])
+        edges = graph.fetch('edges').values.sum(&:size) + variants.sum { |variant| variant.fetch('edges').size }
+        expect(graph.fetch('stats').fetch('edge_count')).to eq(edges)
+        expect(variants.map { |variant| variant.fetch('identifier') }).not_to include('OwnershipStorage')
+        owners = graph.fetch('type_index').select { |_, ids| ids.include?('OwnershipStorage') }.keys
+        expect(owners).to eq([included ? 'concern' : 'lib'])
       end
     end
 
