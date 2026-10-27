@@ -129,8 +129,13 @@ end
 def unit_steps
   env = bundle_env('3.3')
   [Step.new('retrieval quality gate', '3.3', env, %w[bundle exec ruby -Ilib bench/evaluation/runner.rb]),
-   Step.new('script/parallel-rspec (COVERAGE)', '3.3', env.merge('CI' => 'true', 'COVERAGE' => 'true', 'GIT_CONFIG_GLOBAL' => File::NULL),
+   Step.new('script/parallel-rspec (COVERAGE)', '3.3',
+            env.merge('CI' => 'true', 'COVERAGE' => 'true', 'GIT_CONFIG_GLOBAL' => File::NULL),
             %w[bundle exec ruby script/parallel-rspec])]
+end
+
+def selected_steps(match)
+  BOOTED_STEPS.select { |files| match.nil? || files.inspect.include?(match) }
 end
 
 def booted_steps(full, match = nil)
@@ -138,7 +143,7 @@ def booted_steps(full, match = nil)
   BOOTED_ROWS.flat_map do |row|
     gemfile = "gemfiles/rails_#{row[:rails]}.gemfile"
     env = bundle_env(row[:ruby], gemfile).merge('WOODS_RUN_BOOTED_APP' => '1')
-    BOOTED_STEPS.select { |files| match.nil? || files.inspect.include?(match) }.map do |files|
+    selected_steps(match).map do |files|
       step_env = env
       if files == :incremental_equivalence
         files = %w[spec/integration/incremental_equivalence_spec.rb]
