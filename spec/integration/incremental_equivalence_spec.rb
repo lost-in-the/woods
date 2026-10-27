@@ -197,9 +197,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
          Digest::SHA256.hexdigest(unit.metadata.to_json), Digest::SHA256.hexdigest(unit.dependencies.to_json)]
       end
     end
-    expect(captured_rows.map { |row| row.values_at('identifier', 'unit_type', 'source_hash',
-                                                'metadata_hash', 'dependencies_hash') })
-      .to eq(expected_facts.sort_by { |facts| facts.first(2) })
+    captured_facts = captured_rows.map do |row|
+      row.values_at('identifier', 'unit_type', 'source_hash', 'metadata_hash', 'dependencies_hash')
+    end
+    expect(captured_facts).to eq(expected_facts.sort_by { |facts| facts.first(2) })
 
     changed = write_file('app/services/snapshot_probe_service.rb', <<~RUBY)
       class SnapshotProbeService
