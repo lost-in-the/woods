@@ -854,7 +854,11 @@ module Woods
     end
 
     # Every physical source of a unit assembled from several files: a library
-    # unit's contributors, or each file that defines or enhances a rake task.
+    # unit's contributors, each file that defines or enhances a rake task, or a
+    # view component and its sidecar template. A rake task and a component name
+    # their extra files in metadata and carry no byte ranges: the template text
+    # is not part of the published component source, so a contributor record,
+    # which must hash-match published bytes, cannot describe it.
     #
     # @param unit [ExtractedUnit]
     # @param metadata [Hash]
@@ -864,6 +868,8 @@ module Woods
                 SourceContributors.paths(unit)
               elsif unit.type == :rake_task
                 [unit.file_path, *metadata[:defined_in], *metadata[:enhanced_in]].compact
+              elsif unit.type == :view_component
+                [unit.file_path, metadata[:sidecar_template]].compact
               elsif unit.type == :doc
                 document_paths(unit, metadata)
               else

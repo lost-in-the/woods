@@ -4096,11 +4096,24 @@ module Woods
         @dependency_graph.units_for_path(path).each do |identifier, type|
           next if !class_based && convention_path_unit?(type)
           next if aliased_document_retained?(identifier, type, path, removed, affected_types)
+          next if sidecar_of_surviving_component?(identifier, type, path)
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
         @source_inputs&.consume_deleted(path)
       end
+    end
+
+    # A deleted sidecar template is not the end of its view component: the
+    # component's Ruby file still defines it, and the component is re-extracted
+    # without the template.
+    #
+    # @return [Boolean]
+    def sidecar_of_surviving_component?(identifier, type, vanished)
+      return false unless type == :view_component
+
+      primary = @dependency_graph.node(identifier, type: type)&.dig(:file_path)
+      !primary.nil? && primary != vanished && File.exist?(primary)
     end
 
     # Does this unit's `file_path` name a *convention* that need not exist?

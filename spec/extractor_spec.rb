@@ -2060,6 +2060,19 @@ RSpec.describe Woods::Extractor do
       expect(extractor.dependency_graph.node_exists?('Ghost')).to be(false)
     end
 
+    it 'keeps a view component whose sidecar template was deleted but whose Ruby file remains' do
+      component = File.join(tmpdir, 'app/components/shelf_component.rb')
+      FileUtils.mkdir_p(File.dirname(component))
+      FileUtils.touch(component)
+      unit = Woods::ExtractedUnit.new(type: :view_component, identifier: 'ShelfComponent', file_path: component)
+      unit.metadata = { sidecar_template: 'app/components/shelf_component.html.erb' }
+      allow(Woods::DependencyGraph).to receive(:graph_root).and_return(tmpdir)
+      extractor.dependency_graph.register(unit)
+
+      expect(prune(['app/components/shelf_component.html.erb'])).to be_empty
+      expect(extractor.dependency_graph.node_exists?('ShelfComponent')).to be(true)
+    end
+
     it 'sweeps a file-based unit the caller forgot to mention' do
       register(type: :service, identifier: 'GoneService', relative_path: 'app/services/gone_service.rb')
 
