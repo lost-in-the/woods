@@ -50,21 +50,45 @@ RSpec.describe Woods::Temporal::SnapshotUnitFacts do
     )
   end
 
-  it 'returns fresh record containers without modifying frozen input values' do
-    unit.identifier.freeze
-    unit.metadata.freeze
-    unit.dependencies.freeze
-    groups = [[unit].freeze].freeze
-    first = described_class.build(unit_groups: groups)
-    first.first['type'] = 'changed'
-    second = described_class.build(unit_groups: groups)
+  %w[stdlib active_support].each do |encoder|
+    it "matches the pre-refactor fingerprints with #{encoder} to_json dispatch" do
+      lib = File.expand_path('../../lib', __dir__)
+      probe = <<~'RUBY'
+        if ARGV.fetch(0) == 'active_support'
+          require 'logger'
+          require 'active_support'
+          require 'active_support/json'
+        end
+        require 'woods/temporal/snapshot_unit_facts'
+        unit_class = Struct.new(:identifier, :type, :source_code, :metadata, :dependencies)
+        text = "<&caf\u00e9"
+        unit = unit_class.new('Shared', :graphql_query, text,
+                              { 'z' => text, 'a' => { 'nested' => [text] } },
+                              [{ target: 'Other', via: :code_reference, label: text }])
+        groups = [[unit]]
+        # Preserve the original capture implementation as the compatibility
+        # oracle. Its direct to_json dispatch intentionally follows the host.
+        legacy = groups.flat_map do |units|
+          units.map do |entry|
+            {
+              'identifier' => entry.identifier,
+              'type' => entry.type.to_s,
+              'source_hash' => Digest::SHA256.hexdigest(entry.source_code.to_s),
+              'metadata_hash' => Digest::SHA256.hexdigest(entry.metadata.to_json),
+              'dependencies_hash' => Digest::SHA256.hexdigest(entry.dependencies.to_json)
+            }
+          end
+        end
+        puts JSON.generate(legacy: legacy, current: Woods::Temporal::SnapshotUnitFacts.build(unit_groups: groups),
+                           active_support: defined?(ActiveSupport::JSON))
+      RUBY
+      output, error, status = Open3.capture3(RbConfig.ruby, '-I', lib, '-e', probe, encoder)
 
-    expect(second.first.fetch('type')).to eq('graphql_query')
-    expect(second).not_to equal(first)
-    expect(second.first).not_to equal(first.first)
-    expect(unit.type).to eq(:graphql_query)
-    expect(unit.metadata).to eq({})
-    expect(unit.dependencies).to eq([])
+      expect(status.success?).to be(true), error
+      payload = JSON.parse(output)
+      expect(payload.fetch('active_support')).to eq(encoder == 'active_support' ? 'constant' : nil)
+      expect(payload.fetch('current')).to eq(payload.fetch('legacy'))
+    end
   end
 
   { source_code: 'source_hash', metadata: 'metadata_hash',

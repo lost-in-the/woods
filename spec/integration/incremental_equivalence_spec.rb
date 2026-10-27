@@ -175,13 +175,31 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     previous_sha = ENV.fetch('GIT_SHA', nil)
     Woods.configuration.enable_snapshots = true
     ENV['GIT_SHA'] = 'a' * 40
-    index = full_extraction
+    index = Dir.mktmpdir('woods_diff_full')
+    (@scratch_dirs ||= []) << index
+    results = Woods::Extractor.new(output_dir: index).extract_all
     connection = SQLite3::Database.new(File.join(index, 'woods.sqlite3'))
     connection.results_as_hash = true
     store = Woods::Temporal::SnapshotStore.new(connection: connection)
     snapshot = store.find(ENV.fetch('GIT_SHA'))
     expect(snapshot).not_to be_nil
     expect(store.unit_history('Post').first).to include(unit_type: 'model')
+    unit_rows = lambda do
+      connection.execute('SELECT * FROM woods_snapshot_units WHERE snapshot_id = ? ORDER BY identifier, unit_type',
+                         [snapshot.fetch(:id)])
+    end
+    captured_rows = unit_rows.call
+    # The pre-refactor projection, applied to the actual full-run units without
+    # calling the builder under test or re-encoding parsed publication JSON.
+    expected_facts = results.values.flat_map do |units|
+      units.map do |unit|
+        [unit.identifier, unit.type.to_s, Digest::SHA256.hexdigest(unit.source_code.to_s),
+         Digest::SHA256.hexdigest(unit.metadata.to_json), Digest::SHA256.hexdigest(unit.dependencies.to_json)]
+      end
+    end
+    expect(captured_rows.map { |row| row.values_at('identifier', 'unit_type', 'source_hash',
+                                                'metadata_hash', 'dependencies_hash') })
+      .to eq(expected_facts.sort_by { |facts| facts.first(2) })
 
     changed = write_file('app/services/snapshot_probe_service.rb', <<~RUBY)
       class SnapshotProbeService
@@ -191,6 +209,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     Woods::Extractor.new(output_dir: index).extract_changed([changed])
 
     expect(store.find(ENV.fetch('GIT_SHA'))).to eq(snapshot)
+    # Incremental keeps the full-run capture, including the unit-row identities.
+    # A later full run at this SHA may replace these rows with current facts.
+    expect(unit_rows.call).to eq(captured_rows)
     expect(differences(index, full_extraction)).to be_empty
   ensure
     connection&.close
