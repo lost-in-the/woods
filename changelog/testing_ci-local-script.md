@@ -1,0 +1,1 @@
+- Add `script/ci-local`, which runs the lint, coverage-carrying unit and booted Rails 8.1 / 6.0 CI gates locally with per-gate timings, so extraction changes can be checked before a push. `--setup` installs the bundles.
