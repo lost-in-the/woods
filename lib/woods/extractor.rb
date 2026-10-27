@@ -23,6 +23,7 @@ require_relative 'payload_store'
 require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
+require_relative 'git_enrichment_summary'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -972,6 +973,8 @@ module Woods
       @incremental_written = {}
       @retained_units = Set.new
       @git_recheck = Set.new
+      @git_refreshed = Set.new
+      @git_history_failed = false
       @changed_source_paths = nil
       @reference_additions = nil
       @library_replacement_touched = nil
@@ -2138,6 +2141,7 @@ module Woods
     # ──────────────────────────────────────────────────────────────────────
 
     def enrich_with_git_data
+      @git_history_failed = false
       return unless git_available?
 
       # Collect all file paths that need git data. Only app-owned paths under
@@ -2184,6 +2188,7 @@ module Woods
     def annotate_graph_with_git_data
       @results.each_value do |units|
         units.each do |unit|
+          annotate_node_git_sources(unit)
           git = unit.metadata[:git]
           next unless git.is_a?(Hash)
 
@@ -2195,6 +2200,18 @@ module Woods
           )
         end
       end
+    end
+
+    # A multi-source unit keeps its Git facts per source file, so its node has
+    # no `commit_count`; record how many sources have facts for coverage.
+    #
+    # @param unit [ExtractedUnit, Hash]
+    # @return [void]
+    def annotate_node_git_sources(unit)
+      return unless SourceContributors.multiple?(unit)
+
+      count = SourceContributors.git_source_count(unit)
+      @dependency_graph.annotate(unit.identifier, type: unit.type, git_sources: count.positive? ? count : nil)
     end
 
     # The one constructor for the analyzer both extraction paths use.
@@ -2363,10 +2380,7 @@ module Woods
     # @param root [String] Rails.root with a trailing separator
     # @return [Boolean]
     def git_enrichable_path?(path, root)
-      return false unless path&.start_with?(root)
-      return false if path.include?('/vendor/') || path.include?('/node_modules/')
-
-      File.exist?(path)
+      GitEnrichmentSummary.enrichable_path?(path, root)
     end
 
     # Normalize all unit file_paths to relative paths (relative to Rails.root).
@@ -2493,20 +2507,40 @@ module Woods
     #
     # @return [Boolean]
     def git_available?
-      return @git_available if defined?(@git_available)
+      git_availability.fetch(:available)
+    end
 
+    # Whether this run's git calls can produce facts, and when they cannot, a
+    # stable reason for the published {GitEnrichmentSummary}.
+    #
+    # @return [Hash] `{available: Boolean, reason: String, nil}`
+    def git_availability
+      @git_availability ||= probe_git_availability
+    end
+
+    # @return [Hash] see {#git_availability}
+    def probe_git_availability
       _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
       unless status.success?
         warn_unresolvable_git(error)
-        return @git_available = false
+        return { available: false, reason: git_requested? ? 'head_unresolvable' : 'no_repository' }
       end
 
-      @git_available = complete_git_history?
+      complete_git_history? ? { available: true, reason: nil } : { available: false, reason: @git_history_reason }
     rescue Errno::ENOENT
       warn_missing_git_executable
-      @git_available = false
+      { available: false, reason: 'git_executable_missing' }
     rescue StandardError
-      @git_available = false
+      { available: false, reason: 'git_error' }
+    end
+
+    # A working tree or an explicit Git directory asks for history. Without
+    # either, an unresolvable HEAD is an ordinary source archive.
+    #
+    # @return [Boolean]
+    def git_requested?
+      [GitCommand::OVERRIDE_KEY, 'GIT_DIR'].any? { |key| !ENV[key].to_s.empty? } ||
+        File.exist?(File.join(Rails.root.to_s, '.git'))
     end
 
     # An explicit Git directory still requests history when .git is not mounted
@@ -2514,8 +2548,7 @@ module Woods
     #
     # @return [void]
     def warn_missing_git_executable
-      configured = [GitCommand::OVERRIDE_KEY, 'GIT_DIR'].any? { |key| !ENV[key].to_s.empty? }
-      return unless configured || File.exist?(File.join(Rails.root.to_s, '.git'))
+      return unless git_requested?
 
       Rails.logger.warn(
         '[Woods] Git history unavailable: git executable was not found in PATH. ' \
@@ -2532,6 +2565,7 @@ module Woods
 
       shallow = status.success? && output.strip == 'true'
       reason = shallow ? 'shallow repository' : 'repository depth could not be verified'
+      @git_history_reason = shallow ? 'shallow_repository' : 'depth_unverifiable'
       Rails.logger.warn(
         "[Woods] Git enrichment omitted: #{reason}. Fetch full history with git fetch --unshallow " \
         '(or actions/checkout fetch-depth: 0), then run full extraction to refresh git metadata.'
@@ -2593,7 +2627,10 @@ module Woods
       recent_after = Time.current - 90.days
       raw = GitHistory.new(root: Rails.root, logger: Rails.logger, recent_limit: recent_commit_limit)
                       .read(relative_paths, recent_after: recent_after)
-      return {} unless raw
+      unless raw
+        @git_history_failed = true
+        return {}
+      end
 
       raw.transform_values { |data| build_file_metadata(data, recent_after.iso8601) }
     end
@@ -2929,6 +2966,8 @@ module Woods
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
       manifest[:extraction_config] = extraction_config if extraction_config
 
+      manifest[:git_enrichment] = git_enrichment_summary(refreshed: incremental ? (@git_refreshed || Set.new) : :all)
+
       manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
 
       AtomicFile.write(
@@ -2936,6 +2975,24 @@ module Woods
         json_serialize(manifest),
         durable: payload_writes_durable?
       )
+    end
+
+    # The published account of whether this generation's Git facts can be
+    # trusted ({GitEnrichmentSummary}). Counts come from the graph, so no unit
+    # is read; a failed history walk after a resolvable HEAD still counts as
+    # unavailable.
+    #
+    # @param refreshed [Set<Array(String, String)>, Symbol] typed units given
+    #   facts by this run, or `:all` for a full extraction
+    # @return [Hash]
+    def git_enrichment_summary(refreshed:)
+      availability = git_availability
+      failed = availability[:available] && @git_history_failed
+      availability = { available: false, reason: 'history_read_failed' } if failed
+      head = availability[:available] ? run_git('rev-parse', '--verify', 'HEAD^{commit}') : nil
+
+      GitEnrichmentSummary.build(graph: @dependency_graph, root: Rails.root.to_s, availability: availability,
+                                 refreshed: refreshed, head_sha: head&.match?(GitLog::SHA) ? head : nil)
     end
 
     # Unit and chunk counts derived from the per-type _index.json files on
@@ -4197,11 +4254,25 @@ module Woods
         @dependency_graph.units_for_path(path).each do |identifier, type|
           next if !class_based && convention_path_unit?(type)
           next if aliased_document_retained?(identifier, type, path, removed, affected_types)
+          next if sidecar_of_surviving_component?(identifier, type, path)
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
         @source_inputs&.consume_deleted(path)
       end
+    end
+
+    # A deleted sidecar template is not the end of its view component: the
+    # component's Ruby file still defines it. The template is registered under
+    # the component, so a path-keyed prune would otherwise find the component.
+    # Hybrid discovery re-extracts the component without the template.
+    #
+    # @return [Boolean]
+    def sidecar_of_surviving_component?(identifier, type, vanished)
+      return false unless type == :view_component
+
+      primary = @dependency_graph.node(identifier, type: type)&.dig(:file_path)
+      !primary.nil? && primary != vanished && File.exist?(primary)
     end
 
     # Does this unit's `file_path` name a *convention* that need not exist?
@@ -4570,10 +4641,14 @@ module Woods
       git = git_data && git_for_type(identifier, type, git_data)
       if git_data && SourceContributors.multiple?(data)
         SourceContributors.annotate_git(data, git_data)
-        @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil)
+        sources = SourceContributors.git_source_count(data)
+        @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil,
+                                               git_sources: sources.positive? ? sources : nil)
+        note_git_refreshed(identifier, type) if sources.positive?
       elsif git
         (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
         annotate_node_from_git(identifier, type, git)
+        note_git_refreshed(identifier, type)
       end
 
       return false if JSON.generate(data) == before
@@ -4584,6 +4659,14 @@ module Woods
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
       false
+    end
+
+    # Facts for this typed unit were read in this publication, as opposed to
+    # carried over from an earlier capture.
+    #
+    # @return [void]
+    def note_git_refreshed(identifier, type)
+      (@git_refreshed ||= Set.new).add([identifier, type.to_s])
     end
 
     # This (identifier, type) pair's own git data, looked up by its own

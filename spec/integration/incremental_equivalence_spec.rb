@@ -729,6 +729,54 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  describe 'a view component sidecar template (#740)' do
+    let(:component_path) { 'app/components/sidecar_shelf_component.rb' }
+    let(:template_path) { 'app/components/sidecar_shelf_component.html.erb' }
+
+    # The booted app does not load view_component, so the example supplies a
+    # base the extractor recognises and removes it afterwards.
+    before do
+      view_component = Module.new
+      view_component.const_set(:Base, Class.new)
+      stub_const('ViewComponent', view_component)
+    end
+
+    after { Object.send(:remove_const, :SidecarShelfComponent) if Object.const_defined?(:SidecarShelfComponent, false) }
+
+    def component_unit(index)
+      require 'woods/mcp/index_reader'
+      Woods::MCP::IndexReader.new(index).find_unit('SidecarShelfComponent', type: 'view_component')
+    end
+
+    def file_map(index)
+      read_json(index, 'dependency_graph.json').fetch('file_map')
+    end
+
+    def write_component(template_text)
+      load app_path(write_file(component_path, "class SidecarShelfComponent < ViewComponent::Base\nend\n"))
+      write_file(template_path, template_text)
+    end
+
+    it 'lists the template with the component and tracks its edit and deletion' do
+      write_component("<div>one</div>\n")
+      index = full_extraction
+      expect(component_unit(index)).to include('metadata' => hash_including('sidecar_template' => template_path))
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+
+      write_file(template_path, "<div>two</div>\n")
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(file_map(index).fetch(template_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
+
+      delete_file(template_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([template_path])
+      expect(component_unit(index).fetch('metadata')).to include('sidecar_template' => nil)
+      expect(file_map(index)).not_to have_key(template_path)
+      expect(file_map(index).fetch(component_path)).to eq(['SidecarShelfComponent'])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   describe 'standalone application modules (#552)' do
     def write_module_bundle
       path = write_file('app/models/ownership_bundle.rb', <<~RUBY)
@@ -1991,6 +2039,33 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    it 'counts a lib module a model includes once in the manifest and the graph, whichever way it got there' do
+      load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
+      host = write_storage_host(include_storage: true)
+      index = full_extraction
+
+      [true, false].each do |included|
+        unless included
+          write_storage_host(include_storage: false)
+          Woods::Extractor.new(output_dir: index).extract_changed([host])
+          expect(differences(index, full_extraction)).to be_empty
+        end
+
+        graph = read_json(index, 'dependency_graph.json')
+        published = graph.fetch('type_index').values.sum(&:size)
+        expect(read_json(index, 'manifest.json').fetch('total_units')).to eq(published)
+        expect(graph.fetch('stats').fetch('node_count')).to eq(published)
+        # Other examples leave identifiers published under two types; their
+        # second node and its edges are under `variants`.
+        variants = graph.fetch('variants', [])
+        edges = graph.fetch('edges').values.sum(&:size) + variants.sum { |variant| variant.fetch('edges').size }
+        expect(graph.fetch('stats').fetch('edge_count')).to eq(edges)
+        expect(variants.map { |variant| variant.fetch('identifier') }).not_to include('OwnershipStorage')
+        owners = graph.fetch('type_index').select { |_, ids| ids.include?('OwnershipStorage') }.keys
+        expect(owners).to eq([included ? 'concern' : 'lib'])
+      end
+    end
+
     it 'publishes a descendant of an application serializer base as a serializer only' do
       load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
       summary = 'app/models/ownership_summary.rb'
@@ -2946,6 +3021,135 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     def git_in_app(*args)
       output, status = Open3.capture2e('git', '-C', @app_root, *args)
       raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+  end
+
+  describe 'git enrichment summary' do
+    def summary(index_dir)
+      read_json(index_dir, 'manifest.json').fetch('git_enrichment')
+    end
+
+    def git_in_app(*args)
+      output, status = Open3.capture2e({ 'GIT_CONFIG_GLOBAL' => File::NULL }, 'git', '-C', @app_root, *args)
+      raise "git #{args.first} failed: #{output}" unless status.success?
+    end
+
+    def service_unit(index_dir, identifier)
+      Dir[File.join(payload_dir(index_dir), 'services', '*.json')]
+        .reject { |path| File.basename(path) == '_index.json' }
+        .map { |path| JSON.parse(File.read(path)) }
+        .find { |document| document['identifier'] == identifier }
+    end
+
+    # The linked-worktree failure from the field: `.git` is a pointer file to
+    # a directory this process cannot reach.
+    def make_git_unreachable
+      FileUtils.mv(app_path('.git'), app_path('.git.held'))
+      File.write(app_path('.git'), "gitdir: #{app_path('not-mounted/.git/worktrees/wt')}\n")
+    end
+
+    def restore_git
+      FileUtils.rm_f(app_path('.git'))
+      FileUtils.mv(app_path('.git.held'), app_path('.git'))
+    end
+
+    before do
+      %w[Ledger Audit].each do |name|
+        write_file("app/services/#{name.downcase}_service.rb", service_source("#{name}Service"))
+      end
+      git_in_app('init')
+      git_in_app('config', 'user.name', 'Woods test')
+      git_in_app('config', 'user.email', 'woods-test@example.invalid')
+      git_in_app('config', 'commit.gpgsign', 'false')
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'baseline')
+    end
+
+    after { FileUtils.rm_rf([app_path('.git'), app_path('.git.held')]) }
+
+    it 'publishes the same account from an incremental run as from a full extraction' do
+      index_dir = full_extraction
+      expect(summary(index_dir)).to include('state' => 'available', 'reason' => nil)
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to be_positive
+
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      git_in_app('commit', '-am', 'edit ledger')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(summary(index_dir)['state']).to eq('available')
+      expect(summary(index_dir).fetch('capture')).to include('retained' => be_positive)
+    end
+
+    it 'marks a cycle that lost Git as degraded, keeps the rest published, and is repaired by a full run' do
+      index_dir = full_extraction
+      healthy = summary(index_dir)
+
+      make_git_unreachable
+      path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+
+      degraded = summary(index_dir)
+      expect(degraded).to include('state' => 'degraded', 'reason' => 'head_unresolvable', 'head_sha' => nil)
+      expect(degraded.fetch('coverage')).to include('eligible_units' => healthy.dig('coverage', 'eligible_units'),
+                                                    'history_unavailable' => be_positive)
+      expect(degraded.fetch('capture')).to include('refreshed' => 0, 'retained' => be_positive)
+      expect(service_unit(index_dir, 'LedgerService').dig('metadata', 'git')).to be_nil
+      expect(service_unit(index_dir, 'AuditService').dig('metadata', 'git', 'commit_count')).to eq(1)
+
+      restore_git
+      Woods::Extractor.new(output_dir: index_dir).extract_all
+      expect(summary(index_dir)).to eq(healthy.merge('capture' => summary(index_dir)['capture']))
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+
+      2.times do |round|
+        write_file(path, "#{service_source('LedgerService')}# cycle #{round}\n")
+        Woods::Extractor.new(output_dir: index_dir).extract_changed([path])
+        found = differences(index_dir, full_extraction)
+        expect(found).to be_empty, "diverged after cycle #{round}:\n#{found.join("\n")}"
+        expect(summary(index_dir)['state']).to eq('available')
+      end
+    end
+
+    it 'reports a source archive without Git as unavailable and still publishes' do
+      FileUtils.rm_rf(app_path('.git'))
+      index_dir = full_extraction
+
+      expect(summary(index_dir)).to include('state' => 'unavailable', 'reason' => 'no_repository')
+      expect(summary(index_dir).dig('coverage', 'with_facts')).to eq(0)
+      expect(read_json(index_dir, 'manifest.json').fetch('total_units')).to be_positive
+    end
+
+    it 'counts a unit assembled from several source files once, and keeps it equal across a source edit' do
+      write_file('lib/shared_library.rb', "module SharedLibrary\n  ONE = :one\nend\n")
+      version = write_file('lib/shared_library/version.rb', "module SharedLibrary\n  VERSION = '1'\nend\n")
+      git_in_app('add', '.')
+      git_in_app('commit', '-m', 'library')
+      index_dir = full_extraction
+      sources = lambda do |dir|
+        JSON.parse(File.read(File.join(payload_dir(dir), 'dependency_graph.json'))).dig('nodes', 'SharedLibrary')
+      end
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+
+      write_file(version, "module SharedLibrary\n  VERSION = '2'\nend\n")
+      git_in_app('commit', '-am', 'bump')
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([version])
+
+      found = differences(index_dir, full_extraction)
+      expect(found).to be_empty, found.join("\n")
+      expect(sources.call(index_dir)).to include('git_sources' => 2)
+      expect(summary(index_dir)).to include('state' => 'available')
+    end
+
+    it 'counts a file with no commits in the history window as facts' do
+      index_dir = full_extraction
+      untracked = write_file('app/services/fresh_service.rb', service_source('FreshService'))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([untracked])
+
+      expect(service_unit(index_dir, 'FreshService').dig('metadata', 'git', 'commit_count')).to eq(0)
+      expect(summary(index_dir)).to include('state' => 'available')
     end
   end
 
