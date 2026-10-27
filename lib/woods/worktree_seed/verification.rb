@@ -25,10 +25,13 @@ module Woods
     # the source the index recorded. Anything less and the git diff taken later
     # would not describe the difference between the index and the worktree.
     class Verification
-      # Freshness reasons that do not say the source changed. An extraction that
-      # did not start from a fresh-launch handoff cannot vouch for the Ruby boot
-      # boundary; the byte comparison of the indexed source is still complete.
-      TOLERATED_FRESHNESS_REASONS = %w[unverified_boot_boundary].freeze
+      # Freshness reasons that report a gap in what the capture covers, not a
+      # change in the source it did cover. An extraction that did not start from
+      # a fresh-launch handoff cannot vouch for the Ruby boot boundary, and a
+      # process can load Ruby from outside the captured scopes. Every incremental
+      # update shares both blind spots, so neither makes a seed less safe than
+      # the baseline an ordinary `woods:incremental` run starts from.
+      TOLERATED_FRESHNESS_REASONS = %w[unverified_boot_boundary loaded_source_outside_coverage].freeze
 
       # @param source [Pathname] index directory of the checkout to seed from
       # @param root [Pathname] the new worktree's application root
