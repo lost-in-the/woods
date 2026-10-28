@@ -1,25 +1,28 @@
 #!/usr/bin/env ruby
 # frozen_string_literal: true
 
-# Runs the CI gates that need no GitHub, so a push confirms instead of discovers.
+# Runs a fast preflight and selected local CI gates; hosted drift needs a capture.
 #
 #   script/ci-local --setup              # one time: install the bundles
 #   script/ci-local                      # lint, unit (with coverage), booted rows
 #   script/ci-local --only lint|unit|booted
 #   script/ci-local --skip-booted        # quick run
 #   script/ci-local --full               # booted rows at 60 ops, seeds 1,2,3
+#   script/ci-local --hosted-pr          # PR depths: Ruby 3.0 full, Ruby 4.0 smoke
+#   script/ci-local --check              # inspect selected environments only
+#   script/ci-local --reference DIR --run-id ID --attempt N  # match captured toolchain
 #
-# Gates mirror .github/workflows/ci.yml and stop at the first failure:
+# These selected gates follow .github/workflows/ci.yml and stop at the first failure:
 #   lint    Ruby 3.3, base Gemfile: surface inventory + rubocop (the `lint` job)
 #   unit    Ruby 3.3, base Gemfile: retrieval gate + COVERAGE script/parallel-rspec
 #   booted  Ruby 4.0 / Rails 8.1 and Ruby 3.0 / Rails 6.0: the `rails-matrix`
 #           steps, one rspec process per CI step
 #
 # Rubies come from mise (`mise install ruby@3.0 ruby@3.3 ruby@4.0`) and are
-# selected per command with `mise exec`; global mise config is never touched.
+# located with `mise where`, then invoked by absolute path; no global config edits.
 # Bundles install under $WOODS_CI_LOCAL_BUNDLE (default ~/.cache/woods-ci-local/bundle),
 # outside the repo and off /tmp.
-# A missing Ruby aborts with the install command; Ruby 3.0 needs
+# A missing Ruby refuses preflight; Ruby 3.0 needs
 # `MISE_RUBY_COMPILE=1 mise install ruby@3.0` (mise has no precompiled 3.0).
 #
 # Not covered here: the Rails 7.2-only fixture bundles (serializers,
@@ -28,9 +31,15 @@
 require 'fileutils'
 require 'optparse'
 require 'shellwords'
+require_relative 'ci_local_environment'
+
+# Keep gate construction, preflight refusals and subprocess order visible here.
+# rubocop:disable Metrics/MethodLength, Metrics/AbcSize
+# rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 
 ROOT = File.expand_path('..', __dir__)
-BUNDLE_ROOT = ENV.fetch('WOODS_CI_LOCAL_BUNDLE', File.join(Dir.home, '.cache', 'woods-ci-local', 'bundle'))
+BUNDLE_ROOT = File.expand_path(ENV.fetch('WOODS_CI_LOCAL_BUNDLE',
+                                         File.join(Dir.home, '.cache', 'woods-ci-local', 'bundle')), ROOT)
 
 # Booted steps, in ci.yml order. Each entry is one rspec process (a step that
 # lists several files in CI runs them together there, so it does here too).
@@ -70,10 +79,12 @@ BOOTED_ROWS = [
 ].freeze
 
 # A runnable unit of work: a label, an environment, and an argv.
-Step = Struct.new(:label, :ruby, :env, :argv)
+Step = Struct.new(:label, :ruby, :env, :argv, :row)
 
 def options
-  opts = { only: nil, skip_booted: false, full: false, setup: false, match: nil }
+  opts = { only: nil, skip_booted: false, full: false, setup: false, match: nil,
+           hosted_pr: false, check: false, reference: nil, run_id: nil, attempt: nil,
+           rspec_seed: nil, report_dir: nil }
   OptionParser.new do |o|
     o.banner = 'Usage: script/ci-local [--setup] [--only lint|unit|booted] [--skip-booted] [--full] [--match TEXT]'
     o.on('--only GATE', %w[lint unit booted], 'Run one gate: lint, unit or booted') { |v| opts[:only] = v }
@@ -82,88 +93,149 @@ def options
       opts[:full] = true
     end
     o.on('--match TEXT', 'Booted gate: run only steps whose spec paths contain TEXT') { |v| opts[:match] = v }
-    o.on('--setup', 'Install the bundles for every gate, then exit') { opts[:setup] = true }
+    o.on('--hosted-pr', 'Use the hosted PR incremental-equivalence depths for these rows') { opts[:hosted_pr] = true }
+    o.on('--rspec-seed N', Integer, 'Set an explicit RSpec seed for booted processes') { |v| opts[:rspec_seed] = v }
+    o.on('--report-dir DIR', 'Write a JSON report for each booted process') { |v| opts[:report_dir] = v }
+    o.on('--check', 'Inspect the selected environments without running gates') { opts[:check] = true }
+    o.on('--run-id ID', 'Expected hosted run ID') { |v| opts[:run_id] = v }
+    o.on('--attempt N', 'Expected hosted run attempt') { |v| opts[:attempt] = v }
+    o.on('--reference DIR', 'Match toolchain to captured hosted jobs in DIR') do |v|
+      opts[:reference] = v
+    end
+    o.on('--setup', 'Install the selected bundles and check them, then exit') { opts[:setup] = true }
   end.parse!
+  abort "unexpected arguments: #{ARGV.join(' ')}" unless ARGV.empty?
+  abort '--hosted-pr and --full cannot be combined' if opts[:hosted_pr] && opts[:full]
+  abort '--check and --setup cannot be combined' if opts[:check] && opts[:setup]
+  abort '--rspec-seed must be nonnegative' if opts[:rspec_seed]&.negative?
+  if opts[:reference]
+    abort '--reference requires --run-id and --attempt' unless opts[:run_id] && opts[:attempt]
+  elsif opts[:run_id] || opts[:attempt]
+    abort '--run-id and --attempt require --reference'
+  end
   opts
 end
 
-# Confirms the mise Ruby exists. Falling back to another Ruby would test the wrong row.
-def resolve_ruby(version)
-  @rubies[version] ||= begin
-    installed = system('mise', 'where', "ruby@#{version}", out: File::NULL, err: File::NULL)
-    abort "ruby@#{version} is not installed. Run: mise install ruby@#{version}" unless installed
-    version
-  end
+# Confirm and retain the installation path, not a floating mise label per gate.
+def resolve_ruby(version, env, source = ROOT)
+  @rubies ||= {}
+  @rubies[[version, env['MISE_DATA_DIR']]] ||= CiLocalEnvironment.ruby_prefix(source, version, env)
 end
 
-def bundle_env(ruby_version, gemfile = nil)
-  label = [ruby_version, gemfile && File.basename(gemfile, '.gemfile')].compact.join('-')
-  # GEM_HOME rather than BUNDLE_PATH: specs spawn child processes with BUNDLE_* scrubbed,
-  # and those still need to find the gems.
-  home = File.join(BUNDLE_ROOT, label)
-  env = { 'GEM_HOME' => home, 'GEM_PATH' => home }
-  env['BUNDLE_GEMFILE'] = File.join(ROOT, gemfile) if gemfile
-  env
+def bundle_env(row)
+  # In fast mode lint and unit deliberately share the base Gemfile's default
+  # Puma input. The hosted unit constraint is used only with its own reference.
+  record = @references&.fetch(row)
+  source = @profiles ? @profiles.fetch(row) : ROOT
+  CiLocalEnvironment.bundle_env(source, row, BUNDLE_ROOT, record: record)
 end
 
-def wrap(step)
-  ['mise', 'exec', "ruby@#{resolve_ruby(step.ruby)}", '--', *step.argv]
+def wrap(step, prefix)
+  record = @references&.fetch(step.row)
+  return step.argv unless step.argv.first == 'bundle'
+
+  bundler = record&.dig('identity', 'bundler')
+  bundler ||= CiLocalEnvironment.locked_bundler("#{step.env.fetch('BUNDLE_GEMFILE')}.lock")
+  CiLocalEnvironment.bundle_command(prefix, bundler) + step.argv.drop(1)
 end
 
-def run_step(step)
+def run_step(step, opts)
+  source = if @references
+             CiLocalEnvironment.verify_checkout!(ROOT, @references.fetch(step.row), step.row, BUNDLE_ROOT)
+           else
+             ROOT
+           end
   puts "\n$ #{step.label}"
+  record = @references&.fetch(step.row)
+  ruby = record ? record.dig('identity', 'ruby_version') : step.ruby
+  prefix = resolve_ruby(ruby, step.env, source)
+  env = CiLocalEnvironment.ruby_env(prefix, step.env)
+  command = wrap(step, prefix)
+  if opts[:report_dir] && step.row.start_with?('rails-')
+    directory = File.expand_path(opts[:report_dir])
+    FileUtils.mkdir_p(directory)
+    name = "#{step.row}-#{Digest::SHA256.hexdigest(step.argv.join("\0"))[0, 12]}.json"
+    report = File.join(directory, name)
+    if File.exist?(report) || File.symlink?(report)
+      raise CiLocalEnvironment::Error, "refusing to overwrite report #{report}"
+    end
+
+    command += ['--format', 'progress', '--format', 'json', '--out', report]
+  end
+  # Record the checked-in command and the inputs relevant to this runner, never
+  # the full inherited environment (which can contain credentials).
+  keys = %w[BUNDLE_GEMFILE BUNDLE_FROZEN BUNDLE_IGNORE_CONFIG BUNDLE_PATH BUNDLE_WITH BUNDLE_WITHOUT
+            BUNDLE_FORCE_RUBY_PLATFORM CI COVERAGE GEM_HOME GEM_PATH GEMRC GIT_CONFIG_GLOBAL LANG LC_ALL
+            RUBYOPT RUBYLIB RSPEC_OPTS SPEC_OPTS TMPDIR TZ WOODS_PUMA_REQ WOODS_SQLITE3_REQ
+            WOODS_RUN_BOOTED_APP WOODS_DIFF_OPS WOODS_DIFF_SEEDS WOODS_PARALLEL_PROCESSES
+            WOODS_PARALLEL_REPORT_DIR WOODS_COVERAGE_DIR]
+  effective = ENV.to_h.merge(env)
+  visible = effective.slice(*keys)
+  puts "  env #{visible.map { |key, value| "#{key}=#{value.nil? ? '<unset>' : Shellwords.escape(value)}" }.join(' ')}"
+  puts "  argv #{Shellwords.join(command)}"
+  lock = env['BUNDLE_GEMFILE'] && "#{env['BUNDLE_GEMFILE']}.lock"
+  raise CiLocalEnvironment::Error, "refusing redirected lock #{lock}" if lock && File.symlink?(lock)
+
+  before = CiLocalEnvironment.digest(lock) if lock && File.file?(lock)
   started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  ok = system(step.env, *wrap(step), chdir: ROOT)
+  ok = system(env, *command, chdir: source)
+  if before && (!File.file?(lock) || CiLocalEnvironment.digest(lock) != before)
+    raise CiLocalEnvironment::Error, "existing lock changed during #{step.label}: #{lock}"
+  end
+
   [ok, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started]
 end
 
 def lint_steps
-  env = bundle_env('3.3')
+  env = bundle_env('lint')
   [Step.new('release_v2:verify_surface_inventory', '3.3', env,
-            %w[bundle exec rake release_v2:verify_surface_inventory]),
-   Step.new('rubocop', '3.3', env, %w[bundle exec rubocop])]
+            %w[bundle exec ruby bin/rake release_v2:verify_surface_inventory], 'lint'),
+   Step.new('rubocop', '3.3', env, %w[bundle exec ruby bin/rubocop], 'lint')]
 end
 
 # GIT_CONFIG_GLOBAL is blanked so fixture repos in specs don't reach for a signing agent
 # (a developer's global commit.gpgsign); CI runners have no such config.
 def unit_steps
-  env = bundle_env('3.3')
-  [Step.new('retrieval quality gate', '3.3', env, %w[bundle exec ruby -Ilib bench/evaluation/runner.rb]),
+  env = bundle_env('unit')
+  [Step.new('retrieval quality gate', '3.3', env, %w[bundle exec ruby -Ilib bench/evaluation/runner.rb], 'unit'),
    Step.new('script/parallel-rspec (COVERAGE)', '3.3',
             env.merge('CI' => 'true', 'COVERAGE' => 'true', 'GIT_CONFIG_GLOBAL' => File::NULL),
-            %w[bundle exec ruby script/parallel-rspec])]
+            %w[bundle exec ruby script/parallel-rspec], 'unit')]
 end
 
 def selected_steps(match)
   BOOTED_STEPS.select { |files| match.nil? || files.inspect.include?(match) }
 end
 
-def booted_steps(full, match = nil)
-  ops, seeds = full ? ['60', '1,2,3'] : %w[8 1]
+def booted_steps(full, match = nil, hosted_pr: false, seed: nil)
   BOOTED_ROWS.flat_map do |row|
-    gemfile = "gemfiles/rails_#{row[:rails]}.gemfile"
-    env = bundle_env(row[:ruby], gemfile).merge('WOODS_RUN_BOOTED_APP' => '1')
+    name = "rails-#{row[:ruby]}-#{row[:rails]}"
+    ops, seeds = CiLocalEnvironment.profile(full, hosted_pr, row[:ruby])
+    env = bundle_env(name).merge('WOODS_RUN_BOOTED_APP' => '1')
     selected_steps(match).map do |files|
       step_env = env
       if files == :incremental_equivalence
         files = %w[spec/integration/incremental_equivalence_spec.rb]
         step_env = env.merge('WOODS_DIFF_OPS' => ops, 'WOODS_DIFF_SEEDS' => seeds)
       end
-      Step.new("[ruby #{row[:ruby]} / rails #{row[:rails]}] rspec #{files.join(' ')}", row[:ruby], step_env,
-               %w[bundle exec rspec] + files)
+      source = @profiles ? @profiles.fetch(name) : ROOT
+      argv = CiLocalEnvironment.rspec_argv(source, files, seed)
+      Step.new("[ruby #{row[:ruby]} / rails #{row[:rails]}] rspec #{files.join(' ')}", row[:ruby], step_env, argv, name)
     end
   end
 end
 
-def setup_steps
-  # The shared lock can pin tokenizers to its source variant, which needs Rust.
-  # Re-resolving adds the precompiled x86_64-linux variant (Gemfile.lock is gitignored).
-  base = bundle_env('3.3')
-  [Step.new('bundle lock --update tokenizers (ruby 3.3)', '3.3', base, %w[bundle lock --update tokenizers]),
-   *[['3.3', nil], ['4.0', 'gemfiles/rails_8.1.gemfile'], ['3.0', 'gemfiles/rails_6.0.gemfile']].map do |ruby, gemfile|
-     Step.new("bundle install (ruby #{ruby}#{gemfile && ", #{gemfile}"})", ruby, bundle_env(ruby, gemfile),
-              %w[bundle install])
-   end]
+def setup_steps(rows)
+  # Keep an existing lock frozen. An absent lock may be resolved, but setup
+  # must not broadly update an unrelated existing development lock.
+  rows.uniq { |row| CiLocalEnvironment::ROWS.fetch(row).values_at(:ruby, :gemfile) }.map do |row|
+    config = CiLocalEnvironment::ROWS.fetch(row)
+    env = bundle_env(row)
+    lock = "#{env.fetch('BUNDLE_GEMFILE')}.lock"
+    env['BUNDLE_FROZEN'] = nil unless File.exist?(lock)
+    Step.new("bundle install (#{row}, #{config[:gemfile]})", config[:ruby], env,
+             %w[bundle install], row)
+  end
 end
 
 def gates(opts)
@@ -173,43 +245,191 @@ def gates(opts)
     steps = case name
             when 'lint' then lint_steps
             when 'unit' then unit_steps
-            else booted_steps(opts[:full], opts[:match])
+            else booted_steps(opts[:full], opts[:match], hosted_pr: opts[:hosted_pr], seed: opts[:rspec_seed])
             end
+    raise CiLocalEnvironment::Error, '--match selected no booted steps' if name == 'booted' && steps.empty?
+
     [name, steps]
   end
 end
 
-def summary(results, failed_at)
+def summary(results, failed_at, setup: false)
   puts "\n== ci-local summary"
   results.each do |name, seconds, status|
     puts format('  %-8<name>s %<status>-7s %<time>s', name: name, status: status, time: duration(seconds))
   end
-  puts failed_at ? "\nFAILED at: #{failed_at}" : "\nAll gates passed (not a GitHub run; see the header for gaps)."
+  message = if setup
+              'Selected bundle setup passed; no test gate was run.'
+            else
+              'Selected local steps passed; hosted CI and omitted lanes remain separate.'
+            end
+  puts failed_at ? "\nFAILED at: #{failed_at}" : "\n#{message}"
 end
 
 def duration(seconds)
   seconds >= 60 ? format('%<m>dm%<s>02ds', m: seconds / 60, s: seconds % 60) : format('%.1fs', seconds)
 end
 
-@rubies = {}
-opts = options
-steps_to_run = opts[:setup] ? [['setup', setup_steps]] : gates(opts)
-results = []
-failed_at = nil
-
-steps_to_run.each do |name, steps|
-  gate_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-  steps.each do |step|
-    ok, = run_step(step)
-    next if ok
-
-    failed_at = "#{name}: #{step.label}"
-    break
+def preflight(steps, opts)
+  rows = steps.flat_map(&:last).map(&:row).uniq
+  if @references
+    first = @references.values.first
+    puts "== toolchain reference run #{first['run_id']} attempt #{first['attempt']} (#{first['event']})"
+    puts "Reference source #{first['reference_source_sha']}; candidate source #{@candidate_sha}"
+    puts "Source match: #{first['reference_source_sha'] == @candidate_sha}"
+    changed = first.fetch('command_hashes').keys.reject do |path|
+      CiLocalEnvironment.digest(File.join(ROOT, path)) == first.fetch('command_hashes').fetch(path)
+    end
+    puts "Changed command inputs: #{changed.empty? ? '(none)' : changed.join(', ')}"
+  else
+    puts '== fast local preflight (no hosted reference; hosted drift is unknown)'
+    puts 'Fast lint and unit share the base Puma >= 6.0 input; hosted unit uses ~> 8.0.'
+    puts "Candidate commit #{CiLocalEnvironment.git(ROOT, 'rev-parse', 'HEAD').strip}"
+    puts 'Working changes are allowed in fast mode.'
   end
-  elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - gate_started
-  results << [name, elapsed, failed_at ? 'FAILED' : 'passed']
-  break if failed_at
+  puts "Candidate checkout: #{File.realpath(ROOT)}"
+  selection = rows.empty? ? '(none)' : rows.join(', ')
+  selection += "; booted match #{opts[:match].inspect}" if opts[:match]
+  puts "Selected rows: #{selection}"
+  puts 'Omitted: other Ruby/Rails rows, Rails 7.2 fixtures, minimum dependencies, live backends, ' \
+       'transports, package, security and other hosted jobs.'
+  puts 'Checked-in local command and input SHA-256 values:'
+  inputs = (CiLocalEnvironment::COMMAND_INPUTS + rows.flat_map { |row| CiLocalEnvironment.dependencies(row) }).uniq
+  CiLocalEnvironment.hashes(ROOT, inputs).each do |path, sha|
+    puts "  #{sha}  #{path}"
+  end
+  rows.each { |row| preflight_row(row) }
+  return unless @references
+
+  puts 'Toolchain matched to the named run; environment replay is not established.'
+  puts 'The hosted result for this candidate is not established.'
 end
 
-summary(results, failed_at)
-exit(failed_at ? 1 : 0)
+def preflight_row(row)
+  config = CiLocalEnvironment::ROWS.fetch(row)
+  record = @references&.fetch(row)
+  source = record ? CiLocalEnvironment.verify_checkout!(ROOT, record, row, BUNDLE_ROOT) : ROOT
+  ruby = record ? record.dig('identity', 'ruby_version') : config[:ruby]
+  env = bundle_env(row)
+  prefix = resolve_ruby(ruby, env, source)
+  identity = CiLocalEnvironment.probe(source, prefix, env, record&.dig('identity', 'bundler'))
+  CiLocalEnvironment.verify_source!(identity, source, env.fetch('BUNDLE_GEMFILE'))
+  unless identity['ruby_engine'] == 'ruby' && identity['ruby_version'].start_with?("#{config[:ruby]}.")
+    raise CiLocalEnvironment::Error, "mise selected the wrong Ruby for #{row}"
+  end
+
+  puts "  #{row}: #{identity['ruby_description']}; RubyGems #{identity['rubygems']}; Bundler #{identity['bundler']}"
+  puts "    engine #{identity['ruby_engine']}; release #{identity['ruby_version']}; " \
+       "revision #{identity['ruby_revision']}"
+  puts "    Ruby #{identity['ruby_path']} sha256 #{identity['ruby_sha256']}"
+  puts "    OS #{identity['os'].inspect}; Ruby platform #{identity['ruby_platform']}; " \
+       "gem platform #{identity['gem_platform']}"
+  puts "    effective lock #{identity['lock_path']} sha256 #{identity['lock_sha256']}"
+  puts "    Woods source #{identity['woods_path']}; executable #{identity['woods_executable']}"
+  puts "    dependency inputs #{identity['dependency_inputs'].inspect}; #{identity['gems'].length} selected gems"
+  puts "    selected gems #{JSON.generate(identity['gems'])}"
+  return unless record
+
+  expected = record.fetch('identity')
+  differences = CiLocalEnvironment.differences(expected, identity)
+  unless differences.empty?
+    details = differences.map do |key|
+      left = expected[key]
+      right = identity[key]
+      if key == 'gems'
+        left = Digest::SHA256.hexdigest(JSON.generate(left))
+        right = Digest::SHA256.hexdigest(JSON.generate(right))
+      end
+      "#{key}: hosted=#{left.inspect}, local=#{right.inspect}"
+    end
+    raise CiLocalEnvironment::Error, "#{row} toolchain drift: #{details.join('; ')}"
+  end
+
+  os_status = CiLocalEnvironment.report_status(expected['os'], identity['os'])
+  puts "    OS #{os_status}: hosted #{expected['os'].inspect}"
+  binary = CiLocalEnvironment.report_status(expected['ruby_sha256'], identity['ruby_sha256'])
+  puts "    Ruby binary #{binary}: hosted sha256 #{expected['ruby_sha256']}"
+  local_image = { 'ImageOS' => ENV.fetch('ImageOS', nil), 'ImageVersion' => ENV.fetch('ImageVersion', nil) }
+  image = CiLocalEnvironment.report_status(record['image'], local_image)
+  puts "    runner image #{image}: hosted #{record['image'].inspect}; local #{local_image.inspect}"
+end
+
+# Load every selected reference before any profile is provisioned. Extracted
+# from the CLI to keep its existing validation/provisioning order explicit.
+def prepare_reference(rows, opts)
+  @candidate_sha, @references = CiLocalEnvironment.references(
+    File.expand_path(opts[:reference]), rows, opts[:run_id], opts[:attempt], ROOT
+  )
+  event = @references.values.first.fetch('event')
+  if rows.any? { |row| row.start_with?('rails-') } &&
+     !(event == 'pull_request' ? opts[:hosted_pr] : opts[:full])
+    abort "reference is #{event}: use #{event == 'pull_request' ? '--hosted-pr' : '--full'} for booted rows"
+  end
+
+  @profiles = @references.to_h do |row, record|
+    source = if opts[:setup]
+               CiLocalEnvironment.provision(ROOT, record, row, BUNDLE_ROOT)
+             else
+               CiLocalEnvironment.verify_checkout!(ROOT, record, row, BUNDLE_ROOT)
+             end
+    [row, source]
+  end
+end
+
+# Execute real subprocesses in order and stop at the first failure.
+def execute_gates(steps_to_run, opts)
+  results = []
+  failed_at = nil
+  steps_to_run.each do |name, steps|
+    gate_started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    steps.each do |step|
+      ok, = run_step(step, opts)
+      next if ok
+
+      failed_at = "#{name}: #{step.label}"
+      break
+    end
+    elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - gate_started
+    results << [name, elapsed, failed_at ? 'FAILED' : 'passed']
+    break if failed_at
+  end
+  [results, failed_at]
+end
+
+# rubocop:enable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
+# rubocop:enable Metrics/MethodLength, Metrics/AbcSize
+
+if $PROGRAM_NAME == __FILE__
+  @rubies = {}
+  @references = nil
+  @profiles = nil
+  @candidate_sha = nil
+  begin
+    opts = options
+    selection = gates(opts)
+    rows = selection.flat_map(&:last).map(&:row).uniq
+    raise CiLocalEnvironment::Error, 'no gates selected' if rows.empty?
+
+    if opts[:reference]
+      prepare_reference(rows, opts)
+      selection = gates(opts)
+      preflight(selection, opts)
+      if opts[:setup]
+        puts 'Reference provisioning and checks passed; no test gate was run.'
+        exit 0
+      end
+    elsif !opts[:setup]
+      preflight(selection, opts)
+    end
+    exit 0 if opts[:check]
+
+    steps_to_run = opts[:setup] ? [['setup', setup_steps(rows)]] : selection
+    results, failed_at = execute_gates(steps_to_run, opts)
+    preflight(selection, opts) if opts[:setup] && !failed_at
+    summary(results, failed_at, setup: opts[:setup])
+    exit(failed_at ? 1 : 0)
+  rescue CiLocalEnvironment::Error, OptionParser::ParseError, Errno::ENOENT => e
+    warn "ci-local preflight failed: #{e.message}"
+    exit 1
+  end
+end

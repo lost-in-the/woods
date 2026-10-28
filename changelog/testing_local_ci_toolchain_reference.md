@@ -1,0 +1,1 @@
+- Report the local CI toolchain, effective dependency locks, source paths, and omitted hosted jobs before running gates. Capture representative hosted environments and support isolated, fail-closed toolchain matching without claiming a complete hosted replay.
