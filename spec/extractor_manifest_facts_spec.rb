@@ -7,6 +7,7 @@ require 'fileutils'
 require 'json'
 require 'woods'
 require 'woods/extractor'
+require 'active_support'
 require 'active_support/core_ext/time'
 
 RSpec.describe 'Extractor manifest data composition' do
