@@ -19,6 +19,72 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     described_class.new(metadata_store: store).execute(query: query, **options).candidates
   end
 
+  # Keep a full-scan oracle for candidate selection. Scoring and the final
+  # comparator are unchanged; every document reaches the original scorer.
+  let(:scan_class) do
+    Class.new(described_class) do
+      private
+
+      def candidate_documents(_query, _terms)
+        @documents
+      end
+    end
+  end
+
+  it 'scores only possible matches for selective and absent queries' do
+    20.times { |i| add("Unrelated#{i}", source: 'ordinary work') }
+    target = add('Delivery', source: 'rareword')
+    index = described_class.new(metadata_store: store)
+    scored = []
+    allow(index).to receive(:score_document).and_wrap_original do |method, document, terms|
+      scored << document.key
+      method.call(document, terms)
+    end
+
+    expect(index.execute(query: 'rareword').candidates.map(&:identifier)).to eq([target])
+    expect(scored).to eq([target])
+    scored.clear
+    expect(index.execute(query: 'neverindexed').candidates).to be_empty
+    expect(scored).to be_empty
+  end
+
+  it 'matches the full scan for exact identities, Unicode, filters, limits and scoped statistics' do
+    keys = [add('The'), add('Straße'), add('Σ'), add('İ'), add('I'),
+            add('ÉclairPayment', path: 'app/services/charge_card.rb', source: 'label payment rareword',
+                                 metadata: { 'callbacks' => ['normalize_phone'] }),
+            add('Billing::Invoice', source: 'label label commonword'),
+            add('Billing::Invoice', type: 'service', source: 'payment commonword'),
+            add('Other', source: 'rareword commonword'), add('EqualA', source: 'notify'),
+            add('EqualB', source: 'notify'), add('Spec', type: 'test_mapping', source: 'notify'),
+            add(''), add('::')]
+    index = described_class.new(metadata_store: store)
+    scan = scan_class.new(metadata_store: store)
+    queries = ['  THE  ', 'STRASSE', 'σ', 'ς', 'i', "i\u0307", 'ı', 'éclair charge card',
+               "e\u0301clair", 'labels payment', 'rareword rareword', 'normalize phone',
+               'Billing::Invoice', 'notify', 'commonword', 'neverindexed', 'how does the', '', '::']
+    options = [{}, { limit: 0 }, { limit: 1 }, { limit: 40 },
+               { type_filter: [:service], exclude_types: ['service'] },
+               { type_filter: [], exclude_types: ['model'] }, { exclude_types: ['test_mapping'] }]
+    scopes = [nil, [], keys, keys.first(1), keys.first(3), keys.first(6), keys.first(13),
+              [keys.first, keys.first, 'unknown:key']]
+
+    scopes.each do |scope|
+      actual = scope ? index.restricted_to(scope) : index
+      expected = scope ? scan.restricted_to(scope) : scan
+      queries.product(options).each do |query, arguments|
+        result = actual.execute(query: query, **arguments)
+        expect(result).to eq(expected.execute(query: query, **arguments)), "#{scope.inspect}: #{query}: #{arguments}"
+        result.candidates.each do |candidate|
+          expect(candidate.metadata).to equal(actual.units.fetch(candidate.identifier))
+          expect(candidate.metadata).to be_frozen
+        end
+      end
+    end
+
+    nested = index.restricted_to(keys.first(3)).restricted_to(keys.last(3))
+    expect(nested.execute(query: 'notify').candidates).to be_empty
+  end
+
   it 'ranks exact identifiers first and preserves ambiguous typed identities' do
     first = add('Billing::Invoice')
     second = add('Billing::Invoice', type: 'service')
