@@ -1,5 +1,18 @@
 # v2.0 pre-release audit, round 2
 
+> **Historical audit — 2026-09-01; classified 2026-10-27.** This folder's findings,
+> counts, probes, proposed PRs, and release-blocking language describe baseline
+> [`79c156d`](https://github.com/lost-in-the/woods/tree/79c156d5a9c3ff891f70e23a44ba86234da63fca).
+> Remediation history includes [#276](https://github.com/lost-in-the/woods/pull/276);
+> later B-ID decisions and issue migration links are retained in the
+> [backlog archive](../../../.Codex/backlog-archive.json). Active backlog migration
+> shipped in [#629](https://github.com/lost-in-the/woods/pull/629). These are
+> per-finding dispositions, not a claim that every observation remains open or
+> was fixed. Preserve the security and regression evidence below; use
+> [current documentation owners](../../README.md#canonical-owners),
+> [GitHub issues](https://github.com/lost-in-the/woods/issues), and the
+> [release runbook](../../../CONTRIBUTING.md#release-flow) for present decisions.
+
 Generated: 2026-09-01. Audited HEAD: `79c156d` (main, post PR #272).
 Prior audit: `v2-prerelease-audit/` at `c31683c` (2026-08-27), 172 remediation commits ago.
 
@@ -28,7 +41,9 @@ One topic per file. The finding IDs carry the auditing slice as a prefix.
 
 Ledger reconciliation: **58 of 62 prior rows closed-verified.** 1 closed-weak (M2). 4 still open with no disposition record (G-3, L9, L10, L11: the planned PR-2b never shipped).
 
-## The release-blocking set, in attack order
+<a id="the-release-blocking-set-in-attack-order"></a>
+
+## Release-blocking set recorded on 2026-09-01
 
 1. **CORE-2**: `woods:incremental` against an output directory with no baseline silently publishes a near-empty index as generation 1. The documented CI flow (restore cache, run incremental) hits this on any failed cache restore. Executed.
 2. **CON-1**: `console_query` aliasing an unprotected column onto an EAV header name makes the redactor mask the wrong cell. The real secret returns in cleartext. Executed.

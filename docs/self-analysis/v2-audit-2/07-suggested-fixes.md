@@ -1,5 +1,10 @@
 # 07. Suggested fixes
 
+> **Historical proposal — 2026-09-01 baseline `79c156d`.** The PR waves, deferrals
+> into the retired `docs/backlog.json`, and tag criteria below are the original
+> audit proposal. See the [folder's provenance and current owners](README.md)
+> before treating any row as active work or a current release gate.
+
 Fifteen grouped PRs plus a deferral list. Every finding in 03-05 has exactly one disposition row at the bottom.
 
 Same contract as the prior plan: failing test first, quoted red output in the PR, docs and CHANGELOG ride the behavior PR, `bin/rake spec` and `bin/rubocop` clean, opt-in lane run where behavior depends on it.
