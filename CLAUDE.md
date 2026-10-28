@@ -167,6 +167,7 @@ lib/
 │   ├── git_line_stats.rb                # -U0 patch walk: per-file added/removed lines and hunks for chosen commits
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
+│   ├── extraction/                      # Extractor's per-run collaborators (GitCapture: probe, HEAD capture, file facts, commit table; ManifestFacts)
 │   ├── extractors/                      # One class per *_extractor.rb (count: surface inventory) plus supporting utilities (e.g. shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting, declared_parent)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
@@ -246,15 +247,26 @@ The approach depends on the task:
 
 - **New extractors/features:** Strict TDD, write a failing spec in `spec/` first, implement to pass, refactor. No implementation without a failing test.
 - **Bug fixes:** Fix first, then add a regression test that would have caught it.
-- **Refactors:** Lean on existing specs. Run the full suite before and after. If coverage gaps exist, add specs before refactoring, not after.
+- **Refactors:** Lean on the existing specs that cover the moved code. If coverage gaps exist, add specs before refactoring, not after.
+
+### Running specs: narrowest first
+
+Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
+
+- After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
+- Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
+- Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
+- Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
+- Locally, run focused specs almost always. The full suite and whole booted files belong to hosted CI; run them locally only when a cross-cutting change cannot be judged otherwise. Say which you ran and which you skipped.
 
 ```bash
 # Gem unit specs (run from gem root)
-bundle exec rake spec                                              # Full suite
-bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb # Single file
+bin/rspec spec/extractors/model_extractor_spec.rb:42   # One example: the default local run
+bin/rspec spec/extractors/model_extractor_spec.rb      # One file
+bin/rake spec                                          # Full suite: hosted CI, rarely local
 
 # Lint
-bundle exec rubocop -a
+bin/rubocop -a
 ```
 
 After gem-level specs pass, validate in the companion testbed if the change affects extraction output.
@@ -267,6 +279,14 @@ Key references:
 - Incremental extraction contract + dispatch inventory + differential harness → `docs/INCREMENTAL_EXTRACTION.md`
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
 - Historical design documents (from the build phase) live in git history, see `docs/design/README.md`
+
+## Pull Requests
+
+- Agents may push branches and open draft PRs freely; merging needs the maintainer's approval.
+- Open every PR as a draft. Hosted CI and the automated review run on the draft.
+- One PR CI run takes 20 minutes or more, and every push restarts it. Batch fixes and push once; never push only to re-trigger CI.
+- When CI is green and the review's findings are handled, mark the PR ready for review and request the maintainer (`LeahArmstrong`, per `.github/CODEOWNERS`). The maintainer approves, comments, or follows up in the agent session.
+- Merging to `main` is not a release. A flaky or unrelated failure can be named on the PR and handled separately rather than block a merge. The README badge shows `main`'s CI, and releases still require every job in `script/validate-release-run` on the tagged commit.
 
 ## Backlog Workflow
 
