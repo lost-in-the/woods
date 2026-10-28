@@ -58,7 +58,7 @@ This repository registers Woods' own static map as an MCP server: `woods-self` i
 
 A grep for a name misses relative references (`Extraction::GitCapture` written inside `module Woods`); the map resolves them. If a session lacks the `woods-self` tools, approve the server once with `/mcp`, or run `bin/woods-self-mcp` yourself. The first launch builds the map into `tmp/woods_self_map` (about 25 seconds). Later launches serve it at once and refresh it in the background, and the server reads the newest generation on every request. To refresh by hand, run `bin/rake "woods:self_map[tmp/woods_self_map]"`. Never commit map output.
 
-The map has known gaps, tracked in #926: methods inside `class << self`, rake/`exe` top-level code, chained receivers, and `spec/` are not yet mapped. Treat an empty `dependents` answer as "not proven", not "no callers".
+The map is static and its coverage gaps are tracked in #926. Treat an empty `dependents` answer as "not proven", not "no callers".
 
 The self-map is deliberately static. It cannot prove Rails runtime behavior,
 resolved callbacks, routes, Active Record reflections, eager-load outcomes, or
