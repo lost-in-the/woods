@@ -858,10 +858,12 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/serializers.gemfile \
 `spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the
 `spec/dummy` app against a tmpdir copy, applies randomized
 create/modify/delete/rename sequences, and compares the maintained index to a
-cold full extraction at every step. It runs in CI on every Rails-matrix row.
+cold full extraction at every step. It runs on every Rails-matrix row of
+`main` and version tags at 60 operations x 3 seeds; pull requests run the
+security-supported Rails rows at 8 operations x 1 seed.
 
 ```bash
-# CI defaults: 60 operations x 3 seeds
+# Full depth: 60 operations x 3 seeds
 WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
   bundle exec rspec spec/integration/incremental_equivalence_spec.rb
 
