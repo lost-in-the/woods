@@ -85,6 +85,7 @@ require_relative 'poro_reconciliation'
 require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
 require_relative 'doc_references'
+require_relative 'extraction/manifest_facts'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -2984,19 +2985,15 @@ module Woods
     end
 
     def write_manifest(incremental: false)
-      # Worktree-aware git provenance. In a linked worktree +.git+ is a file
-      # pointing at the real git dir; when that dir is unreachable (e.g. an
-      # unmounted host path inside a container) this resolves to "unknown"
-      # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
+      # Preserve the run capture and the existing fallback acquisition order.
       provenance = if @git_capture_head
                      { git_sha: @git_capture_head, git_branch: @git_capture_branch }
                    else
                      GitProvenance.new(root: Rails.root).to_h
                    end
 
-      # Incremental runs never populate @results — deriving counts from
-      # memory would clobber a good manifest with zeros. Recompute from the
-      # persisted per-type _index.json files instead.
+      # Incremental results are partial; counts come from staged per-type indexes,
+      # while configuration remains the published baseline's fingerprint.
       counts, total_chunks =
         if incremental
           persisted_counts
@@ -3005,36 +3002,22 @@ module Woods
            @results.sum { |_, units| units.sum { |u| u.chunks.size } }]
         end
 
-      manifest = {
-        extracted_at: Time.current.iso8601,
-        woods_version: Woods::VERSION,
-        rails_version: Rails.version,
-        ruby_version: RUBY_VERSION,
-
-        # Counts by type
-        counts: counts,
-
-        # Total stats
-        total_units: counts.values.sum,
-        total_chunks: total_chunks,
-
-        # Git provenance (branch/sha), or "unknown" when unresolvable
-        git_sha: provenance[:git_sha],
-        git_branch: provenance[:git_branch],
-
-        # For change detection
-        gemfile_lock_sha: gemfile_lock_sha,
-        schema_sha: schema_sha
-      }
-
-      # An incremental run carries the baseline's digests: it never certifies
-      # a configuration no full extraction ran with.
+      extracted_at = Time.current.iso8601
+      woods_version = Woods::VERSION
+      rails_version = Rails.version
+      ruby_version = RUBY_VERSION
+      lock_digest = gemfile_lock_sha
+      schema_digest = schema_sha
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
-      manifest[:extraction_config] = extraction_config if extraction_config
+      enrichment = git_enrichment_summary(refreshed: incremental ? (@git_refreshed || Set.new) : :all)
+      filter_available = GitSourceFilter.new(root: Rails.root).available?
 
-      manifest[:git_enrichment] = git_enrichment_summary(refreshed: incremental ? (@git_refreshed || Set.new) : :all)
-
-      manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
+      manifest = Extraction::ManifestFacts.build(
+        counts: counts, total_chunks: total_chunks, provenance: provenance,
+        extraction_config: extraction_config, git_enrichment: enrichment, git_filter_available: filter_available,
+        extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
+        ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest
+      )
 
       AtomicFile.write(
         payload_dir.join('manifest.json'),
