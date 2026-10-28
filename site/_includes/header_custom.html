@@ -1,0 +1,15 @@
+<style>
+  .main-header { height: auto; flex-wrap: wrap; }
+  .woods-context { flex: 1 0 100%; padding: .6rem 1rem; border-top: 1px solid #ddd; font-size: .8rem; overflow-wrap: anywhere; }
+  .woods-context p { margin: .25rem 0; }
+  .woods-context nav { display: flex; flex-wrap: wrap; gap: .4rem 1rem; }
+  .woods-context [aria-current] { font-weight: bold; }
+</style>
+<div class="woods-context" data-docs-version="{{ site.docs_version | escape }}">
+  <p><strong>{{ site.docs_label | escape }}</strong> · {{ site.docs_provenance | escape }}</p>
+  <nav aria-label="Documentation version">
+    {% for version in page.version_links %}
+    <a href="{{ version.url | escape }}"{% if version.current %} aria-current="page"{% endif %}{% if version.fallback %} data-version-fallback="true"{% endif %}>{{ version.label | escape }}{% if version.fallback %} (guide unavailable; opens guide list){% endif %}</a>
+    {% endfor %}
+  </nav>
+</div>
