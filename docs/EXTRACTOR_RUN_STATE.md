@@ -58,6 +58,7 @@ flowchart TD
 | `@flow_failures` | `extract_all` (before flows), `precompute_flows`, `finalize_incremental_run` | `extract_all`; `finalize_incremental_run` (before any read) | skipped-files writer, flow refresh | per-run |
 | `@symlinked_root` | `symlinked_root?` | `extract_all`, `prepare_incremental_run` | `crosses_symlink?`, from `path_spellings` | per-run |
 | `@symlinked_dirs` | `symlinked_dir_below?` | `extract_all`, `prepare_incremental_run` | `crosses_symlink?`, from `path_spellings` | per-run |
+| `@git_capture` | `git_capture` (lazy `Extraction::GitCapture`) | `reset_git_capture`, first in `extract_all` and `prepare_incremental_run` | git enrichment, commit table, manifest provenance and Git summary, `retain_unit`, `finalize_incremental_unit_json` | per-run |
 
 Reset in `prepare_incremental_run` only. `extract_all` never resets them, and no full-path code reads them, so a value left by an earlier incremental run is stale but inert. Add a reset to `extract_all` before adding any full-path read.
 
@@ -66,7 +67,6 @@ Reset in `prepare_incremental_run` only. `extract_all` never resets them, and no
 | `@dependents_dirty` | `mark_dependents_dirty` | `prepare_incremental_run` | `finalize_incremental_unit_json` | per-run |
 | `@incremental_written` | `register_and_write` | `prepare_incremental_run` | `finalize_incremental_unit_json` | per-run |
 | `@retained_units` | `retain_unit` | `prepare_incremental_run` | source reference pass | per-run |
-| `@git_recheck` | `retain_unit` | `prepare_incremental_run` | `finalize_incremental_unit_json` | per-run |
 | `@changed_source_paths` | `extract_changed` (after prepare) | `prepare_incremental_run` (nil, so `refresh` has no change set) | `retain_unit` | per-run |
 | `@reference_additions` | lazy, from `@source_reference_baseline` | `prepare_incremental_run` | incremental reference pass | per-run |
 | `@library_replacement_touched` | `replace_type_wholesale(:libs)` | `prepare_incremental_run` | `replace_type_wholesale` | per-run |
@@ -108,9 +108,10 @@ Notes:
 | `@output_dir` | `initialize` | never | all | per-instance |
 | `@payload_store` | `initialize` | never | `begin_payload!` | per-instance |
 | `@pruned_resolvable_classes` | `note_pruned_resolvable` (append) | never | the watch daemon, which dedupes by identifier | per-instance |
-| `@git_available` | `git_available?` (memo) | never | git enrichment | per-instance |
 
-`@git_available` is a documented accepted limit: git becoming available mid-process is not detected.
+## Git state
+
+`Extraction::GitCapture` (`lib/woods/extraction/git_capture.rb`) owns everything a run reads from Git: the availability probe and its reason, the HEAD and branch captured once, whether the history walk failed, the typed units given facts (`note_refreshed`) and the retained units whose facts must be re-read (`request_recheck`). The Extractor holds one capture per run in `@git_capture`, so none of that state can outlive the run. Git becoming available in the middle of a run is not detected; the next run probes again.
 
 ## Adding an ivar
 

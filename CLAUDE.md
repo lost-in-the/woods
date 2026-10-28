@@ -167,6 +167,7 @@ lib/
 │   ├── git_line_stats.rb                # -U0 patch walk: per-file added/removed lines and hunks for chosen commits
 │   ├── resolved_config.rb              # Frozen configuration snapshot
 │   ├── token_utils.rb                  # Token count estimation helpers
+│   ├── extraction/                      # Extractor's per-run collaborators (GitCapture: probe, HEAD capture, file facts, commit table; ManifestFacts)
 │   ├── extractors/                      # One class per *_extractor.rb (count: surface inventory) plus supporting utilities (e.g. shared_utility_methods, shared_dependency_scanner, callback_analyzer, behavioral_profile, route_helper_resolver, ast_source_extraction, source_nesting, declared_parent)
 │   ├── ast/                             # Prism-based AST layer
 │   ├── ruby_analyzer/                   # Static analysis (class, method, dataflow)
