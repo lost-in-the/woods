@@ -247,7 +247,17 @@ The approach depends on the task:
 
 - **New extractors/features:** Strict TDD, write a failing spec in `spec/` first, implement to pass, refactor. No implementation without a failing test.
 - **Bug fixes:** Fix first, then add a regression test that would have caught it.
-- **Refactors:** Lean on existing specs. Run the full suite before and after. If coverage gaps exist, add specs before refactoring, not after.
+- **Refactors:** Lean on the existing specs that cover the moved code. If coverage gaps exist, add specs before refactoring, not after.
+
+### Running specs: narrowest first
+
+Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
+
+- After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
+- Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
+- Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
+- Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
+- The full suite and whole booted files run only when needed: a cross-cutting change before publishing, or left to hosted CI. Say which you ran and which you skipped.
 
 ```bash
 # Gem unit specs (run from gem root)
