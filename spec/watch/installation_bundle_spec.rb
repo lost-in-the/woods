@@ -37,8 +37,8 @@ RSpec.describe 'Watcher installation with an application-owned bundle' do
     package = File.join(@directory, 'fixture.gem')
     run_fixture_command(Gem.ruby, '-S', 'gem', 'build', '--output', package, 'fixture.gemspec', chdir: source)
     gem_home = File.join(@bundle, 'ruby', RbConfig::CONFIG.fetch('ruby_version'))
-    run_fixture_command(Gem.ruby, '-S', 'gem', 'install', '--local', '--ignore-dependencies', '--no-document',
-                        '--install-dir', gem_home, package)
+    run_fixture_command(Gem.ruby, '-S', 'gem', 'install', '--local', '--env-shebang', '--ignore-dependencies',
+                        '--no-document', '--install-dir', gem_home, package)
   end
 
   def write_fixture_spec(source)
