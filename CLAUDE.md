@@ -280,6 +280,14 @@ Key references:
 - Backend selection + cost modeling → `docs/BACKEND_MATRIX.md`
 - Historical design documents (from the build phase) live in git history, see `docs/design/README.md`
 
+## Pull Requests
+
+- Agents may push branches and open draft PRs freely; merging needs the maintainer's approval.
+- Open every PR as a draft. Hosted CI and the automated review run on the draft.
+- One PR CI run takes 20 minutes or more, and every push restarts it. Batch fixes and push once; never push only to re-trigger CI.
+- When CI is green and the review's findings are handled, mark the PR ready for review and request the maintainer (`LeahArmstrong`, per `.github/CODEOWNERS`). The maintainer approves, comments, or follows up in the agent session.
+- Merging to `main` is not a release. A flaky or unrelated failure can be named on the PR and handled separately rather than block a merge. The README badge shows `main`'s CI, and releases still require every job in `script/validate-release-run` on the tagged commit.
+
 ## Backlog Workflow
 
 GitHub issues own active work and pending decisions; Projects organize those
