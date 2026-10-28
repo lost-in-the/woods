@@ -14,6 +14,7 @@ RSpec.describe 'Extractor manifest data composition' do
 
   let(:output) { Pathname.new(@root).join('index') }
   let(:extractor) { Woods::Extractor.new(output_dir: output) }
+  let(:capture) { extractor.send(:git_capture) }
   let(:events) { [] }
   let(:full_config) { { 'full_key' => 'full_digest' } }
   let(:baseline_config) { { 'baseline_key' => 'baseline_digest' } }
@@ -72,7 +73,7 @@ RSpec.describe 'Extractor manifest data composition' do
       events << :schema_digest
       'schema'
     }
-    allow(extractor).to receive(:git_enrichment_summary) { |**_arguments|
+    allow(capture).to receive(:enrichment_summary) { |**_arguments|
       events << :git_summary
       summary
     }
@@ -94,7 +95,7 @@ RSpec.describe 'Extractor manifest data composition' do
 
       expected_bytes = pretty ? JSON.pretty_generate(expected) : JSON.generate(expected)
       expect(Woods::AtomicFile.read(output.join('manifest.json'))).to eq(expected_bytes)
-      expect(extractor).to have_received(:git_enrichment_summary).with(refreshed: :all)
+      expect(capture).to have_received(:enrichment_summary).with(graph: extractor.dependency_graph, full: true)
       expect(events).to eq(%i[provenance timestamp rails_version lock_digest schema_digest configuration
                               git_summary git_filter serialize])
     end
@@ -120,7 +121,7 @@ RSpec.describe 'Extractor manifest data composition' do
     expected[:extraction_config] = baseline_config
     expect(Woods::AtomicFile.read(output.join('manifest.json'))).to eq(JSON.generate(expected))
     expect(Woods.configuration).not_to have_received(:extraction_fingerprint)
-    expect(extractor).to have_received(:git_enrichment_summary).with(refreshed: Set.new)
+    expect(capture).to have_received(:enrichment_summary).with(graph: extractor.dependency_graph, full: false)
     expect(events).to eq(%i[provenance persisted_counts timestamp rails_version lock_digest schema_digest
                             git_summary git_filter serialize])
   end
@@ -129,7 +130,7 @@ RSpec.describe 'Extractor manifest data composition' do
     extractor.instance_variable_set(:@baseline_extraction_config, nil)
     allow(extractor).to receive(:persisted_counts).and_return([{}, 0])
     unavailable = { 'state' => 'unavailable', 'reason' => 'history_read_failed', 'head_sha' => nil }
-    allow(extractor).to receive(:git_enrichment_summary).and_return(unavailable)
+    allow(capture).to receive(:enrichment_summary).and_return(unavailable)
     filter = instance_double(Woods::GitSourceFilter, available?: false)
     allow(Woods::GitSourceFilter).to receive(:new).and_return(filter)
     Woods.configuration.pretty_json = false
@@ -150,17 +151,17 @@ RSpec.describe 'Extractor manifest data composition' do
 
     expect { extractor.send(:write_manifest) }.to raise_error(IOError, 'schema unreadable')
     expect(Woods.configuration).not_to have_received(:extraction_fingerprint)
-    expect(extractor).not_to have_received(:git_enrichment_summary)
+    expect(capture).not_to have_received(:enrichment_summary)
     expect(output.join('manifest.json')).not_to exist
   end
 
   [false, true].each do |incremental|
     it "uses captured revision and branch for #{incremental ? 'incremental' : 'full'} manifest output" do
-      extractor.instance_variable_set(:@git_capture_head, 'a' * 40)
-      extractor.instance_variable_set(:@git_capture_branch, 'captured-branch')
+      capture.instance_variable_set(:@head, 'a' * 40)
+      capture.instance_variable_set(:@branch, 'captured-branch')
       captured_summary = { 'state' => 'available', 'head_sha' => 'a' * 40,
                            'capture' => { 'refreshed' => 0, 'retained' => 2 } }
-      allow(extractor).to receive(:git_enrichment_summary) do |**_arguments|
+      allow(capture).to receive(:enrichment_summary) do |**_arguments|
         events << :git_summary
         captured_summary
       end
@@ -192,14 +193,13 @@ RSpec.describe 'Extractor manifest data composition' do
       order << :configuration unless incremental
       order.push(:git_summary, :git_filter, :serialize)
       expect(events).to eq(order)
-      refreshed = incremental ? Set.new : :all
-      expect(extractor).to have_received(:git_enrichment_summary).with(refreshed: refreshed)
+      expect(capture).to have_received(:enrichment_summary).with(graph: extractor.dependency_graph, full: !incremental)
     end
   end
 
   it 'preserves an unavailable captured branch without substituting the live branch' do
-    extractor.instance_variable_set(:@git_capture_head, 'a' * 40)
-    extractor.instance_variable_set(:@git_capture_branch, nil)
+    capture.instance_variable_set(:@head, 'a' * 40)
+    capture.instance_variable_set(:@branch, nil)
     Woods.configuration.pretty_json = false
 
     extractor.send(:write_manifest)

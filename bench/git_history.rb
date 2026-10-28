@@ -60,7 +60,7 @@ module GitHistoryBenchmark
     data = nil
     6.times do |rep|
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      data = extractor.send(:batch_git_data, paths)
+      data = extractor.send(:git_capture).file_facts(paths)
       duration = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
       elapsed << duration if rep.positive? # Discard one warm-up.
     end

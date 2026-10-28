@@ -13,6 +13,9 @@ node_modules/
 coverage/
 tmp/
 
+# Reproducible maintainer diagram (instructions and historical audits stay tracked)
+/docs/self-analysis/architecture.md
+
 # Environment
 .env
 .byebug_history

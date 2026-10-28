@@ -1,8 +1,20 @@
 # Woods 2.0 documentation rewrite: reconciled plan
 
+> **Completed historical plan — reconciled and executed 2026-09-03; classified
+> 2026-10-27.** The counts and "still to do" rows below describe the reconciliation
+> before execution. The [completed follow-up section](#completed-follow-up-work-executed-2026-09-03)
+> records every remaining box checked and preserves the original PR and marketplace
+> evidence. This receipt landed in
+> [`448bad34`](https://github.com/lost-in-the/woods/commit/448bad34c7b7f18e235d126eb602931109befd32).
+> See the [later dispositions](../../self-analysis/README.md#historical-handwritten-records)
+> and [current documentation owners](../../README.md#canonical-owners) for subsequent
+> work; the original counts below are retained as provenance.
+
 Reconciles `2026-08-27-v2-documentation-rewrite.md` against the branch as of 2026-09-03. Classifies all 49 original tasks, then lists the work that actually remains.
 
-## Bottom line
+<a id="bottom-line"></a>
+
+## Reconciliation recorded on 2026-09-03
 
 **37 of 49 tasks are done. The original plan shipped in PR #245 on 2026-08-27 and nobody checked the boxes.** Four are stale: their acceptance criteria are now false or the target version moved. Eight are undone, and every one of them describes the same missing change in the paired `lost-in-the/plugins` repository.
 
@@ -140,7 +152,9 @@ These are outcomes, not tasks. Judged against the current tree.
 
 Checklist items 518 and 520 restate Task 8, so they add no new work.
 
-## Remaining work
+<a id="remaining-work"></a>
+
+## Completed follow-up work (executed 2026-09-03)
 
 > **Status: executed 2026-09-03 on the release branch (PR #277).** Every box below is
 > checked; deviations are noted inline. R1 was already delivered on the paired
