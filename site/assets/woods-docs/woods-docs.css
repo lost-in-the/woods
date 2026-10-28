@@ -152,6 +152,13 @@ body .site-footer, body .main-content footer { color: var(--woods-mut); }
 }
 
 /* Search keeps its existing overlay, keyboard handlers and version-local index. */
+/* The version band wraps below search; give JTD's percentage-height children
+ * a definite desktop row. Its results top:100% then starts below the query. */
+@media (min-width: 50rem) {
+  .main-header .search { flex: 1 0 100%; height: 3.75rem !important; }
+  .main-header .search-input-wrap,
+  .main-header .search-input { top: 0; left: 0; }
+}
 body .search-input, html.search-active .search-input { color: var(--woods-text); background: var(--woods-ground2); font-family: var(--woods-ff-data); }
 body .search-input::placeholder { color: var(--woods-mut); opacity: 1; }
 body .search-input-wrap { border-radius: var(--woods-radius); box-shadow: none; }
