@@ -14,6 +14,8 @@ bin/rake spec                                    # Full test suite
 bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
 bin/rubocop -a                                   # Lint + autofix
 bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
+bin/rake woods:affected_specs                    # Specs this branch's changes reach, from the self-map (#926)
+bin/rake "woods:affected_specs[lib/woods/x.rb]"  # ...for named paths; hubs it did not expand go to stderr
 
 # Opt-in spec tags (excluded from the default suite)
 WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http

@@ -409,6 +409,12 @@ jobs:
         run: bundle exec rake release_v2:verify_surface_inventory
       - name: Run linter
         run: bundle exec rubocop
+      # Agents choose which specs to run from the self-map (#926); hold its
+      # edges to known truths so a mapping regression cannot narrow them.
+      - name: Check self-map accuracy
+        env:
+          WOODS_RUN_SELF_MAP: '1'
+        run: bundle exec rspec spec/self_map_accuracy_spec.rb
 
   # The encoding canary. Woods writes UTF-8 JSON/JSONL artifacts; a bare
   # File.read tags them with the process default external encoding, so a

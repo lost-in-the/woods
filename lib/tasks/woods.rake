@@ -682,6 +682,25 @@ namespace :woods do
     puts "Woods self-map #{result[:status]} (generation #{result[:generation]}) at #{output_dir}"
   end
 
+  # Internal developer tool (#926): the specs a change to this gem reaches,
+  # read off the self-map, one path per line. Changed paths come from the
+  # argument (space-separated), CHANGED_FILES, or the diff against
+  # origin/main plus uncommitted work. Hubs it did not expand go to stderr.
+  task :affected_specs, [:paths] do |_task, args|
+    require 'woods/gem_mapper'
+    require 'woods/gem_map_affected_specs'
+    require 'woods/published_index'
+
+    gem_root = File.expand_path('../..', __dir__)
+    output_dir = ENV.fetch('WOODS_SELF_MAP_OUTPUT', File.join(gem_root, 'tmp', 'woods_self_map'))
+    Woods::GemMapper.new(root: gem_root, output_dir: output_dir).map!
+    given = args[:paths] || ENV.fetch('CHANGED_FILES', nil)
+    paths = given ? given.split : Woods::GemMapAffectedSpecs.changed_paths(gem_root)
+    result = Woods::GemMapAffectedSpecs.new(Woods::PublishedIndex.open(output_dir)).for(paths)
+    warn "[woods] hubs not expanded, consider a broader run: #{result[:hubs].join(', ')}" if result[:hubs].any?
+    puts result[:specs]
+  end
+
   desc 'Generate execution flow document for a Rails entry point'
   task :flow, [:entry_point] => :environment do |_t, args|
     require 'json'
