@@ -257,15 +257,16 @@ Full files and the full suite are slow here (the suite takes over 15 minutes, on
 - Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
 - Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
 - Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
-- The full suite and whole booted files run only when needed: a cross-cutting change before publishing, or left to hosted CI. Say which you ran and which you skipped.
+- Locally, run focused specs almost always. The full suite and whole booted files belong to hosted CI; run them locally only when a cross-cutting change cannot be judged otherwise. Say which you ran and which you skipped.
 
 ```bash
 # Gem unit specs (run from gem root)
-bundle exec rake spec                                              # Full suite
-bundle exec rake spec SPEC=spec/extractors/model_extractor_spec.rb # Single file
+bin/rspec spec/extractors/model_extractor_spec.rb:42   # One example: the default local run
+bin/rspec spec/extractors/model_extractor_spec.rb      # One file
+bin/rake spec                                          # Full suite: hosted CI, rarely local
 
 # Lint
-bundle exec rubocop -a
+bin/rubocop -a
 ```
 
 After gem-level specs pass, validate in the companion testbed if the change affects extraction output.
