@@ -25,7 +25,7 @@ RSpec.describe 'bin/woods-self-mcp' do
           class Store; end
           class Runner
             def run
-              Store.new
+              Woods::Store.new
             end
           end
         end
