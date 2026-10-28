@@ -57,6 +57,14 @@ RSpec.describe Woods::GemMapAffectedSpecs do
     expect(affected('spec/store_spec.rb')).to eq(%w[spec/store_spec.rb])
   end
 
+  it 'reads constant references from a long run of capitals in linear time' do
+    write('spec/long_spec.rb', "#{'A' * 200_000}\nRSpec.describe Woods::Store do\nend\n")
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    expect(affected('lib/woods/store.rb')).to include('spec/long_spec.rb')
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 10
+  end
+
   it 'does not publish spec source in the map' do
     output = @root.join('map')
     Woods::GemMapper.new(root: @root, output_dir: output).map!

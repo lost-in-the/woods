@@ -11,11 +11,16 @@ module Woods
     # Spec files the self-map reads.
     GLOBS = %w[spec/**/*_spec.rb].freeze
     PATH = %r{\Aspec/.+_spec\.rb\z}
-    QUALIFIED_CONSTANT = /(?<![\w:])(?:::)?[A-Z]\w*(?:::[A-Z]\w*)+/
+    # A qualified constant can only start where a token of word characters
+    # and colons starts, so the source is split into tokens and each one is
+    # matched from its start only: one pass, and no input can make the scan
+    # try a start position twice.
+    TOKEN = /[\w:]+/
+    QUALIFIED_CONSTANT = /\A(?:::)?[A-Z]\w*(?:::[A-Z]\w*)+/
     REQUIRE = /^\s*require(_relative)?[\s(]+['"]([^'"]+)['"]/
     # A spec that globs the library reads every file in it.
     TREE_GLOB = %r{lib/(?:woods/)?\*\*}
-    private_constant :PATH, :QUALIFIED_CONSTANT, :REQUIRE, :TREE_GLOB
+    private_constant :PATH, :TOKEN, :QUALIFIED_CONSTANT, :REQUIRE, :TREE_GLOB
 
     # @param relative [String] path relative to the gem root
     # @return [Boolean]
@@ -43,7 +48,7 @@ module Woods
     private
 
     def references(source, directory)
-      constants = source.scan(QUALIFIED_CONSTANT).map { |name| name.delete_prefix('::') }.uniq
+      constants = source.scan(TOKEN).filter_map { |token| token[QUALIFIED_CONSTANT]&.delete_prefix('::') }.uniq
       required = source.scan(REQUIRE).map do |relative, name|
         library = relative ? Pathname.new(directory).join(name).cleanpath.to_s : File.join('lib', name)
         "file:#{library.delete_suffix('.rb')}.rb"
