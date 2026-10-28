@@ -86,6 +86,7 @@ require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
 require_relative 'doc_references'
 require_relative 'extraction/manifest_facts'
+require_relative 'extraction/git_capture'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -977,8 +978,6 @@ module Woods
       @dependents_dirty = Set.new
       @incremental_written = {}
       @retained_units = Set.new
-      @git_recheck = Set.new
-      @git_refreshed = Set.new
       @changed_source_paths = nil
       @reference_additions = nil
       @library_replacement_touched = nil
@@ -2149,7 +2148,6 @@ module Woods
     # ──────────────────────────────────────────────────────────────────────
 
     def enrich_with_git_data
-      @git_history_failed = false
       return unless git_available?
 
       # Collect all file paths that need git data. Only app-owned paths under
@@ -2168,7 +2166,7 @@ module Woods
       end
 
       # Batch-fetch all git data in minimal subprocess calls
-      git_data = batch_git_data(file_paths)
+      git_data = git_capture.file_facts(file_paths)
 
       # Assign results to units
       @results.each do |type, units|
@@ -2191,7 +2189,7 @@ module Woods
     # the units (an incremental run never holds every unit in memory).
     #
     # @return [void]
-    # build_file_metadata always emits commit_count and change_frequency together
+    # GitCapture#file_facts always emits commit_count and change_frequency together
     # and non-nil, so no nil compaction is needed here (contrast annotate_node_from_git).
     def annotate_graph_with_git_data
       @results.each_value do |units|
@@ -2519,197 +2517,32 @@ module Woods
       path.start_with?(prefix) ? path.sub(prefix, '') : path
     end
 
-    # Can this run's git calls produce real facts?
+    # This run's Git capture ({Extraction::GitCapture}): the availability
+    # probe, the HEAD every Git fact is read at, and the ledger of units given
+    # facts. Built on first use and dropped at every entry point by
+    # {#reset_git_capture}, so no run sees an earlier run's HEAD.
     #
-    # `rev-parse --git-dir` alone is not enough. Over a linked worktree whose
-    # private git directory is reachable but whose `commondir` is not, it
-    # answers while every ref lookup fails and `git log` exits 0 with nothing
-    # to say. Enrichment then wrote `commit_count: 0` and
-    # `change_frequency: new` onto every unit, which reads exactly like a file
-    # that was never committed, where an absent git directory correctly omits
-    # the keys (B-186). HEAD has to resolve, with complete ancestry (B-189).
-    #
-    # Memoized, so the warning below is emitted at most once per run.
-    #
-    # @return [Boolean]
-    def git_available?
-      git_availability.fetch(:available)
+    # @return [Extraction::GitCapture]
+    def git_capture
+      @git_capture ||= Extraction::GitCapture.new(
+        root: Rails.root, logger: Rails.logger,
+        recent_limit: Woods.configuration&.git_recent_commits || GitHistory::DEFAULT_RECENT_LIMIT
+      )
     end
 
-    # Git availability and the captured revision belong to one extraction,
-    # including when a caller reuses this Extractor instance.
-    #
     # @return [void]
     def reset_git_capture
-      @git_availability = nil
-      @git_capture_head = nil
-      @git_capture_branch = GitProvenance::UNKNOWN
-      @git_capture_resolved = false
-      @git_history_failed = false
+      @git_capture = nil
     end
 
-    # Resolve once before reading history. Later commits must not relabel
-    # already-read facts, or put the commit table on a different revision.
-    #
-    # @return [String, nil] full commit SHA, without environment fallback
-    def git_capture_head
-      return @git_capture_head if @git_capture_resolved
-
-      @git_capture_resolved = true
-      # Resolve the named ref itself, so a checkout between these commands
-      # cannot pair the old branch name with the new branch's commit.
-      ref = run_git('symbolic-ref', '--quiet', 'HEAD')
-      revision = ref.empty? ? 'HEAD' : ref
-      head = run_git('rev-parse', '--verify', "#{revision}^{commit}")
-      return unless head.match?(GitLog::SHA)
-
-      @git_capture_branch = ref.start_with?('refs/heads/') ? ref.delete_prefix('refs/heads/') : GitProvenance::UNKNOWN
-      @git_capture_head = head
+    # @return [Boolean] whether this run can read Git facts at all
+    def git_available?
+      git_capture.available?
     end
 
-    # Whether this run's git calls can produce facts, and when they cannot, a
-    # stable reason for the published {GitEnrichmentSummary}.
-    #
-    # @return [Hash] `{available: Boolean, reason: String, nil}`
-    def git_availability
-      @git_availability ||= probe_git_availability
-    end
-
-    # @return [Hash] see {#git_availability}
-    def probe_git_availability
-      _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
-      unless status.success?
-        warn_unresolvable_git(error)
-        return { available: false, reason: git_requested? ? 'head_unresolvable' : 'no_repository' }
-      end
-
-      complete_git_history? ? { available: true, reason: nil } : { available: false, reason: @git_history_reason }
-    rescue Errno::ENOENT
-      warn_missing_git_executable
-      { available: false, reason: 'git_executable_missing' }
-    rescue StandardError
-      { available: false, reason: 'git_error' }
-    end
-
-    # A working tree or an explicit Git directory asks for history. Without
-    # either, an unresolvable HEAD is an ordinary source archive.
-    #
-    # @return [Boolean]
-    def git_requested?
-      [GitCommand::OVERRIDE_KEY, 'GIT_DIR'].any? { |key| !ENV[key].to_s.empty? } ||
-        File.exist?(File.join(Rails.root.to_s, '.git'))
-    end
-
-    # An explicit Git directory still requests history when .git is not mounted
-    # at Rails.root. Ordinary source archives remain a supported, quiet path.
-    #
-    # @return [void]
-    def warn_missing_git_executable
-      return unless git_requested?
-
-      Rails.logger.warn(
-        '[Woods] Git history unavailable: git executable was not found in PATH. ' \
-        'Extraction continues without per-unit Git metadata. Install Git in the extraction environment ' \
-        'and run a full extraction to refresh Git metadata.'
-      )
-    end
-
-    # A shallow HEAD resolves but represents an incomplete ancestry. Do not
-    # turn that boundary into apparent one-commit/new-file churn facts.
-    def complete_git_history?
-      output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
-      return true if status.success? && output.strip == 'false'
-
-      shallow = status.success? && output.strip == 'true'
-      reason = shallow ? 'shallow repository' : 'repository depth could not be verified'
-      @git_history_reason = shallow ? 'shallow_repository' : 'depth_unverifiable'
-      Rails.logger.warn(
-        "[Woods] Git enrichment omitted: #{reason}. Fetch full history with git fetch --unshallow " \
-        '(or actions/checkout fetch-depth: 0), then run full extraction to refresh git metadata.'
-      )
-      false
-    end
-
-    # Say once why no unit will carry git metadata, but only when there is a
-    # working tree to explain. No `.git` at the root is the ordinary source
-    # tarball or `COPY`-without-`.git` case, and it is not a fault.
-    #
-    # @param error [String] git's own stderr
-    # @return [void]
-    def warn_unresolvable_git(error)
-      return unless File.exist?(File.join(Rails.root.to_s, '.git'))
-
-      cause = error.to_s.lines.first.to_s.strip
-      Rails.logger.warn(
-        '[Woods] git cannot resolve HEAD for this working tree, so no unit will carry git ' \
-        "metadata: #{cause}. For a linked worktree, mount the complete shared .git directory " \
-        'at its original path, or set WOODS_GIT_DIR to /mounted-common/worktrees/<id> within ' \
-        'the relocated complete layout. Derive <id> from the worktree Git metadata, not its branch name; ' \
-        "selecting /mounted-common itself uses the primary checkout's HEAD."
-      )
-    end
-
-    # The git command line every enrichment call runs.
-    #
-    # `-C <root>` keeps the result independent of the process working
-    # directory. `WOODS_GIT_DIR` wins when set and selects that git directory's
-    # HEAD. A relocated linked worktree needs its worktree-specific directory
-    # inside the complete shared Git layout (B-181).
-    #
-    # @param args [Array<String>] git arguments
-    # @return [Array<String>] full argv
-    def git_argv(*args)
-      GitCommand.argv(Rails.root, *args)
-    end
-
-    # Safe git command execution — no shell interpolation
-    #
-    # @param args [Array<String>] Git command arguments
-    # @return [String] Command output (empty string on failure)
-    def run_git(*args)
-      output, _error, status = Open3.capture3(*git_argv(*args))
-      status.success? ? output.strip : ''
-    rescue StandardError
-      ''
-    end
-
-    # One HEAD history walk, independent of requested-path grouping. See
-    # GitHistory for explicit merge semantics and binary record framing.
-    # @param file_paths [Array<String>] absolute file paths
-    # @return [Hash{String => Hash}] keyed by Rails.root-relative path
-    def batch_git_data(file_paths)
-      return {} if file_paths.empty?
-
-      head = git_capture_head
-      unless head
-        @git_history_failed = true
-        return {}
-      end
-
-      relative_paths = file_paths.map { |path| normalize_file_path(path) }.uniq
-      recent_after = Time.current - 90.days
-      raw = GitHistory.new(root: Rails.root, logger: Rails.logger, recent_limit: recent_commit_limit)
-                      .read(relative_paths, recent_after: recent_after, revision: head)
-      unless raw
-        @git_history_failed = true
-        return {}
-      end
-
-      raw.transform_values { |data| build_file_metadata(data, recent_after.iso8601) }
-    end
-
-    # @return [Integer] `config.git_recent_commits`, or the default when unconfigured
-    def recent_commit_limit
-      Woods.configuration&.git_recent_commits || GitHistory::DEFAULT_RECENT_LIMIT
-    end
-
-    # Write, keep or withdraw this generation's `git_commits.json` (W-3).
-    #
-    # The table is a pure function of HEAD, the indexed path set and the
-    # bounds ({GitCommitTable}). A full run always walks; an incremental run
-    # keeps the seeded table when it records the same inputs and rebuilds the
-    # whole table otherwise, so both modes publish the same bytes. Without a
-    # readable history the table is withdrawn rather than published empty.
+    # Write, keep or withdraw this generation's `git_commits.json` (W-3), as
+    # {Extraction::GitCapture#commit_table} decides. Without a readable
+    # history the table is withdrawn rather than published empty.
     #
     # Runs after the graph is final, because the indexed path set is read
     # off it.
@@ -2719,7 +2552,7 @@ module Woods
     #   table changed, nil when it is unchanged
     def refresh_commit_table(full:)
       published = published_commit_table
-      table = commit_table_for_run(published, full: full)
+      table = git_capture.commit_table(published, graph: @dependency_graph, full: full)
       return nil if table == published
 
       if table
@@ -2738,76 +2571,6 @@ module Woods
     rescue JSON::ParserError, SystemCallError => e
       Rails.logger.warn "[Woods] Rebuilding #{GitCommitTable::FILENAME}: the seeded copy is unreadable (#{e.class})"
       nil
-    end
-
-    # @param published [Hash, nil]
-    # @param full [Boolean]
-    # @return [Hash, nil] the table this run publishes, nil for none
-    def commit_table_for_run(published, full:)
-      return nil unless git_available?
-
-      head = git_capture_head
-      return nil unless head
-
-      paths = commit_table_paths
-      builder = GitCommitTable.new(root: Rails.root, logger: Rails.logger, settings: GitCommitTable.settings)
-      return published if !full && GitCommitTable.current?(published, builder.key(paths, head: head))
-
-      builder.build(paths, head: head)
-    end
-
-    # Application-owned paths of every indexed unit, by the same rule
-    # per-unit git enrichment uses ({#git_enrichable_path?}), read off the
-    # final graph so full and incremental runs see one set.
-    #
-    # @return [Array<String>] sorted root-relative paths
-    def commit_table_paths
-      root = "#{Rails.root}/"
-      framework = %i[rails_source gem_source]
-      @dependency_graph.registered_paths.filter_map do |registered|
-        path = File.expand_path(registered.to_s, Rails.root.to_s)
-        next unless git_enrichable_path?(path, root)
-        next if @dependency_graph.units_for_path(registered).all? { |_, type| framework.include?(type) }
-
-        normalize_file_path(path)
-      end.uniq.sort
-    end
-
-    # Classify how frequently a file changes based on commit counts.
-    def classify_change_frequency(total_count, recent_count)
-      if total_count <= 2
-        :new
-      elsif recent_count >= 10
-        :hot
-      elsif recent_count >= 3
-        :active
-      elsif recent_count >= 1
-        :stable
-      else
-        :dormant
-      end
-    end
-
-    # Build final metadata hash from raw commit data.
-    def build_file_metadata(data, ninety_days_ago)
-      all_commits = data[:commits] || []
-      contributor_counts = data[:contributors] || {}
-      recent_count = data.fetch(:recent_count) { all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago } }
-      total_count = data.fetch(:commit_count, all_commits.size)
-
-      {
-        last_modified: data[:last_modified],
-        last_author: data[:last_author],
-        commit_count: total_count,
-        contributors: contributor_counts
-                      .sort_by { |_, count| -count }
-                      .first(5)
-                      .map { |name, count| { name: name, commits: count } },
-        recent_commits: all_commits.first(recent_commit_limit).map do |c|
-          { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
-        end,
-        change_frequency: classify_change_frequency(total_count, recent_count)
-      }
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2986,11 +2749,7 @@ module Woods
 
     def write_manifest(incremental: false)
       # Preserve the run capture and the existing fallback acquisition order.
-      provenance = if @git_capture_head
-                     { git_sha: @git_capture_head, git_branch: @git_capture_branch }
-                   else
-                     GitProvenance.new(root: Rails.root).to_h
-                   end
+      provenance = git_capture.provenance || GitProvenance.new(root: Rails.root).to_h
 
       # Incremental results are partial; counts come from staged per-type indexes,
       # while configuration remains the published baseline's fingerprint.
@@ -3009,7 +2768,7 @@ module Woods
       lock_digest = gemfile_lock_sha
       schema_digest = schema_sha
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
-      enrichment = git_enrichment_summary(refreshed: incremental ? (@git_refreshed || Set.new) : :all)
+      enrichment = git_capture.enrichment_summary(graph: @dependency_graph, full: !incremental)
       filter_available = GitSourceFilter.new(root: Rails.root).available?
 
       manifest = Extraction::ManifestFacts.build(
@@ -3024,24 +2783,6 @@ module Woods
         json_serialize(manifest),
         durable: payload_writes_durable?
       )
-    end
-
-    # The published account of whether this generation's Git facts can be
-    # trusted ({GitEnrichmentSummary}). Counts come from the graph, so no unit
-    # is read; a failed history walk after a resolvable HEAD still counts as
-    # unavailable.
-    #
-    # @param refreshed [Set<Array(String, String)>, Symbol] typed units given
-    #   facts by this run, or `:all` for a full extraction
-    # @return [Hash]
-    def git_enrichment_summary(refreshed:)
-      availability = git_availability
-      failed = availability[:available] && @git_history_failed
-      availability = { available: false, reason: 'history_read_failed' } if failed
-      head = availability[:available] ? git_capture_head : nil
-
-      GitEnrichmentSummary.build(graph: @dependency_graph, root: Rails.root.to_s, availability: availability,
-                                 refreshed: refreshed, head_sha: head&.match?(GitLog::SHA) ? head : nil)
     end
 
     # Unit and chunk counts derived from the per-type _index.json files on
@@ -4423,7 +4164,7 @@ module Woods
         mark_dependents_dirty(unit.identifier)
 
         unit.file_path = normalize_file_path(unit.file_path)
-        # Keyed by relative path, which is how batch_git_data keys its result.
+        # Keyed by relative path, which is how GitCapture#file_facts keys its result.
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
@@ -4484,7 +4225,7 @@ module Woods
       changed = @changed_source_paths
       return unless changed.nil? || SourceContributors.paths(unit).any? { |path| changed.include?(path.to_s) }
 
-      (@git_recheck ||= Set.new).add(unit.identifier)
+      git_capture.request_recheck(unit.identifier)
     end
 
     # GraphQL kinds share a payload filename. Validate retained source ownership
@@ -4592,7 +4333,7 @@ module Woods
     # @return [Set<String>] retained identifiers whose Git facts were rewritten
     def finalize_incremental_unit_json(affected_types)
       dependents_dirty = @dependents_dirty || Set.new
-      rechecked = (@git_recheck || Set.new) - (@incremental_written || {}).keys
+      rechecked = git_capture.rechecks - (@incremental_written || {}).keys
       git_dirty = (@incremental_written || {}).keys.to_set | rechecked
       git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.to_a) }
 
@@ -4615,7 +4356,7 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
     # @param git_data [Hash{String => Hash}, nil] batch git data keyed by
-    #   relative path (per {#batch_git_data}), or nil when this identifier
+    #   relative path (per {Extraction::GitCapture#file_facts}), or nil when this identifier
     #   isn't git-dirty this run
     # @return [void]
     def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git_data:)
@@ -4681,11 +4422,11 @@ module Woods
         sources = SourceContributors.git_source_count(data)
         @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil,
                                                git_sources: sources)
-        note_git_refreshed(identifier, type) if sources.positive?
+        git_capture.note_refreshed(identifier, type) if sources.positive?
       elsif git
         (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
         annotate_node_from_git(identifier, type, git)
-        note_git_refreshed(identifier, type)
+        git_capture.note_refreshed(identifier, type)
       end
 
       return false if JSON.generate(data) == before
@@ -4696,14 +4437,6 @@ module Woods
     rescue JSON::ParserError => e
       Rails.logger.warn "[Woods] Could not finalize #{identifier}: #{e.message}"
       false
-    end
-
-    # Facts for this typed unit were read in this publication, as opposed to
-    # carried over from an earlier capture.
-    #
-    # @return [void]
-    def note_git_refreshed(identifier, type)
-      (@git_refreshed ||= Set.new).add([identifier, type.to_s])
     end
 
     # This (identifier, type) pair's own git data, looked up by its own
@@ -4721,8 +4454,9 @@ module Woods
     end
 
     # Mirror of {#annotate_graph_with_git_data} for one incrementally
-    # patched unit. Git data arrives symbol-keyed from {#batch_git_data} and
-    # string-keyed when a caller hands in parsed JSON; both are accepted.
+    # patched unit. Git data arrives symbol-keyed from
+    # {Extraction::GitCapture#file_facts} and string-keyed when a caller hands
+    # in parsed JSON; both are accepted.
     #
     # Unlike {#annotate_graph_with_git_data}, a missing key is never forwarded
     # as an explicit `nil`: {DependencyGraph#annotate} treats `nil` as
@@ -4745,7 +4479,7 @@ module Woods
 
     # Batch-fetch git metadata for the units written by this run, in a single
     # history walk, keyed by Rails.root-relative path the way
-    # {#batch_git_data} returns it.
+    # {Extraction::GitCapture#file_facts} returns it.
     #
     # @param identifiers [Array<String>]
     # @return [Hash{String => Hash}]
@@ -4761,7 +4495,7 @@ module Woods
         end
       end
 
-      batch_git_data(paths.uniq)
+      git_capture.file_facts(paths.uniq)
     rescue StandardError => e
       Rails.logger.warn "[Woods] Incremental git enrichment failed: #{e.message}"
       {}

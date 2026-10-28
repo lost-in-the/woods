@@ -18,7 +18,7 @@ RSpec.describe 'Extractor run state across reused entry points' do
   shared_resets = {
     failed_consumers: :set, source_reference_refreshed: :set, source_reference_paths: :set,
     source_reference_occurrences: :hash, source_reference_baseline: :hash,
-    publication_error: :scalar, payload_generation: :scalar, payload_dir: :scalar
+    publication_error: :scalar, payload_generation: :scalar, payload_dir: :scalar, git_capture: :scalar
   }.freeze
 
   full_resets = shared_resets.merge(
@@ -29,7 +29,7 @@ RSpec.describe 'Extractor run state across reused entry points' do
 
   incremental_resets = shared_resets.merge(
     results: :hash, dependents_dirty: :set, incremental_written: :hash, retained_units: :set,
-    git_recheck: :set, changed_source_paths: :set, reference_additions: :hash,
+    changed_source_paths: :set, reference_additions: :hash,
     library_replacement_touched: :set, identity_claims: :hash, flow_scope: :set,
     previous_flow_index_entries: :hash, incremental_extractors: :hash, source_collector: :scalar,
     hybrid_discovery_keys: :set, active_record_names: :set, package_resolver: :scalar,

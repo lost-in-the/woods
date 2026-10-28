@@ -241,7 +241,7 @@ RSpec.describe 'Git enrichment over a linked worktree' do
       graph.register(unit)
       extractor.instance_variable_set(:@dependency_graph, graph)
       extractor.send(:annotate_graph_with_git_data)
-      extractor.send(:git_enrichment_summary, refreshed: :all)
+      extractor.send(:git_capture).enrichment_summary(graph: graph, full: true)
     end
 
     it 'is available with the HEAD it read for a healthy linked worktree' do
