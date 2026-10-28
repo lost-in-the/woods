@@ -22,15 +22,17 @@ jobs:
     timeout-minutes: 15
     env:
       BUNDLE_GEMFILE: ${{ github.workspace }}/site/Gemfile
-      BUNDLE_PATH: ${{ runner.temp }}/woods-docs/bundle
       BUNDLE_IGNORE_CONFIG: '1'
       BUNDLE_FROZEN: 'true'
       GIT_NO_LAZY_FETCH: '1'
-      WOODS_DOCS_LOCK: ${{ runner.temp }}/woods-docs-heavy.lock
     defaults:
       run:
         shell: bash
     steps:
+      - name: Set runner-local documentation paths
+        run: |
+          printf 'BUNDLE_PATH=%s/woods-docs/bundle\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'WOODS_DOCS_LOCK=%s/woods-docs-heavy.lock\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 1
