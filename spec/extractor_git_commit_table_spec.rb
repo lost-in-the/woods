@@ -134,7 +134,7 @@ RSpec.describe Woods::Extractor, 'commit table' do
     6.times { |i| commit("edit #{i}", { 'app/models/post.rb' => i.to_s }) }
     Woods.configure { |config| config.git_recent_commits = 7 }
 
-    data = extractor.send(:batch_git_data, [model_path.to_s]).fetch('app/models/post.rb')
+    data = extractor.send(:git_capture).file_facts([model_path.to_s]).fetch('app/models/post.rb')
 
     expect(data[:commit_count]).to eq(7)
     expect(data[:recent_commits].size).to eq(7)

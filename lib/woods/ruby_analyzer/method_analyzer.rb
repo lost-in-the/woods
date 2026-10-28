@@ -75,9 +75,34 @@ module Woods
             units << build_method_unit(child, fqn, '#', visibility_tracker.current, file_path)
           when :defs
             units << build_method_unit(child, fqn, '.', :public, file_path)
+          when :sclass
+            singleton_methods(child).each do |method, visibility|
+              units << build_method_unit(method, fqn, '.', visibility, file_path)
+            end
           when :class, :module
             extract_methods_from_tree(child, source, file_path, inner_ns, units)
           end
+        end
+      end
+
+      # Methods defined in a `class << self` body are the owner's singleton
+      # methods, named `Owner.method` like a `def self.method`. Only `self`
+      # opens the owner's own singleton class; `class << other` does not.
+      #
+      # @param sclass_node [Ast::Node]
+      # @return [Array<Array(Ast::Node, Symbol)>] each def with its visibility
+      def singleton_methods(sclass_node)
+        return [] unless sclass_node.receiver == 'self'
+
+        statements = (sclass_node.children || []).flat_map do |child|
+          child.is_a?(Ast::Node) && child.type == :begin ? (child.children || []) : [child]
+        end
+        tracker = VisibilityTracker.new
+        statements.each_with_object([]) do |statement, methods|
+          next unless statement.is_a?(Ast::Node)
+
+          tracker.process_send(statement) if statement.type == :send
+          methods << [statement, tracker.current] if statement.type == :def
         end
       end
 

@@ -158,8 +158,26 @@ module Woods
         unit = ExtractedUnit.new(type: :ruby_file, identifier: "file:#{relative}", file_path: relative)
         unit.source_code = source
         unit.metadata = { static_kind: 'ruby_file', executable: executable?(path) }
+        unit.dependencies = top_level_references(source) if script?(path)
         unit
       end
+    end
+
+    # Rake tasks and executables run their code at the top level, outside any
+    # class or method, so no other unit records what they call.
+    def script?(path)
+      path.end_with?('.rake') || executable?(path)
+    end
+
+    # Constants a script calls methods on, as written. Top-level code sees
+    # only absolute names, which is how {#qualify_dependencies} resolves a
+    # unit without scopes.
+    def top_level_references(source)
+      calls = Ast::CallSiteExtractor.new.extract(Ast::Parser.new.parse(source))
+      receivers = calls.filter_map { |call| call[:receiver] if call[:receiver]&.match?(/\A(?:::)?[A-Z]/) }
+      receivers.uniq.map { |target| { type: :ruby_class, target: target, via: :method_call } }
+    rescue Woods::ExtractionError
+      []
     end
 
     def disambiguate!(units)
@@ -180,16 +198,28 @@ module Woods
       definitions = units.select { |unit| %i[ruby_class ruby_module].include?(unit.type) }.to_h do |unit|
         [unit.metadata[:canonical_identifier] || unit.identifier, unit]
       end
+      owner_scopes = owner_scopes(units)
       units.each do |unit|
-        unit.dependencies.each { |dependency| qualify_dependency(unit, dependency, definitions) }
+        scopes = unit.metadata[:lexical_scopes] || owner_scopes[[unit.namespace, unit.file_path]]
+        unit.dependencies.each { |dependency| qualify_dependency(dependency, Array(scopes), definitions) }
       end
     end
 
-    def qualify_dependency(unit, dependency, definitions)
+    # A method unit carries no nesting of its own: it is written inside the
+    # body of its owner, so it sees the owner's lexical scopes from that file.
+    def owner_scopes(units)
+      units.each_with_object({}) do |unit, scopes|
+        next unless %i[ruby_class ruby_module].include?(unit.type)
+
+        key = [unit.metadata[:canonical_identifier] || unit.identifier, unit.file_path]
+        scopes[key] ||= unit.metadata[:lexical_scopes]
+      end
+    end
+
+    def qualify_dependency(dependency, scopes, definitions)
       target = dependency[:target]
       return unless target.is_a?(String)
 
-      scopes = Array(unit.metadata[:lexical_scopes])
       scopes = scopes.drop(1) if dependency[:via] == :inheritance
       candidates = if target.start_with?('::')
                      [target.delete_prefix('::')]
