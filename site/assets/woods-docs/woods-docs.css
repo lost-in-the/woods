@@ -92,7 +92,7 @@ body :is(img, video) { max-width: 100%; height: auto; }
 /* Keep the locked theme's sidebar/menu breakpoint and disclosure state. */
 body .side-bar { background: var(--woods-panel); border-color: var(--woods-rule); }
 body .site-header, body .main-header { border-color: var(--woods-rule); }
-body .main-header { background: var(--woods-bg); }
+body .main-header, body .side-bar + .main .main-header { background: var(--woods-bg); }
 body .site-title {
   color: var(--woods-bright);
   font-size: 1.125rem !important; /* Beats the theme's site-title fs-6 mixin. */
