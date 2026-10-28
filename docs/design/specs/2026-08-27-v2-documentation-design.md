@@ -1,5 +1,15 @@
 # Woods 2.0 Documentation Architecture
 
+> **Historical design — 2026-08-27; classified 2026-10-27.** The future tense,
+> counts, size targets, and acceptance criteria below belong to the original
+> rewrite design. This retained receipt landed in
+> [`448bad34`](https://github.com/lost-in-the/woods/commit/448bad34c7b7f18e235d126eb602931109befd32).
+> The [reconciled plan](../plans/2026-09-03-v2-documentation-rewrite-reconciled.md#completed-follow-up-work-executed-2026-09-03)
+> records execution on 2026-09-03, including the marketplace follow-up. See the
+> [later dispositions](../../self-analysis/README.md#historical-handwritten-records)
+> and [current documentation owners](../../README.md#canonical-owners) for today's
+> contract and follow-ups.
+
 Woods 2.0 will use a layered, repository-native documentation set: a concise product README, a task-oriented documentation index, separate human and agent setup paths, an executable-surface-first MCP guide, a workflow-focused MCP agent guide, a major-version upgrade runbook, and focused contributor/agent-maintainer instructions. This replaces the current README monolith and removes setup facts duplicated across five or more documents. The primary risk is publishing commands or MCP capabilities that do not match the packaged gem, so every public claim will be checked against the generated v2 surface inventory and packaged-gem verification suite.
 
 ---
