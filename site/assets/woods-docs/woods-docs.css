@@ -1,0 +1,306 @@
+/* Woods guides: the Woods Map Coop at Night palette, adapted for long-form text.
+ * Tokens/roles: woods-map tokens.css, decisions D-10–D-24 (including AA amendments).
+ * Copyright (c) 2026 Leah Armstrong. MIT license: LICENSE.txt beside this sheet.
+ * Font notices and provenance: fonts/{inter,fira-code}/OFL.txt and fonts/README.txt.
+ * Keep Just the Docs' layout, navigation and control behavior; this is an override.
+ */
+
+@font-face{font-family:"Inter";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/inter/inter-latin-400-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Inter";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/inter/inter-latin-ext-400-normal.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Inter";font-style:normal;font-weight:500;font-display:swap;src:url(fonts/inter/inter-latin-500-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Inter";font-style:normal;font-weight:500;font-display:swap;src:url(fonts/inter/inter-latin-ext-500-normal.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Inter";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/inter/inter-latin-700-normal.woff2) format("woff2");unicode-range:U+0000-00FF,U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,U+2193,U+2212,U+2215,U+FEFF,U+FFFD}
+@font-face{font-family:"Inter";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/inter/inter-latin-ext-700-normal.woff2) format("woff2");unicode-range:U+0100-02BA,U+02BD-02C5,U+02C7-02CC,U+02CE-02D7,U+02DD-02FF,U+0304,U+0308,U+0329,U+1D00-1DBF,U+1E00-1E9F,U+1EF2-1EFF,U+2020,U+20A0-20AB,U+20AD-20C0,U+2113,U+2C60-2C7F,U+A720-A7FF}
+@font-face{font-family:"Fira Code";font-style:normal;font-weight:400;font-display:swap;src:url(fonts/fira-code/FiraCode-Regular.woff2) format("woff2")}
+@font-face{font-family:"Fira Code";font-style:normal;font-weight:500;font-display:swap;src:url(fonts/fira-code/FiraCode-Medium.woff2) format("woff2")}
+@font-face{font-family:"Fira Code";font-style:normal;font-weight:700;font-display:swap;src:url(fonts/fira-code/FiraCode-Bold.woff2) format("woff2")}
+
+:root {
+  color-scheme: light;
+  --woods-bg: #FCFCFD;
+  --woods-panel: #F4F5F7;
+  --woods-ground2: #EEF0F2;
+  --woods-sheet: #FFFFFF;
+  --woods-hover: #EEF0F2;
+  --woods-stripe: rgba(20, 19, 23, .035);
+  --woods-bright: #141317;
+  --woods-text: #222126;
+  --woods-mut: #5C6675;
+  --woods-dim: #646E7B;
+  --woods-rule: #E5E8EB;
+  --woods-rule2: #C9CDD3;
+  --woods-select: #7E4384;
+  --woods-select-tint: rgba(126, 67, 132, .08);
+  --woods-link: #4D597A;
+  --woods-mod: #7A5200;
+  --woods-hot: #A74D1A;
+  --woods-risk: #C0392B;
+  --woods-fresh: #436961;
+  --woods-diff-add: #E3F1E3;
+  --woods-diff-del: #F6E3E1;
+  --woods-ff-ui: "Inter", system-ui, sans-serif;
+  --woods-ff-data: "Fira Code", "Fira Mono", ui-monospace, monospace;
+  --woods-s1: 3px;
+  --woods-s2: 5px;
+  --woods-s3: 8px;
+  --woods-s4: 13px;
+  --woods-s5: 21px;
+  --woods-s6: 34px;
+  --woods-s7: 55px;
+  --woods-radius: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --woods-bg: #222126;
+    --woods-panel: #1B1A1F;
+    --woods-ground2: #28272D;
+    --woods-sheet: #222126;
+    --woods-hover: #2A292F;
+    --woods-stripe: rgba(252, 252, 253, .035);
+    --woods-bright: #FCFCFD;
+    --woods-text: #E5E8EB;
+    --woods-mut: #9BA5B0;
+    --woods-dim: #86919E;
+    --woods-rule: #3B3942;
+    --woods-rule2: #4A4852;
+    --woods-select: #B580BC;
+    --woods-select-tint: rgba(181, 128, 188, .08);
+    --woods-link: #7EB1D4;
+    --woods-mod: #F1B73A;
+    --woods-hot: #EF8A3C;
+    --woods-risk: #EE665F;
+    --woods-fresh: #7DAA9E;
+    --woods-diff-add: #2A3A2A;
+    --woods-diff-del: #3A2A2A;
+  }
+}
+
+/* JTD's fs-* mixins force sizes with !important. Match that priority only on
+ * affected sizes; 100% keeps rems tied to the browser's preferred text size. */
+html { font-size: 100% !important; }
+html, body { background: var(--woods-bg); color: var(--woods-text); }
+body { font-family: var(--woods-ff-ui); font-size: 1rem; line-height: 1.7; }
+::selection { background: var(--woods-select); color: var(--woods-bg); }
+body a { color: var(--woods-link); text-decoration: underline; text-underline-offset: 3px; }
+body a:hover { color: var(--woods-link); text-decoration-thickness: 2px; }
+body hr { border-color: var(--woods-rule); background: var(--woods-rule); }
+body :is(input, select, textarea) { accent-color: var(--woods-select); }
+body :is(img, video) { max-width: 100%; height: auto; }
+
+/* Keep the locked theme's sidebar/menu breakpoint and disclosure state. */
+body .side-bar { background: var(--woods-panel); border-color: var(--woods-rule); }
+body .site-header, body .main-header { border-color: var(--woods-rule); }
+body .main-header { background: var(--woods-bg); }
+body .site-title {
+  color: var(--woods-bright);
+  font-size: 1.125rem !important; /* Beats the theme's site-title fs-6 mixin. */
+  font-weight: 700;
+  text-decoration: none;
+  background-image: none;
+}
+body .site-title:hover, body .site-button:hover { background: var(--woods-hover); }
+body .site-button { color: var(--woods-mut); background-image: none; }
+body .icon { color: var(--woods-mut); }
+body .site-nav { padding-top: var(--woods-s5); padding-bottom: var(--woods-s5); }
+.site-nav .nav-list .nav-list-item .nav-list-link {
+  min-height: var(--woods-s6);
+  padding-block: var(--woods-s3);
+  color: var(--woods-text);
+  font-size: .875rem;
+  line-height: 1.5;
+  text-decoration: none;
+  background-image: none;
+  overflow-wrap: anywhere;
+}
+.site-nav .nav-list .nav-list-item .nav-list-link:hover { background: var(--woods-hover); }
+.site-nav .nav-list .nav-list-item .nav-list-link:is(.active, [aria-current="page"]) {
+  color: var(--woods-bright);
+  background: var(--woods-select-tint);
+  box-shadow: inset 3px 0 0 var(--woods-select);
+  font-weight: 700;
+}
+body .nav-category { color: var(--woods-mut); border-color: var(--woods-rule); }
+.site-nav .nav-list .nav-list-item .nav-list-expander { color: var(--woods-mut); background-image: none; }
+body .site-footer, body .main-content footer { color: var(--woods-mut); }
+
+/* The provenance/version band stays in the header and wraps its full text. */
+.main-header .woods-context {
+  padding: var(--woods-s4) var(--woods-s5);
+  border-top: 1px solid var(--woods-rule);
+  color: var(--woods-mut);
+  background: var(--woods-panel);
+  font-size: .8125rem;
+  line-height: 1.65;
+}
+.main-header .woods-context p { margin: 0 0 var(--woods-s3); }
+.main-header .woods-context strong { color: var(--woods-bright); }
+.main-header .woods-context nav { gap: var(--woods-s3) var(--woods-s4); }
+.main-header .woods-context nav a {
+  padding: var(--woods-s2) var(--woods-s3);
+  border-bottom: 3px solid transparent;
+  border-radius: var(--woods-radius);
+  text-decoration: none;
+}
+.main-header .woods-context nav a:hover { background: var(--woods-hover); }
+.main-header .woods-context nav a[aria-current="page"] {
+  color: var(--woods-bright);
+  background: var(--woods-select-tint);
+  border-bottom-color: var(--woods-select);
+  font-weight: 700;
+}
+
+/* Search keeps its existing overlay, keyboard handlers and version-local index. */
+body .search-input, html.search-active .search-input { color: var(--woods-text); background: var(--woods-ground2); font-family: var(--woods-ff-data); }
+body .search-input::placeholder { color: var(--woods-mut); opacity: 1; }
+body .search-input-wrap { border-radius: var(--woods-radius); box-shadow: none; }
+body .search-label .search-icon { color: var(--woods-mut); }
+body .search-input:focus + .search-label .search-icon { color: var(--woods-select); }
+body .search-results {
+  max-height: 70vh !important;
+  color: var(--woods-text);
+  background: var(--woods-sheet);
+  border: 1px solid var(--woods-rule2);
+  border-radius: var(--woods-radius);
+  box-shadow: none;
+  overscroll-behavior: contain;
+}
+body .search-result { color: var(--woods-link); text-decoration: none; }
+body .search-result:hover { background: var(--woods-hover); }
+body .search-result.active {
+  color: var(--woods-bright);
+  background: var(--woods-select-tint);
+  box-shadow: inset 3px 0 0 var(--woods-select);
+}
+body .search-result-previews, body .search-result-rel-url { color: var(--woods-mut); border-color: var(--woods-rule); }
+body .search-result-doc.search-result-doc-parent { color: var(--woods-mut); opacity: 1; }
+.search-results .search-result-doc .search-result-icon { color: var(--woods-link); }
+body .search-result-highlight { color: var(--woods-bright); text-decoration: underline var(--woods-select); }
+body .search-button { color: var(--woods-mut); background: var(--woods-panel); border: 1px solid var(--woods-rule2); border-radius: var(--woods-radius); box-shadow: none; }
+
+/* Documentation reading scale: Inter prose at 16px, rather than Map's 13px data UI. */
+body .main-content-wrap { padding: var(--woods-s6); }
+body .main-content { color: var(--woods-text); font-size: 1rem; line-height: 1.75; }
+.main-content main > :is(p, ul, ol, dl, blockquote) { max-width: 74ch; }
+.main-content :is(h1, h2, h3, h4, h5, h6), .woods-hub h1 {
+  color: var(--woods-bright);
+  font-family: var(--woods-ff-ui);
+  font-weight: 700;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+/* The theme forces h1–h6 sizes; scope priority to the guide heading scale. */
+.main-content h1, .woods-hub h1 { margin-bottom: var(--woods-s5); font-size: clamp(1.75rem, 3vw, 2.125rem) !important; }
+.main-content h2 { margin-top: var(--woods-s7); padding-bottom: var(--woods-s3); border-bottom: 1px solid var(--woods-rule); font-size: 1.375rem !important; }
+.main-content h3 { margin-top: var(--woods-s6); font-size: 1.125rem !important; }
+.main-content h4 { font-size: 1rem !important; }
+.main-content h5 { font-size: .9375rem !important; }
+.main-content h6 { font-size: .875rem !important; }
+.main-content :is(p, ul, ol, dl) { margin-bottom: var(--woods-s5); }
+.main-content li + li { margin-top: var(--woods-s3); }
+.main-content a { overflow-wrap: anywhere; }
+.main-content .anchor-heading { color: var(--woods-link); }
+.main-content blockquote { padding: var(--woods-s4) var(--woods-s5); border: 1px solid var(--woods-rule2); border-radius: var(--woods-radius); color: var(--woods-text); background: var(--woods-panel); }
+.main-content blockquote > :last-child { margin-bottom: 0; }
+.main-content :is(code, pre, kbd, samp) { font-family: var(--woods-ff-data); font-variant-ligatures: none; }
+.main-content :not(pre, figure) > code { padding: 0; border: 0; color: inherit; background: none; font-size: .9em; overflow-wrap: anywhere; }
+.main-content kbd { padding: 0 var(--woods-s2); border: 1px solid var(--woods-rule2); border-radius: 2px; color: var(--woods-mut); background: var(--woods-ground2); font-size: .875em; box-shadow: none; }
+
+/* One scroll region per code block; retain exact text and the theme's copy button. */
+.main-content :is(div.highlighter-rouge, figure.highlight, div.listingblock > div.content) { margin-bottom: var(--woods-s5); color: var(--woods-text); background: var(--woods-panel); border-radius: var(--woods-radius); box-shadow: none; }
+.main-content div.highlighter-rouge > div.highlight,
+.main-content figure.highlight > pre,
+.main-content div.listingblock > div.content {
+  max-width: 100%;
+  padding: var(--woods-s5) var(--woods-s7) var(--woods-s5) var(--woods-s5);
+  overflow-x: auto;
+  border: 1px solid var(--woods-rule2);
+  border-radius: var(--woods-radius);
+  overscroll-behavior-x: contain;
+}
+.main-content .highlight pre, .main-content .highlight code { margin: 0; padding: 0; color: var(--woods-text); background: transparent; border: 0; white-space: pre; overflow-wrap: normal; word-break: normal; }
+.main-content pre { font-size: .875rem; line-height: 1.65; tab-size: 2; }
+.main-content .highlight code { font-size: .875rem; font-variant-ligatures: contextual; }
+.main-content :is(div.highlighter-rouge, figure.highlight, div.listingblock > div.content) > button {
+  top: var(--woods-s2);
+  right: var(--woods-s2);
+  width: var(--woods-s6);
+  height: var(--woods-s6);
+  padding: var(--woods-s3);
+  box-sizing: border-box;
+  opacity: 1;
+  color: var(--woods-mut);
+  background: var(--woods-ground2);
+  border: 1px solid var(--woods-rule2);
+  border-radius: var(--woods-radius);
+  cursor: pointer;
+}
+.main-content :is(div.highlighter-rouge, figure.highlight, div.listingblock > div.content) > button:hover { color: var(--woods-bright); border-color: var(--woods-select); }
+.main-content :is(div.highlighter-rouge, figure.highlight, div.listingblock > div.content) > button svg { fill: currentColor; }
+
+/* Rouge syntax uses Map's semantic font-lock roles in both schemes. */
+.main-content .highlight, .main-content .highlight span { color: var(--woods-text); background-color: transparent; }
+.main-content .highlight :is(.c, .c1, .cm, .cp, .cs, .ch, .cd, .cpf) { color: var(--woods-dim); font-style: italic; }
+.main-content .highlight :is(.k, .kc, .kd, .kn, .kp, .kr, .kt, .kv) { color: var(--woods-select); }
+.main-content .highlight :is(.nf, .fm, .nb, .bp) { color: var(--woods-link); }
+.main-content .highlight :is(.nc, .nn, .no, .nt, .m, .mb, .mf, .mh, .mi, .mo, .il) { color: var(--woods-mod); }
+.main-content .highlight :is(.na, .nv, .vc, .vg, .vi, .vm) { color: var(--woods-hot); }
+.main-content .highlight :is(.s, .s1, .s2, .sa, .sb, .sc, .sd, .se, .sh, .si, .sr, .ss, .sx, .dl) { color: var(--woods-fresh); }
+.main-content .highlight :is(.o, .ow, .p, .gh, .gu) { color: var(--woods-mut); }
+.main-content .highlight .err { color: var(--woods-risk); font-weight: 700; }
+.main-content .highlight .gd { color: var(--woods-text); background: var(--woods-diff-del); }
+.main-content .highlight .gi { color: var(--woods-text); background: var(--woods-diff-add); }
+
+/* Prose tables keep natural columns; wide content scrolls inside its frame. */
+.main-content .table-wrapper { max-width: 100%; margin-bottom: var(--woods-s5); overflow-x: auto; border: 1px solid var(--woods-rule2); border-radius: var(--woods-radius); box-shadow: none; overscroll-behavior-x: contain; }
+.main-content .table-wrapper table { min-width: 32rem; margin-bottom: 0; color: var(--woods-text); background: var(--woods-bg); border-collapse: collapse; font-size: .9375rem; line-height: 1.6; }
+/* Override the theme's cell fs-3; inherit prose or code-table size below. */
+.main-content .table-wrapper :is(th, td) { font-size: inherit !important; padding: var(--woods-s4) var(--woods-s5); color: var(--woods-text); background: transparent; border-right: 1px solid var(--woods-rule); border-bottom: 1px solid var(--woods-rule); }
+.main-content .table-wrapper th { color: var(--woods-bright); background: var(--woods-panel); font-weight: 700; }
+.main-content .table-wrapper tbody tr:nth-child(even) { background: var(--woods-stripe); }
+.main-content .table-wrapper :is(th, td):last-child { border-right: 0; }
+.main-content .table-wrapper tr:last-child td { border-bottom: 0; }
+.main-content .highlight .table-wrapper { margin: 0; border: 0; }
+.main-content .highlight .table-wrapper table { min-width: 0; background: transparent; font-size: .875rem; }
+.main-content .highlight .table-wrapper :is(td, pre) { padding: 0; border: 0; background: transparent; }
+/* JTD's line-numbered code uses fs-2 on pre; retain the code table's 14px. */
+.main-content .highlight .table-wrapper pre { font-size: inherit !important; }
+
+/* Hub and mount-level 404 share the same local stylesheet, without theme markup. */
+body.woods-hub { margin: 0; }
+.woods-hub main { max-width: 46rem; margin: var(--woods-s7) auto; padding: var(--woods-s6); }
+.woods-hub ul { padding-left: var(--woods-s5); }
+.woods-hub li { margin-block: var(--woods-s4); }
+.woods-hub main > p:last-child { margin-top: var(--woods-s6); padding-top: var(--woods-s5); border-top: 1px solid var(--woods-rule); color: var(--woods-mut); font-size: .875rem; }
+
+/* Purple always means focus/selection, with a visible outline or edge as well. */
+body :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline: 2px solid var(--woods-select); outline-offset: 3px; }
+body :is(.nav-list-link, .site-title, .site-button, .search-input, .search-result, .table-wrapper, .highlight):focus-visible { outline-offset: -3px; }
+body .skip-to-main { color: var(--woods-bg); background: var(--woods-select); }
+
+@media (max-width: 639px) {
+  body .main-content-wrap, .woods-hub main { padding: var(--woods-s5); }
+  .main-header .woods-context { padding: var(--woods-s4); }
+  .main-content h2 { margin-top: var(--woods-s6); }
+  .main-content pre { font-size: .875rem; }
+}
+
+@media (pointer: coarse) {
+  body .site-button, body .search-button,
+  .site-nav .nav-list .nav-list-item .nav-list-link,
+  .main-header .woods-context nav a { min-height: 44px; }
+  .main-header .woods-context nav a { display: inline-flex; align-items: center; }
+  .main-content :is(div.highlighter-rouge, figure.highlight, div.listingblock > div.content) > button { width: 44px; height: 44px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html, html:focus-within { scroll-behavior: auto !important; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+@media (forced-colors: active) {
+  body :is(a, button, input, select, textarea, summary, [tabindex]):focus-visible { outline-color: Highlight; }
+  .site-nav .nav-list .nav-list-item .nav-list-link:is(.active, [aria-current="page"]) { border-inline-start: 3px solid Highlight; }
+  .main-header .woods-context nav a[aria-current="page"] { border-bottom-color: Highlight; }
+}

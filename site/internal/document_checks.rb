@@ -87,11 +87,23 @@ module WoodsDocs
     private
 
     def check_public_artifact
+      check_style_assets
       allowed = expected_public_paths
       Dir.glob('**/*', File::FNM_DOTMATCH, base: @public).each do |path|
         next if %w[. ..].include?(File.basename(path))
 
         assert(allowed.include?(path), "Unexpected public artifact: #{path}")
+      end
+    end
+
+    def check_style_assets
+      @metadata.fetch('versions').each do |version|
+        STYLE_FILES.each do |path|
+          source = File.join(ROOT, 'site', path)
+          target = File.join(@public, version.fetch('id'), path)
+          assert(File.file?(target) && Digest::SHA256.file(target).hexdigest == Digest::SHA256.file(source).hexdigest,
+                 "Staged style asset differs from source: #{target}")
+        end
       end
     end
 
@@ -106,7 +118,7 @@ module WoodsDocs
 
     def expected_public_files
       @metadata.fetch('versions').flat_map do |version|
-        files = ['index.html', '404.html', *version.fetch('pages').values, *THEME_FILES]
+        files = ['index.html', '404.html', *version.fetch('pages').values, *THEME_FILES, *STYLE_FILES]
         files.concat(version.fetch('source_asset_sha256').keys.map { |path| "source-assets/#{path}" })
         files.map { |path| "#{version.fetch('id')}/#{path}" }
       end.push('index.html', '404.html', 'build.json')

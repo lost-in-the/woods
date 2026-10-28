@@ -1,6 +1,25 @@
 # frozen_string_literal: true
 
 module WoodsDocs
+  # Exact local styling payload, shared by staging and the public artifact boundary.
+  STYLE_FILES = %w[
+    assets/woods-docs/woods-docs.css
+    assets/woods-docs/scroll-regions.js
+    assets/woods-docs/LICENSE.txt
+    assets/woods-docs/fonts/README.txt
+    assets/woods-docs/fonts/inter/inter-latin-400-normal.woff2
+    assets/woods-docs/fonts/inter/inter-latin-500-normal.woff2
+    assets/woods-docs/fonts/inter/inter-latin-700-normal.woff2
+    assets/woods-docs/fonts/inter/inter-latin-ext-400-normal.woff2
+    assets/woods-docs/fonts/inter/inter-latin-ext-500-normal.woff2
+    assets/woods-docs/fonts/inter/inter-latin-ext-700-normal.woff2
+    assets/woods-docs/fonts/inter/OFL.txt
+    assets/woods-docs/fonts/fira-code/FiraCode-Bold.woff2
+    assets/woods-docs/fonts/fira-code/FiraCode-Medium.woff2
+    assets/woods-docs/fonts/fira-code/FiraCode-Regular.woff2
+    assets/woods-docs/fonts/fira-code/OFL.txt
+  ].freeze
+
   # Generated navigation and landing text; canonical guide bodies stay separate.
   class PageContent
     def initialize(versions)
@@ -61,12 +80,15 @@ module WoodsDocs
     end
 
     def hub_html(heading, text)
+      stylesheet = "#{@versions.first.fetch('prefix')}/assets/woods-docs/woods-docs.css"
       links = @versions.map do |version|
         "<li><a href=\"#{version.fetch('prefix')}/\">#{version.fetch('label')}</a></li>"
       end.join
       '<!doctype html><html lang="en"><head><meta charset="utf-8">' \
         '<meta name="viewport" content="width=device-width, initial-scale=1">' \
-        "<title>#{heading} — Woods</title></head><body><main><h1>#{heading}</h1><p>#{text}</p><ul>#{links}</ul>" \
+        "<title>#{heading} — Woods</title><meta name=\"color-scheme\" content=\"light dark\">" \
+        "<link rel=\"stylesheet\" href=\"#{stylesheet}\"></head><body class=\"woods-hub\"><main>" \
+        "<h1>#{heading}</h1><p>#{text}</p><ul>#{links}</ul>" \
         "<p>Local / CI artifact candidate. Version availability is not a support policy.</p></main></body></html>\n"
     end
   end
@@ -86,6 +108,7 @@ module WoodsDocs
       start = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       FileUtils.mkdir_p(@source)
       FileUtils.cp_r(File.join(ROOT, 'site/_includes'), @source)
+      stage_style
       stage_guides
       stage_navigation
       initialize_search
@@ -95,6 +118,14 @@ module WoodsDocs
     end
 
     private
+
+    def stage_style
+      STYLE_FILES.each do |path|
+        destination = File.join(@source, path)
+        FileUtils.mkdir_p(File.dirname(destination))
+        FileUtils.cp(File.join(ROOT, 'site', path), destination)
+      end
+    end
 
     def stage_page(filename, data, body)
       File.write(File.join(@source, filename), "#{YAML.dump(data)}---\n#{body}")
