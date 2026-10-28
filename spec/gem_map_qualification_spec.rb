@@ -76,4 +76,57 @@ RSpec.describe 'Static map lexical qualification' do
       expect(units.map(&:identifier)).to include('Absolute', 'Absolute::Nested', 'Absolute::Nested#call')
     end
   end
+
+  def map_sources(sources)
+    absolute = sources.transform_keys { |path| File.join(Dir.pwd, path) }
+    Woods::GemMapSource.new(root: Pathname.new(Dir.pwd)).build(absolute)
+  end
+
+  [true, false].each do |use_prism|
+    it "maps class << self methods and the constants they reference with Prism=#{use_prism}" do
+      allow_any_instance_of(Woods::Ast::Parser).to receive(:prism_available?).and_return(use_prism)
+      source = <<~RUBY_SOURCE
+        module Outer
+          class Store; end
+          class << self
+            def extract!
+              Store.new
+            end
+          end
+        end
+      RUBY_SOURCE
+      units, graph = map_sources('lib/example.rb' => source)
+
+      expect(units.map(&:identifier)).to include('Outer.extract!')
+      expect(graph.dependents_of('Outer::Store')).to include('Outer.extract!')
+    end
+  end
+
+  it 'resolves the constant at the head of a chained call' do
+    source = <<~RUBY_SOURCE
+      module Outer
+        module Extraction
+          class Capture; end
+        end
+        class Runner
+          def run
+            Extraction::Capture.new.call
+          end
+        end
+      end
+    RUBY_SOURCE
+    _units, graph = map_sources('lib/example.rb' => source)
+
+    expect(graph.dependents_of('Outer::Extraction::Capture')).to include('Outer::Runner#run')
+  end
+
+  it 'records the constants that top-level rake and executable code references' do
+    _units, graph = map_sources(
+      'lib/example.rb' => "module Outer\n  class Extractor; end\nend\n",
+      'lib/tasks/example.rake' => "namespace :x do\n  task :y do\n    Outer::Extractor.new.run\n  end\nend\n",
+      'exe/example' => "#!/usr/bin/env ruby\nOuter::Extractor.new\n"
+    )
+
+    expect(graph.dependents_of('Outer::Extractor')).to include('file:lib/tasks/example.rake', 'file:exe/example')
+  end
 end
