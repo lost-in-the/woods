@@ -79,6 +79,33 @@ when investigating a major-version mismatch. Matching versions do not certify
 compatibility: an incremental publisher can retain units written by an older
 version. This field does not replace the [upgrade procedure](UPGRADING_TO_2.md).
 
+## Manifest extractor timings
+
+A manifest written by Woods 2.2.0 or later may carry `extractor_timings`: the
+wall seconds each extractor family spent during the run that published it,
+keyed by extractor key (the `counts` keys), sorted by key, rounded to three
+decimals.
+
+```json
+"extractor_timings": {
+  "controllers": 2.013,
+  "js_modules": 9.804,
+  "models": 1.25,
+  "view_templates": 12.418
+}
+```
+
+A full extraction times every family it ran; an incremental run or a targeted
+refresh (`woods:refresh`) records only the families it reached, per file or
+wholesale, so the key describes that run's work, never the whole index. The key
+is absent, not `{}`, when the run timed nothing, and older manifests omit it.
+The timings are measured on the monotonic clock around each family's extractor
+calls; they exclude eager loading, dependency resolution, Git enrichment, graph
+analysis and publication, which `WOODS_PROFILE=1` reports as phases. The
+extraction tasks print the same hash as one sorted line
+(`Extractor timings (top 8 of N, total 65.3s): view_templates 12.4s, ...`)
+so a slow field run can name the family to profile.
+
 ## One generation, pinned for the reader's whole life
 
 Unlike `Woods::MCP::IndexReader`, a `PublishedIndex` never refreshes between calls. It resolves one generation at `.new`/`.open` time and every fact it returns, `units`, the table map, `generation_number`, `external_dependency_checksum`, comes from that one generation for as long as the reader is open. There is no `reload` and no auto-refresh: open a new reader to see a later publish.

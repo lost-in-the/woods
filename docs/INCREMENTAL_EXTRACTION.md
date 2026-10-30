@@ -894,6 +894,14 @@ to find unaccounted work; each line rounds to hundredths of a second. Rails
 boot, Bundler and watch reload work outside the call require separate wall
 measurements. Do not infer that all unaccounted time is boot.
 
+Per-family extractor time needs no flag: every run records the wall seconds
+each extractor family spent (per file or wholesale, whichever the run reached)
+in the manifest's `extractor_timings` and ends the task output with a sorted
+`Extractor timings (...)` line. See [manifest extractor
+timings](PUBLISHED_INDEX.md#manifest-extractor-timings). Those seconds sit
+inside the `extraction`, `re-extraction` and `reconciliation` phases, so do not
+add them to the phase lines.
+
 Both full and incremental runs currently seed the prior payload. Cloning uses
 per-file hardlinks (or copies where links are unsupported); updated files are
 replaced atomically, preserving previous generations. Full-run carry-forward
