@@ -20,6 +20,8 @@ module CiLocalEnvironment
     'rails-3.0-6.0' => { ruby: '3.0', gemfile: 'gemfiles/rails_6.0.gemfile', job: 'rails-matrix',
                          puma: nil, sqlite: '~> 1.4' }
   }.freeze
+  # The rows a hosted pull request runs (`pr: true` in ci.yml); the others run on main and tags only.
+  PULL_REQUEST_ROWS = %w[lint unit rails-4.0-8.1].freeze
   COMMAND_INPUTS = %w[.github/workflows/ci.yml script/ci-local script/ci_local_environment.rb
                       script/parallel-rspec script/parallel_rspec.rb script/parallel_rspec_timings.json
                       bin/rake bin/rubocop bin/rspec .rspec spec/spec_helper.rb
@@ -124,8 +126,11 @@ module CiLocalEnvironment
     argv
   end
 
-  def self.profile(full, hosted_pr, ruby)
-    full || (hosted_pr && ruby == '3.0') ? ['60', '1,2,3'] : %w[8 1]
+  # A hosted pull request runs every booted row it schedules at smoke depth;
+  # pushes and tags run full depth (.github/workflows/ci.yml, #930). Callers
+  # still pass the event and Ruby; neither changes the depth any more.
+  def self.profile(full, *)
+    full ? ['60', '1,2,3'] : %w[8 1]
   end
 
   def self.expected_inputs(row)

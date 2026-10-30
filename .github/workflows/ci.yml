@@ -31,7 +31,9 @@ jobs:
   # Unit specs against the base Gemfile (no full Rails — these stub it). The
   # Ruby axis spans the supported interpreters, including a Ruby 4.0 lane
   # (previously only verified by hand). tokenizers is install-gated off 4.0 in
-  # the Gemfile; the suite falls back to the chars/token ratio there.
+  # the Gemfile; the suite falls back to the chars/token ratio there. Pull
+  # requests run the security-maintained Rubies (`pr: true`); main and version
+  # tags run every row.
   test:
     name: Unit specs (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
@@ -39,25 +41,31 @@ jobs:
       fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
         include:
-          - { ruby-version: '3.0', puma: '~> 6.0' }
-          - { ruby-version: '3.1', puma: '~> 6.0' }
-          - { ruby-version: '3.2', puma: '~> 7.0' }
-          - { ruby-version: '3.4', puma: '~> 8.0' }
-          - { ruby-version: '4.0', puma: '~> 8.0' }
+          - { ruby-version: '3.0', puma: '~> 6.0', pr: false }
+          - { ruby-version: '3.1', puma: '~> 6.0', pr: false }
+          - { ruby-version: '3.2', puma: '~> 7.0', pr: false }
+          - { ruby-version: '3.4', puma: '~> 8.0', pr: true }
+          - { ruby-version: '4.0', puma: '~> 8.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
+      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
     steps: &unit-steps
+      - name: Skipped on pull requests (a line without security support; runs on main and version tags)
+        if: env.WOODS_CI_ROW_ACTIVE != 'true'
+        run: echo 'This row tests a Ruby or Rails line without security support. It runs on main and version tags.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
       - name: Set up Ruby ${{ matrix.ruby-version }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           ruby-version: ${{ matrix.ruby-version }}
           bundler-cache: true
       - name: Capture local-CI unit reference
-        if: ${{ matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && matrix.ruby-version == '3.3' }}
         run: bundle exec ruby script/ci_local_environment.rb capture unit tmp/ci-local-reference/unit
       - name: Publish local-CI unit reference
-        if: ${{ matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && matrix.ruby-version == '3.3' }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-local-unit-attempt-${{ github.run_attempt }}
@@ -67,13 +75,13 @@ jobs:
       # Ruby 3.3 owns coverage and the retrieval-quality gate. Its independent
       # job keeps these gates running when another Ruby row fails.
       - name: Gate captured real-model retrieval quality
-        if: ${{ matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.ruby-version == '3.3') }}
         run: bundle exec ruby -Ilib bench/evaluation/runner.rb
       - name: Run tests
-        if: ${{ matrix.ruby-version != '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.ruby-version != '3.3') }}
         run: bundle exec ruby script/parallel-rspec
       - name: Run tests with coverage
-        if: ${{ matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.ruby-version == '3.3') }}
         env:
           COVERAGE: 'true'
         run: bundle exec ruby script/parallel-rspec
@@ -81,7 +89,7 @@ jobs:
       # gate (spec/simplecov_profile.rb), so the HTML report is available to
       # inspect which files/groups dropped, not just the pass/fail number.
       - name: Publish SimpleCov report
-        if: ${{ !cancelled() && matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (!cancelled() && matrix.ruby-version == '3.3') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: simplecov-report
@@ -89,7 +97,7 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Publish retrieval evaluation report
-        if: ${{ !cancelled() && matrix.ruby-version == '3.3' }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (!cancelled() && matrix.ruby-version == '3.3') }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: retrieval-evaluation
@@ -105,9 +113,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ruby-version: '3.3', puma: '~> 8.0' }
+          - { ruby-version: '3.3', puma: '~> 8.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
+      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
     steps: *unit-steps
 
   # Exact advertised direct runtime floors, without the development Gemfile.
@@ -142,12 +151,15 @@ jobs:
   # can't share a process with it (hence the :booted_app tag + the solo run here).
   # Pairs are explicit to exclude invalid Ruby x Rails combinations (e.g. Rails
   # 6.0 only on Ruby 3.0; Rails 7.2 needs >= 3.1; Rails 8.0 and 8.1 need >= 3.2).
-  # Every pair is scheduled on every PR; failures can cancel sibling rows.
-  # The Rails 7.2 fixture contracts run independently. The randomized
-  # incremental-equivalence depth is full on the oldest, baseline, and newest
-  # representative pairs, and smoke-depth on the other PR rows. Merged-main and
-  # version-tag runs override every row back to the full 60-operation/3-seed
-  # profile, preserving the release evidence at the exact candidate commit.
+  # Pull requests run only the rows marked `pr: true`: the Rails lines that
+  # still receive security releases, at their newest patch (the gemfiles pin
+  # `~> X.Y.0` and no lockfile is checked in), plus the Rails 7.2 fixture
+  # contracts. Every other row still reports, finishing in seconds, so no
+  # required check waits on an unscheduled row. Failures can cancel sibling
+  # rows. PR rows run the randomized incremental-equivalence harness at smoke
+  # depth; merged-main and version-tag runs run every row at the full
+  # 60-operation/3-seed profile, preserving the release evidence at the exact
+  # candidate commit. spec/ci/pull_request_tier_spec.rb holds this contract.
   rails-matrix:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
@@ -155,26 +167,32 @@ jobs:
       fail-fast: ${{ github.event_name == 'pull_request' }}
       matrix:
         include:
-          - { ruby: '3.0', rails: '6.0', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
-          - { ruby: '3.0', rails: '6.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '3.1', rails: '7.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '3.2', rails: '7.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '3.3', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '3.4', rails: '8.1', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
-          - { ruby: '4.0', rails: '8.0', pr_diff_ops: '8', pr_diff_seeds: '1' }
-          - { ruby: '4.0', rails: '8.1', pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.0', rails: '6.0', pr: false, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.0', rails: '6.1', pr: false, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.1', rails: '7.0', pr: false, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.2', rails: '7.1', pr: false, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.3', rails: '8.0', pr: true, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '3.4', rails: '8.1', pr: true, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '4.0', rails: '8.0', pr: true, pr_diff_ops: '8', pr_diff_seeds: '1' }
+          - { ruby: '4.0', rails: '8.1', pr: true, pr_diff_ops: '8', pr_diff_seeds: '1' }
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
+      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
     steps: &rails-steps
+      - name: Skipped on pull requests (a line without security support; runs on main and version tags)
+        if: env.WOODS_CI_ROW_ACTIVE != 'true'
+        run: echo 'This row tests a Ruby or Rails line without security support. It runs on main and version tags.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
       - name: Set up Ruby ${{ matrix.ruby }} (Rails ${{ matrix.rails }})
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         with:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Capture local-CI booted reference
-        if: ${{ (matrix.ruby == '4.0' && matrix.rails == '8.1') || (matrix.ruby == '3.0' && matrix.rails == '6.0') }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && ((matrix.ruby == '4.0' && matrix.rails == '8.1') || (matrix.ruby == '3.0' && matrix.rails == '6.0')) }}
         env:
           WOODS_CI_REFERENCE_OPS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}
           WOODS_CI_REFERENCE_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
@@ -182,7 +200,7 @@ jobs:
           row="rails-${{ matrix.ruby }}-${{ matrix.rails }}"
           bundle exec ruby script/ci_local_environment.rb capture "$row" "tmp/ci-local-reference/$row"
       - name: Publish local-CI booted reference
-        if: ${{ (matrix.ruby == '4.0' && matrix.rails == '8.1') || (matrix.ruby == '3.0' && matrix.rails == '6.0') }}
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && ((matrix.ruby == '4.0' && matrix.rails == '8.1') || (matrix.ruby == '3.0' && matrix.rails == '6.0')) }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ci-local-rails-${{ matrix.ruby }}-${{ matrix.rails }}-attempt-${{ github.run_attempt }}
@@ -190,23 +208,30 @@ jobs:
           if-no-files-found: error
           retention-days: 7
       - name: Run booted-app extraction
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb
 
       - name: Run declaration ownership against booted Rails
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/declaration_identity_spec.rb
 
       - name: Run encrypted Console credential rotation
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
 
       - name: Run session controller identity through real Rails requests
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/session_controller_identity_spec.rb
 
       - name: Run multi-database extraction and equivalence
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/multi_database_extraction_spec.rb
 
       - name: Run opt-in hook refresh through fresh Rails processes
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/hook_refresh_spec.rb
       - name: Fresh-process source provenance
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         env:
           WOODS_RUN_BOOTED_APP: '1'
         run: bundle exec rspec spec/integration/source_input_drift_spec.rb spec/integration/source_output_spec.rb spec/integration/source_manifest_capacity_spec.rb
@@ -214,6 +239,7 @@ jobs:
       # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
       # Isolate booted spec files so fixture applications cannot share state.
       - name: Run Console transport boot contracts
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: |
           bin/rspec spec/console/transport_boot_spec.rb
           bin/rspec spec/console/stdio_e2e_spec.rb
@@ -226,6 +252,7 @@ jobs:
       # extraction at every step. Runs in its own process — like the spec
       # above, it boots the dummy app and can't share one.
       - name: Run incremental equivalence harness
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         env:
           WOODS_DIFF_OPS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}
           WOODS_DIFF_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
@@ -235,22 +262,27 @@ jobs:
       # precompute, and the dedicated flow-artifact sweep, with the
       # precompute_flows gate on. Own process — boots its own dummy app.
       - name: Run incremental flow artifacts
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/extractors/flow_incremental_spec.rb
 
       # Watch daemon against a real booted app (#164 phase 2). Own process for
       # the same reason as the two above — each boots its own Rails app.
       - name: Run watch daemon integration
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/watch_daemon_spec.rb
 
       # The install generator, executed for real: the default examples run on
       # every bundle; the legacy-migration example needs this row's Active
       # Record (#618).
       - name: Run the install generator with Active Record available
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/generators/install_generator_spec.rb
 
       - name: Run managed watcher across fresh Rails boots
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/watch_startup_spec.rb spec/integration/managed_watch_spec.rb
       - name: Console read and response policies
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: |
           bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
           bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
@@ -260,26 +292,29 @@ jobs:
 
       # Six worktrees, disjoint indexes, concurrent readers (#164 phase 4).
       - name: Run multi-worktree integration
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/multi_worktree_spec.rb
 
       # Governed naming must follow the active Zeitwerk inflector (PR-251
       # finding 2). Own process — boots its own Rails app with a custom
       # `api => API` inflection and wrapper-nested siblings under app/services/api/.
       - name: Run inflected-naming integration
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/inflected_naming_spec.rb
 
       # Assigned value classes boot their own Rails app and loader (#559).
       - name: Run assigned value-class ownership integration
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: bundle exec rspec spec/integration/assigned_value_classes_spec.rb
 
       - name: Run reopened library contributor equivalence
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         run: bundle exec rspec spec/integration/library_contributors_spec.rb
 
       # Optional AMS stays outside the base bundle. This fixture boots fresh
       # processes and performs no network I/O after dependency installation.
       - name: Install optional serializer fixture bundle
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         env:
           BUNDLE_GEMFILE: gemfiles/serializers.gemfile
@@ -287,14 +322,14 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run hybrid runtime and fresh schema task equivalence
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         env:
           BUNDLE_GEMFILE: gemfiles/serializers.gemfile
         run: bundle exec rspec spec/integration/incremental_runtime_spec.rb
 
       # Actual optional state-machine registries, kept out of the base bundle.
       - name: Install optional state-machine fixture bundle
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         env:
           BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
@@ -302,13 +337,13 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run literal state-machine forms against loaded registries
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         env:
           BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
         run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
 
       - name: Install optional component fixture bundle
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
         env:
           BUNDLE_GEMFILE: gemfiles/components.gemfile
@@ -316,7 +351,7 @@ jobs:
           ruby-version: ${{ matrix.ruby }}
           bundler-cache: true
       - name: Run component ownership, mailer coverage and schedule identity contracts
-        if: matrix.rails == '7.2'
+        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
         env:
           BUNDLE_GEMFILE: gemfiles/components.gemfile
         run: bundle exec rspec spec/integration/component_ownership_spec.rb
@@ -329,10 +364,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ruby: '3.3', rails: '7.2', pr_diff_ops: '60', pr_diff_seeds: '1,2,3' }
+          - { ruby: '3.3', rails: '7.2', pr: true, pr_diff_ops: '8', pr_diff_seeds: '1' }
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
+      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
     steps: *rails-steps
 
   # Storage adapters against real servers (#220), plus the session tracer
@@ -445,6 +481,12 @@ jobs:
         run: bundle exec rake release_v2:verify_surface_inventory
       - name: Run linter
         run: bundle exec rubocop
+      # Agents choose which specs to run from the self-map (#926); hold its
+      # edges to known truths so a mapping regression cannot narrow them.
+      - name: Check self-map accuracy
+        env:
+          WOODS_RUN_SELF_MAP: '1'
+        run: bundle exec rspec spec/self_map_accuracy_spec.rb
 
   # The encoding canary. Woods writes UTF-8 JSON/JSONL artifacts; a bare
   # File.read tags them with the process default external encoding, so a

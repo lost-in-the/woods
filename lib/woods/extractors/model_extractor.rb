@@ -658,6 +658,7 @@ module Woods
             {
               type: event == :before_commit ? :before_commit : :"#{cb.kind}_#{event}",
               filter: callback_filter_label(cb),
+              origin: callback_origin(model, cb), # app, framework, gem or unknown (LOS-128)
               kind: cb.kind, # :before, :after, :around
               conditions: format_callback_conditions(cb)
             }
@@ -820,7 +821,7 @@ module Woods
           end
         end
 
-        consolidate_dependencies(deps)
+        with_inheritance(consolidate_dependencies(deps), inheritance_dependency(model))
       end
 
       # The class an association points at, as a unit identifier.

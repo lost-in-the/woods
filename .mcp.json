@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "woods-self": {
+      "type": "stdio",
+      "command": "bin/woods-self-mcp",
+      "args": []
+    }
+  }
+}

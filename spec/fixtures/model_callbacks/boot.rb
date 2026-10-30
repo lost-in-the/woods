@@ -45,9 +45,12 @@ Dir.mktmpdir('woods_model_callback_app') do |root|
   raise 'Expected the Rails-generated dependent-destroy Proc' unless callback
 
   filter = callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter
+  # The label names the gem, never the bundle path (LOS-127).
+  path, line = filter.source_location
+  site = "#{Woods::Extractors::SourceOrigin.location(path)}:#{line}"
   unit = Woods::Extractors::ModelExtractor.new.extract_model(Post)
   # No metadata, source, dependency, chunk or hash fields are scrubbed.
   puts JSON.generate(unit: unit.to_h.except(:file_path, :extracted_at),
                      object_filters: object_filters,
-                     framework_filter: "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{filter.source_location.join(':')}>")
+                     framework_filter: "#<#{filter.lambda? ? 'lambda' : 'Proc'} #{site}>")
 end

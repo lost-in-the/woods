@@ -34,6 +34,38 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
     end
   end
 
+  # ── LOS-129: a model referenced on the block's `do` line ──────────
+
+  describe 'a model reference sharing a line with the task block delimiters (LOS-129)' do
+    before do
+      # The real cache's answers for one top-level model: the full-name regex
+      # matches `::Tenant` (`\b` treats `:` as a boundary), and `Tenant` is no
+      # namespaced short name.
+      stub_const('Woods::ModelNameCache', double('ModelNameCache', model_names: %w[Tenant],
+                                                                   model_names_regex: /\bTenant\b/,
+                                                                   short_names_regex: /(?!)/,
+                                                                   resolve_short_name: nil, reset!: nil))
+      create_file('lib/tasks/backfill.rake', <<~RAKE)
+        task backfill: :environment do
+          ::Tenant.where(active: true).find_each { |t| t.touch }
+        end
+        task backfill_one_liner: :environment do ::Tenant.where(active: true).find_each { |t| t.touch }
+        end
+        task backfill_end_line: :environment do
+          ::Tenant.where(active: true).find_each { |t| t.touch } end
+      RAKE
+    end
+
+    it 'records the model edge whichever line of the block the statement sits on' do
+      units = described_class.new.extract_all.to_h { |unit| [unit.identifier, unit.dependencies] }
+      edge = { type: :model, target: 'Tenant', via: :code_reference }
+
+      expect(units.fetch('backfill')).to include(edge)
+      expect(units.fetch('backfill_one_liner')).to include(edge)
+      expect(units.fetch('backfill_end_line')).to include(edge)
+    end
+  end
+
   # ── B-126: one task reopened in two files ──────────────────────────
 
   describe 'a task defined in two .rake files (B-126)' do
