@@ -11,6 +11,8 @@ require_relative 'version'
 require_relative 'coordination/pipeline_lock'
 require_relative 'dependency_graph'
 require_relative 'extracted_unit'
+require_relative 'gem_map_qualifier'
+require_relative 'gem_map_specs'
 require_relative 'filename_utils'
 require_relative 'generation'
 require_relative 'graph_analyzer'
@@ -29,7 +31,7 @@ module Woods
     }.freeze
     PROVENANCE = {
       mode: 'woods_static_ruby_source', runtime_fidelity: 'none', embeddings: 'absent',
-      included: SOURCE_GLOBS, excluded: %w[spec docs .git tmp vendor]
+      included: SOURCE_GLOBS, references_only: GemMapSpecs::GLOBS, excluded: %w[spec/support docs .git tmp vendor]
     }.freeze
 
     def initialize(root:, output_dir:)
@@ -59,8 +61,8 @@ module Woods
     end
 
     def source_files
-      SOURCE_GLOBS.flat_map { |glob| Dir.glob(@root.join(glob).to_s) }
-                  .select { |path| File.file?(path) }.uniq.sort
+      (SOURCE_GLOBS + GemMapSpecs::GLOBS).flat_map { |glob| Dir.glob(@root.join(glob).to_s) }
+                                         .select { |path| File.file?(path) }.uniq.sort
     end
 
     def source_snapshot
@@ -138,14 +140,27 @@ module Woods
     private
 
     def build_units(sources)
+      relative = sources.transform_keys { |path| relative_path(path) }
+      specs = relative.select { |path, _| GemMapSpecs.spec?(path) }
+      units = source_units(sources.reject { |path, _| specs.key?(relative_path(path)) })
+      units.concat(spec_units(specs, relative.keys))
+      GemMapQualifier.new(units).qualify!
+      resolve_dependents(units)
+      units.sort_by { |unit| [unit.identifier, unit.type.to_s, unit.file_path] }
+    end
+
+    def spec_units(specs, paths)
+      library = paths.select { |path| path.start_with?('lib/') && !specs.key?(path) }
+      GemMapSpecs.new(library: library).units(specs)
+    end
+
+    def source_units(sources)
       analyzable = sources.select { |path, _| path.end_with?('.rb', '.rake') || executable?(path) }
       units = RubyAnalyzer.analyze(sources: analyzable)
       units.each { |unit| unit.file_path = relative_path(unit.file_path) }
       units.concat(file_units(sources))
       disambiguate!(units)
-      qualify_dependencies(units)
-      resolve_dependents(units)
-      units.sort_by { |unit| [unit.identifier, unit.type.to_s, unit.file_path] }
+      units
     end
 
     def executable?(path)
@@ -191,46 +206,6 @@ module Woods
           unit.dependencies << { type: unit.type, target: canonical, via: :definition_of }
         end
       end
-    end
-
-    # Resolve only known lexical definitions, retaining external/dynamic names as written.
-    def qualify_dependencies(units)
-      definitions = units.select { |unit| %i[ruby_class ruby_module].include?(unit.type) }.to_h do |unit|
-        [unit.metadata[:canonical_identifier] || unit.identifier, unit]
-      end
-      owner_scopes = owner_scopes(units)
-      units.each do |unit|
-        scopes = unit.metadata[:lexical_scopes] || owner_scopes[[unit.namespace, unit.file_path]]
-        unit.dependencies.each { |dependency| qualify_dependency(dependency, Array(scopes), definitions) }
-      end
-    end
-
-    # A method unit carries no nesting of its own: it is written inside the
-    # body of its owner, so it sees the owner's lexical scopes from that file.
-    def owner_scopes(units)
-      units.each_with_object({}) do |unit, scopes|
-        next unless %i[ruby_class ruby_module].include?(unit.type)
-
-        key = [unit.metadata[:canonical_identifier] || unit.identifier, unit.file_path]
-        scopes[key] ||= unit.metadata[:lexical_scopes]
-      end
-    end
-
-    def qualify_dependency(dependency, scopes, definitions)
-      target = dependency[:target]
-      return unless target.is_a?(String)
-
-      scopes = scopes.drop(1) if dependency[:via] == :inheritance
-      candidates = if target.start_with?('::')
-                     [target.delete_prefix('::')]
-                   else
-                     scopes.map { |scope| "#{scope}::#{target}" } + [target]
-                   end
-      resolved = candidates.find { |candidate| definitions.key?(candidate) }
-      return unless resolved
-
-      dependency[:target] = resolved
-      dependency[:type] = definitions[resolved].type
     end
 
     def resolve_dependents(units)
