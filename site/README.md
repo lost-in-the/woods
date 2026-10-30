@@ -12,9 +12,10 @@ of universal GitHub anchor parity. Browser usability remains an acceptance gate.
 
 ## Build, check, serve
 
-From the repository root, select **Ruby 3.3.x** (for example with `mise`) and
-**Bundler 2.5.22**. CI uses Ruby 3.3.13. The independent `Gemfile` / `Gemfile.lock`
-bundle must not use the root Gemfile or its ignored lockfile.
+From the repository root, select **Ruby 3.4.x** (for example with `mise`) and
+**Bundler 2.5.22**. CI uses Ruby 3.4, the newest patch `ruby/setup-ruby`
+resolves. The independent `Gemfile` / `Gemfile.lock` bundle must not use the
+root Gemfile or its ignored lockfile.
 
 ```bash
 export BUNDLE_GEMFILE="$PWD/site/Gemfile"
