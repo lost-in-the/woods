@@ -333,8 +333,9 @@ Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI
 This is the first bounded slice of [W-12](https://github.com/lost-in-the/woods/issues/762),
 covering retained endpoint resolution, typed unit comparison and immutable JSON,
 with bounded reverse propagation and retained flow evidence in a follow-up slice.
-It does not complete W-12. See the [version 1 contract](design/IMPACT_REPORT.md)
-for selectors, fields, coverage gaps and dependency boundaries.
+It does not complete W-12. See the [version 1 contract](https://github.com/lost-in-the/woods/blob/3e36cd22de5b1e484bacb913c4ad827d9f726d80/docs/design/IMPACT_REPORT.md)
+(source checkout only, pinned) for selectors, fields, coverage gaps and
+dependency boundaries.
 
 ## Moved-message check
 
