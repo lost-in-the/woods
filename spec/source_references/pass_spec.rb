@@ -81,6 +81,21 @@ RSpec.describe Woods::SourceReferences::Pass do
     expect(records).to all(include('kind' => 'constant', 'confidence' => 'verified'))
   end
 
+  # LOS-126: a value read through the class credits the class. The span
+  # covers the class path, and the selector belongs to the value, not to it.
+  it 'credits a nested constant read to its class, with a span over the class path and no selector' do
+    sources['app/models/ref_caller.rb'] =
+      'class RefCaller; def call; RefTarget::LIMITS.first; ::RefTarget::NAMES; end; end'
+    RefTarget.const_set(:LIMITS, [3].freeze)
+    RefTarget.const_set(:NAMES, [].freeze)
+    result = run_pass
+    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
+    records = result.references.fetch(%w[poro RefCaller])
+    expect(records.map { |record| record.values_at('target', 'column', 'length', 'confidence') })
+      .to eq([['RefTarget', 27, 9, 'verified'], ['RefTarget', 52, 11, 'verified']])
+    expect(records).to all(satisfy { |record| !record.key?('method') })
+  end
+
   it 'does not tag a static span, which is not a verified reference' do
     sources['app/models/ref_caller.rb'] = 'class RefCaller; class << self; include RefTarget; end; end'
     records = run_pass.references.fetch(%w[poro RefCaller])

@@ -87,7 +87,14 @@ applied to these edges. See [source-reference baseline and upgrades](INCREMENTAL
 has `line`, `column`, `length`, `target`, `target_type`, `kind: "constant"` and
 `confidence: "verified"`. Lines are 1-based in the published `source_code`;
 columns are 0-based UTF-8 byte offsets and lengths count bytes. Qualified and
-rooted constants occupy their whole source span. Repeated reads remain separate,
+rooted constants occupy their whole source span. A value read through a class
+(`Kit::Button::VARIANTS`, `::CoreModel::UNSHIPPED`) credits the class (LOS-126):
+the path is cut back one segment at a time while it names a value, the first
+class or module reached is the target, the span covers that class path as
+written, and no `method` is recorded, since the selector is called on the value.
+A class or module nested in a unit (`Kit::Button::Icon`) is its own constant
+and credits nothing but itself; an absent path still resolves to nothing.
+Repeated reads remain separate,
 including when an extractor already supplied a dependency edge with `through`.
 The target type comes from the typed registry; the existing caller policy and
 resolution exclusions still apply.

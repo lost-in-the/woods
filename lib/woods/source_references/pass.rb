@@ -194,8 +194,17 @@ module Woods
             'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
             'kind' => 'constant', 'confidence' => 'verified'
           )
-          [edge, span]
+          [edge, value_owner_span(span, result['spelling'])]
         end
+      end
+
+      # A value read through a class credits the class (LOS-126): the span
+      # covers the class path as written, and the selector, which is called
+      # on the value, is not the class's.
+      def value_owner_span(span, spelling)
+        return span unless spelling
+
+        span.except('method').merge('length' => spelling.bytesize)
       end
 
       # One typed candidate is `static`; several are `ambiguous`, each listed.
