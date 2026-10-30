@@ -307,6 +307,7 @@ RSpec.describe Woods::Extractor do
     # (`rake spec SPEC=...`), regardless of which other spec loaded it first.
     before do
       require 'woods'
+      require 'active_support'
       require 'active_support/core_ext/time'
       @original_config = Woods.configuration
       Woods.configuration = Woods::Configuration.new

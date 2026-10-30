@@ -1258,4 +1258,31 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(unit).to be_nil
     end
   end
+  # ── Inheritance edges ────────────────────────────────────────────────
+
+  describe 'inheritance edges' do
+    before do
+      stub_const('ActiveJob::Base', Class.new)
+      stub_const('InheritanceFixture', Module.new)
+    end
+
+    it 'links a job to its application-defined parent job and never to the framework base' do
+      parent = create_file('app/jobs/inheritance_fixture/application_job.rb',
+                           "class InheritanceFixture::ApplicationJob < ActiveJob::Base\nend\n")
+      child = create_file('app/jobs/inheritance_fixture/notify_job.rb', <<~SOURCE)
+        class InheritanceFixture::NotifyJob < InheritanceFixture::ApplicationJob
+          def perform(id)
+            id
+          end
+        end
+      SOURCE
+      load parent
+      load child
+      extractor = described_class.new
+
+      expect(extractor.extract_job_file(child).dependencies)
+        .to include(type: :job, target: 'InheritanceFixture::ApplicationJob', via: :inheritance)
+      expect(extractor.extract_job_file(parent).dependencies.map { |dep| dep[:via] }).not_to include(:inheritance)
+    end
+  end
 end

@@ -171,7 +171,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(callable).to receive(:source_location).and_return(['/app/app/models/post.rb', 12])
       allow(lambda_filter).to receive(:source_location).and_return(['/app/app/models/post.rb', 13])
       allow(native).to receive(:source_location).and_return(nil)
-      allow(external).to receive(:source_location).and_return(['/application/framework.rb', 20])
+      # The lambda `dependent: :destroy` registers (LOS-127): its bundle path
+      # names the host checkout, so the label names the gem instead.
+      bundle = '/home/dev/host/vendor/bundle/ruby/3.3.0/gems/activerecord-7.1.6'
+      allow(external).to receive(:source_location)
+        .and_return(["#{bundle}/lib/active_record/associations/builder/association.rb", 20])
       callbacks = [callable, lambda_filter, native, external, :named_hook, 'string_hook'].map do |filter|
         double('Callback', filter: filter, kind: :before)
       end
@@ -180,9 +184,70 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       expected = [
         '#<Proc app/models/post.rb:12>', '#<lambda app/models/post.rb:13>', '#<Proc native>',
-        '#<Proc /application/framework.rb:20>', 'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
+        '#<Proc activerecord-7.1.6/lib/active_record/associations/builder/association.rb:20>',
+        'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
       ]
-      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(expected)
+      labels = extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }
+      expect(labels).to eq(expected)
+      expect(labels.join).not_to include('/home/dev')
+    end
+
+    it 'publishes who wrote each callback as origin: app, framework, gem or unknown (LOS-128)' do
+      root = Dir.mktmpdir('woods_origin_app')
+      gem_home = Dir.mktmpdir('woods_origin_gems')
+      stub_const('Rails', double('Rails', root: root))
+      load_file = lambda do |base, relative, contents|
+        path = File.join(base, relative)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, contents)
+        load path
+        path
+      end
+      load_file.call(root, 'app/models/concerns/origin_sluggable.rb',
+                     "module OriginSluggable\n  def set_slug; end\nend\n")
+      load_file.call(gem_home, 'gems/activerecord-7.1.6/lib/active_record/autosave_association.rb',
+                     "module OriginAutosave\n  define_method(:autosave_associated_records_for_comments) {}\nend\n")
+      load_file.call(gem_home, 'gems/paper_trail-15.1.0/lib/paper_trail/model.rb',
+                     "module OriginPaperTrail\n  def record_update; end\nend\n")
+      model_path = load_file.call(root, 'app/models/origin_post.rb', <<~RUBY)
+        class OriginPost
+          include OriginSluggable
+          include OriginAutosave
+          include OriginPaperTrail
+
+          %i[validation save create update destroy commit rollback before_commit initialize find touch].each do |event|
+            define_singleton_method(:"_\#{event}_callbacks") { [] }
+          end
+
+          def normalize_email; end
+        end
+      RUBY
+      gem_lambda = -> { raise 'must not execute a callback' }
+      allow(gem_lambda).to receive(:source_location).and_return(
+        [File.join(gem_home, 'gems/activerecord-7.1.6/lib/active_record/associations/builder/association.rb'), 93]
+      )
+      app_proc = proc { raise 'must not execute a callback' }
+      allow(app_proc).to receive(:source_location).and_return([model_path, 9])
+      native = proc { raise 'must not execute a callback' }
+      allow(native).to receive(:source_location).and_return(nil)
+      filters = [:normalize_email, :set_slug, :autosave_associated_records_for_comments, :record_update,
+                 gem_lambda, app_proc, native, 'string_hook', :undefined_hook]
+      callbacks = filters.map { |filter| double('Callback', filter: filter, kind: :before) }
+      callbacks << double('Rails6Callback', filter: gem_lambda.object_id, raw_filter: gem_lambda, kind: :before)
+      model = OriginPost
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      entries = extractor.send(:extract_callbacks, model)
+
+      expect(entries.map { |entry| entry[:origin] })
+        .to eq(%w[app app framework gem framework app unknown unknown unknown framework])
+      expect(entries.map(&:keys)).to all(eq(%i[type filter origin kind conditions]))
+    ensure
+      %i[OriginPost OriginSluggable OriginAutosave OriginPaperTrail].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name)
+      end
+      FileUtils.remove_entry(root) if root
+      FileUtils.remove_entry(gem_home) if gem_home
     end
 
     it 'removes default object identities while preserving custom and named filter labels' do
@@ -342,14 +407,14 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(labels.uniq.size).to eq(3)
     end
 
-    it 'retains native and external source labels using the existing callable formatter' do
+    it 'labels native and external sources without publishing an absolute path' do
       native = proc { raise 'not executed' }
       external = -> { raise 'not executed' }
       allow(native).to receive(:source_location).and_return(nil)
       allow(external).to receive(:source_location).and_return(['/vendor/options.rb', 19])
 
       expect(validations_for(in: native, message: external).first[:options]).to eq(
-        in: '#<Proc native>', message: '#<lambda /vendor/options.rb:19>'
+        in: '#<Proc native>', message: '#<lambda external/options.rb:19>'
       )
     end
   end
@@ -845,7 +910,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       )
       unit.source_code = source
       unit.metadata = {
-        callbacks: [{ type: :before_save, filter: 'normalize_email', kind: :before, conditions: {} }],
+        callbacks: [{ type: :before_save, filter: 'normalize_email', origin: 'app', kind: :before, conditions: {} }],
         column_names: %w[email name]
       }
 
@@ -854,6 +919,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       callback = unit.metadata[:callbacks].first
       expect(callback).to have_key(:side_effects)
       expect(callback[:side_effects][:columns_written]).to include('email')
+      expect(callback).to include(origin: 'app', analysis_status: 'analyzed')
     end
 
     it 'analyzes concern-defined callback methods via the parse-friendly analysis source' do
@@ -1938,6 +2004,63 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
     it 'counts lines of code when it reads the model source itself' do
       expect(with_posix_default_external { extractor.send(:count_loc, model) }).to eq(3)
+    end
+  end
+  # ── extract_dependencies (inheritance edge) ───────────────────────
+
+  describe '#extract_dependencies (inheritance edge)' do
+    include_context 'extractor setup'
+
+    let(:extractor) { described_class.new(table_catalog: double('TableCatalog', for_model: nil)) }
+
+    before do
+      stub_const('InheritanceFixture', Module.new)
+      stub_const('ActiveRecord::Base', Class.new do
+        class << self
+          attr_writer :abstract_class
+
+          def abstract_class?
+            @abstract_class == true
+          end
+
+          def reflect_on_all_associations
+            []
+          end
+
+          def module_parent
+            InheritanceFixture
+          end
+        end
+      end)
+    end
+
+    def declare(relative, source)
+      path = create_file(relative, source)
+      load path
+      path
+    end
+
+    it 'links an STI subclass to the parent model its extractor publishes' do
+      declare('app/models/inheritance_fixture/user.rb', "class InheritanceFixture::User < ActiveRecord::Base\nend\n")
+      declare('app/models/inheritance_fixture/admin.rb', "class InheritanceFixture::Admin < InheritanceFixture::User\nend\n")
+
+      deps = extractor.send(:extract_dependencies, InheritanceFixture::Admin, '')
+
+      expect(deps).to include(type: :model, target: 'InheritanceFixture::User', via: :inheritance)
+    end
+
+    it 'adds no edge to an abstract base, which the model extractor never publishes' do
+      declare('app/models/inheritance_fixture/application_record.rb', <<~SOURCE)
+        class InheritanceFixture::ApplicationRecord < ActiveRecord::Base
+          self.abstract_class = true
+        end
+      SOURCE
+      declare('app/models/inheritance_fixture/post.rb',
+              "class InheritanceFixture::Post < InheritanceFixture::ApplicationRecord\nend\n")
+
+      deps = extractor.send(:extract_dependencies, InheritanceFixture::Post, '')
+
+      expect(deps.map { |dep| dep[:via] }).not_to include(:inheritance)
     end
   end
 end

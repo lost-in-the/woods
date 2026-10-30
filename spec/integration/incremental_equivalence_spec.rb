@@ -736,8 +736,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       write_card('[@title, Post.count, SignatureService.name, BadgeComponent.name].join')
       Woods::Extractor.new(output_dir: index).extract_changed([card_path])
       edges = unit_dependencies(index, 'component', 'Ui::CardComponent')
-      expect(edges).to include(reference('model', 'Post'), reference('service', 'SignatureService'))
-      expect(edges).not_to include(reference('component', 'BadgeComponent'))
+      expect(edges).to include(reference('model', 'Post'), reference('service', 'SignatureService'),
+                               reference('component', 'BadgeComponent'))
       expect(reverse_edges(index, 'SignatureService')).to include('Ui::CardComponent')
       expect(reverse_edges(index, 'Post')).to include('Ui::CardComponent')
       expect(differences(index, full_extraction)).to be_empty

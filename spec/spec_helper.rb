@@ -77,6 +77,9 @@ RSpec.configure do |config|
   # The GitHub Mermaid parse spec (woods#826) runs the vendored Mermaid build
   # in Node; CI opts in with WOODS_RUN_GITHUB_MERMAID=1 where Node is set up.
   config.filter_run_excluding(github_mermaid: true) unless ENV['WOODS_RUN_GITHUB_MERMAID']
+  # Maps this repository for real (about 25 s) to hold the self-map's edges
+  # to known truths (#926); CI opts in with WOODS_RUN_SELF_MAP=1.
+  config.filter_run_excluding(self_map: true) unless ENV['WOODS_RUN_SELF_MAP']
 
   config.after(:each) do
     Woods::ModelNameCache.reset! if defined?(Woods::ModelNameCache) && Woods::ModelNameCache.respond_to?(:reset!)

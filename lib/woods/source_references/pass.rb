@@ -153,10 +153,24 @@ module Woods
         SourceContributors.paths(unit).map { |path| @inputs.relative(path) }
       end
 
+      # Edge labels an extractor gives a component it renders or declares as
+      # a slot. The constant read behind them is the same relationship.
+      STATED_BY_RENDER = %w[render slot].freeze
+      private_constant :STATED_BY_RENDER
+
       # An extractor may already carry the pair with a guessed type; a second
-      # entry for the same relationship would double count in the graph.
+      # entry for the same relationship would double count in the graph. A
+      # `render` or `slot` edge states the reference its constant read would
+      # add, so only a component mentioned outside a render (constructed and
+      # passed on, compared with `is_a?`, handed over as a constant) gains a
+      # `code_reference` edge (LOS-123). Its occurrence is still a span.
       def pair_present?(edges, edge)
-        edges.any? { |existing| existing.values_at('target', 'via') == edge.values_at('target', 'via') }
+        target, via = edge.values_at('target', 'via')
+        edges.any? do |existing|
+          next false unless existing['target'] == target
+
+          existing['via'] == via || (via == 'code_reference' && STATED_BY_RENDER.include?(existing['via']))
+        end
       end
 
       def normalize_edge(edge)
@@ -180,8 +194,17 @@ module Woods
             'file_path' => path, 'target' => edge['target'], 'target_type' => edge['type'],
             'kind' => 'constant', 'confidence' => 'verified'
           )
-          [edge, span]
+          [edge, value_owner_span(span, result['spelling'])]
         end
+      end
+
+      # A value read through a class credits the class (LOS-126): the span
+      # covers the class path as written, and the selector, which is called
+      # on the value, is not the class's.
+      def value_owner_span(span, spelling)
+        return span unless spelling
+
+        span.except('method').merge('length' => spelling.bytesize)
       end
 
       # One typed candidate is `static`; several are `ambiguous`, each listed.

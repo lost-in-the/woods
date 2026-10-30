@@ -18,12 +18,16 @@ RSpec.describe Woods::SourceReferences::CallerPolicy do
       expect(types.reject { |type| policy.caller?(type) }).to be_empty
     end
 
-    it 'lets a component reference everything except another component' do
+    # LOS-123: a component that constructs another component outside a render
+    # call (`Wrapper.new(primary: Kit::Button.new)`) has no edge but this one.
+    # The pass leaves out a reference a `render`/`slot` edge already states.
+    it 'lets a component reference every constant-owned type, components included' do
       component_types.each do |caller|
-        expect(types.reject { |target| policy.permits?(caller, target) }.map(&:to_s)).to match_array(component_types)
+        expect(types.reject { |target| policy.permits?(caller, target) }).to be_empty
       end
-      expect(policy.permits?('component', 'model')).to be(true)
-      expect(policy.permits?('view_component', 'service')).to be(true)
+      expect(policy.permits?('component', 'component')).to be(true)
+      expect(policy.permits?('view_component', 'component')).to be(true)
+      expect(policy.permits?('component', 'view_component')).to be(true)
     end
 
     it 'lets a GraphQL unit reference everything except another GraphQL unit' do
@@ -34,7 +38,7 @@ RSpec.describe Woods::SourceReferences::CallerPolicy do
     end
 
     it 'leaves every other caller type unfiltered' do
-      unfiltered = types.map(&:to_s) - component_types - graphql_types
+      unfiltered = types.map(&:to_s) - graphql_types
       unfiltered.each do |caller|
         expect(types.reject { |target| policy.permits?(caller, target) }).to be_empty
       end

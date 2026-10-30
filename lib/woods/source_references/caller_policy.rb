@@ -15,16 +15,20 @@ module Woods
       TYPES = Registry::TYPES
       ALL = :all
 
-      # Families whose extractors already publish their internal relationships
-      # (`render`/`slot`, `type_reference`/`field_resolver`). A second
-      # `code_reference` edge inside the family would only duplicate those.
-      COMPONENT_TYPES = %i[component view_component].freeze
+      # A family whose extractor already publishes its internal relationships
+      # (`type_reference`/`field_resolver`). A second `code_reference` edge
+      # inside the family would only duplicate those.
+      #
+      # Components are not kept apart (LOS-123): a component that constructs
+      # another and passes it on (`Wrapper.new(primary: Kit::Button.new)`)
+      # has no other edge to it, and {Pass} leaves out the reference a
+      # `render` or `slot` edge already states, so a rendered component is
+      # not linked twice.
       GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
       # Caller type to the target types it may reference.
       DEFAULTS = TYPES.to_h { |type| [type, ALL] }
-                      .merge(COMPONENT_TYPES.to_h { |type| [type, (TYPES - COMPONENT_TYPES).freeze] },
-                             GRAPHQL_TYPES.to_h { |type| [type, (TYPES - GRAPHQL_TYPES).freeze] }).freeze
+                      .merge(GRAPHQL_TYPES.to_h { |type| [type, (TYPES - GRAPHQL_TYPES).freeze] }).freeze
 
       class << self
         # @param overrides [Hash, nil] caller type to +:all+, +false+ or target types

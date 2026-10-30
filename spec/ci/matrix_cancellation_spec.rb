@@ -40,7 +40,8 @@ RSpec.describe 'CI matrix cancellation' do
     expect(unit_steps).to include(a_hash_including('name' => 'Gate captured real-model retrieval quality'))
     expect(unit_steps).to include(a_hash_including('name' => 'Run tests with coverage'))
     expect(unit_steps).to include(a_hash_including('name' => 'Publish SimpleCov report',
-                                                   'if' => "${{ !cancelled() && matrix.ruby-version == '3.3' }}"))
+                                                   'if' => "${{ env.WOODS_CI_ROW_ACTIVE == 'true' && " \
+                                                           "(!cancelled() && matrix.ruby-version == '3.3') }}"))
     commands = jobs.fetch('rails-required').fetch('steps').filter_map { |step| step['run'] }.join("\n")
     expect(commands).to include('spec/integration/library_contributors_spec.rb',
                                 'spec/integration/incremental_runtime_spec.rb',

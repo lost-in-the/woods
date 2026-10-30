@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Serve Woods' own static self-map over MCP (stdio) to agents working on this
+# repository (#926). Registered in .mcp.json as `woods-self`.
+#
+# The first launch builds the map (about 25 seconds). Later launches serve the
+# existing map at once and refresh it in the background; the server reads the
+# newest published generation on every request, and a refresh whose sources
+# are unchanged publishes nothing. stdout carries only MCP protocol messages.
+#
+#   WOODS_SELF_MAP_OUTPUT   map directory (default: tmp/woods_self_map)
+#   WOODS_SELF_MAP_REFRESH  0 skips the background refresh
+set -euo pipefail
+
+root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+map="${WOODS_SELF_MAP_OUTPUT:-$root/tmp/woods_self_map}"
+cd "$root"
+
+if [ ! -f "$map/generation.json" ]; then
+  echo "[woods-self] building the self-map at $map (first launch)" >&2
+  bin/rake "woods:self_map[$map]" >&2
+elif [ "${WOODS_SELF_MAP_REFRESH:-1}" != "0" ]; then
+  nohup bin/rake "woods:self_map[$map]" >/dev/null 2>&1 &
+fi
+
+exec bundle exec ruby exe/woods-mcp-start "$map"

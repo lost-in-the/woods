@@ -644,4 +644,26 @@ RSpec.describe Woods::Extractors::PoroExtractor do
       expect(nested(owners: []).map(&:identifier)).to eq(['NestedFixture::CartType'])
     end
   end
+  # ── Inheritance edges ────────────────────────────────────────────────
+
+  describe 'inheritance edges' do
+    before { stub_const('InheritanceFixture', Module.new) }
+
+    it 'links a plain Ruby object to its application-defined parent' do
+      parent = create_file('app/models/inheritance_fixture/application_form.rb',
+                           "class InheritanceFixture::ApplicationForm\nend\n")
+      child = create_file('app/models/inheritance_fixture/signup_form.rb', <<~SOURCE)
+        class InheritanceFixture::SignupForm < InheritanceFixture::ApplicationForm
+          def save
+            true
+          end
+        end
+      SOURCE
+      load parent
+      load child
+
+      expect(described_class.new.extract_poro_file(child).dependencies)
+        .to include(type: :poro, target: 'InheritanceFixture::ApplicationForm', via: :inheritance)
+    end
+  end
 end

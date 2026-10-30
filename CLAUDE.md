@@ -14,6 +14,8 @@ bin/rake spec                                    # Full test suite
 bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
 bin/rubocop -a                                   # Lint + autofix
 bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
+bin/rake woods:affected_specs                    # Specs this branch's changes reach, from the self-map (#926)
+bin/rake "woods:affected_specs[lib/woods/x.rb]"  # ...for named paths; hubs it did not expand go to stderr
 
 # Opt-in spec tags (excluded from the default suite)
 WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http
@@ -49,24 +51,16 @@ bundle exec rake woods:generate_token    # Random bearer token for woods-mcp-htt
 # woods:send (notion_sync), woods:relay (unblocked_sync)
 ```
 
-### Source-checkout orientation: static Woods self-map
+### Woods on itself: the `woods-self` MCP server (use it before grep)
 
-For an initial audit, debugging a cross-cutting change, or estimating its blast
-radius within this gem, create a disposable static map before editing:
+This repository registers Woods' own static map as an MCP server: `woods-self` in `.mcp.json`, launched by `bin/woods-self-mcp` (#926). Before changing code, and before choosing which specs to run, ask it instead of grepping:
 
-```bash
-output_dir="$(mktemp -d)"
-bin/rake "woods:self_map[$output_dir]"
-bundle exec woods-mcp-start "$output_dir"
-```
+- `dependents` / `dependencies`: what a constant or method reaches and what reaches it. This is the blast radius of a change.
+- `lookup`, `search`, `structure`: where something is defined, and its source excerpt.
 
-This is an internal Woods-only developer tool, not a host-app task. It publishes
-the standard atomic index generation and works with the packaged Index MCP
-server without Rails, a database, or embeddings. Query `woods_status`,
-`structure`, `search`, `lookup`, `dependencies`, and `dependents` to find
-source ownership, inspect constants and excerpts, and follow conservative
-static call/dependency relationships. Use a temporary or ignored output
-directory; do not scan or commit generated map output.
+A grep for a name misses relative references (`Extraction::GitCapture` written inside `module Woods`); the map resolves them. If a session lacks the `woods-self` tools, approve the server once with `/mcp`, or run `bin/woods-self-mcp` yourself. The first launch builds the map into `tmp/woods_self_map` (about 25 seconds). Later launches serve it at once and refresh it in the background, and the server reads the newest generation on every request. To refresh by hand, run `bin/rake "woods:self_map[tmp/woods_self_map]"`. Never commit map output.
+
+The map is static and its coverage gaps are tracked in #926. Treat an empty `dependents` answer as "not proven", not "no callers".
 
 The self-map is deliberately static. It cannot prove Rails runtime behavior,
 resolved callbacks, routes, Active Record reflections, eager-load outcomes, or
@@ -216,7 +210,7 @@ exe/
 - **Dependency graph is bidirectional.** First pass: each extractor records forward dependencies. Second pass: the graph resolves reverse edges (dependents). Both directions matter for retrieval.
 - **PageRank for importance scoring.** `DependencyGraph` computes PageRank over the unit graph to surface high-importance nodes for retrieval ranking. `GraphAnalyzer` provides structural analysis, orphans, dead ends, hubs, cycles, and bridges, for codebase health insights.
 - **Behavioral depth over structural metadata.** Extraction output answers "what happens when X runs?" not just "what exists." Callback side-effects (columns written, jobs enqueued, services called) are detected via `CallbackAnalyzer`. `BehavioralProfile` introspects resolved `Rails.application.config` values. `FlowPrecomputer` generates per-action request flow maps (opt-in via `precompute_flows` config flag, default false).
-- **Navigation edges trace route helper references.** Dependency edges carry a `:via` label that distinguishes relationship types (`:belongs_to`, `:code_reference`, `:render`, `:link_to`, `:redirect_to`, `:form_action`). Navigation edges (`link_to`, `redirect_to`, `form_action`) are resolved from `_path`/`_url` route helpers via `RouteHelperResolver`. These edges mean "this unit references a route helper pointing at that controller", the scanner matches all `_path`/`_url` usages, not just those inside `link_to` calls. The live named-route map is authoritative: genuine `file_path`, `root_path`, and other formerly suppressed names resolve; names without a controller/action route produce no edge.
+- **Navigation edges trace route helper references.** Dependency edges carry a `:via` label that distinguishes relationship types (`:belongs_to`, `:code_reference`, `:render`, `:link_to`, `:redirect_to`, `:form_action`, `:inheritance`). Every class-based unit carries an `:inheritance` edge to its application-defined parent, typed as the parent's own unit type (`Extractors::SuperclassDependency`); a framework parent or one no extractor publishes records no edge. Navigation edges (`link_to`, `redirect_to`, `form_action`) are resolved from `_path`/`_url` route helpers via `RouteHelperResolver`. These edges mean "this unit references a route helper pointing at that controller", the scanner matches all `_path`/`_url` usages, not just those inside `link_to` calls. The live named-route map is authoritative: genuine `file_path`, `root_path`, and other formerly suppressed names resolve; names without a controller/action route produce no edge.
 
 ## Code Conventions
 

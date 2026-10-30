@@ -158,6 +158,9 @@ Dir.mktmpdir('woods_components') do |root|
     Woods::Extractor.new(output_dir: output).extract_all
     reader = Woods::MCP::IndexReader.new(output)
     quote_edge = { 'type' => 'service', 'target' => 'ShipmentQuote', 'via' => 'code_reference' }
+    # PanelComponent names CardComponent outside a render (LOS-123): a
+    # component edge, verified like the service one.
+    card_edge = { 'type' => 'component', 'target' => 'Ui::CardComponent', 'via' => 'code_reference' }
     references = lambda do |identifier, type|
       reader.find_unit(identifier, type: type)['dependencies'].select { |edge| edge['via'] == 'code_reference' }
     end
@@ -166,7 +169,7 @@ Dir.mktmpdir('woods_components') do |root|
     end
     assert_fact(checks, 'autoload-only Phlex and ViewComponent callers publish verified service references') do
       references.call('Ui::CardComponent', 'component') == [quote_edge] &&
-        references.call('Ui::PanelComponent', 'view_component') == [quote_edge] &&
+        references.call('Ui::PanelComponent', 'view_component') == [card_edge, quote_edge] &&
         (%w[Ui::CardComponent Ui::PanelComponent] - quote_callers.call).empty?
     end
     assert_fact(checks, 'legacy fixture contains external definitions') do
@@ -235,7 +238,7 @@ Dir.mktmpdir('woods_components') do |root|
     Woods::Extractor.new(output_dir: output).extract_changed([card_path])
     assert_fact(checks, 'a component that drops its reference withdraws the edge from a held reader') do
       references.call('Ui::CardComponent', 'component').empty? && !quote_callers.call.include?('Ui::CardComponent') &&
-        references.call('Ui::PanelComponent', 'view_component') == [quote_edge]
+        references.call('Ui::PanelComponent', 'view_component') == [card_edge, quote_edge]
     end
     compare.call('component reference removal full/incremental equivalence')
     write_source(root, 'app/views/ui/card_component.rb', quoting_card)

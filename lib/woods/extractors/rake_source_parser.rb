@@ -74,7 +74,6 @@ module Woods
       # @param source [String]
       def initialize(source)
         @source = source
-        @lines = source.lines
         @result = Result.new(definitions: [], enhancements: [], method_definitions: [], constants: [])
         @pending_description = nil
       end
@@ -226,14 +225,36 @@ module Woods
         }
       end
 
-      # The lines between a block's opening and closing lines. A block that
-      # opens and closes on one line yields its statements.
+      # Everything inside a block: from the end of its `do`/`{` and any
+      # `|params|` to the start of its `end`/`}`. A statement that shares a
+      # line with either delimiter is kept (LOS-129); a blank remainder of the
+      # opening line and the indentation before the closing delimiter are
+      # dropped, so a block of whole lines is those lines. A block that opens
+      # and closes on one line yields its statements.
       def body_source(block)
-        first = block.location.start_line
-        last = block.location.end_line
-        return block.body&.slice.to_s if first == last
+        return block.body&.slice.to_s if block.location.start_line == block.location.end_line
 
-        @lines[first...(last - 1)].to_a.join
+        from = [block.opening_loc.end_offset, block.parameters&.location&.end_offset].compact.max
+        inner = @source.byteslice(from...block.closing_loc.start_offset).to_s
+        trim_delimiter_lines(inner)
+      end
+
+      BLANK = /\A[ \t]*\z/
+      private_constant :BLANK
+
+      # Drops a blank remainder of the opening line and the indentation
+      # before the closing delimiter. Both are tested on the bounded text
+      # around a newline, never by a pattern searching the whole body, whose
+      # length is the host's.
+      #
+      # @param inner [String]
+      # @return [String]
+      def trim_delimiter_lines(inner)
+        first = inner.index("\n")
+        inner = inner[(first + 1)..] if first && BLANK.match?(inner[0...first])
+        last = inner.rindex("\n")
+        inner = inner[0..last] if last && BLANK.match?(inner[(last + 1)..])
+        inner
       end
 
       # Mirrors `Rake::TaskManager#resolve_args`.

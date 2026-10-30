@@ -132,7 +132,8 @@ module Woods
         unit.metadata = extract_metadata_from_source(source, class_name)
         live = live_job_class(class_name)
         apply_runtime_resilience(unit.metadata, live) if live
-        unit.dependencies = extract_dependencies(source, class_name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, class_name),
+                                             inheritance_dependency(class_name, file_path: file_path))
         MethodEffects.apply(unit, source)
 
         unit
@@ -164,7 +165,7 @@ module Woods
         unit.namespace = extract_namespace(job_class.name)
         unit.source_code = annotate_source(source, job_class.name)
         unit.metadata = extract_metadata_from_class(job_class, source)
-        unit.dependencies = extract_dependencies(source, job_class.name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, job_class.name), inheritance_dependency(job_class))
         MethodEffects.apply(unit, source)
 
         unit
@@ -220,7 +221,8 @@ module Woods
         unit.namespace = extract_namespace(job_class.name)
         unit.source_code = annotation_banner(job_class.name, metadata[:job_type], metadata[:queue]) + site.source
         unit.metadata = metadata
-        unit.dependencies = extract_dependencies(site.source, job_class.name)
+        unit.dependencies = with_inheritance(extract_dependencies(site.source, job_class.name),
+                                             inheritance_dependency(job_class))
         unit
       end
 
