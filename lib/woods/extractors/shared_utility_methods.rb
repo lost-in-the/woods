@@ -3,6 +3,7 @@
 require_relative 'declared_parent'
 
 require_relative 'source_nesting'
+require_relative 'source_origin'
 require_relative 'method_parameters'
 
 module Woods
@@ -75,11 +76,7 @@ module Woods
       #
       # @return [Array<String>]
       def gem_install_roots
-        roots = Gem.path.dup
-        roots << Bundler.bundle_path.to_s if defined?(Bundler) && Bundler.respond_to?(:bundle_path)
-        roots.uniq.map { |root| File.expand_path(root).delete_suffix(File::SEPARATOR) + File::SEPARATOR }
-      rescue StandardError
-        []
+        SourceOrigin.gem_install_roots
       end
 
       # Whether a resolved source belongs to this application and is a file.
@@ -304,14 +301,18 @@ module Woods
 
       # Proc#to_s embeds a process-local address. Model and controller filters
       # share source-site labels, so metadata and derived chunks agree across
-      # boots. Preserve symbols and other application-defined callback values.
+      # boots and across machines: the site is {SourceOrigin.location}, so an
+      # application file is root-relative, a gem file is named by its gem
+      # (`activerecord-7.1.6/lib/…`) and no absolute path is ever published
+      # (LOS-127). Preserve symbols and other application-defined callback
+      # values.
       def stable_filter(filter)
         return filter unless filter.is_a?(Proc)
 
         location = filter.source_location
         site = if location
                  path, line = location
-                 "#{path.delete_prefix("#{Rails.root}/")}:#{line}"
+                 "#{SourceOrigin.location(path)}:#{line}"
                else
                  'native'
                end

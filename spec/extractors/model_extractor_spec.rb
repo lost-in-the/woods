@@ -171,7 +171,11 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       allow(callable).to receive(:source_location).and_return(['/app/app/models/post.rb', 12])
       allow(lambda_filter).to receive(:source_location).and_return(['/app/app/models/post.rb', 13])
       allow(native).to receive(:source_location).and_return(nil)
-      allow(external).to receive(:source_location).and_return(['/application/framework.rb', 20])
+      # The lambda `dependent: :destroy` registers (LOS-127): its bundle path
+      # names the host checkout, so the label names the gem instead.
+      bundle = '/home/dev/host/vendor/bundle/ruby/3.3.0/gems/activerecord-7.1.6'
+      allow(external).to receive(:source_location)
+        .and_return(["#{bundle}/lib/active_record/associations/builder/association.rb", 20])
       callbacks = [callable, lambda_filter, native, external, :named_hook, 'string_hook'].map do |filter|
         double('Callback', filter: filter, kind: :before)
       end
@@ -180,9 +184,12 @@ RSpec.describe Woods::Extractors::ModelExtractor do
 
       expected = [
         '#<Proc app/models/post.rb:12>', '#<lambda app/models/post.rb:13>', '#<Proc native>',
-        '#<Proc /application/framework.rb:20>', 'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
+        '#<Proc activerecord-7.1.6/lib/active_record/associations/builder/association.rb:20>',
+        'named_hook', 'string_hook', '#<Proc app/models/post.rb:12>'
       ]
-      expect(extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }).to eq(expected)
+      labels = extractor.send(:extract_callbacks, model).map { |entry| entry[:filter] }
+      expect(labels).to eq(expected)
+      expect(labels.join).not_to include('/home/dev')
     end
 
     it 'removes default object identities while preserving custom and named filter labels' do
@@ -342,14 +349,14 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(labels.uniq.size).to eq(3)
     end
 
-    it 'retains native and external source labels using the existing callable formatter' do
+    it 'labels native and external sources without publishing an absolute path' do
       native = proc { raise 'not executed' }
       external = -> { raise 'not executed' }
       allow(native).to receive(:source_location).and_return(nil)
       allow(external).to receive(:source_location).and_return(['/vendor/options.rb', 19])
 
       expect(validations_for(in: native, message: external).first[:options]).to eq(
-        in: '#<Proc native>', message: '#<lambda /vendor/options.rb:19>'
+        in: '#<Proc native>', message: '#<lambda external/options.rb:19>'
       )
     end
   end

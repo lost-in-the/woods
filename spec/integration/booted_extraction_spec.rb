@@ -856,6 +856,10 @@ RSpec.describe 'Model callbacks across Rails processes', :booted_app do
     expect(results.last).to eq(results.first)
     unit = results.first.fetch('unit')
     filter = results.first.fetch('framework_filter')
+    # Gem-relative on every machine, so the index never carries a host path (LOS-127).
+    gem_dir = '(?:activerecord-[^/]+|rails-[^/]+/activerecord)'
+    builder = 'lib/active_record/associations/builder/association\.rb'
+    expect(filter).to match(%r{\A#<(?:lambda|Proc) #{gem_dir}/#{builder}:\d+>\z})
     expect(unit.fetch('metadata').fetch('callbacks')).to include(
       a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter)
     )

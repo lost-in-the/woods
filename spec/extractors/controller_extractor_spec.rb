@@ -71,6 +71,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     it 'handles mixed ActionFilter and proc conditions' do
       action_filter = build_action_filter(%w[destroy])
       proc_condition = proc { true }
+      allow(proc_condition).to receive(:source_location)
+        .and_return(['/srv/bundle/ruby/3.3.0/gems/devise-4.9.4/lib/devise/controllers/helpers.rb', 7])
       callback = build_callback(
         kind: :before, filter: :verify_admin,
         if_conditions: [action_filter, proc_condition]
@@ -79,7 +81,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       only, _, if_labels, _unless_labels = extractor.send(:extract_callback_conditions, callback)
 
       expect(only).to eq(%w[destroy])
-      expect(if_labels).to eq(["#<Proc #{proc_condition.source_location.join(':')}>"])
+      expect(if_labels).to eq(['#<Proc devise-4.9.4/lib/devise/controllers/helpers.rb:7>'])
     end
 
     it 'handles callbacks with no conditions' do
@@ -104,10 +106,11 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
   it 'uses the callable rather than the numeric callback key exposed by Rails 6' do
     callable = proc { true }
+    allow(callable).to receive(:source_location).and_return(['/app/app/controllers/concerns/auth.rb', 4])
     callback = build_callback(kind: :before, filter: callable.object_id)
     callback.define_singleton_method(:raw_filter) { callable }
     controller = double('Controller', _process_action_callbacks: [callback])
-    expected = "#<Proc #{callable.source_location.join(':')}>"
+    expected = '#<Proc app/controllers/concerns/auth.rb:4>'
 
     expect(extractor.send(:extract_filter_chain, controller)).to eq([{ kind: :before, filter: expected }])
     expect(extractor.send(:applicable_filters, controller, 'index')).to eq([{ kind: :before, filter: expected }])
@@ -211,10 +214,19 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(extractor.send(:condition_label, callback)).to eq('#<Proc native>')
     end
 
-    it 'does not strip a similar root prefix from an external source' do
+    it 'labels an external source by its basename, never by a similar root prefix or an absolute path' do
       condition = proc { true }
       allow(condition).to receive(:source_location).and_return(['/application/callbacks.rb', 3])
-      expect(extractor.send(:condition_label, condition)).to eq('#<Proc /application/callbacks.rb:3>')
+      expect(extractor.send(:condition_label, condition)).to eq('#<Proc external/callbacks.rb:3>')
+    end
+
+    it 'labels a gem-defined proc by its gem, not by the bundle path (LOS-127)' do
+      condition = -> { true }
+      allow(condition).to receive(:source_location).and_return(
+        ['/home/dev/host/vendor/bundle/ruby/3.3.0/bundler/gems/rails-1a2b3c4d5e6f/actionpack/lib/filters.rb', 9]
+      )
+      expect(extractor.send(:condition_label, condition))
+        .to eq('#<lambda rails-1a2b3c4d5e6f/actionpack/lib/filters.rb:9>')
     end
 
     it 'labels strings as themselves' do
