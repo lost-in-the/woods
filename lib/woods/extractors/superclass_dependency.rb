@@ -65,6 +65,10 @@ module Woods
       def initialize(app_root: Rails.root.to_s)
         @app_root = File.expand_path(app_root)
         @lookup = SourceReferences::RuntimeLookup.new
+        # Parents repeat across a run (every job shares ApplicationJob, every
+        # component its base), and typing one reflects over its methods when
+        # it is not application source; answer each parent once per run.
+        @types = {}.compare_by_identity
       end
 
       # @param unit_class [Class, String, Object] the unit's loaded class, or
@@ -80,7 +84,7 @@ module Woods
         parent = klass.superclass
         return nil unless parent.is_a?(Class) && parent.name
 
-        type = unit_type_for(parent)
+        type = @types.fetch(parent) { @types[parent] = unit_type_for(parent) }
         { type: type, target: parent.name, via: :inheritance } if type
       end
 
