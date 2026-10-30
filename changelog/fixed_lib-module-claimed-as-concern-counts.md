@@ -1,0 +1,1 @@
+- A library module that a model includes is counted once by the manifest and the dependency graph, as a concern and not as a second library unit. A booted example now covers a full run and the removal of the include.

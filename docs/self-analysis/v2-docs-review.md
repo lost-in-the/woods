@@ -1,8 +1,18 @@
 # Woods v2.0.0 documentation review
 
+> **Historical review — 2026-09-03; classified 2026-10-27.** The measurements and
+> recommendations below describe the reviewed branch, not the current checkout.
+> This receipt landed in [`448bad34`](https://github.com/lost-in-the/woods/commit/448bad34c7b7f18e235d126eb602931109befd32).
+> The [reconciled plan](../design/plans/2026-09-03-v2-documentation-rewrite-reconciled.md#completed-follow-up-work-executed-2026-09-03)
+> records execution on 2026-09-03. See the [later dispositions](README.md#historical-handwritten-records)
+> and [current documentation owners](../README.md#canonical-owners) before treating
+> an original recommendation as active work.
+
 Reviewed 2026-09-03 against `claude/woods-gem-review-pfbbfk` at a clean working tree. Covers all 76 tracked markdown files.
 
-## Headline verdict
+<a id="headline-verdict"></a>
+
+## Verdict recorded on 2026-09-03
 
 **The prose is finished; the shelving is not.** The nine files rewritten for v2 are accurate, consistent, and well routed. The problems left are structural: 13,493 lines of duplicated generated output sit in the documentation directory, the CHANGELOG's 2.0.0 section has duplicate headings, and the README spends its middle third on a migration a new reader will never perform.
 
@@ -65,7 +75,9 @@ Seven observations from those repos, each tied to a Woods recommendation below.
 - **rubocop's `nav.adoc` is 48 lines of ordered links, two levels deep, and nothing else.** No release process, no maintainer instructions. Woods' `docs/README.md` carries a 30-line "At release: cutting the 2.0.0 tag" runbook at lines 64-93.
 - **scientist opens with the pitch before anything else, and has no install section at all.** "Let's pretend you're changing the way you handle permissions" is the first content after the title. Woods' equivalent pitch, `docs/WHY_WOODS.md`, is listed under "Reference" in the docs index and linked from no user-facing page except that one row.
 
-## Fix first
+<a id="fix-first"></a>
+
+## Fix order proposed on 2026-09-03
 
 Ordered by what most improves a cold reader's first five minutes.
 

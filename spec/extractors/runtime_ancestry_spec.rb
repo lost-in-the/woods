@@ -115,4 +115,12 @@ RSpec.describe 'Selected declaration runtime ancestry' do
     expect(policy&.identifier).to eq('UnavailableNamespace::PlainPolicy')
     expect(policy.metadata[:is_pundit]).to be(false)
   end
+  it 'links a policy to its application-defined parent in both policy unit types' do
+    declare('app/policies/ancestry_fixture/application_policy.rb', 'class ApplicationPolicy; end')
+    path = declare('app/policies/ancestry_fixture/order_policy.rb', 'class OrderPolicy < ApplicationPolicy; end')
+    edge = { type: :policy, target: 'AncestryFixture::ApplicationPolicy', via: :inheritance }
+
+    expect(Woods::Extractors::PolicyExtractor.new.extract_policy_file(path).dependencies).to include(edge)
+    expect(Woods::Extractors::PunditExtractor.new.extract_pundit_file(path).dependencies).to include(edge)
+  end
 end

@@ -691,4 +691,34 @@ RSpec.describe Woods::Extractors::ServiceExtractor do
       expect(targets).to include('PaymentService', 'ShippingService')
     end
   end
+  # ── Inheritance edges ────────────────────────────────────────────────
+
+  describe 'inheritance edges' do
+    before { stub_const('InheritanceFixture', Module.new) }
+
+    it 'links a service to its application-defined parent service' do
+      parent = create_file('app/services/inheritance_fixture/application_service.rb',
+                           "class InheritanceFixture::ApplicationService\nend\n")
+      child = create_file('app/services/inheritance_fixture/checkout_service.rb', <<~SOURCE)
+        class InheritanceFixture::CheckoutService < InheritanceFixture::ApplicationService
+          def call
+            'ok'
+          end
+        end
+      SOURCE
+      load parent
+      load child
+
+      expect(described_class.new.extract_service_file(child).dependencies)
+        .to include(type: :service, target: 'InheritanceFixture::ApplicationService', via: :inheritance)
+    end
+
+    it 'adds no edge when the declared class is not loaded' do
+      child = create_file('app/services/inheritance_fixture/unloaded_service.rb',
+                          "class InheritanceFixture::UnloadedService < InheritanceFixture::ApplicationService\nend\n")
+
+      expect(described_class.new.extract_service_file(child).dependencies.map { |dep| dep[:via] })
+        .not_to include(:inheritance)
+    end
+  end
 end

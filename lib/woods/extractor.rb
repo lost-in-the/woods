@@ -15,6 +15,7 @@ require_relative 'token_utils'
 require_relative 'extracted_unit'
 require_relative 'extracted_form'
 require_relative 'dependency_graph'
+require_relative 'render_scope'
 require_relative 'container_attribution'
 require_relative 'source_size'
 require_relative 'extraction_identities'
@@ -22,6 +23,8 @@ require_relative 'payload_store'
 require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
+require_relative 'git_enrichment_summary'
+require_relative 'temporal/snapshot_unit_facts'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
 require_relative 'extractors/phlex_extractor'
@@ -59,6 +62,7 @@ require_relative 'extractors/js_module_extractor'
 require_relative 'extractors/doc_extractor'
 require_relative 'extractors/caching_extractor'
 require_relative 'extractors/factory_extractor'
+require_relative 'extractors/test_examples'
 require_relative 'extractors/test_mapping_extractor'
 require_relative 'extractors/test_support_extractor'
 require_relative 'extractors/poro_extractor'
@@ -81,6 +85,9 @@ require_relative 'poro_reconciliation'
 require_relative 'skipped_files'
 require_relative 'source_references/memo_collector'
 require_relative 'doc_references'
+require_relative 'extraction/manifest_facts'
+require_relative 'extraction/git_capture'
+require_relative 'extraction/extractor_timings'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -512,9 +519,11 @@ module Woods
     # @return [Hash] Results keyed by extractor type
     def extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
+      reset_git_capture
       setup_output_directory
       @results = {}
       @extractors = {}
+      @timing_collector = Extraction::ExtractorTimings.new
       profile_phase('source capture') { begin_source_inputs('full') }
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
@@ -708,8 +717,9 @@ module Woods
       affected_ids = profile_phase('blast radius') do
         @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
       end
-      @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids)
-      affected_ids |= render_retarget_ids(change_set) unless @hybrid_discovery_keys.include?(:controllers)
+      scope = render_scope(change_set)
+      @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids, scope: scope)
+      affected_ids |= render_retarget_ids(change_set, scope: scope)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
@@ -861,7 +871,28 @@ module Woods
       raise @publication_error if @publication_error
     end
 
+    # Wall seconds each extractor family spent in the most recent run on this
+    # instance, keyed by extractor key (string), rounded to three decimals.
+    #
+    # A full extraction times every family it ran; an incremental run or a
+    # targeted refresh names only the families it reached. The same hash is
+    # published in the generation manifest as `extractor_timings`, and the
+    # extraction tasks print it sorted (LOS-130).
+    #
+    # @return [Hash{String => Float}] empty before any run
+    def extractor_timings
+      @timing_collector ? @timing_collector.to_h : {}
+    end
+
     private
+
+    # The run's timing collector, created on demand so the incremental choke
+    # point ({#checked_extraction}) never needs a reset to be safe to call.
+    #
+    # @return [Extraction::ExtractorTimings]
+    def timing_collector
+      @timing_collector ||= Extraction::ExtractorTimings.new
+    end
 
     # Whole-run wall time, including unprofiled setup and failed runs. This
     # separate log family must never be added to the individual phase times.
@@ -951,6 +982,7 @@ module Woods
     # @return [void]
     # @raise [Woods::ExtractionError] see {#begin_payload!}
     def prepare_incremental_run(operation: 'incremental')
+      reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
       profile_phase('source capture') { begin_source_inputs(operation) }
@@ -966,10 +998,10 @@ module Woods
       profile_phase('eager load') { safe_eager_load! }
 
       @results = {}
+      @timing_collector = Extraction::ExtractorTimings.new
       @dependents_dirty = Set.new
       @incremental_written = {}
       @retained_units = Set.new
-      @git_recheck = Set.new
       @changed_source_paths = nil
       @reference_additions = nil
       @library_replacement_touched = nil
@@ -994,15 +1026,12 @@ module Woods
     # The manifest is rewritten only when the run actually changed something.
     # `staleness_seconds` is derived from the manifest timestamp, so touching
     # it after a no-op run reports the index as freshly synced when nothing
-    # was re-read — the misleading half of #164 gap 4. The graph write itself
-    # is unconditional, but on a no-op run it is inert, not meaningful: under
-    # payloads it lands in this run's not-yet-published directory, and a
-    # no-op run returns below before {#publish_generation}, so nothing ever
-    # points at what it just wrote — the next run's {PayloadStore#create}
-    # empties that same (unbumped-generation-numbered) directory before
-    # writing into it again. The graph's content is unchanged on a no-op run
-    # regardless (no touched units, no new edges), so nothing is lost; it is
-    # the write itself, not the recomputation, that goes nowhere.
+    # was re-read — the misleading half of #164 gap 4. A staged payload's
+    # graph is written only when this run will publish; no reader sees an
+    # abandoned stage. Retained Git coverage is still backfilled before the
+    # decision, without becoming a new publication trigger. Runs already known
+    # to publish and legacy flat mode keep their graph-before-report/table
+    # write and error order.
     #
     # No `capture_snapshot` here: snapshots must hash the FULL unit set, and
     # incremental runs only hold changed units in memory — capturing would
@@ -1016,7 +1045,13 @@ module Woods
     # @return [void]
     def finalize_incremental_run(touched, reason: 'incremental')
       withdrew_flows = withdraw_disabled_flows unless Woods.configuration.precompute_flows
-      profile_phase('graph write') { write_dependency_graph }
+      # Coverage migration still runs before the publication decision. Only
+      # the disposable staged graph write can wait until a publish is needed.
+      defer_graph_write = !@payload_dir.nil? && touched.empty? && !withdrew_flows
+      profile_phase(defer_graph_write ? 'git coverage backfill' : 'graph write') do
+        backfill_git_source_counts
+        write_dependency_graph unless defer_graph_write
+      end
       # A skip reason can change while no unit does (a namespace-only file
       # turns into a parse error), so a changed report alone warrants a publish.
       # A payload without one predates the report and gains it on its next
@@ -1035,6 +1070,7 @@ module Woods
         return
       end
 
+      profile_phase('graph write') { write_dependency_graph } if defer_graph_write
       profile_phase('graph analysis') { write_incremental_graph_analysis }
       profile_phase('flows') { refresh_incremental_flows(touched) }
       skipped = SkippedFiles.with_flow_failures(tree_skipped, @flow_failures)
@@ -1122,10 +1158,10 @@ module Woods
     # per-call flag because one extractor instance serves several paths, but
     # retain the failed scope for the run so a later success cannot authorize
     # publication. Watch then carries the complete batch forward for retry.
-    def checked_extraction(key, consumer)
+    def checked_extraction(key, consumer, &block)
       (@failed_consumers ||= Set.new).add(key) if SourceInputs::ConsumerErrors.failed?(consumer)
       SourceInputs::ConsumerErrors.reset(consumer)
-      result = yield
+      result = timing_collector.time(key, &block)
       return result unless source_consumer_failed?(key, consumer)
 
       (@failed_consumers ||= Set.new).add(key)
@@ -1568,7 +1604,7 @@ module Woods
 
         extractor = share_source_collector(extractor_class.new)
         @extractors[type] = extractor
-        units = extractor.extract_all
+        units = timing_collector.time(type) { extractor.extract_all }
 
         @results[type] = units
 
@@ -1611,7 +1647,7 @@ module Woods
           extractor = share_source_collector(extractor_class.new)
           results_mutex.synchronize { @extractors[type] = extractor }
 
-          units = extractor.extract_all
+          units = timing_collector.time(type) { extractor.extract_all }
 
           elapsed = Time.current - start_time
           Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
@@ -2154,7 +2190,7 @@ module Woods
       end
 
       # Batch-fetch all git data in minimal subprocess calls
-      git_data = batch_git_data(file_paths)
+      git_data = git_capture.file_facts(file_paths)
 
       # Assign results to units
       @results.each do |type, units|
@@ -2177,11 +2213,12 @@ module Woods
     # the units (an incremental run never holds every unit in memory).
     #
     # @return [void]
-    # build_file_metadata always emits commit_count and change_frequency together
+    # GitCapture#file_facts always emits commit_count and change_frequency together
     # and non-nil, so no nil compaction is needed here (contrast annotate_node_from_git).
     def annotate_graph_with_git_data
       @results.each_value do |units|
         units.each do |unit|
+          annotate_node_git_sources(unit)
           git = unit.metadata[:git]
           next unless git.is_a?(Hash)
 
@@ -2192,6 +2229,36 @@ module Woods
             change_frequency: git[:change_frequency]
           )
         end
+      end
+    end
+
+    # A multi-source unit keeps its Git facts per source file, so its node has
+    # no `commit_count`; record how many sources have facts for coverage.
+    #
+    # @param unit [ExtractedUnit, Hash]
+    # @return [void]
+    def annotate_node_git_sources(unit)
+      return unless SourceContributors.multiple?(unit)
+
+      count = SourceContributors.git_source_count(unit)
+      @dependency_graph.annotate(unit.identifier, type: unit.type, git_sources: count)
+    end
+
+    # Pre-summary writers kept contributor facts only in unit JSON. Migrate
+    # their retained library nodes before publishing known coverage. An
+    # explicit zero distinguishes counted-but-unavailable from not yet read.
+    # Once a verified count is published, subsequent publications need no
+    # extra unit reads. Unreadable metadata remains unknown and can be retried.
+    #
+    # @return [void]
+    def backfill_git_source_counts
+      @dependency_graph.each_node do |identifier, node|
+        next unless node[:type] == :lib && node[:source_paths]&.size.to_i > 1 && !node.key?(:git_sources)
+
+        unit = read_published_unit(identifier, :lib)
+        next unless SourceContributors.multiple?(unit)
+
+        @dependency_graph.annotate(identifier, type: :lib, git_sources: SourceContributors.git_source_count(unit))
       end
     end
 
@@ -2361,10 +2428,7 @@ module Woods
     # @param root [String] Rails.root with a trailing separator
     # @return [Boolean]
     def git_enrichable_path?(path, root)
-      return false unless path&.start_with?(root)
-      return false if path.include?('/vendor/') || path.include?('/node_modules/')
-
-      File.exist?(path)
+      GitEnrichmentSummary.enrichable_path?(path, root)
     end
 
     # Normalize all unit file_paths to relative paths (relative to Rails.root).
@@ -2458,6 +2522,7 @@ module Woods
           SourceLineMap.record(unit, root: root)
           MethodTable.record(unit)
           CallbackSites.record(unit)
+          Extractors::TestExamples.record(unit)
           unit.file_path = normalize_file_path(unit.file_path)
         end
       end
@@ -2476,137 +2541,32 @@ module Woods
       path.start_with?(prefix) ? path.sub(prefix, '') : path
     end
 
-    # Can this run's git calls produce real facts?
+    # This run's Git capture ({Extraction::GitCapture}): the availability
+    # probe, the HEAD every Git fact is read at, and the ledger of units given
+    # facts. Built on first use and dropped at every entry point by
+    # {#reset_git_capture}, so no run sees an earlier run's HEAD.
     #
-    # `rev-parse --git-dir` alone is not enough. Over a linked worktree whose
-    # private git directory is reachable but whose `commondir` is not, it
-    # answers while every ref lookup fails and `git log` exits 0 with nothing
-    # to say. Enrichment then wrote `commit_count: 0` and
-    # `change_frequency: new` onto every unit, which reads exactly like a file
-    # that was never committed, where an absent git directory correctly omits
-    # the keys (B-186). HEAD has to resolve, with complete ancestry (B-189).
-    #
-    # Memoized, so the warning below is emitted at most once per run.
-    #
-    # @return [Boolean]
+    # @return [Extraction::GitCapture]
+    def git_capture
+      @git_capture ||= Extraction::GitCapture.new(
+        root: Rails.root, logger: Rails.logger,
+        recent_limit: Woods.configuration&.git_recent_commits || GitHistory::DEFAULT_RECENT_LIMIT
+      )
+    end
+
+    # @return [void]
+    def reset_git_capture
+      @git_capture = nil
+    end
+
+    # @return [Boolean] whether this run can read Git facts at all
     def git_available?
-      return @git_available if defined?(@git_available)
-
-      _output, error, status = Open3.capture3(*git_argv('rev-parse', 'HEAD'))
-      unless status.success?
-        warn_unresolvable_git(error)
-        return @git_available = false
-      end
-
-      @git_available = complete_git_history?
-    rescue Errno::ENOENT
-      warn_missing_git_executable
-      @git_available = false
-    rescue StandardError
-      @git_available = false
+      git_capture.available?
     end
 
-    # An explicit Git directory still requests history when .git is not mounted
-    # at Rails.root. Ordinary source archives remain a supported, quiet path.
-    #
-    # @return [void]
-    def warn_missing_git_executable
-      configured = [GitCommand::OVERRIDE_KEY, 'GIT_DIR'].any? { |key| !ENV[key].to_s.empty? }
-      return unless configured || File.exist?(File.join(Rails.root.to_s, '.git'))
-
-      Rails.logger.warn(
-        '[Woods] Git history unavailable: git executable was not found in PATH. ' \
-        'Extraction continues without per-unit Git metadata. Install Git in the extraction environment ' \
-        'and run a full extraction to refresh Git metadata.'
-      )
-    end
-
-    # A shallow HEAD resolves but represents an incomplete ancestry. Do not
-    # turn that boundary into apparent one-commit/new-file churn facts.
-    def complete_git_history?
-      output, _error, status = Open3.capture3(*git_argv('rev-parse', '--is-shallow-repository'))
-      return true if status.success? && output.strip == 'false'
-
-      shallow = status.success? && output.strip == 'true'
-      reason = shallow ? 'shallow repository' : 'repository depth could not be verified'
-      Rails.logger.warn(
-        "[Woods] Git enrichment omitted: #{reason}. Fetch full history with git fetch --unshallow " \
-        '(or actions/checkout fetch-depth: 0), then run full extraction to refresh git metadata.'
-      )
-      false
-    end
-
-    # Say once why no unit will carry git metadata, but only when there is a
-    # working tree to explain. No `.git` at the root is the ordinary source
-    # tarball or `COPY`-without-`.git` case, and it is not a fault.
-    #
-    # @param error [String] git's own stderr
-    # @return [void]
-    def warn_unresolvable_git(error)
-      return unless File.exist?(File.join(Rails.root.to_s, '.git'))
-
-      cause = error.to_s.lines.first.to_s.strip
-      Rails.logger.warn(
-        '[Woods] git cannot resolve HEAD for this working tree, so no unit will carry git ' \
-        "metadata: #{cause}. For a linked worktree, mount the complete shared .git directory " \
-        'at its original path, or set WOODS_GIT_DIR to /mounted-common/worktrees/<id> within ' \
-        'the relocated complete layout. Derive <id> from the worktree Git metadata, not its branch name; ' \
-        "selecting /mounted-common itself uses the primary checkout's HEAD."
-      )
-    end
-
-    # The git command line every enrichment call runs.
-    #
-    # `-C <root>` keeps the result independent of the process working
-    # directory. `WOODS_GIT_DIR` wins when set and selects that git directory's
-    # HEAD. A relocated linked worktree needs its worktree-specific directory
-    # inside the complete shared Git layout (B-181).
-    #
-    # @param args [Array<String>] git arguments
-    # @return [Array<String>] full argv
-    def git_argv(*args)
-      GitCommand.argv(Rails.root, *args)
-    end
-
-    # Safe git command execution — no shell interpolation
-    #
-    # @param args [Array<String>] Git command arguments
-    # @return [String] Command output (empty string on failure)
-    def run_git(*args)
-      output, _error, status = Open3.capture3(*git_argv(*args))
-      status.success? ? output.strip : ''
-    rescue StandardError
-      ''
-    end
-
-    # One HEAD history walk, independent of requested-path grouping. See
-    # GitHistory for explicit merge semantics and binary record framing.
-    # @param file_paths [Array<String>] absolute file paths
-    # @return [Hash{String => Hash}] keyed by Rails.root-relative path
-    def batch_git_data(file_paths)
-      return {} if file_paths.empty?
-
-      relative_paths = file_paths.map { |path| normalize_file_path(path) }.uniq
-      recent_after = Time.current - 90.days
-      raw = GitHistory.new(root: Rails.root, logger: Rails.logger, recent_limit: recent_commit_limit)
-                      .read(relative_paths, recent_after: recent_after)
-      return {} unless raw
-
-      raw.transform_values { |data| build_file_metadata(data, recent_after.iso8601) }
-    end
-
-    # @return [Integer] `config.git_recent_commits`, or the default when unconfigured
-    def recent_commit_limit
-      Woods.configuration&.git_recent_commits || GitHistory::DEFAULT_RECENT_LIMIT
-    end
-
-    # Write, keep or withdraw this generation's `git_commits.json` (W-3).
-    #
-    # The table is a pure function of HEAD, the indexed path set and the
-    # bounds ({GitCommitTable}). A full run always walks; an incremental run
-    # keeps the seeded table when it records the same inputs and rebuilds the
-    # whole table otherwise, so both modes publish the same bytes. Without a
-    # readable history the table is withdrawn rather than published empty.
+    # Write, keep or withdraw this generation's `git_commits.json` (W-3), as
+    # {Extraction::GitCapture#commit_table} decides. Without a readable
+    # history the table is withdrawn rather than published empty.
     #
     # Runs after the graph is final, because the indexed path set is read
     # off it.
@@ -2616,7 +2576,7 @@ module Woods
     #   table changed, nil when it is unchanged
     def refresh_commit_table(full:)
       published = published_commit_table
-      table = commit_table_for_run(published, full: full)
+      table = git_capture.commit_table(published, graph: @dependency_graph, full: full)
       return nil if table == published
 
       if table
@@ -2635,76 +2595,6 @@ module Woods
     rescue JSON::ParserError, SystemCallError => e
       Rails.logger.warn "[Woods] Rebuilding #{GitCommitTable::FILENAME}: the seeded copy is unreadable (#{e.class})"
       nil
-    end
-
-    # @param published [Hash, nil]
-    # @param full [Boolean]
-    # @return [Hash, nil] the table this run publishes, nil for none
-    def commit_table_for_run(published, full:)
-      return nil unless git_available?
-
-      head = run_git('rev-parse', '--verify', 'HEAD^{commit}')
-      return nil unless head.match?(GitLog::SHA)
-
-      paths = commit_table_paths
-      builder = GitCommitTable.new(root: Rails.root, logger: Rails.logger, settings: GitCommitTable.settings)
-      return published if !full && GitCommitTable.current?(published, builder.key(paths, head: head))
-
-      builder.build(paths, head: head)
-    end
-
-    # Application-owned paths of every indexed unit, by the same rule
-    # per-unit git enrichment uses ({#git_enrichable_path?}), read off the
-    # final graph so full and incremental runs see one set.
-    #
-    # @return [Array<String>] sorted root-relative paths
-    def commit_table_paths
-      root = "#{Rails.root}/"
-      framework = %i[rails_source gem_source]
-      @dependency_graph.registered_paths.filter_map do |registered|
-        path = File.expand_path(registered.to_s, Rails.root.to_s)
-        next unless git_enrichable_path?(path, root)
-        next if @dependency_graph.units_for_path(registered).all? { |_, type| framework.include?(type) }
-
-        normalize_file_path(path)
-      end.uniq.sort
-    end
-
-    # Classify how frequently a file changes based on commit counts.
-    def classify_change_frequency(total_count, recent_count)
-      if total_count <= 2
-        :new
-      elsif recent_count >= 10
-        :hot
-      elsif recent_count >= 3
-        :active
-      elsif recent_count >= 1
-        :stable
-      else
-        :dormant
-      end
-    end
-
-    # Build final metadata hash from raw commit data.
-    def build_file_metadata(data, ninety_days_ago)
-      all_commits = data[:commits] || []
-      contributor_counts = data[:contributors] || {}
-      recent_count = data.fetch(:recent_count) { all_commits.count { |c| c[:date] && c[:date] > ninety_days_ago } }
-      total_count = data.fetch(:commit_count, all_commits.size)
-
-      {
-        last_modified: data[:last_modified],
-        last_author: data[:last_author],
-        commit_count: total_count,
-        contributors: contributor_counts
-                      .sort_by { |_, count| -count }
-                      .first(5)
-                      .map { |name, count| { name: name, commits: count } },
-        recent_commits: all_commits.first(recent_commit_limit).map do |c|
-          { sha: c[:sha]&.first(8), message: c[:message], date: c[:date], author: c[:author] }
-        end,
-        change_frequency: classify_change_frequency(total_count, recent_count)
-      }
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2882,15 +2772,11 @@ module Woods
     end
 
     def write_manifest(incremental: false)
-      # Worktree-aware git provenance. In a linked worktree +.git+ is a file
-      # pointing at the real git dir; when that dir is unreachable (e.g. an
-      # unmounted host path inside a container) this resolves to "unknown"
-      # rather than a stale GIT_BRANCH/GIT_SHA build arg. See GitProvenance (#137).
-      provenance = GitProvenance.new(root: Rails.root).to_h
+      # Preserve the run capture and the existing fallback acquisition order.
+      provenance = git_capture.provenance || GitProvenance.new(root: Rails.root).to_h
 
-      # Incremental runs never populate @results — deriving counts from
-      # memory would clobber a good manifest with zeros. Recompute from the
-      # persisted per-type _index.json files instead.
+      # Incremental results are partial; counts come from staged per-type indexes,
+      # while configuration remains the published baseline's fingerprint.
       counts, total_chunks =
         if incremental
           persisted_counts
@@ -2899,34 +2785,23 @@ module Woods
            @results.sum { |_, units| units.sum { |u| u.chunks.size } }]
         end
 
-      manifest = {
-        extracted_at: Time.current.iso8601,
-        woods_version: Woods::VERSION,
-        rails_version: Rails.version,
-        ruby_version: RUBY_VERSION,
-
-        # Counts by type
-        counts: counts,
-
-        # Total stats
-        total_units: counts.values.sum,
-        total_chunks: total_chunks,
-
-        # Git provenance (branch/sha), or "unknown" when unresolvable
-        git_sha: provenance[:git_sha],
-        git_branch: provenance[:git_branch],
-
-        # For change detection
-        gemfile_lock_sha: gemfile_lock_sha,
-        schema_sha: schema_sha
-      }
-
-      # An incremental run carries the baseline's digests: it never certifies
-      # a configuration no full extraction ran with.
+      extracted_at = Time.current.iso8601
+      woods_version = Woods::VERSION
+      rails_version = Rails.version
+      ruby_version = RUBY_VERSION
+      lock_digest = gemfile_lock_sha
+      schema_digest = schema_sha
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
-      manifest[:extraction_config] = extraction_config if extraction_config
+      enrichment = git_capture.enrichment_summary(graph: @dependency_graph, full: !incremental)
+      filter_available = GitSourceFilter.new(root: Rails.root).available?
 
-      manifest[:metadata] = { git_filter: 'unavailable' } unless GitSourceFilter.new(root: Rails.root).available?
+      manifest = Extraction::ManifestFacts.build(
+        counts: counts, total_chunks: total_chunks, provenance: provenance,
+        extraction_config: extraction_config, git_enrichment: enrichment, git_filter_available: filter_available,
+        extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
+        ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
+        extractor_timings: extractor_timings
+      )
 
       AtomicFile.write(
         payload_dir.join('manifest.json'),
@@ -3010,17 +2885,7 @@ module Woods
       store = build_snapshot_store
       return unless store
 
-      unit_hashes = @results.values.flat_map do |units|
-        units.map do |unit|
-          {
-            'identifier' => unit.identifier,
-            'type' => unit.type.to_s,
-            'source_hash' => Digest::SHA256.hexdigest(unit.source_code.to_s),
-            'metadata_hash' => Digest::SHA256.hexdigest(unit.metadata.to_json),
-            'dependencies_hash' => Digest::SHA256.hexdigest(unit.dependencies.to_json)
-          }
-        end
-      end
+      unit_hashes = Temporal::SnapshotUnitFacts.build(unit_groups: @results.values)
 
       store.capture(manifest, unit_hashes)
       Rails.logger.info "[Woods] Snapshot captured for #{manifest['git_sha'][0..7]}"
@@ -3327,40 +3192,88 @@ module Woods
     # recorded graph edges (for example, queue_as Settings::QUEUE). A Ruby edit
     # therefore refreshes both complete hybrid inventories after Rails reload.
     # Non-Ruby batches retain the narrower pre-change graph selection.
-    def hybrid_discovery_keys(change_set, affected_ids)
+    #
+    # Component edges are resolved against the loaded constant tables, so they
+    # re-run with a Ruby edit only when {RenderScope} finds the edit touched a
+    # constant they resolve (or cannot read the edit).
+    def hybrid_discovery_keys(change_set, affected_ids, scope: render_scope(change_set))
       paths = change_set.absolute_paths
       keys = if paths.any? { |path| path.end_with?('.rb') }
-               (HYBRID_DISCOVERY_EXTRACTORS + RUNTIME_RESOLVED_EXTRACTORS).to_set
+               HYBRID_DISCOVERY_EXTRACTORS.to_set.merge(scope.components? ? RUNTIME_RESOLVED_EXTRACTORS : [])
              else
                affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
                            .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
                            .intersection(HYBRID_DISCOVERY_EXTRACTORS).to_set
              end
       keys.add(:view_components) if paths.any? { |path| sidecar_template?(path) }
-      # A controller's render edges are resolved the same way, but every
-      # controller re-running on every Ruby edit would cost more than the
-      # bounded blast radius saves. Controllers re-run when a file that can
-      # define a component changes; a component defined outside the component
-      # directories, or an alias defined elsewhere, retargets a controller's
-      # edge when the controller file changes or on a full extraction.
-      keys.add(:controllers) if paths.any? { |path| Extractors::ComponentDiscovery.component_source_path?(path) }
       keys
     end
 
-    # A controller's render that named no component can only gain a target when
-    # a component appears, and a component can be defined in any Ruby file. The
-    # controllers that still hold an unresolved render are few, so any Ruby edit
-    # re-extracts just those, rather than every controller as a component
-    # directory edit does.
-    #
     # @param change_set [ChangeSet]
-    # @return [Array<String>] controller identifiers with an unresolved render
-    def render_retarget_ids(change_set)
+    # @return [RenderScope]
+    def render_scope(change_set)
+      RenderScope.new(
+        change_set: change_set, graph: @dependency_graph,
+        read_unit: ->(identifier, type) { read_published_unit(identifier, type) },
+        units_of: ->(types) { types.flat_map { |type| published_units_of(type) } },
+        ancestor_names: ->(types) { family_ancestor_names(types) }
+      )
+    end
+
+    # @return [Hash, nil] the published unit, nil when absent or unreadable
+    def read_published_unit(identifier, type)
+      key = TYPE_TO_EXTRACTOR_KEY[type]
+      return nil unless key
+
+      path = payload_dir.join(key.to_s, collision_safe_filename(identifier))
+      File.exist?(path) ? JSON.parse(AtomicFile.read(path)) : nil
+    rescue JSON::ParserError, SystemCallError, EncodingError
+      nil
+    end
+
+    # @return [Array<Hash>] every published unit of a type
+    # @raise [JSON::ParserError, SystemCallError] when one cannot be read
+    def published_units_of(type)
+      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(type).to_s)
+      return [] unless directory.directory?
+
+      directory.children.sort.filter_map do |file|
+        next unless file.extname == '.json' && file.basename.to_s != '_index.json'
+
+        data = JSON.parse(AtomicFile.read(file))
+        data if data['type'].to_s == type.to_s
+      end
+    end
+
+    # Names of the ancestors of the classes the families discover, since a
+    # constant resolves through them.
+    def family_ancestor_names(types)
+      types.flat_map do |type|
+        extractor = extractor_for(TYPE_TO_EXTRACTOR_KEY.fetch(type))
+        next [] unless extractor.respond_to?(:discoverable_classes)
+
+        extractor.discoverable_classes.flat_map { |klass| klass.ancestors.filter_map(&:name) }
+      end.uniq
+    end
+
+    # Keep unresolved renders eligible on any Ruby edit, and select resolved
+    # renders per controller using touched constants and qualified ancestors.
+    # @param change_set [ChangeSet]
+    # @return [Array<String>] controller identifiers needing render resolution
+    def render_retarget_ids(change_set, scope: render_scope(change_set))
       return [] unless change_set.absolute_paths.any? { |path| path.end_with?('.rb') }
 
-      @dependency_graph.units_of_type(:controller).select do |id|
+      unresolved = @dependency_graph.units_of_type(:controller).select do |id|
         @dependency_graph.node(id, type: :controller)&.dig(:unresolved_render_count).to_i.positive?
       end
+      unresolved | scope.controller_ids(ancestors_of: method(:controller_ancestor_names))
+    end
+
+    # @param identifier [String] controller constant name
+    # @return [Array<String>] qualified names in its current lookup ancestry
+    def controller_ancestor_names(identifier)
+      klass = identifier.safe_constantize
+      klass ? klass.ancestors.filter_map(&:name) : [identifier]
     end
 
     # A view component's render edges are read from its sidecar templates too,
@@ -3646,12 +3559,14 @@ module Woods
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
 
-      units = new_classes.filter_map do |klass|
-        extractor_for(key).public_send(spec[:method], klass)
-      rescue StandardError => e
-        @source_inputs&.unverified("extractor:#{key}")
-        Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
-        nil
+      units = timing_collector.time(key) do
+        new_classes.filter_map do |klass|
+          extractor_for(key).public_send(spec[:method], klass)
+        rescue StandardError => e
+          @source_inputs&.unverified("extractor:#{key}")
+          Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
+          nil
+        end
       end
 
       source_consumer_failed?(key)
@@ -3781,7 +3696,8 @@ module Woods
       return Set.new if keys.empty?
 
       keys += ROUTE_CONSUMER_EXTRACTORS if keys.include?(:routes)
-      keys += TABLE_CONSUMER_EXTRACTORS if keys.include?(:database_tables)
+      table_triggered = keys.include?(:database_tables)
+      keys = table_rerun_keys(keys, change_set) if table_triggered
       if keys.include?(:js_modules) && Extractors::JsModuleRegistry.names_changed?(@published_js_names)
         keys += JS_NAME_CONSUMER_EXTRACTORS
       end
@@ -3795,8 +3711,50 @@ module Woods
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
       end
-      touched.merge(reconcile_model_table_edges(affected_types)) if keys.include?(:database_tables)
+      touched.merge(reconcile_model_table_edges(affected_types)) if table_triggered
       touched
+    end
+
+    # Which of the table family a trigger re-runs.
+    #
+    # A schema dump or migration can change anything, so the whole family
+    # re-runs. A model edit can only change which tables exist (a `connects_to`
+    # moves every identifier) and which models own them, and the live catalog
+    # says whether it did: when it equals what the published table units
+    # record, the table units and everything resolving names through the
+    # catalog are what a full extraction would write again, and nothing re-runs.
+    # Declared consumers read table identifiers only, never owners, so an
+    # ownership move alone leaves them out.
+    #
+    # @param keys [Set<Symbol>] triggered extractor keys, including :database_tables
+    # @param change_set [ChangeSet]
+    # @return [Set<Symbol>] the keys to re-run
+    def table_rerun_keys(keys, change_set)
+      table_family = keys + TABLE_CONSUMER_EXTRACTORS
+      schema = Extractors::DatabaseTableExtractor
+      return table_family if change_set.relative_paths.any? { |path| schema.schema_trigger_path?(path) }
+
+      published = published_table_ownership
+      return table_family unless published
+
+      current = Extractors::TableCatalog.from_runtime.ownership_facts
+      return keys - [:database_tables] if current == published
+      return table_family if current.keys.sort != published.keys.sort
+
+      keys + (TABLE_CONSUMER_EXTRACTORS - [:external_consumers])
+    rescue StandardError => e
+      # An unreadable catalog or index re-runs everything, as before.
+      Rails.logger.warn "[Woods] Table ownership comparison failed (#{e.class}): #{e.message}"
+      table_family
+    end
+
+    # @return [Hash{String => Array<String>}, nil] table identifier => owning
+    #   models as the published table units record them; nil when unreadable
+    def published_table_ownership
+      units = published_table_units
+      return nil unless units
+
+      units.to_h { |unit| [unit['identifier'], Array(unit.dig('metadata', 'models'))] }
     end
 
     # A model edit re-runs the table extractor for ownership: which model owns
@@ -3813,15 +3771,22 @@ module Woods
       extractor = extractor_for(:database_tables)
       return unless extractor.is_a?(Extractors::DatabaseTableExtractor)
 
-      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
-      return unless directory.directory?
+      units = published_table_units
+      return unless units
 
-      units = directory.children.sort.filter_map do |file|
+      extractor.schema_cache = Extractors::DatabaseTableExtractor.schema_cache_from(units)
+    end
+
+    # @return [Array<Hash>, nil] the published table units, string-keyed; nil
+    #   when there are none or one is unreadable
+    def published_table_units
+      directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
+      return nil unless directory.directory?
+
+      directory.children.sort.filter_map do |file|
         JSON.parse(AtomicFile.read(file)) if file.extname == '.json' && file.basename.to_s != '_index.json'
       end
-      extractor.schema_cache = Extractors::DatabaseTableExtractor.schema_cache_from(units)
     rescue JSON::ParserError, SystemCallError, EncodingError
-      # An unreadable published unit leaves the cache unset: every table is read live.
       nil
     end
 
@@ -4094,11 +4059,25 @@ module Woods
         @dependency_graph.units_for_path(path).each do |identifier, type|
           next if !class_based && convention_path_unit?(type)
           next if aliased_document_retained?(identifier, type, path, removed, affected_types)
+          next if sidecar_of_surviving_component?(identifier, type, path)
 
           removed.add(identifier) if remove_unit(identifier, affected_types, type: type)
         end
         @source_inputs&.consume_deleted(path)
       end
+    end
+
+    # A deleted sidecar template is not the end of its view component: the
+    # component's Ruby file still defines it. The template is registered under
+    # the component, so a path-keyed prune would otherwise find the component.
+    # Hybrid discovery re-extracts the component without the template.
+    #
+    # @return [Boolean]
+    def sidecar_of_surviving_component?(identifier, type, vanished)
+      return false unless type == :view_component
+
+      primary = @dependency_graph.node(identifier, type: type)&.dig(:file_path)
+      !primary.nil? && primary != vanished && File.exist?(primary)
     end
 
     # Does this unit's `file_path` name a *convention* that need not exist?
@@ -4195,6 +4174,7 @@ module Woods
         SourceLineMap.record(unit, root: Rails.root.to_s)
         MethodTable.record(unit)
         CallbackSites.record(unit)
+        Extractors::TestExamples.record(unit)
         next if unchanged_registered_unit?(type_dir, unit)
 
         affected_types&.add(extractor_key)
@@ -4211,7 +4191,7 @@ module Woods
         mark_dependents_dirty(unit.identifier)
 
         unit.file_path = normalize_file_path(unit.file_path)
-        # Keyed by relative path, which is how batch_git_data keys its result.
+        # Keyed by relative path, which is how GitCapture#file_facts keys its result.
         (@incremental_written ||= {})[unit.identifier] = unit.file_path
 
         write_unit_file(type_dir.join(collision_safe_filename(unit.identifier)), unit)
@@ -4272,7 +4252,7 @@ module Woods
       changed = @changed_source_paths
       return unless changed.nil? || SourceContributors.paths(unit).any? { |path| changed.include?(path.to_s) }
 
-      (@git_recheck ||= Set.new).add(unit.identifier)
+      git_capture.request_recheck(unit.identifier)
     end
 
     # GraphQL kinds share a payload filename. Validate retained source ownership
@@ -4380,7 +4360,7 @@ module Woods
     # @return [Set<String>] retained identifiers whose Git facts were rewritten
     def finalize_incremental_unit_json(affected_types)
       dependents_dirty = @dependents_dirty || Set.new
-      rechecked = (@git_recheck || Set.new) - (@incremental_written || {}).keys
+      rechecked = git_capture.rechecks - (@incremental_written || {}).keys
       git_dirty = (@incremental_written || {}).keys.to_set | rechecked
       git_data = profile_phase('git enrichment') { incremental_git_data(git_dirty.to_a) }
 
@@ -4403,7 +4383,7 @@ module Woods
     # @param affected_types [Set<Symbol>]
     # @param refresh_dependents [Boolean]
     # @param git_data [Hash{String => Hash}, nil] batch git data keyed by
-    #   relative path (per {#batch_git_data}), or nil when this identifier
+    #   relative path (per {Extraction::GitCapture#file_facts}), or nil when this identifier
     #   isn't git-dirty this run
     # @return [void]
     def rewrite_unit_json(identifier, affected_types, refresh_dependents:, git_data:)
@@ -4464,12 +4444,16 @@ module Woods
       end
 
       git = git_data && git_for_type(identifier, type, git_data)
-      if git_data && SourceContributors.multiple?(data)
+      if git_data && !git_data.empty? && SourceContributors.multiple?(data)
         SourceContributors.annotate_git(data, git_data)
-        @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil)
+        sources = SourceContributors.git_source_count(data)
+        @dependency_graph.annotate(identifier, type: type, commit_count: nil, change_frequency: nil,
+                                               git_sources: sources)
+        git_capture.note_refreshed(identifier, type) if sources.positive?
       elsif git
         (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
         annotate_node_from_git(identifier, type, git)
+        git_capture.note_refreshed(identifier, type)
       end
 
       return false if JSON.generate(data) == before
@@ -4497,8 +4481,9 @@ module Woods
     end
 
     # Mirror of {#annotate_graph_with_git_data} for one incrementally
-    # patched unit. Git data arrives symbol-keyed from {#batch_git_data} and
-    # string-keyed when a caller hands in parsed JSON; both are accepted.
+    # patched unit. Git data arrives symbol-keyed from
+    # {Extraction::GitCapture#file_facts} and string-keyed when a caller hands
+    # in parsed JSON; both are accepted.
     #
     # Unlike {#annotate_graph_with_git_data}, a missing key is never forwarded
     # as an explicit `nil`: {DependencyGraph#annotate} treats `nil` as
@@ -4521,7 +4506,7 @@ module Woods
 
     # Batch-fetch git metadata for the units written by this run, in a single
     # history walk, keyed by Rails.root-relative path the way
-    # {#batch_git_data} returns it.
+    # {Extraction::GitCapture#file_facts} returns it.
     #
     # @param identifiers [Array<String>]
     # @return [Hash{String => Hash}]
@@ -4537,7 +4522,7 @@ module Woods
         end
       end
 
-      batch_git_data(paths.uniq)
+      git_capture.file_facts(paths.uniq)
     rescue StandardError => e
       Rails.logger.warn "[Woods] Incremental git enrichment failed: #{e.message}"
       {}

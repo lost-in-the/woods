@@ -1,0 +1,1 @@
+- Preserve chained receiver calls and nested argument calls in the alternate AST parser adapter, including calls that pass a block.

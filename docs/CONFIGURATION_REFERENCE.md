@@ -53,9 +53,9 @@ end
 
 ### CI-only extraction (skip framework sources)
 
-`config.extractors` cannot select a subset of extractors, it's accepted for
-forward compatibility only (see [Extractors](#extractors) below). To speed up
-CI, skip the one extractor that's actually optional instead:
+`config.extractors` is deprecated and cannot select a subset of extractors
+(see [Extractors](#extractors) below). To speed up CI, skip the one extractor
+that's actually optional instead:
 
 ```ruby
 Woods.configure do |config|
@@ -108,7 +108,7 @@ Columns:
 | Option | Type | Default | Role | Description |
 |--------|------|---------|------|-------------|
 | `output_dir` | Pathname/String | `Rails.root.join('tmp/woods')` | user-settable | Directory where extracted data is written |
-| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | accepted, not implemented | Does not select which extractors run. See [Extractors](#extractors) below. |
+| `extractors` | Array&lt;Symbol&gt; | `[:models, :controllers, :services, ...]` | deprecated, inert | Does not select which extractors run. Assigning it warns once; removed in Woods 3.0. See [Extractors](#extractors) below. |
 | `pretty_json` | Boolean | `true` | user-settable | Format extracted JSON with indentation |
 | `retrieval_mode` | Symbol | `:semantic` | user-settable | `:semantic` uses configured embeddings; explicit `:lexical` ranks published text without a provider/vector store. See [retrieval modes](RETRIEVAL_GUIDE.md#embedding-free-lexical-retrieval). |
 | `max_context_tokens` | Integer | `8000` | user-settable | Default context-assembly token budget captured when a retriever is built; per-call budget overrides it |
@@ -700,21 +700,26 @@ Priority levels (`:low`, `:medium`, `:high`) affect retrieval ranking when frame
 
 ## Extractors
 
-`config.extractors` accepts an array of symbols but **extractor selection is
-not implemented**. All 42 extractors always run during a full extraction,
-regardless of what this array holds, nothing in the extraction path reads
-it (`Woods::Extractor::EXTRACTORS` is a frozen constant, not derived from
-config). Setting `extractors` to anything other than its default value emits
-a warning:
+`config.extractors` is **deprecated** and has no effect. All 42 extractors
+always run during a full extraction, regardless of what this array holds.
+Nothing in the extraction path reads it (`Woods::Extractor::EXTRACTORS` is a
+frozen constant, not derived from config). Full, incremental, refresh and watch
+runs cover the same extractors whatever the option holds.
+
+- Reading and assigning it keep working until it is removed in Woods 3.0.
+- An explicit assignment, default list included, prints one deprecation
+  warning per process. Woods' own defaults and a normal boot never do.
+- Remove the line from your initializer. Nothing replaces it, and there is no
+  plan for extractor selection.
 
 ```ruby
 config.extractors = %i[models controllers services]
-# => warns: "config.extractors is accepted for forward compatibility but
-#    extractor selection is not implemented; all extractors run."
+# => [woods] DEPRECATED: config.extractors is deprecated and has no effect: every
+#    extractor always runs. Remove the assignment from your Woods initializer;
+#    the option will be removed in Woods 3.0.
 ```
 
-The array exists for forward compatibility with a future selection knob.
-Leave it at its default. The full list of what always runs:
+The full list of what always runs:
 
 | Symbol | Extractor | What it adds |
 |--------|-----------|-------------|
@@ -1142,14 +1147,20 @@ Defaults:
 
 | Caller types | Target types |
 |--------------|--------------|
-| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
-| `component`, `view_component` | all except `component` and `view_component` |
+| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `component`, `view_component`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
 | `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query` | all except the four GraphQL types |
 
-Components and GraphQL units skip their own family because `render`, `slot`,
-`type_reference` and `field_resolver` edges already state those relationships.
-A design-system component rendered from most views would otherwise add one
-duplicate edge per view.
+GraphQL units skip their own family because `type_reference` and
+`field_resolver` edges already state those relationships.
+
+Components reference components (LOS-123). A component that a caller renders
+or declares as a slot already has a `render` or `slot` edge, and the pass adds
+no `code_reference` beside it, from any caller type. A component the caller
+only constructs and passes on (`Wrapper.new(primary: Kit::Button.new)`),
+compares with `is_a?` or hands over as a constant gains the `code_reference`
+edge. Every occurrence stays a `metadata.references` span either way. Before
+this default, those callers had no edge at all; indexes written under the
+earlier default need one full extraction (see below).
 
 ```ruby
 Woods.configure do |config|
@@ -1512,7 +1523,15 @@ A source archive without a repository remains quiet.
 
 Full and incremental extraction use one streamed `HEAD` history walk, restricted
 to the last 365 days by git's `--since` traversal. Only requested app-owned paths
-are retained. Commit counts and contributors describe **HEAD-reachable touched-path
+are retained. Woods resolves a commit SHA before the walk and uses it for that
+run's history, commit table, manifest `git_sha`, and `git_enrichment.head_sha`.
+The manifest branch is captured with that revision. A failed capture remains
+unavailable for that run, even if Git access recovers before publication.
+Later commits are picked up on the next run, including when an extractor
+instance is reused. Retained unit facts remain identified as retained rather
+than newly verified at that SHA.
+
+Commit counts and contributors describe **HEAD-reachable touched-path
 events**, independent of which other paths are requested:
 
 - A root commit compares with an empty tree; a normal commit compares with its parent.

@@ -70,7 +70,7 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Maintainer material
 
-Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md) and [generated self-analysis diagrams](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis); these maintainer-only paths are not packaged with the gem.
+Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md) and [self-analysis instructions and historical audits](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis); these maintainer-only paths are not packaged with the gem.
 
 [GitHub issues](https://github.com/lost-in-the/woods/issues) track active work
 and pending decisions. The old local backlog is retired; historical records,

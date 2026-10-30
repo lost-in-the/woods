@@ -12,6 +12,7 @@ require_relative '../atomic_file'
 require_relative '../deprecation'
 require_relative '../generation'
 require_relative '../generation_pins'
+require_relative '../git_enrichment_summary'
 require_relative '../git_provenance'
 require_relative '../resilience/incremental_readiness'
 require_relative '../tasks'
@@ -36,6 +37,7 @@ require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'traversal_response'
 require_relative 'version_aware_tool_dispatch'
+require_relative 'worktree_routing'
 
 module Woods
   module MCP
@@ -103,15 +105,19 @@ module Woods
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
                   bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
-          reader = IndexReader.new(index_dir)
-          retriever.bind_reader(reader) if retriever.respond_to?(:bind_reader)
-          reader.warmup! if warmup
+          launch_reader = IndexReader.new(index_dir)
+          retriever.bind_reader(launch_reader) if retriever.respond_to?(:bind_reader)
+          launch_reader.warmup! if warmup
           # Warm the lexical corpus against the reader just bound, once, so the
           # first codebase_retrieve does not build it (F17). bind_reader keeps
           # clearing any earlier snapshot: a corpus warmed against another
           # reader, or mutated through the public metadata store, never
           # survives a bind.
           retriever.warmup! if warmup && retriever.respond_to?(:warmup!)
+          # Read tools close over this stand-in. It forwards to the launch reader
+          # unless the call named a worktree `root` (see WorktreeRouting).
+          router = WorktreeRouting::Router.new(reader: launch_reader, index_dir: index_dir)
+          reader = WorktreeRouting::RoutedReader.new(router)
           config = Woods.configuration
           format = response_format || (config.respond_to?(:context_format) ? config.context_format : nil) || :markdown
           renderer = ToolResponseRenderer.for(format)
@@ -200,26 +206,28 @@ module Woods
           define_pagerank_tool(server, reader, respond, renderer)
           define_framework_tool(server, reader, respond, renderer)
           define_recent_changes_tool(server, reader, respond, renderer)
-          define_reload_tool(server, reader, respond, respond_err, retriever_reloader, bootstrap_state)
+          define_reload_tool(server, launch_reader, respond, respond_err, retriever_reloader, bootstrap_state)
           define_retrieve_tool(server, retriever, respond, respond_err, bootstrap_state)
           define_trace_flow_tool(server, reader, respond, respond_err, renderer)
-          define_diagram_tool(server, reader, index_dir, respond, respond_err)
+          define_diagram_tool(server, reader, router, respond, respond_err)
           # Conditionally register collaborator-dependent tools. Historically
           # all 15 stubs were registered unconditionally and returned
           # isError: true when the wiring was missing — that added token
           # noise to every LLM turn's tool catalog and invited the model to
           # try tools guaranteed to fail. Only register when the collaborator
           # is wired, so tools/list reflects what the server can actually do.
-          define_session_trace_tool(server, reader, respond, respond_err) if session_tracer_wired?
+          define_session_trace_tool(server, launch_reader, respond, respond_err) if session_tracer_wired?
           define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator
           define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
           define_change_impact_tool(server, index_dir, respond, respond_err) if snapshot_store
-          define_notion_sync_tool(server, reader, index_dir, respond, respond_err) if notion_wired?
-          define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
-          register_resource_handler(server, reader)
+          define_notion_sync_tool(server, launch_reader, index_dir, respond, respond_err) if notion_wired?
+          define_woods_status_tool(server, reader, retriever, router, bootstrap_state, respond)
+          register_resource_handler(server, launch_reader)
+          WorktreeRouting.declare_root!(server)
           ToolContract.apply!(server)
-          IndexReaderPinning.install(server, reader: reader)
+          IndexReaderPinning.install(server, reader: launch_reader)
+          WorktreeRouting.install(server, router: router)
           server.instructions = InitializationGuidance.for(server.tools.keys)
 
           # Last, after every conditional registration above — the whole point is
@@ -2011,13 +2019,13 @@ module Woods
         end
 
         # Always registered: Mermaid for one unit from the published index (woods#826).
-        def define_diagram_tool(server, reader, index_dir, respond, respond_err)
+        def define_diagram_tool(server, reader, router, respond, respond_err)
           server.define_tool(
             name: 'diagram',
             description: DiagramTool::DESCRIPTION,
             input_schema: DiagramTool.schema
           ) do |server_context:, **arguments|
-            result = DiagramTool.call(reader, index_dir, **arguments)
+            result = DiagramTool.call(reader, router.current_index_dir, **arguments)
             data = DiagramTool.data(result)
             next respond.call(result.text, data: data) if result.drawn?
 
@@ -2275,13 +2283,15 @@ module Woods
           ]
         end
 
-        def define_woods_status_tool(server, reader, retriever, index_dir, bootstrap_state, respond)
+        def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, respond)
           server.define_tool(
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / not_configured / failed + reason), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
+                         'index.git_enrichment says whether Git facts are trustworthy: state (available, degraded, ' \
+                         'unavailable, unknown), a stable reason, coverage by unit and refreshed versus retained facts. ' \
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \
                          'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
@@ -2293,14 +2303,30 @@ module Woods
           ) do |server_context:, source_check: 'quick'|
             _ = server_context
             status = Woods::MCP::Server.build_status(
-              reader: reader, retriever: retriever, index_dir: index_dir,
+              reader: reader, retriever: retriever, index_dir: router.current_index_dir,
               bootstrap_state: bootstrap_state, source_check: source_check
             )
+            worktrees = Woods::MCP::Server.worktrees_status(router)
+            status[:worktrees] = worktrees if worktrees
             respond.call(JSON.pretty_generate(status))
           end
         end
 
         public
+
+        # The linked worktrees `root` may name, each with the state of its
+        # index, so an agent can see what it can route to before it calls.
+        # Omitted (nil) when the server cannot route, so a server outside a
+        # repository reports exactly what it always did.
+        #
+        # @param router [Woods::MCP::WorktreeRouting::Router]
+        # @return [Array<Hash>, nil]
+        def worktrees_status(router)
+          entries = router.entries
+          return nil if entries.empty?
+
+          entries.map { |entry| worktree_status_entry(router, entry) }
+        end
 
         # Build the woods_status payload. Exposed at module level so specs (and future
         # console/unified-server entry points) can assemble the same shape without
@@ -2344,6 +2370,7 @@ module Woods
               diagnostic: "#{error.message}. Run woods:validate, then restore or rebuild the index.",
               counts: {},
               history: { state: 'unknown', reason: 'publication_unusable' },
+              git_enrichment: { state: 'unknown', reason: 'publication_unusable' },
               incremental: { ready: false, status: 'needs full extraction (published generation marker is unusable)' }
             },
             retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
@@ -2383,6 +2410,37 @@ module Woods
         end
 
         private
+
+        def worktree_status_entry(router, entry)
+          base = { root: entry.root, index_dir: entry.index_dir, default: router.default?(entry) }
+          reader = router.reader_if_indexed(entry)
+          watch = worktree_watch_owner(entry.index_dir)
+          unless reader
+            state = File.directory?(entry.index_dir) ? 'unextracted' : 'missing'
+            return base.merge(state: state, generation: nil, watch: watch)
+          end
+
+          manifest = safe_manifest(reader) || {}
+          number = Woods::Generation.new(output_dir: entry.index_dir).current.number
+          base.merge(state: 'indexed', generation: number.zero? ? nil : number,
+                     git_branch: manifest['git_branch'], git_sha: manifest['git_sha'],
+                     extracted_at: manifest['extracted_at'], watch: watch)
+        rescue StandardError => e
+          base.merge(state: 'unreadable', generation: nil, error: e.class.name)
+        end
+
+        # Who maintains a worktree's index: the watch daemon's pid and host
+        # when it is alive.
+        def worktree_watch_owner(index_dir)
+          path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
+          return { state: 'absent' } unless File.exist?(path)
+
+          status = Woods::Watch::Status.new(output_dir: index_dir)
+          record = status.read
+          { state: record['state'], alive: status.alive?, pid: record['pid'], host: record['host'] }
+        rescue StandardError
+          { state: 'absent' }
+        end
 
         def retriever_status_fields(retriever)
           return { mode: 'lexical' } if retriever.respond_to?(:mode) && retriever.mode == :lexical
@@ -2442,6 +2500,7 @@ module Woods
           root = recorded_source_root(base[:source_freshness])
           head_sha = manifest_sha ? resolve_head_sha(root) : nil
           base[:history] = history_fields(manifest_sha, head_sha, root)
+          base[:git_enrichment] = Woods::GitEnrichmentSummary.from_manifest(manifest)
           base[:incremental] = incremental_fields(index_dir, reader)
           return base unless head_sha
 

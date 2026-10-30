@@ -230,4 +230,82 @@ RSpec.describe 'Git enrichment over a linked worktree' do
       expect(logger).not_to have_received(:warn)
     end
   end
+  # The published Git-enrichment summary: what the manifest says about whether
+  # the facts above can be trusted.
+  describe 'the Git-enrichment summary' do
+    def summarize(unit_path: app_file)
+      unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: unit_path)
+      extractor.instance_variable_set(:@results, { models: [unit] })
+      extractor.send(:enrich_with_git_data)
+      graph = Woods::DependencyGraph.new
+      graph.register(unit)
+      extractor.instance_variable_set(:@dependency_graph, graph)
+      extractor.send(:annotate_graph_with_git_data)
+      extractor.send(:git_capture).enrichment_summary(graph: graph, full: true)
+    end
+
+    it 'is available with the HEAD it read for a healthy linked worktree' do
+      summary = summarize
+
+      expect(summary).to include('state' => 'available', 'reason' => nil, 'head_sha' => @feature_sha)
+      expect(summary.fetch('coverage')).to include('eligible_units' => 1, 'with_facts' => 1)
+    end
+
+    it 'is unavailable with head_unresolvable when the gitdir pointer names a missing path' do
+      break_gitdir_pointer!
+      summary = summarize
+
+      expect(summary).to include('state' => 'unavailable', 'reason' => 'head_unresolvable', 'head_sha' => nil)
+      expect(summary.fetch('coverage')).to include('eligible_units' => 1, 'with_facts' => 0, 'history_unavailable' => 1)
+    end
+
+    it 'is unavailable with head_unresolvable when the commondir is unreachable' do
+      break_commondir!
+
+      expect(summarize).to include('state' => 'unavailable', 'reason' => 'head_unresolvable')
+    end
+
+    it 'is unavailable with shallow_repository for a shallow clone' do
+      shallow = File.join(scratch, 'shallow')
+      run!('git', 'clone', '--quiet', '--depth', '1', '--branch', 'feature', "file://#{main_repo}", shallow,
+           chdir: scratch)
+      allow(Rails).to receive(:root).and_return(Pathname.new(shallow))
+
+      expect(summarize(unit_path: File.join(shallow, 'app', 'models', 'post.rb')))
+        .to include('state' => 'unavailable', 'reason' => 'shallow_repository')
+    end
+
+    it 'is unavailable with no_repository, and stays quiet, for a source archive without Git' do
+      archive = File.join(scratch, 'archive')
+      FileUtils.mkdir_p(File.join(archive, 'app', 'models'))
+      FileUtils.cp(app_file, File.join(archive, 'app', 'models', 'post.rb'))
+      allow(Rails).to receive(:root).and_return(Pathname.new(archive))
+
+      expect(summarize(unit_path: File.join(archive, 'app', 'models', 'post.rb')))
+        .to include('state' => 'unavailable', 'reason' => 'no_repository')
+      expect(logger).not_to have_received(:warn)
+    end
+
+    it 'is unavailable with history_read_failed when Git resolves but the history walk fails' do
+      allow_any_instance_of(Woods::GitHistory).to receive(:read).and_return(nil)
+
+      expect(summarize).to include('state' => 'unavailable', 'reason' => 'history_read_failed')
+    end
+
+    it 'counts a file with no commits inside the history window as facts, not as a failure' do
+      old = File.join(worktree, 'app', 'models', 'ancient.rb')
+      File.write(old, "class Ancient\nend\n")
+      run!('git', 'add', '.', chdir: worktree)
+      long_ago = (Time.now - (800 * 86_400)).utc.iso8601
+      output, status = Open3.capture2e(hermetic_git_env.merge('GIT_AUTHOR_DATE' => long_ago,
+                                                              'GIT_COMMITTER_DATE' => long_ago),
+                                       'git', 'commit', '--quiet', '-m', 'ancient', chdir: worktree)
+      raise output unless status.success?
+
+      summary = summarize(unit_path: old)
+
+      expect(summary).to include('state' => 'available')
+      expect(summary.fetch('coverage')).to include('with_facts' => 1, 'history_unavailable' => 0)
+    end
+  end
 end

@@ -155,6 +155,20 @@ RSpec.describe Woods::Embedding::Provider::Ollama do
     end
   end
 
+  describe 'host handling' do
+    before { allow(http_double).to receive(:request).and_return(success_response) }
+
+    it 'connects to a bracketed IPv6 literal host by its address' do
+      described_class.new(host: 'http://[::1]:11434').embed('hello world')
+      expect(Net::HTTP).to have_received(:new).with('::1', 11_434)
+    end
+
+    it 'connects to an ordinary hostname and port' do
+      described_class.new(host: 'http://ollama.internal:11434').embed('hello world')
+      expect(Net::HTTP).to have_received(:new).with('ollama.internal', 11_434)
+    end
+  end
+
   describe '#dimensions' do
     before { allow(http_double).to receive(:request).and_return(success_response) }
 

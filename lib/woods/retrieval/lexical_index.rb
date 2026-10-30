@@ -45,6 +45,7 @@ module Woods
         @averages = @totals.to_h do |field, total|
           [field, @documents.empty? ? 1.0 : [total.fdiv(@documents.size), 1.0].max]
         end.freeze
+        build_candidate_postings unless documents
       end
 
       # A view over the eligible subset of this index's documents, answering
@@ -68,7 +69,7 @@ module Woods
 
       def execute(query:, limit: DEFAULT_LIMIT, type_filter: nil, exclude_types: nil)
         terms = tokenize(query).uniq
-        candidates = @documents.filter_map do |doc|
+        candidates = candidate_documents(query, terms).filter_map do |doc|
           next unless eligible?(doc.unit, type_filter, exclude_types)
 
           score, fields = score_document(doc, terms)
@@ -88,6 +89,38 @@ module Woods
       end
 
       private
+
+      # Only a root snapshot owns postings. Restricted views keep their
+      # existing scan and subset statistics without building another index.
+      def build_candidate_postings
+        @postings = {}
+        @exact_identifiers = {}
+        @documents.each do |doc|
+          doc.terms.each { |term| (@postings[term] ||= []) << doc }
+          identifier = doc.unit['identifier'].to_s.downcase(:fold)
+          (@exact_identifiers[identifier] ||= []) << doc
+        end
+        [@postings, @exact_identifiers].each do |postings|
+          postings.each_value(&:freeze)
+          postings.freeze
+        end
+      end
+
+      # An exact identifier may contain only stop words, so it cannot rely on
+      # token postings. The scorer still checks casecmp? before boosting it.
+      # Common queries use the original scan to avoid building a large union.
+      def candidate_documents(query, terms)
+        return @documents unless @postings
+
+        lists = terms.filter_map { |term| @postings[term] }
+        exact = @exact_identifiers[query.strip.downcase(:fold)]
+        lists << exact if exact
+        return @documents if lists.sum(&:size) >= @documents.size
+
+        selected = {}
+        lists.each { |documents| documents.each { |doc| selected[doc.key] = doc } }
+        selected.values
+      end
 
       def build_documents(metadata_store)
         metadata_store.all_identifiers.sort.map do |key|

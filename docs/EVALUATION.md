@@ -373,8 +373,10 @@ outside this experiment.
 
 ### Public Writebook task attempts
 
-[`public_task_evidence_capture.json`](../bench/evaluation/public_task_evidence_capture.json)
-records twelve actual agent attempts on the Rails Foundation's public
+[`public_task_evidence_capture.json`](https://github.com/lost-in-the/woods/blob/3e36cd22de5b1e484bacb913c4ad827d9f726d80/bench/evaluation/public_task_evidence_capture.json)
+(source checkout only; the link pins a commit that retains the file, not the Woods
+revision the attempts ran on, which is named below) records twelve actual agent
+attempts on the Rails Foundation's public
 [`ai-evals`](https://github.com/rails/ai-evals) Writebook tasks at revision
 `5327efe54dd767d662ab89332f6a4285fef07bd8` (Writebook 1.2.1):
 `ar-announce-once`, `aj-enqueue-after-commit`, and `ar-archive-book-access`.

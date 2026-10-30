@@ -79,6 +79,33 @@ when investigating a major-version mismatch. Matching versions do not certify
 compatibility: an incremental publisher can retain units written by an older
 version. This field does not replace the [upgrade procedure](UPGRADING_TO_2.md).
 
+## Manifest extractor timings
+
+A manifest written by Woods 2.2.0 or later may carry `extractor_timings`: the
+wall seconds each extractor family spent during the run that published it,
+keyed by extractor key (the `counts` keys), sorted by key, rounded to three
+decimals.
+
+```json
+"extractor_timings": {
+  "controllers": 2.013,
+  "js_modules": 9.804,
+  "models": 1.25,
+  "view_templates": 12.418
+}
+```
+
+A full extraction times every family it ran; an incremental run or a targeted
+refresh (`woods:refresh`) records only the families it reached, per file or
+wholesale, so the key describes that run's work, never the whole index. The key
+is absent, not `{}`, when the run timed nothing, and older manifests omit it.
+The timings are measured on the monotonic clock around each family's extractor
+calls; they exclude eager loading, dependency resolution, Git enrichment, graph
+analysis and publication, which `WOODS_PROFILE=1` reports as phases. The
+extraction tasks print the same hash as one sorted line
+(`Extractor timings (top 8 of N, total 65.3s): view_templates 12.4s, ...`)
+so a slow field run can name the family to profile.
+
 ## One generation, pinned for the reader's whole life
 
 Unlike `Woods::MCP::IndexReader`, a `PublishedIndex` never refreshes between calls. It resolves one generation at `.new`/`.open` time and every fact it returns, `units`, the table map, `generation_number`, `external_dependency_checksum`, comes from that one generation for as long as the reader is open. There is no `reload` and no auto-refresh: open a new reader to see a later publish.
@@ -306,8 +333,9 @@ Retention is `WOODS_PAYLOAD_RETENTION` generations (default 3). Raise it on a CI
 This is the first bounded slice of [W-12](https://github.com/lost-in-the/woods/issues/762),
 covering retained endpoint resolution, typed unit comparison and immutable JSON,
 with bounded reverse propagation and retained flow evidence in a follow-up slice.
-It does not complete W-12. See the [version 1 contract](design/IMPACT_REPORT.md)
-for selectors, fields, coverage gaps and dependency boundaries.
+It does not complete W-12. See the [version 1 contract](https://github.com/lost-in-the/woods/blob/3e36cd22de5b1e484bacb913c4ad827d9f726d80/docs/design/IMPACT_REPORT.md)
+(source checkout only, pinned) for selectors, fields, coverage gaps and
+dependency boundaries.
 
 ## Moved-message check
 

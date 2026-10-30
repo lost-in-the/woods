@@ -8,6 +8,7 @@
 # Usage:
 #   bundle exec rake woods:extract          # Full extraction
 #   bundle exec rake woods:incremental      # Changed files only
+#   bundle exec rake "woods:seed[DIR]"      # Seed a worktree index from another checkout
 #   bundle exec rake woods:extract_framework # Rails/gem sources only
 #   bundle exec rake woods:validate          # Validate index integrity
 #   bundle exec rake woods:stats             # Show index statistics
@@ -51,6 +52,9 @@ namespace :woods do
     puts "  Total: #{results.values.sum(&:size)} units"
     skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
     puts "  #{skipped}" if skipped
+    puts "  #{Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)}"
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts "  #{timings}" if timings
     puts
     puts "Output written to: #{output_dir}"
   end
@@ -113,6 +117,41 @@ namespace :woods do
 
     puts
     puts "Re-extracted #{affected.size} affected units."
+    puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts timings if timings
+  end
+
+  desc 'Seed this worktree\'s index from another checkout\'s published index, then update it incrementally'
+  task :seed, [:from] => :environment do |_task, args|
+    require 'woods/worktree_seed'
+
+    source = args[:from]
+    if source.nil? || source.empty?
+      puts 'Usage: rake "woods:seed[/path/to/other/checkout/tmp/woods]"'
+      exit 1
+    end
+
+    output_dir = ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir)
+
+    unless Woods::RakeHelpers.woods_daemon_coverage(output_dir) == :none
+      puts 'A watch daemon is maintaining this index, so it is not seeded over.'
+      exit 0
+    end
+
+    puts "Seeding #{output_dir} from #{source}..."
+    result = Woods::RakeHelpers.woods_with_extraction_lock(output_dir) do
+      Woods::WorktreeSeed.new(source_dir: source, output_dir: output_dir, root: Rails.root).call
+    end
+
+    case result.mode
+    when :seeded
+      puts "Seeded and brought up to date with #{result.changed.size} changed paths."
+    when :skipped
+      puts "Nothing to do: #{result.reason}."
+    else
+      puts "Seed not usable (#{result.reason}); ran a full extraction instead."
+    end
   end
 
   desc 'Consume an encoded hook refresh batch (internal plugin transport)'
@@ -296,6 +335,8 @@ namespace :woods do
     puts "Refreshed: #{result[:types].join(', ')}"
     puts "Warning: ignored unknown extractor(s): #{result[:unknown].join(', ')}" if result[:unknown].any?
     puts "#{result[:touched].size} unit(s) written or removed."
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts timings if timings
   end
 
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'
@@ -407,6 +448,7 @@ namespace :woods do
   desc 'Show index statistics'
   task stats: :environment do
     require 'woods/payload_store'
+    require 'woods/git_enrichment_summary'
 
     output_dir = Pathname.new(ENV.fetch('WOODS_OUTPUT', Woods.configuration.output_dir))
 
@@ -428,6 +470,7 @@ namespace :woods do
     puts "  Ruby version:  #{manifest['ruby_version'] || 'unknown'}"
     puts "  Git SHA:       #{manifest['git_sha'] || 'unknown'}"
     puts "  Git branch:    #{manifest['git_branch'] || 'unknown'}"
+    puts "  #{Woods::GitEnrichmentSummary.line(Woods::GitEnrichmentSummary.from_manifest(manifest))}"
     puts "  Persistent pins: #{pins.empty? ? 'none' : pins.join(', ')}"
     puts
 
@@ -643,6 +686,25 @@ namespace :woods do
     output_dir = args[:output_dir] || ENV.fetch('WOODS_SELF_MAP_OUTPUT', File.join(gem_root, 'tmp', 'woods_self_map'))
     result = Woods::GemMapper.new(root: gem_root, output_dir: output_dir).map!
     puts "Woods self-map #{result[:status]} (generation #{result[:generation]}) at #{output_dir}"
+  end
+
+  # Internal developer tool (#926): the specs a change to this gem reaches,
+  # read off the self-map, one path per line. Changed paths come from the
+  # argument (space-separated), CHANGED_FILES, or the diff against
+  # origin/main plus uncommitted work. Hubs it did not expand go to stderr.
+  task :affected_specs, [:paths] do |_task, args|
+    require 'woods/gem_mapper'
+    require 'woods/gem_map_affected_specs'
+    require 'woods/published_index'
+
+    gem_root = File.expand_path('../..', __dir__)
+    output_dir = ENV.fetch('WOODS_SELF_MAP_OUTPUT', File.join(gem_root, 'tmp', 'woods_self_map'))
+    Woods::GemMapper.new(root: gem_root, output_dir: output_dir).map!
+    given = args[:paths] || ENV.fetch('CHANGED_FILES', nil)
+    paths = given ? given.split : Woods::GemMapAffectedSpecs.changed_paths(gem_root)
+    result = Woods::GemMapAffectedSpecs.new(Woods::PublishedIndex.open(output_dir)).for(paths)
+    warn "[woods] hubs not expanded, consider a broader run: #{result[:hubs].join(', ')}" if result[:hubs].any?
+    puts result[:specs]
   end
 
   desc 'Generate execution flow document for a Rails entry point'

@@ -320,7 +320,8 @@ module Woods
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name, parent_class)
         unit.metadata = extract_metadata(source, parent_class)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = with_inheritance(extract_dependencies(source),
+                                             inheritance_dependency(class_name, file_path: file_path))
         MethodEffects.apply(unit, source)
       end
 
@@ -416,7 +417,8 @@ module Woods
         unit.namespace = extract_namespace(identifier)
         unit.source_code = annotate_source(body, identifier, parent_class)
         unit.metadata = extract_metadata(body, parent_class)
-        unit.dependencies = extract_dependencies(body)
+        unit.dependencies = with_inheritance(extract_dependencies(body),
+                                             inheritance_dependency(identifier, file_path: file_path))
         MethodEffects.apply(unit, body)
       end
 

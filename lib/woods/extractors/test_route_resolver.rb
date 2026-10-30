@@ -161,7 +161,14 @@ module Woods
         named = @by_name[helper.sub(/_(?:path|url)\z/, '')]
         return nil unless named
 
-        (named.verb == verb ? named : @by_verb_and_path[[verb, named.path]])&.identifier
+        (answers?(named, verb) ? named : @by_verb_and_path[[verb, named.path]])&.identifier
+      end
+
+      # A route drawn `via: :all` is recorded as `ANY` and answers every verb.
+      #
+      # @return [Boolean]
+      def answers?(route, verb)
+        [verb, RouteExtractor::ANY_VERB].include?(route.verb)
       end
 
       # Drop the query string, fragment and trailing slash, with each
@@ -183,7 +190,7 @@ module Woods
         return @literals[key] if @literals.key?(key)
 
         candidates = @routes.select do |route|
-          route.verb == verb && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
+          answers?(route, verb) && path.start_with?(route.prefix) && pattern_for(route.path).match?(path)
         end
         matches = candidates.select { |route| reachable?(route, reachable) }
         request = "#{verb} #{path}"

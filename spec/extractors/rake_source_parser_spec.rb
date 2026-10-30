@@ -57,6 +57,32 @@ RSpec.describe Woods::Extractors::RakeSourceParser do
       expect(found[:body]).to eq("    puts args\n")
     end
 
+    # LOS-129: a statement on the `do` line or the `end` line was outside
+    # the lines between them, so the body (and every edge scanned from it)
+    # lost it.
+    it 'keeps a statement that shares a line with the block delimiters' do
+      on_do_line = definition("task a: :environment do ::Tenant.where(active: true).find_each(&:touch)\nend\n")
+      expect(on_do_line[:body]).to eq(" ::Tenant.where(active: true).find_each(&:touch)\n")
+
+      after_params = definition("task b: :environment do |_t| ::Tenant.touch_all\n  puts 'done'\nend\n")
+      expect(after_params[:body]).to eq(" ::Tenant.touch_all\n  puts 'done'\n")
+
+      on_end_line = definition("task c: :environment do\n  ::Tenant.touch_all end\n")
+      expect(on_end_line[:body]).to eq('  ::Tenant.touch_all ')
+
+      brace = definition("task(:d) { ::Tenant.touch_all\n}\n")
+      expect(brace[:body]).to eq(" ::Tenant.touch_all\n")
+    end
+
+    it 'trims delimiter lines in time linear in the body (CodeQL, woods#936)' do
+      tabs = "\t" * 200_000
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      body = definition("task a: :environment do#{tabs}\n  Tenant.touch_all\n#{tabs}end\n")[:body]
+      expect(body).to eq("  Tenant.touch_all\n")
+      expect(definition("task b: :environment do\n  puts 'x'#{tabs}\nend\n")[:body]).to eq("  puts 'x'#{tabs}\n")
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
+    end
+
     it 'reads a long task name with arguments and an array of prerequisites' do
       name = "backfill_#{'ledger_entry_' * 12}totals"
 

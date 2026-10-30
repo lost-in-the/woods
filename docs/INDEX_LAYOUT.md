@@ -213,8 +213,31 @@ predates the field. Controller filter entries carry the same `declaration`
 (#820) beside their file-relative `line` and `file`, for filters this unit's own
 source declares.
 
-The generation-local internal reference cache is format 7 for this writer;
-format 6 and earlier require a full baseline rebuild before incremental writes.
+A verified span for a module mixed in carries `mixin` (#871), set to the
+receiverless call that mixed it in:
+
+```json
+{"line": 3, "column": 10, "length": 6, "target": "Auditable", "target_type": "concern", "kind": "constant", "confidence": "verified", "mixin": "include"}
+```
+
+- `mixin` is `include`, `extend` or `prepend`. `kind` stays `constant`, so a
+  reader that filters on `kind: constant` and `confidence: verified` still
+  receives these spans. Use `mixin` to tell a module inclusion from a call.
+- It tags a constant written directly as an argument: `include A, B::C`,
+  `extend ::D`, `prepend(E)`. Each constant of a multi-argument call is tagged.
+- It also tags the call inside an `included do` or `class << self` block and
+  inside a method body. Any receiverless `include`, `extend` or `prepend` counts.
+- Not tagged: a call with a receiver (`Other.include X`, `self.include X`,
+  `singleton_class.prepend X`), and a constant that is only part of an argument
+  expression (`include Wrapper.new`). Those keep their ordinary span.
+- Only `verified` spans carry it. `static` and `ambiguous` spans do not.
+- The key is absent on every other span, never `null`. Readers must ignore it
+  when they do not know it, and accept older indexes without it.
+- Like `method`, it records syntax. It does not prove that the module exists at
+  runtime or that the call ran.
+
+The generation-local internal reference cache is format 8 for this writer;
+format 7 and earlier require a full baseline rebuild before incremental writes.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
@@ -317,6 +340,61 @@ or remote refs), rooted at the application with `git -C`, honouring
 `metadata.git` counts a rolling 365 days; the table's window starts at a UTC
 day boundary, so near the boundary the two can differ by up to a day.
 
+### Test examples
+
+A `test_mapping` unit publishes `metadata.examples` (#870): the groups and
+examples of its file, read by static parsing of the published `source_code`.
+No test runs and no framework loads. Lines are 1-based in the same published
+coordinates as `metadata.methods`.
+
+```json
+{"kind": "example", "name": "returns the name", "label": "User#name returns the name", "chain": ["User", "#name"], "line": 3, "end_line": 5}
+{"kind": "example", "name": null, "chain": ["User"], "line": 12, "end_line": 12, "dynamic": true}
+{"kind": "example", "name": "works", "chain": ["Widget"], "line": 4, "end_line": 4, "generated": true, "skip": true}
+```
+
+| Key | Meaning |
+|---|---|
+| `kind` | `group` (`describe`, `context`, `feature`, a Minitest class), `example` (`it`, `specify`, `scenario`, `its`, `test "..."`, `def test_...`), `shared_group` (`shared_examples`, `shared_context`) or `include` (`it_behaves_like`, `include_examples`, `include_context`) |
+| `name` | This node's own label, or `null` when the source does not state it |
+| `chain` | The labels of the enclosing groups, outermost first (`null` for an unstated one) |
+| `label` | The full description RSpec builds from `chain` and `name`. Absent when any part is `null`, for `include` entries and for anything inside a shared group |
+| `line`, `end_line` | The node's extent, from its first call line to its closing `end` |
+| `via` | On `include` entries, the call that includes the shared group |
+
+The entries are in source order, a group before the nodes inside it. The
+optional keys below are present only when true and absent otherwise, never
+`false`:
+
+- `dynamic`: the label is not fully known. `name` or a `chain` entry is `null`
+  because the argument is interpolated, a variable or a call, or is missing
+  (`it { ... }`, whose description RSpec derives at run time). The text is not
+  guessed.
+- `generated`: the node sits inside a block of an ordinary call, such as
+  `%w[a b].each { ... }`, so the file does not say how many examples it makes.
+  Its `name` can still be static.
+- `shared`: the node is a shared group or sits inside one. Its examples run
+  under whichever group includes it, in another file or the same one. This
+  field adds no cross-file expansion.
+- `focus`, `skip`, `pending`: written on the node (`fit`, `xit`, `xdescribe`,
+  `:focus`, `skip: "reason"`, `pending: true`) or inherited from an enclosing
+  group. `skip: false` and `focus: false` clear it. An example without a block
+  is `pending`. Calls made inside an example body (`skip "later"`) are not read.
+
+Limits:
+
+- Static only. A symbol after the first argument is metadata, not label text.
+  Labels from `let`, constants resolved at run time, custom `described_class`
+  rules and metaprogrammed definitions (`define_method`, `class_eval`) are not
+  followed.
+- A Minitest class is a group only when it holds an example. `test "..."` and
+  `def test_...` are read in Minitest files only; the spec DSL is read in both.
+- `test_count` stays a separate, regex-based count and can differ from the
+  number of `example` entries: it does not count `its`, `skip` or `pending`
+  definitions and counts an example written once inside an iteration once.
+- Absence of the key means the table is unavailable (source that does not
+  parse), never "no examples"; an empty array reports none. Older indexes omit it.
+
 ### Inverted flow membership
 
 When flows are precomputed, `flows/by_unit.json` is published alongside
@@ -408,6 +486,15 @@ when loading and republishing a graph, including unchanged incremental nodes.
 Raw consumers of older indexes must treat absent markers as unclassified or use
 the documented type list. Identifiers, `file_map`, and type membership retain
 their existing shapes; older readers can ignore `kind`.
+
+Multi-source library nodes carry `git_sources`, the number of contributors
+with Git facts. Zero means the contributors were counted but none had facts;
+an absent field in an older graph is unknown. Incremental publication backfills
+this count from retained unit JSON without refreshing or re-dating those facts.
+Unreadable unit metadata is retried on a later publication rather than assigned
+a verified zero.
+The manifest counts the library once when `git_sources` is positive; see
+[Git trust diagnostics](TROUBLESHOOTING.md#checking-whether-git-facts-can-be-trusted).
 
 ### Node summaries: unresolved renders and action facts
 

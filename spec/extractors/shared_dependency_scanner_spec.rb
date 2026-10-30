@@ -851,4 +851,55 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
       scanner.scan_model_dependencies(source)
     end
   end
+
+  # ── Nested constant reads (LOS-126) ──────────────────────────────
+  #
+  # `Anchor::Nested` credits `Anchor` only when `Anchor::Nested` is not
+  # itself a class or module: a value read through the model is a read of
+  # the model, a class nested in it is its own unit.
+
+  describe 'constant reads through a model' do
+    let(:short_regex) { /(?<![:.\w])Book\b(?=\s*(?:\.|::|\(|,|\)|\]|=(?!=)|$))/ }
+
+    before do
+      allow(Woods::ModelNameCache).to receive(:model_names_regex)
+        .and_return(/\b(?:CoreModel|Library::Book|User)\b/)
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[CoreModel Library::Book User])
+      allow(Woods::ModelNameCache).to receive(:short_names_regex).and_return(short_regex)
+      allow(Woods::ModelNameCache).to receive(:resolve_short_name) { |short| { 'Book' => 'Library::Book' }[short] }
+      stub_const('CoreModel', Class.new)
+      stub_const('Library::Book', Class.new)
+      CoreModel.const_set(:UNSHIPPED, %w[x].freeze)
+      Library::Book.const_set(:STATES, %w[draft].freeze)
+    end
+
+    def targets(source)
+      scanner.scan_model_dependencies(source).map { |dep| dep[:target] }
+    end
+
+    it 'credits a top-level model read with a leading :: and through a nested value' do
+      expect(targets('states = ::CoreModel::UNSHIPPED')).to eq(['CoreModel'])
+    end
+
+    it 'credits a namespaced model read through a nested value, written in full or by its short name' do
+      expect(targets('Library::Book::STATES.first')).to eq(['Library::Book'])
+      expect(targets("module Library\n  def states = Book::STATES\nend")).to eq(['Library::Book'])
+    end
+
+    it 'credits a model constructed as a hash value' do
+      expect(targets('{ primary: User.new(name: "x") }')).to eq(['User'])
+    end
+
+    it 'does not credit the model when the nested constant is its own class or module' do
+      stub_const('Library::Book::Chapter', Class.new)
+      stub_const('CoreModel::Helpers', Module.new)
+      expect(targets('Library::Book::Chapter.new')).to eq([])
+      expect(targets("module Library\n  def chapter = Book::Chapter.new\nend")).to eq([])
+      expect(targets('CoreModel::Helpers::NAMES')).to eq([])
+    end
+
+    it 'still credits the model when the nested name resolves to nothing loaded' do
+      expect(targets('Library::Book::Ghost.new')).to eq(['Library::Book'])
+    end
+  end
 end

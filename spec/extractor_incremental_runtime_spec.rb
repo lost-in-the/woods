@@ -20,19 +20,25 @@ RSpec.describe 'incremental runtime inputs' do
   let(:extractor) { Woods::Extractor.new(output_dir: @root.join('index')) }
 
   describe 'hybrid runtime refresh selection' do
-    %w[app/models/queue_settings.rb lib/runtime_settings.rb].each do |path|
-      it "refreshes the hybrid and runtime-resolved families after changing #{path} without recorded dependencies" do
-        changes = Woods::ChangeSet.new(paths: [path], root: @root)
-        expect(extractor.send(:hybrid_discovery_keys, changes, []))
-          .to eq(Set[:jobs, :serializers, :components, :view_components])
-      end
+    it 'refreshes hybrid and component families after changing a path outside app/' do
+      changes = Woods::ChangeSet.new(paths: ['lib/runtime_settings.rb'], root: @root)
+      expect(extractor.send(:hybrid_discovery_keys, changes, []))
+        .to eq(Set[:jobs, :serializers, :components, :view_components])
     end
 
-    it 'refreshes controllers as well when a Ruby file under a component directory changes' do
-      FileUtils.mkdir_p(@root.join('app/components'))
-      changes = Woods::ChangeSet.new(paths: ['app/components/shelf/row_component.rb'], root: @root)
+    it 'refreshes hybrid and component families for an unreadable app/ constant edit' do
+      FileUtils.mkdir_p(@root.join('app/models'))
+      File.write(@root.join('app/models/queue_settings.rb'), "Object.const_set(:QUEUE, 'critical')\n")
+      changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
+      expect(extractor.send(:hybrid_discovery_keys, changes, []))
+        .to eq(Set[:jobs, :serializers, :components, :view_components])
+    end
 
-      expect(extractor.send(:hybrid_discovery_keys, changes, [])).to include(:controllers)
+    it 'refreshes only the hybrid families after an app/ edit that touches no constant a render resolves' do
+      FileUtils.mkdir_p(@root.join('app/models'))
+      File.write(@root.join('app/models/queue_settings.rb'), "class QueueSettings\n  QUEUE = 'critical'\nend\n")
+      changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
+      expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
     end
 
     %w[

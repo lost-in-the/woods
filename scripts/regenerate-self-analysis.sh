@@ -1,6 +1,9 @@
 #!/bin/bash
+set -euo pipefail
+
+# Refresh local diagnostics for staged lib/ changes; never stage generated output.
+cd "$(git rev-parse --show-toplevel)"
 changed_files=$(git diff --cached --name-only -- 'lib/')
 if [ -n "$changed_files" ]; then
-  bundle exec rake woods:self_analyze
-  git add tmp/woods_self/ docs/self-analysis/
+  bin/rake woods:self_analyze
 fi

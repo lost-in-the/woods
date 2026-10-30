@@ -174,7 +174,8 @@ module Woods
         unit.namespace = extract_namespace(class_name)
         unit.source_code = build_annotated_source(source, class_name, unit_type, runtime_class)
         unit.metadata = build_metadata(source, class_name, unit_type, runtime_class)
-        unit.dependencies = extract_dependencies(source, class_name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, class_name),
+                                             inheritance_dependency(class_name, file_path: file_path))
         unit.chunks = build_chunks(unit, runtime_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
 
         unit
@@ -218,7 +219,8 @@ module Woods
         unit.namespace = extract_namespace(type_class.name)
         unit.source_code = build_annotated_source(source, type_class.name, unit_type, type_class)
         unit.metadata = build_metadata(source, type_class.name, unit_type, type_class)
-        unit.dependencies = extract_dependencies(source, type_class.name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, type_class.name),
+                                             inheritance_dependency(type_class))
         unit.chunks = build_chunks(unit, type_class) if unit.needs_chunking?(threshold: CHUNK_THRESHOLD)
 
         unit

@@ -877,6 +877,10 @@ multiplexing several worktrees from one process: the single-active-project
 failure mode of stateful multiplexed servers is well documented in adjacent
 tools, and disjoint-by-construction is what makes this design safe.
 
+### Seeding a new worktree
+
+A new worktree needs an index before its daemon has anything to maintain. Instead of a cold full extraction, `woods:seed` copies another checkout's published generation and runs an incremental update for the difference, falling back to a full extraction when the copy cannot be trusted. It builds in a sibling directory and publishes by renaming `generation.json` last, so the daemon and every reader see either no index or the finished one. It does not run while a daemon is alive on the target directory. Details and the verification rules are in [MCP worktree setup](MCP_WORKTREE_SETUP.md#seed-a-new-worktrees-index).
+
 ### Within one worktree, writers serialize
 
 Three writers can want the same index: the daemon, a manual `woods:extract`,

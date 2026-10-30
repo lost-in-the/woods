@@ -83,8 +83,8 @@ RSpec.describe Woods::Extractors::MethodEffects, 'extractor wiring' do
 
     expect(unit.metadata[:method_effects]).to eq(
       'perform' => {
-        jobs_enqueued: [], mail_sent: [], services_called: [], columns_written: [], events_published: [],
-        external_calls: [], via_method: { 'print_label' => { jobs_enqueued: ['ManifestJob'] } }
+        analysis_status: 'analyzed', jobs_enqueued: [], mail_sent: [], services_called: [], columns_written: [],
+        events_published: [], external_calls: [], via_method: { 'print_label' => { jobs_enqueued: ['ManifestJob'] } }
       }
     )
     expect(through_of(unit, :job, 'ManifestJob', :job_enqueue)).to eq('perform')

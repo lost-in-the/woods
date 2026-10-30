@@ -1,0 +1,103 @@
+name: Documentation site candidate
+
+on:
+  pull_request:
+    paths: ['site/**', 'docs/**', 'CONTRIBUTING.md', 'README.md', 'AGENTS.md', 'SECURITY.md', '.github/workflows/docs-site.yml']
+  push:
+    branches: [main]
+    paths: ['site/**', 'docs/**', 'CONTRIBUTING.md', 'README.md', 'AGENTS.md', 'SECURITY.md', '.github/workflows/docs-site.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-site-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docs-site:
+    name: Build and check documentation artifact
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      BUNDLE_GEMFILE: ${{ github.workspace }}/site/Gemfile
+      BUNDLE_IGNORE_CONFIG: '1'
+      BUNDLE_FROZEN: 'true'
+      GIT_NO_LAZY_FETCH: '1'
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Set runner-local documentation paths
+        run: |
+          printf 'BUNDLE_PATH=%s/woods-docs/bundle\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+          printf 'WOODS_DOCS_LOCK=%s/woods-docs-heavy.lock\n' "$RUNNER_TEMP" >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 1
+          fetch-tags: false
+          persist-credentials: false
+      - name: Explicitly fetch and verify the one documentation release
+        run: |
+          git fetch --no-tags --depth=1 origin refs/tags/v2.1.0:refs/tags/v2.1.0
+          test "$(git --no-lazy-fetch rev-parse 'refs/tags/v2.1.0^{commit}')" = cdd330f709cca9f47302390799641b986f08e213
+      - name: Set up the independent docs Ruby
+        uses: ruby/setup-ruby@7f797815d8adceb1c412e7abefdd1ab4abc47a5f # v1
+        with:
+          ruby-version: '3.4'
+          bundler: '2.5.22'
+      - name: Cache only locked documentation dependencies
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ${{ env.BUNDLE_PATH }}
+          key: docs-${{ runner.os }}-${{ runner.arch }}-ruby-3.4-bundler-2.5.22-${{ hashFiles('site/Gemfile.lock') }}
+      - name: Install the isolated frozen bundle
+        run: |
+          ruby --version
+          bundle --version
+          sha256sum site/Gemfile.lock
+          flock -n -E 75 "$WOODS_DOCS_LOCK" bundle install --jobs 2 --retry 1
+      - name: Check owned Ruby and YAML syntax
+        run: |
+          flock -n -E 75 "$WOODS_DOCS_LOCK" bash -euo pipefail -c '
+            for file in site/Gemfile site/*.rb site/internal/*.rb; do ruby -c "$file"; done
+            ruby -ryaml -e "ARGV.each { |path| YAML.safe_load_file(path) }" site/_config.yml site/manifest.yml .github/workflows/docs-site.yml
+          '
+      - name: Build both versions and check the root URL mount
+        id: root_candidate
+        run: |
+          mkdir -p tmp/woods-docs/evidence
+          bundle exec ruby site/build.rb --baseurl '' 2>&1 | tee tmp/woods-docs/evidence/build-root.log
+          bundle exec ruby site/check.rb --baseurl '' 2>&1 | tee tmp/woods-docs/evidence/check-root.log
+      - name: Build both versions and check the /woods URL mount
+        id: woods_candidate
+        run: |
+          bundle exec ruby site/build.rb --baseurl /woods 2>&1 | tee tmp/woods-docs/evidence/build-woods.log
+          bundle exec ruby site/check.rb --baseurl /woods 2>&1 | tee tmp/woods-docs/evidence/check-woods.log
+      - name: Retain accepted candidate HTML, search and public provenance
+        if: ${{ success() && steps.root_candidate.outcome == 'success' && steps.woods_candidate.outcome == 'success' }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-site-candidate
+          path: |
+            tmp/woods-docs/root/public/
+            tmp/woods-docs/woods/public/
+          if-no-files-found: error
+          retention-days: 7
+      - name: Retain build and check diagnostics
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docs-site-diagnostics
+          path: |
+            tmp/woods-docs/evidence/build-root.log
+            tmp/woods-docs/evidence/check-root.log
+            tmp/woods-docs/evidence/build-woods.log
+            tmp/woods-docs/evidence/check-woods.log
+            tmp/woods-docs/root/build.json
+            tmp/woods-docs/root/checks.json
+            tmp/woods-docs/woods/build.json
+            tmp/woods-docs/woods/checks.json
+          if-no-files-found: warn
+          retention-days: 7

@@ -45,11 +45,11 @@ module Woods
 
         return unresolved('unsupported_singleton_scope') if reference.fetch('singleton_depth', 0).positive?
 
-        result = @lookup.call(reference['name'], nesting: reference.fetch('nesting', []))
+        result, spelling = lookup(reference)
         target = result[:target] || autoload_target(result) || source_only_target(reference, result)
         return unresolved(result[:reason] || 'constant_missing') unless target
 
-        target_result(target, owner: reference['owner'])
+        target_result(target, owner: reference['owner'], spelling: spelling)
       end
 
       # Unresolved reasons whose source evidence still names a candidate: the
@@ -90,14 +90,48 @@ module Woods
 
       private
 
-      def target_result(target, owner:)
+      # A value read through a class (`Kit::Button::VARIANTS`,
+      # `::CoreModel::UNSHIPPED`) is a read of the class (LOS-126): the path
+      # is cut back one segment at a time while it names a value, and the
+      # first class or module it reaches is the target. A nested class or
+      # module is its own constant and credits nothing but itself, and an
+      # absent path still resolves to nothing. The spelling is the credited
+      # prefix as written, so a span can cover it.
+      #
+      # @param name [String] the constant path as written
+      # @param nesting [Array<String>] lexical scopes, innermost first
+      # @param original [Hash] the lookup of the whole path
+      # @return [Array(Hash, String, nil)] the lookup to use and the credited spelling
+      def value_owner(name, nesting, original)
+        path = name
+        while (cut = path.rindex('::')) && cut.positive?
+          path = path[0...cut]
+          result = @lookup.call(path, nesting: nesting)
+          return [result, path] if result[:status] == :resolved
+          break unless result[:reason] == 'non_module_constant'
+        end
+        [original, nil]
+      end
+
+      # @return [Array(Hash, String, nil)] the lookup of the reference, or of
+      #   the class a value is read through, with that class path as written
+      def lookup(reference)
+        nesting = reference.fetch('nesting', [])
+        result = @lookup.call(reference['name'], nesting: nesting)
+        return [result, nil] unless result[:reason] == 'non_module_constant'
+
+        value_owner(reference['name'], nesting, result)
+      end
+
+      def target_result(target, owner:, spelling: nil)
         return unresolved('ambiguous_target').merge('target' => target) if ambiguous?(target)
 
         entries = @targets[target]
         return unresolved('target_not_indexed') unless entries&.any?
         return unresolved('self_reference') if target == owner
 
-        { 'status' => 'resolved', 'target' => target, 'type' => entries.first[:type].to_s }
+        resolved = { 'status' => 'resolved', 'target' => target, 'type' => entries.first[:type].to_s }
+        spelling ? resolved.merge('spelling' => spelling) : resolved
       end
 
       def lexical_names(reference)

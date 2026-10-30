@@ -886,6 +886,33 @@ RSpec.describe Woods::DependencyGraph do
     end
   end
 
+  describe 'a view component with a sidecar template' do
+    before { allow(described_class).to receive(:graph_root).and_return('/app') }
+
+    def component_unit(metadata)
+      unit = make_unit(type: :view_component, identifier: 'ShelfComponent',
+                       file_path: '/app/app/components/shelf_component.rb')
+      unit.metadata = metadata
+      unit
+    end
+
+    it 'maps the template to the component and lists both files as its sources' do
+      graph.register(component_unit(sidecar_template: 'app/components/shelf_component.html.erb'))
+
+      template = '/app/app/components/shelf_component.html.erb'
+      expect(graph.units_for_path(template)).to eq([['ShelfComponent', :view_component]])
+      expect(graph.affected_by([template])).to eq(['ShelfComponent'])
+      expect(graph.to_h[:nodes]['ShelfComponent'][:source_paths])
+        .to match_array(%w[app/components/shelf_component.rb app/components/shelf_component.html.erb])
+    end
+
+    it 'keeps a component without a template on its file_path alone' do
+      graph.register(component_unit(sidecar_template: nil))
+
+      expect(graph.to_h[:nodes]['ShelfComponent']).not_to have_key(:source_paths)
+    end
+  end
+
   describe '#remove' do
     before do
       graph.register(make_unit(type: :model, identifier: 'User'))

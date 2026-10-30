@@ -66,6 +66,17 @@ RSpec.describe Woods::GitHistory do
     expect(single[:commits].map { |entry| entry[:message] }).to contain_exactly('root', 'side change')
   end
 
+  it 'walks a supplied commit even after HEAD advances' do
+    commit('original', { 'target.rb' => 'original' })
+    captured_head = git('rev-parse', 'HEAD')
+    commit('later', { 'target.rb' => 'later' })
+
+    result = reader.read(['target.rb'], recent_after: Time.now - 86_400, revision: captured_head)
+
+    expect(result.fetch('target.rb')[:commit_count]).to eq(1)
+    expect(result.fetch('target.rb')[:commits].map { |entry| entry[:sha] }).to eq([captured_head])
+  end
+
   it 'counts an ordinary merge introduction and its side commit as separate events' do
     commit('root', { 'target.rb' => 'base' })
     git('checkout', '-qb', 'side')
