@@ -11,6 +11,7 @@ require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'method_effects'
 require_relative 'route_helper_resolver'
+require_relative 'route_extractor'
 require_relative 'helper_call_scan'
 require_relative 'action_fact_resolution'
 require_relative 'filter_applicability'
@@ -175,12 +176,14 @@ module Woods
         routes.transform_values { |actions| actions.sort.to_h }
       end
 
+      # Rails leaves the verb blank for `match ..., via: :all`. The route
+      # unit records that as {RouteExtractor::ANY_VERB} (LOS-125), and the
+      # controller's route metadata joins it by the same verb.
       def extract_verb(route)
         verb = route.verb
-        return verb if verb.is_a?(String)
-        return verb.source.gsub(/[\^$]/, '') if verb.respond_to?(:source)
-
-        verb.to_s
+        verb = verb.source.gsub(/[\^$]/, '') if !verb.is_a?(String) && verb.respond_to?(:source)
+        verb = verb.to_s
+        verb.empty? ? RouteExtractor::ANY_VERB : verb
       end
 
       # ──────────────────────────────────────────────────────────────────────

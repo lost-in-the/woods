@@ -1172,4 +1172,28 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       end
     end
   end
+
+  # ── route verbs (LOS-125) ────────────────────────────────────────────
+
+  describe '#extract_verb' do
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: Pathname.new('/app')))
+      described_class.new
+    end
+
+    it 'reads a string verb as is' do
+      expect(extractor.send(:extract_verb, double('Route', verb: 'POST'))).to eq('POST')
+    end
+
+    it 'reads a legacy regexp verb without its anchors' do
+      expect(extractor.send(:extract_verb, double('Route', verb: /^GET$/))).to eq('GET')
+    end
+
+    it 'records a blank verb (match via: :all) as ANY, the route unit convention' do
+      expect(extractor.send(:extract_verb, double('Route', verb: '')))
+        .to eq(Woods::Extractors::RouteExtractor::ANY_VERB)
+    end
+  end
 end
