@@ -30,24 +30,15 @@ RSpec.describe 'release workflow contract' do
     steps(job).select { |step| step.fetch('uses', '').start_with?('actions/checkout@') }
   end
 
-  it 'keeps full incremental-equivalence depth on representative PR rows and every candidate build' do
+  it 'keeps full incremental-equivalence depth on every main and candidate build, smoke depth on pull requests' do
     rails_job = ci.fetch('jobs').fetch('rails-matrix')
     rows = %w[rails-matrix rails-required].flat_map do |id|
       ci.fetch('jobs').fetch(id).dig('strategy', 'matrix', 'include')
     end
     harness = steps(rails_job).find { |step| step['name'] == 'Run incremental equivalence harness' }
-    full_rows = rows.select do |row|
-      row['pr_diff_ops'] == '60' && row['pr_diff_seeds'] == '1,2,3'
-    end
-    smoke_rows = rows - full_rows
 
     expect(rows.length).to eq(9)
-    expect(full_rows.map { |row| [row['ruby'], row['rails']] }).to contain_exactly(
-      %w[3.0 6.0],
-      %w[3.3 7.2],
-      %w[3.4 8.1]
-    )
-    expect(smoke_rows).to all(include('pr_diff_ops' => '8', 'pr_diff_seeds' => '1'))
+    expect(rows).to all(include('pr_diff_ops' => '8', 'pr_diff_seeds' => '1'))
     expect(harness.fetch('env')).to eq(
       'WOODS_DIFF_OPS' => "${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}",
       'WOODS_DIFF_SEEDS' => "${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}"
