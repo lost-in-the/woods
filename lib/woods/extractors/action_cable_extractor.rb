@@ -78,7 +78,8 @@ module Woods
         unit.source_code = source
         unit.metadata = build_metadata(source, own_methods)
         unit.metadata[:abstract] = true if name == ABSTRACT_BASE
-        unit.dependencies = source.empty? ? [] : scan_common_dependencies(source)
+        unit.dependencies = with_inheritance(source.empty? ? [] : scan_common_dependencies(source),
+                                             inheritance_dependency(klass))
 
         unit
       rescue StandardError => e

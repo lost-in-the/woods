@@ -858,10 +858,12 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/serializers.gemfile \
 `spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the
 `spec/dummy` app against a tmpdir copy, applies randomized
 create/modify/delete/rename sequences, and compares the maintained index to a
-cold full extraction at every step. It runs in CI on every Rails-matrix row.
+cold full extraction at every step. It runs on every Rails-matrix row of
+`main` and version tags at 60 operations x 3 seeds; pull requests run the
+security-supported Rails rows at 8 operations x 1 seed.
 
 ```bash
-# CI defaults: 60 operations x 3 seeds
+# Full depth: 60 operations x 3 seeds
 WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
   bundle exec rspec spec/integration/incremental_equivalence_spec.rb
 
@@ -893,6 +895,14 @@ failed runs. It is not another phase to sum. Compare it with phase durations
 to find unaccounted work; each line rounds to hundredths of a second. Rails
 boot, Bundler and watch reload work outside the call require separate wall
 measurements. Do not infer that all unaccounted time is boot.
+
+Per-family extractor time needs no flag: every run records the wall seconds
+each extractor family spent (per file or wholesale, whichever the run reached)
+in the manifest's `extractor_timings` and ends the task output with a sorted
+`Extractor timings (...)` line. See [manifest extractor
+timings](PUBLISHED_INDEX.md#manifest-extractor-timings). Those seconds sit
+inside the `extraction`, `re-extraction` and `reconciliation` phases, so do not
+add them to the phase lines.
 
 Both full and incremental runs currently seed the prior payload. Cloning uses
 per-file hardlinks (or copies where links are unsupported); updated files are

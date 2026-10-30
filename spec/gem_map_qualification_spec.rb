@@ -102,6 +102,15 @@ RSpec.describe 'Static map lexical qualification' do
     end
   end
 
+  it 'resolves method constants through the scopes of each file that reopens the owner' do
+    _units, graph = map_sources(
+      'lib/a.rb' => "module Outer\n  class Store; end\n  class Runner\n    def first; Store.new; end\n  end\nend\n",
+      'lib/b.rb' => "module Outer\n  class Runner\n    def second; Store.new; end\n  end\nend\n"
+    )
+
+    expect(graph.dependents_of('Outer::Store')).to include('Outer::Runner#first', 'Outer::Runner#second')
+  end
+
   it 'resolves the constant at the head of a chained call' do
     source = <<~RUBY_SOURCE
       module Outer

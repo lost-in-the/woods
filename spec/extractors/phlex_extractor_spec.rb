@@ -829,4 +829,43 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       expect(described_class.new.extract_all.map(&:identifier)).to eq(%w[AlertComponent WidgetComponent])
     end
   end
+  # ── Inheritance edges ───────────────────────────────────────────────────
+
+  describe 'inheritance edges' do
+    let(:phlex_base) { build_phlex_base }
+    let(:file_system) do
+      {
+        '/rails/app/views/components/kit/button.rb' =>
+          "class Kit::Button < Phlex::HTML\n  def view_template; end\nend\n",
+        '/rails/app/views/components/kit/copy_button.rb' =>
+          "class Kit::CopyButton < Kit::Button\n  def view_template; end\nend\n",
+        '/rails/app/views/components/kit/plain.rb' => "class Kit::Plain < Phlex::HTML\n  def view_template; end\nend\n"
+      }
+    end
+
+    before do
+      stub_const('Phlex::HTML', phlex_base)
+      stub_const('Kit::Button', Class.new(phlex_base))
+      # The fake base answers `name` for its subclasses too.
+      Kit::Button.define_singleton_method(:name) { 'Kit::Button' }
+      allow(Object).to receive(:const_source_location).and_call_original
+      allow(Object).to receive(:const_source_location).with('Kit::Button')
+                                                      .and_return(['/rails/app/views/components/kit/button.rb', 1])
+    end
+
+    it 'links a component to its application-defined parent component' do
+      child = build_component(name: 'Kit::CopyButton', superclass: Kit::Button)
+      child.define_singleton_method(:<) { |other| [Kit::Button, Phlex::HTML].include?(other) }
+
+      unit = described_class.new.extract_component(child)
+
+      expect(unit.dependencies).to include(type: :component, target: 'Kit::Button', via: :inheritance)
+    end
+
+    it 'adds no edge for the framework base' do
+      unit = described_class.new.extract_component(build_component(name: 'Kit::Plain'))
+
+      expect(unit.dependencies.map { |dep| dep[:via] }).not_to include(:inheritance)
+    end
+  end
 end

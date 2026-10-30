@@ -8,7 +8,7 @@
 #   script/ci-local --only lint|unit|booted
 #   script/ci-local --skip-booted        # quick run
 #   script/ci-local --full               # booted rows at 60 ops, seeds 1,2,3
-#   script/ci-local --hosted-pr          # PR depths: Ruby 3.0 full, Ruby 4.0 smoke
+#   script/ci-local --hosted-pr          # PR rows only: Ruby 4.0 / Rails 8.1 at smoke depth
 #   script/ci-local --check              # inspect selected environments only
 #   script/ci-local --reference DIR --run-id ID --attempt N  # match captured toolchain
 #
@@ -93,7 +93,7 @@ def options
       opts[:full] = true
     end
     o.on('--match TEXT', 'Booted gate: run only steps whose spec paths contain TEXT') { |v| opts[:match] = v }
-    o.on('--hosted-pr', 'Use the hosted PR incremental-equivalence depths for these rows') { opts[:hosted_pr] = true }
+    o.on('--hosted-pr', 'Run only the booted rows a hosted PR runs, at its depth') { opts[:hosted_pr] = true }
     o.on('--rspec-seed N', Integer, 'Set an explicit RSpec seed for booted processes') { |v| opts[:rspec_seed] = v }
     o.on('--report-dir DIR', 'Write a JSON report for each booted process') { |v| opts[:report_dir] = v }
     o.on('--check', 'Inspect the selected environments without running gates') { opts[:check] = true }
@@ -210,6 +210,8 @@ end
 def booted_steps(full, match = nil, hosted_pr: false, seed: nil)
   BOOTED_ROWS.flat_map do |row|
     name = "rails-#{row[:ruby]}-#{row[:rails]}"
+    next [] if hosted_pr && !CiLocalEnvironment::PULL_REQUEST_ROWS.include?(name)
+
     ops, seeds = CiLocalEnvironment.profile(full, hosted_pr, row[:ruby])
     env = bundle_env(name).merge('WOODS_RUN_BOOTED_APP' => '1')
     selected_steps(match).map do |files|

@@ -983,7 +983,7 @@ RSpec.describe Woods::Configuration do
       callers = described_class.new.source_reference_callers
       expect(callers.keys).to match_array(types)
       expect(callers.fetch(:model)).to match_array(types)
-      expect(callers.fetch(:component)).to match_array(types - %i[component view_component])
+      expect(callers.fetch(:component)).to match_array(types)
       expect(callers.fetch(:graphql_type))
         .to match_array(types - %i[graphql_type graphql_mutation graphql_resolver graphql_query])
     end

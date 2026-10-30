@@ -1,0 +1,1 @@
+- Record each extractor family's wall time during full, incremental and refresh runs, publish it in the generation manifest as `extractor_timings` (absent when nothing was timed), and end `woods:extract`, `woods:incremental` and `woods:refresh` with one sorted summary line naming the slowest families, so a slow field run says which family pays without a profiler (LOS-130).

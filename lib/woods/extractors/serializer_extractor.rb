@@ -103,7 +103,8 @@ module Woods
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata_from_source(source, class_name)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = with_inheritance(extract_dependencies(source),
+                                             inheritance_dependency(class_name, file_path: file_path))
 
         unit
       rescue StandardError => e
@@ -145,7 +146,7 @@ module Woods
         unit.namespace = extract_namespace(klass.name)
         unit.source_code = annotate_source(source, klass.name)
         unit.metadata = extract_metadata_from_class(klass, source, base_class_name)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = with_inheritance(extract_dependencies(source), inheritance_dependency(klass))
 
         unit
       rescue StandardError => e

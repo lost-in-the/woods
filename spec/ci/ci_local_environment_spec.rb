@@ -620,10 +620,11 @@ RSpec.describe CiLocalEnvironment do
   it 'keeps gate selections and PR/full profiles aligned with the checked-in workflow' do
     jobs = YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true).fetch('jobs')
     expect(jobs.fetch('test-required').dig('strategy', 'matrix', 'include').first)
-      .to include('ruby-version' => '3.3', 'puma' => '~> 8.0')
+      .to include('ruby-version' => '3.3', 'puma' => '~> 8.0', 'pr' => true)
     rows = jobs.fetch('rails-matrix').dig('strategy', 'matrix', 'include')
     [%w[4.0 8.1], %w[3.0 6.0]].each do |ruby, rails|
       entry = rows.find { |item| item['ruby'] == ruby && item['rails'] == rails }
+      expect(entry['pr']).to eq(described_class::PULL_REQUEST_ROWS.include?("rails-#{ruby}-#{rails}"))
       expect(entry.values_at('pr_diff_ops', 'pr_diff_seeds')).to eq(described_class.profile(false, true, ruby))
       expect(described_class.profile(false, false, ruby)).to eq(%w[8 1])
       expect(described_class.profile(true, false, ruby)).to eq(['60', '1,2,3'])
@@ -632,7 +633,9 @@ RSpec.describe CiLocalEnvironment do
     opts = { only: 'booted', skip_booted: false, full: false, match: 'incremental_equivalence',
              hosted_pr: true, rspec_seed: 43_656 }
     steps = runner.send(:gates, opts).first.last
-    expect(steps.map(&:row)).to eq(%w[rails-4.0-8.1 rails-3.0-6.0])
+    expect(steps.map(&:row)).to eq(%w[rails-4.0-8.1])
+    expect(runner.send(:gates, opts.merge(hosted_pr: false)).first.last.map(&:row))
+      .to eq(%w[rails-4.0-8.1 rails-3.0-6.0])
     expect(steps.map { |step| step.argv.last(2) }).to all(eq(%w[--seed 43656]))
     expect(runner.send(:gates, opts.merge(skip_booted: true))).to be_empty
   end

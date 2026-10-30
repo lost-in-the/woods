@@ -831,8 +831,9 @@ module Woods
     # its default ({Woods::SourceReferences::CallerPolicy::DEFAULTS}). A value
     # is +:all+, an Array of target types, or +false+ to stop that type being
     # a caller. By default every constant-owned type is a caller of every
-    # type, except that components add no edge to components and GraphQL
-    # units add none to GraphQL units.
+    # type, except that GraphQL units add no edge to GraphQL units. A
+    # component a caller renders or declares as a slot keeps that edge alone;
+    # one it only constructs and passes on gains a +code_reference+ edge.
     #
     # The policy is recorded in the source-reference cache: after changing
     # it, incremental extraction refuses to run until one full extraction.

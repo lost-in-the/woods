@@ -249,6 +249,13 @@
   ],
   "rake_tasks": [
     {
+      "name": "woods:affected_specs",
+      "arguments": [
+        "paths"
+      ],
+      "prerequisites": []
+    },
+    {
       "name": "woods:check:moved_messages",
       "arguments": [
         "from",
@@ -1165,7 +1172,7 @@
     "index_mcp_tools": 31,
     "presets": 4,
     "public_woods_methods": 9,
-    "rake_tasks": 43,
+    "rake_tasks": 44,
     "tasks_methods": 7,
     "unit_types": 47
   },

@@ -71,6 +71,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     it 'handles mixed ActionFilter and proc conditions' do
       action_filter = build_action_filter(%w[destroy])
       proc_condition = proc { true }
+      allow(proc_condition).to receive(:source_location)
+        .and_return(['/srv/bundle/ruby/3.3.0/gems/devise-4.9.4/lib/devise/controllers/helpers.rb', 7])
       callback = build_callback(
         kind: :before, filter: :verify_admin,
         if_conditions: [action_filter, proc_condition]
@@ -79,7 +81,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       only, _, if_labels, _unless_labels = extractor.send(:extract_callback_conditions, callback)
 
       expect(only).to eq(%w[destroy])
-      expect(if_labels).to eq(["#<Proc #{proc_condition.source_location.join(':')}>"])
+      expect(if_labels).to eq(['#<Proc devise-4.9.4/lib/devise/controllers/helpers.rb:7>'])
     end
 
     it 'handles callbacks with no conditions' do
@@ -104,13 +106,82 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
   it 'uses the callable rather than the numeric callback key exposed by Rails 6' do
     callable = proc { true }
+    allow(callable).to receive(:source_location).and_return(['/app/app/controllers/concerns/auth.rb', 4])
     callback = build_callback(kind: :before, filter: callable.object_id)
     callback.define_singleton_method(:raw_filter) { callable }
     controller = double('Controller', _process_action_callbacks: [callback])
-    expected = "#<Proc #{callable.source_location.join(':')}>"
+    expected = { kind: :before, filter: '#<Proc app/controllers/concerns/auth.rb:4>', origin: 'app' }
 
-    expect(extractor.send(:extract_filter_chain, controller)).to eq([{ kind: :before, filter: expected }])
-    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([{ kind: :before, filter: expected }])
+    expect(extractor.send(:extract_filter_chain, controller)).to eq([expected])
+    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([expected])
+  end
+
+  # ── filter origins (LOS-128) ──────────────────────────────────────────
+  #
+  # Who wrote a filter, beside what the chain says about it: a symbol by
+  # the owner of the method it names, a proc by its own source.
+  describe 'filter origins' do
+    let(:root) { Dir.mktmpdir('filter_origins') }
+    let(:gem_home) { Dir.mktmpdir('filter_origin_gems') }
+    let(:constants) { %i[WOriginAuth WOriginDevise WOriginForgery WOriginPostsController] }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      stub_const('Rails', double('Rails', application: double('Application', routes: routes_double),
+                                          root: Pathname.new(root)))
+      described_class.new
+    end
+
+    after do
+      constants.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name) }
+      FileUtils.remove_entry(root)
+      FileUtils.remove_entry(gem_home)
+    end
+
+    def load_file(base, relative, contents)
+      path = File.join(base, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      load path
+      path
+    end
+
+    before do
+      load_file(root, 'app/controllers/concerns/w_origin_auth.rb', "module WOriginAuth\n  def authenticate; end\nend\n")
+      load_file(gem_home, 'gems/devise-4.9.4/lib/devise/controllers/helpers.rb',
+                "module WOriginDevise\n  def authenticate_user!; end\nend\n")
+      load_file(gem_home, 'gems/actionpack-7.1.6/lib/action_controller/metal/request_forgery_protection.rb',
+                "module WOriginForgery\n  def verify_authenticity_token; end\nend\n")
+      load_file(root, 'app/controllers/w_origin_posts_controller.rb', <<~RUBY)
+        class WOriginPostsController
+          include WOriginAuth
+          include WOriginDevise
+          include WOriginForgery
+
+          private
+
+          def load_post; end
+        end
+      RUBY
+    end
+
+    it 'classifies symbol filters by the method owner and procs by their source, in the chain and per action' do
+      gem_proc = proc { true }
+      allow(gem_proc).to receive(:source_location)
+        .and_return([File.join(gem_home, 'gems/devise-4.9.4/lib/devise/controllers/helpers.rb'), 12])
+      filters = [:load_post, :authenticate, :authenticate_user!, :verify_authenticity_token, gem_proc,
+                 'user_signed_in?', :never_defined]
+      callbacks = filters.map { |filter| build_callback(kind: :before, filter: filter) }
+      WOriginPostsController.define_singleton_method(:_process_action_callbacks) { callbacks }
+      origins = %w[app app gem framework gem unknown unknown]
+
+      chain = extractor.send(:extract_filter_chain, WOriginPostsController)
+
+      expect(chain.map { |entry| entry[:origin] }).to eq(origins)
+      expect(chain.map { |entry| entry.keys.first(3) }).to all(eq(%i[kind filter origin]))
+      expect(extractor.send(:applicable_filters, WOriginPostsController, 'index').map { |entry| entry[:origin] })
+        .to eq(origins)
+    end
   end
 
   # ── callback_applies_to_action? ──────────────────────────────────────
@@ -211,10 +282,19 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(extractor.send(:condition_label, callback)).to eq('#<Proc native>')
     end
 
-    it 'does not strip a similar root prefix from an external source' do
+    it 'labels an external source by its basename, never by a similar root prefix or an absolute path' do
       condition = proc { true }
       allow(condition).to receive(:source_location).and_return(['/application/callbacks.rb', 3])
-      expect(extractor.send(:condition_label, condition)).to eq('#<Proc /application/callbacks.rb:3>')
+      expect(extractor.send(:condition_label, condition)).to eq('#<Proc external/callbacks.rb:3>')
+    end
+
+    it 'labels a gem-defined proc by its gem, not by the bundle path (LOS-127)' do
+      condition = -> { true }
+      allow(condition).to receive(:source_location).and_return(
+        ['/home/dev/host/vendor/bundle/ruby/3.3.0/bundler/gems/rails-1a2b3c4d5e6f/actionpack/lib/filters.rb', 9]
+      )
+      expect(extractor.send(:condition_label, condition))
+        .to eq('#<lambda rails-1a2b3c4d5e6f/actionpack/lib/filters.rb:9>')
     end
 
     it 'labels strings as themselves' do
@@ -532,7 +612,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     it 'records no site for a filter no app source declares' do
       chain = chain_for([build_callback(kind: :before, filter: :verify_authenticity_token)])
 
-      expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token)
+      expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token, origin: 'unknown')
     end
 
     it 'records no site for a filter declared under another kind' do
@@ -1170,6 +1250,30 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         expect(unit.metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
         expect(unit.dependencies).to include(type: :concern, target: 'RequiresAuthor', via: :include)
       end
+    end
+  end
+
+  # ── route verbs (LOS-125) ────────────────────────────────────────────
+
+  describe '#extract_verb' do
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      app_double = double('Application', routes: routes_double)
+      stub_const('Rails', double('Rails', application: app_double, root: Pathname.new('/app')))
+      described_class.new
+    end
+
+    it 'reads a string verb as is' do
+      expect(extractor.send(:extract_verb, double('Route', verb: 'POST'))).to eq('POST')
+    end
+
+    it 'reads a legacy regexp verb without its anchors' do
+      expect(extractor.send(:extract_verb, double('Route', verb: /^GET$/))).to eq('GET')
+    end
+
+    it 'records a blank verb (match via: :all) as ANY, the route unit convention' do
+      expect(extractor.send(:extract_verb, double('Route', verb: '')))
+        .to eq(Woods::Extractors::RouteExtractor::ANY_VERB)
     end
   end
 end

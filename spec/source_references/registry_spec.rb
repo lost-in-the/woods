@@ -202,6 +202,52 @@ RSpec.describe Woods::SourceReferences::Registry do
     expect(registry.resolve(reference('RefToken::Missing'), file_path: '/application/RefCaller.rb')).to be_nil
   end
 
+  # LOS-126: `Kit::Button::VARIANTS` and `::CoreModel::UNSHIPPED` read a value
+  # through the class, so the class is what the caller depends on.
+  describe 'a constant read through a class' do
+    before do
+      RefToken.const_set(:UNSHIPPED, %w[a b].freeze)
+      RefToken.const_set(:LIMITS, { max: 3 }.freeze)
+    end
+
+    it 'credits the class when the nested constant is a value, with the class path as the spelling' do
+      expect(registry.resolve(reference('RefToken::UNSHIPPED'), file_path: '/application/RefCaller.rb'))
+        .to eq(type: :poro, target: 'RefToken', via: :code_reference)
+      expect(registry.explain(reference('RefToken::UNSHIPPED'), file_path: '/application/RefCaller.rb'))
+        .to include('status' => 'resolved', 'target' => 'RefToken', 'spelling' => 'RefToken')
+    end
+
+    it 'keeps the leading :: of a rooted read in the spelling' do
+      expect(registry.explain(reference('::RefToken::UNSHIPPED'), file_path: '/application/RefCaller.rb'))
+        .to include('status' => 'resolved', 'target' => 'RefToken', 'spelling' => '::RefToken')
+    end
+
+    it 'walks back through every value segment' do
+      expect(registry.explain(reference('RefToken::LIMITS::MAX'), file_path: '/application/RefCaller.rb'))
+        .to include('status' => 'resolved', 'target' => 'RefToken', 'spelling' => 'RefToken')
+    end
+
+    it 'does not credit the class when the nested constant is its own class or module' do
+      RefToken.const_set(:Inner, Class.new)
+      RefToken.const_set(:Helpers, Module.new)
+      expect(registry.resolve(reference('RefToken::Inner'), file_path: '/application/RefCaller.rb')).to be_nil
+      expect(registry.resolve(reference('RefToken::Helpers::NAMES'), file_path: '/application/RefCaller.rb')).to be_nil
+    end
+
+    it 'credits the nested class itself when it is indexed' do
+      RefToken.const_set(:Inner, Class.new)
+      RefToken::Inner.const_set(:LIMIT, 1)
+      add_unit('RefToken::Inner')
+      expect(registry.explain(reference('RefToken::Inner::LIMIT'), file_path: '/application/RefCaller.rb'))
+        .to include('status' => 'resolved', 'target' => 'RefToken::Inner', 'spelling' => 'RefToken::Inner')
+    end
+
+    it 'leaves a plain reference without a spelling' do
+      expect(registry.explain(reference('RefToken'), file_path: '/application/RefCaller.rb'))
+        .not_to have_key('spelling')
+    end
+  end
+
   it 'accepts a verified unloaded library declaration for a root-qualified reference' do
     add_unit('RefOffline', type: :lib)
     expect(registry.resolve(reference('::RefOffline'), file_path: '/application/RefCaller.rb'))

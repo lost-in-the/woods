@@ -42,6 +42,10 @@ module Woods
       ROUTES_FILE = 'config/routes.rb'
       ROUTES_DIRECTORY = 'config/routes'
 
+      # The verb recorded for a route Rails leaves verb-less (`via: :all`,
+      # `mount`): it answers every verb. Identifiers read `ANY /404`.
+      ANY_VERB = 'ANY'
+
       # Routing DSL calls recorded as a route file's declarations.
       DECLARATION_METHODS = %w[
         get post put patch delete match root resources resource namespace scope
@@ -248,7 +252,7 @@ module Woods
         return nil if app.nil? || (app.respond_to?(:dispatcher?) && app.dispatcher?)
 
         kind = endpoint_kind(route, app)
-        verb = endpoint_verb(route)
+        verb = route_verb(route)
         path = route_path(route)
 
         unit = ExtractedUnit.new(
@@ -290,12 +294,6 @@ module Woods
 
         path = route.respond_to?(:path) ? route.path : nil
         path.respond_to?(:anchored) && path.anchored == false ? 'mount' : 'rack_endpoint'
-      end
-
-      # `mount` and `via: :all` leave the verb blank; they answer every verb.
-      def endpoint_verb(route)
-        verb = route.respond_to?(:verb) ? route.verb : nil
-        verb.present? ? route_verb(route) : 'ANY'
       end
 
       # An anonymous class has no name, and its `#<Class:0x...>` form
@@ -369,7 +367,7 @@ module Woods
         case metadata[:kind]
         when 'mount' then "mount #{metadata[:app]} => '#{path}'"
         when 'redirect' then "#{verb.downcase} '#{path}', to: #{redirect_declaration(metadata, app)}"
-        else "match '#{path}', to: #{metadata[:app]}, via: :#{verb == 'ANY' ? 'all' : verb.downcase}"
+        else "match '#{path}', to: #{metadata[:app]}, via: :#{verb == ANY_VERB ? 'all' : verb.downcase}"
         end
       end
 
@@ -461,6 +459,10 @@ module Woods
 
       # Extract HTTP verb from route.
       #
+      # Rails leaves the verb blank for a route that answers every verb:
+      # `match '/404', to: 'errors#not_found', via: :all` and `mount`. Such
+      # a route is recorded as {ANY_VERB}, never as GET (LOS-125).
+      #
       # @param route [ActionDispatch::Journey::Route]
       # @return [String]
       def route_verb(route)
@@ -468,7 +470,7 @@ module Woods
           verb = route.verb
           verb.is_a?(String) ? verb : verb.to_s.scan(/[A-Z]+/).first
         else
-          'GET'
+          ANY_VERB
         end.to_s
       end
 
@@ -504,9 +506,20 @@ module Woods
         lines << "# Controller: #{controller}##{action}"
         lines << "# Constraints: #{constraints.inspect}" if constraints.any?
         lines << '#'
-        lines << "# #{verb.downcase} '#{path}', to: '#{controller}##{action}'"
+        lines << "# #{route_declaration(verb, path, controller, action)}"
 
         lines.join("\n")
+      end
+
+      # The routing DSL line that draws a controller route: `get '/users',
+      # to: 'users#index'`, or `match '/404', to: 'errors#not_found',
+      # via: :all` for a route that answers every verb.
+      #
+      # @return [String]
+      def route_declaration(verb, path, controller, action)
+        return "match '#{path}', to: '#{controller}##{action}', via: :all" if verb == ANY_VERB
+
+        "#{verb.downcase} '#{path}', to: '#{controller}##{action}'"
       end
 
       # Build metadata hash for a route.
