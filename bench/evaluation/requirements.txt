@@ -1,5 +1,5 @@
 fastembed==0.9.1
-onnxruntime==1.30.0
+onnxruntime==1.31.1
 tokenizers==0.23.3
 numpy==2.5.3
 huggingface-hub==0.36.2
