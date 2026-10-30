@@ -53,6 +53,8 @@ namespace :woods do
     skipped = Woods::RakeHelpers.woods_skipped_files_summary(output_dir)
     puts "  #{skipped}" if skipped
     puts "  #{Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)}"
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts "  #{timings}" if timings
     puts
     puts "Output written to: #{output_dir}"
   end
@@ -116,6 +118,8 @@ namespace :woods do
     puts
     puts "Re-extracted #{affected.size} affected units."
     puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts timings if timings
   end
 
   desc 'Seed this worktree\'s index from another checkout\'s published index, then update it incrementally'
@@ -331,6 +335,8 @@ namespace :woods do
     puts "Refreshed: #{result[:types].join(', ')}"
     puts "Warning: ignored unknown extractor(s): #{result[:unknown].join(', ')}" if result[:unknown].any?
     puts "#{result[:touched].size} unit(s) written or removed."
+    timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
+    puts timings if timings
   end
 
   desc 'Extract only Rails/gem framework sources (run when dependencies change)'

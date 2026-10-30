@@ -535,4 +535,29 @@ RSpec.describe Woods::Extractors::SerializerExtractor do
       expect(described_class.new.discoverable_classes).not_to include(LedgerFixture::ChargeDecorator)
     end
   end
+  # ── Inheritance edges ────────────────────────────────────────────────
+
+  describe 'inheritance edges' do
+    before do
+      stub_const('ActiveModel::Serializer', Class.new)
+      stub_const('InheritanceFixture', Module.new)
+    end
+
+    it 'links a serializer to its application-defined parent serializer' do
+      parent = create_file('app/serializers/inheritance_fixture/application_serializer.rb',
+                           "class InheritanceFixture::ApplicationSerializer < ActiveModel::Serializer\nend\n")
+      child = create_file('app/serializers/inheritance_fixture/post_serializer.rb', <<~SOURCE)
+        class InheritanceFixture::PostSerializer < InheritanceFixture::ApplicationSerializer
+          def title
+            object.title
+          end
+        end
+      SOURCE
+      load parent
+      load child
+
+      expect(described_class.new.extract_serializer_file(child).dependencies)
+        .to include(type: :serializer, target: 'InheritanceFixture::ApplicationSerializer', via: :inheritance)
+    end
+  end
 end

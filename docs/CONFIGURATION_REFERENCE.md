@@ -1147,14 +1147,20 @@ Defaults:
 
 | Caller types | Target types |
 |--------------|--------------|
-| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
-| `component`, `view_component` | all except `component` and `view_component` |
+| `model`, `controller`, `service`, `poro`, `lib`, `concern`, `job`, `mailer`, `component`, `view_component`, `serializer`, `decorator`, `validator`, `policy`, `pundit_policy`, `manager`, `action_cable_channel` | all |
 | `graphql_type`, `graphql_mutation`, `graphql_resolver`, `graphql_query` | all except the four GraphQL types |
 
-Components and GraphQL units skip their own family because `render`, `slot`,
-`type_reference` and `field_resolver` edges already state those relationships.
-A design-system component rendered from most views would otherwise add one
-duplicate edge per view.
+GraphQL units skip their own family because `type_reference` and
+`field_resolver` edges already state those relationships.
+
+Components reference components (LOS-123). A component that a caller renders
+or declares as a slot already has a `render` or `slot` edge, and the pass adds
+no `code_reference` beside it, from any caller type. A component the caller
+only constructs and passes on (`Wrapper.new(primary: Kit::Button.new)`),
+compares with `is_a?` or hands over as a constant gains the `code_reference`
+edge. Every occurrence stays a `metadata.references` span either way. Before
+this default, those callers had no edge at all; indexes written under the
+earlier default need one full extraction (see below).
 
 ```ruby
 Woods.configure do |config|

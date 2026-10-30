@@ -87,6 +87,7 @@ require_relative 'source_references/memo_collector'
 require_relative 'doc_references'
 require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
+require_relative 'extraction/extractor_timings'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -522,6 +523,7 @@ module Woods
       setup_output_directory
       @results = {}
       @extractors = {}
+      @timing_collector = Extraction::ExtractorTimings.new
       profile_phase('source capture') { begin_source_inputs('full') }
       ModelNameCache.reset!
       # @package_resolver alone is not enough: #package_resolver builds
@@ -869,7 +871,28 @@ module Woods
       raise @publication_error if @publication_error
     end
 
+    # Wall seconds each extractor family spent in the most recent run on this
+    # instance, keyed by extractor key (string), rounded to three decimals.
+    #
+    # A full extraction times every family it ran; an incremental run or a
+    # targeted refresh names only the families it reached. The same hash is
+    # published in the generation manifest as `extractor_timings`, and the
+    # extraction tasks print it sorted (LOS-130).
+    #
+    # @return [Hash{String => Float}] empty before any run
+    def extractor_timings
+      @timing_collector ? @timing_collector.to_h : {}
+    end
+
     private
+
+    # The run's timing collector, created on demand so the incremental choke
+    # point ({#checked_extraction}) never needs a reset to be safe to call.
+    #
+    # @return [Extraction::ExtractorTimings]
+    def timing_collector
+      @timing_collector ||= Extraction::ExtractorTimings.new
+    end
 
     # Whole-run wall time, including unprofiled setup and failed runs. This
     # separate log family must never be added to the individual phase times.
@@ -975,6 +998,7 @@ module Woods
       profile_phase('eager load') { safe_eager_load! }
 
       @results = {}
+      @timing_collector = Extraction::ExtractorTimings.new
       @dependents_dirty = Set.new
       @incremental_written = {}
       @retained_units = Set.new
@@ -1134,10 +1158,10 @@ module Woods
     # per-call flag because one extractor instance serves several paths, but
     # retain the failed scope for the run so a later success cannot authorize
     # publication. Watch then carries the complete batch forward for retry.
-    def checked_extraction(key, consumer)
+    def checked_extraction(key, consumer, &block)
       (@failed_consumers ||= Set.new).add(key) if SourceInputs::ConsumerErrors.failed?(consumer)
       SourceInputs::ConsumerErrors.reset(consumer)
-      result = yield
+      result = timing_collector.time(key, &block)
       return result unless source_consumer_failed?(key, consumer)
 
       (@failed_consumers ||= Set.new).add(key)
@@ -1580,7 +1604,7 @@ module Woods
 
         extractor = share_source_collector(extractor_class.new)
         @extractors[type] = extractor
-        units = extractor.extract_all
+        units = timing_collector.time(type) { extractor.extract_all }
 
         @results[type] = units
 
@@ -1623,7 +1647,7 @@ module Woods
           extractor = share_source_collector(extractor_class.new)
           results_mutex.synchronize { @extractors[type] = extractor }
 
-          units = extractor.extract_all
+          units = timing_collector.time(type) { extractor.extract_all }
 
           elapsed = Time.current - start_time
           Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
@@ -2775,7 +2799,8 @@ module Woods
         counts: counts, total_chunks: total_chunks, provenance: provenance,
         extraction_config: extraction_config, git_enrichment: enrichment, git_filter_available: filter_available,
         extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
-        ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest
+        ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
+        extractor_timings: extractor_timings
       )
 
       AtomicFile.write(
@@ -3534,12 +3559,14 @@ module Woods
       new_classes = discovered.reject { |k| known.include?(k.name) || excluded.include?(k.name) }
       return Set.new if new_classes.empty?
 
-      units = new_classes.filter_map do |klass|
-        extractor_for(key).public_send(spec[:method], klass)
-      rescue StandardError => e
-        @source_inputs&.unverified("extractor:#{key}")
-        Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
-        nil
+      units = timing_collector.time(key) do
+        new_classes.filter_map do |klass|
+          extractor_for(key).public_send(spec[:method], klass)
+        rescue StandardError => e
+          @source_inputs&.unverified("extractor:#{key}")
+          Rails.logger.warn "[Woods] #{key} extraction of #{klass} failed: #{e.message}"
+          nil
+        end
       end
 
       source_consumer_failed?(key)

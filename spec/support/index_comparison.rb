@@ -15,10 +15,12 @@ require 'woods/generation'
 # Three kinds of difference are deliberately tolerated, and nothing else:
 #
 # 1. **Wall-clock stamps** — `extracted_at` on every unit and on the manifest,
-#    `generated_at` in `graph_analysis.json`, and `generated_at` inside each
-#    flow document (M3 flow equivalence), and `since` in `git_commits.json`
-#    (the window's first UTC day). A unit an incremental run correctly
-#    left alone keeps an older stamp. `graph_sha` is *not* excluded: it
+#    `extractor_timings` on the manifest (wall seconds per extractor family,
+#    LOS-130: an incremental run times only the families it reached, and no
+#    two runs take the same time), `generated_at` in `graph_analysis.json`,
+#    and `generated_at` inside each flow document (M3 flow equivalence), and
+#    `since` in `git_commits.json` (the window's first UTC day). A unit an
+#    incremental run correctly left alone keeps an older stamp. `graph_sha` is *not* excluded: it
 #    digests `dependency_graph.json`, whose serialization is a pure function
 #    of graph content (B-180), so the two runs must publish the same digest.
 # 2. **Capture accounting** — `git_enrichment.capture` in the manifest says how
@@ -43,7 +45,7 @@ require 'woods/generation'
 # own snapshot instead (M3).
 module IndexComparison # rubocop:disable Metrics/ModuleLength
   VOLATILE_UNIT_KEYS = %w[extracted_at].freeze
-  VOLATILE_MANIFEST_KEYS = %w[extracted_at].freeze
+  VOLATILE_MANIFEST_KEYS = %w[extracted_at extractor_timings].freeze
   VOLATILE_GIT_ENRICHMENT_KEYS = %w[capture].freeze
   VOLATILE_ANALYSIS_KEYS = %w[generated_at].freeze
   VOLATILE_FLOW_KEYS = %w[generated_at].freeze

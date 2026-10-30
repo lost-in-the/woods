@@ -132,6 +132,23 @@ RSpec.describe Woods::Extractors::TestRouteResolver do
     expect(exercised(source)).to eq([])
   end
 
+  describe 'a route drawn via: :all (LOS-125)' do
+    let(:routes) do
+      [
+        route_double(verb: 'GET', path: '/widgets', controller: 'widgets', action: 'index', name: 'widgets'),
+        route_double(verb: '', path: '/404', controller: 'errors', action: 'not_found', name: 'not_found')
+      ]
+    end
+
+    it 'exercises the ANY route with every verb, by helper and by literal path' do
+      expect(exercised(%(get not_found_path\npost "/404"\nvisit "/404"\n))).to eq(['ANY /404'])
+    end
+
+    it 'still refuses a verb a single-verb route does not accept' do
+      expect(exercised(%(delete widgets_path\n))).to eq([])
+    end
+  end
+
   describe 'subdomain-constrained routes' do
     let(:routes) do
       [

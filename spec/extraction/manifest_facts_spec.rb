@@ -114,6 +114,18 @@ RSpec.describe Woods::Extraction::ManifestFacts do
     expect(build).not_to have_key(:metadata)
   end
 
+  it 'publishes extractor timings after Git enrichment only when a family was timed' do
+    timings = { 'models' => 1.25, 'view_templates' => 12.4 }
+
+    result = build(extractor_timings: timings, git_filter_available: false)
+
+    expect(result.fetch(:extractor_timings)).to equal(timings)
+    expect(result.keys.last(3)).to eq(%i[git_enrichment extractor_timings metadata])
+    expect(build).not_to have_key(:extractor_timings)
+    expect(build(extractor_timings: nil)).not_to have_key(:extractor_timings)
+    expect(build(extractor_timings: {})).not_to have_key(:extractor_timings)
+  end
+
   it 'preserves unknown and missing provenance without discovering another revision' do
     expect(build(provenance: { git_sha: 'unknown', git_branch: 'unknown' }))
       .to include(git_sha: 'unknown', git_branch: 'unknown')

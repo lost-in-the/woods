@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require 'set'
+require 'strscan'
 require_relative '../model_name_cache'
+require_relative '../source_references/runtime_lookup'
 require_relative 'comment_blanking'
 require_relative 'reference_patterns'
 require_relative 'form_action_scan'
@@ -59,8 +61,14 @@ module Woods
         # keeps its `Article` reference.
         scannable = CommentBlanking.ruby(source)
 
+        # A read through the model (`Library::Book::STATES`) is a read of the
+        # model, which `\b` already admits; a class or module nested in it
+        # (`Library::Book::Chapter`) is its own constant and credits nothing
+        # but itself (LOS-126).
         targets = Set.new
-        scannable.scan(ModelNameCache.model_names_regex).each { |m| targets << m }
+        constant_mentions(scannable, ModelNameCache.model_names_regex) do |name, nested|
+          targets << name unless nested && nested_module?(name, nested)
+        end
         extract_constantize_targets(scannable).each { |t| targets << t }
 
         # Short-name + constantize resolution are additive passes guarded
@@ -68,9 +76,9 @@ module Woods
         # `model_names_regex` still work. Real extraction runs always
         # have the full API.
         if ModelNameCache.respond_to?(:short_names_regex) && ModelNameCache.respond_to?(:resolve_short_name)
-          scannable.scan(ModelNameCache.short_names_regex).each do |short|
+          constant_mentions(scannable, ModelNameCache.short_names_regex) do |short, nested|
             resolved = ModelNameCache.resolve_short_name(short)
-            targets << resolved if resolved
+            targets << resolved if resolved && !(nested && nested_module?(resolved, nested))
           end
         end
 
@@ -276,6 +284,45 @@ module Woods
       end
 
       private
+
+      # The constant segment that continues a matched name (`::STATES` after
+      # `Library::Book`).
+      NESTED_SEGMENT = /::([A-Z]\w*+)/
+      private_constant :NESTED_SEGMENT
+
+      # Each match of +regex+ in +source+, with the constant segment that
+      # follows it, if one does. One forward pass: `skip_until` searches
+      # from the scan position, and the anchor is fixed so `\b` sees the
+      # text before it.
+      #
+      # @param source [String]
+      # @param regex [Regexp]
+      # @yieldparam name [String] the matched text
+      # @yieldparam nested [String, nil] the segment after a `::`, or nil
+      # @return [void]
+      def constant_mentions(source, regex)
+        scanner = StringScanner.new(source, fixed_anchor: true)
+        while scanner.skip_until(regex)
+          name = scanner.matched
+          yield name, (scanner[1] if scanner.scan(NESTED_SEGMENT))
+        end
+      end
+
+      # Whether `owner::segment` is a loaded class or module, read from the
+      # constant tables without autoloading or running application code.
+      # A registered autoload and an alias of a module count as one; a
+      # value, an absent name or a name the lookup refuses do not.
+      #
+      # @param owner [String] a fully-qualified name
+      # @param segment [String] the segment read through it
+      # @return [Boolean]
+      def nested_module?(owner, segment)
+        @nested_module_lookup ||= SourceReferences::RuntimeLookup.new
+        result = @nested_module_lookup.call("::#{owner}::#{segment}", allow_private: true)
+        result[:status] == :resolved || %w[constant_alias autoload_pending].include?(result[:reason])
+      rescue StandardError
+        false
+      end
 
       # @return [Array<Array(String, Hash)>] each distinct helper call the
       #   source makes that names a live route, with its resolution

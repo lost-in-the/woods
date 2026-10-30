@@ -90,7 +90,8 @@ module Woods
         unit.source_code = read_source(unit.file_path)
         renders = resolve_render_targets(component, unit.source_code)
         unit.metadata = extract_metadata(component, unit.source_code).merge(component_resolution_metadata(renders))
-        unit.dependencies = extract_dependencies(unit.source_code, renders)
+        unit.dependencies = with_inheritance(extract_dependencies(unit.source_code, renders),
+                                             inheritance_dependency(component))
         apply_route_helper_references(unit, unit.source_code)
         HelperCallScan.annotate(self, unit, component)
 

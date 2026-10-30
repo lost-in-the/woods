@@ -131,7 +131,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
         stub_const('ENV', ENV.to_h.merge('CHANGED_FILES' => path, 'WOODS_OUTPUT' => repo_dir))
         allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
         allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
-        extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil)
+        extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil, extractor_timings: {})
         allow(Woods::Extractor).to receive(:new).and_return(extractor)
         expect(extractor).to receive(:extract_all).and_return({ models: [] })
         expect(extractor).not_to receive(:extract_changed)
@@ -155,7 +155,7 @@ RSpec.describe 'woods:incremental changed-path parsing' do
       expect(Woods::RakeHelpers).not_to receive(:woods_changed_paths_for_range)
       allow(Woods::RakeHelpers).to receive(:woods_daemon_coverage).and_return(:absent)
       allow(Woods::RakeHelpers).to receive(:woods_with_extraction_lock).and_yield
-      extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil)
+      extractor = instance_double(Woods::Extractor, raise_on_publication_failure!: nil, extractor_timings: {})
       allow(Woods::Extractor).to receive(:new).with(output_dir: repo_dir).and_return(extractor)
       expect(extractor).to receive(:extract_changed)
         .with(%w[app/models/user.rb config/routes.rb app/models/deleted.rb]).and_return([])
