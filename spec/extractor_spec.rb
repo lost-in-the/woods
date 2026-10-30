@@ -724,35 +724,6 @@ RSpec.describe Woods::Extractor do
     end
   end
 
-  # ── batch_git_data ───────────────────────────────────────────────────
-
-  describe '#batch_git_data' do
-    before { allow(extractor).to receive(:git_capture_head).and_return('a' * 40) }
-
-    it 'returns empty hash for empty input' do
-      expect(extractor.send(:batch_git_data, [])).to eq({})
-    end
-
-    it 'deduplicates paths and requests one history walk even above the old 500-path batch size' do
-      require 'active_support/all'
-      relative_paths = (1..1100).map { |i| "file_#{i}.rb" }
-      file_paths = relative_paths.flat_map { |path| [File.join(tmpdir, path)] * 2 }
-      reader = instance_double(Woods::GitHistory)
-      allow(Woods::GitHistory).to receive(:new).and_return(reader)
-      expect(reader).to receive(:read).once.with(relative_paths, recent_after: kind_of(Time), revision: 'a' * 40)
-                                      .and_return(relative_paths.to_h { |path| [path, {}] })
-
-      result = extractor.send(:batch_git_data, file_paths)
-      expect(result.size).to eq(1100)
-    end
-
-    it 'omits all metadata when the history reader fails' do
-      reader = instance_double(Woods::GitHistory, read: nil)
-      allow(Woods::GitHistory).to receive(:new).and_return(reader)
-      expect(extractor.send(:batch_git_data, [File.join(tmpdir, 'file.rb')])).to eq({})
-    end
-  end
-
   describe '#enrich_with_git_data' do
     it 'sends only app-owned paths under Rails.root to git' do
       # A gem-owned unit (an engine model) carries its real absolute path,
@@ -779,7 +750,7 @@ RSpec.describe Woods::Extractor do
       extractor.instance_variable_set(:@results, { models: [app_unit, gem_unit, vendored_unit] })
 
       allow(extractor).to receive(:git_available?).and_return(true)
-      expect(extractor).to receive(:batch_git_data).with([app_path]).and_return({})
+      expect(extractor.send(:git_capture)).to receive(:file_facts).with([app_path]).and_return({})
 
       extractor.send(:enrich_with_git_data)
     ensure
@@ -798,7 +769,7 @@ RSpec.describe Woods::Extractor do
     it 'runs enrichment commands against Rails.root rather than the process working directory' do
       run_command(tmpdir, 'git', 'init', '--quiet', '--initial-branch', 'app-root')
 
-      actual_root = Pathname.new(extractor.send(:run_git, 'rev-parse', '--show-toplevel')).realpath
+      actual_root = Pathname.new(extractor.send(:git_capture).send(:run_git, 'rev-parse', '--show-toplevel')).realpath
       expect(actual_root).to eq(Pathname.new(tmpdir).realpath)
     end
 

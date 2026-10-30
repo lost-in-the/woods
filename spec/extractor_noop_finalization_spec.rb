@@ -395,10 +395,11 @@ RSpec.describe Woods::Extractor, 'payload-only no-op finalization' do
   it 'keeps the settled captured revision authoritative in a HEAD-only publication' do
     open_stage
     captured = 'a' * 40
-    extractor.instance_variable_set(:@git_capture_head, captured)
-    extractor.instance_variable_set(:@git_capture_branch, 'captured-branch')
-    extractor.instance_variable_set(:@git_capture_resolved, true)
-    allow(extractor).to receive(:git_availability).and_return(available: true)
+    capture = extractor.send(:git_capture)
+    capture.instance_variable_set(:@head, captured)
+    capture.instance_variable_set(:@branch, 'captured-branch')
+    capture.instance_variable_set(:@head_resolved, true)
+    allow(capture).to receive(:availability).and_return(available: true)
     expect(Woods::GitProvenance).not_to receive(:new)
     allow(extractor).to receive(:refresh_commit_table) do
       events << :table
