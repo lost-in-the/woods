@@ -658,13 +658,15 @@ module Woods
       return if clusters.empty?
 
       pending = filtered_ids.select { |id| cluster_prefix(id).nil? }.sort
+      # Seed lookups may be cached while scoring. Root owners enter only
+      # after the whole round, overwriting any earlier nil misses.
+      membership = {}
 
       ORPHAN_ASSIGNMENT_ROUNDS.times do
         break if pending.empty?
 
-        membership = clusters.transform_values { |cluster| cluster[:member_set] }.freeze
         assignments = pending.filter_map do |id|
-          best_cluster = find_most_connected_cluster(id, clusters.keys, membership)
+          best_cluster = find_most_connected_cluster(id, clusters, membership)
           [id, best_cluster] if best_cluster
         end
         break if assignments.empty?
@@ -672,6 +674,7 @@ module Woods
         assignments.each do |id, name|
           clusters[name][:members] << id
           clusters[name][:member_set].add(id)
+          membership[id] = name
         end
         pending -= assignments.map(&:first)
       end
@@ -680,25 +683,22 @@ module Woods
     # Find which cluster a unit has the most connections to.
     #
     # @param identifier [String]
-    # @param cluster_names [Array<String>]
-    # @param membership [Hash{String => Set<String>}] name => members, read as
-    #   of the start of the assignment round (see {#assign_orphaned_units})
+    # @param clusters [Hash] namespace clusters, unchanged while scoring a round
+    # @param membership [Hash] cached neighbor owners, including nil misses;
+    #   new root owners are applied only after scoring the complete round
     # @return [String, nil]
-    def find_most_connected_cluster(identifier, cluster_names, membership)
+    def find_most_connected_cluster(identifier, clusters, membership)
       connections = Hash.new(0)
 
-      # Check forward edges (dependencies)
+      # Preserve repeated forward targets and the graph's unique reverse
+      # neighbors: each contribution counts, including reciprocal edges.
       @graph.dependencies_of(identifier).each do |dep|
-        cluster_names.each do |name|
-          connections[name] += 1 if membership[name].include?(dep)
-        end
+        name = cluster_owner(dep, clusters, membership)
+        connections[name] += 1 if name
       end
-
-      # Check reverse edges (dependents)
       @graph.dependents_of(identifier).each do |dep|
-        cluster_names.each do |name|
-          connections[name] += 1 if membership[name].include?(dep)
-        end
+        name = cluster_owner(dep, clusters, membership)
+        connections[name] += 1 if name
       end
 
       return nil if connections.empty?
@@ -707,6 +707,17 @@ module Woods
       # cluster the hash happened to enumerate first, which is registration
       # order — the one determinism hole left in this class.
       connections.max_by { |name, count| [count, name] }.first
+    end
+
+    # Resolve only neighbors that scoring encounters, rather than walking all
+    # seed members. A namespace prefix has one possible owner, but membership
+    # must still be checked because type/custom filters can exclude that seed.
+    def cluster_owner(identifier, clusters, membership)
+      membership.fetch(identifier) do
+        name = cluster_prefix(identifier)
+        seed = clusters[name]
+        membership[identifier] = seed && seed[:member_set].include?(identifier) ? name : nil
+      end
     end
 
     # Merge clusters smaller than min_size into their most-connected neighbor.

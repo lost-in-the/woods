@@ -59,6 +59,11 @@ module Woods
         candidate if candidate && KINDS[candidate.type] == :constant
       end
 
+      # @return [Array<Prism::Node>] the arguments written directly in the call
+      def arguments(node)
+        node.arguments&.arguments.to_a
+      end
+
       def children(node)
         return [node.value].compact if CONSTANT_WRITES.include?(node.type)
         return [] if %i[constant_target_node constant_path_target_node].include?(node.type)

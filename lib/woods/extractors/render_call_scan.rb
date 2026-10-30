@@ -66,6 +66,29 @@ module Woods
         []
       end
 
+      # Whether published source may render one of these constant segments.
+      # The text prefilter only avoids unnecessary parsing; the tree decides
+      # whether a matching name is a render, including an alias spelling.
+      # Ambiguous source retains conservative incremental selection.
+      # @param source [String, nil] published controller source
+      # @param names [#any?, #include?] touched constant segments
+      # @return [Boolean]
+      def self.may_render_constants?(source, names:)
+        text = source.to_s
+        return false unless names.any? { |name| text.include?(name) }
+
+        parsed = Prism.parse(text)
+        return true unless parsed.errors.empty?
+
+        visitor = new
+        parsed.value.accept(visitor)
+        visitor.candidates.any? do |candidate|
+          candidate.kind == :constant && candidate.name.split('::').any? { |part| names.include?(part) }
+        end
+      rescue SystemStackError
+        true
+      end
+
       # @return [Array<Candidate>]
       attr_reader :candidates
 

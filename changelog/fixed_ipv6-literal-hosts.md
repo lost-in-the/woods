@@ -1,0 +1,1 @@
+- The Ollama and Qdrant clients and the MCP provider probe connect to a bracketed IPv6 literal host (`http://[::1]:11434`, `http://[fd00::5]:6333`) by its address. The brackets were handed to the socket layer as part of the hostname, so such a URL failed with a name-resolution error even though the Qdrant private-host check already read it correctly.

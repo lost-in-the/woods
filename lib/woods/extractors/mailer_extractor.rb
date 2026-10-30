@@ -198,7 +198,8 @@ module Woods
 
           result = {
             type: :"#{cb.kind}_action",
-            filter: callback_filter_label(cb)
+            filter: callback_filter_label(cb),
+            origin: callback_origin(mailer, cb)
           }
           result[:only] = only if only.any?
           result[:except] = except if except.any?

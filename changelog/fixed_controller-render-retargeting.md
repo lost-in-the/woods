@@ -1,0 +1,1 @@
+- Retarget resolved controller render edges when a Ruby edit outside component directories changes a component constant, selecting controllers individually and preserving qualified ancestor matching.

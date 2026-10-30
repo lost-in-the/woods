@@ -25,8 +25,16 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     git('commit', '-qm', message, "--author=#{author} <test@example.invalid>")
   end
 
+  def capture
+    extractor.send(:git_capture)
+  end
+
+  def facts(*paths)
+    capture.file_facts(paths)
+  end
+
   def metadata
-    extractor.send(:batch_git_data, [path]).fetch('sample.rb')
+    facts(path).fetch('sample.rb')
   end
 
   before do
@@ -60,6 +68,40 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
 
     expect(unit.metadata[:git][:commit_count]).to eq(1)
     expect(incremental.fetch('sample.rb')).to eq(unit.metadata[:git])
+  end
+
+  it 'keeps a failed capture unresolved until the next extraction run' do
+    failed = capture
+    allow(failed).to receive(:run_git).and_call_original
+    allow(failed).to receive(:run_git).with('symbolic-ref', '--quiet', 'HEAD').and_return('')
+    allow(failed).to receive(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').and_return('')
+
+    expect(facts(path)).to eq({})
+    expect(extractor.send(:refresh_commit_table, full: true)).to be_nil
+    expect(failed).to have_received(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').once
+    expect(failed.enrichment_summary(graph: extractor.dependency_graph, full: true))
+      .to include('state' => 'unavailable', 'reason' => 'history_read_failed', 'head_sha' => nil)
+
+    extractor.send(:reset_git_capture)
+    expect(capture).not_to equal(failed)
+    expect(metadata[:commit_count]).to eq(1)
+  end
+
+  it 'walks the captured named ref when HEAD changes between capture commands' do
+    head = git('rev-parse', 'HEAD')
+    moved = false
+    allow(capture).to receive(:run_git).and_call_original
+    allow(capture).to receive(:run_git).with('symbolic-ref', '--quiet', 'HEAD').and_wrap_original do |method, *args|
+      ref = method.call(*args)
+      git('checkout', '-qb', 'after-capture')
+      commit('later branch commit')
+      moved = true
+      ref
+    end
+
+    expect(metadata[:commit_count]).to eq(1)
+    expect(moved).to be(true)
+    expect(capture.enrichment_summary(graph: extractor.dependency_graph, full: true).fetch('head_sha')).to eq(head)
   end
 
   it 'applies the full path exclusions to incremental git enrichment across typed collisions' do
@@ -190,7 +232,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     expect(metadata[:commit_count]).to eq(2)
     expect(metadata[:recent_commits].map { |entry| entry[:message] })
       .to contain_exactly('main commit', 'checkpoint commit')
-    expect(extractor.send(:batch_git_data, [path, root.join('other.rb').to_s]).fetch('sample.rb')).to eq(metadata)
+    expect(facts(path, root.join('other.rb').to_s).fetch('sample.rb')).to eq(metadata)
   end
 
   it 'preserves literal filenames and subject delimiters in published metadata' do
@@ -199,7 +241,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     git('add', '--', strange)
     git('commit', '-qm', 'subject ||| untouched')
 
-    data = extractor.send(:batch_git_data, [strange]).fetch(File.basename(strange))
+    data = facts(strange).fetch(File.basename(strange))
     expect(data[:commit_count]).to eq(1)
     expect(data[:recent_commits].first[:message]).to eq('subject ||| untouched')
   end
@@ -216,7 +258,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     git('worktree', 'add', '-q', worktree.to_s, 'unmerged')
     allow(Rails).to receive(:root).and_return(worktree)
 
-    data = extractor.send(:batch_git_data, [worktree.join('sample.rb').to_s])
+    data = facts(worktree.join('sample.rb').to_s)
     expect(data.fetch('sample.rb')[:commit_count]).to eq(2)
     messages = data.fetch('sample.rb')[:recent_commits].map { |entry| entry[:message] }
     expect(messages).to contain_exactly('main commit', 'checkpoint commit')

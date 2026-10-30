@@ -3,6 +3,7 @@
 require_relative 'declared_parent'
 
 require_relative 'source_nesting'
+require_relative 'source_origin'
 require_relative 'method_parameters'
 
 module Woods
@@ -75,11 +76,7 @@ module Woods
       #
       # @return [Array<String>]
       def gem_install_roots
-        roots = Gem.path.dup
-        roots << Bundler.bundle_path.to_s if defined?(Bundler) && Bundler.respond_to?(:bundle_path)
-        roots.uniq.map { |root| File.expand_path(root).delete_suffix(File::SEPARATOR) + File::SEPARATOR }
-      rescue StandardError
-        []
+        SourceOrigin.gem_install_roots
       end
 
       # Whether a resolved source belongs to this application and is a file.
@@ -168,6 +165,38 @@ module Woods
       # @return [String, nil] Explicit parent of that declaration, or nil
       def extract_parent_class(source, class_name)
         DeclaredParent.call(source, class_name)
+      end
+
+      # The `:inheritance` edge to the unit's application-defined parent, or
+      # nil when the parent is a framework class or one no extractor
+      # publishes. See {SuperclassDependency}, loaded on first use because
+      # it needs every extractor's file rules.
+      #
+      # @param unit_class [Class, String] the loaded class, or the identifier
+      #   a file-based extractor read from +file_path+
+      # @param file_path [String, nil] the declaring file, with an identifier
+      # @return [Hash, nil]
+      def inheritance_dependency(unit_class, file_path: nil)
+        return nil unless unit_class.is_a?(Class) || unit_class.is_a?(String)
+
+        @inheritance_dependency ||= begin
+          require_relative 'superclass_dependency'
+          SuperclassDependency.new
+        end
+        @inheritance_dependency.call(unit_class, file_path: file_path)
+      end
+
+      # Appends the structural edge after consolidation, which keeps one edge
+      # per type and target whatever its `via`, so a parent the source also
+      # references keeps both edges, as controllers and mailers do.
+      #
+      # @param dependencies [Array<Hash>] consolidated edges
+      # @param edge [Hash, nil] from {#inheritance_dependency}
+      # @return [Array<Hash>]
+      def with_inheritance(dependencies, edge)
+        return dependencies unless edge
+
+        (dependencies + [edge]).uniq { |dependency| dependency.values_at(:type, :target, :via) }
       end
 
       # Whether the source declares the selected identity as a class.
@@ -304,14 +333,18 @@ module Woods
 
       # Proc#to_s embeds a process-local address. Model and controller filters
       # share source-site labels, so metadata and derived chunks agree across
-      # boots. Preserve symbols and other application-defined callback values.
+      # boots and across machines: the site is {SourceOrigin.location}, so an
+      # application file is root-relative, a gem file is named by its gem
+      # (`activerecord-7.1.6/lib/…`) and no absolute path is ever published
+      # (LOS-127). Preserve symbols and other application-defined callback
+      # values.
       def stable_filter(filter)
         return filter unless filter.is_a?(Proc)
 
         location = filter.source_location
         site = if location
                  path, line = location
-                 "#{path.delete_prefix("#{Rails.root}/")}:#{line}"
+                 "#{SourceOrigin.location(path)}:#{line}"
                else
                  'native'
                end
@@ -332,7 +365,54 @@ module Woods
         label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
       end
 
-      private :callback_filter, :stable_filter, :callback_filter_label, :legacy_action_filter_actions
+      # Who wrote a callback (LOS-128), published as +origin+ beside
+      # +analysis_status+, which says only whether its body could be read.
+      # A Proc is placed by its source location; a Symbol by the owner of
+      # the method it names on +klass+ (a method a concern under app/
+      # defines is the application's, a `define_method` in Active Record's
+      # autosave builder is the framework's); another callback object by
+      # its class's definition site. A String filter, a native method and a
+      # method +klass+ does not define are {SourceOrigin::UNKNOWN}. Nothing
+      # is called.
+      #
+      # @param klass [Class, Module] the model or controller the callback runs on
+      # @param callback [ActiveSupport::Callbacks::Callback]
+      # @return [String] {SourceOrigin::APP}, {SourceOrigin::FRAMEWORK},
+      #   {SourceOrigin::GEM} or {SourceOrigin::UNKNOWN}
+      def callback_origin(klass, callback)
+        filter_origin(klass, callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter)
+      end
+
+      # @param klass [Class, Module]
+      # @param filter [Object] a callback's filter: Proc, Symbol, String or object
+      # @return [String] see {#callback_origin}
+      def filter_origin(klass, filter)
+        SourceOrigin.origin(filter_source_path(klass, filter))
+      end
+
+      # The file that defines a filter, when Ruby knows one.
+      #
+      # @param klass [Class, Module]
+      # @param filter [Object]
+      # @return [String, nil]
+      def filter_source_path(klass, filter)
+        case filter
+        when Proc then filter.source_location&.first
+        when Symbol
+          return nil unless klass.respond_to?(:instance_method)
+
+          klass.instance_method(filter).source_location&.first
+        when String, Integer, nil then nil
+        else
+          name = filter.is_a?(Module) ? filter.name : filter.class.name
+          name && Object.respond_to?(:const_source_location) ? Object.const_source_location(name)&.first : nil
+        end
+      rescue StandardError
+        nil
+      end
+
+      private :callback_filter, :stable_filter, :callback_filter_label, :legacy_action_filter_actions,
+              :callback_origin, :filter_origin, :filter_source_path
 
       # Human-readable label for a non-ActionFilter condition.
       #

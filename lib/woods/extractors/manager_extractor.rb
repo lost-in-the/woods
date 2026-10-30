@@ -72,7 +72,8 @@ module Woods
         unit.namespace = extract_namespace(class_name)
         unit.source_code = annotate_source(source, class_name)
         unit.metadata = extract_metadata(source, class_name, ancestry)
-        unit.dependencies = extract_dependencies(source, class_name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, class_name),
+                                             inheritance_dependency(class_name, file_path: file_path))
         MethodEffects.apply(unit, source)
 
         unit

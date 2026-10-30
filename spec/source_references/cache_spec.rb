@@ -62,10 +62,9 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(described_class.read(path)).to eq(data)
   end
 
-  it 'requires format 7 and refuses format 6 so unchanged callers gain declaration evidence after a full rebuild' do
-    expect(described_class::VERSION).to eq(7)
-    analysis.delete('macros')
-    write_json(data.merge('version' => 6))
+  it 'requires format 8 and refuses format 7 so unchanged callers gain mixin tags after a full rebuild' do
+    expect(described_class::VERSION).to eq(8)
+    write_json(data.merge('version' => 7))
     expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
   end
 
@@ -89,6 +88,18 @@ RSpec.describe Woods::SourceReferences::Cache do
         write_json(data)
         expect { described_class.read(path) }.to raise_error(described_class::Invalid)
       end
+    end
+  end
+
+  it 'round trips a mixin tag and rejects any value other than include, extend or prepend' do
+    data['files'].values.first['analysis'] = Woods::SourceReferences::Collector.new.call(
+      'class Caller; include A; extend B; prepend C; D; end'
+    )
+    described_class.write(path, data)
+    expect(described_class.read(path)).to eq(data)
+    ['load', '', nil, :include, 1].each do |value|
+      data['files'].values.first['analysis']['references'].first['mixin'] = value
+      expect { described_class.write(path, data) }.to raise_error(described_class::Invalid, /mixin/)
     end
   end
 

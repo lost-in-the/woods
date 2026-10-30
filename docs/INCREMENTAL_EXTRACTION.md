@@ -303,20 +303,35 @@ step before it.
    already reached by the pre-change dependency graph. The application must have
    loaded the changed runtime before extraction, through a fresh boot or reload.
 
-   Components and view components re-run with them on a Ruby edit. A `render`
+   Components and view components re-run with them on a Ruby edit only when
+   the edit touched a constant they resolve. `RenderScope` reads the
+   constants a file defines from its syntax tree before and after the edit
+   (the file before is recovered from the published units that hold it), and
+   compares the touched names with the names the families resolved (render and
+   slot targets, unresolved and external names) and the ancestors of their
+   classes. A method body edit, or a new class nothing renders, re-runs
+   neither family. An edit it cannot read re-runs them: a path outside an
+   `app/` directory, a syntax error, `const_set`, `autoload`, or a method named
+   like a constant (a Kit method). A part of a file that no published unit
+   holds is read as new, which can only make an edit look larger. A render
    edge names the component the running app would reach, resolved against the
    loaded constant tables (lexical scope, included Phlex Kits, top level), so
    creating `Billing::V2::TierGrid` retargets an unchanged
    `Billing::V2::ManagePage` that already renders `TierGrid.new`, and no graph
-   edge leads there. Controllers resolve their render edges the same way but
-   re-run only when a Ruby file under a component directory
-   (`component_paths`) changes, since every controller re-running on every
-   Ruby edit would cost more than the bounded blast radius saves. A component
-   defined outside those directories, or an alias defined elsewhere, retargets
-   a controller's edge when the controller file changes or on a full
-   extraction. The exception is a render that resolved to nothing: a
-   controller holding one re-runs on any Ruby edit, so a component created
-   outside those directories still resolves it. Only units whose output changed are rewritten. The same
+   edge leads there. Controllers resolve their render edges the same way:
+   a Ruby edit that touches a constant a controller resolves refreshes that
+   controller, including a component or alias defined in a service file or
+   another directory outside `component_paths`. Selection also checks render
+   constants as written, since an alias can name a different component class.
+   Ancestor matching uses qualified
+   names, so `Importers::Base` does not match `ActionController::Base`. Readable
+   `lib/` edits use their published previous source to narrow selection too.
+   An unrelated readable edit leaves other controllers untouched; an opaque
+   edit or a `lib/` edit without a recorded baseline conservatively refreshes
+   every controller.
+   A controller holding an unresolved render still re-runs on any Ruby edit,
+   so a component created elsewhere can resolve it. Only units whose output
+   changed are rewritten. The same
    reload requirement applies: a constant the process has not loaded, or has not
    unloaded, resolves as that process sees it. View components also re-run when
    a sidecar template changes (a template with a Ruby file of the same name
@@ -466,7 +481,7 @@ cheap, which is what makes wholesale replacement the right shape.
 | files under `config.test_support_paths` (default `spec/support/**`, `spec/*_helper.rb`, `spec/lib/**`, and the same under `test/`; never the test files `test_mappings` claims) | test_support, test_mappings |
 | `db/views/**/*.sql` | database_views |
 | `config.graphql_document_paths` (default `app/javascript/**/*.{graphql,gql}`, `app/frontend/**/*.{graphql,gql}`; never a path under `node_modules/`, root-level included), `app/graphql/**/*.rb` | graphql_operations |
-| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers |
+| `db/schema.rb`, `db/structure.sql`, `db/*_schema.rb`, `db/*_structure.sql`, `db/migrate/**/*.rb`, `app/models/**/*.rb` at the root or under a pack or engine (`**/app/models/**/*.rb`) | database_tables, **and** migrations, database_views, external_consumers (a schema dump or migration); for a model file, only when the live table catalog no longer matches the published table units |
 | the file named by `external_table_consumers_path` | external_consumers |
 | `app/views/**` templates, `app/controllers/**/*.rb`, `app/mailers/**/*.rb` | view_templates |
 | any `config.javascript_paths` module (default `app/javascript/**/*.{js,ts,jsx,tsx,mjs}`, `app/assets/javascripts/**/*.js`) | js_modules; **and** components, view components, view templates when the name map moved |
@@ -524,7 +539,10 @@ Nine of these deserve a note:
   `TABLE_CONSUMER_EXTRACTORS` (migrations, database views, external consumers)
   resolve table names through the same catalog, so they re-run with the
   tables: a model added for a table gives that table's unchanged migration a
-  model edge. The trigger paths are a proxy. **A schema change applied
+  model edge. A model edit re-runs them only when the live catalog differs from
+  the published table units (a table, or an owner of one, moved); declared
+  consumers read table identifiers only, so an ownership move alone leaves them
+  out. The trigger paths are a proxy. **A schema change applied
   with no file change is not seen; run a full extraction.** Schema dumps are
   restart inputs, so `woods:incremental` already selects a full extraction for
   them, and the direct `extract_changed` API refuses them. Models are not
@@ -840,10 +858,12 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/serializers.gemfile \
 `spec/integration/incremental_equivalence_spec.rb` is the oracle. It boots the
 `spec/dummy` app against a tmpdir copy, applies randomized
 create/modify/delete/rename sequences, and compares the maintained index to a
-cold full extraction at every step. It runs in CI on every Rails-matrix row.
+cold full extraction at every step. It runs on every Rails-matrix row of
+`main` and version tags at 60 operations x 3 seeds; pull requests run the
+security-supported Rails rows at 8 operations x 1 seed.
 
 ```bash
-# CI defaults: 60 operations x 3 seeds
+# Full depth: 60 operations x 3 seeds
 WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
   bundle exec rspec spec/integration/incremental_equivalence_spec.rb
 
@@ -875,6 +895,14 @@ failed runs. It is not another phase to sum. Compare it with phase durations
 to find unaccounted work; each line rounds to hundredths of a second. Rails
 boot, Bundler and watch reload work outside the call require separate wall
 measurements. Do not infer that all unaccounted time is boot.
+
+Per-family extractor time needs no flag: every run records the wall seconds
+each extractor family spent (per file or wholesale, whichever the run reached)
+in the manifest's `extractor_timings` and ends the task output with a sorted
+`Extractor timings (...)` line. See [manifest extractor
+timings](PUBLISHED_INDEX.md#manifest-extractor-timings). Those seconds sit
+inside the `extraction`, `re-extraction` and `reconciliation` phases, so do not
+add them to the phase lines.
 
 Both full and incremental runs currently seed the prior payload. Cloning uses
 per-file hardlinks (or copies where links are unsupported); updated files are
@@ -1031,19 +1059,20 @@ memoizes the result per served generation (dropped on reload), so the cache is
 parsed once per generation. Restoring cache bytes inside one generation shows up
 after the next reload or generation change.
 
-The development constant-span writer uses cache format 7. It requires validated
+The development constant-span writer uses cache format 8. It requires validated
 line, byte column and byte length for every candidate, and records the
 [caller policy](CONFIGURATION_REFERENCE.md#source-reference-callers) that
 produced its edges. It also retains optional syntactic method selectors on
 constant receiver candidates, including unresolved ones. Format 7 adds the
 class-body declaration macros (associations, callbacks, scopes) with the
-position of each literal symbol argument. A format 6 or earlier
+position of each literal symbol argument. Format 8 adds the `mixin` tag on
+constants passed to a receiverless `include`, `extend` or `prepend`. A format 7 or earlier
 cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
-Unchanged source identities otherwise reuse cached analysis; accepting format 6
-would leave those callers without declaration evidence. Missing optional fields in
-a format 7 record are valid but do not prove semantic completeness: bare reads
+Unchanged source identities otherwise reuse cached analysis; accepting format 7
+would leave those callers without mixin tags. Missing optional fields in
+a format 8 record are valid but do not prove semantic completeness: bare reads
 have no selector, and contract tests establish expected presence on receivers.
 Updating only a reader does not enrich an existing generation.
 

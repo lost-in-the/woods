@@ -99,6 +99,10 @@ module Woods
         # serialize behind a generation check, and a reader that took the
         # freshness lock must be able to touch the caches without deadlocking.
         @cache_mutex = Mutex.new
+        # A first recent_changes read may populate a bucket while other HTTP
+        # requests are pinned to the same generation.
+        @recent_changes_mutex = Mutex.new
+        @recent_changes_cache = {}
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @loaded_token = nil
@@ -302,6 +306,7 @@ module Woods
         @index_cache = {}
         @domain_clusters_cache = {}
         @index_identifier_sets = {}
+        @recent_changes_mutex.synchronize { @recent_changes_cache = {} }
         @scope_corpus = nil
         @manifest = nil
         @incremental_readiness = nil
@@ -1023,33 +1028,60 @@ module Woods
                  TYPE_DIRS
                end
 
-        units_with_dates = []
+        units_with_dates = dirs.flat_map { |dir| recent_changes_for_directory(dir) }
+        result = units_with_dates.sort_by { |u| u[:last_modified] }.reverse.first(limit)
+        return result if current_payload_dir == @index_dir
 
-        dirs.each do |dir|
-          entries = read_index(dir)
-          entries.each do |entry|
-            id = entry['identifier']
-            unit = load_search_unit(DIR_TO_TYPE.fetch(dir), id)
-            next unless unit
+        # The caller can mutate returned fields without changing the summary,
+        # another request's response, or the reader's cached index entries.
+        result.map { |row| copy_recent_changes_value(row) }
+      end
 
-            last_modified = unit.dig('metadata', 'git', 'last_modified')
-            next unless last_modified
+      # Lazily retain only response fields, never full unit payloads. Cache by
+      # directory rather than query: the order and duplication of the caller's
+      # type filters still determine the order of equal timestamps. A flat
+      # index can be rewritten in place, even if it has a generation marker,
+      # so it must continue reading units on every request.
+      def recent_changes_for_directory(dir)
+        return read_recent_changes_directory(dir) if current_payload_dir == @index_dir
 
-            units_with_dates << {
-              identifier: id,
-              type: DIR_TO_TYPE[dir],
-              file_path: unit['file_path'],
-              last_modified: last_modified,
-              author: unit.dig('metadata', 'git', 'last_author')
-            }
+        @recent_changes_mutex.synchronize do
+          @recent_changes_cache[dir] ||= read_recent_changes_directory(dir).map do |row|
+            copy_recent_changes_value(row)
           end
         end
-
-        units_with_dates
-          .sort_by { |u| u[:last_modified] }
-          .reverse
-          .first(limit)
       end
+      private :recent_changes_for_directory
+
+      def read_recent_changes_directory(dir)
+        read_index(dir).filter_map do |entry|
+          id = entry['identifier']
+          unit = load_search_unit(DIR_TO_TYPE.fetch(dir), id)
+          next unless unit
+
+          last_modified = unit.dig('metadata', 'git', 'last_modified')
+          next unless last_modified
+
+          { identifier: id, type: DIR_TO_TYPE[dir], file_path: unit['file_path'],
+            last_modified: last_modified, author: unit.dig('metadata', 'git', 'last_author') }
+        end
+      end
+      private :read_recent_changes_directory
+
+      # Published fields are normally strings, but preserve the JSON values an
+      # older or third-party index supplied while detaching mutable containers.
+      def copy_recent_changes_value(value)
+        case value
+        when String then value.dup
+        when Array then value.map { |item| copy_recent_changes_value(item) }
+        when Hash
+          value.each_with_object({}) do |(key, item), copy|
+            copy[copy_recent_changes_value(key)] = copy_recent_changes_value(item)
+          end
+        else value
+        end
+      end
+      private :copy_recent_changes_value
 
       # @return [Hash] Raw dependency graph data from JSON
       #

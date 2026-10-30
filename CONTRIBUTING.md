@@ -234,20 +234,22 @@ Accepted crash/eviction limits are documented in the
 
 ## Before you push
 
-`script/ci-local` runs the GitHub-free CI gates locally, so CI confirms instead of discovering. It stops at the first failure and prints per-gate durations.
+`script/ci-local` runs a fast local preflight over selected CI gates. Before running gates it reports the actual Ruby engine/release/revision and executable hash, RubyGems, Bundler, effective lock path/hash, selected gem versions/platforms, dependency inputs, and Woods source binding. It stops at the first failing command and prints durations. Without a named reference, hosted drift is unknown.
 
 ```bash
 script/ci-local                 # lint, unit with coverage, booted Rails rows
 script/ci-local --skip-booted   # quick run
 script/ci-local --only booted   # after an extraction change
 script/ci-local --full          # booted rows at 60 operations, seeds 1,2,3
+script/ci-local --hosted-pr     # PR rows only: Ruby 4.0 / Rails 8.1 at smoke depth
+script/ci-local --check         # environment checks only; no gates or provisioning
 script/ci-local --only booted --match incremental_equivalence   # one booted step
 ```
 
 - **lint:** surface inventory and RuboCop on Ruby 3.3.
 - **unit:** the retrieval-quality gate, then `script/parallel-rspec` with coverage on Ruby 3.3.
 - **booted:** the `rails-matrix` steps for Ruby 4.0 / Rails 8.1 and Ruby 3.0 / Rails 6.0, with the same step grouping as `ci.yml`.
-- **not covered:** the Rails 7.2 fixture bundles, the other matrix rows, live backends and the MCP transport job.
+- **omitted:** other Ruby/Rails rows, Rails 7.2 fixture bundles, minimum dependencies, live backends, MCP transport/Inspector, package, security, POSIX-locale and other hosted jobs. A filtered `--match` run also omits the other booted steps.
 
 One-time setup (the host base Gemfile has no Rails, so the booted rows need their own gemfiles and Rubies):
 
@@ -257,7 +259,39 @@ MISE_RUBY_COMPILE=1 RUBY_CFLAGS="-O3 -std=gnu17" mise install ruby@3.0   # no pr
 script/ci-local --setup
 ```
 
-Bundles install under `${WOODS_CI_LOCAL_BUNDLE:-~/.cache/woods-ci-local/bundle}`. Rubies are chosen per command with `mise exec`, so global mise config is untouched.
+Bundles install under `${WOODS_CI_LOCAL_BUNDLE:-~/.cache/woods-ci-local/bundle}`. Mise locates installed Rubies; commands then use absolute Ruby/Bundler paths and a controlled child environment. The runner does not edit global mise or Bundler settings. Fast mode allows working changes and uses the complete current checkout. Its lint and unit gates deliberately share the base Gemfile's default Puma declaration (`>= 6.0`), allowing one frozen development lock. Hosted unit CI declares `~> 8.0`; matching that row requires its separate reference bundle.
+
+`--setup` provisions the selected fast-mode bundles, then checks them without running test gates. With no selection flags it provisions all three Gemfiles. Existing locks remain frozen and their bytes are checked after commands; an absent native lock may be resolved locally. Setup no longer runs a broad dependency update. If an existing lock is incompatible, retain it and use a separate task checkout for an explicit new resolution. An existing lock selects its exact `BUNDLED WITH` version; a missing installation fails rather than silently choosing another Bundler. Reference setup below can install the captured Bundler into task storage.
+
+### Match a named hosted toolchain
+
+The workflow captures the lint, Ruby 3.3 coverage/unit, Ruby 4.0/Rails 8.1 and Ruby 3.0/Rails 6.0 environments immediately after `ruby/setup-ruby`. Each capture contains its native lock and structured identities. Artifact names are `ci-local-lint-attempt-N`, `ci-local-unit-attempt-N`, `ci-local-rails-4.0-8.1-attempt-N`, and `ci-local-rails-3.0-6.0-attempt-N` (seven-day retention). Obtain them through trusted access to one named repository run and attempt. Extract their row directories into one reference directory; local JSON does not authenticate its own provenance. A capture records environment selection before tests, and does not establish that the job passed. The Ruby 3.0/Rails 6.0 reference is captured only on `main` and version-tag runs, since that row does not run on pull requests.
+
+Each selected row needs `environment.json` and `Gemfile.lock` under its own `lint/`, `unit/`, `rails-4.0-8.1/`, or `rails-3.0-6.0/` directory. Missing rows, mixed attempts/events/source SHAs, contradictory inputs, malformed records and changed lock bytes refuse before provisioning. Partial reruns cannot be assembled into one fictitious attempt; narrow `--only` if evidence exists for fewer rows.
+
+```bash
+# In a clean, committed candidate with compatible dependency/config inputs:
+WOODS_CI_LOCAL_BUNDLE=/path/to/task-storage script/ci-local \
+  --reference /path/to/reference --run-id 12345 --attempt 1 --setup --hosted-pr
+WOODS_CI_LOCAL_BUNDLE=/path/to/task-storage script/ci-local \
+  --reference /path/to/reference --run-id 12345 --attempt 1 --check --hosted-pr
+WOODS_CI_LOCAL_BUNDLE=/path/to/task-storage script/ci-local \
+  --reference /path/to/reference --run-id 12345 --attempt 1 --hosted-pr \
+  --rspec-seed 43656 --report-dir /path/to/new-reports
+# For a captured push run, use --full in place of --hosted-pr.
+```
+
+Reference setup uses task-local mise data/cache/state/config directories below the bundle root's `mise/` directory; `WOODS_CI_LOCAL_MISE_ROOT` can select another task directory. It installs the exact captured Ruby release if absent, verifies engine/release/revision, RubyGems and runtime/gem platforms, installs the exact Bundler into a row-specific gem home, and installs the captured lock frozen. A Ruby/RubyGems/platform mismatch stops before installing Bundler. Setup does not upgrade RubyGems automatically; a different shipped RubyGems version needs a matching task-owned Ruby installation before retrying. Ruby 3.0 may need the compile settings shown above. Missing build prerequisites or unavailable recorded versions are errors, with no fallback to a newer release.
+
+Each reference row runs in a complete local clone of the candidate at the native Gemfile path, preserving `exe/`, package resources, and relative path dependencies across Bundler 2.2/2.5/4. Row storage includes the candidate's canonical checkout path and commit, run, attempt and row. Every check/run verifies the binding, clean candidate and clone, lock bytes, and actual Bundler-selected Woods root, executable, version file, Gemfile and lock. A mismatched existing profile refuses without relinking or overwriting it. Candidate development locks are left alone. Reports and coverage produced inside these row clones remain at the printed row paths.
+
+Matching requires exact Ruby engine/release/revision, RubyGems, Bundler, runtime/gem platforms, lock bytes, selected gem name/version/platform triples, and row-specific effective Puma/sqlite inputs. The base Gemfile, selected appraisal, gemspec and version-file bytes must match the capture. Reference and candidate source SHAs are recorded separately: a later clean commit with those dependency inputs unchanged may use the older toolchain reference. Changed workflow/runner/RSpec-setup/regression hashes are reported, not represented as hosted validation of the new source. Code, specs and command/profile behavior still require qualification on that candidate.
+
+OS, Ruby executable bytes and runner image are reported independently as match/different/unknown. They do not block native toolchain matching. The claim is **toolchain matched to the named run; environment replay and the hosted result for this candidate are not established**. Native extension bytes, linked libraries, services, machine load/scheduling and omitted lanes remain outside that claim. A reference is a historical selection, not proof that floating hosted setup still selects it today.
+
+RSpec children clear inherited `SPEC_OPTS`, `RSPEC_OPTS`, Bundler's saved original overrides, alternate lock selection and Ruby injection options. Booted commands explicitly select the checked-in `.rspec`, bypassing user and `.rspec-local` option files. The unit runner retains its explicit options and reporting. `--rspec-seed` and `--report-dir` apply only to booted RSpec processes; unit seeds/reports remain owned by `script/parallel-rspec`. Default incremental depth remains 8 operations/seed 1 for both rows; `--full` remains 60/1,2,3 for both, while `--hosted-pr` runs only the row a hosted pull request runs, Ruby 4.0/Rails 8.1, at 8/1. Ruby 3.0/Rails 6.0 runs on `main` and tags only, so a pull-request reference has no record for it. Incremental-operation seeds and RSpec order seeds are separate inputs. Uncaptured hosted RSpec orders remain unknown.
+
+The shared capture/observation helper is `script/ci_local_environment.rb`. Run its focused contract with `bin/rspec spec/ci/ci_local_environment_spec.rb` under each supported qualification pair. Bundler 4 fixture preparation requires the locally installed fixture gems and their cached `.gem` archives: the spec finalizes package checksums through Bundler's local specification/checksum/lock APIs before frozen activation, and refuses a missing archive. This affects temporary test locks only; application locks and production checksum/frozen validation retain their normal behavior. `--add-checksums` is unsuitable for this offline fixture preparation because its Bundler implementation enables remote sources.
 
 ## Keep public surfaces synchronized
 

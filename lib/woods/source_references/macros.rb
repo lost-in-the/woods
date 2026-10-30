@@ -14,6 +14,21 @@ module Woods
           %W[#{kind}_action prepend_#{kind}_action append_#{kind}_action]
         end).uniq.freeze
       MACROS = (ASSOCIATION_MACROS + CALLBACK_MACROS + %w[scope]).freeze
+      # Receiverless calls whose constant arguments are mixed into the caller.
+      MIXIN_CALLS = %w[include extend prepend].freeze
+
+      # `include`, `extend` and `prepend` of a constant written straight in the
+      # call: the constant's span is tagged with which of the three it is. The
+      # constant is still an ordinary reference for resolution; only the
+      # published span learns the relationship.
+      def mark_mixins(node)
+        return unless @adapter.receiver(node).nil?
+
+        name = @adapter.selector(node).to_s
+        return unless MIXIN_CALLS.include?(name)
+
+        @adapter.arguments(node).each { |argument| @mixins[argument] = name if @adapter.kind(argument) == :constant }
+      end
     end
   end
 end

@@ -8,7 +8,9 @@ require 'yaml'
 # where those names live, so a rename there must move the validator too, or
 # every release dispatch fails at release-context after the tag is pushed.
 RSpec.describe 'release CI contract job names' do
-  let(:ci_jobs) { YAML.load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__)).fetch('jobs') }
+  let(:ci_jobs) do
+    YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true).fetch('jobs')
+  end
   let(:required_jobs) do
     source = File.read(File.expand_path('../../script/validate-release-run', __dir__))
     literal = source[/REQUIRED_CI_JOBS = (\{.*?\})\.freeze/m, 1]

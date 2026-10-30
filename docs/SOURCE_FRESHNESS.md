@@ -182,6 +182,15 @@ Every consuming scope keeps its own identities. An events scan can reread a
 service file while its service unit remains untouched; refreshing events does
 not certify the retained service unit. Successful file/whole-extractor work
 updates only its scopes, including negative results and confirmed deletion.
+Dispatch rules identify potential consumers, rather than promising that every
+matching family runs for every edit. A family skipped after its relevant facts
+compare equal keeps its previous source identities. For example, a body-only
+edit under `app/models/concerns/` can leave table ownership unchanged, so the
+table family is skipped and `whole:database_tables` retains that file's previous
+identity. Model and concern units can still equal a full extraction. This
+conservative provenance difference does not establish a unit-content mismatch.
+Do not refresh a skipped family's identity merely because another consumer read
+the file. A verified full launcher run establishes a new complete baseline.
 Unchanged scopes keep their earlier baseline. A file can therefore remain
 `drifted` after an incremental task or hook re-extracts it: its file-extractor
 scope may be current while retained `runtime` evidence still refers to the old
