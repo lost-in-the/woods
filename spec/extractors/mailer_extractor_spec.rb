@@ -327,6 +327,13 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(unit.dependencies)
         .to include(type: :service, target: 'AuditService', via: :code_reference, through: 'new_post')
     end
+
+    it 'places a symbol filter by the owner of the method it names (LOS-128)' do
+      unit = described_class.new.extract_mailer(FactsDigestMailer)
+
+      callback = unit.metadata[:callbacks].find { |cb| cb[:filter] == 'set_footer' }
+      expect(callback).to include(origin: 'app')
+    end
   end
 
   describe 'callback extraction' do
@@ -344,6 +351,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       expect(unit.metadata[:callbacks].size).to eq(1)
       expect(unit.metadata[:callbacks].first[:type]).to eq(:before_action)
       expect(unit.metadata[:callbacks].first[:filter]).to eq('set_user')
+      expect(unit.metadata[:callbacks].first).to include(origin: 'unknown')
     end
 
     it 'extracts callback with :only condition' do
