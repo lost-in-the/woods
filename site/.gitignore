@@ -1,0 +1,2 @@
+# The isolated documentation bundle is locked independently of the gem.
+!Gemfile.lock
