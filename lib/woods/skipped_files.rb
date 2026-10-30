@@ -57,6 +57,7 @@ module Woods
       @root = root.to_s
       @poro = poro
       @git_filter = GitSourceFilter.new(root: @root)
+      @git_reasons = {}
     end
 
     # @param unit_paths [Enumerable<String, nil>] every unit's file_path, absolute or root-relative
@@ -103,8 +104,13 @@ module Woods
 
     private
 
+    # Every configuration source among the candidates is asked about in one
+    # {GitSourceFilter#skip_reasons} call, which {#reason_for} then reads.
     def candidates
-      (ruby_candidates + configuration_candidates + GraphQLDocumentPaths.under(@root)).uniq.sort
+      ruby = ruby_candidates
+      sources = configuration_sources | ruby.select { |relative| PathDispatcher.configuration_source_path?(relative) }
+      @git_reasons = @git_filter.skip_reasons(sources)
+      (ruby + sources.select { |relative| @git_reasons[relative] } + GraphQLDocumentPaths.under(@root)).uniq.sort
     end
 
     def ruby_candidates
@@ -116,24 +122,21 @@ module Woods
       end
     end
 
-    def configuration_candidates
+    def configuration_sources
       config = Extractors::ConfigurationExtractor
       globs = [*Extractors::ConfigFileExtractor.configured_paths, *config::SOURCE_FILES,
                *config::DIRECTORY_TYPES.keys.map { |dir| "#{dir}/**/*.rb" },
                'config/routes.rb', 'config/routes/**/*.rb', 'lib/**/generators/**/*.rb']
       globs.flat_map { |glob| Dir.glob(glob, File::FNM_EXTGLOB, base: @root) }.select do |relative|
-        File.file?(File.join(@root, relative)) && PathDispatcher.configuration_source_path?(relative) &&
-          @git_filter.skip_reason(relative)
+        File.file?(File.join(@root, relative)) && PathDispatcher.configuration_source_path?(relative)
       end
     end
 
     # The file's own shape decides first, so `module Admin; end` under an
     # owned directory reads namespace_only, not rejected_by its owner.
     def reason_for(relative)
-      if PathDispatcher.configuration_source_path?(relative)
-        reason = @git_filter.skip_reason(relative)
-        return reason if reason
-      end
+      reason = git_reason(relative)
+      return reason if reason
 
       return 'template' if Extractors::LibExtractor.generator_template?(relative)
 
@@ -145,6 +148,13 @@ module Woods
 
       key = PathDispatcher.claiming_key_for(relative)
       key ? "rejected_by:#{key}" : @poro.skip_reason(path)
+    end
+
+    # The Git reason of a configuration source, from the batch {#candidates} asked for.
+    def git_reason(relative)
+      return unless PathDispatcher.configuration_source_path?(relative)
+
+      @git_reasons.fetch(relative) { @git_filter.skip_reason(relative) }
     end
 
     # Configuration sources are YAML or Ruby, so no path takes both branches.
