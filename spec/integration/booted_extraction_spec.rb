@@ -156,7 +156,7 @@ RSpec.describe 'Booted-app extraction', :booted_app do
 
     metadata = find_unit(:models, 'Post').fetch('metadata')
     expect(metadata.fetch('callbacks')).to include(
-      a_hash_including('type' => 'before_save', 'filter' => 'normalize_title', 'kind' => 'before')
+      a_hash_including('type' => 'before_save', 'filter' => 'normalize_title', 'kind' => 'before', 'origin' => 'app')
     )
     expect(metadata.fetch('callback_count')).to eq(metadata.fetch('callbacks').length)
   end
@@ -856,12 +856,13 @@ RSpec.describe 'Model callbacks across Rails processes', :booted_app do
     expect(results.last).to eq(results.first)
     unit = results.first.fetch('unit')
     filter = results.first.fetch('framework_filter')
-    # Gem-relative on every machine, so the index never carries a host path (LOS-127).
+    # Gem-relative on every machine, so the index never carries a host path (LOS-127),
+    # and written by the framework (LOS-128).
     gem_dir = '(?:activerecord-[^/]+|rails-[^/]+/activerecord)'
     builder = 'lib/active_record/associations/builder/association\.rb'
     expect(filter).to match(%r{\A#<(?:lambda|Proc) #{gem_dir}/#{builder}:\d+>\z})
     expect(unit.fetch('metadata').fetch('callbacks')).to include(
-      a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter)
+      a_hash_including('type' => 'before_destroy', 'kind' => 'before', 'filter' => filter, 'origin' => 'framework')
     )
     chunk = unit.fetch('chunks').find { |entry| entry.fetch('chunk_type') == 'callbacks' }
     expect(chunk.fetch('content')).to include(filter)
@@ -994,7 +995,7 @@ RSpec.describe 'Controllers outside ActionController::Base, in a real Rails proc
                                                                    'filters' => [], 'ancestors' => ['HealthController'])
     expect(units.fetch('PingController')['metadata']).to include(
       'metal' => true, 'actions' => ['index'],
-      'filters' => [{ 'kind' => 'before', 'filter' => 'stamp',
+      'filters' => [{ 'kind' => 'before', 'filter' => 'stamp', 'origin' => 'app',
                       'line' => 6, 'file' => 'app/controllers/ping_controller.rb',
                       'owner' => 'PingController', 'applies_to' => ['index'], 'applicability' => 'resolved' }]
     )

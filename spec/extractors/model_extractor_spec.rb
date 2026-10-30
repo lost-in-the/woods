@@ -192,6 +192,64 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(labels.join).not_to include('/home/dev')
     end
 
+    it 'publishes who wrote each callback as origin: app, framework, gem or unknown (LOS-128)' do
+      root = Dir.mktmpdir('woods_origin_app')
+      gem_home = Dir.mktmpdir('woods_origin_gems')
+      stub_const('Rails', double('Rails', root: root))
+      load_file = lambda do |base, relative, contents|
+        path = File.join(base, relative)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, contents)
+        load path
+        path
+      end
+      load_file.call(root, 'app/models/concerns/origin_sluggable.rb',
+                     "module OriginSluggable\n  def set_slug; end\nend\n")
+      load_file.call(gem_home, 'gems/activerecord-7.1.6/lib/active_record/autosave_association.rb',
+                     "module OriginAutosave\n  define_method(:autosave_associated_records_for_comments) {}\nend\n")
+      load_file.call(gem_home, 'gems/paper_trail-15.1.0/lib/paper_trail/model.rb',
+                     "module OriginPaperTrail\n  def record_update; end\nend\n")
+      model_path = load_file.call(root, 'app/models/origin_post.rb', <<~RUBY)
+        class OriginPost
+          include OriginSluggable
+          include OriginAutosave
+          include OriginPaperTrail
+
+          %i[validation save create update destroy commit rollback before_commit initialize find touch].each do |event|
+            define_singleton_method(:"_\#{event}_callbacks") { [] }
+          end
+
+          def normalize_email; end
+        end
+      RUBY
+      gem_lambda = -> { raise 'must not execute a callback' }
+      allow(gem_lambda).to receive(:source_location).and_return(
+        [File.join(gem_home, 'gems/activerecord-7.1.6/lib/active_record/associations/builder/association.rb'), 93]
+      )
+      app_proc = proc { raise 'must not execute a callback' }
+      allow(app_proc).to receive(:source_location).and_return([model_path, 9])
+      native = proc { raise 'must not execute a callback' }
+      allow(native).to receive(:source_location).and_return(nil)
+      filters = [:normalize_email, :set_slug, :autosave_associated_records_for_comments, :record_update,
+                 gem_lambda, app_proc, native, 'string_hook', :undefined_hook]
+      callbacks = filters.map { |filter| double('Callback', filter: filter, kind: :before) }
+      callbacks << double('Rails6Callback', filter: gem_lambda.object_id, raw_filter: gem_lambda, kind: :before)
+      model = OriginPost
+      allow(model).to receive(:_save_callbacks).and_return(callbacks)
+
+      entries = extractor.send(:extract_callbacks, model)
+
+      expect(entries.map { |entry| entry[:origin] })
+        .to eq(%w[app app framework gem framework app unknown unknown unknown framework])
+      expect(entries.map(&:keys)).to all(eq(%i[type filter origin kind conditions]))
+    ensure
+      %i[OriginPost OriginSluggable OriginAutosave OriginPaperTrail].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name)
+      end
+      FileUtils.remove_entry(root) if root
+      FileUtils.remove_entry(gem_home) if gem_home
+    end
+
     it 'removes default object identities while preserving custom and named filter labels' do
       stub_const('NamedCallback', Class.new)
       object = NamedCallback.new
@@ -852,7 +910,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       )
       unit.source_code = source
       unit.metadata = {
-        callbacks: [{ type: :before_save, filter: 'normalize_email', kind: :before, conditions: {} }],
+        callbacks: [{ type: :before_save, filter: 'normalize_email', origin: 'app', kind: :before, conditions: {} }],
         column_names: %w[email name]
       }
 
@@ -861,6 +919,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       callback = unit.metadata[:callbacks].first
       expect(callback).to have_key(:side_effects)
       expect(callback[:side_effects][:columns_written]).to include('email')
+      expect(callback).to include(origin: 'app', analysis_status: 'analyzed')
     end
 
     it 'analyzes concern-defined callback methods via the parse-friendly analysis source' do

@@ -110,10 +110,78 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     callback = build_callback(kind: :before, filter: callable.object_id)
     callback.define_singleton_method(:raw_filter) { callable }
     controller = double('Controller', _process_action_callbacks: [callback])
-    expected = '#<Proc app/controllers/concerns/auth.rb:4>'
+    expected = { kind: :before, filter: '#<Proc app/controllers/concerns/auth.rb:4>', origin: 'app' }
 
-    expect(extractor.send(:extract_filter_chain, controller)).to eq([{ kind: :before, filter: expected }])
-    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([{ kind: :before, filter: expected }])
+    expect(extractor.send(:extract_filter_chain, controller)).to eq([expected])
+    expect(extractor.send(:applicable_filters, controller, 'index')).to eq([expected])
+  end
+
+  # ── filter origins (LOS-128) ──────────────────────────────────────────
+  #
+  # Who wrote a filter, beside what the chain says about it: a symbol by
+  # the owner of the method it names, a proc by its own source.
+  describe 'filter origins' do
+    let(:root) { Dir.mktmpdir('filter_origins') }
+    let(:gem_home) { Dir.mktmpdir('filter_origin_gems') }
+    let(:constants) { %i[WOriginAuth WOriginDevise WOriginForgery WOriginPostsController] }
+
+    let(:extractor) do
+      routes_double = double('Routes', routes: [], named_routes: {})
+      stub_const('Rails', double('Rails', application: double('Application', routes: routes_double),
+                                          root: Pathname.new(root)))
+      described_class.new
+    end
+
+    after do
+      constants.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name) }
+      FileUtils.remove_entry(root)
+      FileUtils.remove_entry(gem_home)
+    end
+
+    def load_file(base, relative, contents)
+      path = File.join(base, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, contents)
+      load path
+      path
+    end
+
+    before do
+      load_file(root, 'app/controllers/concerns/w_origin_auth.rb', "module WOriginAuth\n  def authenticate; end\nend\n")
+      load_file(gem_home, 'gems/devise-4.9.4/lib/devise/controllers/helpers.rb',
+                "module WOriginDevise\n  def authenticate_user!; end\nend\n")
+      load_file(gem_home, 'gems/actionpack-7.1.6/lib/action_controller/metal/request_forgery_protection.rb',
+                "module WOriginForgery\n  def verify_authenticity_token; end\nend\n")
+      load_file(root, 'app/controllers/w_origin_posts_controller.rb', <<~RUBY)
+        class WOriginPostsController
+          include WOriginAuth
+          include WOriginDevise
+          include WOriginForgery
+
+          private
+
+          def load_post; end
+        end
+      RUBY
+    end
+
+    it 'classifies symbol filters by the method owner and procs by their source, in the chain and per action' do
+      gem_proc = proc { true }
+      allow(gem_proc).to receive(:source_location)
+        .and_return([File.join(gem_home, 'gems/devise-4.9.4/lib/devise/controllers/helpers.rb'), 12])
+      filters = [:load_post, :authenticate, :authenticate_user!, :verify_authenticity_token, gem_proc,
+                 'user_signed_in?', :never_defined]
+      callbacks = filters.map { |filter| build_callback(kind: :before, filter: filter) }
+      WOriginPostsController.define_singleton_method(:_process_action_callbacks) { callbacks }
+      origins = %w[app app gem framework gem unknown unknown]
+
+      chain = extractor.send(:extract_filter_chain, WOriginPostsController)
+
+      expect(chain.map { |entry| entry[:origin] }).to eq(origins)
+      expect(chain.map { |entry| entry.keys.first(3) }).to all(eq(%i[kind filter origin]))
+      expect(extractor.send(:applicable_filters, WOriginPostsController, 'index').map { |entry| entry[:origin] })
+        .to eq(origins)
+    end
   end
 
   # ── callback_applies_to_action? ──────────────────────────────────────
@@ -544,7 +612,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
     it 'records no site for a filter no app source declares' do
       chain = chain_for([build_callback(kind: :before, filter: :verify_authenticity_token)])
 
-      expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token)
+      expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token, origin: 'unknown')
     end
 
     it 'records no site for a filter declared under another kind' do

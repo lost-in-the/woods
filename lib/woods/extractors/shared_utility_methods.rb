@@ -333,7 +333,54 @@ module Woods
         label.gsub(/:0x[0-9a-f]+(?=>)/i, '')
       end
 
-      private :callback_filter, :stable_filter, :callback_filter_label, :legacy_action_filter_actions
+      # Who wrote a callback (LOS-128), published as +origin+ beside
+      # +analysis_status+, which says only whether its body could be read.
+      # A Proc is placed by its source location; a Symbol by the owner of
+      # the method it names on +klass+ (a method a concern under app/
+      # defines is the application's, a `define_method` in Active Record's
+      # autosave builder is the framework's); another callback object by
+      # its class's definition site. A String filter, a native method and a
+      # method +klass+ does not define are {SourceOrigin::UNKNOWN}. Nothing
+      # is called.
+      #
+      # @param klass [Class, Module] the model or controller the callback runs on
+      # @param callback [ActiveSupport::Callbacks::Callback]
+      # @return [String] {SourceOrigin::APP}, {SourceOrigin::FRAMEWORK},
+      #   {SourceOrigin::GEM} or {SourceOrigin::UNKNOWN}
+      def callback_origin(klass, callback)
+        filter_origin(klass, callback.respond_to?(:raw_filter) ? callback.raw_filter : callback.filter)
+      end
+
+      # @param klass [Class, Module]
+      # @param filter [Object] a callback's filter: Proc, Symbol, String or object
+      # @return [String] see {#callback_origin}
+      def filter_origin(klass, filter)
+        SourceOrigin.origin(filter_source_path(klass, filter))
+      end
+
+      # The file that defines a filter, when Ruby knows one.
+      #
+      # @param klass [Class, Module]
+      # @param filter [Object]
+      # @return [String, nil]
+      def filter_source_path(klass, filter)
+        case filter
+        when Proc then filter.source_location&.first
+        when Symbol
+          return nil unless klass.respond_to?(:instance_method)
+
+          klass.instance_method(filter).source_location&.first
+        when String, Integer, nil then nil
+        else
+          name = filter.is_a?(Module) ? filter.name : filter.class.name
+          name && Object.respond_to?(:const_source_location) ? Object.const_source_location(name)&.first : nil
+        end
+      rescue StandardError
+        nil
+      end
+
+      private :callback_filter, :stable_filter, :callback_filter_label, :legacy_action_filter_actions,
+              :callback_origin, :filter_origin, :filter_source_path
 
       # Human-readable label for a non-ActionFilter condition.
       #

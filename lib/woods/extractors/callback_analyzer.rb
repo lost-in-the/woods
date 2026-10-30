@@ -100,7 +100,9 @@ module Woods
       # UNSUPPORTED or SOURCE_UNAVAILABLE.
       #
       # @param callback_hash [Hash] Callback metadata from ModelExtractor:
-      #   { type:, filter:, kind:, conditions: }
+      #   { type:, filter:, origin:, kind:, conditions: }. +origin+ (who
+      #   wrote the callback) is kept as given; +analysis_status+ says only
+      #   whether its body could be read.
       # @return [Hash] The callback hash with added :side_effects and
       #   :analysis_status keys
       def analyze(callback_hash)

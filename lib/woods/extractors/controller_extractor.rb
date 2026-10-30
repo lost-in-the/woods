@@ -305,7 +305,8 @@ module Woods
         process_action_callbacks(controller).map do |callback|
           only, except, if_conds, unless_conds = extract_callback_conditions(callback)
 
-          result = { kind: callback.kind, filter: callback_filter(callback) }
+          result = { kind: callback.kind, filter: callback_filter(callback),
+                     origin: callback_origin(controller, callback) }
           result[:only] = only.sort if only.any?
           result[:except] = except.sort if except.any?
           result[:if] = if_conds.join(', ') if if_conds.any?
@@ -1151,7 +1152,9 @@ module Woods
         applicable = process_action_callbacks(controller).select do |cb|
           callback_applies_to_action?(cb, action_name)
         end
-        applicable.map { |cb| { kind: cb.kind, filter: callback_filter(cb) } }
+        applicable.map do |cb|
+          { kind: cb.kind, filter: callback_filter(cb), origin: callback_origin(controller, cb) }
+        end
       end
 
       # Determine if a callback applies to a given action name.
