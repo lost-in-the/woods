@@ -221,6 +221,36 @@ RSpec.describe Woods::Extractors::RouteExtractor do
     end
   end
 
+  # ── LOS-125: `via: :all` controller routes ─────────────────────────
+
+  describe 'a controller route drawn via: :all (LOS-125)' do
+    # Rails leaves `route.verb` blank for `match '/404', to: 'errors#not_found', via: :all`.
+    let(:route) { build_route(verb: '', path: '/404', controller: 'errors', action: 'not_found', name: 'not_found') }
+
+    before do
+      routes_collection = double('RoutesCollection', routes: [route])
+      application = double('Application', routes: routes_collection)
+      stub_const('Rails', double('Rails', application: application, logger: logger))
+      allow(Rails).to receive(:respond_to?).with(:application).and_return(true)
+    end
+
+    it 'records the route as ANY, the mount and Rack endpoint convention, never as GET' do
+      unit = described_class.new.extract_all.first
+
+      expect(unit.identifier).to eq('ANY /404')
+      expect(unit.metadata).to include(http_method: 'ANY', controller: 'errors', action: 'not_found')
+      expect(unit.dependencies).to include(type: :controller, target: 'ErrorsController', via: :route_dispatch)
+    end
+
+    it 'renders the declaration as a match via: :all' do
+      unit = described_class.new.extract_all.first
+
+      expect(unit.source_code).to include('# Route: ANY /404')
+      expect(unit.source_code).to include("match '/404', to: 'errors#not_found', via: :all")
+      expect(unit.source_code).not_to include("any '/404'")
+    end
+  end
+
   # ── Dependencies ─────────────────────────────────────────────────────
 
   describe 'dependency extraction' do

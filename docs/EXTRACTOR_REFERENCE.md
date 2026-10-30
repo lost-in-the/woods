@@ -618,7 +618,7 @@ otherwise eligible files and the manifest records `metadata.git_filter: "unavail
 
 **Key details:**
 - Pure runtime introspection, reads the live routing table, not `config/routes.rb` AST
-- Each unit's identifier is `"VERB /path"` (e.g., `"POST /orders"`)
+- Each unit's identifier is `"VERB /path"` (e.g., `"POST /orders"`). A route that answers every verb (`match '/404', to: 'errors#not_found', via: :all`) is `"ANY /404"` with `metadata.http_method` `"ANY"`, the same convention as mounts and Rack endpoints; its source line reads `match '/404', to: 'errors#not_found', via: :all`
 - A route with request constraints is qualified: `"GET /users [subdomain=api]"`, `"GET /users [format=json]"`, `"GET /users [constraint=proc]"` for a callable. Path-segment requirements (`id: /\d+/`) do not qualify
 - Routes that still share an identifier are numbered in route order (`"GET /users #2"`) so none are dropped
 - Records controller, action, route name, and constraints
