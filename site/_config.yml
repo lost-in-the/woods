@@ -1,0 +1,29 @@
+title: Woods guides
+description: Versioned canonical Woods documentation — local and CI artifact candidate
+lang: en-US
+theme: just-the-docs
+url: ''
+markdown: kramdown
+highlighter: rouge
+kramdown:
+  input: GFM
+  hard_wrap: false
+  gfm_quirks: [paragraph_end, no_auto_typographic]
+  syntax_highlighter: rouge
+search_enabled: true
+search:
+  heading_level: 3
+  previews: 2
+  button: true
+enable_copy_code_button: true
+heading_anchors: true
+nav_sort: case_insensitive
+back_to_top: true
+back_to_top_text: Back to top
+footer_content: 'Local / CI artifact candidate. Repository guides own the content; version availability does not establish a support policy.'
+plugins:
+  - jekyll-include-cache
+  - jekyll-seo-tag
+exclude: []
+sass:
+  style: compressed

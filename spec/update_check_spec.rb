@@ -307,12 +307,23 @@ RSpec.describe Woods::UpdateCheck do
     end
 
     it 'stops the background thread on shutdown without leaking it' do
-      before_count = Thread.list.size
-      background(->(_url) { sleep })
+      started = Queue.new
+      background(lambda do |_url|
+        started << Thread.current
+        sleep
+      end)
+      worker = wait_for_thread_signal(started)
+      refresh = Woods::UpdateCheck::BackgroundRefresh
+      expect(refresh.send(:current)).to equal(worker)
+      expect(worker).to be_alive
+      allow(worker).to receive(:join).and_call_original
 
       described_class.shutdown(timeout: 0.05)
 
-      expect(Thread.list.size).to eq(before_count)
+      expect(worker).not_to be_alive
+      expect(refresh.send(:current)).to be_nil
+      expect(worker).to have_received(:join).with(0.05)
+      expect(worker).to have_received(:join).with(no_args)
     end
   end
 

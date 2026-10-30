@@ -1,0 +1,49 @@
+# Deliberate public-guide allowlist. Historical audits/design material stay in Git.
+repository: https://github.com/lost-in-the/woods
+release:
+  name: v2.1.0
+  commit: cdd330f709cca9f47302390799641b986f08e213
+groups:
+  Install and connect:
+    - docs/GETTING_STARTED.md
+    - docs/AGENT_SETUP.md
+    - docs/DOCKER_SETUP.md
+    - docs/MCP_SERVERS.md
+    - docs/CONSOLE_MCP_SETUP.md
+    - docs/MCP_HTTP_TRANSPORT.md
+    - docs/MCP_WORKTREE_SETUP.md
+  Work with agents:
+    - docs/AGENT_GUIDE.md
+    - docs/MCP_TOOL_COOKBOOK.md
+    - docs/AUTOMATIC_MAINTENANCE.md
+    - docs/CLIENT_HOOKS.md
+    - docs/SOURCE_FRESHNESS.md
+  Configure and retrieve:
+    - docs/CONFIGURATION_REFERENCE.md
+    - docs/BACKEND_MATRIX.md
+    - docs/RETRIEVAL_GUIDE.md
+    - docs/EMBEDDING_MODELS.md
+    - docs/TOKEN_BENCHMARK.md
+  Diagnose and upgrade:
+    - docs/TROUBLESHOOTING.md
+    - docs/UPGRADING_TO_2.md
+    - docs/FAQ.md
+  Understand the index:
+    - docs/WHY_WOODS.md
+    - docs/INTERNALS.md
+    - docs/EXTRACTOR_REFERENCE.md
+    - docs/PUBLISHED_INDEX.md
+    - docs/INDEX_LAYOUT.md
+    - docs/RUNTIME_TRACING.md
+    - docs/EVALUATION.md
+    - docs/INCREMENTAL_EXTRACTION.md
+    - docs/WATCH_DAEMON.md
+    - docs/EXTRACTOR_RUN_STATE.md
+  Export and integrate:
+    - docs/MARKDOWN_EXPORT.md
+    - docs/OBSIDIAN_INTEGRATION.md
+    - docs/NOTION_INTEGRATION.md
+    - docs/UNBLOCKED_INTEGRATION.md
+  Find owners and contribute:
+    - docs/README.md
+    - CONTRIBUTING.md
