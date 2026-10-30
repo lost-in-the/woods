@@ -45,6 +45,27 @@ RSpec.describe Woods::Extractors::SourceOrigin do
     expect(site('/g/gems/rack-test-2.1.0/lib/rack/test.rb').origin).to eq('gem')
   end
 
+  it 'cuts a gem path in time linear in its length (CodeQL, woods#936)' do
+    repeated = '/gems/./a' * 50_000
+    started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    expect(site("#{repeated}/gems/rack-3.1.8/lib/rack.rb").to_h).to eq(origin: 'gem',
+                                                                       location: 'rack-3.1.8/lib/rack.rb')
+    expect(site("#{'/bundler/gems/./a' * 50_000}/bundler/gems/rails-1a2b3c4d5e6f/x.rb").location)
+      .to eq('rails-1a2b3c4d5e6f/x.rb')
+    expect(described_class.gem_name("#{'-0' * 50_000}x")).to eq('')
+    expect(described_class.gem_name("name#{'-0' * 50_000}")).to eq('name')
+    expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
+  end
+
+  it 'reads a version suffix from the first dash a digit follows and a sha from the last dash' do
+    expect(described_class.gem_name('activerecord-7.1.6')).to eq('activerecord')
+    expect(described_class.gem_name('nokogiri-1.16.0-x86_64-linux')).to eq('nokogiri')
+    expect(described_class.gem_name('rails-1a2b3c4d5e6f')).to eq('rails')
+    expect(described_class.gem_name('rails-abcdef1234567')).to eq('rails')
+    expect(described_class.gem_name('my-engine-0.1.0')).to eq('my-engine')
+    expect(described_class.gem_name('my-engine-abc')).to eq('my-engine-abc')
+  end
+
   it 'names a Bundler git checkout by its directory' do
     expect(site('/g/bundler/gems/rails-1a2b3c4d5e6f/activerecord/lib/active_record/base.rb').to_h)
       .to eq(origin: 'framework', location: 'rails-1a2b3c4d5e6f/activerecord/lib/active_record/base.rb')

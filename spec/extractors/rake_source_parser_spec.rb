@@ -74,6 +74,15 @@ RSpec.describe Woods::Extractors::RakeSourceParser do
       expect(brace[:body]).to eq(" ::Tenant.touch_all\n")
     end
 
+    it 'trims delimiter lines in time linear in the body (CodeQL, woods#936)' do
+      tabs = "\t" * 200_000
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      body = definition("task a: :environment do#{tabs}\n  Tenant.touch_all\n#{tabs}end\n")[:body]
+      expect(body).to eq("  Tenant.touch_all\n")
+      expect(definition("task b: :environment do\n  puts 'x'#{tabs}\nend\n")[:body]).to eq("  puts 'x'#{tabs}\n")
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1.0
+    end
+
     it 'reads a long task name with arguments and an array of prerequisites' do
       name = "backfill_#{'ledger_entry_' * 12}totals"
 

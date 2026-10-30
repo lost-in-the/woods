@@ -63,15 +63,19 @@ module Woods
 
       # An installed gem: `…/gems/<name>-<version>/<rest>`. The last such
       # segment wins, so a bundle under the application root still resolves
-      # to the gem.
-      INSTALLED_GEM = %r{\A.*/gems/(?<dir>[^/]+)/(?<rest>.+)\z}
+      # to the gem. Paths are cut at the marker with string searches, never
+      # an unanchored pattern: a path is library input, and a backtracking
+      # scan over it would be polynomial in its length.
+      INSTALLED_GEM = '/gems/'
 
       # A Bundler git checkout: `…/bundler/gems/<name>-<sha>/<rest>`.
-      GIT_GEM = %r{\A.*/bundler/gems/(?<dir>[^/]+)/(?<rest>.+)\z}
+      GIT_GEM = '/bundler/gems/'
 
-      # The version (or git sha) suffix of a gem directory name:
-      # `activerecord-7.1.6`, `nokogiri-1.16.0-x86_64-linux`, `rails-1a2b3c4d5e6f`.
-      VERSION_SUFFIX = /-\d.*\z|-[0-9a-f]{7,}\z/
+      # A git sha suffix of a gem directory name (`rails-1a2b3c4d5e6f`),
+      # matched against the text after the last dash only. A version suffix
+      # (`activerecord-7.1.6`, `nokogiri-1.16.0-x86_64-linux`) starts at the
+      # first dash a digit follows; see {gem_name}.
+      GIT_SHA = /\A\h{7,}\z/
 
       # Directory segments under the application root that hold other
       # people's code.
@@ -132,7 +136,29 @@ module Woods
       # @param dir [String]
       # @return [String]
       def gem_name(dir)
-        dir.sub(VERSION_SUFFIX, '')
+        version_at = dir.index(/-\d/)
+        return dir[0...version_at] if version_at
+
+        sha_at = dir.rindex('-')
+        return dir[0...sha_at] if sha_at && GIT_SHA.match?(dir[(sha_at + 1)..])
+
+        dir
+      end
+
+      # The gem directory and the path below it, cut at the last +marker+.
+      #
+      # @param absolute [String]
+      # @param marker [String] {GIT_GEM} or {INSTALLED_GEM}
+      # @return [Array(String, String), nil] dir and rest, or nil when the
+      #   marker is absent or either side is empty
+      def gem_parts(absolute, marker)
+        at = absolute.rindex(marker)
+        return nil unless at
+
+        dir, rest = absolute[(at + marker.length)..].split('/', 2)
+        return nil if dir.nil? || dir.empty? || rest.nil? || rest.empty?
+
+        [dir, rest]
       end
 
       # Directories gems are installed into, as absolute paths with a trailing
@@ -178,11 +204,8 @@ module Woods
       # @param absolute [String]
       # @return [Site, nil]
       def gem_site(absolute)
-        match = GIT_GEM.match(absolute) || INSTALLED_GEM.match(absolute)
-        if match
-          name = gem_name(match[:dir])
-          return Site.new(origin: gem_origin(name), location: "#{match[:dir]}/#{match[:rest]}")
-        end
+        dir, rest = gem_parts(absolute, GIT_GEM) || gem_parts(absolute, INSTALLED_GEM)
+        return Site.new(origin: gem_origin(gem_name(dir)), location: "#{dir}/#{rest}") if dir
 
         loaded_gem_site(absolute)
       end
