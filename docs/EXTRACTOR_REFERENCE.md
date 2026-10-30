@@ -53,8 +53,11 @@ jobs, mailers, components, view components, GraphQL types, mutations, resolvers
 and queries, serializers, decorators, validators, policies, managers and
 channels. Which target types a caller may reference is set by
 [`source_reference_callers`](CONFIGURATION_REFERENCE.md#source-reference-callers);
-by default a component adds no edge to another component and a GraphQL unit adds
-none to another GraphQL unit. A caller whose class is not loaded when the pass
+by default a GraphQL unit adds no edge to another GraphQL unit. A component a
+caller renders or declares as a slot keeps its `render` or `slot` edge alone; a
+component the caller only constructs and passes on, compares with `is_a?` or
+names as a constant gains a `code_reference` edge (LOS-123), from a component
+or any other caller. A caller whose class is not loaded when the pass
 runs, such as a GraphQL file in an application without graphql-ruby, publishes
 no edge. It parses original Ruby source and attributes reads
 to their declaring owner. Ordinary method bodies, singleton methods and callback

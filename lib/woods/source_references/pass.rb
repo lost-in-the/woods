@@ -153,10 +153,24 @@ module Woods
         SourceContributors.paths(unit).map { |path| @inputs.relative(path) }
       end
 
+      # Edge labels an extractor gives a component it renders or declares as
+      # a slot. The constant read behind them is the same relationship.
+      STATED_BY_RENDER = %w[render slot].freeze
+      private_constant :STATED_BY_RENDER
+
       # An extractor may already carry the pair with a guessed type; a second
-      # entry for the same relationship would double count in the graph.
+      # entry for the same relationship would double count in the graph. A
+      # `render` or `slot` edge states the reference its constant read would
+      # add, so only a component mentioned outside a render (constructed and
+      # passed on, compared with `is_a?`, handed over as a constant) gains a
+      # `code_reference` edge (LOS-123). Its occurrence is still a span.
       def pair_present?(edges, edge)
-        edges.any? { |existing| existing.values_at('target', 'via') == edge.values_at('target', 'via') }
+        target, via = edge.values_at('target', 'via')
+        edges.any? do |existing|
+          next false unless existing['target'] == target
+
+          existing['via'] == via || (via == 'code_reference' && STATED_BY_RENDER.include?(existing['via']))
+        end
       end
 
       def normalize_edge(edge)

@@ -429,24 +429,40 @@ RSpec.describe Woods::SourceReferences::Pass do
       %w[Shipment ShipmentQuote LedgerPolicy].each { |name| stub_const(name, Class.new) }
     end
 
-    it 'links a component to the model and service it reads, and to no other component' do
+    it 'links a component to the model and service it reads, and not again to the component it renders' do
+      render = { 'type' => 'component', 'target' => 'Ui::BadgeComponent', 'via' => 'render' }
+      units.first['dependencies'] = [render]
       expect(run_pass.dependencies.fetch(%w[component Shipments::SummaryView])).to eq(
-        [{ 'type' => 'model', 'target' => 'Shipment', 'via' => 'code_reference' },
+        [render,
+         { 'type' => 'model', 'target' => 'Shipment', 'via' => 'code_reference' },
          { 'type' => 'service', 'target' => 'ShipmentQuote', 'via' => 'code_reference' }]
       )
     end
 
-    it 'links a view component to the policy it constructs, and to no other component' do
+    # LOS-123: the extractor links what a component renders and the Kit
+    # methods it calls. A component built and passed on (`SummaryView.new`
+    # outside `render`) was no edge, because the policy kept components off
+    # each other to avoid doubling every render edge.
+    it 'links a view component to the policy and the component it constructs outside a render' do
       expect(run_pass.dependencies.fetch(%w[view_component LedgerRowComponent])).to eq(
-        [{ 'type' => 'policy', 'target' => 'LedgerPolicy', 'via' => 'code_reference' }]
+        [{ 'type' => 'component', 'target' => 'Shipments::SummaryView', 'via' => 'code_reference' },
+         { 'type' => 'policy', 'target' => 'LedgerPolicy', 'via' => 'code_reference' }]
       )
+    end
+
+    it 'does not link again a component a slot edge already names' do
+      slot = { 'type' => 'component', 'target' => 'Ui::BadgeComponent', 'via' => 'slot' }
+      units.first['dependencies'] = [slot]
+      expect(run_pass.dependencies.fetch(%w[component Shipments::SummaryView]).map { |e| e['target'] })
+        .to eq(%w[Ui::BadgeComponent Shipment ShipmentQuote])
     end
 
     it 'keeps the extractor-owned model edge beside the verified one' do
       scanned = { 'type' => 'model', 'target' => 'Shipment', 'via' => 'data_dependency' }
-      units.first['dependencies'] = [scanned]
+      render = { 'type' => 'component', 'target' => 'Ui::BadgeComponent', 'via' => 'render' }
+      units.first['dependencies'] = [scanned, render]
       result = run_pass
-      expect(result.dependencies.fetch(%w[component Shipments::SummaryView])).to start_with(scanned)
+      expect(result.dependencies.fetch(%w[component Shipments::SummaryView])).to start_with(scanned, render)
       owner = result.cache['owners'].find { |entry| entry['identifier'] == 'Shipments::SummaryView' }
       expect(owner['added'].map { |added| added['target'] }).to eq(%w[Shipment ShipmentQuote])
     end
@@ -456,10 +472,76 @@ RSpec.describe Woods::SourceReferences::Pass do
       expect(run_pass.dependencies.fetch(%w[component Shipments::SummaryView])).to eq([])
     end
 
-    it 'publishes component-to-component edges when the policy asks for them' do
-      policy = Woods::SourceReferences::CallerPolicy.new(component: :all)
-      expect(run_pass(policy: policy).dependencies.fetch(%w[component Shipments::SummaryView])).to include(
-        { 'type' => 'component', 'target' => 'Ui::BadgeComponent', 'via' => 'code_reference' }
+    it 'publishes no component-to-component edge when the policy keeps the family apart' do
+      policy = Woods::SourceReferences::CallerPolicy.new(view_component: %i[policy])
+      expect(run_pass(policy: policy).dependencies.fetch(%w[view_component LedgerRowComponent])).to eq(
+        [{ 'type' => 'policy', 'target' => 'LedgerPolicy', 'via' => 'code_reference' }]
+      )
+    end
+  end
+
+  # The fixture of the field report behind LOS-123: a UI-kit button built as
+  # a slot argument and passed on, never rendered by the caller itself.
+  context 'with a component constructed outside a render call' do
+    let(:sources) do
+      {
+        'app/components/menu.rb' => <<~RUBY,
+          class Menu < Kit::Component
+            def view_template = render(Wrapper.new(primary: Kit::Button.new(label: "x")))
+          end
+        RUBY
+        'app/controllers/menus_controller.rb' => <<~RUBY,
+          class MenusController
+            def show
+              render Menu.new
+              @fallback = { primary: Kit::Button.new(label: "y") }
+            end
+          end
+        RUBY
+        'app/components/kit/component.rb' => 'module Kit; class Component; end; end',
+        'app/components/kit/button.rb' => 'module Kit; class Button < Kit::Component; end; end',
+        'app/components/wrapper.rb' => 'class Wrapper < Kit::Component; end'
+      }
+    end
+    let(:render) { { 'type' => 'component', 'target' => 'Wrapper', 'via' => 'render' } }
+    let(:units) do
+      [unit('Menu', 'app/components/menu.rb', 'component').merge('dependencies' => [render]),
+       unit('MenusController', 'app/controllers/menus_controller.rb', 'controller')
+         .merge('dependencies' => [{ 'type' => 'component', 'target' => 'Menu', 'via' => 'render' }]),
+       unit('Kit::Component', 'app/components/kit/component.rb', 'component'),
+       unit('Kit::Button', 'app/components/kit/button.rb', 'component'),
+       unit('Wrapper', 'app/components/wrapper.rb', 'component')]
+    end
+
+    before do
+      stub_const('Kit', Module.new)
+      base = stub_const('Kit::Component', Class.new)
+      %w[Kit::Button Wrapper Menu].each { |name| stub_const(name, Class.new(base)) }
+      stub_const('MenusController', Class.new)
+    end
+
+    # The superclass is no reference of the body (the collector reads class
+    # bodies), so the base gains no edge from every component that extends it.
+    it 'links the caller to the component it constructs and keeps the render edge single' do
+      result = run_pass
+      expect(result.dependencies.fetch(%w[component Menu])).to eq(
+        [render, { 'type' => 'component', 'target' => 'Kit::Button', 'via' => 'code_reference' }]
+      )
+      owner = result.cache['owners'].find { |entry| entry['identifier'] == 'Menu' }
+      expect(owner['added'].map { |added| added['target'] }).to eq(%w[Kit::Button])
+    end
+
+    it 'keeps every occurrence as a span, the rendered one included' do
+      spans = run_pass.references.fetch(%w[component Menu])
+      expect(spans.map { |span| span.values_at('target', 'method', 'confidence') }).to eq(
+        [['Wrapper', 'new', 'verified'], ['Kit::Button', 'new', 'verified']]
+      )
+    end
+
+    it 'applies the same rule to a controller: no second edge for a rendered component' do
+      expect(run_pass.dependencies.fetch(%w[controller MenusController])).to eq(
+        [{ 'type' => 'component', 'target' => 'Menu', 'via' => 'render' },
+         { 'type' => 'component', 'target' => 'Kit::Button', 'via' => 'code_reference' }]
       )
     end
   end
