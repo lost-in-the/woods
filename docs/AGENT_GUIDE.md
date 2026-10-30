@@ -16,8 +16,10 @@ Check `tools/list`; this capability requires snapshot-store wiring and is absent
 from the default 14-tool catalog. Use `gen:N` selectors when a SHA maps to several
 retained generations. Preserve endpoint/type/generation evidence, incomplete
 coverage and unknowns. The tool does not save reports or prove complete impact.
-See the [report contract](design/IMPACT_REPORT.md) for exact bounds and unfinished
-analyses; historical source links require a separate generation-pinned route.
+See the
+[report contract](https://github.com/lost-in-the/woods/blob/3e36cd22de5b1e484bacb913c4ad827d9f726d80/docs/design/IMPACT_REPORT.md)
+(source checkout only, pinned) for exact bounds and unfinished analyses;
+historical source links require a separate generation-pinned route.
 
 ## Start every session with status
 

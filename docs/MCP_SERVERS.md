@@ -515,7 +515,8 @@ Selectors are strings: `gen:N`, SHA prefixes or `now`. Mixed range/focus modes f
 same versioned report in `structuredContent.data`. The tool never saves or shares
 reports. Depth is 0..10, with the existing type/via filters and explicit finite
 Impact budgets. Focus accepts at most 1000 typed identities over MCP. See the
-[impact report contract](design/IMPACT_REPORT.md) for coverage and limitations.
+[impact report contract](https://github.com/lost-in-the/woods/blob/3e36cd22de5b1e484bacb913c4ad827d9f726d80/docs/design/IMPACT_REPORT.md) (source checkout
+only, pinned) for coverage and limitations.
 
 Snapshots have a supported packaged path: an existing `woods.sqlite3` is
 auto-discovered. `WOODS_SNAPSHOTS=true` enables store construction but does **not**
