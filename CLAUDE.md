@@ -58,7 +58,7 @@ This repository registers Woods' own static map as an MCP server: `woods-self` i
 - `dependents` / `dependencies`: what a constant or method reaches and what reaches it. This is the blast radius of a change.
 - `lookup`, `search`, `structure`: where something is defined, and its source excerpt.
 
-A grep for a name misses relative references (`Extraction::GitCapture` written inside `module Woods`); the map resolves them. If a session lacks the `woods-self` tools, approve the server once with `/mcp`, or run `bin/woods-self-mcp` yourself. The first launch builds the map into `tmp/woods_self_map` (about 25 seconds). Later launches serve it at once and refresh it in the background, and the server reads the newest generation on every request. To refresh by hand, run `bin/rake "woods:self_map[tmp/woods_self_map]"`. Never commit map output.
+A grep for a name misses relative references (`Extraction::GitCapture` written inside `module Woods`); the map resolves them. `.claude/settings.json` enables the server for every session (`enabledMcpjsonServers`). If a session still lacks the `woods-self` tools, check `/mcp`, or run `bin/woods-self-mcp` yourself. The first launch builds the map into `tmp/woods_self_map` (about 25 seconds). Later launches serve it at once and refresh it in the background, and the server reads the newest generation on every request. To refresh by hand, run `bin/rake "woods:self_map[tmp/woods_self_map]"`. Never commit map output.
 
 The map is static and its coverage gaps are tracked in #926. Treat an empty `dependents` answer as "not proven", not "no callers".
 
