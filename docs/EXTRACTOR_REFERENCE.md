@@ -248,6 +248,8 @@ The orchestrator calls `Rails.application.eager_load!` once before extraction be
 
 Every extractor returns `Array<ExtractedUnit>`. An `ExtractedUnit` is a self-contained snapshot of one code unit with source, metadata, and relationships. See [ExtractedUnit Field Reference](#extractedunit-field-reference) at the bottom of this doc.
 
+**Inheritance edges.** Every class-based unit carries one `:inheritance` dependency edge to its application-defined parent class, whatever its own type: `class Kit::CopyButton < Kit::Button` gives the component `{ type: :component, target: "Kit::Button", via: :inheritance }`, and an STI model, a job under `ApplicationJob`, a service, a PORO, a policy, a serializer, a decorator, a validator, a manager, a library class, a channel and a GraphQL type are linked the same way (`Woods::Extractors::SuperclassDependency`). The parent is the runtime superclass, never a parsed name, and the edge is typed as the unit the parent's own extractor publishes: the runtime families (`ClassFamilies`) first, then the file rule claiming the parent's file. A framework or gem parent records no edge. Nor does a parent no extractor publishes, so the graph never carries an edge to a missing unit: an abstract Active Record base (`ApplicationRecord`) is not a model unit, a ViewComponent preview is not a component unit, and a class under `app/jobs` or `app/serializers` that its extractor does not admit is left alone. A file-based unit gets the edge only when its class is loaded and that file defines it; a same-named class from another file never lends its parent.
+
 ---
 
 ### Container attribution

@@ -821,7 +821,7 @@ module Woods
           end
         end
 
-        consolidate_dependencies(deps)
+        with_inheritance(consolidate_dependencies(deps), inheritance_dependency(model))
       end
 
       # The class an association points at, as a unit identifier.

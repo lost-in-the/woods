@@ -70,7 +70,8 @@ module Woods
         unit.source_code = annotate_source(source, class_name)
         ancestry = DeclarationAncestry.new(source: source, identifier: class_name, file_path: file_path)
         unit.metadata = extract_metadata(source, class_name, ancestry)
-        unit.dependencies = extract_dependencies(source, class_name)
+        unit.dependencies = with_inheritance(extract_dependencies(source, class_name),
+                                             inheritance_dependency(class_name, file_path: file_path))
 
         unit
       rescue StandardError => e

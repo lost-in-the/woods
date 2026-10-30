@@ -2006,4 +2006,61 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(with_posix_default_external { extractor.send(:count_loc, model) }).to eq(3)
     end
   end
+  # ── extract_dependencies (inheritance edge) ───────────────────────
+
+  describe '#extract_dependencies (inheritance edge)' do
+    include_context 'extractor setup'
+
+    let(:extractor) { described_class.new(table_catalog: double('TableCatalog', for_model: nil)) }
+
+    before do
+      stub_const('InheritanceFixture', Module.new)
+      stub_const('ActiveRecord::Base', Class.new do
+        class << self
+          attr_writer :abstract_class
+
+          def abstract_class?
+            @abstract_class == true
+          end
+
+          def reflect_on_all_associations
+            []
+          end
+
+          def module_parent
+            InheritanceFixture
+          end
+        end
+      end)
+    end
+
+    def declare(relative, source)
+      path = create_file(relative, source)
+      load path
+      path
+    end
+
+    it 'links an STI subclass to the parent model its extractor publishes' do
+      declare('app/models/inheritance_fixture/user.rb', "class InheritanceFixture::User < ActiveRecord::Base\nend\n")
+      declare('app/models/inheritance_fixture/admin.rb', "class InheritanceFixture::Admin < InheritanceFixture::User\nend\n")
+
+      deps = extractor.send(:extract_dependencies, InheritanceFixture::Admin, '')
+
+      expect(deps).to include(type: :model, target: 'InheritanceFixture::User', via: :inheritance)
+    end
+
+    it 'adds no edge to an abstract base, which the model extractor never publishes' do
+      declare('app/models/inheritance_fixture/application_record.rb', <<~SOURCE)
+        class InheritanceFixture::ApplicationRecord < ActiveRecord::Base
+          self.abstract_class = true
+        end
+      SOURCE
+      declare('app/models/inheritance_fixture/post.rb',
+              "class InheritanceFixture::Post < InheritanceFixture::ApplicationRecord\nend\n")
+
+      deps = extractor.send(:extract_dependencies, InheritanceFixture::Post, '')
+
+      expect(deps.map { |dep| dep[:via] }).not_to include(:inheritance)
+    end
+  end
 end

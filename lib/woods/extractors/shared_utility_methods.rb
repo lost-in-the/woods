@@ -167,6 +167,38 @@ module Woods
         DeclaredParent.call(source, class_name)
       end
 
+      # The `:inheritance` edge to the unit's application-defined parent, or
+      # nil when the parent is a framework class or one no extractor
+      # publishes. See {SuperclassDependency}, loaded on first use because
+      # it needs every extractor's file rules.
+      #
+      # @param unit_class [Class, String] the loaded class, or the identifier
+      #   a file-based extractor read from +file_path+
+      # @param file_path [String, nil] the declaring file, with an identifier
+      # @return [Hash, nil]
+      def inheritance_dependency(unit_class, file_path: nil)
+        return nil unless unit_class.is_a?(Class) || unit_class.is_a?(String)
+
+        @inheritance_dependency ||= begin
+          require_relative 'superclass_dependency'
+          SuperclassDependency.new
+        end
+        @inheritance_dependency.call(unit_class, file_path: file_path)
+      end
+
+      # Appends the structural edge after consolidation, which keeps one edge
+      # per type and target whatever its `via`, so a parent the source also
+      # references keeps both edges, as controllers and mailers do.
+      #
+      # @param dependencies [Array<Hash>] consolidated edges
+      # @param edge [Hash, nil] from {#inheritance_dependency}
+      # @return [Array<Hash>]
+      def with_inheritance(dependencies, edge)
+        return dependencies unless edge
+
+        (dependencies + [edge]).uniq { |dependency| dependency.values_at(:type, :target, :via) }
+      end
+
       # Whether the source declares the selected identity as a class.
       #
       # @param source [String] Ruby source code

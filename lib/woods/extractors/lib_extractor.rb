@@ -159,7 +159,8 @@ module Woods
         unit.source_code  = annotate_source(source, class_name, parent_class)
         unit.metadata     = extract_metadata(source, parent_class)
         unit.metadata[:kind] = 'generator' if generator?(parent_class)
-        unit.dependencies = extract_dependencies(source)
+        unit.dependencies = with_inheritance(extract_dependencies(source),
+                                             inheritance_dependency(class_name, file_path: file_path))
 
         { unit: unit, source: source, analysis: SourceReferences::Collector.new.call(source) }
       rescue StandardError => e
