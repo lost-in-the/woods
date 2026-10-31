@@ -3660,6 +3660,67 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── A structural blast radius (#946 option 3) ────────────────────────────
+  #
+  # `incremental_blast_radius_depth = :structural` follows inheritance,
+  # include and extend edges to any depth and every other edge one hop. The
+  # case a depth cap cannot cover is an STI grandchild: RadiusSportsCar <
+  # RadiusCar < RadiusVehicle reflects the association its grandparent
+  # declares, two inheritance hops from the edited file.
+  describe 'a structural blast radius' do
+    around do |example|
+      Woods.configuration.incremental_blast_radius_depth = :structural
+      example.run
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = nil
+    end
+
+    # Retire the chain the way a reload would. A subclass copies its parent's
+    # reflections, validators and callbacks when it is defined, so editing the
+    # grandparent in place never reaches an already-loaded grandchild; a
+    # reloading app defines all three again.
+    def unload_chain
+      %w[RadiusSportsCar RadiusCar RadiusVehicle].each do |name|
+        next unless Object.const_defined?(name, false)
+
+        Object.const_get(name).abstract_class = true
+        Object.send(:remove_const, name)
+      end
+    end
+
+    after { unload_chain }
+
+    # @return [String] the grandparent's path, the only file that changed
+    def load_chain(vehicle_body = '')
+      unload_chain
+      write_file('app/models/radius_vehicle.rb', <<~RUBY)
+        class RadiusVehicle < ApplicationRecord
+          self.table_name = 'posts'
+          #{vehicle_body}
+        end
+      RUBY
+      write_file('app/models/radius_car.rb', "class RadiusCar < RadiusVehicle\nend\n")
+      write_file('app/models/radius_sports_car.rb', "class RadiusSportsCar < RadiusCar\nend\n")
+      %w[radius_vehicle radius_car radius_sports_car].each { |name| load app_path("app/models/#{name}.rb") }
+      'app/models/radius_vehicle.rb'
+    end
+
+    def associations(dir, identifier)
+      unit = unit_snapshot(dir).values.find { |candidate| candidate['identifier'] == identifier }
+      Array(unit.dig('metadata', 'associations')).map { |association| association['name'].to_s }
+    end
+
+    it 'keeps an STI grandchild equivalent when its grandparent gains an association' do
+      load_chain
+
+      index = run_sequence([-> { load_chain('has_many :comments, foreign_key: :post_id') }])
+
+      # The change reached the grandchild's own payload, so the comparison
+      # above held a re-derived unit, not one that never moved.
+      expect(associations(index, 'RadiusSportsCar')).to include('comments')
+    end
+  end
+
   # ── SUMMARY.md totals (M4) ───────────────────────────────────────────────
   #
   # An incremental run used to ship the seeded previous generation's

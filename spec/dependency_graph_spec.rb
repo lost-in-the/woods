@@ -223,6 +223,50 @@ RSpec.describe Woods::DependencyGraph do
       expect(affected).to include('UserService')
       expect(affected).not_to include('UsersController')
     end
+
+    # #946 option 3: structural edges (inheritance, include, extend) carry a
+    # change to any depth, because an STI grandchild or an includer reflects
+    # what it inherits; every other edge carries it one hop.
+    context 'with structural_vias' do
+      def register(identifier, type, *dependencies)
+        graph.register(make_unit(
+                         type: type, identifier: identifier,
+                         file_path: "app/#{type}s/#{identifier.downcase}.rb",
+                         dependencies: dependencies.map { |target, via| { type: :model, target: target, via: via } }
+                       ))
+      end
+
+      before do
+        register('Vehicle', :model)
+        register('Car', :model, %w[Vehicle inheritance])
+        register('SportsCar', :model, %w[Car inheritance])
+        register('Garage', :service, %w[SportsCar code_reference])
+        register('GaragesController', :controller, %w[Garage code_reference])
+        register('Fleet', :service, %w[Vehicle code_reference])
+        register('FleetsController', :controller, %w[Fleet code_reference])
+        register('Towing', :concern, %w[Fleet include])
+      end
+
+      let(:affected) { graph.affected_by(['app/models/vehicle.rb'], structural_vias: %w[inheritance include extend]) }
+
+      it 'follows inheritance edges to any depth' do
+        expect(affected).to include('Car', 'SportsCar')
+      end
+
+      it 'takes one other hop from every unit the structural walk reaches' do
+        expect(affected).to include('Garage', 'Fleet')
+      end
+
+      it 'stops after that hop, whatever edge comes next' do
+        expect(affected).not_to include('GaragesController', 'FleetsController', 'Towing')
+      end
+
+      it 'reads edge kinds published as strings, the way a reloaded graph holds them' do
+        reloaded = described_class.from_h(graph.to_h)
+        expect(reloaded.affected_by(['app/models/vehicle.rb'], structural_vias: %w[inheritance]))
+          .to contain_exactly('Vehicle', 'Car', 'SportsCar', 'Garage', 'Fleet')
+      end
+    end
   end
 
   describe '#typed_identifiers' do

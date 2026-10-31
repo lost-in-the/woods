@@ -276,6 +276,12 @@ module Woods
     # GraphQL types all use the same extractor method.
     GRAPHQL_TYPES = %i[graphql_type graphql_mutation graphql_resolver graphql_query].freeze
 
+    # Edge kinds `incremental_blast_radius_depth = :structural` follows to
+    # any depth (#946 option 3): a subclass, an includer or an extender
+    # reflects what it inherits, so a change reaches it however far down the
+    # chain it sits. Every other edge carries a change one hop.
+    STRUCTURAL_VIAS = %w[inheritance include extend].freeze
+
     # File-based unit types the full path ALSO discovers by class, with the
     # class-based entry point to re-extract them through. Re-extracting one
     # of these by file is faithful only when the file names the unit; see
@@ -716,7 +722,7 @@ module Woods
       # Blast radius from the pre-change graph, bounded by
       # `incremental_blast_radius_depth` (nil = the unbounded closure).
       affected_ids = profile_phase('blast radius') do
-        @dependency_graph.affected_by(change_set.absolute_paths, max_depth: blast_radius_depth)
+        @dependency_graph.affected_by(change_set.absolute_paths, **blast_radius_bounds)
       end
       scope = render_scope(change_set)
       @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids, scope: scope)
@@ -937,9 +943,18 @@ module Woods
     # that gains or loses an inbound edge is rewritten by
     # {#finalize_incremental_unit_json} whether or not the walk reached it.
     #
-    # @return [Integer, nil]
+    # @return [Integer, Symbol, nil] a hop count, +:structural+ ({#blast_radius_bounds}), or nil
     def blast_radius_depth
       Woods.configuration&.incremental_blast_radius_depth
+    end
+
+    # The keywords {DependencyGraph#affected_by} takes for the configured
+    # bound: a hop count, or the edge-kind walk.
+    #
+    # @return [Hash]
+    def blast_radius_bounds
+      depth = blast_radius_depth
+      depth == :structural ? { structural_vias: STRUCTURAL_VIAS } : { max_depth: depth }
     end
 
     # The units a controller's flow document could reach from this run's

@@ -128,6 +128,34 @@ RSpec.describe Woods::Extractor, 'incremental blast radius' do
     end
   end
 
+  # #946 option 3: inheritance, include and extend edges to any depth, every
+  # other edge one hop. The chain's belongs_to edges are not structural, so
+  # only ChainB, one hop out, is re-extracted.
+  context 'when incremental_blast_radius_depth is :structural' do
+    before { Woods.configuration.incremental_blast_radius_depth = :structural }
+
+    it 're-extracts one hop along non-structural edges' do
+      expect(re_extracted).to eq(%w[ChainB])
+    end
+
+    it 'follows inheritance from the changed unit, not past a non-structural hop' do
+      extractor.dependency_graph.register(chain_unit('ChainE', target: 'ChainB', via: :inheritance))
+      extractor.dependency_graph.register(chain_unit('ChainF', target: 'ChainA', via: :inheritance))
+
+      expect(re_extracted).to eq(%w[ChainB ChainF])
+    end
+  end
+
+  def chain_unit(identifier, target:, via:)
+    unit = Woods::ExtractedUnit.new(
+      type: :model,
+      identifier: identifier,
+      file_path: rails_root.join("app/models/#{identifier.downcase}.rb").to_s
+    )
+    unit.dependencies = [{ type: :model, target: target, via: via }]
+    unit
+  end
+
   # ChainB, re-extracted with a fresh edge to ChainC.
   def rewired_chain_b
     unit = Woods::ExtractedUnit.new(
