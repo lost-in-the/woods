@@ -24,7 +24,8 @@ RSpec.describe 'woods:incremental full-run reason (#948)' do
   end
 
   around do |example|
-    keys = %w[CHANGED_FILES CI_COMMIT_BEFORE_SHA CI_COMMIT_SHA GITHUB_BASE_REF WOODS_IGNORE_WATCH WOODS_GIT_DIR]
+    keys = %w[CHANGED_FILES CI_COMMIT_BEFORE_SHA CI_COMMIT_SHA GITHUB_BASE_REF WOODS_IGNORE_WATCH WOODS_GIT_DIR
+              WOODS_OUTPUT]
     saved = keys.to_h { |key| [key, ENV.fetch(key, nil)] }
     keys.each { |key| ENV.delete(key) }
     example.run
