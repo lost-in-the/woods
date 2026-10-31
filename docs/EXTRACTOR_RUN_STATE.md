@@ -27,7 +27,7 @@ flowchart TD
   prep --> bsi
   prep --> bp2["begin_payload!(strict: true)"]
   prep --> reset_inc[inline reset block]
-  inc --> setsc["sets changed_source_paths, published_js_names, hybrid_discovery_keys, flow_scope"]
+  inc --> setsc["sets changed_source_paths, published_js_names, hybrid_discovery_keys, flow_scope, flow_changed_units"]
   full --> pub[publish_generation]
   inc --> fin[finalize_incremental_run] --> pub
   ref --> fin
@@ -72,6 +72,7 @@ Reset in `prepare_incremental_run` only. `extract_all` never resets them, and no
 | `@library_replacement_touched` | `replace_type_wholesale(:libs)` | `prepare_incremental_run` | `replace_type_wholesale` | per-run |
 | `@identity_claims` | `verify_identity_claims!` | `prepare_incremental_run` | identity checks, GraphQL kind withdrawal | per-run |
 | `@flow_scope` | `extract_changed` | `prepare_incremental_run` (nil means reassemble every touched controller); `rerun_whole_app_extractors` when routes or controllers re-run | `refresh_incremental_flows` | per-run |
+| `@flow_changed_units` | `extract_changed` (the units the changed files define, from the pre-change graph) | `prepare_incremental_run` (nil means no controller is added from the flow inverse) | `refresh_incremental_flows`, through `flow_stepped_controllers` (#945) | per-run |
 | `@previous_flow_index_entries` | lazy read of the published flow index | `prepare_incremental_run` | `refresh_incremental_flows` | per-run |
 | `@hybrid_discovery_keys` | `extract_changed` | `prepare_incremental_run` (empty set) | changed-path dispatch, `re_extract_unit` | per-run |
 | `@active_record_names` | `active_record_names` (lazy) | `prepare_incremental_run` | incremental PORO paths | per-run |

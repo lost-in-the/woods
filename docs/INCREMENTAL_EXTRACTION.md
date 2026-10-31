@@ -724,6 +724,14 @@ touching any dependency edge; and a controller whose action set no longer
 matches the previous index, which is how an action inherited from further up a
 controller chain than the radius reaches still lands.
 
+The radius rests on the graph, and the assembler can step into a unit the graph
+holds no edge to (a lib class instantiated inside an action, say). So the run
+also looks up the units its changed files define in the previous generation's
+flow inverse (`flows/by_unit.json`, or the previous flow documents when an
+older generation has none) and re-assembles every controller whose flows step
+into one of them, re-extracted or not (#945). An inverse or document that
+cannot be read stops the run instead of carrying a flow it cannot check.
+
 After the index is rewritten, a **dedicated flow-artifact sweep** removes
 every `flows/` document no index entry references. It validates against
 `flow_index.json` and is deliberately separate from the unit sweep: flows/

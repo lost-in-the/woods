@@ -88,6 +88,7 @@ require_relative 'doc_references'
 require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
 require_relative 'extraction/extractor_timings'
+require_relative 'extraction/flow_reach'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -721,6 +722,7 @@ module Woods
       @hybrid_discovery_keys = hybrid_discovery_keys(change_set, affected_ids, scope: scope)
       affected_ids |= render_retarget_ids(change_set, scope: scope)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
+      @flow_changed_units = flow_changed_units_for(change_set)
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
       touched = profile_phase('re-extraction') do
@@ -951,7 +953,10 @@ module Woods
     #
     # Reverse reachability is the same relation the refresh already rested on
     # (`touched` is itself the graph's reverse closure), so this narrows the
-    # distance without changing the edge set behind the decision.
+    # distance without changing the edge set behind the decision. The
+    # assembler can step into a unit the graph holds no edge to; those
+    # controllers come from the previous flow inverse instead
+    # ({#flow_stepped_controllers}, #945).
     #
     # @param change_set [Woods::ChangeSet]
     # @return [Set<String>]
@@ -961,6 +966,23 @@ module Woods
       @dependency_graph.affected_by(
         change_set.absolute_paths, max_depth: FlowPrecomputer::DEFAULT_MAX_DEPTH
       ).to_set
+    end
+
+    # The units defined by the run's changed files, read off the pre-change
+    # graph, so a deleted file still names the units it held.
+    #
+    # The flow refresh looks these up in the previous flow inverse
+    # ({#flow_stepped_controllers}): a flow can step into a unit the graph
+    # holds no edge to, which {#flow_scope_for} cannot see (#945).
+    #
+    # @param change_set [Woods::ChangeSet]
+    # @return [Set<String>]
+    def flow_changed_units_for(change_set)
+      return Set.new unless Woods.configuration.precompute_flows
+
+      change_set.absolute_paths.each_with_object(Set.new) do |path, units|
+        units.merge(@dependency_graph.identifiers_for_path(path))
+      end
     end
 
     # @return [Boolean] whether phase timing is enabled for this process
@@ -1009,6 +1031,10 @@ module Woods
       # nil = no scope was computed for this run, so every re-extracted
       # controller has its flows reassembled. {#refresh} leaves it that way.
       @flow_scope = nil
+      # The units the run's changed files define, read off the pre-change
+      # graph; nil (a targeted {#refresh}) adds no controller from the flow
+      # inverse. See {#flow_stepped_controllers}.
+      @flow_changed_units = nil
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
       @source_collector = nil
@@ -1944,10 +1970,14 @@ module Woods
       controllers_dir = payload_dir.join('controllers')
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
-      return if reextracted.empty? && removed.empty?
+      stepped = flow_stepped_controllers
+      unchanged = (stepped - reextracted - removed).select do |id|
+        controllers_dir.join(collision_safe_filename(id)).exist?
+      end
+      return if reextracted.empty? && unchanged.empty? && removed.empty?
 
       reassemble, carried = partition_flow_controllers(
-        reextracted.filter_map { |id| unit_from_payload(:controllers, id) }
+        (reextracted + unchanged.sort).filter_map { |id| unit_from_payload(:controllers, id) }, stepped
       )
       Rails.logger.info "[Woods] Refreshing flows for #{reassemble.size} controller(s), " \
                         "#{carried.size} carried forward, #{removed.size} removed..."
@@ -1976,23 +2006,47 @@ module Woods
     # annotation back.
     #
     # A controller is reassembled when the run changed something its flow can
-    # reach ({#flow_scope_for}), or when its own action set no longer matches
-    # the previous generation's index. The second test is what catches an
+    # reach ({#flow_scope_for}), when its previous flow steps into a unit a
+    # changed file defines (+stepped+, {#flow_stepped_controllers}), or when
+    # its own action set no longer matches the previous generation's index. The second test is what catches an
     # action arriving from further up a controller inheritance chain than the
     # flow radius reaches, and a controller the index has never seen.
     #
     # Without a scope (a targeted {#refresh}, or a routes re-run) everything
     # is reassembled, which is what this path always did.
     #
-    # @param units [Array<ExtractedUnit>] the run's re-extracted controllers
+    # @param units [Array<ExtractedUnit>] the run's re-extracted controllers,
+    #   plus the unchanged ones whose previous flow steps into a changed unit
+    # @param stepped [Set<String>] controllers whose previous flow steps into
+    #   a unit a changed file defines
     # @return [Array(Array<ExtractedUnit>, Array<ExtractedUnit>)]
-    def partition_flow_controllers(units)
+    def partition_flow_controllers(units, stepped = Set.new)
       return [units, []] if @flow_scope.nil?
 
       previous = previous_flow_index_actions
       units.partition do |unit|
-        @flow_scope.include?(unit.identifier) || flow_actions_of(unit) != previous[unit.identifier]
+        @flow_scope.include?(unit.identifier) || stepped.include?(unit.identifier) ||
+          flow_actions_of(unit) != previous[unit.identifier]
       end
+    end
+
+    # Controllers whose previous flow documents step into a unit the run's
+    # changed files define, read from the previous flow inverse.
+    #
+    # The graph walk behind {#flow_scope_for} misses a flow that steps into a
+    # unit the graph holds no edge to, for example a lib class instantiated
+    # inside an action. Such a controller kept its old step lines (#945). The
+    # inverse records every expanded step, so it names them directly, whether
+    # or not the controller itself was re-extracted.
+    #
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when the previous inverse or a flow
+    #   document cannot be read
+    def flow_stepped_controllers
+      return Set.new if @flow_changed_units.nil? || @flow_changed_units.empty?
+
+      Extraction::FlowReach.new(payload_dir: payload_dir, index_entries: previous_flow_index_entries)
+                           .controllers_through(@flow_changed_units)
     end
 
     # The actions a unit's metadata declares, as the index records them.

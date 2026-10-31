@@ -25,6 +25,11 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
   let(:extractor) { described_class.new(output_dir: File.join(tmpdir, 'output')) }
   let(:precomputer) { instance_double(Woods::FlowPrecomputer, failures: {}) }
   let(:recompute_calls) { [] }
+  # The previous generation's flow inverse (flows/by_unit.json), its flow
+  # documents' steps, and controllers it holds that this run never touches.
+  let(:by_unit) { nil }
+  let(:flow_steps) { {} }
+  let(:untouched_controllers) { [] }
 
   # ModelLeaf is the file that changes. NearController reaches it in two
   # hops, FarController in five.
@@ -116,18 +121,29 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
     FileUtils.mkdir_p(flows)
 
     index = {}
-    %w[NearController FarController].each do |identifier|
-      payload_json = JSON.generate(
-        'type' => 'controller',
-        'identifier' => identifier,
-        'file_path' => "app/controllers/#{identifier.downcase}.rb",
-        'metadata' => { 'actions' => ['index'] }
-      )
-      File.write(controllers.join(extractor.send(:collision_safe_filename, identifier)), payload_json)
+    (%w[NearController FarController] + untouched_controllers).each do |identifier|
+      write_controller_payload(controllers, identifier)
       index["#{identifier}#index"] = "flows/#{identifier}_index.json"
-      File.write(flows.join("#{identifier}_index.json"), '{}')
+      write_flow_document(flows, identifier)
     end
     File.write(flows.join('flow_index.json'), JSON.generate(index))
+    File.write(flows.join('by_unit.json'), JSON.generate(by_unit)) if by_unit
+  end
+
+  def write_controller_payload(controllers, identifier)
+    payload_json = JSON.generate(
+      'type' => 'controller',
+      'identifier' => identifier,
+      'file_path' => "app/controllers/#{identifier.downcase}.rb",
+      'metadata' => { 'actions' => ['index'] }
+    )
+    File.write(controllers.join(extractor.send(:collision_safe_filename, identifier)), payload_json)
+  end
+
+  def write_flow_document(flows, identifier)
+    steps = flow_steps[identifier]
+    document = steps ? JSON.generate('entry_point' => "#{identifier}#index", 'steps' => steps) : '{}'
+    File.write(flows.join("#{identifier}_index.json"), document)
   end
 
   def run
@@ -141,5 +157,47 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
 
   it 'carries the controller outside the radius forward instead' do
     expect(run[:rest][:carried_identifiers]).to eq(['FarController'])
+  end
+
+  # The flow assembler can step into a unit the graph holds no edge to (a lib
+  # class instantiated inside an action). The graph radius then misses the
+  # controller and its flow kept the old step lines (#945). The previous flow
+  # inverse names it.
+  context 'when a controller outside the radius has a flow that steps into the changed unit' do
+    let(:by_unit) { { 'ModelLeaf' => { 'model' => ['FarController#index'] } } }
+
+    it 'reassembles it instead of carrying it forward' do
+      result = run
+      expect(result[:recomputed]).to eq(%w[FarController NearController])
+      expect(result[:rest][:carried_identifiers]).to eq([])
+    end
+  end
+
+  context 'when a controller the run did not re-extract steps into the changed unit' do
+    let(:untouched_controllers) { ['DetachedController'] }
+    let(:by_unit) { { 'ModelLeaf' => { 'model' => ['DetachedController#index'] } } }
+
+    it 'reassembles it too' do
+      expect(run[:recomputed]).to eq(%w[DetachedController NearController])
+    end
+  end
+
+  context 'when the previous generation has no flow inverse' do
+    let(:flow_steps) do
+      { 'FarController' => [{ 'unit' => 'FarController#index', 'type' => 'controller' },
+                            { 'unit' => 'ModelLeaf', 'type' => 'model' }] }
+    end
+
+    it 'reads the steps from the flow documents' do
+      expect(run[:recomputed]).to eq(%w[FarController NearController])
+    end
+  end
+
+  context 'when the flow inverse names an unrelated unit only' do
+    let(:by_unit) { { 'ServiceD' => { 'service' => ['FarController#index'] } } }
+
+    it 'still carries the controller forward' do
+      expect(run[:rest][:carried_identifiers]).to eq(['FarController'])
+    end
   end
 end
