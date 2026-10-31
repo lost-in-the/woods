@@ -52,10 +52,10 @@ RSpec.describe 'Watcher reconciliation across publication' do
     File.write(manifest_path, JSON.generate(data))
   end
 
-  def daemon
+  def daemon(logger: nil)
     watcher = double(start: nil, stop: nil)
     Woods::Watch::Daemon.new(root: root, output_dir: index_root, watcher: watcher, debounce: 0,
-                             extractor_factory: -> { consumer },
+                             extractor_factory: -> { consumer }, logger: logger,
                              reloader: double(enabled?: true, reload!: true),
                              boot_snapshot: Woods::Watch::BootSnapshot.new(root: root)).tap do |instance|
       # Exercise real startup/shutdown without parking in the production tick;
@@ -201,14 +201,81 @@ RSpec.describe 'Watcher reconciliation across publication' do
     expect(consumer).to have_received(:extract_all).once
   end
 
-  it 'keeps a recent changed path uncovered when the bounded content scan cannot read it' do
+  context 'when a file was rewritten with its indexed content while the daemon was stopped (#947)' do
+    let(:logger) { instance_spy(Logger) }
+
+    before do
+      # Indexed siblings, untouched since: the start-up scan walks them first.
+      3.times do |index|
+        path = File.join(root, "app/models/model_#{index}.rb")
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, "class Model#{index}; end")
+        File.utime(Time.at(clock.to_i - 10), Time.at(clock.to_i - 10), path)
+      end
+      prepare.send(:publish_generation, 'full')
+      File.write(source, 'before')
+      stamp_source(clock.to_i + 60)
+    end
+
+    it 'schedules no work for it and logs how many candidates the digest check dropped' do
+      expect(daemon(logger: logger).run).to eq(:stopped)
+
+      expect(consumer).not_to have_received(:extract_changed)
+      expect(consumer).not_to have_received(:extract_all)
+      expect(logger).to have_received(:info).with(/1 startup candidate.*content matches the index/)
+    end
+
+    # The field case: an application whose scoped tree outgrows the start-up
+    # scan budget. Only the candidates' own bytes decide.
+    it 'drops it even when the tree is larger than the start-up scan budget' do
+      stub_const('Woods::SourceInputs::Scanner::DEFAULT_LIMITS',
+                 Woods::SourceInputs::Scanner::DEFAULT_LIMITS.merge(max_files: 2))
+
+      daemon(logger: logger).run
+
+      expect(consumer).not_to have_received(:extract_changed)
+      expect(logger).to have_received(:info).with(/1 startup candidate.*content matches the index/)
+    end
+
+    it 'still catches up the path when the index records no digest for it' do
+      rewrite_manifest do |data|
+        data['scopes'].each_value { |paths| paths.delete('app/views/posts/show.html.erb') }
+      end
+
+      daemon(logger: logger).run
+
+      expect(consumer).to have_received(:extract_changed).with([source])
+      expect(logger).not_to have_received(:info).with(/content matches the index/)
+    end
+
+    it 'still catches up the path when its content cannot be read' do
+      allow_any_instance_of(Woods::SourceInputs::StableReader)
+        .to receive(:read).and_raise(Woods::SourceInputs::StableReader::Error, 'source_file_unreadable')
+
+      daemon(logger: logger).run
+
+      expect(consumer).to have_received(:extract_changed).with([source])
+    end
+  end
+
+  it 'still catches up a path whose content changed while the daemon was stopped' do
     prepare.send(:publish_generation, 'full')
-    File.write(source, 'changed')
-    stamp_source(clock.to_i)
+    File.write(source, 'after')
+    stamp_source(clock.to_i + 60)
+
+    daemon.run
+
+    expect(consumer).to have_received(:extract_changed).with([source]).once
+  end
+
+  it 'keeps a recorded dirty path that was deleted while the daemon was stopped' do
+    publish_with_edit(prepare, :write_source_inputs, mtime: clock.to_i - 10)
+    File.unlink(source)
+
     scan = Woods::Watch::CatchUp.new(root: root, output_dir: index_root, ignored: [])
-    allow(scan).to receive(:current_identities).and_return({})
 
     expect(scan.paths).to include(source)
+    expect(scan.unchanged).to eq(0)
   end
 
   it 'does not accept a matching sibling consumer as proof of all retained facts' do

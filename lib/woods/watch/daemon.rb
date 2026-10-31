@@ -714,7 +714,7 @@ module Woods
 
         carried = restore_pending
         scan = catch_up_scan
-        paths = (scan.paths + carried + vanished_restart_paths).uniq
+        paths = startup_paths(scan, carried)
         boot_changes = @boot_snapshot ? @boot_snapshot.changed_paths : []
         enqueue(boot_changes) unless boot_changes.empty?
         prepare_startup_reconciliation(paths, rebuild: scan.rebuild?)
@@ -729,6 +729,17 @@ module Woods
         @logger.info("[Woods] watch: #{paths.size} path(s) changed before startup — catching up")
         enqueue(paths, startup: true)
         drain
+      end
+
+      # Modification-time-only changes (#947) cost nothing, but the log says
+      # how many, so a quiet start-up after a branch switch is explained.
+      def startup_paths(scan, carried)
+        paths = (scan.paths + carried + vanished_restart_paths).uniq
+        count = scan.unchanged
+        return paths unless count.positive?
+
+        @logger.info("[Woods] watch: #{count} startup candidate(s) skipped — content matches the index")
+        paths
       end
 
       def prepare_startup_reconciliation(paths, rebuild: false)

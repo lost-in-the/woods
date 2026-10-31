@@ -436,11 +436,34 @@ rounded down to include the entire second on coarse filesystems, plus recorded
 source-change error paths. Publication time is too late: a file can change
 between capture and publication, including after final source verification.
 
-A bounded content scan excludes candidates only when their recorded consumer
-identities all match the current bytes. Unchanged files in the capture second
-therefore do not repeatedly trigger extraction. Missing identity evidence keeps
-the candidate uncovered. This startup check is not a full source-freshness
-certification; use [`source_freshness`](SOURCE_FRESHNESS.md) for that evidence.
+The modification time is only the cheap first filter; the content decides.
+Each candidate is read once, bounded and stability-checked, and keyed with
+the index's private source key. It is dropped only when every consumer scope
+of `source_inputs.json` records a digest for its path and all of them equal
+the bytes on disk. A branch switch, `git checkout -- file`, a stash round
+trip or an edit reverted while the daemon was stopped moves modification times
+without changing content, and costs no extraction. Unchanged files in the
+capture second do not repeatedly trigger extraction either. The check reads
+the candidates only, never the whole tree, so an application larger than a
+tree scan's budget is still judged per file. All the reads share a 30-second
+budget. The log names how many candidates it dropped:
+
+```
+[Woods] watch: 2 startup candidate(s) skipped — content matches the index
+```
+
+The check fails open. A candidate is caught up as before when:
+
+- the manifest records no digest for its path;
+- its scopes disagree about the digest;
+- it is deleted, unreadable, unstable while read, or larger than 8 MB;
+- the shared budget has run out.
+
+An oversized manifest publishes no per-path digests: there, startup compares
+one digest of the whole captured tree, and either the tree is unchanged or
+every candidate is caught up. This startup check is not a full
+source-freshness certification; use [`source_freshness`](SOURCE_FRESHNESS.md)
+for that evidence. Live changes after startup are not digest-checked.
 
 An older index without this capture boundary, or one with invalid/mismatched
 metadata or a dangling payload pointer, receives a full reconciliation under
