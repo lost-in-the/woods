@@ -62,7 +62,17 @@ namespace :woods do
   desc 'Scan the forest — full extraction (alias for extract)'
   task scan: :extract
 
-  desc 'Incremental extraction based on git changes'
+  # `rake -T` shows the first sentence; `rake -D woods:incremental` the rest.
+  desc <<~DESC
+    Incremental extraction of changed files (by default: since HEAD~1, including uncommitted work).
+    Change set, first match wins: CHANGED_FILES (comma-separated paths; git is not consulted),
+    then CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA (GitLab), then origin/$GITHUB_BASE_REF...HEAD (GitHub),
+    else `git diff HEAD~1`: the last commit plus the working tree's staged and unstaged changes to
+    tracked files (untracked files are not included). A changed restart input (Gemfile, Gemfile.lock,
+    config/initializers/, db/schema.rb, ...) runs a full extraction, and the task prints each path
+    that forced it and whether it came from a commit or the working tree. Set CHANGED_FILES to
+    choose the paths yourself.
+  DESC
   task incremental: :environment do
     require 'woods/extractor'
     require 'woods/input_rules'
@@ -81,7 +91,8 @@ namespace :woods do
     # reaches the index however good the dispatch behind it is (#164).
     input_rules = Woods::InputRules.for_index(output_dir)
     changed_files = changed_files.reject(&:empty?).reject { |path| input_rules.action(path) == :ignore }
-    full = changed_files.any? { |path| input_rules.action(path) == :full }
+    forcing = changed_files.select { |path| input_rules.action(path) == :full }
+    full = forcing.any?
 
     if changed_files.empty?
       puts 'No relevant files changed. Skipping extraction.'
@@ -103,6 +114,13 @@ namespace :woods do
     puts "#{full ? 'Full' : 'Incremental'} extraction for #{changed_files.size} changed files..."
     changed_files.each { |f| puts "  - #{f}" }
     puts
+    if full
+      # Name what forced the full run and where it came from (#948): the
+      # default range reads the working tree, so an uncommitted restart
+      # input forces one as surely as a committed one.
+      Woods::RakeHelpers.woods_full_run_reason(forcing).each { |line| puts line }
+      puts
+    end
 
     extractor = Woods::Extractor.new(output_dir: output_dir)
     affected = Woods::RakeHelpers.woods_with_extraction_lock(output_dir) do
@@ -181,7 +199,7 @@ namespace :woods do
     abort e.message
   end
 
-  desc 'Tend the garden — incremental extraction (alias for incremental)'
+  desc 'Tend the garden — incremental extraction (alias for incremental; see `rake -D woods:incremental`)'
   task tend: :incremental
 
   desc 'Watch the app and keep the index current (resident daemon)'
