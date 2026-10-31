@@ -31,7 +31,8 @@ RSpec.describe 'Extractor run state across reused entry points' do
     results: :hash, dependents_dirty: :set, incremental_written: :hash, retained_units: :set,
     changed_source_paths: :set, reference_additions: :hash,
     library_replacement_touched: :set, identity_claims: :hash, flow_scope: :set,
-    previous_flow_index_entries: :hash, incremental_extractors: :hash, source_collector: :scalar,
+    flow_changed_units: :set, previous_flow_index_entries: :hash, incremental_extractors: :hash,
+    source_collector: :scalar,
     hybrid_discovery_keys: :set, active_record_names: :set, package_resolver: :scalar,
     persisted_index_stats: :hash, graph_sha: :scalar, flow_failures: :array,
     symlinked_root: :scalar, symlinked_dirs: :hash
