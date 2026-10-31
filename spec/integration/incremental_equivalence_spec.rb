@@ -5462,11 +5462,15 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # #945: the flow assembler can step into a lib class the dependency graph
     # holds no edge to. Here the action names it by its unqualified short
     # name: the assembler resolves that by suffix, the reference scanner
-    # records no edge (the example asserts both). The radius the flow refresh
-    # walks is the graph's, so before the fix a lib edit left the controller's
-    # flow carried forward with the old step lines. The lib file is edited
-    # alone, and again with the controller, so both the untouched and the
-    # re-extracted controller paths are held to a full run.
+    # records no edge (the example asserts both). Ruby's own lookup would not
+    # resolve that name from a top-level controller, so this is a constructed
+    # disagreement, not a claim about how the field case lost its edge (a
+    # namespaced controller that does resolve it gets the edge). What it holds
+    # is the fix's property: the flow refresh no longer depends on the graph
+    # reaching every unit a flow steps into. Before the fix a lib edit left
+    # the controller's flow carried forward with the old step lines. The lib
+    # file is edited alone, and again with the controller, so both the
+    # untouched and the re-extracted controller paths are held to a full run.
     it 'keeps a flow that steps into a lib class without a graph edge equivalent as that file changes' do
       lib = 'lib/flow_lib/flow_tracker.rb'
       controller = 'app/controllers/tracks_controller.rb'
