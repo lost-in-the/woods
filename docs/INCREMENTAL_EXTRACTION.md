@@ -78,6 +78,51 @@ This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.
 
+## Which changes the task sees
+
+`woods:incremental` builds its change set from the first of these that applies
+(`RakeHelpers#woods_incremental_changed_paths` and `#woods_incremental_range`):
+
+| Source | Diff | Working tree |
+|---|---|---|
+| `CHANGED_FILES` is set | None. The comma-separated list is the change set. | Not read. |
+| `CI_COMMIT_BEFORE_SHA` is set (GitLab) | `git diff <before>..<CI_COMMIT_SHA or HEAD>` | Not read. |
+| `GITHUB_BASE_REF` is set (GitHub Actions) | `git diff origin/<ref>...HEAD` (from the merge base) | Not read. |
+| None of the above (the default) | `git diff HEAD~1`: one revision, compared with the working tree | **Included.** |
+
+The default is one revision, not a range, so git compares `HEAD~1` with the
+files on disk. Its change set is the last commit **plus every uncommitted
+change to a tracked file, staged or not** (including `git add -N` paths). A
+file changed in the last commit and reverted on disk drops out. Untracked
+files are not included; `git add` one to include it. A run meant to cover one
+commit therefore also covers local edits. When one of those edits is a
+restart input (a local `Gemfile` pin, an initializer), the run is a full
+extraction.
+
+To leave the working tree out, commit, stash or revert local changes first,
+or set `CHANGED_FILES` (for example
+`CHANGED_FILES="$(git diff --name-only HEAD~1 HEAD | paste -sd, -)"`). The CI
+ranges never read the working tree.
+
+When a restart input forces a full extraction, the task names each forcing
+path and its source after the changed-file list (#948). The first ten are
+listed; the rest are counted:
+
+```text
+Full extraction forced by 2 restart inputs (state captured at boot, which an incremental run cannot refresh):
+  - Gemfile (working tree, uncommitted)
+  - Gemfile.lock (committed in HEAD~1..HEAD)
+Uncommitted changes are included: with no CHANGED_FILES or CI range, the change set is `git diff HEAD~1` against the working tree (staged and unstaged; untracked files are not). Commit, stash or revert them, or set CHANGED_FILES, to leave them out.
+```
+
+A source reads `committed in <range>`, `working tree, uncommitted`, both
+(`committed in HEAD~1..HEAD, then changed again in the working tree`),
+`named by CHANGED_FILES`, or `source unknown` when git cannot attribute the
+path. Woods works the source out with two extra diffs, `HEAD~1..HEAD` and
+`HEAD`, and only once a full run is already decided. The note about
+uncommitted changes appears only when a forcing path came from the working
+tree.
+
 ## Exit behavior in CI chains
 
 The task decides what to do before it extracts, and the exit code is part of
@@ -88,7 +133,7 @@ failure a CI chain cannot afford:
 |---|---|
 | `CHANGED_FILES` is set | Comma-separated application-relative or contained absolute paths; normalized before filtering. Git is not consulted. |
 | The git range resolves | Current behavior: extract the changed paths, or exit 0 with `No relevant files changed` when nothing relevant changed. |
-| A changed input requires a restart | On revisions containing #588, the fresh one-shot task selects full extraction before relevance filtering, including schema-only changes. |
+| A changed input requires a restart | On revisions containing #588, the fresh one-shot task selects full extraction before relevance filtering, including schema-only changes. It prints each forcing path and whether it came from a commit or the working tree ([above](#which-changes-the-task-sees)). |
 | The range fails **and** a `:running` watch daemon maintains the index | Stand down with a printed reason, exit 0 — the daemon's start-up catch-up covers whatever changed. |
 | The range fails otherwise | Actionable error naming the range, **exit 1**. |
 | There is no `git` binary at all | Same two rows as above: the failure reads `git unavailable: …` and takes the daemon-coverage decision, rather than dying with an `Errno::ENOENT` backtrace. |
@@ -108,7 +153,8 @@ v2 betas. Reading old indexes and rebuilding them fully remain supported; see
 [the v1 upgrade procedure](UPGRADING_TO_2.md).
 
 The range comes from `CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA` (GitLab),
-`origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default).
+`origin/$GITHUB_BASE_REF...HEAD` (GitHub Actions), or `HEAD~1` (default; it
+also reads the working tree, see [above](#which-changes-the-task-sees)).
 Whitespace-only CI variables are ignored; a nonempty GitLab before-SHA with
 no current SHA compares against `HEAD`. Nonempty invalid revisions still fail.
 An unresolvable range — a GitLab zero-SHA on a new branch, an unfetched base ref,

@@ -1466,7 +1466,7 @@ configuration mismatch before publication. See [launcher output selection](SOURC
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `WOODS_OUTPUT` | `Woods.configuration.output_dir` | Overrides the output directory for extraction/watch and embedding tasks without editing the initializer; embedding also places its default SQLite metadata database there. Explicit database options take precedence. |
-| `CHANGED_FILES` | unset | Comma-separated explicit changed-path list for `woods:incremental`; when set, git range resolution is skipped entirely. |
+| `CHANGED_FILES` | unset | Comma-separated explicit changed-path list for `woods:incremental`; when set, git range resolution is skipped entirely. Without it or a CI range, the default `git diff HEAD~1` also includes uncommitted changes to tracked files (see [Incremental Extraction](./INCREMENTAL_EXTRACTION.md#which-changes-the-task-sees)). |
 | `CI_COMMIT_BEFORE_SHA`, `CI_COMMIT_SHA` | unset (GitLab) | Build the diff range `<before>..<after>` for `woods:incremental`. A zero before-SHA (new branch) makes the range unresolvable, which exits 1 unless a running daemon covers the index. |
 | `GITHUB_BASE_REF` | unset (GitHub Actions) | Build the diff range `origin/<ref>...HEAD` for `woods:incremental`; an unfetched ref makes the range unresolvable, same exit behavior. |
 | `RAILS_ENV` | `development` | Rails environment the rake tasks boot in. |

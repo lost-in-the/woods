@@ -422,6 +422,24 @@ module Woods
       exit 1
     end
 
+    # Why a `woods:incremental` run became a full extraction (#948): each
+    # forcing path with its source (committed, working tree, or CHANGED_FILES),
+    # capped at {FullRunReason::LIMIT}. The source is re-derived the way
+    # {#woods_incremental_changed_paths} chose it; the extra diffs run only
+    # once a full run is already decided.
+    #
+    # @param paths [Array<String>] application-relative paths that forced the run
+    # @return [Array<String>] printable lines
+    def woods_full_run_reason(paths)
+      require 'woods/full_run_reason'
+      range = ENV.fetch('CHANGED_FILES', nil) ? nil : woods_incremental_range
+      diff = lambda do |revisions|
+        changed, failure = woods_changed_paths_for_range(revisions)
+        [changed && woods_normalize_incremental_paths(changed), failure]
+      end
+      FullRunReason.new(paths: paths, range: range, diff: diff).lines
+    end
+
     # Normalize before the task filters against application-relative rules.
     # ChangeSet retains outside-root paths as absolute; exclude those here so
     # traversal spellings cannot reach extraction as application source. This
