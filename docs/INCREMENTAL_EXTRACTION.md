@@ -472,6 +472,17 @@ is rewritten by the second pass whether or not the walk reached it.
 `spec/integration/incremental_equivalence_spec.rb` holds a depth of 1 to
 full-extraction equivalence, including that case.
 
+`:structural` bounds the walk by edge kind instead (#946, opt-in while it is
+measured). Inheritance, include and extend edges carry a change to any depth;
+every other edge carries it one hop, from the changed units and from every
+unit that structural walk reached, and the walk stops there. That covers the
+STI grandchild: `SportsCar` is two inheritance hops from `Vehicle`, and the
+equivalence spec holds it to a full run when `Vehicle` gains an association,
+the case a depth of 1 gets wrong. It does not cover a nested
+`has_many :through`, whose chain runs along association edges, and an included
+module every controller shares still reaches every controller. Measure it on
+the tree before relying on it.
+
 ## Dispatch inventory
 
 ### Per-file

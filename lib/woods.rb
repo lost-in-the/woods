@@ -607,12 +607,20 @@ module Woods
     # graph. A nested `has_many :through` resolves through the same kind of
     # chain. Set this only on a tree you know has neither.
     #
-    # @param value [Integer, nil] must be a positive Integer, or nil
+    # +:structural+ bounds the walk by edge kind instead (#946 option 3,
+    # opt-in while it is measured): inheritance, include and extend edges to
+    # any depth, which is what covers the STI grandchild, and every other
+    # edge one hop.
+    #
+    # @param value [Integer, Symbol, nil] a positive Integer, +:structural+, or nil
     # @raise [ConfigurationError] otherwise
     def incremental_blast_radius_depth=(value)
-      @incremental_blast_radius_depth = validate_optional_positive_integer!(
-        :incremental_blast_radius_depth, value
-      )
+      unless value.nil? || value == :structural || (value.is_a?(Integer) && value.positive?)
+        raise ConfigurationError,
+              "incremental_blast_radius_depth must be a positive Integer, :structural or nil, got #{value.inspect}"
+      end
+
+      @incremental_blast_radius_depth = value
     end
 
     # Application event APIs {Woods::Extractors::EventExtractor} recognizes
