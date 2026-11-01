@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'woods/retrieval/lexical_index'
 require 'woods/storage/metadata_store'
 require 'woods/storage_identity'
+require 'weakref'
 
 RSpec.describe Woods::Retrieval::LexicalIndex do
   let(:store) { Woods::Storage::MetadataStore::InMemory.new }
@@ -159,6 +160,31 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     end
     expect { view.execute(query: 'localword', limit: -1) }.to raise_error(ArgumentError)
     expect { empty.execute(query: '', limit: -1) }.to raise_error(ArgumentError)
+  end
+
+  # Construct on a separate stack so only the returned view and weak probes
+  # survive. MetadataStore retains its original records, not the index copies.
+  def detached_view(nested:)
+    keep = add('Inside', source: 'localword')
+    outside = add('Outside', source: 'foreignword ' * 4000)
+    index = described_class.new(metadata_store: store)
+    document = index.instance_variable_get(:@documents).find { |doc| doc.key == outside }
+    probes = [index, document, document.unit, document.unit.fetch('source_code'), document.fields,
+              document.lengths].map { |object| WeakRef.new(object) }
+    view = index.restricted_to([keep])
+    view = view.restricted_to([keep, outside]) if nested
+    [view, probes, keep]
+  end
+
+  it 'lets detached narrow and nested views release unrelated document bodies and scoring tallies' do
+    [false, true].each do |nested|
+      view, probes, keep = detached_view(nested: nested)
+      3.times { GC.start(full_mark: true, immediate_sweep: true) }
+
+      probes.each { |probe| expect(probe.weakref_alive?).to be_falsey }
+      expect(view.execute(query: 'localword').candidates.map(&:identifier)).to eq([keep])
+      %w[foreignword Outside].each { |query| expect(view.execute(query: query).candidates).to be_empty }
+    end
   end
 
   it 'ranks exact identifiers first and preserves ambiguous typed identities' do
