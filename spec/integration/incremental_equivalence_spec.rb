@@ -952,7 +952,14 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    # The shared file is edited without being named in the change set, so only
+    # a walk that keeps going through code references reaches the model that
+    # inlines it. That is the unbounded closure's property; every writer
+    # Woods ships (woods:incremental, the watcher) names each edited file, and
+    # the bounded default (#946) is held to equivalence where it does.
     it 're-extracts every shared-file owner through transitive source references' do
+      previous_depth = Woods.configuration.incremental_blast_radius_depth
+      Woods.configuration.incremental_blast_radius_depth = nil
       dependency_path = write_file('lib/ownership_dependency.rb', 'class OwnershipDependency; end')
       load app_path(dependency_path)
       bundle_path = write_module_bundle
@@ -981,6 +988,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                                                             'OwnershipSecondFeature')
       expect(graph.fetch('type_index').fetch('poro')).to include('OwnershipBundle', 'OwnershipSibling')
       expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = previous_depth
     end
 
     it 'refuses a transitive shared-file refresh when a partial boot retains an unrefreshed module' do
