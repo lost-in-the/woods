@@ -482,7 +482,11 @@ the case a depth of 1 gets wrong. A nested `has_many :through` is reached in
 one hop: the model publishes a `through_chain` edge to every model its
 through reflection's chain passes through, so `Owner has_many :parts, through:
 :bridges`, where Bridge's `:parts` runs through Link, depends on Link directly
-(#961), and the spec holds that to a full run too. It cannot follow an
+(#961), and the spec holds that to a full run too. Flows keep their own
+radius: with `precompute_flows` on, every previously published controller
+within the flow assembler's depth of the change is reassembled from its
+previous payload, whether or not a bounded walk re-extracted it, so a bounded
+radius narrows unit re-extraction and never flow reassembly. It cannot follow an
 inheritance edge the graph lacks, and an included module every controller
 shares still reaches every controller. Measure it on the tree before relying
 on it.
