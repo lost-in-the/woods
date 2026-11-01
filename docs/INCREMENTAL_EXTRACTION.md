@@ -454,7 +454,7 @@ files' own units. It takes three kinds of value:
 |---|---|---|
 | `:structural` (default, #946) | Inheritance, include and extend edges to any depth; every other edge one hop, from the changed units and from every unit that structural walk reached | Most trees |
 | `nil` | The unbounded transitive closure: every unit that reaches the changed file, at any depth | The equivalence guarantee without relying on edge kinds; the default before #946 |
-| A positive Integer | That many reverse hops of any kind | Only a tree with no STI grandchildren and no nested `has_many :through` |
+| A positive Integer | That many reverse hops of any kind | Only a tree with no STI grandchildren |
 
 The reason to bound it is cost. A unit's extracted content is mostly a
 function of its own source and its own reflection, so on most graphs the deep
@@ -475,11 +475,19 @@ STI descendants that a full run re-derived. The equivalence spec holds both
 `:structural` and a depth of 1 to a full run, including that case for
 `:structural`.
 
-What `:structural` does not reach is a nested `has_many :through` whose chain
-runs only along association edges: it follows them one hop. It also cannot
-follow an inheritance edge the graph lacks, and an included module that every
-controller shares still reaches every controller. Set `nil` on a tree where any
-of those matters.
+A nested `has_many :through` is reached in one hop: the model publishes a
+`through_chain` edge to every model its through reflection's chain passes
+through, so `Owner has_many :parts, through: :bridges`, where Bridge's `:parts`
+runs through Link, depends on Link directly, and the equivalence spec holds
+that to a full run under `:structural` (#963). Flows keep their own radius:
+with `precompute_flows` on, every previously published controller within the
+flow assembler's depth of the change is reassembled from its previous payload,
+whether or not a bounded walk re-extracted it, so a bound narrows unit
+re-extraction and never flow reassembly.
+
+What `:structural` cannot do is follow an inheritance edge the graph lacks,
+and an included module that every controller shares still reaches every
+controller. Set `nil` on a tree where either matters.
 
 What the bound never affects is `dependents`. Edges change only when a unit is
 re-extracted, and the run marks every target of a re-extracted unit's edges,

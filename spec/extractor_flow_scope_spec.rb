@@ -30,6 +30,7 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
   let(:by_unit) { nil }
   let(:flow_steps) { {} }
   let(:untouched_controllers) { [] }
+  let(:blast_radius_depth) { nil }
 
   # ModelLeaf is the file that changes. NearController reaches it in two
   # hops, FarController in five.
@@ -52,6 +53,10 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
     @original_config = Woods.configuration
     Woods.configuration = Woods::Configuration.new
     Woods.configuration.precompute_flows = true
+    # The examples below describe the unbounded radius, where every
+    # controller reaching the change is re-extracted; the structural
+    # context at the end overrides it.
+    Woods.configuration.incremental_blast_radius_depth = blast_radius_depth
 
     register_graph
     stub_precomputer
@@ -198,6 +203,24 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
 
     it 'still carries the controller forward' do
       expect(run[:rest][:carried_identifiers]).to eq(['FarController'])
+    end
+  end
+
+  # A bounded radius re-extracts only what reaches the change through
+  # structural edges or one other hop, so NearController (two code
+  # references away) is not re-extracted. Its flow document still expands
+  # into ModelLeaf, so a full run would reassemble it: the flow refresh takes
+  # every previously published controller inside the flow assembly radius,
+  # not only the re-extracted ones (#961).
+  context 'with a structural blast radius' do
+    let(:blast_radius_depth) { :structural }
+
+    it 'reassembles a controller inside the flow assembly radius the run did not re-extract' do
+      expect(run[:recomputed]).to eq(['NearController'])
+    end
+
+    it 'leaves a controller outside both radii alone' do
+      expect(run[:rest][:carried_identifiers]).to eq([])
     end
   end
 end

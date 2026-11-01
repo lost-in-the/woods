@@ -574,11 +574,13 @@ and in practice that unit is reached along inheritance. An STI grandchild
 (`SportsCar < Car < Vehicle`) inherits its grandparent's associations,
 validations and callback chain; `:structural` follows inheritance, include and
 extend edges to any depth, so it reaches the grandchild, and stops every other
-edge after one hop. A nested `has_many :through` resolves along association
-edges and is reached only one hop, and a missing inheritance edge cannot be
-followed. Set `nil` for the unbounded closure where either matters, and an
-Integer only on a tree with neither shape. The units a bound stops
-re-extracting still get their `dependents` list refreshed, and
+edge after one hop. A nested `has_many :through` is reached too: each through
+association publishes a `through_chain` edge to every model on its chain, one
+hop away. A missing inheritance edge cannot be followed; set `nil` for the
+unbounded closure where that matters, and an Integer only on a tree with no STI
+grandchildren. The units a bound stops re-extracting still get their
+`dependents` list refreshed, flows within the flow assembler's depth are
+reassembled whatever the bound, and
 `spec/integration/incremental_equivalence_spec.rb` holds every setting to
 full-extraction equivalence.
 

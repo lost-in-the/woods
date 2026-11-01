@@ -606,13 +606,13 @@ module Woods
     # grandparent's reflection (`reflect_on_all_associations`, `_validators`
     # and the callback chain are all inherited), so `SportsCar < Car <
     # Vehicle` changes when `Vehicle` does, and the inheritance edges reach it.
-    # A nested `has_many :through` resolves through association edges instead
-    # and is reached only one hop.
+    # A nested `has_many :through` is reached as well: each through
+    # association publishes a `through_chain` edge to every model on its
+    # reflection chain, one hop away (#963).
     #
     # +nil+ keeps the unbounded transitive closure, the default before #946.
     # A positive Integer caps the walk at that many hops of any kind, which
-    # misses the STI grandchild; set one only on a tree you know has neither
-    # shape.
+    # misses the STI grandchild; set one only on a tree you know has none.
     #
     # @param value [Integer, Symbol, nil] a positive Integer, +:structural+, or nil
     # @raise [ConfigurationError] otherwise

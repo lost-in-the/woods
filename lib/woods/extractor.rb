@@ -1986,7 +1986,7 @@ module Woods
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
       stepped = flow_stepped_controllers
-      unchanged = (stepped - reextracted - removed).select do |id|
+      unchanged = ((stepped | flow_scope_controllers) - reextracted - removed).select do |id|
         controllers_dir.join(collision_safe_filename(id)).exist?
       end
       return if reextracted.empty? && unchanged.empty? && removed.empty?
@@ -2043,6 +2043,22 @@ module Woods
         @flow_scope.include?(unit.identifier) || stepped.include?(unit.identifier) ||
           flow_actions_of(unit) != previous[unit.identifier]
       end
+    end
+
+    # Previously published controllers inside the flow assembly radius
+    # ({#flow_scope_for}).
+    #
+    # Under the unbounded blast radius every one of them was re-extracted
+    # already. A bounded radius (`:structural`, an Integer) re-extracts fewer,
+    # yet a controller a few code references from the change still expands
+    # into it and a full run would reassemble its flow, so the refresh takes
+    # it from its previous payload (#961).
+    #
+    # @return [Set<String>]
+    def flow_scope_controllers
+      return Set.new if @flow_scope.nil? || @flow_scope.empty?
+
+      @flow_scope & previous_flow_index_controllers
     end
 
     # Controllers whose previous flow documents step into a unit the run's
