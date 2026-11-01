@@ -3765,6 +3765,58 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       # above held a re-derived unit, not one that never moved.
       expect(associations(index, 'RadiusSportsCar')).to include('comments')
     end
+
+    # A nested has_many :through whose source runs through a model the owner
+    # has no edge to: RadiusOwner's :radius_parts goes through
+    # RadiusBridge#radius_parts, itself through RadiusLink's belongs_to. The
+    # owner's published foreign key is RadiusLink's, two association hops
+    # from RadiusLink's file.
+    def through_chain_sources
+      {
+        'radius_owner' => "class RadiusOwner < ApplicationRecord\n  self.table_name = 'posts'\n  " \
+                          "has_many :radius_bridges, foreign_key: :post_id\n  " \
+                          "has_many :radius_parts, through: :radius_bridges\nend\n",
+        'radius_bridge' => "class RadiusBridge < ApplicationRecord\n  self.table_name = 'comments'\n  " \
+                           "has_many :radius_links, foreign_key: :post_id\n  " \
+                           "has_many :radius_parts, through: :radius_links\nend\n",
+        'radius_part' => "class RadiusPart < ApplicationRecord\n  self.table_name = 'posts'\nend\n"
+      }
+    end
+
+    def load_through_chain(link_options)
+      %w[RadiusOwner RadiusBridge RadiusLink RadiusPart].each do |name|
+        next unless Object.const_defined?(name, false)
+
+        Object.const_get(name).abstract_class = true
+        Object.send(:remove_const, name)
+      end
+      through_chain_sources.each { |name, source| write_file("app/models/#{name}.rb", source) }
+      link = "class RadiusLink < ApplicationRecord\n  self.table_name = 'comments'\n  " \
+             "belongs_to :radius_part#{link_options}\nend\n"
+      write_file('app/models/radius_link.rb', link)
+      %w[radius_part radius_link radius_bridge radius_owner].each { |name| load app_path("app/models/#{name}.rb") }
+      'app/models/radius_link.rb'
+    end
+
+    def owner_part_foreign_key(dir)
+      unit = unit_snapshot(dir).values.find { |candidate| candidate['identifier'] == 'RadiusOwner' }
+      unit.dig('metadata', 'associations').find { |association| association['name'].to_s == 'radius_parts' }
+          .fetch('foreign_key')
+    end
+
+    it 'keeps a nested has_many :through owner equivalent when the far source model changes' do
+      load_through_chain('')
+      index = run_sequence([-> { load_through_chain(', foreign_key: :post_id') }])
+
+      expect(owner_part_foreign_key(index)).to eq('post_id')
+    ensure
+      %w[RadiusOwner RadiusBridge RadiusLink RadiusPart].each do |name|
+        next unless Object.const_defined?(name, false)
+
+        Object.const_get(name).abstract_class = true
+        Object.send(:remove_const, name)
+      end
+    end
   end
 
   # ── SUMMARY.md totals (M4) ───────────────────────────────────────────────

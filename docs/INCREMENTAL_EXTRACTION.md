@@ -478,10 +478,14 @@ every other edge carries it one hop, from the changed units and from every
 unit that structural walk reached, and the walk stops there. That covers the
 STI grandchild: `SportsCar` is two inheritance hops from `Vehicle`, and the
 equivalence spec holds it to a full run when `Vehicle` gains an association,
-the case a depth of 1 gets wrong. It does not cover a nested
-`has_many :through`, whose chain runs along association edges, and an included
-module every controller shares still reaches every controller. Measure it on
-the tree before relying on it.
+the case a depth of 1 gets wrong. A nested `has_many :through` is reached in
+one hop: the model publishes a `through_chain` edge to every model its
+through reflection's chain passes through, so `Owner has_many :parts, through:
+:bridges`, where Bridge's `:parts` runs through Link, depends on Link directly
+(#961), and the spec holds that to a full run too. It cannot follow an
+inheritance edge the graph lacks, and an included module every controller
+shares still reaches every controller. Measure it on the tree before relying
+on it.
 
 ## Dispatch inventory
 

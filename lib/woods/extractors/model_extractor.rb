@@ -785,6 +785,8 @@ module Woods
           nil
         end
 
+        deps.concat(through_chain_dependencies(model, deps))
+
         # The table unit this model reads, when the live schema has it.
         table = (@table_catalog ||= TableCatalog.from_runtime).for_model(model)
         deps << { type: :database_table, target: table.identifier, via: :table } if table
@@ -841,6 +843,34 @@ module Woods
         return ConstantPaths.normalize(written) if polymorphic_reflection?(assoc)
 
         reflected_class_name(assoc) || ConstantPaths.resolve(written, owner_nesting(model)).target
+      end
+
+      # A through association's published metadata (its foreign key, its
+      # target) is read from the reflections along its chain, so the model
+      # depends on every model that chain passes through, not only the ones
+      # it names: `has_many :parts, through: :bridges`, where Bridge's own
+      # `:parts` runs through Link, reads Link's `belongs_to`. One edge per
+      # chain model the model does not already reach lets a one-hop walk (the
+      # `:structural` blast radius) re-extract it when Link changes (#961).
+      #
+      # @return [Array<Hash>] `:through_chain` edges
+      def through_chain_dependencies(model, deps)
+        reached = deps.to_set { |dep| dep[:target] }
+        model.reflect_on_all_associations.select { |assoc| assoc.options[:through] }
+             .flat_map { |assoc| through_chain_models(assoc) }.uniq
+             .reject { |name| name == model.name || reached.include?(name) }
+             .map { |name| { type: :model, target: name, via: :through_chain } }
+      end
+
+      # @return [Array<String>] the owners and targets of a through
+      #   association's reflection chain; empty when it cannot be reflected on
+      def through_chain_models(assoc)
+        return [] unless assoc.respond_to?(:chain)
+
+        assoc.chain.flat_map { |reflection| [reflection.active_record, reflection.klass] }
+             .filter_map { |klass| klass.name if klass.respond_to?(:name) && !klass.name.to_s.empty? }
+      rescue StandardError, LoadError
+        []
       end
 
       # @return [String, nil] the name of the class the reflection computes

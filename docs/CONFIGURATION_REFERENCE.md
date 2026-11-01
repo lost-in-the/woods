@@ -574,8 +574,10 @@ out really can have content that depends on the changed file. An STI grandchild
 validations and callback chain, and a nested `has_many :through` resolves
 through the same kind of chain, while the graph only records the one-hop
 superclass reference each source file mentions. `:structural` covers the STI
-grandchild (it follows inheritance to any depth) but not the nested
-`has_many :through`. Set an Integer only on a tree you know has neither shape; the units it stops re-extracting still get their `dependents`
+grandchild (it follows inheritance to any depth) and the nested
+`has_many :through` (each through association publishes a `through_chain` edge
+to every model on its chain, one hop away). Set an Integer only on a tree you
+know has neither shape; the units it stops re-extracting still get their `dependents`
 list refreshed, and `spec/integration/incremental_equivalence_spec.rb` holds a
 depth of 1 to full-extraction equivalence.
 
