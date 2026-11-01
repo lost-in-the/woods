@@ -173,6 +173,17 @@ module Woods
         end
       end
 
+      # A constant written straight in `include`, `extend` or `prepend` is a
+      # structural edge (#959), the label the edge-kind blast radius follows
+      # to any depth; a prepend is an include ahead of the class. Every other
+      # verified read is a code reference.
+      MIXIN_VIAS = { 'include' => 'include', 'prepend' => 'include', 'extend' => 'extend' }.freeze
+      private_constant :MIXIN_VIAS
+
+      def edge_via(reference)
+        MIXIN_VIAS.fetch(reference['mixin'], 'code_reference')
+      end
+
       def normalize_edge(edge)
         edge.transform_keys(&:to_s).transform_values { |value| value.is_a?(Symbol) ? value.to_s : value }
       end
@@ -187,7 +198,7 @@ module Woods
           result = @registry.explain(reference, file_path: path)
           next candidate_occurrence(unit, reference, result, path) unless result['status'] == 'resolved'
 
-          edge = { 'type' => result.fetch('type'), 'target' => result.fetch('target'), 'via' => 'code_reference' }
+          edge = { 'type' => result.fetch('type'), 'target' => result.fetch('target'), 'via' => edge_via(reference) }
           next unless @policy.permits?(unit['type'], edge['type'].to_sym)
 
           span = reference.slice('line', 'column', 'length', 'method', 'mixin').merge(
