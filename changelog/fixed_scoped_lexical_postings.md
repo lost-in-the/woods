@@ -1,0 +1,1 @@
+- Reuse generation-owned lexical postings in scoped retrieval while preserving subset scores and ordering, avoiding scoring unrelated units for selective or absent terms.

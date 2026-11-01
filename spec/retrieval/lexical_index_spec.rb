@@ -85,6 +85,82 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(nested.execute(query: 'notify').candidates).to be_empty
   end
 
+  it 'scores only scoped posting matches without rebuilding documents or postings, including nested views' do
+    keys = 30.times.map { |i| add("Ordinary#{i}", source: 'commonword') }
+    target = add('Delivery', source: 'rareword commonword')
+    outside = add('Outside', source: 'rareword commonword')
+    index = described_class.new(metadata_store: store)
+    expect(store).not_to receive(:find)
+    expect_any_instance_of(described_class).not_to receive(:build_documents)
+    expect_any_instance_of(described_class).not_to receive(:build_candidate_postings)
+
+    broad = index.restricted_to(keys + [target])
+    narrow = broad.restricted_to(keys.first(8) + [target, outside])
+    [broad, narrow].each do |view|
+      expect(view.units.fetch(target)).to equal(index.units.fetch(target))
+      scored = []
+      allow(view).to receive(:score_document).and_wrap_original do |method, document, terms|
+        scored << document.key
+        method.call(document, terms)
+      end
+      expect(view.execute(query: 'rareword').candidates.map(&:identifier)).to eq([target])
+      expect(scored).to eq([target])
+      scored.clear
+      expect(view.execute(query: 'neverindexed').candidates).to be_empty
+      expect(scored).to be_empty
+    end
+  end
+
+  it 'matches fresh full-scan subset indexes for empty, narrow, broad and nested scopes' do
+    keys = [add('The'), add('Straße'), add('Σ'), add('İ'), add('I'),
+            add('Invoice', source: 'rareword commonword'),
+            add('Invoice', type: 'service', source: 'commonword'),
+            add('EqualA', source: 'notify'), add('EqualB', source: 'notify')]
+    index = described_class.new(metadata_store: store)
+    parent = index.restricted_to(keys.first(8))
+    scopes = [[], keys.first(1), keys.first(4), keys.first(8), keys, [keys.first, keys.first, 'unknown']]
+    queries = ['THE', 'STRASSE', 'ς', "i\u0307", 'rareword', 'commonword', 'notify', '', 'how does the']
+    options = [{}, { limit: 0 }, { limit: 1 }, { limit: 50 },
+               { type_filter: [:service], exclude_types: ['service'] }, { exclude_types: ['model'] }]
+    scopes.each do |scope|
+      [index, parent].each do |origin|
+        eligible = Woods::Storage::MetadataStore::InMemory.new
+        (scope & origin.units.keys).each { |key| eligible.store(key, store.find(key)) }
+        fresh = scan_class.new(metadata_store: eligible)
+        view = origin.restricted_to(scope)
+        expect(view).not_to receive(:tally)
+        queries.product(options).each do |query, arguments|
+          expect(view.execute(query: query, **arguments)).to eq(fresh.execute(query: query, **arguments))
+        end
+      end
+    end
+  end
+
+  it 'does not score scoped documents for globally common terms or stop-word exacts outside the scope' do
+    keys = 12.times.map { |i| add("Outside#{i}", source: 'foreignword') }
+    add('The')
+    inside = add('Inside', source: 'localword')
+    index = described_class.new(metadata_store: store)
+    view = index.restricted_to([inside])
+    expect(view).not_to receive(:score_document)
+    %w[foreignword THE].each { |query| expect(view.execute(query: query).candidates).to be_empty }
+    expect(index.restricted_to(keys).execute(query: 'foreignword').candidates.size).to eq(12)
+  end
+
+  it 'preserves scoped invalid query and limit behavior, including empty and type-excluded views' do
+    key = add('Inside', source: 'localword')
+    index = described_class.new(metadata_store: store)
+    empty = index.restricted_to([])
+    view = index.restricted_to([key])
+    [nil, 1, :localword].each do |query|
+      expect(empty.execute(query: query).candidates).to be_empty
+      expect(view.execute(query: query, exclude_types: ['model']).candidates).to be_empty
+      expect { view.execute(query: query) }.to raise_error(NoMethodError)
+    end
+    expect { view.execute(query: 'localword', limit: -1) }.to raise_error(ArgumentError)
+    expect { empty.execute(query: '', limit: -1) }.to raise_error(ArgumentError)
+  end
+
   it 'ranks exact identifiers first and preserves ambiguous typed identities' do
     first = add('Billing::Invoice')
     second = add('Billing::Invoice', type: 'service')

@@ -525,7 +525,11 @@ eligibility from that corpus. How long the corpus lives depends on the store:
 - **SQLite metadata store**: the adapter tracks no change version
   (`snapshot_version` is nil), so every scoped request reads the store as before.
 - **Lexical mode**: the corpus shares the index's own immutable units and lives
-  as long as the pipeline.
+  as long as the pipeline. Scoped lexical views also share its frozen token and
+  exact-identifier postings, intersecting candidates with eligible keys while
+  retaining the subset's BM25 statistics. Broad queries retain the scan fallback.
+  Keeping a standalone scoped view alive retains the full generation corpus
+  through those shared postings, even when the view contains few units.
 - **Index Server discovery** (`search`): the corpus holds facts only, read once
   per loaded generation from every published unit and dropped with the reader's
   other caches; deep-field matching reads candidate bodies the same bounded way

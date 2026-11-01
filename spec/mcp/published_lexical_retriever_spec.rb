@@ -118,6 +118,37 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     expect(second.sources.map { |source| source[:generation] }.uniq).to eq([2])
   end
 
+  it 'keeps an in-flight scoped query on the old postings while explicit reload builds the new generation' do
+    publish_payload('one', 'oldword', package: 'packs/billing')
+    retriever.warmup!
+    entered = Queue.new
+    release = Queue.new
+    built = Queue.new
+    retriever.snapshot.last.pipeline_observer = lambda do |_|
+      entered << true
+      release.pop
+    end
+    query = Thread.new { retriever.retrieve('oldword', packages: ['packs/billing']) }
+    Timeout.timeout(5) { entered.pop }
+    publish_payload('two', 'newword', package: 'packs/other')
+    reload = Thread.new do
+      Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir,
+                                                         hooks: { after_candidates: -> { built << true } })
+    end
+    Timeout.timeout(5) { built.pop }
+    expect(retriever.snapshot.first.first).to eq(1)
+    release << true
+    first = Timeout.timeout(5) { query.value }
+    expect(first.sources).to include(include(identifier: 'Post', generation: 1))
+    expect(first.context).to include('oldword')
+    expect(Timeout.timeout(5) { reload.value }).to include(metadata: 9)
+    expect(retriever.retrieve('newword', packages: ['packs/other']).sources)
+      .to include(include(identifier: 'Post', generation: 2))
+  ensure
+    release << true if release
+    [query, reload].compact.each { |thread| thread.kill if thread.alive? }
+  end
+
   it 'pins package eligibility and source provenance to the same generation during publication' do
     publish_payload('one', 'oldword', package: 'packs/billing')
     retriever.warmup!
@@ -141,6 +172,44 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     File.write(marker, JSON.generate(data))
     expect(retriever.retrieve('newword').context).to include('newword')
     expect(retriever.retrieve('oldword').sources).to be_empty
+  end
+
+  it 'reuses scoped postings within a generation and replaces them after a failed reload recovers' do
+    publish_payload('one', 'oldword', package: 'packs/billing')
+    retriever.warmup!
+    old = retriever.snapshot
+    expect(retriever.retrieve('oldword', packages: ['packs/billing']).sources)
+      .to include(include(identifier: 'Post', generation: 1))
+    expect(retriever.snapshot).to equal(old)
+
+    publish_payload('two', 'newword', package: 'packs/other')
+    post = Dir.glob(File.join(index_dir, 'payloads/two/models/Post_*.json')).fetch(0)
+    saved = File.read(post)
+    File.write(post, '{broken')
+    expect { Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir) }
+      .to raise_error(Woods::MCP::ReloadDegraded)
+    expect(retriever.snapshot).to equal(old)
+
+    File.write(post, saved)
+    Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir)
+    expect(retriever.snapshot).not_to equal(old)
+    expect(retriever.retrieve('newword', packages: ['packs/other']).sources)
+      .to include(include(identifier: 'Post', generation: 2))
+    expect(retriever.retrieve('oldword', packages: ['packs/other']).sources).to be_empty
+  end
+
+  it 'rebuilds flat legacy scoped snapshots on every request' do
+    post = Dir.glob(File.join(index_dir, 'models', 'Post_*.json')).fetch(0)
+    data = JSON.parse(File.read(post)).merge('source_code' => 'oldword')
+    File.write(post, JSON.generate(data))
+    expect(retriever.retrieve('oldword', source_paths: ['app/models']).sources)
+      .to include(include(identifier: 'Post'))
+    old = retriever.snapshot
+    File.write(post, JSON.generate(data.merge('source_code' => 'newword')))
+    expect(retriever.retrieve('newword', source_paths: ['app/models']).sources)
+      .to include(include(identifier: 'Post'))
+    expect(retriever.snapshot).not_to equal(old)
+    expect(retriever.retrieve('oldword', source_paths: ['app/models']).sources).to be_empty
   end
 
   it 'refuses corrupt generation markers instead of silently serving a cached snapshot' do

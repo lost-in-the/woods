@@ -35,7 +35,9 @@ module Woods
       #   document set to index instead (see {#restricted_to})
       # @param statistics [Array(Hash, Hash), nil] per-field length totals
       #   and document frequencies already known for +documents+
-      def initialize(metadata_store: nil, documents: nil, statistics: nil)
+      # @param candidate_postings [Array(Hash, Hash), nil] the root's frozen
+      #   token and exact-identifier postings, shared by restricted views
+      def initialize(metadata_store: nil, documents: nil, statistics: nil, candidate_postings: nil)
         @stems = {}
         @documents = (documents || build_documents(metadata_store)).freeze
         @units = @documents.to_h { |doc| [doc.key, doc.unit] }.freeze
@@ -45,6 +47,8 @@ module Woods
         @averages = @totals.to_h do |field, total|
           [field, @documents.empty? ? 1.0 : [total.fdiv(@documents.size), 1.0].max]
         end.freeze
+        @shared_postings = !candidate_postings.nil?
+        @postings, @exact_identifiers = candidate_postings
         build_candidate_postings unless documents
       end
 
@@ -52,7 +56,9 @@ module Woods
       # exactly what an index built over those records would: the BM25
       # statistics (field-length averages, document frequencies) are
       # recomputed over the subset and the documents, immutable, are shared,
-      # so nothing is re-read or re-tokenised (F6 step 2). A scoped request
+      # so nothing is re-read or re-tokenised (F6 step 2). Candidate postings
+      # are shared with the root and intersected with this view's keys. A view
+      # therefore retains its generation's full document corpus. A scoped request
       # used to build a whole index over the eligible records every time.
       # When the subset is most of the index, the statistics come from
       # subtracting the excluded documents' tallies from this index's own,
@@ -64,7 +70,8 @@ module Woods
         allowed = keys.to_set
         documents, excluded = @documents.partition { |doc| allowed.include?(doc.key) }
         statistics = subtract(excluded) if excluded.size < documents.size
-        self.class.new(documents: documents, statistics: statistics)
+        self.class.new(documents: documents, statistics: statistics,
+                       candidate_postings: @postings && [@postings, @exact_identifiers])
       end
 
       def execute(query:, limit: DEFAULT_LIMIT, type_filter: nil, exclude_types: nil)
@@ -90,8 +97,7 @@ module Woods
 
       private
 
-      # Only a root snapshot owns postings. Restricted views keep their
-      # existing scan and subset statistics without building another index.
+      # Only a root snapshot builds postings; restricted views share them.
       def build_candidate_postings
         @postings = {}
         @exact_identifiers = {}
@@ -111,14 +117,20 @@ module Woods
       # Common queries use the original scan to avoid building a large union.
       def candidate_documents(query, terms)
         return @documents unless @postings
+        # Legacy scoped scans only inspect query.strip after eligibility.
+        # Preserve that behavior for invalid inputs and empty views.
+        return @documents if @shared_postings && (!query.is_a?(String) || @documents.empty?)
 
-        lists = terms.filter_map { |term| @postings[term] }
+        lists = terms.filter_map { |term| @postings[term] if @frequencies.key?(term) }
         exact = @exact_identifiers[query.strip.downcase(:fold)]
+        exact = exact.select { |doc| @units.key?(doc.key) } if exact && @shared_postings
         lists << exact if exact
         return @documents if lists.sum(&:size) >= @documents.size
 
         selected = {}
-        lists.each { |documents| documents.each { |doc| selected[doc.key] = doc } }
+        lists.each do |documents|
+          documents.each { |doc| selected[doc.key] = doc if @units.key?(doc.key) }
+        end
         selected.values
       end
 
