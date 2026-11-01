@@ -182,6 +182,81 @@ RSpec.describe Woods::SourceReferences::Registry do
     end
   end
 
+  # #956: a namespace segment nothing has loaded yet. Zeitwerk registers an
+  # implicit namespace as an autoload of its directory, an explicit one as an
+  # autoload of its file; the library under it sits where the remaining
+  # segments, underscored, put it.
+  context 'captured libraries under a pending namespace (#956)' do
+    after do
+      Object.send(:remove_const, :RefPendingSpace) if Object.const_defined?(:RefPendingSpace, false)
+    end
+
+    def library(identifier, path)
+      add_unit(identifier, type: :lib, path: path)
+    end
+
+    def resolve(name)
+      registry.resolve(reference(name), file_path: '/application/RefCaller.rb')
+    end
+
+    context 'with an implicit namespace (a directory autoload)' do
+      before { Object.autoload(:RefPendingSpace, '/application/lib/ref_pending_space') }
+
+      it 'resolves a qualified reference to the library without loading the namespace' do
+        library('RefPendingSpace::Inner::HtmlToken', '/application/lib/ref_pending_space/inner/html_token.rb')
+
+        expect(resolve('RefPendingSpace::Inner::HtmlToken'))
+          .to eq(type: :lib, target: 'RefPendingSpace::Inner::HtmlToken', via: :code_reference)
+        expect(resolve('::RefPendingSpace::Inner::HtmlToken')).to include(target: 'RefPendingSpace::Inner::HtmlToken')
+        expect(Object.autoload?(:RefPendingSpace)).to eq('/application/lib/ref_pending_space')
+      end
+
+      it 'declines a library file away from the conventional path' do
+        library('RefPendingSpace::Inner::HtmlToken', '/application/lib/elsewhere/html_token.rb')
+
+        expect(resolve('RefPendingSpace::Inner::HtmlToken')).to be_nil
+      end
+
+      it 'declines a unit that is not a library' do
+        add_unit('RefPendingSpace::Inner::HtmlToken', type: :poro,
+                                                      path: '/application/lib/ref_pending_space/inner/html_token.rb')
+
+        expect(resolve('RefPendingSpace::Inner::HtmlToken')).to be_nil
+      end
+
+      it 'declines an identifier published under two types' do
+        library('RefPendingSpace::Inner::HtmlToken', '/application/lib/ref_pending_space/inner/html_token.rb')
+        add_unit('RefPendingSpace::Inner::HtmlToken', type: :concern,
+                                                      path: '/application/lib/ref_pending_space/inner/html_token.rb')
+
+        expect(registry.explain(reference('RefPendingSpace::Inner::HtmlToken'), file_path: '/application/RefCaller.rb'))
+          .to include('reason' => 'ambiguous_target')
+      end
+    end
+
+    it 'resolves under an explicit namespace (a file autoload)' do
+      Object.autoload(:RefPendingSpace, '/application/lib/ref_pending_space.rb')
+      library('RefPendingSpace::Token', '/application/lib/ref_pending_space/token.rb')
+
+      expect(resolve('RefPendingSpace::Token')).to include(type: :lib, target: 'RefPendingSpace::Token')
+    end
+
+    it 'resolves under a pending namespace inside a loaded module' do
+      stub_const('RefLoadedSpace', Module.new)
+      RefLoadedSpace.autoload(:Pending, '/application/lib/ref_loaded_space/pending')
+      library('RefLoadedSpace::Pending::Token', '/application/lib/ref_loaded_space/pending/token.rb')
+
+      expect(resolve('RefLoadedSpace::Pending::Token')).to include(type: :lib, target: 'RefLoadedSpace::Pending::Token')
+    end
+
+    it 'does not guess how a relative namespace autoload resolves through the load path' do
+      Object.autoload(:RefPendingSpace, 'lib/ref_pending_space')
+      library('RefPendingSpace::Token', '/application/lib/ref_pending_space/token.rb')
+
+      expect(resolve('RefPendingSpace::Token')).to be_nil
+    end
+  end
+
   it 'bypasses application overrides of constant reflection' do
     RefCaller.define_singleton_method(:const_get) { |*| raise 'must not call application code' }
     RefCaller.define_singleton_method(:const_defined?) { |*| raise 'must not call application code' }

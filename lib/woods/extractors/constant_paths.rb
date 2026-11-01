@@ -91,11 +91,13 @@ module Woods
         end
       end
 
-      # The registration names the constant; loading it is not ours to do.
+      # The registration names the constant; loading it is not ours to do. A
+      # constant under a pending namespace (`pending_remainder`) has no
+      # registration of its own, so it stays unresolved here.
       #
       # @return [Resolution]
       def pending(path, result)
-        target = result[:pending_target]
+        target = result[:pending_target] unless result[:pending_remainder]
         Resolution.new(target: target || normalize(path), status: target ? :pending : :unresolved, builtin: false)
       end
 

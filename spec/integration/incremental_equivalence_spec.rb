@@ -3660,6 +3660,52 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # ── A library under a pending namespace (#956) ──────────────────────────
+  #
+  # A compact-form library class (`module PendLib::Inner` then `class
+  # Tracker`) under a namespace nothing has loaded yet: Zeitwerk registers an
+  # implicit namespace as an autoload of its directory, and extraction never
+  # triggers it. Before #956 the lookup dropped the pending evidence at that
+  # segment, so the library was never a reference target and the controller's
+  # fully qualified reference produced no edge.
+  describe 'a library under a pending namespace' do
+    after do
+      Object.send(:remove_const, :PendLib) if Object.const_defined?(:PendLib, false)
+    end
+
+    def write_tracker(body = "def track(id) = id\n")
+      write_file('lib/pend_lib/inner/tracker.rb', <<~RUBY)
+        module PendLib::Inner
+          class Tracker
+            #{body}
+          end
+        end
+      RUBY
+      'lib/pend_lib/inner/tracker.rb'
+    end
+
+    def tracks_controller_edges(index)
+      unit = unit_snapshot(index).values.find { |candidate| candidate['identifier'] == 'PendTracksController' }
+      unit.fetch('dependencies').select { |dep| dep['via'] == 'code_reference' }.map { |dep| dep['target'] }
+    end
+
+    it 'records the reference edge and keeps it equivalent as the library changes' do
+      write_tracker
+      Object.autoload(:PendLib, app_path('lib/pend_lib'))
+      write_file('app/controllers/pend_tracks_controller.rb', <<~RUBY)
+        class PendTracksController < ApplicationController
+          def show = PendLib::Inner::Tracker.new.track(params[:id])
+        end
+      RUBY
+      load app_path('app/controllers/pend_tracks_controller.rb')
+
+      index = run_sequence([-> { write_tracker("# moved down\ndef track(id) = id.to_s\n") }])
+
+      expect(tracks_controller_edges(index)).to include('PendLib::Inner::Tracker')
+      expect(Object.autoload?(:PendLib)).to eq(app_path('lib/pend_lib'))
+    end
+  end
+
   # ── A structural blast radius (#946 option 3) ────────────────────────────
   #
   # `incremental_blast_radius_depth = :structural` follows inheritance,
