@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'pathname'
+require 'active_support/inflector'
 require_relative 'runtime_lookup'
 require_relative 'value_class'
 require_relative '../source_contributors'
@@ -203,9 +204,22 @@ module Woods
       end
 
       def autoload_declaration?(result, identifier, path)
+        return false unless result[:pending_target] == identifier
+
         registered = result[:autoload_path]
-        result[:pending_target] == identifier && registered.is_a?(String) &&
-          Pathname.new(registered).absolute? && absolute(registered) == path
+        return false unless registered.is_a?(String) && Pathname.new(registered).absolute?
+
+        expected = result[:pending_remainder] ? namespaced_path(registered, result[:pending_remainder]) : registered
+        absolute(expected) == path
+      end
+
+      # Where a constant under a pending namespace lives: the namespace's
+      # registered path (a directory for an implicit namespace, a file for an
+      # explicit one) without `.rb`, then each remaining segment underscored,
+      # the way Zeitwerk maps files to constants (#956).
+      def namespaced_path(namespace_path, remainder)
+        segments = remainder.map { |part| ActiveSupport::Inflector.underscore(part) }
+        "#{File.join(namespace_path.delete_suffix('.rb'), *segments)}.rb"
       end
 
       def autoload_target(result)

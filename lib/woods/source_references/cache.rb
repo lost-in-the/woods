@@ -46,7 +46,9 @@ module Woods
       # Analysis record groups and the validator of each record.
       CHECKS = { 'declarations' => :declaration!, 'references' => :reference!, 'skipped' => :skipped!,
                  'macros' => :macro! }.freeze
-      VERSION = 8
+      VERSION = 9
+      # Edge labels the pass adds: a verified constant read, or a mixin of one (#959).
+      PASS_VIAS = %w[code_reference include extend].freeze
       MAX_BYTES = 64 * 1024 * 1024
       MAX_FILES = 100_000
       MAX_OWNERS = 200_000
@@ -255,7 +257,7 @@ module Woods
           shape!(edge, %w[type target via])
           type!(edge['type'])
           constant!(edge['target'])
-          require!(edge['via'] == 'code_reference', 'invalid pass-owned edge label')
+          require!(PASS_VIAS.include?(edge['via']), 'invalid pass-owned edge label')
         end
 
         def type!(type)

@@ -52,6 +52,18 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(File.stat(path).mode & 0o777).to eq(0o600)
   end
 
+  it 'round trips pass-owned mixin edges and refuses any other label (#959)' do
+    added = data['owners'].first['added']
+    added.push({ 'type' => 'lib', 'target' => 'TokenCodec', 'via' => 'include' },
+               { 'type' => 'lib', 'target' => 'TokenCodec', 'via' => 'extend' })
+    described_class.write(path, data)
+    expect(described_class.read(path)).to eq(data)
+
+    added << { 'type' => 'lib', 'target' => 'TokenCodec', 'via' => 'inheritance' }
+    write_json(data)
+    expect { described_class.read(path) }.to raise_error(described_class::Invalid, /pass-owned edge label/)
+  end
+
   it 'round trips optional selector evidence including operators without adding it to bare constants' do
     data['files'].values.first['analysis'] = Woods::SourceReferences::Collector.new.call(
       'class Caller; Target.call; Target[Argument] = Value; Target + Other; Target; end'
@@ -62,9 +74,9 @@ RSpec.describe Woods::SourceReferences::Cache do
     expect(described_class.read(path)).to eq(data)
   end
 
-  it 'requires format 8 and refuses format 7 so unchanged callers gain mixin tags after a full rebuild' do
-    expect(described_class::VERSION).to eq(8)
-    write_json(data.merge('version' => 7))
+  it 'requires format 9 and refuses format 8 so unchanged callers gain mixin edge labels after a full rebuild' do
+    expect(described_class::VERSION).to eq(9)
+    write_json(data.merge('version' => 8))
     expect { described_class.read(path) }.to raise_error(described_class::Invalid, /unsupported version/)
   end
 
@@ -281,7 +293,7 @@ RSpec.describe Woods::SourceReferences::Cache do
     owner_type: ->(value) { value['owners'].first['type'] = 'factory' },
     edge_type: ->(value) { value['owners'].first['added'].first['type'] = 1 },
     edge_target: ->(value) { value['owners'].first['added'].first['target'] = 'TokenCodec.call' },
-    edge_label: ->(value) { value['owners'].first['added'].first['via'] = 'include' },
+    edge_label: ->(value) { value['owners'].first['added'].first['via'] = 'inheritance' },
     raw_source: ->(value) { value['files'].values.first['analysis']['source_code'] = 'class Caller; end' },
     reference_owner: ->(value) { value['files'].values.first['analysis']['references'].first['owner'] = 'Wrong' },
     reference_name: ->(value) { value['files'].values.first['analysis']['references'].first['name'] = 'foo()' },

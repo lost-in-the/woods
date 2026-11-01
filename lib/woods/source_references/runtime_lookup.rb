@@ -59,12 +59,23 @@ module Woods
         return scopes unless scopes[:scopes]
 
         result = first_constant(scopes[:scopes], parts.shift, public_only: name.start_with?('::') && !allow_private)
-        parts.each do |part|
-          return result.except(:pending_target, :autoload_path) unless module_object?(result[:value])
+        parts.each_with_index do |part, index|
+          return pending_through(result, parts.drop(index)) unless module_object?(result[:value])
 
           result = first_constant(qualified_scopes(result[:value]), part, public_only: !allow_private)
         end
         result
+      end
+
+      # A namespace segment that is itself a pending autoload stops the walk
+      # without loading it (#956). Its evidence names the whole requested
+      # constant and keeps the namespace's registered path, with the segments
+      # still to walk, so Registry can match a library declared where that
+      # path puts them. Any other stop carries no evidence.
+      def pending_through(result, remainder)
+        return result.except(:pending_target, :autoload_path) unless result[:pending_target]
+
+        result.merge(pending_target: [result[:pending_target], *remainder].join('::'), pending_remainder: remainder)
       end
 
       def valid_name?(name)
