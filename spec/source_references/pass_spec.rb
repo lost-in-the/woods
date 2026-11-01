@@ -70,11 +70,14 @@ RSpec.describe Woods::SourceReferences::Pass do
       .to include('name' => 'Missing', 'method' => 'call')
   end
 
-  it 'tags a verified include, extend or prepend of a constant, without changing the edge or the kind' do
+  # #959: a mixin is a structural edge, so the edge-kind blast radius
+  # follows it to any depth. `prepend` is an include ahead of the class.
+  it 'tags a verified include, extend or prepend of a constant and labels its edge include or extend' do
     sources['app/models/ref_caller.rb'] =
       'class RefCaller; include RefTarget; extend RefTarget; prepend RefTarget; RefTarget.new; end'
     result = run_pass
-    expect(result.dependencies.fetch(%w[poro RefCaller])).to eq([edge])
+    expect(result.dependencies.fetch(%w[poro RefCaller]))
+      .to eq([edge, edge.merge('via' => 'extend'), edge.merge('via' => 'include')])
     records = result.references.fetch(%w[poro RefCaller])
     expect(records.map { |record| record.values_at('mixin', 'method') })
       .to eq([['include', nil], ['extend', nil], ['prepend', nil], [nil, 'new']])
@@ -83,6 +86,17 @@ RSpec.describe Woods::SourceReferences::Pass do
 
   # LOS-126: a value read through the class credits the class. The span
   # covers the class path, and the selector belongs to the value, not to it.
+  it 'labels a mixin-only reference without adding a code_reference edge' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; include RefTarget; end'
+    expect(run_pass.dependencies.fetch(%w[poro RefCaller])).to eq([edge.merge('via' => 'include')])
+  end
+
+  it 'adds no second include edge beside the one an extractor already records' do
+    sources['app/models/ref_caller.rb'] = 'class RefCaller; include RefTarget; end'
+    units.first['dependencies'] = [{ 'type' => 'poro', 'target' => 'RefTarget', 'via' => 'include' }]
+    expect(run_pass.dependencies.fetch(%w[poro RefCaller])).to eq([edge.merge('via' => 'include')])
+  end
+
   it 'credits a nested constant read to its class, with a span over the class path and no selector' do
     sources['app/models/ref_caller.rb'] =
       'class RefCaller; def call; RefTarget::LIMITS.first; ::RefTarget::NAMES; end; end'

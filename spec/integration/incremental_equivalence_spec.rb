@@ -654,7 +654,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'requires a full rebuild of format 7 before either public incremental writer can advance' do
+    it 'requires a full rebuild of format 8 before either public incremental writer can advance' do
       caller_path = write_file('app/models/reference_upgrade_caller.rb', <<~RUBY)
         class ReferenceUpgradeCaller
           def call
@@ -668,8 +668,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       token = generation.current.token
       cache_path = generation.payload_dir.join('source_references.json')
       cache = read_json(index, 'source_references.json')
-      expect(cache.fetch('version')).to eq(8)
-      cache['version'] = 7
+      expect(cache.fetch('version')).to eq(9)
+      cache['version'] = 8
       File.binwrite(cache_path, JSON.generate(cache))
       previous_cache = File.binread(cache_path)
       previous_units = unit_snapshot(index)
@@ -683,7 +683,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
 
       Woods::Extractor.new(output_dir: index).extract_all
-      expect(read_json(index, 'source_references.json').fetch('version')).to eq(8)
+      expect(read_json(index, 'source_references.json').fetch('version')).to eq(9)
       Woods::Extractor.new(output_dir: index).extract_changed([caller_path])
       expect(differences(index, full_extraction)).to be_empty
     ensure
