@@ -85,17 +85,26 @@ RSpec.describe Woods::Extractor, 'incremental blast radius' do
     identifiers.sort
   end
 
-  it 'walks the whole transitive dependent closure of the changed file' do
-    expect(re_extracted).to eq(%w[ChainB ChainC ChainD])
+  # The default is the edge-kind walk (#946): the chain's belongs_to edges
+  # are not structural, so only ChainB, one hop out, is re-extracted.
+  it 'walks structural edges by default and other edges one hop' do
+    expect(re_extracted).to eq(%w[ChainB])
   end
 
-  it 'reports every unit in the closure as touched' do
-    expect(extractor.extract_changed([changed_path]).sort).to eq(%w[ChainA ChainB ChainC ChainD])
+  # `nil` keeps the unbounded closure; an Integer bounds the walk at that
+  # many reverse hops from the changed file's own units.
+  context 'when incremental_blast_radius_depth is nil' do
+    before { Woods.configuration.incremental_blast_radius_depth = nil }
+
+    it 'walks the whole transitive dependent closure of the changed file' do
+      expect(re_extracted).to eq(%w[ChainB ChainC ChainD])
+    end
+
+    it 'reports every unit in the closure as touched' do
+      expect(extractor.extract_changed([changed_path]).sort).to eq(%w[ChainA ChainB ChainC ChainD])
+    end
   end
 
-  # The cap is opt-in. `nil` (the default) keeps the unbounded closure the
-  # examples above pin; an Integer bounds the walk at that many reverse hops
-  # from the changed file's own units.
   context 'when incremental_blast_radius_depth is 1' do
     before { Woods.configuration.incremental_blast_radius_depth = 1 }
 
