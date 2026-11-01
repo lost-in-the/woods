@@ -608,15 +608,25 @@ RSpec.describe Woods::Configuration do
       expect(config.incremental_blast_radius_depth).to eq(1)
     end
 
-    it 'rejects zero, negatives, and non-Integers' do
+    # #946 option 3, opt-in while it is measured.
+    it 'accepts :structural' do
+      config = described_class.new
+      config.incremental_blast_radius_depth = :structural
+
+      expect(config.incremental_blast_radius_depth).to eq(:structural)
+    end
+
+    it 'rejects zero, negatives, and other values' do
       config = described_class.new
 
       expect { config.incremental_blast_radius_depth = 0 }
-        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+        .to raise_error(Woods::ConfigurationError, /positive Integer, :structural or nil/)
       expect { config.incremental_blast_radius_depth = -2 }
-        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+        .to raise_error(Woods::ConfigurationError, /positive Integer, :structural or nil/)
       expect { config.incremental_blast_radius_depth = 'deep' }
-        .to raise_error(Woods::ConfigurationError, /positive Integer or nil/)
+        .to raise_error(Woods::ConfigurationError, /positive Integer, :structural or nil/)
+      expect { config.incremental_blast_radius_depth = 'structural' }
+        .to raise_error(Woods::ConfigurationError, /positive Integer, :structural or nil/)
     end
   end
 

@@ -380,11 +380,19 @@ module Woods
     # Find all units affected by changes to given files
     # Uses BFS to find transitive dependents
     #
+    # With +structural_vias+ the walk is bounded by edge kind instead of by
+    # depth (#946): it follows those edges to any depth, then takes one hop
+    # along any other edge from every unit that walk reached, and stops.
+    # +max_depth+ is ignored then.
+    #
     # @param changed_files [Array<String>] List of changed file paths
     # @param max_depth [Integer] Maximum traversal depth (nil for unlimited)
+    # @param structural_vias [Enumerable<String, Symbol>, nil] edge kinds a
+    #   change travels without limit
     # @return [Array<String>] List of affected unit identifiers
-    def affected_by(changed_files, max_depth: nil)
+    def affected_by(changed_files, max_depth: nil, structural_vias: nil)
       directly_changed = changed_files.flat_map { |f| (@file_map[f] || []).to_a }.uniq
+      return structural_closure(directly_changed, structural_vias) if structural_vias
 
       affected = Set.new(directly_changed)
       queue = directly_changed.map { |id| [id, 0] } # [identifier, depth]
@@ -406,6 +414,45 @@ module Woods
 
       affected.to_a
     end
+
+    # {#affected_by}'s edge-kind walk: the closure over +vias+ from +seeds+,
+    # then every dependent of that closure one hop along any other edge.
+    #
+    # @param seeds [Array<String>] the changed files' own units
+    # @param vias [Enumerable<String, Symbol>]
+    # @return [Array<String>]
+    def structural_closure(seeds, vias)
+      structural = vias.to_set(&:to_s)
+      reached = Set.new(seeds)
+      queue = seeds.dup
+      while (current = queue.shift)
+        (@reverse[current] || []).each do |dependent|
+          next if reached.include?(dependent) || documentation_only?(dependent)
+          next unless edge_vias(dependent, current).intersect?(structural)
+
+          reached.add(dependent)
+          queue.push(dependent)
+        end
+      end
+
+      affected = reached.dup
+      reached.each do |unit|
+        (@reverse[unit] || []).each { |dependent| affected.add(dependent) unless documentation_only?(dependent) }
+      end
+      affected.to_a
+    end
+
+    # Every +via+ on +source+'s edges to +target+, across its typed nodes.
+    # An edge loaded from JSON carries its +via+ as a String, a registered one
+    # as a Symbol.
+    #
+    # @return [Set<String>]
+    def edge_vias(source, target)
+      (@edges[source] || {}).each_value.with_object(Set.new) do |edges, vias|
+        edges.each { |edge| vias.add(edge[:via].to_s) if edge[:target] == target }
+      end
+    end
+    private :structural_closure, :edge_vias
 
     # The graph without {DOCUMENTATION_UNIT_TYPES}: what PageRank and
     # {GraphAnalyzer} measure. A document that mentions thirty units would

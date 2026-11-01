@@ -522,7 +522,7 @@ end
 | `git_commit_table_line_stats` | Boolean | `true` | Whether the commit table records each listed file's added and removed lines and hunks. They come from a second `-U0` patch walk over only the table's commits, which costs much more than the table's own walk on a long history; `false` leaves the fields out. |
 | `git_commit_table_hunk_budget` | Integer | `50000` | The most hunks the commit table keeps across all commits, newest first (at most 100 per file); files past it keep their line counts and say `hunks_truncated`. |
 | `git_commit_table_files_limit` | Integer | `100` | The most files the commit table lists for one commit; the rest are counted in that commit's `files_omitted`. The table's `paths` index is never bounded by it, so co-change stays complete. |
-| `incremental_blast_radius_depth` | Integer or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. See the note below before setting it. |
+| `incremental_blast_radius_depth` | Integer, `:structural` or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. `:structural` follows inheritance, include and extend edges to any depth and every other edge one hop (opt-in, #946). See the note below before setting it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
 
 **Tuning volatile dependency reports.** Start with
@@ -573,8 +573,9 @@ out really can have content that depends on the changed file. An STI grandchild
 (`SportsCar < Car < Vehicle`) inherits its grandparent's associations,
 validations and callback chain, and a nested `has_many :through` resolves
 through the same kind of chain, while the graph only records the one-hop
-superclass reference each source file mentions. Set the key on a tree you know
-has neither shape; the units it stops re-extracting still get their `dependents`
+superclass reference each source file mentions. `:structural` covers the STI
+grandchild (it follows inheritance to any depth) but not the nested
+`has_many :through`. Set an Integer only on a tree you know has neither shape; the units it stops re-extracting still get their `dependents`
 list refreshed, and `spec/integration/incremental_equivalence_spec.rb` holds a
 depth of 1 to full-extraction equivalence.
 
