@@ -3790,6 +3790,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         Object.const_get(name).abstract_class = true
         Object.send(:remove_const, name)
       end
+      # Rails 6.0 resolves a reflection's class through this cache, which
+      # would hand the reloaded chain the removed RadiusLink. A real run
+      # boots fresh, and Rails' own reloader clears it.
+      ActiveSupport::Dependencies::Reference.clear! if defined?(ActiveSupport::Dependencies::Reference)
       through_chain_sources.each { |name, source| write_file("app/models/#{name}.rb", source) }
       link = "class RadiusLink < ApplicationRecord\n  self.table_name = 'comments'\n  " \
              "belongs_to :radius_part#{link_options}\nend\n"
