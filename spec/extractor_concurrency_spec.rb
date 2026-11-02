@@ -193,7 +193,8 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
 
     it 'runs no more extractor threads at once than the ActiveRecord pool has connections (WDS-100)' do
       Woods.configure { |c| c.concurrent_extraction = true }
-      pool = double('pool', size: 3)
+      pool = double('pool', size: 3, stat: { busy: 0 })
+      allow(pool).to receive(:with_connection) { |&block| block.call }
       stub_const('ActiveRecord::Base', double('AR', connection_pool: pool))
 
       lock = Mutex.new

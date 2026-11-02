@@ -209,7 +209,7 @@ jobs:
           retention-days: 7
       - name: Run booted-app extraction
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb
+        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb spec/integration/concurrent_extraction_pool_spec.rb
 
       - name: Run declaration ownership against booted Rails
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
