@@ -26,6 +26,7 @@ require_relative 'bootstrap_state'
 require_relative 'change_impact'
 require_relative 'diagram_tool'
 require_relative 'errors'
+require_relative 'hydration'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
@@ -99,21 +100,32 @@ module Woods
         #   hydrated/degraded/failed lifecycle plus the reason so operators can
         #   diagnose "why is semantic search disabled" without reading the Ruby
         #   source. Nil just means the caller didn't go through Bootstrapper.
-        # @param warmup [Boolean] Pre-populate the index reader's caches during build,
-        #   shifting first-tool-call latency to startup. Default: true. Pass false for
-        #   tests or when startup time matters more than first-query latency.
+        # @param warmup [Symbol, Boolean] When to pre-populate the index reader's
+        #   and retriever's caches (see {Hydration}):
+        #   - `:after_handshake` (default, also `true`): on a background thread
+        #     started once the MCP `initialize` response is on the wire, so the
+        #     handshake is answered in milliseconds and a tool call that arrives
+        #     during the warm-up waits for it (bounded) before answering.
+        #   - `:before_handshake`: synchronously, inside this method, before the
+        #     transport starts — the behaviour before WDS-78. A warm-up
+        #     exception propagates out of `build`.
+        #   - `:none` (also `false`): never; every cache fills on first use.
+        #   `woods_status` reports the state under `hydration`.
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
-                  bootstrap_state: nil, response_format: nil, warmup: true, retriever_reloader: nil)
+                  bootstrap_state: nil, response_format: nil, warmup: :after_handshake, retriever_reloader: nil)
           launch_reader = IndexReader.new(index_dir)
           retriever.bind_reader(launch_reader) if retriever.respond_to?(:bind_reader)
-          launch_reader.warmup! if warmup
           # Warm the lexical corpus against the reader just bound, once, so the
           # first codebase_retrieve does not build it (F17). bind_reader keeps
           # clearing any earlier snapshot: a corpus warmed against another
           # reader, or mutated through the public metadata store, never
           # survives a bind.
-          retriever.warmup! if warmup && retriever.respond_to?(:warmup!)
+          hydration = Hydration.new(mode: hydration_mode(warmup)) do
+            launch_reader.warmup!
+            retriever.warmup! if retriever.respond_to?(:warmup!)
+          end
+          hydration.run! if hydration.mode == :before_handshake
           # Read tools close over this stand-in. It forwards to the launch reader
           # unless the call named a worktree `root` (see WorktreeRouting).
           router = WorktreeRouting::Router.new(reader: launch_reader, index_dir: index_dir)
@@ -222,12 +234,16 @@ module Woods
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
           define_change_impact_tool(server, index_dir, respond, respond_err) if snapshot_store
           define_notion_sync_tool(server, launch_reader, index_dir, respond, respond_err) if notion_wired?
-          define_woods_status_tool(server, reader, retriever, router, bootstrap_state, respond)
+          define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond)
           register_resource_handler(server, launch_reader)
           WorktreeRouting.declare_root!(server)
           ToolContract.apply!(server)
           IndexReaderPinning.install(server, reader: launch_reader)
           WorktreeRouting.install(server, router: router)
+          # Outermost of the dispatch prepends: a call waits for the warm-up
+          # before it takes a generation pin, so a waiting call never holds a
+          # pin an exclusive reload would have to drain.
+          install_hydration(server, hydration)
           server.instructions = InitializationGuidance.for(server.tools.keys)
 
           # Last, after every conditional registration above — the whole point is
@@ -237,6 +253,28 @@ module Woods
         end
 
         private
+
+        # @param warmup [Symbol, Boolean] the `build` keyword
+        # @return [Symbol] a {Hydration::MODES} member
+        def hydration_mode(warmup)
+          case warmup
+          when true, :after_handshake then :after_handshake
+          when :before_handshake then :before_handshake
+          when false, nil, :none then :none
+          else
+            raise ArgumentError,
+                  "warmup: must be :after_handshake, :before_handshake, :none, true or false, got #{warmup.inspect}"
+          end
+        end
+
+        # @param server [MCP::Server]
+        # @param hydration [Hydration]
+        # @return [MCP::Server]
+        def install_hydration(server, hydration)
+          server.instance_variable_set(:@woods_hydration, hydration)
+          server.singleton_class.prepend(Hydration::Dispatch)
+          server
+        end
 
         # Session tracer requires a configured session_store on Woods.configuration.
         # The tool reads the store inside its handler; skipping registration when
@@ -2283,12 +2321,13 @@ module Woods
           ]
         end
 
-        def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, respond)
+        def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond)
           server.define_tool(
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
-                         'bootstrap state (hydrated / degraded / not_configured / failed + reason), and feature flags. ' \
+                         'bootstrap state (hydrated / degraded / not_configured / failed + reason), cache hydration ' \
+                         '(hydration.state: warming / ready / failed + error), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
                          'index.git_enrichment says whether Git facts are trustworthy: state (available, degraded, ' \
                          'unavailable, unknown), a stable reason, coverage by unit and refreshed versus retained facts. ' \
@@ -2308,6 +2347,7 @@ module Woods
             )
             worktrees = Woods::MCP::Server.worktrees_status(router)
             status[:worktrees] = worktrees if worktrees
+            status[:hydration] = hydration.to_h
             respond.call(JSON.pretty_generate(status))
           end
         end

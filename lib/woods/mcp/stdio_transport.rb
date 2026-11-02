@@ -44,6 +44,26 @@ module Woods
               'the Woods stdio frame guard cannot attach to this release'
       end
 
+      # @param server [MCP::Server] a server from {Server.build}, or any
+      #   SDK server (the frame guard needs nothing of Woods)
+      def initialize(server, **)
+        super
+        # Cache warm-up starts only once the `initialize` response is on the
+        # wire (see {#send_response}): the loop is single-threaded, and a
+        # warm-up thread started inside the handler could take the GVL for
+        # its first JSON parse before the handshake was written.
+        @woods_hydration = server.respond_to?(:woods_hydration) ? server.woods_hydration : nil
+        @woods_hydration&.defer_start_to_transport!
+      end
+
+      # @param message [String, Hash]
+      # @return [void]
+      def send_response(message)
+        super
+      ensure
+        @woods_hydration&.start_if_armed!
+      end
+
       private
 
       # Reads frames until one is acceptable or stdin is exhausted. A frame the
