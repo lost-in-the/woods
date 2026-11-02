@@ -65,7 +65,20 @@ RSpec.describe Woods::Extractors::MiddlewareArgument do
     first = -> { raise 'must not run' }
     second = proc { raise 'must not run' }
     expect(described_class.render(first)).not_to eq(described_class.render(second))
-    expect(described_class.render(first)).to include(__FILE__)
+    expect(described_class.render(first)).to include(File.basename(__FILE__))
     expect(described_class.render(first)).not_to match(/0x[0-9a-f]+/)
+  end
+
+  # A proc from a gem (Woods' own railtie registers middleware lambdas) is
+  # labelled by its gem, never by the host's bundle path (#968).
+  it 'labels a proc and an anonymous class method by a stable site, never an absolute path' do
+    gem_proc = -> {}
+    allow(gem_proc).to receive(:source_location)
+      .and_return(['/srv/app/vendor/bundle/ruby/3.3.0/gems/woods-1.0.0/lib/woods/railtie.rb', 12])
+    expect(described_class.render(gem_proc)).to eq('#<lambda woods-1.0.0/lib/woods/railtie.rb:12>')
+
+    anonymous = Class.new { def call; end }
+    expect(described_class.render(anonymous)).not_to include(File.dirname(__FILE__))
+    expect(described_class.render(anonymous)).to match(%r{call@[^/(]\S*/#{File.basename(__FILE__)}:\d+})
   end
 end

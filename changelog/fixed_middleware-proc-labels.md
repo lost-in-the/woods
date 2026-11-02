@@ -1,0 +1,1 @@
+- Middleware arguments that are procs, and methods of anonymous middleware classes, are now labelled by a stable site (`woods-1.0.0/lib/woods/railtie.rb:12`, `config/application.rb:20`) instead of an absolute path (#968). The middleware unit no longer differs between machines or containers that install the same gems in different places, as callback and filter labels already did.
