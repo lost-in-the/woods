@@ -57,6 +57,55 @@ RSpec.describe Woods::AtomicFile do
     # O1: permissions are explicit per artifact. Only artifacts with a
     # documented cross-boundary consumer pass a wider mode; Tempfile's 0600
     # default must not silently widen (or silently forbid widening) anywhere.
+    it 'publishes the requested 0600 even under a umask that strips owner bits (#976 review)' do
+      path = File.join(@dir, 'masked.json')
+      previous = File.umask(0o200)
+      begin
+        described_class.write(path, 'data', durable: false)
+        described_class.write("#{path}.durable", 'data')
+      ensure
+        File.umask(previous)
+      end
+
+      expect(File.stat(path).mode & 0o777).to eq(0o600)
+      expect(File.stat("#{path}.durable").mode & 0o777).to eq(0o600)
+      expect(File.read(path)).to eq('data')
+    end
+
+    it 'leaves a pre-existing file at its temp name untouched and writes through another name (#976 review)' do
+      path = File.join(@dir, 'note.md')
+      taken = []
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap do |candidate|
+          next unless taken.empty?
+
+          File.write(candidate, 'someone else')
+          taken << candidate
+        end
+      end
+
+      described_class.write(path, 'mine')
+
+      expect(File.read(path)).to eq('mine')
+      expect(File.read(taken.first)).to eq('someone else')
+    end
+
+    it 'gives up after repeated collisions without removing any colliding file' do
+      path = File.join(@dir, 'note.md')
+      taken = []
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap do |candidate|
+          File.write(candidate, 'someone else')
+          taken << candidate
+        end
+      end
+
+      expect { described_class.write(path, 'mine') }.to raise_error(Errno::EEXIST)
+      expect(taken.size).to eq(described_class::TEMP_ATTEMPTS)
+      expect(taken).to all(satisfy { |candidate| File.read(candidate) == 'someone else' })
+      expect(File).not_to exist(path)
+    end
+
     it 'applies an explicitly requested wider mode' do
       path = File.join(@dir, 'shared.md')
       described_class.write(path, 'data', mode: 0o644)
