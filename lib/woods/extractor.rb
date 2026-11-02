@@ -556,7 +556,9 @@ module Woods
       @graph_sha = nil
       @symlinked_root = nil
       @symlinked_dirs = nil
-      profile_phase('payload seed') { begin_payload! }
+      # A full run rewrites every unit file of every family it extracts and
+      # sweeps the rest, so seeding those is work the run undoes.
+      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_type_dirs) }
 
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
@@ -1273,12 +1275,12 @@ module Woods
     # @raise [Woods::ExtractionError] when the payload directory could not be
     #   opened and flat fallback is not allowed, or when `strict` and a
     #   payload-born index's payload directory could not be opened
-    def begin_payload!(strict: false)
+    def begin_payload!(strict: false, rewritten_dirs: [])
       @publication_error = nil
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
       @payload_dir = @payload_store.create(@payload_generation)
-      seed_payload(marker)
+      seed_payload(marker, rewritten_dirs: rewritten_dirs)
     rescue StandardError => e
       if strict && marker&.payload
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -1424,12 +1426,30 @@ module Woods
     #
     # @param marker [Woods::Generation::Marker] the published generation
     # @return [void]
-    def seed_payload(marker)
+    # @param rewritten_dirs [Array<String>] top-level payload directories
+    #   whose unit files this run writes in full, so they are not seeded;
+    #   anything else inside them (the non-JSON files and subdirectories the
+    #   orphan sweep also never touches) still carries forward
+    def seed_payload(marker, rewritten_dirs: [])
       if marker.payload && (source = @output_dir.join(marker.payload)).directory?
-        @payload_store.clone(source, @payload_dir)
+        @payload_store.clone(source, @payload_dir, without_json: rewritten_dirs)
       else
+        # A flat root is seeded once, on the first payload-publishing run.
         seed_payload_from_flat_root
       end
+    end
+
+    # The per-type directories a full run writes in full and then sweeps
+    # ({#sweep_orphaned_unit_files}): every extractor family the configuration
+    # does not gate out. A gated family (`rails_source` with
+    # `include_framework_sources` off) keeps its seeded units, as before.
+    #
+    # On the 11k-unit field app seeding was 3.4s of hardlinks that the run
+    # then replaced one by one; the sweep then had nothing to find.
+    #
+    # @return [Array<String>]
+    def replaced_type_dirs
+      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s)
     end
 
     # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for

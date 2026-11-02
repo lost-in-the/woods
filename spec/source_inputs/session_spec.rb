@@ -262,6 +262,31 @@ RSpec.describe Woods::SourceInputs::Session do
     end
   end
 
+  it 'rechecks an unchanged tree by stamp without re-reading its bytes when the capture ran in-process' do
+    write('app/services/pay.rb', 'before')
+    run = session(verified: false)
+    rechecks = []
+    allow(Woods::SourceInputs::Scanner).to receive(:new).and_wrap_original do |m, *args, **kw|
+      m.call(*args, **kw).tap { |scanner| rechecks << scanner if kw[:known]&.any? }
+    end
+    manifest = finish(run)
+    expect(manifest.data['errors']).to be_empty
+    expect(rechecks.size).to eq(1)
+    expect(rechecks.first.call['metrics']).to include('reused_files' => 1, 'bytes' => 0)
+  end
+
+  it 'rechecks a handed-off capture by re-hashing, since its stamps belong to another process' do
+    write('app/services/pay.rb', 'before')
+    run = session
+    known = []
+    allow(Woods::SourceInputs::Scanner).to receive(:new).and_wrap_original do |m, *args, **kw|
+      known << kw[:known]
+      m.call(*args, **kw)
+    end
+    finish(run)
+    expect(known).to eq([{}])
+  end
+
   it 'retains pre-consumption bytes when a source changes while extraction runs' do
     write('app/services/pay.rb', 'before')
     run = session

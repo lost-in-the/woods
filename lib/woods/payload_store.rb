@@ -105,20 +105,25 @@ module Woods
     #
     # @param source [Pathname, String] the previous generation's payload
     # @param target [Pathname, String] a directory returned by {#create}
+    # @param without_json [Array<String>] names of top-level directories of
+    #   +source+ whose +*.json+ files are left out, for a caller that will
+    #   write every one of them again; their other entries are still cloned
     # @return [void]
-    def clone(source, target)
+    def clone(source, target, without_json: [])
       from = File.expand_path(source.to_s)
       return unless File.directory?(from)
 
       to = target.to_s
       FileUtils.mkdir_p(to)
-      pending = [[from, to]]
+      pending = [[from, to, false]]
       until pending.empty?
-        source_dir, target_dir = pending.pop
+        source_dir, target_dir, json_free = pending.pop
         Dir.each_child(source_dir) do |name|
+          next if json_free && name.end_with?('.json')
+
           entry = File.join(source_dir, name)
           destination = File.join(target_dir, name)
-          replicate(entry, destination, pending)
+          replicate(entry, destination, pending, json_free: source_dir == from && without_json.include?(name))
         end
       end
     end
@@ -269,11 +274,13 @@ module Woods
     # @param destination [String] where it belongs in the target
     # @param pending [Array] directories still to visit
     # @return [void]
-    def replicate(entry, destination, pending)
+    # +json_free+ marks a directory whose +*.json+ files the caller rewrites;
+    # it applies to that directory only, not to directories below it.
+    def replicate(entry, destination, pending, json_free: false)
       stat = File.lstat(entry)
       if stat.directory? || (stat.symlink? && File.directory?(entry))
         FileUtils.mkdir_p(destination)
-        pending << [entry, destination] if stat.directory?
+        pending << [entry, destination, json_free] if stat.directory?
       else
         link_or_copy(entry, destination)
       end

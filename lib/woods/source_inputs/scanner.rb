@@ -20,11 +20,21 @@ module Woods
 
       attr_reader :root, :scopes
 
-      def initialize(root:, output_dir:, key:, scopes: Scopes.new, **limits)
+      # The stamps ({#stamp}) of every file the last {#call} hashed, by
+      # relative path. In-memory only: a recheck in the same process hands
+      # them back as +known+ so an untouched file is not read twice.
+      attr_reader :stamps
+
+      # @param known [Hash{String => Array(Array, String)}] relative path →
+      #   [stamp, identity] from an earlier scan in this process. A file whose
+      #   device, inode, size, mtime and ctime all match keeps that identity
+      #   without being re-read; any difference re-hashes it.
+      def initialize(root:, output_dir:, key:, scopes: Scopes.new, known: {}, **limits) # rubocop:disable Metrics/ParameterLists -- one keyword per binding
         @root = SourcePathEncoding.expand(root)
         @output_dir = SourcePathEncoding.expand(output_dir)
         @key = key
         @scopes = scopes
+        @known = known
         @limits = DEFAULT_LIMITS.merge(limits)
         return if @limits.values.all? { |value| value.is_a?(Numeric) && value.finite? && value.positive? }
 
@@ -32,14 +42,7 @@ module Woods
       end
 
       def call
-        @captured_at = Time.now.to_f
-        @started = monotonic
-        @files = {}
-        @scope_paths = {}
-        @errors = []
-        @bytes = 0
-        @visited = 0
-        @directory_links = {}
+        reset
         walk
         verify_directory_links
         result
@@ -55,6 +58,19 @@ module Woods
       end
 
       private
+
+      def reset
+        @captured_at = Time.now.to_f
+        @started = monotonic
+        @files = {}
+        @stamps = {}
+        @scope_paths = {}
+        @errors = []
+        @bytes = 0
+        @visited = 0
+        @reused = 0
+        @directory_links = {}
+      end
 
       def walk
         raise Errno::ENOENT, @root unless File.directory?(@root)
@@ -164,19 +180,34 @@ module Woods
         return if consumers.empty?
 
         real = SourcePathEncoding.utf8!(File.realpath(path))
-        unless real.start_with?("#{@resolved_root}/")
-          error('external_source_path', relative)
-          return
-        end
-        identity = read_identity(path, real, stamp(File.stat(real)))
-        return unless identity
+        return error('external_source_path', relative) unless real.start_with?("#{@resolved_root}/")
 
-        @files[relative] = identity
-        consumers.each { |scope| (@scope_paths[scope] ||= []) << relative }
+        current = stamp(File.stat(real))
+        identity = known_identity(relative, current) || read_identity(path, real, current)
+        record(relative, identity, current, consumers) if identity
       rescue SystemCallError, IOError
         error('source_file_unreadable', relative)
       rescue EncodingError, SourcePathEncoding::Invalid
         error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
+      end
+
+      def record(relative, identity, current, consumers)
+        @files[relative] = identity
+        @stamps[relative] = current
+        consumers.each { |scope| (@scope_paths[scope] ||= []) << relative }
+      end
+
+      # The identity an earlier scan recorded for an unchanged file. ctime
+      # moves on every write, rename and permission change and cannot be set
+      # from user space, so an equal stamp means the bytes are the ones that
+      # were hashed. Only {#result}'s +files+ reuse it; the file still counts
+      # toward the visit budget.
+      def known_identity(relative, current)
+        stamp, identity = @known[relative]
+        return nil unless stamp && identity && stamp == current
+
+        @reused += 1
+        identity
       end
 
       def read_identity(path, resolved, expected) # rubocop:disable Metrics/CyclomaticComplexity -- stable descriptor and original resolution checks
@@ -242,8 +273,9 @@ module Woods
           'extra_roots' => @scopes.extra_roots, 'files' => @files.sort.to_h,
           'scope_paths' => @scope_paths.transform_values(&:sort).sort.to_h,
           'errors' => @errors, 'complete' => @errors.empty?,
-          'metrics' => { 'visited_files' => @visited, 'hashed_files' => @files.size,
-                         'bytes' => @bytes, 'elapsed_ms' => ((monotonic - @started) * 1000).round(3) } }
+          'metrics' => { 'visited_files' => @visited, 'hashed_files' => @files.size - @reused,
+                         'reused_files' => @reused, 'bytes' => @bytes,
+                         'elapsed_ms' => ((monotonic - @started) * 1000).round(3) } }
       end
 
       def monotonic

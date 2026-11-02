@@ -94,7 +94,7 @@ RSpec.describe Woods::AtomicFile do
 
       it 'does not fsync the temp file or the directory' do
         fsyncs = 0
-        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        allow_any_instance_of(File).to receive(:fsync) { fsyncs += 1 }
         expect(described_class).not_to receive(:fsync_directory)
 
         described_class.write(File.join(@dir, 'deferred.json'), 'data', durable: false)
@@ -104,12 +104,13 @@ RSpec.describe Woods::AtomicFile do
 
       it 'still fsyncs both when durable (the default)' do
         fsyncs = 0
-        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        allow_any_instance_of(File).to receive(:fsync) { fsyncs += 1 }
         expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
 
         described_class.write(File.join(@dir, 'durable.json'), 'data')
 
-        expect(fsyncs).to eq(1)
+        # One for the temp file, one inside fsync_directory.
+        expect(fsyncs).to eq(2)
       end
 
       it 'cleans up and preserves the target when a non-durable rename fails' do
@@ -126,8 +127,8 @@ RSpec.describe Woods::AtomicFile do
     it 'uses unique temporary names for concurrent writers' do
       path = File.join(@dir, 'note.md')
       temporary_paths = Queue.new
-      allow(Tempfile).to receive(:new).and_wrap_original do |original, *args|
-        original.call(*args).tap { |tempfile| temporary_paths << tempfile.path }
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap { |tmp| temporary_paths << tmp }
       end
 
       contents = ['a' * 10_000, 'b' * 20_000]
@@ -143,7 +144,7 @@ RSpec.describe Woods::AtomicFile do
     it 'cleans up and preserves the target when temp-file fsync fails' do
       path = File.join(@dir, 'note.md')
       File.write(path, 'original')
-      allow_any_instance_of(Tempfile).to receive(:fsync).and_raise(IOError, 'disk failure')
+      allow_any_instance_of(File).to receive(:fsync).and_raise(IOError, 'disk failure')
 
       expect { described_class.write(path, 'new') }.to raise_error(IOError, 'disk failure')
       expect(File.read(path)).to eq('original')

@@ -83,6 +83,40 @@ RSpec.describe Woods::SourceInputs::Scanner do
     expect(scan['files']).not_to eq(first['files'])
   end
 
+  it 'reuses a known identity when every stamp field matches, and re-hashes when one moves' do
+    path = write('app/services/pay.rb', 'version1')
+    write('app/services/ship.rb', 'ship')
+    first = described_class.new(root: @root, output_dir: @output, key: @key)
+    before = first.call
+    known = first.stamps.to_h { |relative, stamp| [relative, [stamp, before['files'].fetch(relative)]] }
+
+    unchanged = described_class.new(root: @root, output_dir: @output, key: @key, known: known).call
+    expect(unchanged['files']).to eq(before['files'])
+    expect(unchanged['metrics']).to include('reused_files' => 2, 'hashed_files' => 0, 'bytes' => 0)
+
+    sleep 0.01
+    File.binwrite(path, 'version2')
+    changed = described_class.new(root: @root, output_dir: @output, key: @key, known: known).call
+    expect(changed['files']['app/services/ship.rb']).to eq(before['files']['app/services/ship.rb'])
+    expect(changed['files']['app/services/pay.rb']).not_to eq(before['files']['app/services/pay.rb'])
+    expect(changed['metrics']).to include('reused_files' => 1, 'hashed_files' => 1)
+  end
+
+  it 'does not reuse an identity for a same-size rewrite that restores the mtime, because ctime still moves' do
+    path = write('app/services/pay.rb', 'version1')
+    first = described_class.new(root: @root, output_dir: @output, key: @key)
+    before = first.call
+    known = first.stamps.to_h { |relative, stamp| [relative, [stamp, before['files'].fetch(relative)]] }
+    timestamp = File.mtime(path)
+    sleep 0.01
+    File.binwrite(path, 'version2')
+    File.utime(timestamp, timestamp, path)
+
+    after = described_class.new(root: @root, output_dir: @output, key: @key, known: known).call
+    expect(after['files']).not_to eq(before['files'])
+    expect(after['metrics']).to include('reused_files' => 0)
+  end
+
   it 'prunes the index itself and normal generated directories before scanning contents' do
     write('tmp/deep/app/services/not_input.rb', 'generated')
     write('index/app/services/not_input.rb', 'generated')
