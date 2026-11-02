@@ -264,6 +264,13 @@ Fresh `degraded` still means incremental work is needed; a fresh `running`
 record can outlive a crashed foreign daemon by up to 15 minutes. Older versions
 need their status check run in the daemon's own container.
 
+From Woods `2.2.0` (check the installed version's release notes), watch `state`
+is derived when the status is read: `dead` (same-host pid gone), `stale` (older
+than the freshness window) or `unverified` (a fresh foreign-host record this
+reader may not check). `recorded_state` keeps the daemon's own word. None of the
+three means the index is being kept fresh; on earlier versions, read `alive`, not
+`state`.
+
 Writer-version provenance (#323) is available in Woods `2.0.0.beta3`: verify the installed
 gem version's release notes before expecting it. If `index.woods_version` exists, compare it
 with `server.version`; missing/null is unknown, not a failure. A validator
@@ -387,6 +394,18 @@ explicit path above; `WOODS_DIR` is also supported. Woods `2.0.0` includes
 version's configuration guide before relying on that fallback.
 
 Then reconnect through the MCP client and call `woods_status`. Use client-native tool inspection after initialization. Expect 14 packaged Index tools, not all conditional schemas.
+
+From Woods `2.2.0` (verify in the installed version's release notes): the server
+answers `initialize` before it warms its caches, so `woods_status.hydration.state`
+can read `warming` for the first seconds; tool calls during warm-up wait (bounded
+by `WOODS_MCP_HYDRATION_WAIT_SECONDS`) and are not an error. `failed` names the
+warm-up error while the server keeps serving. `woods_status.identity` names the
+served checkout, branch, generation and the Woods build that wrote the index.
+`woods-mcp-start` refuses an index from a different checkout and names both;
+offer `--allow-mismatch` / `WOODS_MCP_ALLOW_MISMATCH=1` only when serving another
+checkout's index is intended. A read answered with `index_build_mismatch` means
+the index was written by another Woods version or build: re-extract with the
+installed version rather than treating it as corruption.
 
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
