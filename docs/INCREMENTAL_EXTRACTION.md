@@ -42,6 +42,13 @@ earlier writers compared them, and a unit with one dependent never matched).
 Controller flow annotations are compared, so a re-extracted controller with
 precomputed flows is always registered and its flows reassembled.
 
+The comparison runs before the method table, callback and filter declaration
+sites and test examples are recorded, and leaves them out on both sides: they
+are derived from the source and metadata it already compares. A unit re-derived
+unchanged keeps the tables its published JSON carries, so a gem release that
+changes how they are computed refreshes them only with a full extraction, the
+same contract as units outside the blast radius.
+
 | Retained unit | What still happens |
 |---|---|
 | Gains or loses a caller | Its `dependents` are rewritten by the second pass. |
