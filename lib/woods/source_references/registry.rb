@@ -192,6 +192,12 @@ module Woods
         result[:target] == identifier && declaration['kind'] == kind
       end
 
+      # The declaration's lexical name equals the identifier. A relative
+      # qualified name inside a module block (`module A` then `class B::C`)
+      # counts too (#956). Ruby could bind `B` outside `A`; the match stands
+      # only where {#source_declaration?} also finds the identifier absent at
+      # runtime or autoloaded from this very file, so no other constant can
+      # claim the name.
       def static_declaration?(declaration, identifier)
         name = declaration['name']
         return false unless name.is_a?(String) && RuntimeLookup::CONSTANT.match?(name)
@@ -200,7 +206,7 @@ module Woods
         nesting = declaration.fetch('enclosing_nesting', [])
         return name == identifier if nesting.empty?
 
-        !name.include?('::') && [nesting.first, name].join('::') == identifier
+        [nesting.first, name].join('::') == identifier
       end
 
       def autoload_declaration?(result, identifier, path)

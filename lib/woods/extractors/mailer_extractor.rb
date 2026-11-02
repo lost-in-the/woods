@@ -286,7 +286,7 @@ module Woods
         parent = mailer.superclass
         return nil unless parent.is_a?(Class) && app_defined_mailer?(parent)
 
-        { type: :mailer, target: parent.name, via: :inheritance }
+        { type: :mailer, target: Module.instance_method(:name).bind_call(parent), via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────
