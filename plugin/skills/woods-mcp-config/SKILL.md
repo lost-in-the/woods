@@ -120,6 +120,10 @@ worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
 override; the shared root selects the primary checkout's HEAD. Follow the
 [worktree mount guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
+From Woods `2.2.0` (check the installed version's release notes), `woods_status`
+summarizes the other linked checkouts by state by default; pass
+`worktrees: "list"` to see each entry.
+
 A read-only index mount is sufficient for structural tools. The `reload` tool for in-memory semantic retrieval also takes Woods' shared on-disk writer lock, so the MCP process needs write access to the index directory. Without it, reload returns a typed degraded error and keeps serving the previous aligned generation. Either grant that access or restart the MCP process after publishing a new embedded index.
 
 In Woods 2.1, the `:local` preset also returns
