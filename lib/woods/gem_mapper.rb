@@ -48,6 +48,10 @@ module Woods
         units, graph = GemMapSource.new(root: @root).build(snapshot[:sources])
         payload = create_payload
         GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum]).write
+        # The publisher writes every file without its own flush; one flush of
+        # the payload tree makes them all durable before the pointer moves,
+        # the same contract the app pipeline keeps (see Extractor#sync_payload).
+        AtomicFile.sync_directory_tree(payload)
         ensure_snapshot_unchanged!(snapshot[:checksum])
         marker = publish_generation
         { status: :published, generation: marker.number, units: units.size }
@@ -248,23 +252,31 @@ module Woods
 
     private
 
+    # Every payload file is written without its own fsync; {GemMapper#map!}
+    # flushes the whole tree once before it publishes the pointer. Per-file
+    # fsyncs were the largest single cost of a first self-map build
+    # (~10,000 files, ~5.5s of a 14.5s build; WDS-101).
+    def write_file(path, content)
+      AtomicFile.write(path, content, durable: false)
+    end
+
     def write_type(directory, units)
       FileUtils.mkdir_p(directory)
       units.each do |unit|
-        AtomicFile.write(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
+        write_file(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
       end
       index = units.map do |unit|
         { identifier: unit.identifier, type: unit.type.to_s, file_path: unit.file_path, namespace: unit.namespace,
           estimated_tokens: unit.estimated_tokens, chunk_count: unit.chunks.size }
       end
-      AtomicFile.write(directory.join('_index.json'), JSON.pretty_generate(index))
+      write_file(directory.join('_index.json'), JSON.pretty_generate(index))
     end
 
     def write_graph
       data = @graph.to_h
       data[:pagerank] = @graph.pagerank
-      AtomicFile.write(@payload.join('dependency_graph.json'), JSON.pretty_generate(data))
-      AtomicFile.write(@payload.join('graph_analysis.json'), JSON.pretty_generate(GraphAnalyzer.new(@graph).analyze))
+      write_file(@payload.join('dependency_graph.json'), JSON.pretty_generate(data))
+      write_file(@payload.join('graph_analysis.json'), JSON.pretty_generate(GraphAnalyzer.new(@graph).analyze))
     end
 
     def write_manifest
@@ -279,12 +291,12 @@ module Woods
         provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum),
         graph_nodes: stats[:node_count], graph_edges: stats[:edge_count]
       }
-      AtomicFile.write(@payload.join('manifest.json'), JSON.pretty_generate(manifest))
+      write_file(@payload.join('manifest.json'), JSON.pretty_generate(manifest))
     end
 
     def write_summary
       stats = @graph.to_h.fetch(:stats)
-      AtomicFile.write(@payload.join('SUMMARY.md'), [
+      write_file(@payload.join('SUMMARY.md'), [
         '# Woods static Ruby source map', '', "Units: #{@units.size}", "Graph nodes: #{stats[:node_count]}",
         "Graph edges: #{stats[:edge_count]}", 'Static source analysis only; not a Rails runtime extraction.'
       ].join("\n"))
