@@ -27,7 +27,7 @@ RSpec.describe 'Index MCP initialization guidance' do
   it 'gives a concise status, discovery, traversal and verification workflow' do
     text = initialize_result(build).fetch('instructions')
 
-    expect(text).to start_with('Start with woods_status')
+    expect(text).to include('Start with woods_status')
     expect(text).to include('search', 'lookup', 'depth 1 or 2', 'types and via',
                             'partial', 'current source', 'not proof of absence')
     expect(text.bytesize).to be <= 2048
@@ -76,6 +76,16 @@ RSpec.describe 'Index MCP initialization guidance' do
     end
   end
 
+  it 'leads with the served identity and keeps a long one within the byte budget' do
+    identity = instance_double(Woods::MCP::ServedIdentity, summary: "Serving the index of #{'x' * 900}.",
+                                                           warnings: ['y' * 900])
+    text = Woods::MCP::InitializationGuidance.for(build.tools.keys, identity: identity)
+
+    expect(text).to start_with('Serving the index of')
+    expect(text).to include('(truncated; see woods_status identity)', 'Start with woods_status')
+    expect(text.bytesize).to be <= Woods::MCP::InitializationGuidance::MAX_BYTES
+  end
+
   it 'is stable across builds and index configuration that does not change tool wiring' do
     original = initialize_result(build).fetch('instructions')
     Woods.configuration.context_format = :plain
@@ -88,7 +98,7 @@ RSpec.describe 'Index MCP initialization guidance' do
       result = initialize_result(build, version: version)
 
       expect(result['protocolVersion']).to eq(version)
-      expect(result['instructions']).to start_with('Start with woods_status')
+      expect(result['instructions']).to include('Start with woods_status')
     end
   end
 
@@ -122,6 +132,6 @@ RSpec.describe 'Index MCP initialization guidance' do
     expect(File).not_to receive(:write)
     expect(Woods::MCP::IndexReader).not_to receive(:new)
 
-    expect(initialize_result(server).fetch('instructions')).to start_with('Start with woods_status')
+    expect(initialize_result(server).fetch('instructions')).to include('Start with woods_status')
   end
 end

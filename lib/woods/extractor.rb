@@ -10,6 +10,7 @@ require 'set'
 require_relative 'atomic_file'
 require_relative 'source_file'
 require_relative 'version'
+require_relative 'build_identity'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -2926,7 +2927,8 @@ module Woods
         extraction_config: extraction_config, git_enrichment: enrichment, git_filter_available: filter_available,
         extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
         ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
-        extractor_timings: extractor_timings
+        extractor_timings: extractor_timings, woods_build: BuildIdentity.current.manifest_fields,
+        root: File.expand_path(Rails.root.to_s)
       )
 
       AtomicFile.write(

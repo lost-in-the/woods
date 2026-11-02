@@ -15,6 +15,8 @@ require_relative '../generation_pins'
 require_relative '../git_enrichment_summary'
 require_relative '../git_provenance'
 require_relative '../resilience/incremental_readiness'
+require_relative 'served_identity'
+require_relative 'build_gap'
 require_relative '../tasks'
 require_relative '../watch/status'
 require_relative '../watch/supervision_status'
@@ -238,13 +240,16 @@ module Woods
           register_resource_handler(server, launch_reader)
           WorktreeRouting.declare_root!(server)
           ToolContract.apply!(server)
+          # Innermost of the dispatch prepends: inside the pin and the route,
+          # so it compares the manifest the call actually read.
+          BuildGap.install(server, router: router)
           IndexReaderPinning.install(server, reader: launch_reader)
           WorktreeRouting.install(server, router: router)
           # Outermost of the dispatch prepends: a call waits for the warm-up
           # before it takes a generation pin, so a waiting call never holds a
           # pin an exclusive reload would have to drain.
           install_hydration(server, hydration)
-          server.instructions = InitializationGuidance.for(server.tools.keys)
+          server.instructions = InitializationGuidance.for(server.tools.keys, identity: ServedIdentity.read(index_dir))
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one
@@ -2324,7 +2329,9 @@ module Woods
         def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond)
           server.define_tool(
             name: 'woods_status',
-            description: 'Diagnose whether the Woods index and server are healthy. Returns extraction metadata ' \
+            description: 'Diagnose whether the Woods index and server are healthy. Leads with identity: the ' \
+                         "index's checkout root, branch, generation and writer build, client_matches (whether that " \
+                         'is the launch checkout) and any build mismatch with this server. Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / not_configured / failed + reason), cache hydration ' \
                          '(hydration.state: warming / ready / failed + error), and feature flags. ' \
@@ -2448,6 +2455,7 @@ module Woods
         # while this one says what to do.
         def degraded_status(error, retriever, index_dir, bootstrap_state)
           {
+            identity: identity_section(index_dir, nil),
             ready: false,
             server: { name: 'woods', version: Woods::VERSION, index_dir: index_dir.to_s,
                       update: Woods::UpdateCheck.status_hash(background: true) },
@@ -2476,6 +2484,7 @@ module Woods
           resolved = bootstrap_state&.resolved_config
 
           {
+            identity: identity_section(index_dir, manifest),
             ready: manifest && !manifest['counts'].to_h.empty?,
             server: {
               name: 'woods',
@@ -2494,6 +2503,21 @@ module Woods
             bootstrap: bootstrap_state&.to_h,
             features: retrieval_features(config, resolved, retriever)
           }
+        end
+
+        # Which checkout, branch, generation and build the report describes,
+        # and whether that checkout is the client's: the launch directory, or
+        # the worktree a routed call named as `root`.
+        #
+        # @return [Hash, nil]
+        def identity_section(index_dir, manifest)
+          return unless index_dir
+
+          route = Thread.current[WorktreeRouting::THREAD_KEY]
+          cwd = route.respond_to?(:root) ? route.root.to_s : Dir.pwd
+          ServedIdentity.read(index_dir, cwd: cwd, manifest: manifest).to_h
+        rescue StandardError => e
+          { error: e.class.name }
         end
 
         private
@@ -2611,7 +2635,9 @@ module Woods
                    else
                      Woods::Resilience::IncrementalReadiness.new(index_dir: index_dir).call
                    end
-          { ready: result.ready?, status: result.to_s }
+          fields = { ready: result.ready?, status: result.to_s }
+          fields[:cause] = result.cause if result.respond_to?(:cause) && result.cause
+          fields
         end
 
         # Whether the Git-derived facts in the published index describe the

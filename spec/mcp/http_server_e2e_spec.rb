@@ -283,7 +283,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
       expect(response.code).to eq('200'), response.body
       result = JSON.parse(response.body).fetch('result')
       expect(result['protocolVersion']).to eq('2025-06-18')
-      expect(result.fetch('instructions')).to start_with('Start with woods_status')
+      expect(result.fetch('instructions')).to include('Start with woods_status')
       expect(result.fetch('instructions')).to include('structural readiness alone is insufficient')
       expect(result.fetch('instructions').bytesize).to be <= 2048
     end
@@ -356,7 +356,7 @@ RSpec.describe 'woods-mcp-http end to end', :http_server do
                         params: { protocolVersion: '2025-06-18', capabilities: {},
                                   clientInfo: { name: 'legacy', version: '1' } } })
       expect(response['mcp-session-id']).not_to be_nil
-      expect(JSON.parse(response.body).dig('result', 'instructions')).to start_with('Start with woods_status')
+      expect(JSON.parse(response.body).dig('result', 'instructions')).to include('Start with woods_status')
     end
   end
 end

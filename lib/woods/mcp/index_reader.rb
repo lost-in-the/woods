@@ -7,6 +7,7 @@ require 'json'
 require 'pathname'
 require 'set'
 
+require_relative '../build_identity'
 require_relative '../generation'
 require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
@@ -1576,7 +1577,7 @@ module Woods
         directory = TYPE_TO_DIR[type] || UNIT_TYPE_TO_DIR.fetch(type)
         data = load_unit(directory, unit_filename(identifier))
         unless valid_published_unit?(data, directory, identifier)
-          raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{type}:#{identifier}"
         end
 
         data
@@ -1661,10 +1662,22 @@ module Woods
           decode ? decode.call(content) : JSON.parse(content)
         end
         unless valid_published_unit?(data, dir, identifier)
-          raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{dir}/#{filename}"
         end
 
         data
+      end
+
+      # A unit another Woods build wrote can fail this build's identity
+      # guard; that is a version gap, not corruption. Checked before the
+      # guard's own message is raised.
+      #
+      # @return [String, nil]
+      def build_gap_message
+        comparison = BuildIdentity.compare(manifest)
+        comparison.message if comparison.mismatch?
+      rescue StandardError
+        nil
       end
 
       def valid_published_unit?(data, dir, identifier)
