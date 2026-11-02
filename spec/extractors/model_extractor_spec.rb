@@ -1720,6 +1720,41 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(results.map { |a| a[:name] }).to eq(%i[comments likes])
     end
 
+    it 'records a polymorphic association\'s declared inverse without asking Active Record to resolve it' do
+      polymorphic = make_assoc(:subject)
+      allow(polymorphic).to receive_messages(macro: :belongs_to, polymorphic?: true,
+                                             options: { polymorphic: true, inverse_of: :comments })
+      allow(polymorphic).to receive(:inverse_of)
+        .and_raise(ArgumentError, 'Polymorphic associations do not support computing the class.')
+      allow(model).to receive(:reflect_on_all_associations).and_return([polymorphic])
+
+      results = extractor.send(:extract_associations, model)
+
+      expect(results.first).to include(name: :subject, polymorphic: true, inverse_of: :comments)
+      expect(extractor.warnings).to be_empty
+    end
+
+    it 'reports no inverse for a polymorphic association that opts out with inverse_of: false' do
+      polymorphic = make_assoc(:subject)
+      allow(polymorphic).to receive_messages(polymorphic?: true, options: { polymorphic: true, inverse_of: false })
+      allow(polymorphic).to receive(:inverse_of).and_raise(ArgumentError)
+      allow(model).to receive(:reflect_on_all_associations).and_return([polymorphic])
+
+      expect(extractor.send(:extract_associations, model).first[:inverse_of]).to be_nil
+    end
+
+    it 'skips an association that raises any error, keeping the rest of the model' do
+      good = make_assoc(:comments)
+      broken = make_assoc(:attachments)
+      allow(broken).to receive(:foreign_key).and_raise(ArgumentError, 'unsupported option')
+      allow(model).to receive(:reflect_on_all_associations).and_return([broken, good])
+
+      results = extractor.send(:extract_associations, model)
+
+      expect(results.map { |assoc| assoc[:name] }).to eq(%i[comments])
+      expect(extractor.warnings.first).to include('Post', 'attachments', 'unsupported option')
+    end
+
     it 'records a warning for each skipped association' do
       broken = make_assoc(:gadgets)
       allow(broken).to receive(:class_name).and_raise(NameError, 'uninitialized constant Gadgets')

@@ -294,6 +294,23 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(writers).to eq(writers.sort.uniq)
   end
 
+  it 'keeps a model whose polymorphic belongs_to declares inverse_of, recording the declared inverse' do
+    model = Class.new(ActiveRecord::Base) do
+      self.table_name = 'comments'
+      belongs_to :subject, polymorphic: true, inverse_of: :comments, optional: true
+      belongs_to :post
+    end
+    stub_const('PolymorphicInverseProbe', model)
+    extractor = Woods::Extractors::ModelExtractor.new
+
+    associations = extractor.send(:extract_associations, model)
+
+    expect(associations.find { |assoc| assoc[:name] == :subject })
+      .to include(polymorphic: true, inverse_of: :comments)
+    expect(associations.map { |assoc| assoc[:name] }).to include(:post)
+    expect(extractor.warnings).to be_empty
+  end
+
   it 'retains an application-defined model constructor after schema loading (#363)' do
     model = Class.new(ActiveRecord::Base) do
       self.table_name = 'posts'

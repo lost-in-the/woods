@@ -593,8 +593,9 @@ module Woods
       end
 
       # Extract all associations with full details.
-      # Broken associations (e.g. missing class_name) are skipped with a warning
-      # instead of aborting the entire model extraction.
+      # An association that raises while it is read (a missing class_name, or
+      # an option Active Record refuses to resolve) is skipped with a warning;
+      # it never costs the model its unit.
       #
       # `from_db` and `to_db` name the database each side resolves to (nil on
       # Rails 6.0, where `connection_db_config` does not exist, and nil on
@@ -614,15 +615,31 @@ module Woods
             through_db: through_association_database(assoc),
             polymorphic: assoc.polymorphic?,
             foreign_key: assoc.foreign_key,
-            inverse_of: assoc.inverse_of&.name,
+            inverse_of: association_inverse_name(assoc),
             from_db: from_db,
             to_db: association_target_database(assoc),
             disable_joins: assoc.options[:disable_joins] == true
           }
-        rescue NameError => e
+        rescue StandardError => e
           @warnings << "[#{model.name}] Skipping broken association #{assoc.name}: #{e.message}"
           nil
         end
+      end
+
+      # The inverse an association names. Active Record cannot compute the
+      # inverse of a polymorphic belongs_to (it would need the target class)
+      # and raises, so that side reports the declared +inverse_of:+ option.
+      #
+      # @param assoc [ActiveRecord::Reflection::AssociationReflection]
+      # @return [Symbol, nil]
+      def association_inverse_name(assoc)
+        return assoc.inverse_of&.name unless assoc.polymorphic?
+
+        # `inverse_of: false` opts out, so only a name counts.
+        declared = assoc.options[:inverse_of]
+        return nil unless declared.is_a?(Symbol) || declared.is_a?(String)
+
+        declared.to_sym
       end
 
       def extract_association_options(assoc)
