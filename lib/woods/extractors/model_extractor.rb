@@ -593,9 +593,11 @@ module Woods
       end
 
       # Extract all associations with full details.
-      # An association that raises while it is read (a missing class_name, or
-      # an option Active Record refuses to resolve) is skipped with a warning;
-      # it never costs the model its unit.
+      # An association that raises while its metadata entry is built here (a
+      # missing class_name, or an option Active Record refuses to resolve) is
+      # skipped with a warning instead of failing {#extract_model}. Other
+      # passes over associations (dependencies, polymorphic interfaces) keep
+      # their own handling.
       #
       # `from_db` and `to_db` name the database each side resolves to (nil on
       # Rails 6.0, where `connection_db_config` does not exist, and nil on
