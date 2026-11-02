@@ -120,6 +120,12 @@ worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
 override; the shared root selects the primary checkout's HEAD. Follow the
 [worktree mount guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
+From Woods `2.2.0` (check the installed version's release notes), register each
+checkout with its own index: `woods-mcp-start` refuses an index that belongs to a
+different checkout unless given `--allow-mismatch` or
+`WOODS_MCP_ALLOW_MISMATCH=1`, and a branch difference only warns. Verify with
+`woods_status.identity.client_matches`.
+
 From Woods `2.2.0` (check the installed version's release notes), `woods_status`
 summarizes the other linked checkouts by state by default; pass
 `worktrees: "list"` to see each entry.
