@@ -1771,9 +1771,9 @@ module Woods
     # @return [Integer, nil] pool connections not currently leased; nil
     #   without ActiveRecord or a pool to ask
     def available_pool_connections
-      return nil unless defined?(ActiveRecord::Base)
+      pool = configured_connection_pool
+      return nil unless pool
 
-      pool = ActiveRecord::Base.connection_pool
       size = pool.size
       return nil unless size.is_a?(Integer) && size.positive?
 
@@ -1786,10 +1786,25 @@ module Woods
     # Hold one pool connection for exactly one extractor, and give it back
     # when the extractor returns, so a worker never keeps a connection
     # leased between extractors or after its thread ends.
+    # Lease a connection for the worker only when a pool is configured, the
+    # same decision {#available_pool_connections} makes, so extractors that
+    # never touch a database still run with Active Record loaded but no
+    # connection. Checkout and query failures on a real pool still raise.
     def with_worker_connection(&block)
-      return yield unless defined?(ActiveRecord::Base) && ActiveRecord::Base.respond_to?(:connection_pool)
+      pool = configured_connection_pool
+      return yield unless pool
 
-      ActiveRecord::Base.connection_pool.with_connection(&block)
+      pool.with_connection(&block)
+    end
+
+    # @return [Object, nil] the Active Record connection pool, or nil when
+    #   Active Record is absent or has no connection configured
+    def configured_connection_pool
+      return nil unless defined?(ActiveRecord::Base) && ActiveRecord::Base.respond_to?(:connection_pool)
+
+      ActiveRecord::Base.connection_pool
+    rescue ActiveRecord::ConnectionNotEstablished
+      nil
     end
 
     # ──────────────────────────────────────────────────────────────────────

@@ -54,6 +54,13 @@ RSpec.describe 'Concurrent extraction against a real connection pool', :booted_a
     ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:', pool: pool, checkout_timeout: 0.1)
   end
 
+  it 'runs database-free extractors when Active Record is loaded but no connection is configured' do
+    ActiveRecord::Base.remove_connection
+    db_free = Class.new { def extract_all = [] }
+
+    expect { run_concurrent(services: db_free, jobs: Class.new(db_free)) }.not_to raise_error
+  end
+
   it 'runs on the calling thread when that thread holds the pool\'s only connection (WDS-100)' do
     establish(pool: 1)
     ActiveRecord::Base.connection_pool.with_connection do
