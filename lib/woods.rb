@@ -275,9 +275,9 @@ module Woods
       @git_commit_table_files_limit = 100
       @git_commit_table_line_stats = true
       @git_commit_table_hunk_budget = 50_000
-      # nil = the unbounded transitive closure. See the setter for why the
-      # default is not a small number.
-      @incremental_blast_radius_depth = nil
+      # :structural = inheritance, include and extend edges to any depth, every
+      # other edge one hop (#946). See the setter for why it is not a hop count.
+      @incremental_blast_radius_depth = :structural
       # false = payload files are written without a per-file fsync and the
       # whole payload is flushed once before `generation.json` is written.
       # See the setter.
@@ -593,24 +593,26 @@ module Woods
       @git_commit_table_hunk_budget = validate_positive_integer!(:git_commit_table_hunk_budget, value)
     end
 
-    # How many reverse hops an incremental run walks from a changed file
-    # before it stops re-extracting dependents. `nil` (the default) keeps the
-    # unbounded transitive closure.
+    # How far an incremental run walks from a changed file before it stops
+    # re-extracting dependents.
     #
-    # A unit's extracted content is mostly a function of its own source and
-    # its own reflection, so on most graphs a small cap re-extracts the same
-    # bytes far faster. It is not safe everywhere, which is why the default
-    # is unbounded: an STI grandchild reads its grandparent's reflection
-    # (`reflect_on_all_associations`, `_validators` and the callback chain
-    # are all inherited), so `SportsCar < Car < Vehicle` has content that
-    # changes when `Vehicle` changes while sitting two hops away in the
-    # graph. A nested `has_many :through` resolves through the same kind of
-    # chain. Set this only on a tree you know has neither.
+    # +:structural+ (the default, #946) bounds the walk by edge kind:
+    # inheritance, include and extend edges carry a change to any depth, every
+    # other edge one hop, from the changed units and from every unit that
+    # structural walk reached. A unit's extracted content is mostly a function
+    # of its own source and its own reflection, so the deep half of an
+    # unbounded closure re-derives bytes that do not change; what does change
+    # two hops out is what a unit inherits. An STI grandchild reads its
+    # grandparent's reflection (`reflect_on_all_associations`, `_validators`
+    # and the callback chain are all inherited), so `SportsCar < Car <
+    # Vehicle` changes when `Vehicle` does, and the inheritance edges reach it.
+    # A nested `has_many :through` is reached as well: each through
+    # association publishes a `through_chain` edge to every model on its
+    # reflection chain, one hop away (#963).
     #
-    # +:structural+ bounds the walk by edge kind instead (#946 option 3,
-    # opt-in while it is measured): inheritance, include and extend edges to
-    # any depth, which is what covers the STI grandchild, and every other
-    # edge one hop.
+    # +nil+ keeps the unbounded transitive closure, the default before #946.
+    # A positive Integer caps the walk at that many hops of any kind, which
+    # misses the STI grandchild; set one only on a tree you know has none.
     #
     # @param value [Integer, Symbol, nil] a positive Integer, +:structural+, or nil
     # @raise [ConfigurationError] otherwise

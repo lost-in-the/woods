@@ -522,7 +522,7 @@ end
 | `git_commit_table_line_stats` | Boolean | `true` | Whether the commit table records each listed file's added and removed lines and hunks. They come from a second `-U0` patch walk over only the table's commits, which costs much more than the table's own walk on a long history; `false` leaves the fields out. |
 | `git_commit_table_hunk_budget` | Integer | `50000` | The most hunks the commit table keeps across all commits, newest first (at most 100 per file); files past it keep their line counts and say `hunks_truncated`. |
 | `git_commit_table_files_limit` | Integer | `100` | The most files the commit table lists for one commit; the rest are counted in that commit's `files_omitted`. The table's `paths` index is never bounded by it, so co-change stays complete. |
-| `incremental_blast_radius_depth` | Integer, `:structural` or `nil` | `nil` | How many reverse hops an incremental run walks from a changed file before it stops re-extracting dependents. `nil` keeps the unbounded transitive closure. `:structural` follows inheritance, include and extend edges to any depth and every other edge one hop (opt-in, #946). See the note below before setting it. |
+| `incremental_blast_radius_depth` | `:structural`, Integer or `nil` | `:structural` | How far an incremental run walks from a changed file before it stops re-extracting dependents. `:structural` follows inheritance, include and extend edges to any depth and every other edge one hop (#946). `nil` keeps the unbounded transitive closure; an Integer caps the walk at that many hops of any kind. See the note below before changing it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
 
 **Tuning volatile dependency reports.** Start with
@@ -568,18 +568,21 @@ timestamps are retained ahead of corrupt files, then treated as oldest among
 usable snapshots. Direct lookup and diff still reject invalid
 caller-supplied SHA paths with an argument error.
 
-`incremental_blast_radius_depth` is unbounded by default because a unit two hops
-out really can have content that depends on the changed file. An STI grandchild
+`incremental_blast_radius_depth` defaults to `:structural` (#946) because a
+unit two hops out really can have content that depends on the changed file,
+and in practice that unit is reached along inheritance. An STI grandchild
 (`SportsCar < Car < Vehicle`) inherits its grandparent's associations,
-validations and callback chain, and a nested `has_many :through` resolves
-through the same kind of chain, while the graph only records the one-hop
-superclass reference each source file mentions. `:structural` covers the STI
-grandchild (it follows inheritance to any depth) and the nested
-`has_many :through` (each through association publishes a `through_chain` edge
-to every model on its chain, one hop away). Set an Integer only on a tree you
-know has neither shape; the units it stops re-extracting still get their `dependents`
-list refreshed, and `spec/integration/incremental_equivalence_spec.rb` holds a
-depth of 1 to full-extraction equivalence.
+validations and callback chain; `:structural` follows inheritance, include and
+extend edges to any depth, so it reaches the grandchild, and stops every other
+edge after one hop. A nested `has_many :through` is reached too: each through
+association publishes a `through_chain` edge to every model on its chain, one
+hop away. A missing inheritance edge cannot be followed; set `nil` for the
+unbounded closure where that matters, and an Integer only on a tree with no STI
+grandchildren. The units a bound stops re-extracting still get their
+`dependents` list refreshed, flows within the flow assembler's depth are
+reassembled whatever the bound, and
+`spec/integration/incremental_equivalence_spec.rb` holds every setting to
+full-extraction equivalence.
 
 `durable_payload_writes` is off by default, and off is not the weaker
 guarantee. Readers resolve only through `generation.json`, so a payload file

@@ -447,49 +447,52 @@ would report the index as freshly synced when nothing was re-read.
 
 ## Bounding the blast radius
 
-`incremental_blast_radius_depth` caps how many reverse hops step 1 walks.
-`nil`, the default, keeps the unbounded transitive closure: every unit that
-reaches the changed file, at any depth, is re-extracted.
+`incremental_blast_radius_depth` bounds how far step 1 walks from the changed
+files' own units. It takes three kinds of value:
 
-The reason to cap it is cost. A unit's extracted content is mostly a function
-of its own source and its own reflection, so on most graphs the deep half of
-the closure re-derives bytes that do not change. On a 200-service chain in the
-dummy app, one leaf edit re-extracts 200 units unbounded and 2 at a depth
-of 1.
+| Value | Walk | Use |
+|---|---|---|
+| `:structural` (default, #946) | Inheritance, include and extend edges to any depth; every other edge one hop, from the changed units and from every unit that structural walk reached | Most trees |
+| `nil` | The unbounded transitive closure: every unit that reaches the changed file, at any depth | The equivalence guarantee without relying on edge kinds; the default before #946 |
+| A positive Integer | That many reverse hops of any kind | Only a tree with no STI grandchildren |
 
-The reason the default is not capped is that "mostly" is not "always". An STI
-grandchild reads its grandparent's reflection: `SportsCar < Car < Vehicle`
-inherits `Vehicle`'s associations, validations and callback chain, and a
-nested `has_many :through` resolves through the same kind of chain. The graph
-records only the one-hop superclass reference each source file mentions, so
-that grandchild sits two hops out while its content depends on hop zero. Set
-the key on a tree you know has neither shape.
+The reason to bound it is cost. A unit's extracted content is mostly a
+function of its own source and its own reflection, so on most graphs the deep
+half of the closure re-derives bytes that do not change. On one production app
+of about 11,400 units, a one-line non-leaf edit re-derived 7,243 units
+unbounded (88% of a full extract's time) and 440 under `:structural`, about
+half the time, with the same payloads as a full extract. On a 200-service chain
+in the dummy app, one leaf edit re-extracts 200 units unbounded and 2 at a
+depth of 1.
 
-What the cap never affects is `dependents`. Edges change only when a unit is
+What a bound must still reach is what a unit inherits. An STI grandchild reads
+its grandparent's reflection: `SportsCar < Car < Vehicle` inherits `Vehicle`'s
+associations, validations and callback chain. The graph records the one-hop
+superclass edge each class carries, so the grandchild sits two inheritance
+hops out while its content depends on hop zero. `:structural` follows those
+edges to any depth; a depth of 1 does not, and on the field app it missed 17
+STI descendants that a full run re-derived. The equivalence spec holds both
+`:structural` and a depth of 1 to a full run, including that case for
+`:structural`.
+
+A nested `has_many :through` is reached in one hop: the model publishes a
+`through_chain` edge to every model its through reflection's chain passes
+through, so `Owner has_many :parts, through: :bridges`, where Bridge's `:parts`
+runs through Link, depends on Link directly, and the equivalence spec holds
+that to a full run under `:structural` (#963). Flows keep their own radius:
+with `precompute_flows` on, every previously published controller within the
+flow assembler's depth of the change is reassembled from its previous payload,
+whether or not a bounded walk re-extracted it, so a bound narrows unit
+re-extraction and never flow reassembly.
+
+What `:structural` cannot do is follow an inheritance edge the graph lacks,
+and an included module that every controller shares still reaches every
+controller. Set `nil` on a tree where either matters.
+
+What the bound never affects is `dependents`. Edges change only when a unit is
 re-extracted, and the run marks every target of a re-extracted unit's edges,
 before and after registration, so a unit that gains or loses an inbound edge
 is rewritten by the second pass whether or not the walk reached it.
-`spec/integration/incremental_equivalence_spec.rb` holds a depth of 1 to
-full-extraction equivalence, including that case.
-
-`:structural` bounds the walk by edge kind instead (#946, opt-in while it is
-measured). Inheritance, include and extend edges carry a change to any depth;
-every other edge carries it one hop, from the changed units and from every
-unit that structural walk reached, and the walk stops there. That covers the
-STI grandchild: `SportsCar` is two inheritance hops from `Vehicle`, and the
-equivalence spec holds it to a full run when `Vehicle` gains an association,
-the case a depth of 1 gets wrong. A nested `has_many :through` is reached in
-one hop: the model publishes a `through_chain` edge to every model its
-through reflection's chain passes through, so `Owner has_many :parts, through:
-:bridges`, where Bridge's `:parts` runs through Link, depends on Link directly
-(#961), and the spec holds that to a full run too. Flows keep their own
-radius: with `precompute_flows` on, every previously published controller
-within the flow assembler's depth of the change is reassembled from its
-previous payload, whether or not a bounded walk re-extracted it, so a bounded
-radius narrows unit re-extraction and never flow reassembly. It cannot follow an
-inheritance edge the graph lacks, and an included module every controller
-shares still reaches every controller. Measure it on the tree before relying
-on it.
 
 ## Dispatch inventory
 

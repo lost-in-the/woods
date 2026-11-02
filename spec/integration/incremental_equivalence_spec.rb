@@ -952,7 +952,14 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    # The shared file is edited without being named in the change set, so only
+    # a walk that keeps going through code references reaches the model that
+    # inlines it. That is the unbounded closure's property; every writer
+    # Woods ships (woods:incremental, the watcher) names each edited file, and
+    # the bounded default (#946) is held to equivalence where it does.
     it 're-extracts every shared-file owner through transitive source references' do
+      previous_depth = Woods.configuration.incremental_blast_radius_depth
+      Woods.configuration.incremental_blast_radius_depth = nil
       dependency_path = write_file('lib/ownership_dependency.rb', 'class OwnershipDependency; end')
       load app_path(dependency_path)
       bundle_path = write_module_bundle
@@ -981,6 +988,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                                                                             'OwnershipSecondFeature')
       expect(graph.fetch('type_index').fetch('poro')).to include('OwnershipBundle', 'OwnershipSibling')
       expect(differences(index, full_extraction)).to be_empty
+    ensure
+      Woods.configuration.incremental_blast_radius_depth = previous_depth
     end
 
     it 'refuses a transitive shared-file refresh when a partial boot retains an unrefreshed module' do
@@ -1932,6 +1941,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
 
     it 'agrees with a full extraction when a name moves outside a capped blast radius' do
+      previous_depth = Woods.configuration.incremental_blast_radius_depth
       Woods.configuration.incremental_blast_radius_depth = 1
       write_consumers
       write_file('app/javascript/alpine/a.js', "export default () => ({})\n")
@@ -1951,7 +1961,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(js_edges(index, 'view_templates',
                       'posts/panel.html.erb')).to eq([['app/javascript/alpine/b.js', 'alpine_data']])
     ensure
-      Woods.configuration.incremental_blast_radius_depth = nil
+      Woods.configuration.incremental_blast_radius_depth = previous_depth
     end
 
     it 're-runs the name consumers wholesale only when the name map moved' do
@@ -3606,10 +3616,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # is never re-extracted during the sequence.
   describe 'a capped blast radius' do
     around do |example|
+      previous_depth = Woods.configuration.incremental_blast_radius_depth
       Woods.configuration.incremental_blast_radius_depth = 1
       example.run
     ensure
-      Woods.configuration.incremental_blast_radius_depth = nil
+      Woods.configuration.incremental_blast_radius_depth = previous_depth
     end
 
     # Found by identifier rather than by filename: the filename helper lives
@@ -3715,10 +3726,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # declares, two inheritance hops from the edited file.
   describe 'a structural blast radius' do
     around do |example|
+      previous_depth = Woods.configuration.incremental_blast_radius_depth
       Woods.configuration.incremental_blast_radius_depth = :structural
       example.run
     ensure
-      Woods.configuration.incremental_blast_radius_depth = nil
+      Woods.configuration.incremental_blast_radius_depth = previous_depth
     end
 
     # Retire the chain the way a reload would. A subclass copies its parent's

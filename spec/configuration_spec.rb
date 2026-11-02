@@ -597,8 +597,15 @@ RSpec.describe Woods::Configuration do
   end
 
   describe '#incremental_blast_radius_depth' do
-    it 'defaults to nil, the unbounded closure' do
-      expect(described_class.new.incremental_blast_radius_depth).to be_nil
+    it 'defaults to :structural, the edge-kind walk (#946)' do
+      expect(described_class.new.incremental_blast_radius_depth).to eq(:structural)
+    end
+
+    it 'accepts nil, the unbounded closure' do
+      config = described_class.new
+      config.incremental_blast_radius_depth = nil
+
+      expect(config.incremental_blast_radius_depth).to be_nil
     end
 
     it 'accepts a positive Integer' do
