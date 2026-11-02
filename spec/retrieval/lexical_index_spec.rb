@@ -178,7 +178,11 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
 
   it 'lets detached narrow and nested views release unrelated document bodies and scoring tallies' do
     [false, true].each do |nested|
-      view, probes, keep = detached_view(nested: nested)
+      # Built on a short-lived thread: MRI marks the machine stack
+      # conservatively, so a stale word left by the helper's own frame can
+      # otherwise keep the excluded document alive. The thread's stack goes
+      # with it, leaving only the references the view itself holds.
+      view, probes, keep = Thread.new { detached_view(nested: nested) }.value
       3.times { GC.start(full_mark: true, immediate_sweep: true) }
 
       probes.each { |probe| expect(probe.weakref_alive?).to be_falsey }
