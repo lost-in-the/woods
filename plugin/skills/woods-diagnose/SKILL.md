@@ -264,6 +264,13 @@ Fresh `degraded` still means incremental work is needed; a fresh `running`
 record can outlive a crashed foreign daemon by up to 15 minutes. Older versions
 need their status check run in the daemon's own container.
 
+From Woods `2.2.0` (check the installed version's release notes), watch `state`
+is derived when the status is read: `dead` (same-host pid gone), `stale` (older
+than the freshness window) or `unverified` (a fresh foreign-host record this
+reader may not check). `recorded_state` keeps the daemon's own word. None of the
+three means the index is being kept fresh; on earlier versions, read `alive`, not
+`state`.
+
 Writer-version provenance (#323) is available in Woods `2.0.0.beta3`: verify the installed
 gem version's release notes before expecting it. If `index.woods_version` exists, compare it
 with `server.version`; missing/null is unknown, not a failure. A validator
