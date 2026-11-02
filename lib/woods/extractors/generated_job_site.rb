@@ -4,6 +4,7 @@ require 'prism'
 require 'active_support/core_ext/string/inflections'
 require_relative '../source_file'
 require_relative 'shared_utility_methods'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -69,7 +70,7 @@ module Woods
         return @files[path] if @files.key?(path)
 
         source = SourceFile.read(path)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         @files[path] = result.success? ? { source: source, lines: source.lines, tree: result.value } : nil
       end
 

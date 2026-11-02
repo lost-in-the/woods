@@ -4,6 +4,7 @@ require 'prism'
 require 'strscan'
 require_relative 'comment_blanking'
 require_relative '../source_references/runtime_lookup'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -62,7 +63,7 @@ module Woods
       # @param source [String] Ruby source
       # @return [Array<Reference>]
       def references(source)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return token_references(source) unless parsed.success?
 
         [].tap { |found| walk(parsed.value, [], found) }

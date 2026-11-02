@@ -3,6 +3,7 @@
 require 'prism'
 require 'set'
 require_relative '../source_file'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -223,7 +224,7 @@ module Woods
       # @param entries [Hash{String => Entry}]
       # @param only [String, nil] restrict to one module name
       def read_modules(file, entries, only: nil)
-        result = Prism.parse(SourceFile.read(File.join(@root, file)))
+        result = Woods::ParseCache.parse(SourceFile.read(File.join(@root, file)))
         return if result.failure?
 
         walk(result.value, nil, file, entries, only)

@@ -4,6 +4,7 @@ require 'prism'
 require_relative '../source_file'
 require_relative 'action_facts'
 require_relative 'filter_applicability'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -111,7 +112,7 @@ module Woods
 
       # One parse and definition walk per file per extractor instance.
       def fact_definitions(file)
-        (@fact_definitions ||= {})[file] ||= ActionFacts.definitions(Prism.parse(SourceFile.read(file)).value)
+        (@fact_definitions ||= {})[file] ||= ActionFacts.definitions(Woods::ParseCache.parse(SourceFile.read(file)).value)
       end
 
       def fact_path(file)

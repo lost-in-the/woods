@@ -41,24 +41,26 @@ module Woods
 
     # Publishes one complete source snapshot, or skips when it is unchanged.
     def map!
-      with_lock do
-        snapshot = source_snapshot
-        return { status: :skipped, generation: current_generation.number } if current_checksum == snapshot[:checksum]
-
-        units, graph = GemMapSource.new(root: @root).build(snapshot[:sources])
-        payload = create_payload
-        GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum]).write
-        # The publisher writes every file without its own flush; one flush of
-        # the payload tree makes them all durable before the pointer moves,
-        # the same contract the app pipeline keeps (see Extractor#sync_payload).
-        AtomicFile.sync_directory_tree(payload)
-        ensure_snapshot_unchanged!(snapshot[:checksum])
-        marker = publish_generation
-        { status: :published, generation: marker.number, units: units.size }
-      end
+      Woods::ParseCache.with { with_lock { map_locked } }
     end
 
     private
+
+    def map_locked
+      snapshot = source_snapshot
+      return { status: :skipped, generation: current_generation.number } if current_checksum == snapshot[:checksum]
+
+      units, graph = GemMapSource.new(root: @root).build(snapshot[:sources])
+      payload = create_payload
+      GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum]).write
+      # The publisher writes every file without its own flush; one flush of
+      # the payload tree makes them all durable before the pointer moves,
+      # the same contract the app pipeline keeps (see Extractor#sync_payload).
+      AtomicFile.sync_directory_tree(payload)
+      ensure_snapshot_unchanged!(snapshot[:checksum])
+      marker = publish_generation
+      { status: :published, generation: marker.number, units: units.size }
+    end
 
     def with_lock(&block)
       Coordination::PipelineLock.new(lock_dir: @output_dir.to_s, name: 'woods_self_map').with_lock(&block)

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module SourceReferences
@@ -15,7 +16,7 @@ module Woods
       DYNAMIC_BLOCK_METHODS = %i[class_eval module_eval instance_eval class_exec module_exec instance_exec].freeze
 
       def parse(source)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         error = result.errors.first
         [result.value, error && { 'message' => error.message, 'line' => error.location.start_line }]
       end

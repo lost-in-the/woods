@@ -535,6 +535,32 @@ module Woods
     #
     # @return [Hash] Results keyed by extractor type
     def extract_all
+      with_parse_cache { perform_extract_all }
+    end
+
+    def extract_changed(changed_files)
+      with_parse_cache { perform_extract_changed(changed_files) }
+    end
+
+    # One Prism parse per distinct source for the length of the run; see
+    # {Woods::ParseCache}. The log line is the run's reuse ratio, which is what
+    # a profile of a slow app needs before anything finer.
+    def with_parse_cache
+      Woods::ParseCache.with(budget: parse_cache_budget) do
+        result = yield
+        if profiling? && (store = Woods::ParseCache.active)
+          Rails.logger.info "[Woods] [profile] parse cache: #{store.parses} parses, #{store.hits} reuses"
+        end
+        result
+      end
+    end
+
+    def parse_cache_budget
+      budget = Woods.configuration&.parse_cache_source_bytes
+      budget.nil? ? Woods::ParseCache::DEFAULT_BUDGET : budget
+    end
+
+    def perform_extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       reset_git_capture
       setup_output_directory
@@ -713,7 +739,7 @@ module Woods
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     # @raise [Woods::ExtractionError] when boot-captured inputs require a fresh
     #   Rails process and full extraction instead of reusing this runtime
-    def extract_changed(changed_files)
+    def perform_extract_changed(changed_files)
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       require_relative 'input_rules'

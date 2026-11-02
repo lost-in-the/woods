@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'node'
+require_relative '../parse_cache'
 
 module Woods
   class Error < StandardError; end unless defined?(Woods::Error)
@@ -67,14 +68,16 @@ module Woods
       def parse_with_prism(source)
         require 'prism' unless defined?(Prism)
 
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
 
         unless result.success?
           errors = result.errors.map(&:message).join(', ')
           raise Woods::ExtractionError, "Parse error: #{errors}"
         end
 
-        convert_prism_node(result.value, source)
+        # The normalized tree is a pure function of the source, and no reader
+        # mutates it, so a run converts each distinct source once as well.
+        Woods::ParseCache.derive(:ast, source) { convert_prism_node(result.value, source) }
       end
 
       # Parse using the parser gem (fallback for older Ruby).

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative 'parse_cache'
 
 module Woods
   # Method definitions in a unit's published `source_code` (#752): name, kind,
@@ -50,7 +51,7 @@ module Woods
     def call(source)
       return nil unless source.is_a?(String) && !source.empty?
 
-      result = Prism.parse(source)
+      result = Woods::ParseCache.parse(source)
       return nil if result.errors.any?
 
       entries = Walker.new.call(result.value)
@@ -62,7 +63,7 @@ module Woods
     # A block whose decoded text does not parse contributes nothing.
     def concern_entries(source)
       blocks(source.lines(chomp: true)).flat_map do |first_line, text|
-        parsed = Prism.parse(text)
+        parsed = Woods::ParseCache.parse(text)
         next [] if parsed.errors.any?
 
         Walker.new.call(parsed.value).map do |entry|
