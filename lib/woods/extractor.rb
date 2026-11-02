@@ -1668,13 +1668,18 @@ module Woods
       end
     end
 
-    # Run each extractor in its own thread, then register results sequentially.
+    # Run the extractors on a bounded pool of threads, then register results
+    # sequentially.
     #
     # Thread safety notes:
     # - ModelNameCache is pre-computed before threads start (avoids ||= race)
-    # - Each thread gets its own extractor instance (no shared mutable state)
+    # - Each extractor type gets its own extractor instance
+    # - The one shared parser, {#source_collector}, serializes its own calls
     # - Results collected via Mutex-protected Hash
     # - DependencyGraph registration is sequential (post-join)
+    # - The pool is no wider than the ActiveRecord connection pool, so a
+    #   schema-reading extractor never waits out `checkout_timeout` behind
+    #   forty siblings (WDS-100); see {#concurrent_extraction_workers}
     def extract_all_concurrent
       # Pre-compute ModelNameCache to avoid race on lazy memoization.
       # Multiple threads calling model_names concurrently could trigger
@@ -1690,26 +1695,34 @@ module Woods
 
       results_mutex = Mutex.new
       failures = []
-      active = EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }
-      threads = active.map do |type, extractor_class|
+      queue = Queue.new
+      EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }.each { |pair| queue << pair }
+      queue.close
+      workers = concurrent_extraction_workers(queue.size)
+      Rails.logger.info "[Woods] Concurrent extraction: #{queue.size} extractors on #{workers} threads"
+
+      threads = Array.new(workers) do
         Thread.new do
-          Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
-          start_time = Time.current
+          while (pair = queue.pop)
+            type, extractor_class = pair
+            begin
+              Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
+              start_time = Time.current
 
-          extractor = share_source_collector(extractor_class.new)
-          results_mutex.synchronize { @extractors[type] = extractor }
+              extractor = share_source_collector(extractor_class.new)
+              results_mutex.synchronize { @extractors[type] = extractor }
 
-          units = timing_collector.time(type) { extractor.extract_all }
+              units = timing_collector.time(type) { extractor.extract_all }
 
-          elapsed = Time.current - start_time
-          Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+              elapsed = Time.current - start_time
+              Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
-          results_mutex.synchronize do
-            @results[type] = units
+              results_mutex.synchronize { @results[type] = units }
+            rescue StandardError => e
+              Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
+              results_mutex.synchronize { failures << [type, e] }
+            end
           end
-        rescue StandardError => e
-          Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
-          results_mutex.synchronize { failures << [type, e] }
         end
       end
 
@@ -1728,6 +1741,24 @@ module Woods
       EXTRACTORS.each_key do |type|
         (@results[type] || []).each { |unit| @dependency_graph.register(unit) }
       end
+    end
+
+    # How many threads {#extract_all_concurrent} runs: the number of
+    # extractors, capped at the ActiveRecord pool size so every thread can
+    # hold a connection at once. Without ActiveRecord there is nothing to
+    # cap on.
+    #
+    # @param extractor_count [Integer]
+    # @return [Integer] at least 1
+    def concurrent_extraction_workers(extractor_count)
+      limit = extractor_count
+      if defined?(ActiveRecord::Base)
+        pool_size = ActiveRecord::Base.connection_pool.size
+        limit = [limit, pool_size].min if pool_size.is_a?(Integer) && pool_size.positive?
+      end
+      [limit, 1].max
+    rescue StandardError
+      [extractor_count, 1].max
     end
 
     # ──────────────────────────────────────────────────────────────────────

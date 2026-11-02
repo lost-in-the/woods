@@ -182,4 +182,46 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
         .to raise_error(Woods::ExtractionError, /models/)
     end
   end
+
+  # ── Pool width ──────────────────────────────────────────────────────
+
+  describe 'thread pool width' do
+    before do
+      allow(Woods::ModelNameCache).to receive(:model_names).and_return([])
+      allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
+    end
+
+    it 'runs no more extractor threads at once than the ActiveRecord pool has connections (WDS-100)' do
+      Woods.configure { |c| c.concurrent_extraction = true }
+      pool = double('pool', size: 3)
+      stub_const('ActiveRecord::Base', double('AR', connection_pool: pool))
+
+      lock = Mutex.new
+      live = 0
+      peak = 0
+      Woods::Extractor::EXTRACTORS.each_value do |klass|
+        extractor_double = double(extract_all: [], package_roots: [])
+        allow(extractor_double).to receive(:extract_all) do
+          lock.synchronize do
+            live += 1
+            peak = [peak, live].max
+          end
+          sleep 0.002
+          lock.synchronize { live -= 1 }
+          []
+        end
+        allow(klass).to receive(:new).and_return(extractor_double)
+      end
+
+      extractor.extract_all
+
+      expect(peak).to be <= 3
+      expect(peak).to be >= 2
+    end
+
+    it 'uses one thread per extractor when there is no ActiveRecord pool to respect' do
+      hide_const('ActiveRecord') if defined?(ActiveRecord)
+      expect(extractor.send(:concurrent_extraction_workers, 7)).to eq(7)
+    end
+  end
 end
