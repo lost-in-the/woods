@@ -39,14 +39,34 @@ module Woods
           %w[1 true yes].include?(env.fetch(ALLOW_ENV, '').to_s.strip.downcase)
         end
 
+        # Read once: the marker, then the manifest of the payload that marker
+        # names, so a publication between the two cannot pair one
+        # generation's number with another's manifest.
+        #
         # @param index_dir [String, Pathname]
         # @param cwd [String] the launcher's working directory
         # @param build [BuildIdentity] this reader's build
+        # @param manifest [Hash, nil] a manifest to describe instead (specs);
+        #   a pinned reader's caller uses {.pinned}
         # @return [ServedIdentity]
         def read(index_dir, cwd: Dir.pwd, build: BuildIdentity.current, manifest: nil)
           generation = Woods::Generation.new(output_dir: index_dir)
           marker = current_marker(generation)
-          manifest ||= read_manifest(generation) if marker
+          manifest ||= read_manifest(generation, marker) if marker
+          new(index_dir: index_dir, marker: marker, manifest: manifest, cwd: cwd, build: build)
+        end
+
+        # The identity of what a pinned reader serves: its loaded generation's
+        # marker and manifest, never a fresh read of `generation.json`.
+        #
+        # @param index_dir [String, Pathname]
+        # @param reader [#loaded_marker]
+        # @param manifest [Hash, nil] the manifest the caller read inside the pin
+        # @param cwd [String]
+        # @param build [BuildIdentity]
+        # @return [ServedIdentity]
+        def pinned(index_dir, reader:, manifest:, cwd: Dir.pwd, build: BuildIdentity.current)
+          marker = reader.loaded_marker || Woods::Generation::UNPUBLISHED
           new(index_dir: index_dir, marker: marker, manifest: manifest, cwd: cwd, build: build)
         end
 
@@ -101,8 +121,8 @@ module Woods
           nil
         end
 
-        def read_manifest(generation)
-          path = generation.payload_dir.join('manifest.json')
+        def read_manifest(generation, marker)
+          path = generation.payload_dir(marker).join('manifest.json')
           return unless path.file? && path.size <= MAX_MANIFEST_BYTES
 
           data = JSON.parse(AtomicFile.read(path))

@@ -367,4 +367,60 @@ RSpec.describe 'Served index identity' do
       expect(comparison.state).to eq('same_version')
     end
   end
+  # A publication can land between two reads of one identity: the pin and the
+  # identity block in woods_status, or the marker and the manifest at startup.
+  # Every identity field must then still describe one snapshot.
+  describe 'a generation published between reads' do
+    let(:first) { { 'git_sha' => '1' * 40, 'woods_version' => Woods::VERSION, 'woods_revision' => '1' * 40 } }
+    let(:second) { { 'git_sha' => '2' * 40, 'woods_version' => '0.0.2-next', 'woods_revision' => '2' * 40 } }
+
+    def publish(root, generation, manifest)
+      index = index_of(root)
+      payload = File.join(index, 'payloads', "gen-#{generation}")
+      FileUtils.cp_r(Dir.glob(File.join(index, 'payloads', '*')).first, payload)
+      recorded = JSON.parse(File.read(File.join(payload, 'manifest.json'))).merge(manifest)
+      File.write(File.join(payload, 'manifest.json'), JSON.generate(recorded))
+      File.write(File.join(index, 'generation.json'),
+                 JSON.generate(number: generation, token: "t#{generation}", updated_at: '2026-11-02T10:00:00Z',
+                               reason: 'extract', payload: "payloads/gen-#{generation}"))
+    end
+
+    def expect_first_snapshot(identity)
+      expect(identity.transform_keys(&:to_s)).to include(
+        'generation' => 1, 'generation_updated_at' => '2026-11-01T10:00:00Z', 'git_sha' => '1' * 40,
+        'woods_version' => Woods::VERSION, 'woods_revision' => '1' * 40
+      )
+    end
+
+    it 'reports the pinned generation in woods_status, never the one published after the pin' do
+      alpha = checkout('checkout-alpha', manifest: first)
+      server = Dir.chdir(alpha) { build_server(index_of(alpha)) }
+      reader = server.instance_variable_get(:@woods_index_reader)
+      allow(Woods::MCP::Server).to receive(:identity_section).and_wrap_original do |original, *args|
+        publish(alpha, 2, second)
+        original.call(*args)
+      end
+
+      identity = Dir.chdir(alpha) { status(server) }.fetch('identity')
+
+      expect(reader.loaded_generation).to eq(1)
+      expect_first_snapshot(identity)
+    end
+
+    it 'resolves the startup manifest from the one marker it read' do
+      alpha = checkout('checkout-alpha', manifest: first)
+      published = false
+      allow_any_instance_of(Woods::Generation).to receive(:current).and_wrap_original do |original, *args|
+        original.call(*args).tap do
+          publish(alpha, 2, second) unless published
+          published = true
+        end
+      end
+
+      identity = Woods::MCP::ServedIdentity.read(index_of(alpha), cwd: alpha)
+
+      expect_first_snapshot(identity.to_h)
+      expect(identity.summary).to include('generation 1, updated 2026-11-01T10:00:00Z', "(#{'1' * 12})")
+    end
+  end
 end

@@ -107,6 +107,7 @@ module Woods
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @loaded_token = nil
+        @loaded_marker = nil
         @generation_signature = nil
         @payload_retention_pin = nil
         # The directory the loaded generation's payload lives in. nil until a
@@ -119,6 +120,14 @@ module Woods
       #
       # @return [Integer, nil] nil until something has been read
       attr_reader :loaded_generation
+
+      # The marker of the generation this reader's caches were populated
+      # from: what a pinned caller reports beside the manifest it read, so the
+      # two describe one snapshot without reading `generation.json` again.
+      #
+      # @return [Woods::Generation::Marker, nil] nil until a published
+      #   generation has been loaded (and for a flat index without one)
+      attr_reader :loaded_marker
 
       # Cache identity includes the publish token: overlapping writers can
       # legitimately publish the same number with a different immutable payload.
@@ -1309,6 +1318,7 @@ module Woods
         @payload_dir = directory
         @loaded_token = marker.token
         @loaded_generation = marker.number
+        @loaded_marker = marker
       end
 
       # Is there an index here at all?

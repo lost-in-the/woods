@@ -2484,7 +2484,7 @@ module Woods
           resolved = bootstrap_state&.resolved_config
 
           {
-            identity: identity_section(index_dir, manifest),
+            identity: identity_section(index_dir, manifest, reader),
             ready: manifest && !manifest['counts'].to_h.empty?,
             server: {
               name: 'woods',
@@ -2509,13 +2509,21 @@ module Woods
         # and whether that checkout is the client's: the launch directory, or
         # the worktree a routed call named as `root`.
         #
+        # With a pinned +reader+, the generation comes from the reader's loaded
+        # marker beside the +manifest+ it read, so a publication landing after
+        # the pin cannot pair the new generation number with the old manifest.
+        #
         # @return [Hash, nil]
-        def identity_section(index_dir, manifest)
+        def identity_section(index_dir, manifest, reader = nil)
           return unless index_dir
 
           route = Thread.current[WorktreeRouting::THREAD_KEY]
           cwd = route.respond_to?(:root) ? route.root.to_s : Dir.pwd
-          ServedIdentity.read(index_dir, cwd: cwd, manifest: manifest).to_h
+          if reader.respond_to?(:loaded_marker)
+            ServedIdentity.pinned(index_dir, reader: reader, manifest: manifest, cwd: cwd).to_h
+          else
+            ServedIdentity.read(index_dir, cwd: cwd).to_h
+          end
         rescue StandardError => e
           { error: e.class.name }
         end

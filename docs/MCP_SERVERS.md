@@ -194,6 +194,10 @@ compare as they always did.
 Identity costs two small file reads (`generation.json` and the manifest) and
 the client checkout's `HEAD` file before the handshake. A git-loaded reader runs
 `git rev-parse` on its own checkout only when the manifest records a revision.
+The manifest is the one that same `generation.json` read names, and
+`woods_status` takes both from the generation its call pinned, so generation,
+commit and writer build always describe one snapshot even while a new
+generation is being published.
 
 ### Initialization guidance
 
