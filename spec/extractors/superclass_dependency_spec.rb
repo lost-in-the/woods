@@ -167,6 +167,83 @@ RSpec.describe Woods::Extractors::SuperclassDependency do
       .to eq(type: :graphql_mutation, target: 'InheritanceFixture::BaseMutation', via: :inheritance)
   end
 
+  # A parent class may define its own `self.name` (a display name, a
+  # registry key). The edge names the constant, never that override (#965).
+  it 'targets the constant name of a parent that overrides self.name' do
+    declare('app/models/inheritance_fixture/named_base.rb',
+            "class InheritanceFixture::NamedBase\n  def self.name = 'NamedBase'\nend\n")
+    declare('app/forms/inheritance_fixture/named_form.rb',
+            "class InheritanceFixture::NamedForm < InheritanceFixture::NamedBase\nend\n")
+
+    expect(resolver.call(InheritanceFixture::NamedForm))
+      .to eq(type: :poro, target: 'InheritanceFixture::NamedBase', via: :inheritance)
+  end
+
+  # Libraries are autoloaded, not eager-loaded, so during extraction a lib
+  # class and its lib parent are still pending autoloads. The parent comes
+  # from the declaration, resolved lexically against what the runtime
+  # registers, and nothing is loaded to find it (#965).
+  describe 'a library that is still a pending autoload' do
+    let(:space) { File.join(tmp_dir, 'lib/inh_pending') }
+
+    after do
+      %i[InhPending InhPendingTop InhPendingBase].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    def ledger(source)
+      Object.autoload(:InhPending, space)
+      create_file('lib/inh_pending/base_client.rb', "module InhPending\n  class BaseClient\n  end\nend\n")
+      create_file('lib/inh_pending/ledger_client.rb', source)
+    end
+
+    it 'resolves a short parent inside its module block without loading either class' do
+      path = ledger("module InhPending\n  class LedgerClient < BaseClient\n  end\nend\n")
+
+      expect(resolver.call('InhPending::LedgerClient', file_path: path))
+        .to eq(type: :lib, target: 'InhPending::BaseClient', via: :inheritance)
+      expect(Object.autoload?(:InhPending)).to eq(space)
+    end
+
+    it 'resolves relative, compact and rooted spellings of the parent' do
+      relative = ledger("module InhPending\n  class LedgerClient < InhPending::BaseClient\n  end\nend\n")
+      expect(resolver.call('InhPending::LedgerClient', file_path: relative)).to include(target: 'InhPending::BaseClient')
+
+      compact = ledger("class InhPending::LedgerClient < InhPending::BaseClient\nend\n")
+      expect(resolver.call('InhPending::LedgerClient', file_path: compact)).to include(target: 'InhPending::BaseClient')
+
+      rooted = ledger("module InhPending\n  class LedgerClient < ::InhPending::BaseClient\n  end\nend\n")
+      expect(resolver.call('InhPending::LedgerClient', file_path: rooted)).to include(target: 'InhPending::BaseClient')
+    end
+
+    it 'resolves a top-level library parent' do
+      base = create_file('lib/inh_pending_base.rb', "class InhPendingBase\nend\n")
+      top = create_file('lib/inh_pending_top.rb', "class InhPendingTop < InhPendingBase\nend\n")
+      Object.autoload(:InhPendingBase, base)
+      Object.autoload(:InhPendingTop, top)
+
+      expect(resolver.call('InhPendingTop', file_path: top))
+        .to eq(type: :lib, target: 'InhPendingBase', via: :inheritance)
+    end
+
+    it 'emits nothing for a parent the runtime does not know or a framework parent' do
+      missing = ledger("module InhPending\n  class LedgerClient < MissingBase\n  end\nend\n")
+      expect(resolver.call('InhPending::LedgerClient', file_path: missing)).to be_nil
+
+      framework = ledger("module InhPending\n  class LedgerClient < StandardError\n  end\nend\n")
+      expect(resolver.call('InhPending::LedgerClient', file_path: framework)).to be_nil
+    end
+
+    it 'never reads a declaration from a file the autoload does not place the class in' do
+      ledger("module InhPending\n  class LedgerClient < BaseClient\n  end\nend\n")
+      stray = create_file('lib/vendored/ledger_client.rb',
+                          "module InhPending\n  class LedgerClient < BaseClient\n  end\nend\n")
+
+      expect(resolver.call('InhPending::LedgerClient', file_path: stray)).to be_nil
+    end
+  end
+
   describe 'a declared identifier' do
     it 'resolves the loaded class the file owns and reads its runtime parent' do
       declare('app/services/inheritance_fixture/application_service.rb',

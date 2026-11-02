@@ -3783,6 +3783,29 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # RadiusBridge#radius_parts, itself through RadiusLink's belongs_to. The
     # owner's published foreign key is RadiusLink's, two association hops
     # from RadiusLink's file.
+    # A library and its library parent stay pending autoloads during
+    # extraction, so the edge comes from the child's declaration (#965).
+    # Without it the walk cannot reach the child from its parent at all.
+    def write_pending_library(base_body = '')
+      write_file('lib/pend_inh/base_client.rb', "module PendInh\n  class BaseClient\n#{base_body}  end\nend\n")
+      write_file('lib/pend_inh/ledger_client.rb', "module PendInh\n  class LedgerClient < BaseClient\n  end\nend\n")
+      'lib/pend_inh/base_client.rb'
+    end
+
+    it 'records the inheritance edge of a pending library and keeps it equivalent as its parent changes' do
+      write_pending_library
+      Object.autoload(:PendInh, app_path('lib/pend_inh'))
+
+      index = run_sequence([-> { write_pending_library("    def ledger = :changed\n") }])
+
+      child = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'PendInh::LedgerClient' }
+      expect(child.fetch('dependencies'))
+        .to include(include('type' => 'lib', 'target' => 'PendInh::BaseClient', 'via' => 'inheritance'))
+      expect(Object.autoload?(:PendInh)).to eq(app_path('lib/pend_inh'))
+    ensure
+      Object.send(:remove_const, :PendInh) if Object.const_defined?(:PendInh, false)
+    end
+
     def through_chain_sources
       {
         'radius_owner' => "class RadiusOwner < ApplicationRecord\n  self.table_name = 'posts'\n  " \
