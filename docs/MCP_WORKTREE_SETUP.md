@@ -63,11 +63,17 @@ How routing works:
 - **Refusals.** A path outside the allowlist, a relative path or a non-string is `invalid_params` with `argument: "root"` and `accepted_roots` in `_meta`. A listed worktree with no published index is `not_found` with `argument: "root"`.
 - **No inference.** Without `root` the call is served from the index the server was started with, exactly as before. The caller's working directory is never consulted.
 
-`woods_status` lists the worktrees it can route to under `worktrees`: each with `root`, `index_dir`, `default`, `state` (`indexed`, `unextracted` or `missing`), `generation`, `git_branch`, `git_sha` and `watch` (the watch daemon's state, pid and host). With `root`, the rest of the report describes that worktree's index. The `retriever`, `bootstrap` and `features` sections still describe the server.
+By default `woods_status` summarizes the other worktrees it can route to under `worktrees`, so its size does not grow with the number of checkouts. The summary excludes the worktree the call describes (the launch one, or the one named by `root`), because the rest of the report already covers it:
+
+```json
+"worktrees": { "scope": "other_checkouts", "count": 3, "by_state": { "indexed": 1, "unextracted": 1, "missing": 1, "unreadable": 0 } }
+```
+
+Pass `worktrees: "list"` for one entry per worktree, the served one included: each with `root`, `index_dir`, `default`, `state` (`indexed`, `unextracted`, `missing` or `unreadable`), `generation`, `git_branch`, `git_sha` and `watch` (the watch daemon's state, pid and host). `worktrees: "none"` omits the section. With `root`, the rest of the report describes that worktree's index. The `retriever`, `bootstrap` and `features` sections still describe the server.
 
 `codebase_retrieve`, the pipeline, feedback and snapshot tools, `reload` and the MCP resources are bound to the served index and take no `root`.
 
-**For subagents:** give each subagent the absolute path of the worktree it edits and tell it to pass that as `root` on every Woods call. Run `woods:extract` (or `woods:incremental` under a watch daemon) in that worktree first, then check `woods_status` for its entry. A subagent that omits `root` is answered from the parent's index, with no warning.
+**For subagents:** give each subagent the absolute path of the worktree it edits and tell it to pass that as `root` on every Woods call. Run `woods:extract` (or `woods:incremental` under a watch daemon) in that worktree first, then check `woods_status` with `worktrees: "list"` for its entry. A subagent that omits `root` is answered from the parent's index, with no warning.
 
 ## Seed a new worktree's index
 

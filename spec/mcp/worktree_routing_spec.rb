@@ -174,8 +174,8 @@ RSpec.describe 'Index MCP per-call worktree root' do
     expect(response.dig('result', '_meta', 'accepted_roots')).to eq([])
   end
 
-  it 'lists each worktree in woods_status with generation, branch, sha and watcher' do
-    worktrees = JSON.parse(result_text(rpc('woods_status', {})))['worktrees']
+  it 'lists each worktree in woods_status with generation, branch, sha and watcher when asked' do
+    worktrees = JSON.parse(result_text(rpc('woods_status', { 'worktrees' => 'list' })))['worktrees']
     by_root = worktrees.to_h { |entry| [entry['root'], entry] }
 
     expect(by_root.keys).to contain_exactly(main_root, feature_root, bare_root)
@@ -185,6 +185,49 @@ RSpec.describe 'Index MCP per-call worktree root' do
                                              'git_branch' => 'feature')
     expect(by_root[feature_root]['watch']).to include('state' => 'absent')
     expect(by_root[bare_root]).to include('state' => 'unextracted', 'generation' => nil)
+  end
+
+  it 'returns in list mode exactly the per-worktree entries woods_status listed before the summary' do
+    listed = JSON.parse(result_text(rpc('woods_status', { 'worktrees' => 'list' })))['worktrees']
+    router = Woods::MCP::WorktreeRouting::Router.new(reader: Woods::MCP::IndexReader.new(main_index),
+                                                     index_dir: main_index)
+
+    expect(listed).to eq(JSON.parse(JSON.generate(Woods::MCP::Server.worktrees_status(router))))
+  end
+
+  it 'summarizes the other worktrees by state by default, excluding the served one' do
+    missing_root = File.join(base, 'missing')
+    git(main_root, 'worktree', 'add', '-q', '-b', 'missing', missing_root)
+
+    summary = JSON.parse(result_text(rpc('woods_status', {})))['worktrees']
+
+    expect(summary).to eq('scope' => 'other_checkouts', 'count' => 3,
+                          'by_state' => { 'indexed' => 1, 'unextracted' => 1, 'missing' => 1, 'unreadable' => 0 })
+  end
+
+  it 'excludes the worktree named by root from the summary instead of the launch one' do
+    status = JSON.parse(result_text(rpc('woods_status', { 'root' => feature_root })))
+
+    expect(status.dig('index', 'git_branch')).to eq('feature')
+    expect(status['worktrees']).to eq('scope' => 'other_checkouts', 'count' => 2,
+                                      'by_state' => { 'indexed' => 1, 'unextracted' => 1, 'missing' => 0,
+                                                      'unreadable' => 0 })
+  end
+
+  it 'omits the worktrees section when asked for none' do
+    expect(JSON.parse(result_text(rpc('woods_status', { 'worktrees' => 'none' })))).not_to have_key('worktrees')
+  end
+
+  it 'keeps the default woods_status size flat as linked worktrees grow to 50' do
+    status_size = ->(arguments) { JSON.generate(JSON.parse(result_text(rpc('woods_status', arguments)))).bytesize }
+    few_default = status_size.call({})
+    few_list = status_size.call({ 'worktrees' => 'list' })
+    47.times { |index| git(main_root, 'worktree', 'add', '-q', '-b', "wt#{index}", File.join(base, "wt#{index}")) }
+
+    summary = JSON.parse(result_text(rpc('woods_status', {})))['worktrees']
+    expect(summary['count']).to eq(49)
+    expect(status_size.call({})).to be_within(16).of(few_default)
+    expect(status_size.call({ 'worktrees' => 'list' }) - few_list).to be > 47 * 100
   end
 
   it 'adds root to the schema of the read tools and nothing else' do

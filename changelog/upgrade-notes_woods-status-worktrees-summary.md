@@ -1,0 +1,1 @@
+- `woods_status`'s `worktrees` section is now a summary object rather than an array of per-checkout entries. A client that read `root`, `state`, `generation`, `git_branch`, `git_sha` or `watch` from each entry passes `worktrees: "list"` to get the previous array unchanged.

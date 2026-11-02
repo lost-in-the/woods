@@ -137,6 +137,12 @@ module Woods
           real(entry.index_dir) == real(@index_dir)
         end
 
+        # Whether +entry+ is the worktree the in-flight call describes: the
+        # `root` it named, or the launch worktree when it named none.
+        def served?(entry)
+          real(entry.index_dir) == real(current_index_dir)
+        end
+
         # The reader cached for +entry+, or nil when it has no published index.
         # Does not raise for an unextracted worktree.
         def reader_if_indexed(entry)
