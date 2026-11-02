@@ -21,6 +21,19 @@ module Woods
     # * **stopped** — nothing is maintaining this index. Fall back to whatever
     #   the last explicit run left.
     #
+    # Two more states exist only on the read side, because a daemon cannot
+    # amend its own record after it dies (see {#report}):
+    #
+    # * **stale** — the record claims `running` or `degraded` but is older than
+    #   {STALE_AFTER}; whatever wrote it has stopped heartbeating.
+    # * **dead** — the record names a same-host pid that no longer exists.
+    # * **unverified** — a fresh record from another host that this reader is
+    #   not opted in to trust (see {#alive?}); the daemon may well be alive in
+    #   its container, but nothing here can say so.
+    #
+    # The daemon never writes any of these; {#write} rejects them. The recorded state
+    # travels alongside as `recorded_state` so no reader loses information.
+    #
     # Degraded is the important one. #164's failure posture is that a daemon
     # never crash-loops and never publishes a partial write, which means it
     # spends real time in a state where the answer it can give is out of date.
@@ -29,6 +42,9 @@ module Woods
       FILENAME = 'watch_status.json'
 
       STATES = %i[running degraded stopped].freeze
+
+      # States only a reader derives; see {#report}.
+      DERIVED_STATES = %i[stale dead unverified].freeze
 
       # A status record older than this is not believed, however healthy it
       # claims to be. The daemon heartbeats every five minutes, including
@@ -110,6 +126,34 @@ module Woods
         process_alive?(record['pid'])
       end
 
+      # The record as a reader should believe it.
+      #
+      # `state` is whatever the daemon last wrote, and a daemon killed with
+      # `kill -9` leaves `running` behind forever. {#alive?} already knows
+      # better, but a consumer that reads `state` and ignores `alive` concludes
+      # the index is being kept fresh. Here the two agree: `state` becomes
+      # `stale` when the record has aged past +max_age+, `dead` when it names a
+      # same-host pid that no longer exists, and stays as recorded only while
+      # the daemon is alive. The daemon's own word is kept as `recorded_state`.
+      #
+      # A fresh foreign-host record that this reader is not opted in to trust
+      # is neither provably dead nor stale, but reporting it as `running` beside
+      # `alive: false` is the contradiction this exists to remove: it becomes
+      # `unverified`. `dead` and `stale` are only ever claimed on evidence.
+      #
+      # @param max_age [Numeric] see {#alive?}
+      # @param trust_foreign_host [Boolean] see {#alive?}
+      # @return [Hash] string-keyed record with `state`, `recorded_state`, `alive`
+      def report(max_age: STALE_AFTER, trust_foreign_host: ENV['WOODS_WATCH_TRUST_FOREIGN_HOST'] == '1')
+        record = read
+        alive = alive?(max_age: max_age, trust_foreign_host: trust_foreign_host)
+        record.merge(
+          'state' => derived_state(record, alive: alive, max_age: max_age),
+          'recorded_state' => record['state'],
+          'alive' => alive
+        )
+      end
+
       # The identity a pid is only meaningful within.
       #
       # In a container the hostname defaults to the container id, so this
@@ -124,6 +168,25 @@ module Woods
       end
 
       private
+
+      # `dead` outranks `stale`: a vanished pid is direct evidence, an old
+      # timestamp only circumstantial. A record the daemon itself marked
+      # `stopped` is left alone — there is nothing to derive. Whatever claims
+      # `running` or `degraded` while `alive?` says no is never reported as such.
+      def derived_state(record, alive:, max_age:)
+        recorded = record['state']
+        return recorded if alive || !%w[running degraded].include?(recorded)
+        return 'dead' if known_dead?(record)
+        return 'stale' unless recent?(record['updated_at'], max_age)
+
+        'unverified'
+      end
+
+      # Only a same-host pid can be checked; a foreign one is never declared dead.
+      def known_dead?(record)
+        pid = record['pid']
+        same_host?(record['host']) && pid.is_a?(Integer) && pid.positive? && !process_alive?(pid)
+      end
 
       # A pid is only meaningful inside the namespace that issued it.
       #

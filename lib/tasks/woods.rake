@@ -306,10 +306,15 @@ namespace :woods do
     output_dir = ENV.fetch('WOODS_OUTPUT') { File.join(Woods::RakeHelpers.woods_task_root, 'tmp/woods') }
     status = Woods::Watch::Status.new(output_dir: output_dir)
 
-    puts JSON.pretty_generate(status.read)
+    # `report`, not `read`: `state` is derived from liveness at read time, so a
+    # daemon that died without clearing its record shows `dead` or `stale`
+    # rather than the `running` it last wrote. The daemon's own word
+    # is kept as `recorded_state`.
+    report = status.report
+    puts JSON.pretty_generate(report)
     # Exit status is the point: a worktree hook can `rake woods:watch_status ||
     # start_daemon` without parsing anything.
-    exit(status.alive? ? 0 : 1)
+    exit(report['alive'] ? 0 : 1)
   end
 
   desc 'Re-run named extractors wholesale, e.g. woods:refresh[routes,middleware]'

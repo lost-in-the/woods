@@ -124,4 +124,74 @@ RSpec.describe Woods::Watch::Status do
       expect(soon.alive?).to be true
     end
   end
+
+  # A daemon that dies cannot amend its own record, so `running` outlives the
+  # process that wrote it. The reported `state` is derived from liveness at
+  # read time and the daemon's word is kept as `recorded_state`.
+  describe '#report' do
+    let(:now) { Time.utc(2026, 1, 1, 12, 0, 0) }
+    let(:writer) { described_class.new(output_dir: output_dir, clock: -> { now.iso8601 }) }
+
+    def reader(at: now)
+      described_class.new(output_dir: output_dir, clock: -> { at.iso8601 })
+    end
+
+    it 'reports running while the daemon is alive' do
+      writer.write(state: :running, generation: 3)
+      allow(Process).to receive(:kill).with(0, Process.pid).and_return(1)
+
+      expect(reader.report).to include('state' => 'running', 'recorded_state' => 'running',
+                                       'alive' => true, 'generation' => 3)
+    end
+
+    it 'leaves a degraded daemon degraded while it is alive' do
+      writer.write(state: :degraded, reason: 'reload failed')
+      allow(Process).to receive(:kill).with(0, Process.pid).and_return(1)
+
+      expect(reader.report).to include('state' => 'degraded', 'recorded_state' => 'degraded',
+                                       'alive' => true, 'reason' => 'reload failed')
+    end
+
+    it 'reports dead when the same-host pid is gone' do
+      writer.write(state: :running)
+      allow(Process).to receive(:kill).with(0, Process.pid).and_raise(Errno::ESRCH)
+
+      expect(reader.report).to include('state' => 'dead', 'recorded_state' => 'running', 'alive' => false)
+    end
+
+    it 'reports stale when the record has outlived STALE_AFTER' do
+      writer.write(state: :running, host: 'another-container')
+
+      report = reader(at: now + described_class::STALE_AFTER + 60).report(trust_foreign_host: true)
+      expect(report).to include('state' => 'stale', 'recorded_state' => 'running', 'alive' => false)
+    end
+
+    it 'prefers dead over stale when both hold' do
+      writer.write(state: :running)
+      allow(Process).to receive(:kill).with(0, Process.pid).and_raise(Errno::ESRCH)
+
+      expect(reader(at: now + described_class::STALE_AFTER + 60).report).to include('state' => 'dead')
+    end
+
+    # The field case: written inside a container, read on the host. Neither
+    # dead nor stale, but `running` beside `alive: false` is the contradiction.
+    it 'reports a fresh foreign record it is not trusted to check as unverified' do
+      writer.write(state: :degraded, host: 'another-container', reason: 'reload failed')
+
+      expect(reader.report(trust_foreign_host: false))
+        .to include('state' => 'unverified', 'recorded_state' => 'degraded', 'alive' => false)
+      expect(reader.report(trust_foreign_host: true))
+        .to include('state' => 'degraded', 'recorded_state' => 'degraded', 'alive' => true)
+    end
+
+    it 'leaves stopped alone' do
+      writer.write(state: :stopped)
+
+      expect(reader.report).to include('state' => 'stopped', 'recorded_state' => 'stopped', 'alive' => false)
+    end
+
+    it 'reports stopped with its reason when no daemon has run' do
+      expect(reader.report).to include('state' => 'stopped', 'recorded_state' => 'stopped', 'alive' => false)
+    end
+  end
 end

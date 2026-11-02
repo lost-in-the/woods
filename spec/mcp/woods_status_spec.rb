@@ -266,7 +266,7 @@ RSpec.describe 'woods_status tool' do
         Woods::Watch::Status.new(output_dir: index_dir)
                             .write(state: :running, host: 'another-container')
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return(nil)
-        expect(status_for[:watch]).to include(state: 'running', alive: false)
+        expect(status_for[:watch]).to include(state: 'unverified', recorded_state: 'running', alive: false)
 
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
         expect(status_for[:watch]).to include(state: 'running', alive: true)
@@ -280,7 +280,19 @@ RSpec.describe 'woods_status tool' do
         Woods::Watch::Status.new(output_dir: index_dir)
                             .write(state: :running, generation: 7, last_action: 'incremental')
 
-        expect(status_for[:watch]).to include(state: 'running', generation: 7, last_action: 'incremental')
+        expect(status_for[:watch]).to include(state: 'running', recorded_state: 'running', alive: true,
+                                              generation: 7, last_action: 'incremental')
+      end
+
+      # A daemon killed with SIGKILL leaves `running` behind. `state` is derived
+      # from liveness so a reader branching on it alone sees `dead`, and the
+      # daemon's last word survives as `recorded_state`.
+      it 'reports a daemon whose pid is gone as dead rather than running' do
+        Woods::Watch::Status.new(output_dir: index_dir).write(state: :running, generation: 7)
+        allow(Process).to receive(:kill).and_call_original
+        allow(Process).to receive(:kill).with(0, Process.pid).and_raise(Errno::ESRCH)
+
+        expect(status_for[:watch]).to include(state: 'dead', recorded_state: 'running', alive: false)
       end
 
       # The state that matters: alive, but the index is frozen and the reason
