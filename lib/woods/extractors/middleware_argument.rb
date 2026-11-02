@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'source_origin'
+
 module Woods
   module Extractors
     # Stable, readable middleware arguments without inspecting opaque runtime state.
@@ -22,7 +24,7 @@ module Woods
           pairs = value.map { |key, item| "#{render(key, ancestors, nested: true)}=>#{render(item, ancestors, nested: true)}" }
           "{#{pairs.join(', ')}}"
         when Module then module_name(value)
-        when Proc then "#<#{value.lambda? ? 'lambda' : 'Proc'} #{value.source_location&.join(':') || 'native'}>"
+        when Proc then "#<#{value.lambda? ? 'lambda' : 'Proc'} #{site(value.source_location)}>"
         else
           # Only Object's identity-based implementation is replaced. Never scrub
           # arbitrary hex strings or override application-defined textual values.
@@ -39,9 +41,23 @@ module Woods
 
         parent = value.is_a?(Class) ? " < #{module_name(value.superclass)}" : ''
         methods = (value.instance_methods(false) + value.private_instance_methods(false)).uniq.sort.map do |name|
-          "#{name}@#{value.instance_method(name).source_location&.join(':') || 'native'}"
+          "#{name}@#{site(value.instance_method(name).source_location)}"
         end
         "#<anonymous #{value.class}#{parent}#{" (#{methods.join(', ')})" unless methods.empty?}>"
+      end
+
+      # A source site that names what defines it, not where this machine
+      # installed it: an application file root-relative, a gem file by its
+      # gem (`woods-1.0.0/lib/woods/railtie.rb`), as callback labels are
+      # ({SourceOrigin.location}, #968).
+      #
+      # @param location [Array(String, Integer), nil] a +source_location+
+      # @return [String]
+      def site(location)
+        return 'native' unless location
+
+        path, line = location
+        "#{SourceOrigin.location(path)}:#{line}"
       end
 
       # Ruby temporary names are explicitly not constant paths and can contain
