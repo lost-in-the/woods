@@ -287,6 +287,62 @@ module Woods
         end
       end
 
+      # Raised at a {#yield_point!} inside {#yielding_to_drains} when another
+      # thread is waiting for the held generation pins to drain. Unwinding
+      # releases this thread's pins (and any lock taken inside them), and
+      # {#yielding_to_drains} runs its block again once the waiter is through.
+      class PinYielded < StandardError; end
+
+      YIELDING_KEY = :woods_index_reader_yielding
+      private_constant :YIELDING_KEY
+
+      # Run work that holds generation pins for a long time but may give them
+      # up and start over: the background cache warm-up (WDS-78).
+      #
+      # An ordinary pin holder is never interrupted; an exclusive reload or a
+      # refresh drain (MCP-5) waits for it, and while it waits every NEW pin
+      # waits behind it. For a request-sized pin that is the point. For the
+      # warm-up, which pins for the whole corpus read (seconds on a large
+      # index), it would turn one `reload`, or one publish, into a stall of
+      # every tool call until the warm-up ends, past any wait cap. Inside this
+      # block {#yield_point!} unwinds instead, and the block is retried: its
+      # next pin waits for the reload or refresh like any new pin, then warms
+      # the generation that is now current. A warm-up yields only to a waiter,
+      # never to plain traffic, so it always finishes once waiters stop.
+      #
+      # @yield the work to run; must be safe to run again from the start
+      # @return [Object] the block's value
+      def yielding_to_drains
+        previous = Thread.current[YIELDING_KEY]
+        Thread.current[YIELDING_KEY] = self
+        begin
+          yield
+        rescue PinYielded
+          retry
+        ensure
+          Thread.current[YIELDING_KEY] = previous
+        end
+      end
+
+      # A safe point in long pinned work: inside {#yielding_to_drains}, raise
+      # {PinYielded} when a pin drain is being waited for; anywhere else, a
+      # no-op. Nothing built since the last safe point may be published
+      # before it, so callers place it before work, not after.
+      #
+      # @return [void]
+      # @raise [PinYielded]
+      def yield_point!
+        return unless Thread.current[YIELDING_KEY].equal?(self)
+
+        raise PinYielded, 'yielding generation pins to a waiting reload or refresh' if drain_requested?
+      end
+
+      # @return [Boolean] true while an exclusive reload or a refresh drain is
+      #   waiting for the held pins to be released
+      def drain_requested?
+        @freshness_mutex.synchronize { @exclusive_waiters.positive? || @refresh_waiters.positive? }
+      end
+
       # Pre-populate cached state so the first MCP tool call doesn't pay
       # for disk reads + JSON parsing.
       #
@@ -1402,11 +1458,18 @@ module Woods
           identifier_map: -> { identifier_map }
         }
         steps.each_with_object({}) do |(step, runner), result|
-          runner.call
-          result[step] = true
-        rescue StandardError => e
-          result[step] = e
+          # Outside the per-step rescue, which would swallow the unwind.
+          yield_point!
+          result[step] = warmup_step(runner)
         end
+      end
+
+      # @return [true, StandardError]
+      def warmup_step(runner)
+        runner.call
+        true
+      rescue StandardError => e
+        e
       end
 
       # Compile a case-insensitive regex from a query string.

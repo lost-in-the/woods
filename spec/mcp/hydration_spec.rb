@@ -2,6 +2,9 @@
 
 require 'spec_helper'
 require 'json'
+require 'tmpdir'
+require 'fileutils'
+require 'timeout'
 require 'mcp'
 require 'woods'
 require 'woods/dependency_graph'
@@ -227,6 +230,155 @@ RSpec.describe Woods::MCP::Hydration do
       initialize_request(server)
       wait_until { server.woods_hydration.done? }
       expect(order.size.times.map { order.pop }).to eq(%i[reader retriever])
+    end
+  end
+
+  # The stubs above hold IndexReader#warmup! before it takes any lock, so they
+  # cannot show a call blocking on a lock the warm-up holds. These hold the
+  # real PublishedLexicalRetriever's corpus build inside the `woods-hydration`
+  # thread, where it holds both the retriever's snapshot mutex and a reader
+  # generation pin.
+  describe 'contention with the real lexical retriever' do
+    let(:index_dir) { Dir.mktmpdir('woods-hydration-contention') }
+    let(:retriever) { Woods::MCP::PublishedLexicalRetriever.new(index_dir: index_dir) }
+    let(:in_corpus) { Queue.new }
+
+    before do
+      Woods.configuration = Woods::Configuration.new
+      FileUtils.cp_r("#{fixture_dir}/.", index_dir)
+    end
+
+    after { FileUtils.rm_rf(index_dir) }
+
+    def build_lexical(**options)
+      Woods::MCP::Server.build(index_dir: index_dir, retriever: retriever, response_format: :json, **options)
+    end
+
+    def hydration_thread?
+      Thread.current.name == 'woods-hydration'
+    end
+
+    # Blocks the warm-up's corpus read on the latch, inside the snapshot mutex.
+    # The latch is re-armed after release so a restarted warm-up passes through.
+    def hold_corpus_on_latch!
+      reader_class = Woods::MCP::IndexReader
+      allow_any_instance_of(reader_class).to receive(:each_unit).and_wrap_original do |original, *args, **opts, &block|
+        if block && hydration_thread?
+          in_corpus << true
+          gate = latch.pop
+          latch << gate unless latch.closed?
+        end
+        original.call(*args, **opts, &block)
+      end
+    end
+
+    # Makes the warm-up's corpus read slow (per unit) instead of stopped, so a
+    # warm-up that yields its generation pin between units can be observed.
+    def slow_corpus!(per_unit: 0.25)
+      fast = false
+      reader_class = Woods::MCP::IndexReader
+      allow_any_instance_of(reader_class).to receive(:each_unit).and_wrap_original do |original, *args, **opts, &block|
+        next original.call(*args, **opts, &block) unless block && hydration_thread?
+
+        in_corpus << true
+        original.call(*args, **opts) do |unit|
+          sleep per_unit unless fast
+          block.call(unit)
+        end
+      end
+      -> { fast = true }
+    end
+
+    def structured(response)
+      response.dig('result', 'structuredContent')
+    end
+
+    it 'answers codebase_retrieve past the cap without waiting on the snapshot lock the warm-up holds' do
+      hold_corpus_on_latch!
+      server = build_lexical
+      hydration = server.woods_hydration
+      allow(hydration).to receive(:wait_cap).and_return(0.01)
+      initialize_request(server)
+      Timeout.timeout(5) { in_corpus.pop }
+
+      call = Thread.new { tool_call(server, 'codebase_retrieve', { 'query' => 'Post' }) }
+
+      expect(call.join(0.25)).not_to be_nil, 'codebase_retrieve is still blocked on the warm-up snapshot lock'
+      response = call.value
+      expect(response).not_to have_key('error')
+      expect(response.dig('result', 'isError')).not_to be(true)
+      expect(structured(response)['data']).to include('status' => 'warming', 'retryable' => true)
+      expect(structured(response)['data']['retry_after_seconds']).to be_a(Numeric)
+      expect(structured(response)['data']).not_to have_key('sources')
+      expect(response.dig('result', '_meta')).to include('hydration' => 'warming', 'retryable' => true)
+      expect(hydration.state).to eq(:warming)
+
+      latch << :go
+      wait_until { hydration.done? }
+      expect(hydration.state).to eq(:ready)
+
+      warmed = tool_call(server, 'codebase_retrieve', { 'query' => 'Post' }, id: 3)
+      expect(warmed.dig('result', 'isError')).not_to be(true)
+      expect(warmed.dig('result', 'content', 0, 'text')).to include('Post')
+    end
+
+    it 'answers every other tool from the cold reader while the corpus build is stopped' do
+      hold_corpus_on_latch!
+      server = build_lexical
+      hydration = server.woods_hydration
+      allow(hydration).to receive(:wait_cap).and_return(0.01)
+      initialize_request(server)
+      Timeout.timeout(5) { in_corpus.pop }
+
+      call = Thread.new { tool_call(server, 'lookup', { 'identifier' => 'Post' }) }
+
+      expect(call.join(1)).not_to be_nil, 'lookup is blocked behind the warm-up'
+      expect(tool_json(call.value)['identifier']).to eq('Post')
+      latch << :go
+      wait_until { hydration.done? }
+    end
+
+    it 'yields the warm-up generation pin to a reload, so reload and later calls do not wait for the warm-up' do
+      finish = slow_corpus!
+      server = build_lexical
+      hydration = server.woods_hydration
+      allow(hydration).to receive(:wait_cap).and_return(0.01)
+      initialize_request(server)
+      Timeout.timeout(5) { in_corpus.pop }
+
+      reload = Thread.new { tool_call(server, 'reload', {}, id: 3) }
+      sleep 0.05
+      lookup = Thread.new { tool_call(server, 'lookup', { 'identifier' => 'Post' }, id: 4) }
+
+      expect(reload.join(1.5)).not_to be_nil, 'reload is waiting for the warm-up generation pin'
+      expect(lookup.join(1.5)).not_to be_nil, 'lookup is queued behind a reload waiting on the warm-up'
+      expect(tool_json(reload.value)['reloaded']).to be(true)
+      expect(tool_json(lookup.value)['identifier']).to eq('Post')
+
+      finish.call
+      wait_until { hydration.done? }
+      expect(hydration.state).to eq(:ready)
+    end
+
+    it 'yields the warm-up generation pin when a generation is published mid-warm-up' do
+      generation = Woods::Generation.new(output_dir: index_dir)
+      generation.bump!(reason: 'full')
+      finish = slow_corpus!
+      server = build_lexical
+      hydration = server.woods_hydration
+      allow(hydration).to receive(:wait_cap).and_return(0.01)
+      initialize_request(server)
+      Timeout.timeout(5) { in_corpus.pop }
+
+      generation.bump!(reason: 'incremental')
+      lookup = Thread.new { tool_call(server, 'lookup', { 'identifier' => 'Post' }) }
+
+      expect(lookup.join(1.5)).not_to be_nil, 'lookup is draining the warm-up generation pin'
+      expect(tool_json(lookup.value)['identifier']).to eq('Post')
+
+      finish.call
+      wait_until { hydration.done? }
+      expect(hydration.state).to eq(:ready)
     end
   end
 

@@ -256,10 +256,28 @@ and still describes the semantic stores.
 
 A tool call that arrives during the warm-up waits for it to finish, up to
 `WOODS_MCP_HYDRATION_WAIT_SECONDS` (default 30), then dispatches against the
-warmed caches. Past the cap, or after a failed warm-up, it answers from the
-cold reader: every cache fills lazily on first use, so the answer is the
-same, only slower, and nothing is answered from a partially built cache.
-`woods_status` and `reload` never wait. A client that skips the legacy
+warmed caches. After a failed warm-up it answers from the cold reader. Past
+the cap the call no longer waits on anything the warm-up holds:
+
+- Every reader-backed tool (`lookup`, `search`, the traversals, resources and
+  the rest) answers from the cold reader: every cache fills lazily on first
+  use, so the answer is the same, only slower, and nothing is answered from a
+  partially built cache.
+- `codebase_retrieve` in lexical mode needs the whole corpus, and building
+  it is the warm-up's job. Rather than build a second copy (as slow as the
+  warm-up and doubling its memory), it answers a non-error, retryable
+  `warming` result: `structuredContent.data.status` is `warming`,
+  `retryable` is `true`, `retry_after_seconds` is set, `hydration` carries
+  the `woods_status` section, and there are no sources, so it can never pass
+  for "no matches". The text says the same. A retry waits for the warm-up
+  again, up to the cap. In semantic mode there is no corpus warm-up and
+  `codebase_retrieve` answers as before.
+
+`woods_status` and `reload` never wait for the warm-up. A `reload`, or a
+newly published generation, that needs the warm-up's generation pins
+released does not queue behind it either: the warm-up gives its pins up,
+lets the reload or refresh through, and starts again on the generation that
+is then current. A client that skips the legacy
 handshake (`server/discover`) starts the warm-up with its first tool call.
 While the warm-up parses a large index, concurrent calls can pause for a
 garbage-collection cycle of a few seconds; that is latency, not a wrong
