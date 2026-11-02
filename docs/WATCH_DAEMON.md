@@ -353,6 +353,17 @@ within a debounce window), `degraded` (alive but *cannot* update, index frozen
 at a known generation, reason attached), `stopped` (nothing is maintaining this
 index). A stale answer is only dangerous when nothing says so.
 
+The file holds the daemon's last word, and a daemon that dies cannot amend it.
+Readers (`woods:watch_status`, `woods_status`) therefore derive the `state`
+they report from liveness at read time: `stale` when the record is older than
+`stale_after_seconds` (15 minutes, two missed heartbeats), `dead` when it names
+a same-host pid that no longer exists. `running` and `degraded` are reported
+only while the daemon is alive. The raw value travels alongside as
+`recorded_state`, and `alive` is the same verdict as the exit status. A fresh
+record from another host that the reader is not opted in to trust (below) is
+neither provably dead nor stale, so it keeps its recorded state with
+`alive: false`.
+
 The extractor publishes `generation.json` as the last write of a run, before
 the daemon can write the cycle's outcome. While a cycle runs, the record says
 so: `"cycle": "extracting"`, with `cycle_kind` (`full` or `incremental`) and
@@ -769,7 +780,9 @@ party) behaves exactly as it always did.
     "staleness_seconds": 12
   },
   "watch": {
-    "state": "degraded",                  // running | degraded | stopped | absent
+    "state": "degraded",                  // running | degraded | stale | dead | stopped | absent
+    "recorded_state": "degraded",         // what the daemon last wrote; stale/dead are derived at read time
+    "alive": true,
     "reason": "SyntaxError: unexpected end-of-input",
     "generation": 41
   } }

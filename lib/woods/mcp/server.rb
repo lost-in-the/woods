@@ -2435,9 +2435,9 @@ module Woods
           path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
           return { state: 'absent' } unless File.exist?(path)
 
-          status = Woods::Watch::Status.new(output_dir: index_dir)
-          record = status.read
-          { state: record['state'], alive: status.alive?, pid: record['pid'], host: record['host'] }
+          record = Woods::Watch::Status.new(output_dir: index_dir).report
+          { state: record['state'], recorded_state: record['recorded_state'], alive: record['alive'],
+            pid: record['pid'], host: record['host'] }
         rescue StandardError
           { state: 'absent' }
         end
@@ -2670,7 +2670,10 @@ module Woods
         # (current, or current within a debounce window), `degraded` (alive but
         # unable to update — the reason says why, and the index is frozen at a
         # known generation), and `stopped`/`absent` (nothing is maintaining
-        # this index; fall back to whatever the last explicit run left).
+        # this index; fall back to whatever the last explicit run left). Two
+        # more are derived at read time, since a dead daemon cannot amend its
+        # own record: `stale` (older than `stale_after_seconds`) and `dead`
+        # (same-host pid gone). See {Woods::Watch::Status#report}.
         #
         # @return [Hash]
         def watch_section(index_dir)
@@ -2679,22 +2682,22 @@ module Woods
           path = File.join(index_dir.to_s, Woods::Watch::Status::FILENAME)
           return { state: 'absent' } unless File.exist?(path)
 
-          # AtomicFile.read: the daemon's reasons contain em dashes, and a
-          # US-ASCII default external encoding turns a plain File.read of them
-          # into an Encoding::InvalidByteSequenceError — raising out of
-          # woods_status entirely rather than degrading it.
-          record = JSON.parse(Woods::AtomicFile.read(path))
-          # `state` is whatever the daemon last wrote, and a `kill -9`'d daemon
-          # leaves `running` behind forever. `alive?` adds the two checks that
-          # catch that — a recent record and, for local hosts, a live pid — so the
-          # payload can distinguish "maintaining this index" from "claimed to be,
-          # once". Reported as a separate field rather than by overwriting
-          # `state`, because the recorded state and the liveness verdict answer
-          # different questions and an operator wants both.
-          status = Woods::Watch::Status.new(output_dir: index_dir)
-          section = { state: record['state'], reason: record['reason'], generation: record['generation'],
+          # `recorded_state` is whatever the daemon last wrote, and a `kill -9`'d
+          # daemon leaves `running` behind forever. `state` is derived from the
+          # liveness verdict at read time (`stale`, `dead`) so a reader that
+          # branches on it alone cannot take a dead daemon for a live one
+          # (WDS-108); `alive` and `recorded_state` keep both answers visible.
+          # Parse first so an unreadable file stays `absent` (Status#read would
+          # soften it to a synthetic `stopped`). AtomicFile.read: the daemon's
+          # reasons contain em dashes, and a US-ASCII default external encoding
+          # turns a plain File.read of them into an
+          # Encoding::InvalidByteSequenceError.
+          JSON.parse(Woods::AtomicFile.read(path))
+          record = Woods::Watch::Status.new(output_dir: index_dir).report
+          section = { state: record['state'], recorded_state: record['recorded_state'],
+                      reason: record['reason'], generation: record['generation'],
                       pid: record['pid'], updated_at: record['updated_at'],
-                      alive: status.alive?, stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
+                      alive: record['alive'], stale_after_seconds: Woods::Watch::Status::STALE_AFTER,
                       last_action: record['last_action'], last_duration_ms: record['last_duration_ms'] }
           section.merge(watch_cycle_fields(record, index_dir))
         rescue StandardError
