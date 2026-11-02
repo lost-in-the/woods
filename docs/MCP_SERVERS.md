@@ -163,6 +163,67 @@ of extracted units with verified embedding coverage. Positive counts do not
 prove complete coverage or working provider access. See
 [semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
+### Startup and cache hydration
+
+The Index Server answers `initialize` before it warms its caches. The
+warm-up (the reader's manifest, summary, graph and identifier map, plus the
+lexical corpus in `WOODS_RETRIEVAL_MODE=lexical`) runs on one background
+thread that starts once the `initialize` response has been written, so the
+handshake takes milliseconds on any index size. Before this change the
+server warmed first and answered `initialize` after 9-13 s on an index of
+~11,000 units; a client with a short handshake probe (Claude Code gives up
+at 5 s) recorded the server as rejecting `initialize` and connected only on
+a later pass.
+
+`woods_status` reports the warm-up under `hydration`: `state` is `warming`,
+`ready` or `failed` (with `error.class` and `error.message`), next to
+`warmup` (`after_handshake`, `before_handshake` or `none`), `started_at`,
+`finished_at` and `duration_seconds`. The `bootstrap` section is unchanged
+and still describes the semantic stores.
+
+A tool call that arrives during the warm-up waits for it to finish, up to
+`WOODS_MCP_HYDRATION_WAIT_SECONDS` (default 30), then dispatches against the
+warmed caches. After a failed warm-up it answers from the cold reader. Past
+the cap the call no longer waits on anything the warm-up holds:
+
+- Every reader-backed tool (`lookup`, `search`, the traversals, resources and
+  the rest) answers from the cold reader: every cache fills lazily on first
+  use, so the answer is the same, only slower, and nothing is answered from a
+  partially built cache.
+- `codebase_retrieve` in lexical mode needs the whole corpus, and building
+  it is the warm-up's job. Rather than build a second copy (as slow as the
+  warm-up and doubling its memory), it answers a non-error, retryable
+  `warming` result: `structuredContent.data.status` is `warming`,
+  `retryable` is `true`, `retry_after_seconds` is set, `hydration` carries
+  the `woods_status` section, and there are no sources, so it can never pass
+  for "no matches". The text says the same. A retry waits for the warm-up
+  again, up to the cap. In semantic mode there is no corpus warm-up and
+  `codebase_retrieve` answers as before.
+
+`woods_status` and `reload` never wait for the warm-up. A `reload`, or a
+newly published generation, that needs the warm-up's generation pins
+released does not queue behind it either: the warm-up gives its pins up,
+lets the reload or refresh through, and starts again on the generation that
+is then current. A client that skips the legacy
+handshake (`server/discover`) starts the warm-up with its first tool call.
+While the warm-up parses a large index, concurrent calls can pause for a
+garbage-collection cycle of a few seconds; that is latency, not a wrong
+answer.
+
+Embedding the server: `Woods::MCP::Server.build(warmup:)` takes
+`:after_handshake` (the default), `:before_handshake` (warm synchronously
+inside `build`, before the transport starts, the behaviour of earlier
+releases; a warm-up exception propagates out of `build`) or `:none`. `true`
+and `false` still mean the default and `:none`. Over stdio, use
+`Woods::MCP::StdioTransport`: it starts the warm-up only after the handshake
+response is flushed. On the HTTP transport the warm-up starts as the
+`initialize` handler returns.
+
+The self-map server (`bin/woods-self-mcp`) is the same Index Server, so a
+launch that finds a built map answers `initialize` at once too. A first
+launch still builds the map before the server starts: the Index Server
+cannot boot against a directory that holds no published generation yet.
+
 ### Tools (31 — 15 registered in the packaged default)
 
 The Index Server defines 31 schemas across core and conditional capabilities. The normal packaged executable registers the 15 tools below; the remaining schemas require the specialized wiring described afterward.

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'hydration'
 require_relative 'index_reader'
 require_relative '../retriever'
 require_relative '../storage/metadata_store'
@@ -49,7 +50,7 @@ module Woods
           result.sources.each { |source| source[:generation] = reader.loaded_generation }
           result
         end
-      rescue Retriever::StoreError
+      rescue Retriever::StoreError, Hydration::Warming
         raise
       rescue StandardError => e
         raise if e.is_a?(Woods::InvalidQueryError) || e.is_a?(ArgumentError)
@@ -93,22 +94,44 @@ module Woods
         raise IOError, 'missing or escaping generation payload'
       end
 
+      # A call answered past the hydration wait cap ({Hydration.past_cap?})
+      # never queues on the snapshot mutex: the thread holding it is building
+      # the corpus (the background warm-up, or another request), and waiting
+      # for that build is exactly the wait the cap bounds. It raises
+      # {Hydration::Warming} instead, which `codebase_retrieve` answers as a
+      # retryable "warming" result. A free mutex is taken as usual, so a
+      # past-cap call that finds no build in progress still builds and answers.
       def snapshot_for_reader
-        @snapshot_mutex.synchronize do
-          key = reader.generation_identity
-          # Flat legacy indexes have no immutable generation identity. Rebuild
-          # each time instead of serving changed files from a permanent cache.
-          return @snapshot.last if key.first && @snapshot&.first == key
+        return @snapshot_mutex.synchronize { current_snapshot } unless Hydration.past_cap?
 
-          metadata = Storage::MetadataStore::InMemory.new
-          reader.each_unit do |unit|
-            metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit)
-          end
-          candidate = Retriever.new(vector_store: nil, metadata_store: metadata, graph_store: nil,
-                                    embedding_provider: nil, mode: :lexical)
-          @snapshot = [key.freeze, candidate].freeze
-          candidate
+        raise Hydration::Warming, 'the lexical corpus is being built' unless @snapshot_mutex.try_lock
+
+        begin
+          current_snapshot
+        ensure
+          @snapshot_mutex.unlock
         end
+      end
+
+      # Callers hold `@snapshot_mutex`.
+      def current_snapshot
+        key = reader.generation_identity
+        # Flat legacy indexes have no immutable generation identity. Rebuild
+        # each time instead of serving changed files from a permanent cache.
+        return @snapshot.last if key.first && @snapshot&.first == key
+
+        metadata = Storage::MetadataStore::InMemory.new
+        reader.each_unit do |unit|
+          # The warm-up gives up its pins here when a reload or a refresh is
+          # waiting for them (IndexReader#yielding_to_drains); nothing is
+          # installed, and it rebuilds on the generation that follows.
+          reader.yield_point!
+          metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit)
+        end
+        candidate = Retriever.new(vector_store: nil, metadata_store: metadata, graph_store: nil,
+                                  embedding_provider: nil, mode: :lexical)
+        @snapshot = [key.freeze, candidate].freeze
+        candidate
       end
     end
   end

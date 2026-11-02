@@ -2,10 +2,15 @@
 # Serve Woods' own static self-map over MCP (stdio) to agents working on this
 # repository (#926). Registered in .mcp.json as `woods-self`.
 #
-# The first launch builds the map (about 25 seconds). Later launches serve the
-# existing map at once and refresh it in the background; the server reads the
-# newest published generation on every request, and a refresh whose sources
-# are unchanged publishes nothing. stdout carries only MCP protocol messages.
+# The first launch builds the map (about 25 seconds) before the server starts:
+# the Index Server cannot boot against a directory with no published
+# generation, so a cold launch still answers `initialize` only after the
+# build (WDS-78 covers the warm path; the cold path is open). Later launches
+# serve the existing map at once, answer `initialize` before the server's
+# own cache warm-up, and refresh the map in the background; the server reads
+# the newest published generation on every request, and a refresh whose
+# sources are unchanged publishes nothing. stdout carries only MCP protocol
+# messages.
 #
 #   WOODS_SELF_MAP_OUTPUT   map directory (default: tmp/woods_self_map)
 #   WOODS_SELF_MAP_REFRESH  0 skips the background refresh
