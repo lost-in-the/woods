@@ -11,13 +11,27 @@ module Woods
       module_function
 
       def call(source, identifier)
+        declaration(source, identifier)&.fetch(:parent)
+      end
+
+      # The selected class declaration's parent spelling and the lexical
+      # scopes its parent expression is evaluated in, innermost first: the
+      # qualified names of the enclosing class and module blocks, as
+      # `Module.nesting` reads just outside the class keyword.
+      #
+      # @param source [String] Ruby source
+      # @param identifier [String] the fully qualified class the file declares
+      # @return [Hash, nil] `{ parent: String, nesting: Array<String> }` for a
+      #   class with an explicit constant parent; nil otherwise
+      def declaration(source, identifier)
         parsed = Prism.parse(source)
         return nil unless parsed.success?
 
-        find(parsed.value, identifier, '')&.first
+        match = find(parsed.value, identifier, '', [])
+        match if match&.fetch(:parent)
       end
 
-      def find(node, identifier, namespace)
+      def find(node, identifier, namespace, scopes)
         return unless node
 
         if node.is_a?(Prism::ClassNode) || node.is_a?(Prism::ModuleNode)
@@ -26,14 +40,15 @@ module Woods
 
           qualified = name.start_with?('::') ? name.delete_prefix('::') : [namespace, name].reject(&:empty?).join('::')
           if qualified == identifier
-            return [node.is_a?(Prism::ClassNode) ? constant_name(node.superclass) : nil]
+            parent = node.is_a?(Prism::ClassNode) ? constant_name(node.superclass) : nil
+            return { parent: parent, nesting: scopes }
           end
 
-          return find(node.body, identifier, qualified)
+          return find(node.body, identifier, qualified, [qualified, *scopes])
         end
 
         node.compact_child_nodes.each do |child|
-          match = find(child, identifier, namespace)
+          match = find(child, identifier, namespace, scopes)
           return match if match
         end
         nil

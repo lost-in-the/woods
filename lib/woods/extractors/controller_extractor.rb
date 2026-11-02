@@ -1064,7 +1064,7 @@ module Woods
         parent = controller.superclass
         return nil unless parent.is_a?(Class) && app_defined_controller?(parent)
 
-        { type: :controller, target: parent.name, via: :inheritance }
+        { type: :controller, target: Module.instance_method(:name).bind_call(parent), via: :inheritance }
       end
 
       # ──────────────────────────────────────────────────────────────────────

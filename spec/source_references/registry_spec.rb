@@ -9,14 +9,14 @@ RSpec.describe Woods::SourceReferences::Registry do
   let(:sources) { {} }
   let(:units) { [] }
 
-  def add_unit(name, type: :poro, path: nil, kind: 'class', nesting: nil)
+  def add_unit(name, type: :poro, path: nil, kind: 'class', nesting: nil, declared: "::#{name}", enclosing: [])
     path ||= "#{root}/#{name.gsub('::', '_')}.rb"
     unit = Woods::ExtractedUnit.new(type: type, identifier: name, file_path: path)
     units << unit
     source = (sources[path] ||= { 'declarations' => [], 'references' => [], 'parse_error' => nil })
     source['declarations'] << {
-      'owner' => name, 'name' => "::#{name}", 'kind' => kind,
-      'nesting' => nesting || [name], 'enclosing_nesting' => [], 'line' => 1, 'end_line' => 9
+      'owner' => name, 'name' => declared, 'kind' => kind,
+      'nesting' => nesting || [name], 'enclosing_nesting' => enclosing, 'line' => 1, 'end_line' => 9
     }
     unit
   end
@@ -209,6 +209,25 @@ RSpec.describe Woods::SourceReferences::Registry do
           .to eq(type: :lib, target: 'RefPendingSpace::Inner::HtmlToken', via: :code_reference)
         expect(resolve('::RefPendingSpace::Inner::HtmlToken')).to include(target: 'RefPendingSpace::Inner::HtmlToken')
         expect(Object.autoload?(:RefPendingSpace)).to eq('/application/lib/ref_pending_space')
+      end
+
+      # `module RefPendingSpace` then `class Inner::HtmlToken`: a relative
+      # qualified name inside an enclosing module block.
+      it 'resolves a library declared by a relative qualified name inside its namespace' do
+        add_unit('RefPendingSpace::Inner::HtmlToken', type: :lib,
+                                                      path: '/application/lib/ref_pending_space/inner/html_token.rb',
+                                                      declared: 'Inner::HtmlToken', enclosing: ['RefPendingSpace'])
+
+        expect(resolve('RefPendingSpace::Inner::HtmlToken'))
+          .to eq(type: :lib, target: 'RefPendingSpace::Inner::HtmlToken', via: :code_reference)
+      end
+
+      it 'declines a relative qualified declaration that names another constant' do
+        add_unit('RefPendingSpace::Inner::HtmlToken', type: :lib,
+                                                      path: '/application/lib/ref_pending_space/inner/html_token.rb',
+                                                      declared: 'Other::HtmlToken', enclosing: ['RefPendingSpace'])
+
+        expect(resolve('RefPendingSpace::Inner::HtmlToken')).to be_nil
       end
 
       it 'declines a library file away from the conventional path' do
