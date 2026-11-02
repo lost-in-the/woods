@@ -82,6 +82,21 @@ RSpec.describe Woods::PayloadStore do
       expect(target.join('flows/models/Post.json')).to exist
     end
 
+    it 'keeps a directory whose name ends in .json when leaving out a family\'s JSON files' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models/archive.json'))
+      File.write(source.join('models/Post.json'), '{}')
+      File.write(source.join('models/archive.json/notes.txt'), 'kept')
+      File.write(source.join('models/archive.json/Old.json'), '{}')
+
+      target = store.create(2)
+      store.clone(source, target, without_json: %w[models])
+
+      expect(target.join('models/Post.json')).not_to exist
+      expect(target.join('models/archive.json/notes.txt').read).to eq('kept')
+      expect(target.join('models/archive.json/Old.json')).to exist
+    end
+
     it 'clones nested Unicode paths with a trailing source separator and preserves old bytes' do
       source = store.create(1)
       relative = 'models/nested space/élève.json'

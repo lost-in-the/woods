@@ -119,9 +119,11 @@ module Woods
       until pending.empty?
         source_dir, target_dir, json_free = pending.pop
         Dir.each_child(source_dir) do |name|
-          next if json_free && name.end_with?('.json')
-
           entry = File.join(source_dir, name)
+          # Only JSON *files* are left out: a directory whose name ends in
+          # .json is still walked, so its other content survives.
+          next if json_free && name.end_with?('.json') && !File.lstat(entry).directory?
+
           destination = File.join(target_dir, name)
           replicate(entry, destination, pending, json_free: source_dir == from && without_json.include?(name))
         end
