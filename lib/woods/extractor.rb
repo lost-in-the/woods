@@ -1726,7 +1726,7 @@ module Woods
     # - DependencyGraph registration is sequential (post-join)
     # - The pool is no wider than the ActiveRecord connections free at
     #   start, each worker holds one only while an extractor runs, and with
-    #   none free the extractors run on the calling thread (WDS-100); see
+    #   none free the extractors run on the calling thread rather than wait on the pool; see
     #   {#concurrent_extraction_workers}
     def extract_all_concurrent
       # Pre-compute ModelNameCache to avoid race on lazy memoization.
@@ -4439,7 +4439,7 @@ module Woods
     #
     # The comparison is in {ExtractedForm.before_tables}: the method table,
     # test examples and declaration sites are derived from what that form
-    # holds, so the fresh unit need not carry them yet (#WDS-103).
+    # holds, so the fresh unit need not carry them yet.
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 

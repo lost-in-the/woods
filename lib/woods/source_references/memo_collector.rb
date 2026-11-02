@@ -16,7 +16,7 @@ module Woods
     # it is building in instance state for the length of one `call`, and
     # both adapters keep per-parse state too, so under `concurrent_extraction`
     # two extractor threads parsing through the same instance interleaved
-    # their records (WDS-100). Parsing holds the GVL anyway, so serializing
+    # their records when concurrent extraction shares one instance. Parsing holds the GVL anyway, so serializing
     # it costs the threads nothing they could have had.
     class MemoCollector
       # @param collector [Collector] the parser to memoize

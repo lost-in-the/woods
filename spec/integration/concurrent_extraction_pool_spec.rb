@@ -3,7 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 
-# A real Active Record pool, not a double for its size: the WDS-100 review
+# A real Active Record pool, not a double for its size: a review
 # reproduced a worker waiting out checkout_timeout while the calling thread
 # sat in join holding the pool's only connection.
 RSpec.describe 'Concurrent extraction against a real connection pool', :booted_app do
@@ -61,7 +61,7 @@ RSpec.describe 'Concurrent extraction against a real connection pool', :booted_a
     expect { run_concurrent(services: db_free, jobs: Class.new(db_free)) }.not_to raise_error
   end
 
-  it 'runs on the calling thread when that thread holds the pool\'s only connection (WDS-100)' do
+  it 'runs on the calling thread when that thread holds the pool\'s only connection' do
     establish(pool: 1)
     ActiveRecord::Base.connection_pool.with_connection do
       expect { run_concurrent(models: querying_extractor) }.not_to raise_error

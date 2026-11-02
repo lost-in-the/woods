@@ -28,7 +28,7 @@ RSpec.describe Woods::SourceReferences::MemoCollector do
     expect(analysis.fetch('declarations').first).to be_frozen
   end
 
-  it 'keeps each thread\'s analysis whole when several parse through one instance (WDS-100)' do
+  it 'keeps each thread\'s analysis whole when several parse through one instance' do
     # Big enough that the thread scheduler switches mid-parse.
     body = Array.new(400) { |m| "  def step#{m} = Dep#{m}.new\n" }.join
     sources = Array.new(24) { |i| "class Model#{i}\n#{body}end\n" }

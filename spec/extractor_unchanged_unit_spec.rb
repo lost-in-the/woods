@@ -10,7 +10,7 @@ require 'woods/extractor'
 # most of them come out unchanged. The unchanged check runs before the
 # Prism-walking table passes (method table, callback declaration sites, test
 # examples), which derive only from what the check compares, so a retained
-# unit skips them and keeps its published JSON (WDS-103).
+# unit skips them and keeps its published JSON.
 RSpec.describe Woods::Extractor, 'unchanged re-derived units' do
   include_context 'isolated Woods runtime'
 
