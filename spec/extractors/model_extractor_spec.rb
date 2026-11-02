@@ -1538,6 +1538,44 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(extractor.send(:extract_polymorphic_interfaces, model)).to eq([])
     end
 
+    # A through association's published metadata (foreign key, target) comes
+    # from the reflections along its chain, so the owner depends on every
+    # model the chain passes through, not only on the ones it names (#961).
+    context 'with a nested through chain' do
+      def chain_reflection(owner, target)
+        double("Reflection(#{owner}->#{target})", active_record: double(owner, name: owner),
+                                                  klass: double(target, name: target))
+      end
+
+      let(:through) do
+        double('Assoc(parts)', name: :parts, macro: :has_many, class_name: 'Part', polymorphic?: false,
+                               source_reflection: nil, through_reflection: nil, options: { through: :bridges },
+                               chain: [chain_reflection('Link', 'Part'), chain_reflection('Bridge', 'Link'),
+                                       chain_reflection('Comment', 'Bridge')])
+      end
+      let(:bridges) do
+        double('Assoc(bridges)', name: :bridges, macro: :has_many, class_name: 'Bridge', polymorphic?: false,
+                                 options: {})
+      end
+
+      it 'adds an edge to each chain model the owner does not already reach' do
+        deps = extractor.send(:extract_dependencies, model_with_associations(bridges, through), nil)
+
+        expect(deps.map { |dep| dep.slice(:type, :target, :via) }).to eq(
+          [{ type: :model, target: 'Bridge', via: :has_many }, { type: :model, target: 'Part', via: :has_many },
+           { type: :model, target: 'Link', via: :through_chain }]
+        )
+      end
+
+      it 'skips a chain it cannot reflect on' do
+        allow(through).to receive(:chain).and_raise(NameError, 'uninitialized constant Part')
+
+        deps = extractor.send(:extract_dependencies, model_with_associations(bridges, through), nil)
+
+        expect(deps.map { |dep| dep[:via] }).not_to include(:through_chain)
+      end
+    end
+
     it 'strips a leading :: from an association edge target' do
       rooted = double('Assoc(versions)', name: :versions, macro: :has_many,
                                          class_name: '::Depot::CrateVersion', polymorphic?: false, options: {})
