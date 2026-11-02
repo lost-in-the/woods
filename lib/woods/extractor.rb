@@ -1668,13 +1668,19 @@ module Woods
       end
     end
 
-    # Run each extractor in its own thread, then register results sequentially.
+    # Run the extractors on a bounded pool of threads, then register results
+    # sequentially.
     #
     # Thread safety notes:
     # - ModelNameCache is pre-computed before threads start (avoids ||= race)
-    # - Each thread gets its own extractor instance (no shared mutable state)
+    # - Each extractor type gets its own extractor instance
+    # - The one shared parser, {#source_collector}, serializes its own calls
     # - Results collected via Mutex-protected Hash
     # - DependencyGraph registration is sequential (post-join)
+    # - The pool is no wider than the ActiveRecord connections free at
+    #   start, each worker holds one only while an extractor runs, and with
+    #   none free the extractors run on the calling thread (WDS-100); see
+    #   {#concurrent_extraction_workers}
     def extract_all_concurrent
       # Pre-compute ModelNameCache to avoid race on lazy memoization.
       # Multiple threads calling model_names concurrently could trigger
@@ -1690,30 +1696,44 @@ module Woods
 
       results_mutex = Mutex.new
       failures = []
-      active = EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }
-      threads = active.map do |type, extractor_class|
-        Thread.new do
-          Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
-          start_time = Time.current
+      queue = Queue.new
+      EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }.each { |pair| queue << pair }
+      queue.close
+      workers = concurrent_extraction_workers(queue.size)
+      drain = lambda do
+        while (pair = queue.pop)
+          type, extractor_class = pair
+          begin
+            Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
+            start_time = Time.current
 
-          extractor = share_source_collector(extractor_class.new)
-          results_mutex.synchronize { @extractors[type] = extractor }
+            extractor = share_source_collector(extractor_class.new)
+            results_mutex.synchronize { @extractors[type] = extractor }
 
-          units = timing_collector.time(type) { extractor.extract_all }
+            units = with_worker_connection { timing_collector.time(type) { extractor.extract_all } }
 
-          elapsed = Time.current - start_time
-          Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+            elapsed = Time.current - start_time
+            Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
-          results_mutex.synchronize do
-            @results[type] = units
+            results_mutex.synchronize { @results[type] = units }
+          rescue StandardError => e
+            Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
+            results_mutex.synchronize { failures << [type, e] }
           end
-        rescue StandardError => e
-          Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
-          results_mutex.synchronize { failures << [type, e] }
         end
       end
 
-      threads.each(&:join)
+      if workers.zero?
+        # Every pool connection is already leased (typically the only one, by
+        # this thread): a worker could never check one out, so run here, on
+        # the connection this thread already holds.
+        Rails.logger.info '[Woods] Concurrent extraction: no free pool connection; ' \
+                          "#{queue.size} extractors on the calling thread"
+        drain.call
+      else
+        Rails.logger.info "[Woods] Concurrent extraction: #{queue.size} extractors on #{workers} threads"
+        Array.new(workers) { Thread.new(&drain) }.each(&:join)
+      end
 
       # Fail closed, matching sequential extraction: a raise there aborts
       # before registering anything for the run. Silently substituting `[]`
@@ -1728,6 +1748,63 @@ module Woods
       EXTRACTORS.each_key do |type|
         (@results[type] || []).each { |unit| @dependency_graph.register(unit) }
       end
+    end
+
+    # How many worker threads {#extract_all_concurrent} starts: the number of
+    # extractors, capped at the pool connections nobody holds right now, so
+    # every worker can check one out at once. The pool's size is its total
+    # capacity; a connection this thread (or another) already leases is not
+    # available to a worker, and counting it let a worker wait out
+    # `checkout_timeout` while the caller sat in `join` holding the only
+    # connection. Zero means run on the calling thread. Without ActiveRecord
+    # there is nothing to cap on.
+    #
+    # @param extractor_count [Integer]
+    # @return [Integer] 0 (run on the calling thread) up to +extractor_count+
+    def concurrent_extraction_workers(extractor_count)
+      available = available_pool_connections
+      return extractor_count if available.nil?
+
+      [extractor_count, available].min.clamp(0, extractor_count)
+    end
+
+    # @return [Integer, nil] pool connections not currently leased; nil
+    #   without ActiveRecord or a pool to ask
+    def available_pool_connections
+      pool = configured_connection_pool
+      return nil unless pool
+
+      size = pool.size
+      return nil unless size.is_a?(Integer) && size.positive?
+
+      busy = pool.respond_to?(:stat) ? pool.stat[:busy].to_i : 0
+      [size - busy, 0].max
+    rescue StandardError
+      nil
+    end
+
+    # Hold one pool connection for exactly one extractor, and give it back
+    # when the extractor returns, so a worker never keeps a connection
+    # leased between extractors or after its thread ends.
+    # Lease a connection for the worker only when a pool is configured, the
+    # same decision {#available_pool_connections} makes, so extractors that
+    # never touch a database still run with Active Record loaded but no
+    # connection. Checkout and query failures on a real pool still raise.
+    def with_worker_connection(&block)
+      pool = configured_connection_pool
+      return yield unless pool
+
+      pool.with_connection(&block)
+    end
+
+    # @return [Object, nil] the Active Record connection pool, or nil when
+    #   Active Record is absent or has no connection configured
+    def configured_connection_pool
+      return nil unless defined?(ActiveRecord::Base) && ActiveRecord::Base.respond_to?(:connection_pool)
+
+      ActiveRecord::Base.connection_pool
+    rescue ActiveRecord::ConnectionNotEstablished
+      nil
     end
 
     # ──────────────────────────────────────────────────────────────────────
