@@ -134,7 +134,8 @@ namespace :woods do
     end
 
     puts
-    puts "Re-extracted #{affected.size} affected units."
+    radius = extractor.last_blast_radius_size if !full && extractor.respond_to?(:last_blast_radius_size)
+    puts radius ? "Re-extracted #{affected.size} affected units (blast radius: #{radius} units)." : "Re-extracted #{affected.size} affected units."
     puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
     timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
     puts timings if timings

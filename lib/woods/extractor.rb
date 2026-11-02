@@ -480,6 +480,16 @@ module Woods
 
     attr_reader :output_dir, :dependency_graph
 
+    # The size of the last incremental run's blast radius: every unit the
+    # pre-change graph reaches from the changed files under the configured
+    # bound, before any is re-extracted. Wholesale re-runs and units with no
+    # file of their own are re-derived without being counted among the
+    # units written, so this is larger than what {#extract_changed} returns
+    # (#966).
+    #
+    # @return [Integer, nil] nil before any incremental run
+    attr_reader :last_blast_radius_size
+
     # Units {#remove_stale_classes} pruned although this process still
     # resolves their constant: the runtime no longer discovers the class, so a
     # full extraction here would not produce the unit either, but a fresh
@@ -729,6 +739,7 @@ module Woods
       affected_ids |= render_retarget_ids(change_set, scope: scope)
       @flow_scope = profile_phase('flow radius') { flow_scope_for(change_set) }
       @flow_changed_units = flow_changed_units_for(change_set)
+      @last_blast_radius_size = affected_ids.size
       Rails.logger.info "[Woods] #{change_set.size} changed files affect #{affected_ids.size} units"
 
       touched = profile_phase('re-extraction') do
@@ -1994,8 +2005,12 @@ module Woods
       reassemble, carried = partition_flow_controllers(
         (reextracted + unchanged.sort).filter_map { |id| unit_from_payload(:controllers, id) }, stepped
       )
+      # Every published flow the run neither reassembles nor removes is kept
+      # as it was; under a bounded radius most of them were never re-extracted,
+      # so counting only the re-extracted ones would understate it (#966).
+      kept = (previous_flow_index_controllers - reassemble.map(&:identifier) - removed).size
       Rails.logger.info "[Woods] Refreshing flows for #{reassemble.size} controller(s), " \
-                        "#{carried.size} carried forward, #{removed.size} removed..."
+                        "#{kept} kept, #{removed.size} removed..."
       precomputer = flow_precomputer([])
       annotations = precomputer.recompute_delta(
         touched_units: reassemble,
