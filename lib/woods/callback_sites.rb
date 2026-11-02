@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative 'method_table'
+require_relative 'parse_cache'
 
 module Woods
   # Where each model callback (#817) and controller filter (#820) is
@@ -49,13 +50,13 @@ module Woods
     def call(source)
       return {} unless source.is_a?(String) && !source.empty?
 
-      parsed = Prism.parse(source)
+      parsed = Woods::ParseCache.parse(source)
       return {} if parsed.errors.any?
 
       sites = Hash.new { |hash, key| hash[key] = [] }
       collect(parsed.value, 0, sites)
       MethodTable.blocks(source.lines(chomp: true)).each do |first_line, text|
-        block = Prism.parse(text)
+        block = Woods::ParseCache.parse(text)
         collect(block.value, first_line - 1, sites) if block.errors.empty?
       end
       sites

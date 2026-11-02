@@ -2,6 +2,7 @@
 
 require 'prism'
 require 'strscan'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -213,7 +214,7 @@ module Woods
         offsets = {}
         returned_roots = {}
         selected = []
-        pending = [[Prism.parse(source).value, false, false]]
+        pending = [[Woods::ParseCache.parse(source).value, false, false]]
         until pending.empty?
           node, record, literal = pending.pop
           record = literal = true if returned_roots.key?(node)

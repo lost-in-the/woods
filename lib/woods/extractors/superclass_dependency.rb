@@ -4,6 +4,7 @@ require_relative 'shared_utility_methods'
 require_relative 'declared_parent'
 require_relative '../source_file'
 require_relative '../source_references/runtime_lookup'
+require_relative '../parse_cache'
 # ClassFamilies loads the Phlex and serializer extractors, and
 # PathDispatcher's file rules name every extractor's directories. Both are
 # loaded here rather than by the extractors that use this class, which
@@ -206,7 +207,7 @@ module Woods
       # @return [Boolean] whether the file declares +identifier+ as a class,
       #   so a module the autoloader would define there is never a parent
       def declares_class?(path, identifier)
-        parsed = Prism.parse(SourceFile.read(path))
+        parsed = Woods::ParseCache.parse(SourceFile.read(path))
         parsed.success? && class_declared?(parsed.value, identifier, '')
       end
 

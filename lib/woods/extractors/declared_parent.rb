@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -24,7 +25,7 @@ module Woods
       # @return [Hash, nil] `{ parent: String, nesting: Array<String> }` for a
       #   class with an explicit constant parent; nil otherwise
       def declaration(source, identifier)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return nil unless parsed.success?
 
         match = find(parsed.value, identifier, '', [])

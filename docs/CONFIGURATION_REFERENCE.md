@@ -524,6 +524,7 @@ end
 | `git_commit_table_files_limit` | Integer | `100` | The most files the commit table lists for one commit; the rest are counted in that commit's `files_omitted`. The table's `paths` index is never bounded by it, so co-change stays complete. |
 | `incremental_blast_radius_depth` | `:structural`, Integer or `nil` | `:structural` | How far an incremental run walks from a changed file before it stops re-extracting dependents. `:structural` follows inheritance, include and extend edges to any depth and every other edge one hop (#946). `nil` keeps the unbounded transitive closure; an Integer caps the walk at that many hops of any kind. See the note below before changing it. |
 | `durable_payload_writes` | Boolean | `false` | Force an `fsync` on every payload file as it is written, on top of the single flush every publish already performs. See the note below before setting it. |
+| `parse_cache_source_bytes` | Integer or `nil` | `nil` (1 MB) | How many bytes of source the per-run parse cache keeps syntax trees for. Every analysis that reads a unit's source during a run (`woods:extract`, `woods:incremental`, the self-map) shares one parse per distinct source inside this window; `0` disables the cache. A larger window reuses more but holds more trees and costs GC time, which is why the default is small. |
 
 **Tuning volatile dependency reports.** Start with
 `graph_analysis.json`'s `stats.volatile_dependency_count`: it counts every

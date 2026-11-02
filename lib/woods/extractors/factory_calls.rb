@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -25,7 +26,7 @@ module Woods
       # @return [Hash{Integer => Hash}, nil] call facts keyed by the 1-based
       #   line the call starts on, or nil when the source does not parse
       def by_line(source)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return nil unless parsed.success?
 
         calls = {}

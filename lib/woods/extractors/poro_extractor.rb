@@ -2,6 +2,7 @@
 
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
+require_relative '../parse_cache'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -283,7 +284,7 @@ module Woods
       def namespace_only?(source, declarations)
         return false unless declarations.all? { |declaration| declaration['kind'] == 'module' }
 
-        pending = [Prism.parse(source).value]
+        pending = [Woods::ParseCache.parse(source).value]
         until pending.empty?
           node = pending.pop
           return false if CONTENT_NODES.any? { |type| node.is_a?(type) }

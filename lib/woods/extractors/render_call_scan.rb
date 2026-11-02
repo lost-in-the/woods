@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -58,7 +59,7 @@ module Woods
       # @return [Array<Candidate>] candidates in source order
       def self.call(source)
         scan = new
-        Prism.parse(source).value.accept(scan)
+        Woods::ParseCache.parse(source).value.accept(scan)
         scan.candidates
       rescue SystemStackError
         # Source nested past what a recursive walk can follow names no
@@ -77,7 +78,7 @@ module Woods
         text = source.to_s
         return false unless names.any? { |name| text.include?(name) }
 
-        parsed = Prism.parse(text)
+        parsed = Woods::ParseCache.parse(text)
         return true unless parsed.errors.empty?
 
         visitor = new

@@ -4,6 +4,7 @@ require 'digest'
 require 'json'
 require 'prism'
 require 'set'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -50,7 +51,7 @@ module Woods
       # @param source [String] Ruby source
       # @return [Result]
       def self.call(source)
-        parsed = Prism.parse(source.to_s)
+        parsed = Woods::ParseCache.parse(source.to_s)
         return Result.new(definitions: {}, opaque: true) unless parsed.errors.empty?
 
         visitor = new

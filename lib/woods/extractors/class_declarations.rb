@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative '../source_references/runtime_lookup'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -14,7 +15,7 @@ module Woods
       # @param source [String] original Ruby source
       # @return [Array<Hash>] class identities, lexical scopes and syntax nodes
       def read(source)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return [] unless parsed.success?
 
         Collector.new.call(parsed.value)

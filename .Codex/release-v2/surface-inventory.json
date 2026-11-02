@@ -130,6 +130,8 @@
     "notion_export_column_defaults=",
     "output_dir",
     "output_dir=",
+    "parse_cache_source_bytes",
+    "parse_cache_source_bytes=",
     "precompute_flows",
     "precompute_flows=",
     "pretty_json",
@@ -1161,7 +1163,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 170,
+    "configuration_attributes": 172,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

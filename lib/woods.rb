@@ -191,7 +191,8 @@ module Woods
                 :pretty_json,
                 :context_format, :cache_enabled, :volatile_dependency_ratio, :volatile_dependency_limit_per_target,
                 :graph_cycle_limit, :graph_cycle_max_length, :method_effects_limit,
-                :incremental_blast_radius_depth, :durable_payload_writes, :event_patterns, :event_paths,
+                :incremental_blast_radius_depth, :durable_payload_writes, :parse_cache_source_bytes,
+                :event_patterns, :event_paths,
                 :unclaimed_ruby_paths, :graphql_document_paths, :config_file_paths, :config_file_values,
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
                 :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
@@ -282,6 +283,7 @@ module Woods
       # whole payload is flushed once before `generation.json` is written.
       # See the setter.
       @durable_payload_writes = false
+      @parse_cache_source_bytes = nil
       # Directories the component extractors walk before reading `descendants`,
       # relative to Rails.root. See Extractors::ComponentDiscovery.
       @component_paths = Extractors::ComponentDiscovery::DEFAULT_COMPONENT_PATHS.dup
@@ -411,6 +413,22 @@ module Woods
     def durable_payload_writes=(value)
       validate_boolean!(:durable_payload_writes, value)
       @durable_payload_writes = value
+    end
+
+    # How many bytes of source the per-run parse cache keeps trees for
+    # ({Woods::ParseCache}). nil takes the gem default (1 MB), 0 disables the
+    # cache. A larger window reuses more parses across analyses but holds
+    # more trees, which costs GC time; the default is where the two balanced
+    # on a 10,000-unit app.
+    #
+    # @param value [Integer, nil]
+    # @raise [Woods::ConfigurationError] when value is not a non-negative Integer or nil
+    def parse_cache_source_bytes=(value)
+      unless value.nil? || (value.is_a?(Integer) && value >= 0)
+        raise ConfigurationError, 'parse_cache_source_bytes must be a non-negative Integer or nil'
+      end
+
+      @parse_cache_source_bytes = value
     end
 
     # @param value [Boolean] Must be true or false

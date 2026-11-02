@@ -3,6 +3,7 @@
 require 'prism'
 require 'strscan'
 require_relative 'view_engines/haml'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -84,7 +85,7 @@ module Woods
 
       # @return [Array<Range>] Byte ranges, sorted
       def ruby_prose(source)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         comments = result.comments.map { |comment| comment.location.start_offset...comment.location.end_offset }
         (comments + heredoc_text(result.value)).sort_by(&:begin)
       end

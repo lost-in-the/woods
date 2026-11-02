@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -81,7 +82,7 @@ module Woods
       def call(source, framework: nil)
         return nil unless source.is_a?(String)
 
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         return nil if result.errors.any?
 
         Walker.new(minitest: framework.to_s == 'minitest').call(result.value)

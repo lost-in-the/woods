@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative '../source_file'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -245,7 +246,7 @@ module Woods
 
       # Calls that are direct statements of a class body, receiverless.
       def class_body_calls(source)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         calls = []
         visit = lambda do |node|
           next unless node
