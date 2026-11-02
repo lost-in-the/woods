@@ -2,6 +2,7 @@
 
 require 'prism'
 require 'set'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -14,7 +15,7 @@ module Woods
     class ModuleDefSites
       # @param source [String] Ruby source of one file
       def initialize(source)
-        @tree = Prism.parse(source).value
+        @tree = Woods::ParseCache.parse(source).value
       end
 
       # @param lines [Enumerable<Integer>] start lines of the module declarations to read

@@ -596,6 +596,28 @@ RSpec.describe Woods::Configuration do
     end
   end
 
+  describe '#parse_cache_source_bytes' do
+    it 'defaults to nil, the gem default window' do
+      expect(described_class.new.parse_cache_source_bytes).to be_nil
+    end
+
+    it 'accepts a byte count, including 0 to disable the cache' do
+      config = described_class.new
+      config.parse_cache_source_bytes = 0
+      expect(config.parse_cache_source_bytes).to eq(0)
+      config.parse_cache_source_bytes = 4 * 1024 * 1024
+      expect(config.parse_cache_source_bytes).to eq(4_194_304)
+    end
+
+    it 'rejects anything but a non-negative Integer or nil' do
+      config = described_class.new
+      expect { config.parse_cache_source_bytes = -1 }
+        .to raise_error(Woods::ConfigurationError, /non-negative Integer or nil/)
+      expect { config.parse_cache_source_bytes = '1MB' }
+        .to raise_error(Woods::ConfigurationError, /non-negative Integer or nil/)
+    end
+  end
+
   describe '#incremental_blast_radius_depth' do
     it 'defaults to :structural, the edge-kind walk (#946)' do
       expect(described_class.new.incremental_blast_radius_depth).to eq(:structural)

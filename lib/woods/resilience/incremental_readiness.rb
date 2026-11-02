@@ -4,6 +4,7 @@ require 'json'
 require 'pathname'
 require 'rubygems/version'
 require_relative '../atomic_file'
+require_relative '../build_identity'
 require_relative '../generation'
 require_relative '../source_references/cache'
 require_relative '../source_references/registry'
@@ -28,11 +29,24 @@ module Woods
       # @!attribute [r] ready?
       #   @return [Boolean]
       # @!attribute [r] reason
-      #   @return [String, nil] why a full extraction is needed
-      Result = Struct.new(:ready?, :reason, keyword_init: true) do
-        # @return [String] `ready`, or `needs full extraction (<reason>)`
+      #   @return [String, nil] why a full extraction is needed, or which
+      #     build wrote the index
+      # @!attribute [r] cause
+      #   @return [String, nil] `build_mismatch` when this reader cannot judge
+      #     the baseline because another Woods build wrote it
+      Result = Struct.new(:ready?, :reason, :cause, keyword_init: true) do
+        # @return [String] `ready`, `needs full extraction (<reason>)`, or
+        #   `build mismatch (<reason>)`
         def to_s
-          ready? ? 'ready' : "needs full extraction (#{reason})"
+          return 'ready' if ready?
+          return "build mismatch (#{reason})" if build_mismatch?
+
+          "needs full extraction (#{reason})"
+        end
+
+        # @return [Boolean]
+        def build_mismatch?
+          cause == 'build_mismatch'
         end
       end
 
@@ -65,8 +79,10 @@ module Woods
       end
 
       # @param index_dir [String, Pathname] the index output directory
-      def initialize(index_dir:)
+      # @param build [BuildIdentity] the build asking, compared with the writer
+      def initialize(index_dir:, build: BuildIdentity.current)
         @generation = Generation.new(output_dir: index_dir)
+        @build = build
       end
 
       # @return [Result]
@@ -76,7 +92,9 @@ module Woods
         return not_ready(check.problem) if check.problem
 
         problem = cache_problem(@generation.payload_dir)
-        problem ? not_ready(problem) : Result.new(ready?: true)
+        return Result.new(ready?: true) unless problem
+
+        build_mismatch(check.manifest) || not_ready(problem)
       rescue SystemCallError, IOError => e
         not_ready("the published index cannot be read (#{e.class})")
       end
@@ -85,6 +103,18 @@ module Woods
 
       def not_ready(reason)
         Result.new(ready?: false, reason: reason)
+      end
+
+      # A baseline another Woods build wrote can look unusable to this one
+      # (its source reference cache is that build's format) while its writer
+      # can extend it. Say so instead of asking for a full extraction.
+      def build_mismatch(manifest)
+        comparison = BuildIdentity.compare(manifest, reader: @build)
+        return unless comparison.mismatch?
+
+        Result.new(ready?: false, cause: 'build_mismatch',
+                   reason: "#{comparison.message} This reader cannot judge incremental readiness of an index " \
+                           'another build wrote')
       end
 
       def cache_problem(payload)

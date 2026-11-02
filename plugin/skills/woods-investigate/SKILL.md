@@ -16,7 +16,7 @@ Follow the [agent guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/A
 when instructions are absent. A registered tool does not establish retrieval
 readiness or authorize maintenance or live Console access.
 
-Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; verify the retrieval mode and its data before using `codebase_retrieve` (see Conceptual questions below). If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist.
+Call `woods_status` before relying on the index. Require a ready index with a current generation and non-zero counts for the types you need; verify the retrieval mode and its data before using `codebase_retrieve` (see Conceptual questions below). If status is unhealthy or the generation predates the code under review, report that and ask the owner to run `woods:incremental` or `woods:extract` — do not present "not found" as proof the code does not exist. Where the installed version reports them (Woods `2.2.0`), also check that `identity.client_matches` is not `false` (otherwise the index belongs to another checkout), and treat `hydration.state: warming`, or a retryable `warming` result from `codebase_retrieve`, as a short wait, not a failure.
 
 ## The default loop
 

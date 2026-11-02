@@ -4,6 +4,7 @@ require 'prism'
 require 'set'
 require_relative '../source_file'
 require_relative 'callback_analyzer'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -182,7 +183,7 @@ module Woods
           end
           node.compact_child_nodes.each { |child| visit.call(child) }
         end
-        visit.call(Prism.parse(source).value)
+        visit.call(Woods::ParseCache.parse(source).value)
         names.uniq
       end
 

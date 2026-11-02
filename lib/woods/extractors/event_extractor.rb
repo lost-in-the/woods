@@ -2,6 +2,7 @@
 
 require_relative '../source_file'
 require 'prism'
+require_relative '../parse_cache'
 
 require_relative '../source_inputs/consumer_errors'
 
@@ -192,7 +193,7 @@ module Woods
             else
               register_subscriber(event_map, event_name, file_path, entry[:system])
             end
-            tree ||= Prism.parse(source)
+            tree ||= Woods::ParseCache.parse(source)
             record_identity(event_map[event_name], match, tree, source)
           end
         end

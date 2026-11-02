@@ -2,6 +2,7 @@
 
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
+require_relative '../parse_cache'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
@@ -109,7 +110,7 @@ module Woods
         initial_state = parse_initial_state_aasm(source)
         events = parse_events_from_source(source, /\Aevent\s+:(\w+)/)
         callbacks = parse_state_machine_callbacks(source)
-        transition_callbacks = TransitionCallbacks.read(Prism.parse(source).value)
+        transition_callbacks = TransitionCallbacks.read(Woods::ParseCache.parse(source).value)
 
         [build_unit(
           identifier: "#{class_name}::aasm",
@@ -159,7 +160,7 @@ module Woods
         initial_state = source.match(/state\s+:(\w+)[^#\n]*,\s*initial:\s*true/)&.[](1)
         transitions = parse_statesman_transitions(source)
         callbacks = parse_state_machine_callbacks(source)
-        transition_callbacks = TransitionCallbacks.read(Prism.parse(source).value)
+        transition_callbacks = TransitionCallbacks.read(Woods::ParseCache.parse(source).value)
 
         [build_unit(
           identifier: "#{class_name}::statesman",

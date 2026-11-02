@@ -395,6 +395,23 @@ version's configuration guide before relying on that fallback.
 
 Then reconnect through the MCP client and call `woods_status`. Use client-native tool inspection after initialization. Expect 14 packaged Index tools, not all conditional schemas.
 
+From Woods `2.2.0` (verify in the installed version's release notes): the server
+answers `initialize` before it warms its caches, so `woods_status.hydration.state`
+can read `warming` for the first seconds. Tool calls during warm-up wait (bounded
+by `WOODS_MCP_HYDRATION_WAIT_SECONDS`) and are not an error. Past that wait, a
+lexical `codebase_retrieve` can return `status: warming` with `retryable: true`
+and no sources: retry after `retry_after_seconds` rather than reading it as an
+empty result. `failed` names the warm-up error while the server keeps serving.
+
+From Woods `2.2.0` (verify in the installed version's release notes),
+`woods_status.identity` names the served checkout, branch, generation and the
+Woods build that wrote the index. `woods-mcp-start` refuses an index from a
+different checkout and names both; offer `--allow-mismatch` /
+`WOODS_MCP_ALLOW_MISMATCH=1` only when serving another checkout's index is
+intended. A read answered with `index_build_mismatch` means the index was written
+by another Woods version or build: re-extract with the installed version rather
+than treating it as corruption.
+
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
 For corrupt pipeline cooldown state, first confirm this is a custom server

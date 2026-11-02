@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -26,7 +27,7 @@ module Woods
       # @param source [String] Ruby source of one file
       # @return [Array<Hash>] +:identifier+, +:value_kind+, +:line+, +:end_line+ in source order
       def call(source)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         return [] unless result.success?
 
         result.value.statements.body.filter_map { |node| assignment(node) }

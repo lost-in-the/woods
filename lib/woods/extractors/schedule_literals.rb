@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative '../source_references/runtime_lookup'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -21,7 +22,7 @@ module Woods
       # @return [Prism::ProgramNode]
       # @raise [ParseError] when Prism reports a syntax error
       def parse(source)
-        result = Prism.parse(source)
+        result = Woods::ParseCache.parse(source)
         raise ParseError, result.errors.first.message unless result.success?
 
         result.value

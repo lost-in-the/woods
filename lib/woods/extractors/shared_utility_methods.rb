@@ -60,14 +60,28 @@ module Woods
       def app_source?(path, app_root)
         return false unless path
 
-        prefix = File.expand_path(app_root.to_s).delete_suffix(File::SEPARATOR) + File::SEPARATOR
-        absolute = File.expand_path(path.to_s)
+        prefix = app_root_prefix(app_root)
+        absolute = clean_absolute?(path) ? path.to_s : File.expand_path(path.to_s)
         return false unless absolute.start_with?(prefix)
 
         relative = absolute.delete_prefix(prefix)
         return false if relative.split(File::SEPARATOR).any? { |part| %w[vendor node_modules].include?(part) }
 
         gem_install_roots.none? { |root| root.start_with?(prefix) && root != prefix && absolute.start_with?(root) }
+      end
+
+      # `File.expand_path` is a C-level path walk; on a 10,000-unit app this
+      # helper paid it ~2 × 150,000 times for the same root and for paths that
+      # were already absolute and clean (WDS-90).
+      def app_root_prefix(app_root)
+        root = app_root.to_s
+        (@app_root_prefixes ||= {})[root] ||= File.expand_path(root).delete_suffix(File::SEPARATOR) + File::SEPARATOR
+      end
+
+      # True for a path `File.expand_path` would return unchanged.
+      def clean_absolute?(path)
+        path = path.to_s
+        path.start_with?(File::SEPARATOR) && !path.match?(%r{/\.|//|/\z|\A/~})
       end
 
       # Directories gems are installed into, as absolute paths with a trailing

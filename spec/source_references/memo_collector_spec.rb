@@ -27,4 +27,20 @@ RSpec.describe Woods::SourceReferences::MemoCollector do
     expect(analysis.fetch('declarations')).to be_frozen
     expect(analysis.fetch('declarations').first).to be_frozen
   end
+
+  it 'keeps each thread\'s analysis whole when several parse through one instance (WDS-100)' do
+    # Big enough that the thread scheduler switches mid-parse.
+    body = Array.new(400) { |m| "  def step#{m} = Dep#{m}.new\n" }.join
+    sources = Array.new(24) { |i| "class Model#{i}\n#{body}end\n" }
+    expected = sources.map { |src| Woods::SourceReferences::Collector.new.call(src) }
+    memo = described_class.new
+
+    per_thread = Array.new(8) do |t|
+      Thread.new { sources.rotate(t * 3).map { |src| memo.call(src) } }
+    end.map(&:value)
+
+    per_thread.each_with_index do |results, t|
+      expect(results).to eq(expected.rotate(t * 3))
+    end
+  end
 end

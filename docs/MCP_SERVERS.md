@@ -54,7 +54,7 @@ Prefer the application's bundle and a project-scoped configuration:
 }
 ```
 
-`woods-mcp-start` checks that the directory and published manifest exist, then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
+`woods-mcp-start` checks that the directory and published manifest exist and that the index belongs to the checkout it was launched in (see [served index identity](#served-index-identity)), then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
 
 The MCP client owns this reader process. Automatic index maintenance has its own
 [watcher startup](WATCH_DAEMON.md#managed-development-startup): configuring MCP
@@ -128,15 +128,88 @@ Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Mo
 
 Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woods::MCP::StdioTransport`, which answers a frame that is not valid UTF-8, or whose JSON escapes decode to invalid UTF-8 (an unpaired surrogate), with the JSON-RPC parse error (`-32700`), logs one `rejected frame` line on stderr, and keeps serving. The frame is never rewritten. Earlier releases exited with status 1 on such a frame (the `mcp` gem strips and parses it unguarded), and `woods-mcp-start` has no restart loop, so the server stayed down until the client reconnected. A frame that is merely not JSON is still answered by the SDK's own parse error.
 
+### Served index identity
+
+With several checkouts of one repository, a server's name does not say which
+index it serves. The Index Server says so itself:
+
+- **At connect.** `instructions` lead with one line naming the checkout
+  (directory name and path), the branch the index was extracted on, the
+  generation number and its `updated_at`, and the Woods version (and git
+  revision, for a git-loaded build) that wrote the index. Mismatch warnings
+  follow it, each prefixed `WARNING:`. The identity is read once, at startup;
+  the generation can advance while connected.
+- **In `woods_status`.** The report leads with `identity`: `root` (recorded
+  application root), `repository_root` and `root_name` (the checkout),
+  `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
+  `woods_version`, `woods_revision`, `woods_revision_dirty`, then
+  `client_matches`, `client_match_reason`, `client_root`, `client_branch`,
+  `branch_matches`, `mismatch_allowed` and `build` (writer versus reader).
+  For a call routed with [`root`](MCP_WORKTREE_SETUP.md#one-server-several-worktrees-root),
+  the client is that worktree.
+
+**Which checkout.** The checkout containing the root the manifest records,
+when this process can reach it; otherwise the checkout containing the index
+directory (an index written before roots were recorded, or one written inside
+a container and read through a bind mount). A checkout is the nearest directory
+holding `.git`, so an application in a subdirectory belongs to the repository
+above it and a worktree nested inside another checkout is its own. The client
+is the checkout containing the launcher's working directory.
+
+`client_matches` is `true` or `false` when both checkouts are known, and `null`
+when either is not (`client_match_reason` says which: `root_not_recorded`,
+`recorded_root_unreachable`, `client_outside_checkout`).
+
+**Root mismatch refuses.** `woods-mcp-start` exits 1 when `client_matches` is
+`false`, naming both checkouts. Pass `--allow-mismatch`, or set
+`WOODS_MCP_ALLOW_MISMATCH=1`, to serve another checkout's index on purpose: the
+launcher then connects with a warning on stderr, and the instructions and
+`woods_status` carry the warning. `woods-mcp` itself never refuses; it reports.
+
+**Branch differences warn.** A branch that differs from the client checkout's is
+a warning, not a refusal: detached HEADs and one worktree per branch are
+normal. A detached HEAD on either side compares as unknown.
+
+**Builds.** Each manifest records the writer's `woods_version`, and for a
+git-loaded build `woods_revision` and `woods_revision_dirty` (see
+[manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance)).
+When the writer is another build, the instructions, `woods_status.identity.build`
+and the launcher say so:
+
+- another version string: "Index written by Woods X, this reader is Y; run
+  `woods:extract` or request a re-index."
+- the same version string at another revision: "Index written by a different
+  Woods build (<rev>); …"
+
+The index is still served; backward-compatible reading is not offered. A read
+that fails this reader's payload guards (for example
+`typed unit identity mismatch`) is answered with that message and error code
+`index_build_mismatch` instead of `corrupt_artifact`; the original text is in
+`_meta.read_error`. `woods_status.index.incremental` reports
+`cause: "build_mismatch"` and a `build mismatch (...)` status rather than
+"needs full extraction" when this reader cannot use a baseline another build
+wrote. A released gem records no revision, so two released builds of one version
+compare as they always did.
+
+Identity costs two small file reads (`generation.json` and the manifest) and
+the client checkout's `HEAD` file before the handshake. A git-loaded reader runs
+`git rev-parse` on its own checkout only when the manifest records a revision.
+The manifest is the one that same `generation.json` read names, and
+`woods_status` takes both from the generation its call pinned, so generation,
+commit and writer build always describe one snapshot even while a new
+generation is being published.
+
 ### Initialization guidance
 
 The Index Server supplies a short, client-neutral `instructions` field through
-the SDK's `initialize` response and modern `server/discover`. It describes the
+the SDK's `initialize` response and modern `server/discover`. It leads with the
+[served index identity](#served-index-identity), then describes the
 status → discovery → inspection → bounded traversal → source-verification
 workflow, and lists only the tools actually registered by this server.
-Instructions are stable for unchanged tool registration and bounded to 2,048
-UTF-8 bytes across supported configurations. Building the text does not probe
-providers, extract code, or write configuration.
+Instructions are stable for an unchanged index and tool registration, and
+bounded to 2,048 UTF-8 bytes (a long identity is truncated; `woods_status` has
+it whole). Building the text does not probe providers, extract code, or write
+configuration.
 
 Registration alone does not establish retrieval readiness: check `woods_status`
 before using `codebase_retrieve`, including after reload. The guidance grants
@@ -162,6 +235,67 @@ populated, or unknown. These are stored records (including chunks), not a count
 of extracted units with verified embedding coverage. Positive counts do not
 prove complete coverage or working provider access. See
 [semantic corpus diagnostics](RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
+
+### Startup and cache hydration
+
+The Index Server answers `initialize` before it warms its caches. The
+warm-up (the reader's manifest, summary, graph and identifier map, plus the
+lexical corpus in `WOODS_RETRIEVAL_MODE=lexical`) runs on one background
+thread that starts once the `initialize` response has been written, so the
+handshake takes milliseconds on any index size. Before this change the
+server warmed first and answered `initialize` after 9-13 s on an index of
+~11,000 units; a client with a short handshake probe (Claude Code gives up
+at 5 s) recorded the server as rejecting `initialize` and connected only on
+a later pass.
+
+`woods_status` reports the warm-up under `hydration`: `state` is `warming`,
+`ready` or `failed` (with `error.class` and `error.message`), next to
+`warmup` (`after_handshake`, `before_handshake` or `none`), `started_at`,
+`finished_at` and `duration_seconds`. The `bootstrap` section is unchanged
+and still describes the semantic stores.
+
+A tool call that arrives during the warm-up waits for it to finish, up to
+`WOODS_MCP_HYDRATION_WAIT_SECONDS` (default 30), then dispatches against the
+warmed caches. After a failed warm-up it answers from the cold reader. Past
+the cap the call no longer waits on anything the warm-up holds:
+
+- Every reader-backed tool (`lookup`, `search`, the traversals, resources and
+  the rest) answers from the cold reader: every cache fills lazily on first
+  use, so the answer is the same, only slower, and nothing is answered from a
+  partially built cache.
+- `codebase_retrieve` in lexical mode needs the whole corpus, and building
+  it is the warm-up's job. Rather than build a second copy (as slow as the
+  warm-up and doubling its memory), it answers a non-error, retryable
+  `warming` result: `structuredContent.data.status` is `warming`,
+  `retryable` is `true`, `retry_after_seconds` is set, `hydration` carries
+  the `woods_status` section, and there are no sources, so it can never pass
+  for "no matches". The text says the same. A retry waits for the warm-up
+  again, up to the cap. In semantic mode there is no corpus warm-up and
+  `codebase_retrieve` answers as before.
+
+`woods_status` and `reload` never wait for the warm-up. A `reload`, or a
+newly published generation, that needs the warm-up's generation pins
+released does not queue behind it either: the warm-up gives its pins up,
+lets the reload or refresh through, and starts again on the generation that
+is then current. A client that skips the legacy
+handshake (`server/discover`) starts the warm-up with its first tool call.
+While the warm-up parses a large index, concurrent calls can pause for a
+garbage-collection cycle of a few seconds; that is latency, not a wrong
+answer.
+
+Embedding the server: `Woods::MCP::Server.build(warmup:)` takes
+`:after_handshake` (the default), `:before_handshake` (warm synchronously
+inside `build`, before the transport starts, the behaviour of earlier
+releases; a warm-up exception propagates out of `build`) or `:none`. `true`
+and `false` still mean the default and `:none`. Over stdio, use
+`Woods::MCP::StdioTransport`: it starts the warm-up only after the handshake
+response is flushed. On the HTTP transport the warm-up starts as the
+`initialize` handler returns.
+
+The self-map server (`bin/woods-self-mcp`) is the same Index Server, so a
+launch that finds a built map answers `initialize` at once too. A first
+launch still builds the map before the server starts: the Index Server
+cannot boot against a directory that holds no published generation yet.
 
 ### Tools (31 — 15 registered in the packaged default)
 

@@ -60,6 +60,43 @@ RSpec.describe Woods::PayloadStore do
       expect(target.join('models/Post.json').read).to eq('{"identifier":"Post"}')
     end
 
+    it 'leaves out the *.json files of directories a caller will rewrite, and nothing else' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models/notes'))
+      FileUtils.mkdir_p(source.join('flows/models'))
+      File.write(source.join('manifest.json'), '{}')
+      File.write(source.join('models/Post.json'), '{"identifier":"Post"}')
+      File.write(source.join('models/_index.json'), '[]')
+      File.write(source.join('models/README.txt'), 'kept')
+      File.write(source.join('models/notes/Post.json'), '{}')
+      File.write(source.join('flows/models/Post.json'), '{}')
+
+      target = store.create(2)
+      store.clone(source, target, without_json: %w[models])
+
+      expect(target.join('models/Post.json')).not_to exist
+      expect(target.join('models/_index.json')).not_to exist
+      expect(target.join('models/README.txt')).to exist
+      expect(target.join('models/notes/Post.json')).to exist
+      expect(target.join('manifest.json')).to exist
+      expect(target.join('flows/models/Post.json')).to exist
+    end
+
+    it 'keeps a directory whose name ends in .json when leaving out a family\'s JSON files' do
+      source = store.create(1)
+      FileUtils.mkdir_p(source.join('models/archive.json'))
+      File.write(source.join('models/Post.json'), '{}')
+      File.write(source.join('models/archive.json/notes.txt'), 'kept')
+      File.write(source.join('models/archive.json/Old.json'), '{}')
+
+      target = store.create(2)
+      store.clone(source, target, without_json: %w[models])
+
+      expect(target.join('models/Post.json')).not_to exist
+      expect(target.join('models/archive.json/notes.txt').read).to eq('kept')
+      expect(target.join('models/archive.json/Old.json')).to exist
+    end
+
     it 'clones nested Unicode paths with a trailing source separator and preserves old bytes' do
       source = store.create(1)
       relative = 'models/nested space/élève.json'

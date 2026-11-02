@@ -39,8 +39,8 @@ module Woods
   #   `db/schema.rb`) or a git diff cannot be taken
   # - the extraction configuration differs, or the incremental run raises
   #
-  # What is rewritten for the new checkout: `git_branch` and `git_sha` in the
-  # manifest, and the recorded source root and generation number in
+  # What is rewritten for the new checkout: `git_branch`, `git_sha` and `root`
+  # in the manifest, and the recorded source root and generation number in
   # `source_inputs.json`. The generation number restarts at 1, as it is local to
   # an index. Embedding dumps and other operational state are not copied.
   #
@@ -138,7 +138,8 @@ module Woods
     def rewrite_provenance(payload)
       provenance = GitProvenance.new(root: @root).to_h
       update_json(payload.join('manifest.json')) do |manifest|
-        manifest.merge('git_sha' => provenance[:git_sha], 'git_branch' => provenance[:git_branch])
+        manifest.merge('git_sha' => provenance[:git_sha], 'git_branch' => provenance[:git_branch],
+                       'root' => File.expand_path(@root.to_s))
       end
       update_json(payload.join('source_inputs.json')) do |inputs|
         inputs.merge('root' => SourcePathEncoding.expand(@root), 'generation' => 1)

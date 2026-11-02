@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative '../source_file'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -190,7 +191,7 @@ module Woods
       #   line of its first declaration
       def filter_declarations(path)
         (@filter_declarations ||= {})[path] ||= begin
-          parsed = Prism.parse(SourceFile.read(path))
+          parsed = Woods::ParseCache.parse(SourceFile.read(path))
           sites = {}
           collect_filter_declarations(parsed.value, sites) if parsed.success?
           sites

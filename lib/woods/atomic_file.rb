@@ -14,7 +14,7 @@ module Woods
   #
   # @example
   #   Woods::AtomicFile.write("tmp/woods/obsidian_vault/models/User.md", note_body)
-  module AtomicFile
+  module AtomicFile # rubocop:disable Metrics/ModuleLength -- write, durability and read helpers share one contract
     module_function
 
     # Atomically write +content+ to +path+, creating parent directories.
@@ -48,26 +48,76 @@ module Woods
     #   (default true). Pass false only for a file that something else makes
     #   durable before any reader can resolve it.
     # @return [void]
-    def write(path, content, mode: 0o600, durable: true)
+    DEFAULT_MODE = 0o600
+
+    def write(path, content, mode: DEFAULT_MODE, durable: true)
       path = path.to_s
-      FileUtils.mkdir_p(File.dirname(path))
-      tmp = Tempfile.new('.woods-', File.dirname(path))
-      # Binary mode so the content's bytes (e.g. UTF-8) are written verbatim
-      # regardless of the process's default external encoding.
-      tmp.binmode
-      tmp.write(content)
-      tmp.flush
-      tmp.fsync if durable
-      tmp.close
-      # Chmod the temp file so the destination is born with its final
-      # permissions — never observed more open or more closed in between.
-      File.chmod(mode, tmp.path)
-      File.rename(tmp.path, path)
-      fsync_directory(File.dirname(path)) if durable
+      directory = File.dirname(path)
+      # O_EXCL so a name collision fails instead of truncating a sibling's
+      # temp file. Binary mode so the content's bytes (e.g. UTF-8) are
+      # written verbatim regardless of the process's default external
+      # encoding.
+      tmp, file = open_exclusive(directory, mode)
+      begin
+        # fchmod on the open descriptor: the umask applied at creation can
+        # strip bits from any mode, the default 0600 included (a mask of
+        # 0200 would publish 0400), so the destination is born with exactly
+        # the requested permissions.
+        file.chmod(mode)
+        file.binmode
+        file.write(content)
+        file.flush
+        file.fsync if durable
+      ensure
+        file.close
+      end
+      File.rename(tmp, path)
+      fsync_directory(directory) if durable
     rescue StandardError
-      tmp&.close
-      tmp&.unlink
+      # Only a file this call created is ours to remove; a name that was
+      # already taken never got this far (see {.open_exclusive}).
+      File.unlink(tmp) if tmp && File.exist?(tmp)
       raise
+    end
+
+    # A sibling name no other writer will pick: pid, thread, and a counter.
+    # Cheaper than Tempfile (no finalizer, no lock file, no stat of the
+    # directory) — on a payload of ten thousand files that is most of the
+    # write phase's system time.
+    def temp_path(directory)
+      @sequence ||= 0
+      @sequence_lock ||= Mutex.new
+      n = @sequence_lock.synchronize { @sequence += 1 }
+      File.join(directory, ".woods-#{Process.pid}-#{Thread.current.object_id}-#{n}.tmp")
+    end
+
+    # Attempts at a fresh temp name before giving up on a directory whose
+    # names keep colliding.
+    TEMP_ATTEMPTS = 8
+
+    # Create and open a temp file this call owns, creating its directory on
+    # first use rather than checking for it on every write. A name that
+    # already exists is left untouched and another is tried.
+    #
+    # @return [Array(String, File)] the temp path and its open handle
+    # @raise [Errno::EEXIST] when every attempt collided
+    def open_exclusive(directory, mode)
+      attempts = 0
+      begin
+        tmp = temp_path(directory)
+        [tmp, File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, mode)]
+      rescue Errno::ENOENT
+        raise if attempts.positive? && File.directory?(directory)
+
+        FileUtils.mkdir_p(directory)
+        attempts += 1
+        retry
+      rescue Errno::EEXIST
+        attempts += 1
+        raise if attempts >= TEMP_ATTEMPTS
+
+        retry
+      end
     end
 
     # Make every file under +directory+ durable with one filesystem flush.

@@ -10,6 +10,7 @@ require 'set'
 require_relative 'atomic_file'
 require_relative 'source_file'
 require_relative 'version'
+require_relative 'build_identity'
 require_relative 'filename_utils'
 require_relative 'token_utils'
 require_relative 'extracted_unit'
@@ -535,6 +536,32 @@ module Woods
     #
     # @return [Hash] Results keyed by extractor type
     def extract_all
+      with_parse_cache { perform_extract_all }
+    end
+
+    def extract_changed(changed_files)
+      with_parse_cache { perform_extract_changed(changed_files) }
+    end
+
+    # One Prism parse per distinct source for the length of the run; see
+    # {Woods::ParseCache}. The log line is the run's reuse ratio, which is what
+    # a profile of a slow app needs before anything finer.
+    def with_parse_cache
+      Woods::ParseCache.with(budget: parse_cache_budget) do
+        result = yield
+        if profiling? && (store = Woods::ParseCache.active)
+          Rails.logger.info "[Woods] [profile] parse cache: #{store.parses} parses, #{store.hits} reuses"
+        end
+        result
+      end
+    end
+
+    def parse_cache_budget
+      budget = Woods.configuration&.parse_cache_source_bytes
+      budget.nil? ? Woods::ParseCache::DEFAULT_BUDGET : budget
+    end
+
+    def perform_extract_all
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       reset_git_capture
       setup_output_directory
@@ -556,7 +583,9 @@ module Woods
       @graph_sha = nil
       @symlinked_root = nil
       @symlinked_dirs = nil
-      profile_phase('payload seed') { begin_payload! }
+      # A full run rewrites every unit file of every family it extracts and
+      # sweeps the rest, so seeding those is work the run undoes.
+      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_type_dirs) }
 
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
@@ -713,7 +742,7 @@ module Woods
     # @return [Array<String>] Identifiers of units re-extracted, added, or removed
     # @raise [Woods::ExtractionError] when boot-captured inputs require a fresh
     #   Rails process and full extraction instead of reusing this runtime
-    def extract_changed(changed_files)
+    def perform_extract_changed(changed_files)
       profile_started = Process.clock_gettime(Process::CLOCK_MONOTONIC) if profiling?
       change_set = ChangeSet.new(paths: changed_files, root: Rails.root)
       require_relative 'input_rules'
@@ -1273,12 +1302,12 @@ module Woods
     # @raise [Woods::ExtractionError] when the payload directory could not be
     #   opened and flat fallback is not allowed, or when `strict` and a
     #   payload-born index's payload directory could not be opened
-    def begin_payload!(strict: false)
+    def begin_payload!(strict: false, rewritten_dirs: [])
       @publication_error = nil
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
       @payload_dir = @payload_store.create(@payload_generation)
-      seed_payload(marker)
+      seed_payload(marker, rewritten_dirs: rewritten_dirs)
     rescue StandardError => e
       if strict && marker&.payload
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -1424,12 +1453,30 @@ module Woods
     #
     # @param marker [Woods::Generation::Marker] the published generation
     # @return [void]
-    def seed_payload(marker)
+    # @param rewritten_dirs [Array<String>] top-level payload directories
+    #   whose unit files this run writes in full, so they are not seeded;
+    #   anything else inside them (the non-JSON files and subdirectories the
+    #   orphan sweep also never touches) still carries forward
+    def seed_payload(marker, rewritten_dirs: [])
       if marker.payload && (source = @output_dir.join(marker.payload)).directory?
-        @payload_store.clone(source, @payload_dir)
+        @payload_store.clone(source, @payload_dir, without_json: rewritten_dirs)
       else
+        # A flat root is seeded once, on the first payload-publishing run.
         seed_payload_from_flat_root
       end
+    end
+
+    # The per-type directories a full run writes in full and then sweeps
+    # ({#sweep_orphaned_unit_files}): every extractor family the configuration
+    # does not gate out. A gated family (`rails_source` with
+    # `include_framework_sources` off) keeps its seeded units, as before.
+    #
+    # On the 11k-unit field app seeding was 3.4s of hardlinks that the run
+    # then replaced one by one; the sweep then had nothing to find.
+    #
+    # @return [Array<String>]
+    def replaced_type_dirs
+      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s)
     end
 
     # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for
@@ -1668,13 +1715,19 @@ module Woods
       end
     end
 
-    # Run each extractor in its own thread, then register results sequentially.
+    # Run the extractors on a bounded pool of threads, then register results
+    # sequentially.
     #
     # Thread safety notes:
     # - ModelNameCache is pre-computed before threads start (avoids ||= race)
-    # - Each thread gets its own extractor instance (no shared mutable state)
+    # - Each extractor type gets its own extractor instance
+    # - The one shared parser, {#source_collector}, serializes its own calls
     # - Results collected via Mutex-protected Hash
     # - DependencyGraph registration is sequential (post-join)
+    # - The pool is no wider than the ActiveRecord connections free at
+    #   start, each worker holds one only while an extractor runs, and with
+    #   none free the extractors run on the calling thread (WDS-100); see
+    #   {#concurrent_extraction_workers}
     def extract_all_concurrent
       # Pre-compute ModelNameCache to avoid race on lazy memoization.
       # Multiple threads calling model_names concurrently could trigger
@@ -1690,30 +1743,44 @@ module Woods
 
       results_mutex = Mutex.new
       failures = []
-      active = EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }
-      threads = active.map do |type, extractor_class|
-        Thread.new do
-          Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
-          start_time = Time.current
+      queue = Queue.new
+      EXTRACTORS.reject { |type, _| skip_by_configuration?(type) }.each { |pair| queue << pair }
+      queue.close
+      workers = concurrent_extraction_workers(queue.size)
+      drain = lambda do
+        while (pair = queue.pop)
+          type, extractor_class = pair
+          begin
+            Rails.logger.info "[Woods] [Thread] Extracting #{type}..."
+            start_time = Time.current
 
-          extractor = share_source_collector(extractor_class.new)
-          results_mutex.synchronize { @extractors[type] = extractor }
+            extractor = share_source_collector(extractor_class.new)
+            results_mutex.synchronize { @extractors[type] = extractor }
 
-          units = timing_collector.time(type) { extractor.extract_all }
+            units = with_worker_connection { timing_collector.time(type) { extractor.extract_all } }
 
-          elapsed = Time.current - start_time
-          Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
+            elapsed = Time.current - start_time
+            Rails.logger.info "[Woods] [Thread] Extracted #{units.size} #{type} in #{elapsed.round(2)}s"
 
-          results_mutex.synchronize do
-            @results[type] = units
+            results_mutex.synchronize { @results[type] = units }
+          rescue StandardError => e
+            Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
+            results_mutex.synchronize { failures << [type, e] }
           end
-        rescue StandardError => e
-          Rails.logger.error "[Woods] [Thread] #{type} failed: #{e.message}"
-          results_mutex.synchronize { failures << [type, e] }
         end
       end
 
-      threads.each(&:join)
+      if workers.zero?
+        # Every pool connection is already leased (typically the only one, by
+        # this thread): a worker could never check one out, so run here, on
+        # the connection this thread already holds.
+        Rails.logger.info '[Woods] Concurrent extraction: no free pool connection; ' \
+                          "#{queue.size} extractors on the calling thread"
+        drain.call
+      else
+        Rails.logger.info "[Woods] Concurrent extraction: #{queue.size} extractors on #{workers} threads"
+        Array.new(workers) { Thread.new(&drain) }.each(&:join)
+      end
 
       # Fail closed, matching sequential extraction: a raise there aborts
       # before registering anything for the run. Silently substituting `[]`
@@ -1728,6 +1795,63 @@ module Woods
       EXTRACTORS.each_key do |type|
         (@results[type] || []).each { |unit| @dependency_graph.register(unit) }
       end
+    end
+
+    # How many worker threads {#extract_all_concurrent} starts: the number of
+    # extractors, capped at the pool connections nobody holds right now, so
+    # every worker can check one out at once. The pool's size is its total
+    # capacity; a connection this thread (or another) already leases is not
+    # available to a worker, and counting it let a worker wait out
+    # `checkout_timeout` while the caller sat in `join` holding the only
+    # connection. Zero means run on the calling thread. Without ActiveRecord
+    # there is nothing to cap on.
+    #
+    # @param extractor_count [Integer]
+    # @return [Integer] 0 (run on the calling thread) up to +extractor_count+
+    def concurrent_extraction_workers(extractor_count)
+      available = available_pool_connections
+      return extractor_count if available.nil?
+
+      [extractor_count, available].min.clamp(0, extractor_count)
+    end
+
+    # @return [Integer, nil] pool connections not currently leased; nil
+    #   without ActiveRecord or a pool to ask
+    def available_pool_connections
+      pool = configured_connection_pool
+      return nil unless pool
+
+      size = pool.size
+      return nil unless size.is_a?(Integer) && size.positive?
+
+      busy = pool.respond_to?(:stat) ? pool.stat[:busy].to_i : 0
+      [size - busy, 0].max
+    rescue StandardError
+      nil
+    end
+
+    # Hold one pool connection for exactly one extractor, and give it back
+    # when the extractor returns, so a worker never keeps a connection
+    # leased between extractors or after its thread ends.
+    # Lease a connection for the worker only when a pool is configured, the
+    # same decision {#available_pool_connections} makes, so extractors that
+    # never touch a database still run with Active Record loaded but no
+    # connection. Checkout and query failures on a real pool still raise.
+    def with_worker_connection(&block)
+      pool = configured_connection_pool
+      return yield unless pool
+
+      pool.with_connection(&block)
+    end
+
+    # @return [Object, nil] the Active Record connection pool, or nil when
+    #   Active Record is absent or has no connection configured
+    def configured_connection_pool
+      return nil unless defined?(ActiveRecord::Base) && ActiveRecord::Base.respond_to?(:connection_pool)
+
+      ActiveRecord::Base.connection_pool
+    rescue ActiveRecord::ConnectionNotEstablished
+      nil
     end
 
     # ──────────────────────────────────────────────────────────────────────
@@ -2900,7 +3024,8 @@ module Woods
         extraction_config: extraction_config, git_enrichment: enrichment, git_filter_available: filter_available,
         extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
         ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
-        extractor_timings: extractor_timings
+        extractor_timings: extractor_timings, woods_build: BuildIdentity.current.manifest_fields,
+        root: File.expand_path(Rails.root.to_s)
       )
 
       AtomicFile.write(
@@ -4270,12 +4395,17 @@ module Woods
           SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
         end
         (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
-        # Before the unchanged check: the unit on disk carries its map.
+        # Before the unchanged check: the unit on disk carries its map, and
+        # the map depends on the file as it is now, not only on the unit.
         SourceLineMap.record(unit, root: Rails.root.to_s)
+        next if unchanged_registered_unit?(type_dir, unit)
+
+        # After it: these three walk the source with Prism and derive only
+        # from what the check already compared, so an unchanged unit keeps
+        # the tables its published JSON carries.
         MethodTable.record(unit)
         CallbackSites.record(unit)
         Extractors::TestExamples.record(unit)
-        next if unchanged_registered_unit?(type_dir, unit)
 
         affected_types&.add(extractor_key)
         mark_dependents_dirty(unit.identifier)
@@ -4306,12 +4436,16 @@ module Woods
     # so compared whole it never matched a published unit that had even one
     # dependent. Changed source, metadata or extractor edges keep the ordinary
     # registration path; identity checks already ran.
+    #
+    # The comparison is in {ExtractedForm.before_tables}: the method table,
+    # test examples and declaration sites are derived from what that form
+    # holds, so the fresh unit need not carry them yet (#WDS-103).
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      fresh = ExtractedForm.of(JSON.parse(JSON.generate(normalized.to_h)))
+      fresh = ExtractedForm.before_tables(JSON.parse(JSON.generate(normalized.to_h)))
       path = type_dir.join(collision_safe_filename(unit.identifier))
       return false unless fresh == published_extracted_form(path, unit)
 
@@ -4319,13 +4453,14 @@ module Woods
       true
     end
 
-    # @return [String, nil] the published unit's {ExtractedForm}; nil when the
-    #   file is missing, unreadable, or disagrees with its reference ownership
+    # @return [String, nil] the published unit's {ExtractedForm.before_tables};
+    #   nil when the file is missing, unreadable, or disagrees with its
+    #   reference ownership
     def published_extracted_form(path, unit)
       return nil unless File.exist?(path)
 
       key = [unit.type.to_s, unit.identifier]
-      ExtractedForm.of(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+      ExtractedForm.before_tables(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
     rescue StandardError
       nil
     end

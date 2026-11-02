@@ -363,7 +363,7 @@ module Woods
       def verify_stability
         return unless @key
 
-        after = scan(max_seconds: recheck_seconds)
+        after = scan(max_seconds: recheck_seconds, known: known_identities)
         after.fetch('errors').each { |error| record_error(error) }
         changed_paths(after).first(MAX_ERRORS).each do |path|
           record_error('reason' => 'source_changed_during_extraction', 'path' => path)
@@ -395,8 +395,21 @@ module Woods
         end
       end
 
-      def scan(**limits)
-        Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @rules, **limits).call
+      def scan(known: {}, **limits)
+        scanner = Scanner.new(root: @root, output_dir: @output, key: @key, scopes: @rules, known: known, **limits)
+        scanner.call.tap { @capture_stamps ||= scanner.stamps }
+      end
+
+      # The capture's stamps paired with its identities, for the recheck. A
+      # snapshot that came from a boot handoff has no stamps in this process,
+      # so the recheck then hashes everything, as before.
+      #
+      # @return [Hash{String => Array(Array, String)}]
+      def known_identities
+        return {} unless @capture_stamps
+
+        files = @snapshot.fetch('files', {})
+        @capture_stamps.filter_map { |path, stamp| [path, [stamp, files[path]]] if files[path] }.to_h
       end
 
       # The recheck repeats the capture's work, so its time budget scales with

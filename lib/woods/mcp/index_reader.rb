@@ -7,6 +7,7 @@ require 'json'
 require 'pathname'
 require 'set'
 
+require_relative '../build_identity'
 require_relative '../generation'
 require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
@@ -106,6 +107,7 @@ module Woods
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @loaded_token = nil
+        @loaded_marker = nil
         @generation_signature = nil
         @payload_retention_pin = nil
         # The directory the loaded generation's payload lives in. nil until a
@@ -118,6 +120,14 @@ module Woods
       #
       # @return [Integer, nil] nil until something has been read
       attr_reader :loaded_generation
+
+      # The marker of the generation this reader's caches were populated
+      # from: what a pinned caller reports beside the manifest it read, so the
+      # two describe one snapshot without reading `generation.json` again.
+      #
+      # @return [Woods::Generation::Marker, nil] nil until a published
+      #   generation has been loaded (and for a flat index without one)
+      attr_reader :loaded_marker
 
       # Cache identity includes the publish token: overlapping writers can
       # legitimately publish the same number with a different immutable payload.
@@ -275,6 +285,62 @@ module Woods
         ensure
           release_exclusive_generation(thread)
         end
+      end
+
+      # Raised at a {#yield_point!} inside {#yielding_to_drains} when another
+      # thread is waiting for the held generation pins to drain. Unwinding
+      # releases this thread's pins (and any lock taken inside them), and
+      # {#yielding_to_drains} runs its block again once the waiter is through.
+      class PinYielded < StandardError; end
+
+      YIELDING_KEY = :woods_index_reader_yielding
+      private_constant :YIELDING_KEY
+
+      # Run work that holds generation pins for a long time but may give them
+      # up and start over: the background cache warm-up (WDS-78).
+      #
+      # An ordinary pin holder is never interrupted; an exclusive reload or a
+      # refresh drain (MCP-5) waits for it, and while it waits every NEW pin
+      # waits behind it. For a request-sized pin that is the point. For the
+      # warm-up, which pins for the whole corpus read (seconds on a large
+      # index), it would turn one `reload`, or one publish, into a stall of
+      # every tool call until the warm-up ends, past any wait cap. Inside this
+      # block {#yield_point!} unwinds instead, and the block is retried: its
+      # next pin waits for the reload or refresh like any new pin, then warms
+      # the generation that is now current. A warm-up yields only to a waiter,
+      # never to plain traffic, so it always finishes once waiters stop.
+      #
+      # @yield the work to run; must be safe to run again from the start
+      # @return [Object] the block's value
+      def yielding_to_drains
+        previous = Thread.current[YIELDING_KEY]
+        Thread.current[YIELDING_KEY] = self
+        begin
+          yield
+        rescue PinYielded
+          retry
+        ensure
+          Thread.current[YIELDING_KEY] = previous
+        end
+      end
+
+      # A safe point in long pinned work: inside {#yielding_to_drains}, raise
+      # {PinYielded} when a pin drain is being waited for; anywhere else, a
+      # no-op. Nothing built since the last safe point may be published
+      # before it, so callers place it before work, not after.
+      #
+      # @return [void]
+      # @raise [PinYielded]
+      def yield_point!
+        return unless Thread.current[YIELDING_KEY].equal?(self)
+
+        raise PinYielded, 'yielding generation pins to a waiting reload or refresh' if drain_requested?
+      end
+
+      # @return [Boolean] true while an exclusive reload or a refresh drain is
+      #   waiting for the held pins to be released
+      def drain_requested?
+        @freshness_mutex.synchronize { @exclusive_waiters.positive? || @refresh_waiters.positive? }
       end
 
       # Pre-populate cached state so the first MCP tool call doesn't pay
@@ -1308,6 +1374,7 @@ module Woods
         @payload_dir = directory
         @loaded_token = marker.token
         @loaded_generation = marker.number
+        @loaded_marker = marker
       end
 
       # Is there an index here at all?
@@ -1391,11 +1458,18 @@ module Woods
           identifier_map: -> { identifier_map }
         }
         steps.each_with_object({}) do |(step, runner), result|
-          runner.call
-          result[step] = true
-        rescue StandardError => e
-          result[step] = e
+          # Outside the per-step rescue, which would swallow the unwind.
+          yield_point!
+          result[step] = warmup_step(runner)
         end
+      end
+
+      # @return [true, StandardError]
+      def warmup_step(runner)
+        runner.call
+        true
+      rescue StandardError => e
+        e
       end
 
       # Compile a case-insensitive regex from a query string.
@@ -1576,7 +1650,7 @@ module Woods
         directory = TYPE_TO_DIR[type] || UNIT_TYPE_TO_DIR.fetch(type)
         data = load_unit(directory, unit_filename(identifier))
         unless valid_published_unit?(data, directory, identifier)
-          raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{type}:#{identifier}"
         end
 
         data
@@ -1661,10 +1735,22 @@ module Woods
           decode ? decode.call(content) : JSON.parse(content)
         end
         unless valid_published_unit?(data, dir, identifier)
-          raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{dir}/#{filename}"
         end
 
         data
+      end
+
+      # A unit another Woods build wrote can fail this build's identity
+      # guard; that is a version gap, not corruption. Checked before the
+      # guard's own message is raised.
+      #
+      # @return [String, nil]
+      def build_gap_message
+        comparison = BuildIdentity.compare(manifest)
+        comparison.message if comparison.mismatch?
+      rescue StandardError
+        nil
       end
 
       def valid_published_unit?(data, dir, identifier)

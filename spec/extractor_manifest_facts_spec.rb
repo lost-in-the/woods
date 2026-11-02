@@ -24,9 +24,11 @@ RSpec.describe 'Extractor manifest data composition' do
   let(:expected) do
     {
       extracted_at: '2026-10-27T12:00:00Z', woods_version: 'contract-version',
+      woods_revision: 'e' * 40, woods_revision_dirty: true,
       rails_version: 'contract-rails', ruby_version: RUBY_VERSION,
       counts: { models: 2, controllers: 0 }, total_units: 2, total_chunks: 3,
-      git_sha: 'capture', git_branch: 'main', gemfile_lock_sha: nil, schema_sha: 'schema',
+      git_sha: 'capture', git_branch: 'main', root: File.expand_path(@root),
+      gemfile_lock_sha: nil, schema_sha: 'schema',
       extraction_config: full_config, git_enrichment: summary
     }
   end
@@ -40,6 +42,9 @@ RSpec.describe 'Extractor manifest data composition' do
 
   before do
     stub_const('Woods::VERSION', 'contract-version')
+    build = instance_double(Woods::BuildIdentity,
+                            manifest_fields: { woods_revision: 'e' * 40, woods_revision_dirty: true })
+    allow(Woods::BuildIdentity).to receive(:current).and_return(build)
     logger = double('Logger').as_null_object
     stub_const('Rails', double('Rails', root: Pathname.new(@root), logger: logger))
     allow(Rails).to receive(:version) {

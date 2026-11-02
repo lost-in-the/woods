@@ -2,6 +2,7 @@
 
 require_relative 'line_neutralizer'
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -85,7 +86,7 @@ module Woods
       #   byte offsets and qualified name, outer scopes before the ones
       #   they enclose; nil when the source does not parse
       def self.lexical_scopes(source)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return nil unless parsed.success?
 
         scopes = []
@@ -184,7 +185,7 @@ module Woods
       # @return [String, nil] Qualified module name, or nil when the source
       #   opens no module
       def qualified_outer_module_name(source)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return unless parsed.success?
 
         each_syntax_declaration(parsed.value) do |kind, name, _qualified, node|
@@ -241,7 +242,7 @@ module Woods
       # @yieldparam qualified [String] Enclosing stack joined with the name
       # @return [void]
       def each_declaration(source, &block)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         if parsed.success?
           each_syntax_declaration(parsed.value, &block)
           return

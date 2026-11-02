@@ -67,7 +67,22 @@ targeted refreshes, and the static Woods self-map write it. A no-op leaves the
 published manifest and its version unchanged. Resolve the manifest through the
 generation pointer, as Woods readers do.
 
-Older manifests may omit the field or contain `null`; that means unknown.
+A version string cannot tell builds between two releases apart: every build
+pinned to a git revision reports the same `x.y.z.alpha`. So the manifest also
+records:
+
+| Field | Value |
+|---|---|
+| `woods_revision` | Full git revision of the writing Woods build: the locked revision of a Bundler git source, or `git rev-parse HEAD` of a checkout whose root is the gem root (a path gem or development checkout). `null` for a released gem. A gem vendored inside another repository never reports that repository's revision. |
+| `woods_revision_dirty` | `true` when that checkout had uncommitted changes under `lib/`, `exe/` or the gemspec; `false` for a clean checkout or a Bundler git source; `null` without a revision. |
+| `root` | Absolute application root the run indexed. `woods:seed` rewrites it for the new worktree. |
+
+They are manifest-only: no unit or payload digest includes them. Readers use
+them for the [served index identity](MCP_SERVERS.md#served-index-identity):
+which checkout an index describes, and whether the build reading it is the one
+that wrote it.
+
+Older manifests may omit `woods_version` or contain `null`; that means unknown.
 `woods_status.index.woods_version` reports this value from the served manifest,
 while `woods_status.server.version` identifies the running MCP reader. The reader
 never substitutes its own version for missing writer provenance.

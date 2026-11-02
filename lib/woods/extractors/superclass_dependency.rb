@@ -4,6 +4,7 @@ require_relative 'shared_utility_methods'
 require_relative 'declared_parent'
 require_relative '../source_file'
 require_relative '../source_references/runtime_lookup'
+require_relative '../parse_cache'
 # ClassFamilies loads the Phlex and serializer extractors, and
 # PathDispatcher's file rules name every extractor's directories. Both are
 # loaded here rather than by the extractors that use this class, which
@@ -124,20 +125,34 @@ module Woods
       end
 
       # Ruby binds a relative parent's first segment in the innermost
-      # enclosing scope that defines it, then at the top level, and walks
-      # the rest from there. A scope the runtime does not know the segment
-      # in is skipped, as Ruby skips it.
+      # enclosing scope whose own constant table defines it, then through
+      # the innermost scope's ancestors, then at the top level, and walks
+      # the rest from there. A module a scope includes never outranks an
+      # outer scope that defines the segment itself (WDS-110).
       def declared_parent_edge(declared)
-        parent = declared[:parent]
-        target = if parent.start_with?('::')
-                   parent.delete_prefix('::')
-                 else
-                   first = parent.split('::').first
-                   scope = declared[:nesting].find { |candidate| known?("#{candidate}::#{first}") }
-                   [scope, parent].compact.join('::')
-                 end
+        target = declared_target(declared[:parent], declared[:nesting])
         result = @lookup.call("::#{target}", allow_private: true)
         candidate_edge(result, target) unless result[:status] == :missing
+      end
+
+      # @return [String] the qualified constant +parent+ names from +nesting+
+      def declared_target(parent, nesting)
+        return parent.delete_prefix('::') if parent.start_with?('::')
+
+        first = parent.split('::').first
+        scope = nesting.find { |candidate| own_constant?(candidate, first) }
+        scope ||= nesting.first if nesting.first && known?("#{nesting.first}::#{first}")
+        [scope, parent].compact.join('::')
+      end
+
+      # @return [Boolean] whether +scope_name+'s own constant table defines
+      #   or registers +name+, never through its ancestors; under a pending
+      #   scope, whether the autoloader would define it there
+      def own_constant?(scope_name, name)
+        scope = @lookup.call("::#{scope_name}", allow_private: true)
+        return known?("#{scope_name}::#{name}") unless scope[:status] == :resolved
+
+        @lookup.reflect(scope[:value], :const_defined?, name, false)
       end
 
       # @return [Boolean] whether the runtime defines or registers +name+;
@@ -192,7 +207,7 @@ module Woods
       # @return [Boolean] whether the file declares +identifier+ as a class,
       #   so a module the autoloader would define there is never a parent
       def declares_class?(path, identifier)
-        parsed = Prism.parse(SourceFile.read(path))
+        parsed = Woods::ParseCache.parse(SourceFile.read(path))
         parsed.success? && class_declared?(parsed.value, identifier, '')
       end
 

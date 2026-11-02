@@ -323,6 +323,49 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     end
   end
 
+  # The background warm-up (WDS-78) pins for seconds; inside
+  # #yielding_to_drains it steps aside for a waiting reload instead of
+  # queueing every new pin behind that reload until it finishes.
+  describe '#yielding_to_drains' do
+    it 'unwinds the pinned work for a waiting exclusive reload, then runs it again' do
+      generation.bump!(reason: 'full')
+      reader = described_class.new(dir)
+      reader.manifest
+      runs = 0
+      reload = nil
+
+      Timeout.timeout(10) do
+        reader.yielding_to_drains do
+          runs += 1
+          reader.with_pinned_generation do
+            if runs == 1
+              reload = Thread.new { reader.with_exclusive_reload { |manifest| manifest['total_units'] } }
+              sleep 0.01 until reader.drain_requested?
+            end
+            reader.yield_point!
+          end
+        end
+      end
+
+      expect(runs).to eq(2)
+      expect(reload.value).to eq(1)
+    end
+
+    it 'never unwinds work outside the block, or when nobody waits' do
+      reader = described_class.new(dir)
+      allow(reader).to receive(:drain_requested?).and_return(true)
+      expect { reader.yield_point! }.not_to raise_error
+
+      allow(reader).to receive(:drain_requested?).and_return(false)
+      runs = 0
+      reader.yielding_to_drains do
+        runs += 1
+        reader.yield_point!
+      end
+      expect(runs).to eq(1)
+    end
+  end
+
   describe '#with_exclusive_reload' do
     it 'reloads the post-publication manifest before yielding it' do
       reader = described_class.new(dir, auto_refresh: false)

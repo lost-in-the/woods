@@ -18,6 +18,10 @@ module Woods
       # @param git_filter_available [Boolean] whether Git filtering is available
       # @param extracted_at [String] timestamp acquired by the caller
       # @param woods_version [String] Woods version for this run
+      # @param woods_build [Hash] `woods_revision` and `woods_revision_dirty`
+      #   of the writing build ({BuildIdentity#manifest_fields}); both nil for
+      #   a released gem
+      # @param root [String, nil] absolute application root the run indexed
       # @param rails_version [String] Rails version for this run
       # @param ruby_version [String] Ruby version for this run
       # @param gemfile_lock_sha [String, nil] caller-acquired lockfile digest
@@ -31,10 +35,11 @@ module Woods
       # rubocop:disable-next Metrics/ParameterLists
       def self.build(counts:, total_chunks:, provenance:, extraction_config:, git_enrichment:,
                      git_filter_available:, extracted_at:, woods_version:, rails_version:, ruby_version:,
-                     gemfile_lock_sha:, schema_sha:, extractor_timings: nil)
+                     gemfile_lock_sha:, schema_sha:, extractor_timings: nil, woods_build: {}, root: nil)
         manifest = {
           extracted_at: extracted_at,
           woods_version: woods_version,
+          woods_revision: woods_build[:woods_revision], woods_revision_dirty: woods_build[:woods_revision_dirty],
           rails_version: rails_version,
           ruby_version: ruby_version,
           counts: counts,
@@ -42,6 +47,7 @@ module Woods
           total_chunks: total_chunks,
           git_sha: provenance[:git_sha],
           git_branch: provenance[:git_branch],
+          root: root,
           gemfile_lock_sha: gemfile_lock_sha,
           schema_sha: schema_sha
         }

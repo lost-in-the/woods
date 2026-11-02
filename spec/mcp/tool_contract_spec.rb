@@ -409,11 +409,15 @@ RSpec.describe 'Index MCP tool contracts' do
                                                 [%w[watch state], 'absent'],
                                                 [%w[retriever configured], true],
                                                 [%w[features notion_configured], true],
+                                                [%w[hydration warmup], 'none'],
+                                                [%w[hydration state], 'ready'],
                                                 key_sets: {
-                                                  [] => %w[ready server index watch supervision retriever bootstrap features]
+                                                  [] => %w[identity ready server index watch supervision retriever bootstrap
+                                                           features hydration]
                                                 }
                                               ), properties: {
-                                                'source_check' => enum_contract(%w[quick deep], nil, 10_000)
+                                                'source_check' => enum_contract(%w[quick deep], nil, 10_000),
+                                                'worktrees' => enum_contract(%w[summary list none], nil, 10_000)
                                               })
     }
   end
@@ -1035,6 +1039,10 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def assert_woods_status_enum(value, result)
+    # The fixture index is in no repository, so every `worktrees` mode omits the section.
+    return expect(result.dig('structuredContent', 'data')).not_to have_key('worktrees') if
+      %w[summary list none].include?(value)
+
     expect(result.dig('structuredContent', 'data', 'index', 'source_freshness')).to include(
       'state' => 'unknown', 'check' => value, 'complete' => false
     )

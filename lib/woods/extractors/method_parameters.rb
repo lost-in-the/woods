@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'prism'
+require_relative '../parse_cache'
 
 module Woods
   module Extractors
@@ -11,7 +12,7 @@ module Woods
       module_function
 
       def extract(source, method_name)
-        parsed = Prism.parse(source)
+        parsed = Woods::ParseCache.parse(source)
         return [] unless parsed.success?
 
         method = find_method(parsed.value, method_name.to_sym)
