@@ -2,6 +2,8 @@
 
 require 'spec_helper'
 require 'delegate'
+require 'open3'
+require 'rbconfig'
 require 'active_support/core_ext/string/inflections'
 require 'woods'
 require 'woods/extractor'
@@ -241,6 +243,123 @@ RSpec.describe Woods::Extractors::SuperclassDependency do
                           "module InhPending\n  class LedgerClient < BaseClient\n  end\nend\n")
 
       expect(resolver.call('InhPending::LedgerClient', file_path: stray)).to be_nil
+    end
+  end
+
+  # Ruby binds a relative parent in each enclosing scope's own constant
+  # table first, innermost out, then in the innermost scope's ancestors,
+  # then at the top level. A module the scope includes never outranks an
+  # outer scope that defines the name itself (WDS-110). Every expectation
+  # here is the superclass a separate Ruby process binds after loading the
+  # same files, never a name read off the resolver.
+  describe 'a pending library whose scope includes a module defining the parent name' do
+    let(:child_path) { File.join(tmp_dir, 'lib/wds_outer/scope/child.rb') }
+    let(:nested_child) { child_naming('WdsBase') }
+
+    def child_naming(parent)
+      "module WdsOuter\n  module Scope\n    class Child < #{parent}\n    end\n  end\nend\n"
+    end
+
+    after do
+      %i[WdsOuter WdsAncestor WdsBase].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    # Writes +files+ (relative path => source), loads every one but those in
+    # +pending+ (relative path => [owner constant, name]), which are
+    # registered as autoloads instead, and registers Child as a pending
+    # autoload of WdsOuter::Scope.
+    def scenario(files, child: nested_child, pending: {})
+      paths = files.to_h { |relative, source| [relative, create_file(relative, source)] }
+      paths.each { |relative, path| load path unless pending.key?(relative) }
+      pending.each { |relative, (owner, name)| Object.const_get(owner).autoload(name, paths.fetch(relative)) }
+      create_file('lib/wds_outer/scope/child.rb', child)
+      WdsOuter::Scope.autoload(:Child, child_path)
+      guard_const_missing
+      paths.values
+    end
+
+    def guard_const_missing
+      [WdsOuter, WdsOuter::Scope, WdsAncestor].each do |scope|
+        scope.define_singleton_method(:const_missing) { |*| raise 'must not call const_missing' }
+      end
+    end
+
+    # The parent Ruby itself binds: a fresh process requires the same files,
+    # then Child's, and reads the superclass's constant name.
+    def ruby_binding(paths)
+      script = [*paths, child_path].map { |path| "require #{path.inspect}" }
+      script << 'puts Module.instance_method(:name).bind_call(WdsOuter::Scope::Child.superclass)'
+      output, status = Open3.capture2e(RbConfig.ruby, '--disable-gems', '-e', script.join("\n"))
+      raise "ruby could not load the fixture: #{output}" unless status.success?
+
+      output.strip
+    end
+
+    def pending_edge
+      edge = resolver.call('WdsOuter::Scope::Child', file_path: child_path)
+      expect(WdsOuter::Scope.autoload?(:Child)).to eq(child_path)
+      edge
+    end
+
+    let(:ancestor) { ['lib/wds_ancestor.rb', "module WdsAncestor\n  class WdsBase\n  end\nend\n"] }
+    let(:outer_base) { ['lib/wds_outer/wds_base.rb', "module WdsOuter\n  class WdsBase\n  end\nend\n"] }
+    let(:scope) { ['lib/wds_outer/scope.rb', "module WdsOuter\n  module Scope\n    include WdsAncestor\n  end\nend\n"] }
+    let(:top_base) { ['lib/wds_base.rb', "class WdsBase\nend\n"] }
+
+    it 'binds the outer scope that defines the name, not the included module' do
+      paths = scenario([ancestor, outer_base, scope])
+      binding = ruby_binding(paths)
+
+      expect(binding).to eq('WdsOuter::WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: binding, via: :inheritance)
+    end
+
+    it 'binds the outer scope when its parent is itself a pending autoload' do
+      paths = scenario([ancestor, outer_base, scope], pending: { outer_base.first => %w[WdsOuter WdsBase] })
+      binding = ruby_binding(paths)
+
+      expect(binding).to eq('WdsOuter::WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: binding, via: :inheritance)
+      expect(WdsOuter.autoload?(:WdsBase)).to eq(paths[1])
+    end
+
+    it 'binds the included module when no enclosing scope defines the name' do
+      paths = scenario([ancestor, scope])
+      binding = ruby_binding(paths)
+
+      expect(binding).to eq('WdsAncestor::WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: binding, via: :inheritance)
+    end
+
+    it 'binds the included module ahead of a top-level class of the same name' do
+      paths = scenario([top_base, ancestor, scope])
+      binding = ruby_binding(paths)
+
+      expect(binding).to eq('WdsAncestor::WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: binding, via: :inheritance)
+    end
+
+    it 'binds a qualified or rooted parent where it names, whatever the scope includes' do
+      qualified = scenario([top_base, ancestor, outer_base, scope],
+                           child: child_naming('WdsOuter::WdsBase'))
+      expect(pending_edge).to eq(type: :lib, target: ruby_binding(qualified), via: :inheritance)
+
+      rooted = scenario([top_base, ancestor, outer_base, scope],
+                        child: child_naming('::WdsBase'))
+      expect(ruby_binding(rooted)).to eq('WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: 'WdsBase', via: :inheritance)
+    end
+
+    it 'names the constant of an outer parent that overrides self.name' do
+      named = ['lib/wds_outer/wds_base.rb',
+               "module WdsOuter\n  class WdsBase\n    def self.name = 'Imposter'\n  end\nend\n"]
+      paths = scenario([ancestor, named, scope])
+      binding = ruby_binding(paths)
+
+      expect(binding).to eq('WdsOuter::WdsBase')
+      expect(pending_edge).to eq(type: :lib, target: binding, via: :inheritance)
     end
   end
 
