@@ -105,6 +105,22 @@ RSpec.describe Woods::Retrieval::SourceEvidence do
     expect(result.provenance[:physical_location]).to be_nil
   end
 
+  it 'finds a namespaced concern display block by the full name the header carries' do
+    source = <<~SOURCE
+      class Billing::Invoice
+      # │ Included from: Canopy::Refundable                                    │
+      # └─────────────────────────────────────────────────────────────────────┘
+        # module Canopy::Refundable
+        #   def refund; payment.reverse!; end
+        # end
+      # ─────────────────────────── End Canopy::Refundable ───────────────────────────
+      end
+    SOURCE
+    result = render(unit(source, metadata: { 'inlined_concerns' => ['Canopy::Refundable'] }))
+    span = result.provenance[:spans].find { |entry| entry[:kind] == 'inlined_concern_display' }
+    expect(span).to include(name: 'Canopy::Refundable', lexical_owner: 'Canopy::Refundable')
+  end
+
   it 'provides an outline without pretending to infer signatures or inherited definitions' do
     data = unit('class Billing::Invoice < Parent; def refund(payment); payment.reverse!; end; end',
                 metadata: { 'callbacks' => [{ 'method' => 'inherited_refund', 'defined_in' => 'Parent' }] })

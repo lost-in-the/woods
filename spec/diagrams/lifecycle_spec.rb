@@ -89,6 +89,22 @@ RSpec.describe Woods::Diagrams::Lifecycle do
     end
   end
 
+  it 'reads a namespaced inlined concern\'s methods from the concern unit of that full name' do
+    units = DiagramIndex::UNITS.map do |unit|
+      case unit['identifier']
+      when 'Taggable' then unit.merge('identifier' => 'Canopy::Taggable')
+      when 'Post' then unit.merge('metadata' => unit['metadata'].merge('inlined_concerns' => ['Canopy::Taggable']))
+      else unit
+      end
+    end
+    Dir.mktmpdir('woods-diagrams-namespaced-concern') do |root|
+      reader = Woods::MCP::IndexReader.new(DiagramIndex.write(root, units: units))
+      result = Woods::Diagrams.build(reader, kind: 'lifecycle', identifier: 'Post')
+      expect(result.text).to include('App->>M: before_save normalize_tags')
+      expect(result.details).to include('framework_callbacks' => 1)
+    end
+  end
+
   it 'draws only models' do
     expect { build(identifier: 'DigestMailer') }
       .to raise_error(Woods::Diagrams::InvalidRequest, /draws a model; DigestMailer is a mailer/)
