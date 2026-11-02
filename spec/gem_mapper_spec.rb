@@ -59,6 +59,50 @@ RSpec.describe Woods::GemMapper do
     expect(entries).to all(include('type' => 'ruby_module'))
   end
 
+  it 'writes payload files without per-file flushes and flushes the tree once before publishing (WDS-101)' do
+    Dir.mktmpdir('woods_self_map_sync') do |dir|
+      gem_root = File.join(dir, 'gem')
+      FileUtils.mkdir_p(File.join(gem_root, 'lib/tiny'))
+      File.write(File.join(gem_root, 'lib/tiny.rb'), "module Tiny; end\n")
+      File.write(File.join(gem_root, 'lib/tiny/thing.rb'), "module Tiny\n  class Thing; end\nend\n")
+      out = File.join(dir, 'out')
+
+      events = []
+      allow(Woods::AtomicFile).to receive(:write).and_wrap_original do |m, *args, **kw|
+        events << [:write, args.first.to_s, kw.fetch(:durable, true)]
+        m.call(*args, **kw)
+      end
+      allow(Woods::AtomicFile).to receive(:sync_directory_tree).and_wrap_original do |m, *args|
+        events << [:sync, args.first.to_s]
+        m.call(*args)
+      end
+      allow(Woods::Generation).to receive(:new).and_wrap_original do |m, *args, **kw|
+        m.call(*args, **kw).tap do |gen|
+          allow(gen).to receive(:bump!).and_wrap_original do |bump, *a, **k|
+            events << [:publish]
+            bump.call(*a, **k)
+          end
+        end
+      end
+
+      result = described_class.new(root: gem_root, output_dir: out).map!
+
+      expect(result).to include(status: :published)
+      payload = Woods::Generation.new(output_dir: out).payload_dir.to_s
+      payload_writes, other_writes = events.select { |e| e.first == :write }.partition { |e| e[1].start_with?(payload) }
+      expect(payload_writes).not_to be_empty
+      expect(payload_writes.map(&:last).uniq).to eq([false])
+      # The generation pointer and anything outside the payload keep their own flush.
+      expect(other_writes.map(&:last).uniq).to eq([true])
+      sync_at = events.index { |e| e.first == :sync }
+      publish_at = events.index { |e| e.first == :publish }
+      expect(sync_at).not_to be_nil
+      expect(publish_at).not_to be_nil
+      expect(sync_at).to be < publish_at
+      expect(events[sync_at].last).to eq(payload)
+    end
+  end
+
   it 'skips an unchanged tree without advancing the generation' do
     mapper = described_class.new(root: root, output_dir: output_dir)
     original_manifest = File.binread(payload_dir.join('manifest.json'))

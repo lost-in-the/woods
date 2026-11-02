@@ -1,0 +1,1 @@
+- The self-map (`woods:self_map`, `bin/woods-self-mcp`'s first launch) builds about a third faster. Its ~10,000 payload files were each written with their own `fsync`; they are now written without one and the payload tree is flushed once before the generation pointer moves, the same publish contract the app index already keeps. 17.4s → 11.5s on the gem's own checkout.
