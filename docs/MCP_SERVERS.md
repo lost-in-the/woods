@@ -54,7 +54,7 @@ Prefer the application's bundle and a project-scoped configuration:
 }
 ```
 
-`woods-mcp-start` checks that the directory and published manifest exist, then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
+`woods-mcp-start` checks that the directory and published manifest exist and that the index belongs to the checkout it was launched in (see [served index identity](#served-index-identity)), then replaces itself with `woods-mcp`. It does not install dependencies or restart a crashed process.
 
 The MCP client owns this reader process. Automatic index maintenance has its own
 [watcher startup](WATCH_DAEMON.md#managed-development-startup): configuring MCP
@@ -128,15 +128,88 @@ Prefer a real MCP client's connection flow over a hand-written JSON-RPC pipe. Mo
 
 Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woods::MCP::StdioTransport`, which answers a frame that is not valid UTF-8, or whose JSON escapes decode to invalid UTF-8 (an unpaired surrogate), with the JSON-RPC parse error (`-32700`), logs one `rejected frame` line on stderr, and keeps serving. The frame is never rewritten. Earlier releases exited with status 1 on such a frame (the `mcp` gem strips and parses it unguarded), and `woods-mcp-start` has no restart loop, so the server stayed down until the client reconnected. A frame that is merely not JSON is still answered by the SDK's own parse error.
 
+### Served index identity
+
+With several checkouts of one repository, a server's name does not say which
+index it serves. The Index Server says so itself:
+
+- **At connect.** `instructions` lead with one line naming the checkout
+  (directory name and path), the branch the index was extracted on, the
+  generation number and its `updated_at`, and the Woods version (and git
+  revision, for a git-loaded build) that wrote the index. Mismatch warnings
+  follow it, each prefixed `WARNING:`. The identity is read once, at startup;
+  the generation can advance while connected.
+- **In `woods_status`.** The report leads with `identity`: `root` (recorded
+  application root), `repository_root` and `root_name` (the checkout),
+  `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
+  `woods_version`, `woods_revision`, `woods_revision_dirty`, then
+  `client_matches`, `client_match_reason`, `client_root`, `client_branch`,
+  `branch_matches`, `mismatch_allowed` and `build` (writer versus reader).
+  For a call routed with [`root`](MCP_WORKTREE_SETUP.md#one-server-several-worktrees-root),
+  the client is that worktree.
+
+**Which checkout.** The checkout containing the root the manifest records,
+when this process can reach it; otherwise the checkout containing the index
+directory (an index written before roots were recorded, or one written inside
+a container and read through a bind mount). A checkout is the nearest directory
+holding `.git`, so an application in a subdirectory belongs to the repository
+above it and a worktree nested inside another checkout is its own. The client
+is the checkout containing the launcher's working directory.
+
+`client_matches` is `true` or `false` when both checkouts are known, and `null`
+when either is not (`client_match_reason` says which: `root_not_recorded`,
+`recorded_root_unreachable`, `client_outside_checkout`).
+
+**Root mismatch refuses.** `woods-mcp-start` exits 1 when `client_matches` is
+`false`, naming both checkouts. Pass `--allow-mismatch`, or set
+`WOODS_MCP_ALLOW_MISMATCH=1`, to serve another checkout's index on purpose: the
+launcher then connects with a warning on stderr, and the instructions and
+`woods_status` carry the warning. `woods-mcp` itself never refuses; it reports.
+
+**Branch differences warn.** A branch that differs from the client checkout's is
+a warning, not a refusal: detached HEADs and one worktree per branch are
+normal. A detached HEAD on either side compares as unknown.
+
+**Builds.** Each manifest records the writer's `woods_version`, and for a
+git-loaded build `woods_revision` and `woods_revision_dirty` (see
+[manifest writer provenance](PUBLISHED_INDEX.md#manifest-writer-provenance)).
+When the writer is another build, the instructions, `woods_status.identity.build`
+and the launcher say so:
+
+- another version string: "Index written by Woods X, this reader is Y; run
+  `woods:extract` or request a re-index."
+- the same version string at another revision: "Index written by a different
+  Woods build (<rev>); …"
+
+The index is still served; backward-compatible reading is not offered. A read
+that fails this reader's payload guards (for example
+`typed unit identity mismatch`) is answered with that message and error code
+`index_build_mismatch` instead of `corrupt_artifact`; the original text is in
+`_meta.read_error`. `woods_status.index.incremental` reports
+`cause: "build_mismatch"` and a `build mismatch (...)` status rather than
+"needs full extraction" when this reader cannot use a baseline another build
+wrote. A released gem records no revision, so two released builds of one version
+compare as they always did.
+
+Identity costs two small file reads (`generation.json` and the manifest) and
+the client checkout's `HEAD` file before the handshake. A git-loaded reader runs
+`git rev-parse` on its own checkout only when the manifest records a revision.
+The manifest is the one that same `generation.json` read names, and
+`woods_status` takes both from the generation its call pinned, so generation,
+commit and writer build always describe one snapshot even while a new
+generation is being published.
+
 ### Initialization guidance
 
 The Index Server supplies a short, client-neutral `instructions` field through
-the SDK's `initialize` response and modern `server/discover`. It describes the
+the SDK's `initialize` response and modern `server/discover`. It leads with the
+[served index identity](#served-index-identity), then describes the
 status → discovery → inspection → bounded traversal → source-verification
 workflow, and lists only the tools actually registered by this server.
-Instructions are stable for unchanged tool registration and bounded to 2,048
-UTF-8 bytes across supported configurations. Building the text does not probe
-providers, extract code, or write configuration.
+Instructions are stable for an unchanged index and tool registration, and
+bounded to 2,048 UTF-8 bytes (a long identity is truncated; `woods_status` has
+it whole). Building the text does not probe providers, extract code, or write
+configuration.
 
 Registration alone does not establish retrieval readiness: check `woods_status`
 before using `codebase_retrieve`, including after reload. The guidance grants

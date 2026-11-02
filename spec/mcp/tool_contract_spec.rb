@@ -412,7 +412,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                                 [%w[hydration warmup], 'none'],
                                                 [%w[hydration state], 'ready'],
                                                 key_sets: {
-                                                  [] => %w[ready server index watch supervision retriever bootstrap
+                                                  [] => %w[identity ready server index watch supervision retriever bootstrap
                                                            features hydration]
                                                 }
                                               ), properties: {

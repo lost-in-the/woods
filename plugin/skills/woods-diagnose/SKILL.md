@@ -396,6 +396,15 @@ lexical `codebase_retrieve` can return `status: warming` with `retryable: true`
 and no sources: retry after `retry_after_seconds` rather than reading it as an
 empty result. `failed` names the warm-up error while the server keeps serving.
 
+From Woods `2.2.0` (verify in the installed version's release notes),
+`woods_status.identity` names the served checkout, branch, generation and the
+Woods build that wrote the index. `woods-mcp-start` refuses an index from a
+different checkout and names both; offer `--allow-mismatch` /
+`WOODS_MCP_ALLOW_MISMATCH=1` only when serving another checkout's index is
+intended. A read answered with `index_build_mismatch` means the index was written
+by another Woods version or build: re-extract with the installed version rather
+than treating it as corruption.
+
 For Docker-only bundles, test the configured container command instead, for example `docker compose exec -T app bundle exec woods-mcp /app/tmp/woods`. Use the container path for a container process and a host path only for a host process.
 
 For corrupt pipeline cooldown state, first confirm this is a custom server

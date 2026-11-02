@@ -44,7 +44,7 @@ Replace both paths with the intended Rails worktree. Preserve other server entri
 
 For Docker, use the [container-first setup](DOCKER_SETUP.md#default-run-it-through-the-application-container). Select the intended Compose project and service, and verify that its mounted application directory is the worktree you mean to index. `docker compose exec` targets an existing container; running the command from a different checkout does not change that container's mounts. The index path must be visible inside that container.
 
-Keep a separate output directory for each checkout when you need checkout-specific answers; one server can answer for all of a repository's worktrees when callers pass [`root`](#one-server-several-worktrees-root). If you intentionally point at another checkout's index, Woods serves that published content; registration alone does not make it describe the current worktree.
+Keep a separate output directory for each checkout when you need checkout-specific answers; one server can answer for all of a repository's worktrees when callers pass [`root`](#one-server-several-worktrees-root). `woods-mcp-start` refuses an index another checkout recorded, naming both; to point at another checkout's index on purpose, pass `--allow-mismatch` (or `WOODS_MCP_ALLOW_MISMATCH=1`), and Woods serves that published content with a warning. See [served index identity](MCP_SERVERS.md#served-index-identity).
 
 ## One server, several worktrees (`root`)
 
@@ -88,7 +88,7 @@ What it does:
 
 1. **Verifies the seed.** The seed must be written by this Woods version and be incremental-ready. It must record a commit that exists in the new worktree's repository. Its own checkout must still be on that commit, with no uncommitted changes, and still match the source it indexed. It must carry its source identity key. The `Gemfile.lock` and schema digests it recorded must equal this worktree's, because a gitignored boot input never shows in a git diff.
 2. **Builds beside the target.** The copy and the incremental run happen in `<output>.seed-<pid>`. The only thing that makes the index visible is the final rename of `generation.json` into the output directory, so a reader never sees a half-seeded index. A crash leaves no published generation.
-3. **Rewrites what names the checkout.** `git_branch` and `git_sha` in the manifest, and the recorded source root in `source_inputs.json`, now describe the new worktree. The generation number restarts at 1.
+3. **Rewrites what names the checkout.** `git_branch`, `git_sha` and `root` in the manifest, and the recorded source root in `source_inputs.json`, now describe the new worktree. The generation number restarts at 1.
 4. **Updates incrementally.** The change set is `git diff <seed commit>` against the working tree (committed and uncommitted tracked changes) plus untracked files. Ignored files are not in it.
 
 If any check fails, or a changed path needs a fresh Rails boot (`Gemfile.lock`, an initializer, `db/schema.rb`), or the extraction configuration differs, or the incremental run raises, the task runs a full extraction instead and prints the reason. It does nothing when the output directory already has a published index, and it stands down while a watch daemon maintains that directory.
@@ -104,7 +104,7 @@ The Woods setup/configuration skills help configure a server; their presence alo
 ## Verify registration and the served index
 
 1. Open `/mcp` in the relevant Claude Code session and inspect the Woods connection and available tools.
-2. Call the Index Server's `woods_status`. Check `index_dir`, generation, and available freshness/provenance information against the intended extraction. A successful connection to the wrong index is still the wrong setup.
+2. Call the Index Server's `woods_status`. Check `identity` first (`root_name`, `branch`, `generation`, `client_matches`), then `index_dir` and available freshness/provenance information against the intended extraction. A successful connection to the wrong index is still the wrong setup.
 3. Use `search` and typed `lookup` for a known unit from that checkout. When checking a subagent, verify that it can call the inherited tools and is using the same intended index.
 
 The optional Console Server is a separate connection to a booted Rails application. If deliberately enabled, check it with `console_status` and verify its application/container separately. Console access is not required to verify the Index Server.

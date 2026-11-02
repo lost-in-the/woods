@@ -41,6 +41,10 @@ require_relative '../lib/woods/mcp/bootstrapper'
 require_relative '../lib/woods/embedding/text_preparer'
 require_relative '../lib/woods/embedding/indexer'
 
+# Accepted here too, so a wrapper that forwards it does not name it as the
+# index. Only woods-mcp-start refuses a root mismatch; this server reports it.
+ENV['WOODS_MCP_ALLOW_MISMATCH'] = '1' if ARGV.delete('--allow-mismatch')
+
 begin
   index_dir = Woods::MCP::Bootstrapper.resolve_index_dir(ARGV)
   retriever, bootstrap_state = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)

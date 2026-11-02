@@ -7,11 +7,14 @@
 # same as when launched directly. RubyGems loads gem executables as Ruby, so
 # this wrapper must remain a Ruby program when packaged.
 
+# `--allow-mismatch` (or WOODS_MCP_ALLOW_MISMATCH=1) serves an index that
+# another checkout of the repository recorded; without it that is refused.
+allow_mismatch = !ARGV.delete('--allow-mismatch').nil?
 index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
 
 if index_dir.nil? || index_dir.empty?
   warn 'Error: No index directory specified.'
-  warn 'Usage: woods-mcp-start /path/to/index_dir'
+  warn 'Usage: woods-mcp-start [--allow-mismatch] /path/to/index_dir'
   exit 1
 end
 
@@ -60,6 +63,25 @@ unless manifest_present?(index_dir)
   warn path_remedy
   exit 1
 end
+
+# Which checkout the index describes, against the directory this launcher
+# runs in. Reads generation.json, the manifest and the checkout's HEAD file
+# only, so the handshake stays fast. A root mismatch is refused unless
+# allowed; a branch difference or a writer from another Woods build is a
+# warning (the server repeats both to the client at connect).
+require_relative '../lib/woods/mcp/served_identity'
+identity = Woods::MCP::ServedIdentity.read(index_dir)
+allow_mismatch ||= Woods::MCP::ServedIdentity.allow_mismatch?
+if identity.client_matches == false
+  unless allow_mismatch
+    warn "Error: #{identity.refusal_message}"
+    exit 1
+  end
+
+  ENV[Woods::MCP::ServedIdentity::ALLOW_ENV] = '1'
+  warn "Warning: serving another checkout's index (mismatch allowed). #{identity.warnings.first}"
+end
+identity.warnings.drop(identity.client_matches == false ? 1 : 0).each { |message| warn "Warning: #{message}" }
 
 if ENV['MCP_PROTOCOL_VERSION'] && !ENV['MCP_PROTOCOL_VERSION'].empty?
   warn "Pinning MCP protocol version to #{ENV.fetch('MCP_PROTOCOL_VERSION')} (unset it to negotiate)."

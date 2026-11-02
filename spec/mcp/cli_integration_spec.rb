@@ -74,7 +74,7 @@ RSpec.describe 'MCP CLI integration' do
         if version == '2024-11-05'
           expect(result).not_to have_key('instructions')
         else
-          expect(result.fetch('instructions')).to start_with('Start with woods_status')
+          expect(result.fetch('instructions')).to include('Start with woods_status')
           expect(result.fetch('instructions')).to include('structural readiness alone is insufficient')
         end
       end

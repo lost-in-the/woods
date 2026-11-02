@@ -7,6 +7,7 @@ require 'json'
 require 'pathname'
 require 'set'
 
+require_relative '../build_identity'
 require_relative '../generation'
 require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
@@ -106,6 +107,7 @@ module Woods
         @generation = Woods::Generation.new(output_dir: @index_dir)
         @loaded_generation = nil
         @loaded_token = nil
+        @loaded_marker = nil
         @generation_signature = nil
         @payload_retention_pin = nil
         # The directory the loaded generation's payload lives in. nil until a
@@ -118,6 +120,14 @@ module Woods
       #
       # @return [Integer, nil] nil until something has been read
       attr_reader :loaded_generation
+
+      # The marker of the generation this reader's caches were populated
+      # from: what a pinned caller reports beside the manifest it read, so the
+      # two describe one snapshot without reading `generation.json` again.
+      #
+      # @return [Woods::Generation::Marker, nil] nil until a published
+      #   generation has been loaded (and for a flat index without one)
+      attr_reader :loaded_marker
 
       # Cache identity includes the publish token: overlapping writers can
       # legitimately publish the same number with a different immutable payload.
@@ -1364,6 +1374,7 @@ module Woods
         @payload_dir = directory
         @loaded_token = marker.token
         @loaded_generation = marker.number
+        @loaded_marker = marker
       end
 
       # Is there an index here at all?
@@ -1639,7 +1650,7 @@ module Woods
         directory = TYPE_TO_DIR[type] || UNIT_TYPE_TO_DIR.fetch(type)
         data = load_unit(directory, unit_filename(identifier))
         unless valid_published_unit?(data, directory, identifier)
-          raise IOError, "typed unit identity mismatch: #{type}:#{identifier}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{type}:#{identifier}"
         end
 
         data
@@ -1724,10 +1735,22 @@ module Woods
           decode ? decode.call(content) : JSON.parse(content)
         end
         unless valid_published_unit?(data, dir, identifier)
-          raise IOError, "typed unit identity mismatch: #{dir}/#{filename}"
+          raise IOError, build_gap_message || "typed unit identity mismatch: #{dir}/#{filename}"
         end
 
         data
+      end
+
+      # A unit another Woods build wrote can fail this build's identity
+      # guard; that is a version gap, not corruption. Checked before the
+      # guard's own message is raised.
+      #
+      # @return [String, nil]
+      def build_gap_message
+        comparison = BuildIdentity.compare(manifest)
+        comparison.message if comparison.mismatch?
+      rescue StandardError
+        nil
       end
 
       def valid_published_unit?(data, dir, identifier)

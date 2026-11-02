@@ -19,14 +19,16 @@ RSpec.describe Woods::Extraction::ManifestFacts do
       extracted_at: '2026-10-27T12:00:00Z', woods_version: '2.1.1.alpha',
       rails_version: '8.1.0', ruby_version: '4.0.7', counts: counts,
       total_chunks: 0, provenance: provenance, gemfile_lock_sha: nil, schema_sha: 'schema-digest',
-      extraction_config: configuration, git_enrichment: git_enrichment, git_filter_available: true
+      extraction_config: configuration, git_enrichment: git_enrichment, git_filter_available: true,
+      woods_build: { woods_revision: 'f' * 40, woods_revision_dirty: false }, root: '/srv/app'
     }
   end
   let(:expected) do
     {
       extracted_at: '2026-10-27T12:00:00Z', woods_version: '2.1.1.alpha',
+      woods_revision: 'f' * 40, woods_revision_dirty: false,
       rails_version: '8.1.0', ruby_version: '4.0.7', counts: { controllers: 0, models: 2 },
-      total_units: 2, total_chunks: 0, git_sha: 'captured-commit', git_branch: 'main',
+      total_units: 2, total_chunks: 0, git_sha: 'captured-commit', git_branch: 'main', root: '/srv/app',
       gemfile_lock_sha: nil, schema_sha: 'schema-digest',
       extraction_config: { 'include_framework_sources' => 'digest' },
       git_enrichment: { 'state' => 'available', 'head_sha' => 'captured-commit',
@@ -42,16 +44,18 @@ RSpec.describe Woods::Extraction::ManifestFacts do
     result = build
 
     expect(result).to eq(expected)
-    expect(result.keys).to eq(%i[extracted_at woods_version rails_version ruby_version counts total_units total_chunks
-                                 git_sha git_branch gemfile_lock_sha schema_sha extraction_config git_enrichment])
+    expect(result.keys).to eq(%i[extracted_at woods_version woods_revision woods_revision_dirty rails_version
+                                 ruby_version counts total_units total_chunks git_sha git_branch root
+                                 gemfile_lock_sha schema_sha extraction_config git_enrichment])
     expect(result.fetch(:counts).keys).to eq(%i[controllers models])
   end
 
   it 'preserves complete compact bytes including null and nested field order' do
     expected_bytes = '{"extracted_at":"2026-10-27T12:00:00Z","woods_version":"2.1.1.alpha",' \
+                     "\"woods_revision\":\"#{'f' * 40}\",\"woods_revision_dirty\":false," \
                      '"rails_version":"8.1.0","ruby_version":"4.0.7","counts":{"controllers":0,"models":2},' \
                      '"total_units":2,"total_chunks":0,"git_sha":"captured-commit","git_branch":"main",' \
-                     '"gemfile_lock_sha":null,"schema_sha":"schema-digest",' \
+                     '"root":"/srv/app","gemfile_lock_sha":null,"schema_sha":"schema-digest",' \
                      '"extraction_config":{"include_framework_sources":"digest"},' \
                      '"git_enrichment":{"state":"available","head_sha":"captured-commit",' \
                      '"capture":{"refreshed":1,"retained":1}}}'
@@ -64,6 +68,8 @@ RSpec.describe Woods::Extraction::ManifestFacts do
       {
         "extracted_at": "2026-10-27T12:00:00Z",
         "woods_version": "2.1.1.alpha",
+        "woods_revision": "#{'f' * 40}",
+        "woods_revision_dirty": false,
         "rails_version": "8.1.0",
         "ruby_version": "4.0.7",
         "counts": {
@@ -74,6 +80,7 @@ RSpec.describe Woods::Extraction::ManifestFacts do
         "total_chunks": 0,
         "git_sha": "captured-commit",
         "git_branch": "main",
+        "root": "/srv/app",
         "gemfile_lock_sha": null,
         "schema_sha": "schema-digest",
         "extraction_config": {
