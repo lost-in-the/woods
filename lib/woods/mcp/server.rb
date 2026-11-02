@@ -2371,25 +2371,72 @@ module Woods
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \
                          'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
-                         'Incomplete evidence is unknown. Call this first on cold connect.',
+                         'Incomplete evidence is unknown. Call this first on cold connect. ' \
+                         '`worktrees` counts the other linked checkouts by state; pass worktrees: "list" for each entry.',
             input_schema: { type: 'object', properties: {
               source_check: { type: 'string', enum: %w[quick deep], default: 'quick',
-                              description: 'Bounded source content verification: quick (250ms) or deep (5s).' }
+                              description: 'Bounded source content verification: quick (250ms) or deep (5s).' },
+              worktrees: { type: 'string', enum: WORKTREES_MODES, default: 'summary',
+                           description: 'Linked checkouts: summary (counts by state of those other than the ' \
+                                        'served one), list (one entry per checkout, served one included), or none.' }
             } }
-          ) do |server_context:, source_check: 'quick'|
+          ) do |server_context:, source_check: 'quick', worktrees: 'summary'|
             _ = server_context
             status = Woods::MCP::Server.build_status(
               reader: reader, retriever: retriever, index_dir: router.current_index_dir,
               bootstrap_state: bootstrap_state, source_check: source_check
             )
-            worktrees = Woods::MCP::Server.worktrees_status(router)
-            status[:worktrees] = worktrees if worktrees
+            section = Woods::MCP::Server.worktrees_section(router, worktrees)
+            status[:worktrees] = section if section
             status[:hydration] = hydration.to_h
             respond.call(JSON.pretty_generate(status))
           end
         end
 
         public
+
+        # Values of woods_status's `worktrees` argument.
+        WORKTREES_MODES = %w[summary list none].freeze
+
+        # Every `state` {#worktree_status_entry} produces. The summary always
+        # carries each one (zero when absent) so its shape is fixed.
+        WORKTREE_STATES = %w[indexed unextracted missing unreadable].freeze
+
+        # The `worktrees` section of woods_status for +mode+, or nil to omit it.
+        #
+        # - `summary` (default): `{ scope:, count:, by_state: }` over the linked
+        #   checkouts other than the one this call describes (the launch index,
+        #   or the `root` the call named), which the rest of the report already
+        #   covers. Its size does not grow with the number of checkouts.
+        # - `list`: {#worktrees_status}, every checkout including the served one.
+        # - `none`: omitted.
+        #
+        # @param router [Woods::MCP::WorktreeRouting::Router]
+        # @param mode [String] one of {WORKTREES_MODES}
+        # @return [Hash, Array<Hash>, nil]
+        def worktrees_section(router, mode)
+          case mode.to_s
+          when 'none' then nil
+          when 'list' then worktrees_status(router)
+          else worktrees_summary(router)
+          end
+        end
+
+        # Counts of the linked checkouts other than the served one, by state.
+        # Nil when the server cannot route, as {#worktrees_status} is.
+        #
+        # @param router [Woods::MCP::WorktreeRouting::Router]
+        # @return [Hash, nil]
+        def worktrees_summary(router)
+          entries = router.entries
+          return nil if entries.empty?
+
+          others = entries.reject { |entry| router.served?(entry) }
+          states = others.map { |entry| worktree_status_entry(router, entry)[:state] }
+          by_state = WORKTREE_STATES.to_h { |state| [state.to_sym, 0] }
+          states.each { |state| by_state[state.to_sym] = by_state.fetch(state.to_sym, 0) + 1 }
+          { scope: 'other_checkouts', count: others.size, by_state: by_state }
+        end
 
         # The linked worktrees `root` may name, each with the state of its
         # index, so an agent can see what it can route to before it calls.
