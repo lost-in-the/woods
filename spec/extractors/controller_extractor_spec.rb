@@ -1210,6 +1210,19 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
         expect(metadata[:inlined_concerns]).to eq(['RequiresAuthor'])
       end
 
+      it 'records a namespaced inlined concern by its full name, keeping same-short-name concerns apart' do
+        gate, audit = %w[Gatekeeping::RequiresAuthor Auditing::RequiresAuthor].map do |name|
+          concern_module(name, write_concern_file(name, concern_code))
+        end
+        controller = metadata_controller('PostsController', [gate, audit])
+        source = "class PostsController < ApplicationController\nend\n"
+
+        metadata = extractor.send(:extract_metadata, controller, source, action_sources: {})
+
+        expect(metadata[:inlined_concerns])
+          .to contain_exactly('Gatekeeping::RequiresAuthor', 'Auditing::RequiresAuthor')
+      end
+
       it 'does not claim inlining for a detected concern whose source file cannot be read' do
         mod = concern_module('DynamicallyDefined', nil)
         controller = metadata_controller('PostsController', [mod])

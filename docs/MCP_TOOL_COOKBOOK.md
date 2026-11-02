@@ -239,7 +239,7 @@ end
 # ─────────────────────────── End Searchable ───────────────────────────
 ```
 
-The `metadata.inlined_concerns` array lists which concerns were resolved. On a model, each entry is the concern's full constant name, so a namespaced concern reads `Canopy::MoneyColumns` and matches that concern unit's identifier:
+The `metadata.inlined_concerns` array lists which concerns were resolved. On a model or controller, each entry is the concern's full constant name, so a namespaced concern reads `Canopy::MoneyColumns` and matches that concern unit's identifier:
 
 ```json
 { "inlined_concerns": ["Auditable", "Searchable"] }

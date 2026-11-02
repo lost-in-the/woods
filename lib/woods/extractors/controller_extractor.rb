@@ -530,7 +530,7 @@ module Woods
       # @param source [String, nil] Pre-read controller source (read from
       #   disk when nil)
       # @return [Array(String, Array<String>)] The concern-inlined source
-      #   and the demodulized names of the concerns actually inlined into
+      #   and the full names of the concerns actually inlined into
       #   it. Returning the pair keeps metadata[:inlined_concerns] truthful
       #   — it is derived from the insertion result, never recomputed
       #   independently of what the composite source carries.
@@ -548,7 +548,7 @@ module Woods
         return [source, []] if concern_sources.empty?
 
         [insert_concern_block(controller, source, build_concern_block(concern_sources)),
-         concern_sources.map { |name, _code| name.demodulize }]
+         concern_sources.map(&:first)]
       end
 
       # Resolve [name, code] pairs for every detected concern whose source
@@ -820,7 +820,7 @@ module Woods
       #
       # @param controller [Class] The controller class
       # @param source [String, nil] The raw controller source code
-      # @param inlined_concerns [Array<String>, nil] Demodulized names of
+      # @param inlined_concerns [Array<String>, nil] Full names of
       #   the concerns actually inlined into the unit's source_code (from
       #   {#build_controller_source_with_concerns}). When nil, derived by
       #   running the same inlining — the metadata must never claim a
@@ -863,7 +863,7 @@ module Woods
           # Concerns included (detected by membership, not name — #175)
           included_concerns: extract_included_concerns(controller),
 
-          # Concerns actually inlined into source_code (demodulized)
+          # Concerns actually inlined into source_code, by full name
           inlined_concerns: inlined_concerns || build_controller_source_with_concerns(controller, source).last,
 
           # Response formats
