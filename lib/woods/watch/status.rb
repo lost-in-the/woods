@@ -27,8 +27,11 @@ module Woods
     # * **stale** — the record claims `running` or `degraded` but is older than
     #   {STALE_AFTER}; whatever wrote it has stopped heartbeating.
     # * **dead** — the record names a same-host pid that no longer exists.
+    # * **unverified** — a fresh record from another host that this reader is
+    #   not opted in to trust (see {#alive?}); the daemon may well be alive in
+    #   its container, but nothing here can say so.
     #
-    # The daemon never writes either; {#write} rejects them. The recorded state
+    # The daemon never writes any of these; {#write} rejects them. The recorded state
     # travels alongside as `recorded_state` so no reader loses information.
     #
     # Degraded is the important one. #164's failure posture is that a daemon
@@ -41,7 +44,7 @@ module Woods
       STATES = %i[running degraded stopped].freeze
 
       # States only a reader derives; see {#report}.
-      DERIVED_STATES = %i[stale dead].freeze
+      DERIVED_STATES = %i[stale dead unverified].freeze
 
       # A status record older than this is not believed, however healthy it
       # claims to be. The daemon heartbeats every five minutes, including
@@ -134,8 +137,9 @@ module Woods
       # the daemon is alive. The daemon's own word is kept as `recorded_state`.
       #
       # A fresh foreign-host record that this reader is not opted in to trust
-      # is neither provably dead nor stale, so it keeps its recorded state with
-      # `alive: false`; `dead` and `stale` are only ever claimed on evidence.
+      # is neither provably dead nor stale, but reporting it as `running` beside
+      # `alive: false` is the contradiction this exists to remove: it becomes
+      # `unverified`. `dead` and `stale` are only ever claimed on evidence.
       #
       # @param max_age [Numeric] see {#alive?}
       # @param trust_foreign_host [Boolean] see {#alive?}
@@ -167,14 +171,15 @@ module Woods
 
       # `dead` outranks `stale`: a vanished pid is direct evidence, an old
       # timestamp only circumstantial. A record the daemon itself marked
-      # `stopped` is left alone — there is nothing to derive.
+      # `stopped` is left alone — there is nothing to derive. Whatever claims
+      # `running` or `degraded` while `alive?` says no is never reported as such.
       def derived_state(record, alive:, max_age:)
         recorded = record['state']
         return recorded if alive || !%w[running degraded].include?(recorded)
         return 'dead' if known_dead?(record)
         return 'stale' unless recent?(record['updated_at'], max_age)
 
-        recorded
+        'unverified'
       end
 
       # Only a same-host pid can be checked; a foreign one is never declared dead.

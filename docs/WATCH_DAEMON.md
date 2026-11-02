@@ -361,8 +361,8 @@ a same-host pid that no longer exists. `running` and `degraded` are reported
 only while the daemon is alive. The raw value travels alongside as
 `recorded_state`, and `alive` is the same verdict as the exit status. A fresh
 record from another host that the reader is not opted in to trust (below) is
-neither provably dead nor stale, so it keeps its recorded state with
-`alive: false`.
+neither provably dead nor stale, so it is reported as `unverified` — the
+container's daemon may be fine, but nothing on this side can say so.
 
 The extractor publishes `generation.json` as the last write of a run, before
 the daemon can write the cycle's outcome. While a cycle runs, the record says
@@ -780,8 +780,8 @@ party) behaves exactly as it always did.
     "staleness_seconds": 12
   },
   "watch": {
-    "state": "degraded",                  // running | degraded | stale | dead | stopped | absent
-    "recorded_state": "degraded",         // what the daemon last wrote; stale/dead are derived at read time
+    "state": "degraded",                  // running | degraded | stale | dead | unverified | stopped | absent
+    "recorded_state": "degraded",         // what the daemon last wrote; stale/dead/unverified are derived at read time
     "alive": true,
     "reason": "SyntaxError: unexpected end-of-input",
     "generation": 41

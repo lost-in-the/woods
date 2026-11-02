@@ -2673,7 +2673,8 @@ module Woods
         # this index; fall back to whatever the last explicit run left). Two
         # more are derived at read time, since a dead daemon cannot amend its
         # own record: `stale` (older than `stale_after_seconds`) and `dead`
-        # (same-host pid gone). See {Woods::Watch::Status#report}.
+        # (same-host pid gone) and `unverified` (fresh foreign-host record this reader is not
+        # opted in to trust). See {Woods::Watch::Status#report}.
         #
         # @return [Hash]
         def watch_section(index_dir)

@@ -266,7 +266,7 @@ RSpec.describe 'woods_status tool' do
         Woods::Watch::Status.new(output_dir: index_dir)
                             .write(state: :running, host: 'another-container')
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return(nil)
-        expect(status_for[:watch]).to include(state: 'running', alive: false)
+        expect(status_for[:watch]).to include(state: 'unverified', recorded_state: 'running', alive: false)
 
         allow(ENV).to receive(:[]).with('WOODS_WATCH_TRUST_FOREIGN_HOST').and_return('1')
         expect(status_for[:watch]).to include(state: 'running', alive: true)

@@ -173,10 +173,15 @@ RSpec.describe Woods::Watch::Status do
       expect(reader(at: now + described_class::STALE_AFTER + 60).report).to include('state' => 'dead')
     end
 
-    it 'keeps the recorded state for a fresh foreign record it is not trusted to check' do
-      writer.write(state: :running, host: 'another-container')
+    # The field case: written inside a container, read on the host. Neither
+    # dead nor stale, but `running` beside `alive: false` is the contradiction.
+    it 'reports a fresh foreign record it is not trusted to check as unverified' do
+      writer.write(state: :degraded, host: 'another-container', reason: 'reload failed')
 
-      expect(reader.report(trust_foreign_host: false)).to include('state' => 'running', 'alive' => false)
+      expect(reader.report(trust_foreign_host: false))
+        .to include('state' => 'unverified', 'recorded_state' => 'degraded', 'alive' => false)
+      expect(reader.report(trust_foreign_host: true))
+        .to include('state' => 'degraded', 'recorded_state' => 'degraded', 'alive' => true)
     end
 
     it 'leaves stopped alone' do
