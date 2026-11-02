@@ -3806,6 +3806,161 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.send(:remove_const, :PendInh) if Object.const_defined?(:PendInh, false)
     end
 
+    # ── A library parent's change reaching its descendant (WDS-111) ────────
+    #
+    # Two outputs agree when both omit the evidence, so these examples read
+    # the descendant's own payload before and after one incremental run and
+    # assert it moved before holding the run to a full extraction. Each
+    # negative control makes the same change with the descendant's
+    # inheritance edge gone and shows the walk then misses it.
+    #
+    # Jobs and serializers are not used: any Ruby change replaces them
+    # wholesale ({Extractor::HYBRID_DISCOVERY_EXTRACTORS}), so a job's
+    # inherited rescue handlers refresh with or without the edge.
+    describe 'a library parent change reaching its descendant (WDS-111)' do
+      # One baseline and one incremental run, without an equivalence check
+      # between them: the evidence comes first, and a control's run diverges.
+      #
+      # @return [Array] the evidence before, the evidence after, the index
+      def evidence_across_change(operation)
+        index_dir = Dir.mktmpdir('woods_diff_incr')
+        (@scratch_dirs ||= []) << index_dir
+        @retired_paths = []
+        Woods::Extractor.new(output_dir: index_dir).extract_all
+        before = yield(index_dir)
+        Woods::Extractor.new(output_dir: index_dir).extract_changed(Array(operation.call))
+        [before, yield(index_dir), index_dir]
+      end
+
+      def unload_ledger_controllers
+        %w[RadiusLedgersController RadiusLedgerBaseController].each do |name|
+          Object.send(:remove_const, name) if Object.const_defined?(name, false)
+        end
+      end
+
+      after { unload_ledger_controllers }
+
+      def ledger_base(audited:)
+        audit_filter = audited ? "  after_action :audit_ledger\n" : ''
+        audit_method = audited ? "  def audit_ledger; end\n" : ''
+        "  before_action :require_ledger\n#{audit_filter}\n  private\n\n  def require_ledger; end\n#{audit_method}"
+      end
+
+      # A base controller under lib/ and an application controller that
+      # declares no filter of its own: every filter the child publishes is
+      # read off its loaded class, inherited from the library parent.
+      #
+      # @return [String] the parent's path, the only file that changed
+      def load_ledger_controllers(audited:)
+        unload_ledger_controllers
+        write_file('lib/radius_ledger_base_controller.rb',
+                   "class RadiusLedgerBaseController < ApplicationController\n#{ledger_base(audited: audited)}end\n")
+        write_file('app/controllers/radius_ledgers_controller.rb',
+                   "class RadiusLedgersController < RadiusLedgerBaseController\n  def index; end\nend\n")
+        load app_path('lib/radius_ledger_base_controller.rb')
+        load app_path('app/controllers/radius_ledgers_controller.rb')
+        'lib/radius_ledger_base_controller.rb'
+      end
+
+      # @return [Array<Array(String, String)>] the child's published filters
+      #   that the library parent declares, as [kind, filter]
+      def inherited_filters(dir)
+        unit = unit_snapshot(dir).values.find { |candidate| candidate['identifier'] == 'RadiusLedgersController' }
+        unit.dig('metadata', 'filters')
+            .select { |filter| filter['owner'] == 'RadiusLedgerBaseController' }
+            .map { |filter| [filter['kind'], filter['filter']] }
+      end
+
+      def audited_ledger_change
+        -> { load_ledger_controllers(audited: true) }
+      end
+
+      it "publishes a library base controller's new filter on its application subclass" do
+        load_ledger_controllers(audited: false)
+
+        before, after, index = evidence_across_change(audited_ledger_change) { |dir| inherited_filters(dir) }
+
+        expect(before).to eq([%w[before require_ledger]])
+        expect(after).to eq([%w[before require_ledger], %w[after audit_ledger]])
+        expect(differences(index, full_extraction)).to be_empty
+      end
+
+      it 'misses that filter when the subclass has no inheritance edge (negative control)' do
+        allow_any_instance_of(Woods::Extractors::ControllerExtractor)
+          .to receive(:superclass_dependency).and_return(nil)
+        load_ledger_controllers(audited: false)
+
+        before, after, = evidence_across_change(audited_ledger_change) { |dir| inherited_filters(dir) }
+
+        expect(before).to eq([%w[before require_ledger]])
+        expect { expect(after).to eq([%w[before require_ledger], %w[after audit_ledger]]) }
+          .to raise_error(RSpec::Expectations::ExpectationNotMetError)
+        expect(after).to eq(before)
+      end
+
+      # A pending library publishes only what its own file says (LibExtractor
+      # reads source, never the parent), and any lib/ change re-runs the
+      # library extractor wholesale. So a library child's unit carries no
+      # evidence of its parent, and is refreshed with or without the walk.
+      # What the edge does carry is the walk: from the parent's file to the
+      # child, and on through the child's other dependents.
+      def structural_radii
+        radii = []
+        allow_any_instance_of(Woods::DependencyGraph)
+          .to receive(:affected_by).and_wrap_original do |original, *args, **opts|
+          original.call(*args, **opts).tap { |ids| radii << ids if opts.key?(:structural_vias) }
+        end
+        radii
+      end
+
+      def pending_library_child(dir)
+        unit_snapshot(dir).values.find { |unit| unit['identifier'] == 'PendInh::LedgerClient' }
+      end
+
+      def settled_library_change
+        -> { write_pending_library("    def ledger = :kept\n    def settle = :added\n") }
+      end
+
+      it 'walks from a pending library parent to its library child, which publishes nothing of the parent' do
+        write_pending_library("    def ledger = :kept\n")
+        Object.autoload(:PendInh, app_path('lib/pend_inh'))
+        radii = structural_radii
+
+        before, after, index = evidence_across_change(settled_library_change) { |dir| pending_library_child(dir) }
+
+        expect(radii.last).to include('PendInh::BaseClient', 'PendInh::LedgerClient')
+        expect(after.fetch('dependencies'))
+          .to include(include('type' => 'lib', 'target' => 'PendInh::BaseClient', 'via' => 'inheritance'))
+        # The payload limitation, pinned: the parent gained a public method
+        # and the child's published unit did not move.
+        expect(after).to eq(before)
+        expect(differences(index, full_extraction)).to be_empty
+        expect(Object.autoload?(:PendInh)).to eq(app_path('lib/pend_inh'))
+      ensure
+        Object.send(:remove_const, :PendInh) if Object.const_defined?(:PendInh, false)
+      end
+
+      it 'leaves the pending library child out of the walk without its inheritance edge (negative control)' do
+        require 'woods/extractors/superclass_dependency'
+        allow_any_instance_of(Woods::Extractors::SuperclassDependency)
+          .to receive(:call).and_wrap_original do |original, *args, **opts|
+          edge = original.call(*args, **opts)
+          edge unless edge && edge[:target] == 'PendInh::BaseClient'
+        end
+        write_pending_library("    def ledger = :kept\n")
+        Object.autoload(:PendInh, app_path('lib/pend_inh'))
+        radii = structural_radii
+
+        evidence_across_change(settled_library_change) { |dir| pending_library_child(dir) }
+
+        expect(radii.last).to include('PendInh::BaseClient')
+        expect { expect(radii.last).to include('PendInh::LedgerClient') }
+          .to raise_error(RSpec::Expectations::ExpectationNotMetError)
+      ensure
+        Object.send(:remove_const, :PendInh) if Object.const_defined?(:PendInh, false)
+      end
+    end
+
     def through_chain_sources
       {
         'radius_owner' => "class RadiusOwner < ApplicationRecord\n  self.table_name = 'posts'\n  " \
