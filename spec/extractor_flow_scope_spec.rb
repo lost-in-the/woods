@@ -223,4 +223,21 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
       expect(run[:rest][:carried_identifiers]).to eq([])
     end
   end
+
+  # The flow line counts every published flow the run keeps, not only the
+  # re-extracted controllers it carries forward, so a bounded radius and
+  # the unbounded one report the same kept count for the same output (#966).
+  context 'when a controller the run never touches keeps its flow' do
+    let(:untouched_controllers) { ['DetachedController'] }
+
+    %i[unbounded structural].each do |radius|
+      it "logs it as kept under the #{radius} radius" do
+        Woods.configuration.incremental_blast_radius_depth = (radius == :structural ? :structural : nil)
+        run
+
+        expect(logger).to have_received(:info)
+          .with('[Woods] Refreshing flows for 1 controller(s), 2 kept, 0 removed...')
+      end
+    end
+  end
 end
