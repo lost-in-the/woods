@@ -57,6 +57,55 @@ RSpec.describe Woods::AtomicFile do
     # O1: permissions are explicit per artifact. Only artifacts with a
     # documented cross-boundary consumer pass a wider mode; Tempfile's 0600
     # default must not silently widen (or silently forbid widening) anywhere.
+    it 'publishes the requested 0600 even under a umask that strips owner bits (#976 review)' do
+      path = File.join(@dir, 'masked.json')
+      previous = File.umask(0o200)
+      begin
+        described_class.write(path, 'data', durable: false)
+        described_class.write("#{path}.durable", 'data')
+      ensure
+        File.umask(previous)
+      end
+
+      expect(File.stat(path).mode & 0o777).to eq(0o600)
+      expect(File.stat("#{path}.durable").mode & 0o777).to eq(0o600)
+      expect(File.read(path)).to eq('data')
+    end
+
+    it 'leaves a pre-existing file at its temp name untouched and writes through another name (#976 review)' do
+      path = File.join(@dir, 'note.md')
+      taken = []
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap do |candidate|
+          next unless taken.empty?
+
+          File.write(candidate, 'someone else')
+          taken << candidate
+        end
+      end
+
+      described_class.write(path, 'mine')
+
+      expect(File.read(path)).to eq('mine')
+      expect(File.read(taken.first)).to eq('someone else')
+    end
+
+    it 'gives up after repeated collisions without removing any colliding file' do
+      path = File.join(@dir, 'note.md')
+      taken = []
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap do |candidate|
+          File.write(candidate, 'someone else')
+          taken << candidate
+        end
+      end
+
+      expect { described_class.write(path, 'mine') }.to raise_error(Errno::EEXIST)
+      expect(taken.size).to eq(described_class::TEMP_ATTEMPTS)
+      expect(taken).to all(satisfy { |candidate| File.read(candidate) == 'someone else' })
+      expect(File).not_to exist(path)
+    end
+
     it 'applies an explicitly requested wider mode' do
       path = File.join(@dir, 'shared.md')
       described_class.write(path, 'data', mode: 0o644)
@@ -94,7 +143,7 @@ RSpec.describe Woods::AtomicFile do
 
       it 'does not fsync the temp file or the directory' do
         fsyncs = 0
-        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        allow_any_instance_of(File).to receive(:fsync) { fsyncs += 1 }
         expect(described_class).not_to receive(:fsync_directory)
 
         described_class.write(File.join(@dir, 'deferred.json'), 'data', durable: false)
@@ -104,12 +153,13 @@ RSpec.describe Woods::AtomicFile do
 
       it 'still fsyncs both when durable (the default)' do
         fsyncs = 0
-        allow_any_instance_of(Tempfile).to receive(:fsync) { fsyncs += 1 }
+        allow_any_instance_of(File).to receive(:fsync) { fsyncs += 1 }
         expect(described_class).to receive(:fsync_directory).with(@dir).and_call_original
 
         described_class.write(File.join(@dir, 'durable.json'), 'data')
 
-        expect(fsyncs).to eq(1)
+        # One for the temp file, one inside fsync_directory.
+        expect(fsyncs).to eq(2)
       end
 
       it 'cleans up and preserves the target when a non-durable rename fails' do
@@ -126,8 +176,8 @@ RSpec.describe Woods::AtomicFile do
     it 'uses unique temporary names for concurrent writers' do
       path = File.join(@dir, 'note.md')
       temporary_paths = Queue.new
-      allow(Tempfile).to receive(:new).and_wrap_original do |original, *args|
-        original.call(*args).tap { |tempfile| temporary_paths << tempfile.path }
+      allow(described_class).to receive(:temp_path).and_wrap_original do |original, *args|
+        original.call(*args).tap { |tmp| temporary_paths << tmp }
       end
 
       contents = ['a' * 10_000, 'b' * 20_000]
@@ -143,7 +193,7 @@ RSpec.describe Woods::AtomicFile do
     it 'cleans up and preserves the target when temp-file fsync fails' do
       path = File.join(@dir, 'note.md')
       File.write(path, 'original')
-      allow_any_instance_of(Tempfile).to receive(:fsync).and_raise(IOError, 'disk failure')
+      allow_any_instance_of(File).to receive(:fsync).and_raise(IOError, 'disk failure')
 
       expect { described_class.write(path, 'new') }.to raise_error(IOError, 'disk failure')
       expect(File.read(path)).to eq('original')
