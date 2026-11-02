@@ -308,7 +308,7 @@ namespace :woods do
 
     # `report`, not `read`: `state` is derived from liveness at read time, so a
     # daemon that died without clearing its record shows `dead` or `stale`
-    # rather than the `running` it last wrote (WDS-108). The daemon's own word
+    # rather than the `running` it last wrote. The daemon's own word
     # is kept as `recorded_state`.
     report = status.report
     puts JSON.pretty_generate(report)

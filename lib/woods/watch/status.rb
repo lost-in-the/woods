@@ -22,7 +22,7 @@ module Woods
     #   the last explicit run left.
     #
     # Two more states exist only on the read side, because a daemon cannot
-    # amend its own record after it dies ({#report}, WDS-108):
+    # amend its own record after it dies (see {#report}):
     #
     # * **stale** — the record claims `running` or `degraded` but is older than
     #   {STALE_AFTER}; whatever wrote it has stopped heartbeating.

@@ -127,7 +127,7 @@ RSpec.describe Woods::Watch::Status do
 
   # A daemon that dies cannot amend its own record, so `running` outlives the
   # process that wrote it. The reported `state` is derived from liveness at
-  # read time and the daemon's word is kept as `recorded_state` (WDS-108).
+  # read time and the daemon's word is kept as `recorded_state`.
   describe '#report' do
     let(:now) { Time.utc(2026, 1, 1, 12, 0, 0) }
     let(:writer) { described_class.new(output_dir: output_dir, clock: -> { now.iso8601 }) }

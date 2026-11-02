@@ -2844,8 +2844,8 @@ module Woods
           # `recorded_state` is whatever the daemon last wrote, and a `kill -9`'d
           # daemon leaves `running` behind forever. `state` is derived from the
           # liveness verdict at read time (`stale`, `dead`) so a reader that
-          # branches on it alone cannot take a dead daemon for a live one
-          # (WDS-108); `alive` and `recorded_state` keep both answers visible.
+          # branches on it alone cannot take a dead daemon for a live one;
+          # `alive` and `recorded_state` keep both answers visible.
           # Parse first so an unreadable file stays `absent` (Status#read would
           # soften it to a synthetic `stopped`). AtomicFile.read: the daemon's
           # reasons contain em dashes, and a US-ASCII default external encoding
