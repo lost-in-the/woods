@@ -26,13 +26,26 @@ module Woods
     # **A tool call during warm-up is correct, not fast.** {Dispatch#call_tool}
     # waits for the warm-up to finish, up to {#wait_cap} seconds (default
     # {DEFAULT_WAIT_CAP}, `WOODS_MCP_HYDRATION_WAIT_SECONDS` overrides), and
-    # then dispatches. Past the cap, or after a failed warm-up, the call
-    # answers from the cold reader: every reader accessor is lazy and
-    # memoized, so the result is the same, only slower, and the warm-up
-    # thread keeps filling the caches meanwhile. Nothing is ever answered
-    # from a partially built cache: the reader's own locks (the generation
-    # pin, the cache mutex, the retriever's snapshot mutex) order the two
-    # threads, and the warm-up holds a generation pin for its duration.
+    # then dispatches. After a failed warm-up the call answers from the cold
+    # reader. Past the cap it is dispatched with {.past_cap?} set, and the
+    # cap then bounds the whole call, not only the condition-variable wait:
+    #
+    # - Every reader-backed tool answers from the cold reader. Reader
+    #   accessors are lazy and memoized, so the result is the same, only
+    #   slower; the warm-up takes no reader lock a call needs for longer than
+    #   one cache update, and its generation pins yield to a waiting reload or
+    #   refresh ({IndexReader#yielding_to_drains}) instead of queueing every
+    #   later call behind that waiter.
+    # - `codebase_retrieve` in lexical mode needs the whole corpus, which is
+    #   what the warm-up is building under the retriever's snapshot mutex. A
+    #   cold answer would be a second full build of the same corpus, as slow
+    #   as the warm-up and doubling its memory, so the call answers
+    #   {Warming} instead: a structured, retryable, non-error result with no
+    #   partial sources. A retry waits for the warm-up again, up to the cap.
+    #
+    # Nothing is ever answered from a partially built cache: the reader's own
+    # locks (the generation pin, the cache mutex, the retriever's snapshot
+    # mutex) order the two threads.
     #
     # An exception in the warm-up is captured into the `failed` state and
     # reported by `woods_status` under `hydration`; the server keeps serving.
@@ -55,10 +68,36 @@ module Woods
 
       WAIT_CAP_ENV = 'WOODS_MCP_HYDRATION_WAIT_SECONDS'
 
+      # Raised by a cache that cannot answer a {.past_cap?} call without
+      # waiting on the warm-up (the lexical corpus); the tool answers it as a
+      # retryable `warming` result, never as an error.
+      class Warming < StandardError; end
+
+      PAST_CAP_KEY = :woods_hydration_past_cap
+      private_constant :PAST_CAP_KEY
+
+      class << self
+        # @return [Boolean] true while this thread answers a call whose
+        #   hydration wait expired with the warm-up still running
+        def past_cap?
+          Thread.current[PAST_CAP_KEY] == true
+        end
+
+        # @yield the dispatch to run with {.past_cap?} set
+        # @return [Object] the block's value
+        def answering_past_cap
+          previous = Thread.current[PAST_CAP_KEY]
+          Thread.current[PAST_CAP_KEY] = true
+          yield
+        ensure
+          Thread.current[PAST_CAP_KEY] = previous
+        end
+      end
+
       # Tools that answer during warm-up without waiting for it.
       # `woods_status` reports the warm-up state, so it must not block on it;
-      # `reload` serializes on the reader's exclusive lock, which already
-      # waits for the warm-up's generation pin to drain.
+      # `reload` serializes on the reader's exclusive lock, and the warm-up
+      # yields its generation pins to that lock instead of making it wait.
       NON_WAITING_TOOL_NAMES = %w[woods_status reload].freeze
 
       # @return [Symbol] one of {MODES}
@@ -229,15 +268,16 @@ module Woods
               # The status tool is "call this first on cold connect"; a client
               # that never sent `initialize` still gets its warm-up started.
               hydration.start!
-            else
-              hydration.wait
+            elsif hydration.wait == :warming
+              return Hydration.answering_past_cap { super }
             end
           end
           super
         end
 
         def read_resource_contents(request, **)
-          @woods_hydration&.wait
+          return Hydration.answering_past_cap { super } if @woods_hydration&.wait == :warming
+
           super
         end
       end
