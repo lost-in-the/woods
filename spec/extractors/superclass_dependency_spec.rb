@@ -249,7 +249,7 @@ RSpec.describe Woods::Extractors::SuperclassDependency do
   # Ruby binds a relative parent in each enclosing scope's own constant
   # table first, innermost out, then in the innermost scope's ancestors,
   # then at the top level. A module the scope includes never outranks an
-  # outer scope that defines the name itself (WDS-110). Every expectation
+  # outer scope that defines the name itself. Every expectation
   # here is the superclass a separate Ruby process binds after loading the
   # same files, never a name read off the resolver.
   describe 'a pending library whose scope includes a module defining the parent name' do

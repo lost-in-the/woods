@@ -113,7 +113,7 @@ module Woods
         #     handshake is answered in milliseconds and a tool call that arrives
         #     during the warm-up waits for it (bounded) before answering.
         #   - `:before_handshake`: synchronously, inside this method, before the
-        #     transport starts — the behaviour before WDS-78. A warm-up
+        #     transport starts — the behaviour before answer-first startup. A warm-up
         #     exception propagates out of `build`.
         #   - `:none` (also `false`): never; every cache fills on first use.
         #   `woods_status` reports the state under `hydration`.

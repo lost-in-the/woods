@@ -14,7 +14,7 @@ module Woods
     # handshake timeout (Claude Code's version-negotiation probe gives up at
     # 5 seconds) records the server as rejecting `initialize` and connects
     # only on a later pass, after the agent has planned its first turn
-    # without Woods (WDS-78).
+    # without Woods.
     #
     # The work now runs on one background thread. It is armed by the first
     # successful `initialize` ({Dispatch#init}), and on stdio it starts only

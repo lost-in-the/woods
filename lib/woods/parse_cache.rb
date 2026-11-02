@@ -9,7 +9,7 @@ module Woods
   # A unit's source is read by several analyses that each parsed it again:
   # lexical nesting, the method table, callback sites, test examples, the
   # PORO walker, and so on. On a 10,000-unit app that was ~10,700 parses for
-  # ~1,900 distinct sources (WDS-90). The cache is keyed by content digest,
+  # ~1,900 distinct sources. The cache is keyed by content digest,
   # so two units that embed the same concern share one parse and a file
   # edited between two incremental runs is parsed again.
   #

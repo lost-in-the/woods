@@ -257,7 +257,7 @@ module Woods
     # Every payload file is written without its own fsync; {GemMapper#map!}
     # flushes the whole tree once before it publishes the pointer. Per-file
     # fsyncs were the largest single cost of a first self-map build
-    # (~10,000 files, ~5.5s of a 14.5s build; WDS-101).
+    # (~10,000 files, ~5.5s of a 14.5s build).
     def write_file(path, content)
       AtomicFile.write(path, content, durable: false)
     end

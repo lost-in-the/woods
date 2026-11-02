@@ -3806,7 +3806,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       Object.send(:remove_const, :PendInh) if Object.const_defined?(:PendInh, false)
     end
 
-    # ── A library parent's change reaching its descendant (WDS-111) ────────
+    # ── A library parent's change reaching its descendant ──────────────
     #
     # Two outputs agree when both omit the evidence, so these examples read
     # the descendant's own payload before and after one incremental run and
@@ -3817,7 +3817,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # Jobs and serializers are not used: any Ruby change replaces them
     # wholesale ({Extractor::HYBRID_DISCOVERY_EXTRACTORS}), so a job's
     # inherited rescue handlers refresh with or without the edge.
-    describe 'a library parent change reaching its descendant (WDS-111)' do
+    describe 'a library parent change reaching its descendant' do
       # One baseline and one incremental run, without an equivalence check
       # between them: the evidence comes first, and a control's run diverges.
       #
@@ -3906,8 +3906,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       # child, and on through the child's other dependents.
       def structural_radii
         radii = []
-        allow_any_instance_of(Woods::DependencyGraph)
-          .to receive(:affected_by).and_wrap_original do |original, *args, **opts|
+        ExampleScopedWrap.activate(Woods::DependencyGraph, :affected_by) do |original, *args, **opts|
           original.call(*args, **opts).tap { |ids| radii << ids if opts.key?(:structural_vias) }
         end
         radii
@@ -3942,8 +3941,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       it 'leaves the pending library child out of the walk without its inheritance edge (negative control)' do
         require 'woods/extractors/superclass_dependency'
-        allow_any_instance_of(Woods::Extractors::SuperclassDependency)
-          .to receive(:call).and_wrap_original do |original, *args, **opts|
+        ExampleScopedWrap.activate(Woods::Extractors::SuperclassDependency, :call) do |original, *args, **opts|
           edge = original.call(*args, **opts)
           edge unless edge && edge[:target] == 'PendInh::BaseClient'
         end

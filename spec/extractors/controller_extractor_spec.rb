@@ -818,6 +818,16 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(extractor.discoverable_classes).to contain_exactly(posts)
     end
 
+    it 'excludes a reloaded controller\'s superseded class, which descendants still lists under its name' do
+      superseded = app_controller_class('PostsController')
+      current = named_controller_class('PostsController')
+      stub_action_controller_base(superseded, current)
+      stub_const('PostsController', current)
+
+      expect(extractor.discoverable_classes).to contain_exactly(current)
+      expect(extractor.extract_controller(superseded)).to be_nil
+    end
+
     it 'excludes anonymous controller classes' do
       posts = app_controller_class('PostsController')
       anonymous = Class.new

@@ -128,7 +128,7 @@ module Woods
       # enclosing scope whose own constant table defines it, then through
       # the innermost scope's ancestors, then at the top level, and walks
       # the rest from there. A module a scope includes never outranks an
-      # outer scope that defines the segment itself (WDS-110).
+      # outer scope that defines the segment itself.
       def declared_parent_edge(declared)
         target = declared_target(declared[:parent], declared[:nesting])
         result = @lookup.call("::#{target}", allow_private: true)

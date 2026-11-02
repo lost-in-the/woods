@@ -205,15 +205,30 @@ module Woods
       # two must agree or the incremental class reconciliation recomputes
       # the same phantom "additions" every run.
       #
+      # A reload leaves the previous class object in +descendants+ under the
+      # name its replacement now holds, so a superseded class is rejected too:
+      # otherwise one controller is extracted twice and the survivor is
+      # whichever the walk reached last.
+      #
       # @param controller [Class] Candidate controller class
       # @return [Boolean]
       def app_defined_controller?(controller)
         return false if controller.name.nil?
+        return false unless current_constant?(controller)
 
         path = source_file_for(controller)
         return false unless path
 
         File.exist?(path) && app_source?(path, Rails.root.to_s)
+      end
+
+      # @param controller [Class]
+      # @return [Boolean] false when the name resolves to a different object;
+      #   a name that resolves to nothing loaded is left to the other checks
+      def current_constant?(controller)
+        @constant_lookup ||= SourceReferences::RuntimeLookup.new
+        current = @constant_lookup.call("::#{controller.name}", allow_private: true)[:value]
+        current.nil? || current.equal?(controller)
       end
 
       # Find the source file for a controller, validating paths are within Rails.root.

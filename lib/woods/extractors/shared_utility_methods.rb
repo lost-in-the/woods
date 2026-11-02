@@ -72,7 +72,7 @@ module Woods
 
       # `File.expand_path` is a C-level path walk; on a 10,000-unit app this
       # helper paid it ~2 × 150,000 times for the same root and for paths that
-      # were already absolute and clean (WDS-90).
+      # were already absolute and clean.
       def app_root_prefix(app_root)
         root = app_root.to_s
         (@app_root_prefixes ||= {})[root] ||= File.expand_path(root).delete_suffix(File::SEPARATOR) + File::SEPARATOR

@@ -59,7 +59,7 @@ RSpec.describe Woods::GemMapper do
     expect(entries).to all(include('type' => 'ruby_module'))
   end
 
-  it 'writes payload files without per-file flushes and flushes the tree once before publishing (WDS-101)' do
+  it 'writes payload files without per-file flushes and flushes the tree once before publishing' do
     Dir.mktmpdir('woods_self_map_sync') do |dir|
       gem_root = File.join(dir, 'gem')
       FileUtils.mkdir_p(File.join(gem_root, 'lib/tiny'))

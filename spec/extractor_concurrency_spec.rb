@@ -191,7 +191,7 @@ RSpec.describe Woods::Extractor, 'concurrent extraction' do
       allow(Woods::ModelNameCache).to receive(:model_names_regex).and_return(/(?!)/)
     end
 
-    it 'runs no more extractor threads at once than the ActiveRecord pool has connections (WDS-100)' do
+    it 'runs no more extractor threads at once than the ActiveRecord pool has connections' do
       Woods.configure { |c| c.concurrent_extraction = true }
       pool = double('pool', size: 3, stat: { busy: 0 })
       allow(pool).to receive(:with_connection) { |&block| block.call }

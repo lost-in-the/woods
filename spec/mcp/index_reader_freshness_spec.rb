@@ -323,7 +323,7 @@ RSpec.describe Woods::MCP::IndexReader, 'generation-based self-refresh' do
     end
   end
 
-  # The background warm-up (WDS-78) pins for seconds; inside
+  # The background cache warm-up pins for seconds; inside
   # #yielding_to_drains it steps aside for a waiting reload instead of
   # queueing every new pin behind that reload until it finishes.
   describe '#yielding_to_drains' do

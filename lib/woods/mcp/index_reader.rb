@@ -297,7 +297,7 @@ module Woods
       private_constant :YIELDING_KEY
 
       # Run work that holds generation pins for a long time but may give them
-      # up and start over: the background cache warm-up (WDS-78).
+      # up and start over: the background cache warm-up the server runs after answering `initialize`.
       #
       # An ordinary pin holder is never interrupted; an exclusive reload or a
       # refresh drain (MCP-5) waits for it, and while it waits every NEW pin

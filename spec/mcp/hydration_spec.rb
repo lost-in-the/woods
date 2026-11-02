@@ -12,7 +12,7 @@ require 'woods/mcp/server'
 require 'woods/mcp/published_lexical_retriever'
 require 'woods/mcp/stdio_transport'
 
-# Startup ordering of the Index MCP server (WDS-78): the `initialize`
+# Startup ordering of the Index MCP server: the `initialize`
 # handshake is answered before the cache warm-up, which runs on a background
 # thread once the handshake response is on the wire. A tool call that arrives
 # during the warm-up waits for it (bounded) and answers correctly either way.
