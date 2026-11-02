@@ -14,6 +14,13 @@ module Woods
   # @example
   #   ExtractedForm.of(published, reference_edges: added) == ExtractedForm.of(fresh)
   module ExtractedForm
+    # Metadata the Prism-walking passes derive from `source_code` and the
+    # extractor's own metadata before a unit is written ({MethodTable},
+    # {Extractors::TestExamples}): pure functions of the rest of the form.
+    TABLE_KEYS = %w[methods examples].freeze
+    # Entry lists whose `declaration` {CallbackSites} derives the same way.
+    DECLARATION_LISTS = %w[callbacks filters].freeze
+
     module_function
 
     # @param data [Hash] string-keyed unit JSON
@@ -30,6 +37,33 @@ module Woods
       form['dependencies'] = dependencies
       form['metadata'] = without_git(form['metadata']) if form['metadata'].is_a?(Hash)
       JSON.generate(form)
+    end
+
+    # The form before the table passes run: {.of} without the method table,
+    # the test example table and callback or filter declaration sites. Those
+    # are derived from `source_code` and the remaining metadata alone, so two
+    # units equal in this form are equal in {.of} once the passes have run.
+    #
+    # @param data [Hash] string-keyed unit JSON
+    # @param reference_edges [Array<Hash>] as for {.of}
+    # @return [String, nil] canonical JSON, or nil as for {.of}
+    def before_tables(data, reference_edges: [])
+      form = data
+      form = data.merge('metadata' => without_tables(data['metadata'])) if data['metadata'].is_a?(Hash)
+      of(form, reference_edges: reference_edges)
+    end
+
+    # @param metadata [Hash]
+    # @return [Hash] metadata without the pass-derived tables and declaration sites
+    def without_tables(metadata)
+      stripped = metadata.except(*TABLE_KEYS)
+      DECLARATION_LISTS.each do |key|
+        list = stripped[key]
+        next unless list.is_a?(Array)
+
+        stripped[key] = list.map { |entry| entry.is_a?(Hash) ? entry.except('declaration') : entry }
+      end
+      stripped
     end
 
     # @param dependencies [Array<Hash>, nil] published edges

@@ -4270,12 +4270,17 @@ module Woods
           SourceContributors.paths(unit).each { |path| @source_inputs&.consume_unit(extractor_key, path) }
         end
         (@source_reference_refreshed ||= Set.new).add([unit.type.to_s, unit.identifier])
-        # Before the unchanged check: the unit on disk carries its map.
+        # Before the unchanged check: the unit on disk carries its map, and
+        # the map depends on the file as it is now, not only on the unit.
         SourceLineMap.record(unit, root: Rails.root.to_s)
+        next if unchanged_registered_unit?(type_dir, unit)
+
+        # After it: these three walk the source with Prism and derive only
+        # from what the check already compared, so an unchanged unit keeps
+        # the tables its published JSON carries.
         MethodTable.record(unit)
         CallbackSites.record(unit)
         Extractors::TestExamples.record(unit)
-        next if unchanged_registered_unit?(type_dir, unit)
 
         affected_types&.add(extractor_key)
         mark_dependents_dirty(unit.identifier)
@@ -4306,12 +4311,16 @@ module Woods
     # so compared whole it never matched a published unit that had even one
     # dependent. Changed source, metadata or extractor edges keep the ordinary
     # registration path; identity checks already ran.
+    #
+    # The comparison is in {ExtractedForm.before_tables}: the method table,
+    # test examples and declaration sites are derived from what that form
+    # holds, so the fresh unit need not carry them yet (#WDS-103).
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      fresh = ExtractedForm.of(JSON.parse(JSON.generate(normalized.to_h)))
+      fresh = ExtractedForm.before_tables(JSON.parse(JSON.generate(normalized.to_h)))
       path = type_dir.join(collision_safe_filename(unit.identifier))
       return false unless fresh == published_extracted_form(path, unit)
 
@@ -4319,13 +4328,14 @@ module Woods
       true
     end
 
-    # @return [String, nil] the published unit's {ExtractedForm}; nil when the
-    #   file is missing, unreadable, or disagrees with its reference ownership
+    # @return [String, nil] the published unit's {ExtractedForm.before_tables};
+    #   nil when the file is missing, unreadable, or disagrees with its
+    #   reference ownership
     def published_extracted_form(path, unit)
       return nil unless File.exist?(path)
 
       key = [unit.type.to_s, unit.identifier]
-      ExtractedForm.of(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+      ExtractedForm.before_tables(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
     rescue StandardError
       nil
     end
