@@ -87,7 +87,7 @@ record="$(mktemp "${TMPDIR:-/tmp}/woods-source-status.XXXXXX")" || exit 0
 runner=""; timer=""
 cleanup() {
   [ -z "$runner" ] || kill -KILL -- "-$runner" 2>/dev/null || true
-  [ -z "$timer" ] || kill -TERM -- "-$timer" 2>/dev/null || true
+  [ -z "$timer" ] || kill -KILL -- "-$timer" 2>/dev/null || true
   rm -f "$record"
 }
 trap cleanup EXIT
@@ -98,6 +98,9 @@ set -m
 rake="${WOODS_HOOK_RAKE:-bundle exec rake}"
 ( cd "$cwd" || exit 1; exec $rake "woods:source_status[$encoded]" ) >"$record" 2>/dev/null &
 runner=$!
+# The runner may get TERM (a chance to shut down cleanly) because the timer
+# sends it no sooner than a second after the fork, long after the runner has
+# shed the hook's inherited traps. The timer itself is stopped with KILL.
 ( sleep 10; kill -TERM -- "-$runner" 2>/dev/null; sleep 1; kill -KILL -- "-$runner" 2>/dev/null ) >/dev/null 2>&1 &
 timer=$!
 # Not a tracked job: bash prints "Terminated" for a tracked job it reaps
@@ -107,7 +110,7 @@ wait "$runner" 2>/dev/null
 result=$?
 kill -KILL -- "-$runner" 2>/dev/null || true
 runner=""
-kill -TERM -- "-$timer" 2>/dev/null || true
+kill -KILL -- "-$timer" 2>/dev/null || true
 timer=""
 set +m
 if [ "$result" -ne 0 ]; then

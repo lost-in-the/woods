@@ -117,6 +117,25 @@ RSpec.describe 'plugin hooks (#280)' do
         expect(status).to be_success, err
       end
     end
+
+    # A forked `( sleep ...; kill ... ) &` timer keeps the hook's INT/TERM and
+    # EXIT traps until bash resets them in the child. A TERM sent in that
+    # window runs the parent's cleanup inside the timer: it deleted the
+    # session-start status record before it was read (reported as "freshness
+    # is unknown") and could release the refresh hook's run lock. KILL runs
+    # no trap, so stopping a timer with it cannot.
+    it 'stops their deadline timers with KILL, which cannot run an inherited cleanup trap' do
+      Dir[File.join(plugin_root, 'hooks', '*.sh')].each do |script|
+        text = File.read(script)
+        next unless text.include?('timer=$!')
+
+        timer_kills = text.each_line.grep(/\bkill\b.*\$timer/)
+        expect(timer_kills).not_to be_empty, File.basename(script)
+        timer_kills.each do |line|
+          expect(line).to match(/kill -KILL -- "-\$timer"/), "#{File.basename(script)}: #{line.strip}"
+        end
+      end
+    end
   end
 
   describe 'woods-post-edit.sh' do
