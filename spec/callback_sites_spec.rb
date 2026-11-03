@@ -16,9 +16,12 @@ RSpec.describe Woods::CallbackSites do
     CONCERN
   end
 
+  # The published source is the file verbatim, as SourceLineMap.record
+  # proves during extraction; without that proof no file line is reported.
   def unit(source, callbacks)
     Woods::ExtractedUnit.new(type: :model, identifier: 'Post', file_path: 'app/models/post.rb').tap do |u|
       u.source_code = source
+      u.source_identity_lines = source.lines.size
       u.metadata[:callbacks] = callbacks
     end
   end
@@ -97,6 +100,7 @@ RSpec.describe Woods::CallbackSites do
       Woods::ExtractedUnit.new(type: :controller, identifier: 'PostsController',
                                file_path: 'app/controllers/posts_controller.rb').tap do |u|
         u.source_code = source
+        u.source_identity_lines = source.lines.size
         u.metadata[:filters] = filters
       end
     end

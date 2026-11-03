@@ -201,13 +201,14 @@ coordinates:
 `file_line`/`file_end_line` are the lines in the file a reader opens: the
 unit's own file, translated through `source_line_map`. Cite `file_line` when
 pointing at code. `file_line` is null when the line has no mapped file line:
-a line Woods added, or code from a library unit's secondary contributor file,
-which `source_contributors` locates instead.
+a line Woods added, code from a library unit's secondary contributor file
+(`source_contributors` locates it), or any line of a unit whose placement in its
+file was not proven (a slice of the file, or a file that could not be read).
 The Markdown and Claude renderers of `lookup` print these entries as
 `file lines: 36-38` first and `published source lines: 41-43` after, with
 `in <concern>` when `file_unit` is set and `file line: not mapped` when
-`file_line` is null, so neither number appears under a bare
-`line` label.
+`file_line` is null. Entries without a `file_line` key (an index written
+before these fields, or a reference span in another file) still print `line`.
 
 A concern's methods inlined as a commented display block keep the concern as
 `owner`, with `line` inside the block. Their `file_line` is the line in the

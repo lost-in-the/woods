@@ -7,6 +7,10 @@ require 'woods/file_lines'
 require 'woods/method_table'
 require 'woods/callback_sites'
 require 'woods/extractors/test_examples'
+require 'woods/extractors/model_extractor'
+require 'digest'
+require 'fileutils'
+require 'tmpdir'
 
 # Lines that leave the server for a reader carry the file's own line beside
 # the annotated one: a header Woods prepends and a concern block it inlines
@@ -44,20 +48,53 @@ RSpec.describe Woods::FileLines do
 
   let(:header) { "# == Schema Information\n#\n# Table name: invoices\n#\n\n" }
 
+  # The extractor's own block builder, so a change to its frame format
+  # can't leave this spec passing against a stale copy.
   def concern_block(name, code)
-    body = code.lines.map { |line| "  # #{line.rstrip}" }.join("\n")
-    "# ┌─────────────────────────────────────────────────────────────────────┐\n" \
-      "# │ Included from: #{name.ljust(54)}│\n" \
-      "# └─────────────────────────────────────────────────────────────────────┘\n" \
-      "#{body}\n" \
-      "# ─────────────────────────── End #{name} ───────────────────────────\n"
+    Woods::Extractors::ModelExtractor.allocate.send(:build_concern_block, [[name, code]])
+  end
+
+  around do |example|
+    Dir.mktmpdir('woods-file-lines') do |root|
+      @root = root
+      example.run
+    end
+  end
+
+  # A unit whose file is on disk, placed the way extraction places it.
+  def unit_from_file(annotated, contents: file, type: :model, identifier: 'Invoice', path: 'app/models/invoice.rb')
+    FileUtils.mkdir_p(File.dirname(File.join(@root, path)))
+    File.write(File.join(@root, path), contents)
+    Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: path).tap do |unit|
+      unit.source_code = annotated
+      yield unit if block_given?
+      Woods::SourceLineMap.record(unit, root: @root)
+    end
   end
 
   def model(annotated)
-    Woods::ExtractedUnit.new(type: :model, identifier: 'Invoice', file_path: 'app/models/invoice.rb').tap do |unit|
-      unit.source_code = annotated
-      map = Woods::SourceLineMap.build(file, annotated)
-      unit.metadata[:source_line_map] = map if map
+    unit_from_file(annotated)
+  end
+
+  # A library unit published from several files, as LibExtractor assembles it.
+  def library(primary, secondary)
+    published = +''
+    records = [['lib/util.rb', primary], ['lib/util/second.rb', secondary]].map do |path, code|
+      published << "# Library contributor: #{path}\n"
+      start_byte = published.bytesize
+      start_line = published.count("\n") + 1
+      published << code
+      record = { 'file_path' => path, 'source_sha256' => Digest::SHA256.hexdigest(code),
+                 'source_start_line' => 1, 'source_end_line' => code.lines.size,
+                 'published_start_byte' => start_byte, 'published_end_byte' => published.bytesize,
+                 'published_start_line' => start_line, 'published_end_line' => start_line + code.lines.size - 1,
+                 'facts' => {} }
+      published << "\n\n"
+      record
+    end
+    unit_from_file(published, contents: primary, type: :lib, identifier: 'Util', path: 'lib/util.rb') do |unit|
+      unit.metadata[:source_contributors_version] = Woods::SourceContributors::VERSION
+      unit.metadata[:source_contributors] = records
     end
   end
 
@@ -130,32 +167,52 @@ RSpec.describe Woods::FileLines do
     expect(locator.annotate('line' => 1, 'end_line' => 1)).to include('file_line' => nil, 'file_end_line' => nil)
   end
 
-  # A library unit concatenates every file that reopens one module; the map
-  # covers only the primary file, so a real method from another contributor
-  # has no file line here. It must read as unmapped, not as Woods' own text.
-  it 'leaves a method from a secondary library contributor without a file line' do
-    primary = "module Util\n  def first; end\nend\n"
-    secondary = "module Util\n  def second; end\nend\n"
-    published = "#{primary}\n# Library contributor: lib/util/second.rb\n#{secondary}"
-    unit = Woods::ExtractedUnit.new(type: :lib, identifier: 'Util', file_path: 'lib/util.rb').tap do |lib|
-      lib.source_code = published
-      map = Woods::SourceLineMap.build(primary, published)
-      lib.metadata[:source_line_map] = map if map
-    end
+  # A sliced unit (a nested class, a constant, a generated definition)
+  # publishes part of its file, so no map is built; that proves nothing about
+  # where the slice sits, and the slice's own lines must not pass as file lines.
+  it 'reports no file line for a unit that publishes only a slice of its file' do
+    outer = "module Outer\n  VERSION = 1\n\n  class Inner\n    def run; end\n  end\nend\n"
+    slice = "# Nested in Outer\nclass Inner\n  def run; end\nend\n"
+    unit = unit_from_file(slice, contents: outer, type: :poro, identifier: 'Outer::Inner', path: 'lib/outer.rb')
+    expect(unit.metadata).not_to have_key(:source_line_map)
 
     Woods::MethodTable.record(unit)
 
-    expect(method_named(unit, 'first')['file_line']).to eq(2)
+    expect(method_named(unit, 'run')).to include('line' => 3, 'file_line' => nil, 'file_end_line' => nil)
+  end
+
+  it 'reports no file line when the file cannot be read' do
+    unit = Woods::ExtractedUnit.new(type: :model, identifier: 'Invoice', file_path: 'app/models/missing.rb')
+    unit.source_code = file
+    Woods::SourceLineMap.record(unit, root: @root)
+
+    Woods::MethodTable.record(unit)
+
+    expect(unit.metadata[:methods]).to all(include('file_line' => nil, 'file_end_line' => nil))
+  end
+
+  # A library unit concatenates every file that reopens one module. The
+  # primary file's lines come from its own contributor fragment, ends
+  # included; a real method from another contributor has no file line here
+  # (it reads as unmapped, not as Woods' own text).
+  it 'places a library unit through its primary contributor fragment only' do
+    primary = "module Util\n  def first\n    1\n  end\nend\n"
+    secondary = "module Util\n  def second\n    2\n  end\nend\n"
+    unit = library(primary, secondary)
+
+    Woods::MethodTable.record(unit)
+
+    expect(method_named(unit, 'first')).to include('file_line' => 2, 'file_end_line' => 4)
     second = method_named(unit, 'second')
-    expect(second['line']).to eq(file_line_of(published, 'def second'))
-    expect(second['file_line']).to be_nil
+    expect(second['line']).to eq(file_line_of(unit.source_code, 'def second'))
+    expect(second).to include('file_line' => nil, 'file_end_line' => nil)
   end
 
   it 'gives test examples their file lines' do
     spec_file = "RSpec.describe Invoice do\n  it 'totals' do\n  end\nend\n"
-    unit = Woods::ExtractedUnit.new(type: :test_mapping, identifier: 'spec/models/invoice_spec.rb',
-                                    file_path: 'spec/models/invoice_spec.rb').tap do |test_unit|
-      test_unit.source_code = spec_file
+    unit = unit_from_file(spec_file, contents: spec_file, type: :test_mapping,
+                                     identifier: 'spec/models/invoice_spec.rb',
+                                     path: 'spec/models/invoice_spec.rb') do |test_unit|
       test_unit.metadata[:test_framework] = :rspec
     end
 

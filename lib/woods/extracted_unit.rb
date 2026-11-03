@@ -30,7 +30,10 @@ module Woods
                   :metadata,       # Hash: Type-specific structured data
                   :dependencies,   # Array<Hash>: What this unit calls/references
                   :dependents,     # Array<Hash>: What references this unit (populated in second pass)
-                  :chunks          # Array<Hash>: Pre-chunked versions if unit is large
+                  :chunks,         # Array<Hash>: Pre-chunked versions if unit is large
+                  # Integer, nil: leading lines of source_code proven to be
+                  # the file verbatim (SourceLineMap.record); not serialized
+                  :source_identity_lines
 
     def initialize(type:, identifier:, file_path:)
       @type = type

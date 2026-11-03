@@ -60,7 +60,10 @@ module Woods
       start + line - first
     end
 
-    # Store the map for +unit+ in its metadata, or remove a stale one.
+    # Store the map for +unit+ in its metadata, or remove a stale one. A
+    # missing map means either "no line moved" or "the file could not be
+    # placed" (unreadable, or a slice of it), so the proven case is recorded
+    # separately, on the unit only: {ExtractedUnit#source_identity_lines}.
     #
     # @param unit [Woods::ExtractedUnit] a unit whose source was read from
     #   `file_path`
@@ -70,12 +73,26 @@ module Woods
     def record(unit, root: nil)
       path = unit.file_path
       path = File.expand_path(path, root) if root && path.is_a?(String)
-      map = build(read(path), unit.source_code)
+      original = read(path)
+      map = build(original, unit.source_code)
       if map
         unit.metadata[:source_line_map] = map
       else
         unit.metadata.delete(:source_line_map)
       end
+      unit.source_identity_lines = map ? nil : identity_lines(original, unit.source_code)
+    end
+
+    # @param original [String, nil] the file's content
+    # @param annotated [String, nil] the unit's `source_code`
+    # @return [Integer, nil] the file's line count when the annotated text
+    #   starts with the whole file verbatim (anything after it is Woods'),
+    #   so its first that-many lines are file lines; nil when not proven
+    def identity_lines(original, annotated)
+      return nil if original.nil? || annotated.nil?
+
+      source = original.b.lines(chomp: true)
+      annotated.b.lines(chomp: true).first(source.size) == source ? source.size : nil
     end
 
     # Latest-match embedding of every file line into the annotated lines,
