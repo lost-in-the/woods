@@ -110,8 +110,9 @@ RSpec.describe 'Published compact evidence tools' do
 
   describe 'lookup evidence control combinations' do
     let(:hint) do
-      'Valid combinations: evidence: "full" (the default) with include_source and sections; ' \
-        'or evidence: "compact" or "outline" with query and budget. Do not mix the two groups.'
+      'Incompatible controls: evidence: "compact" or "outline" cannot take include_source: false or ' \
+        'non-empty sections, and evidence: "full" (the default) cannot take query or budget. ' \
+        'Drop the incompatible control, or change evidence.'
     end
 
     # Truth table: full-only controls (include_source: false, sections) and

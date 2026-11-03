@@ -94,11 +94,12 @@ module Woods
       DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
       DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
-      # The two groups of lookup controls that combine. Served with the
-      # refusal of any call that mixes them.
-      LOOKUP_EVIDENCE_HINT = 'Valid combinations: evidence: "full" (the default) with include_source and ' \
-                             'sections; or evidence: "compact" or "outline" with query and budget. ' \
-                             'Do not mix the two groups.'
+      # Names exactly the controls each evidence mode refuses, so the hint is
+      # no stricter than the rule: compact with include_source: true or empty
+      # sections is accepted.
+      LOOKUP_EVIDENCE_HINT = 'Incompatible controls: evidence: "compact" or "outline" cannot take ' \
+                             'include_source: false or non-empty sections, and evidence: "full" (the default) ' \
+                             'cannot take query or budget. Drop the incompatible control, or change evidence.'
 
       class << self
         # Build a configured MCP::Server with all tools and resources.
