@@ -6059,6 +6059,126 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                     -> { sieves.call('all', true) }])
     end
 
+    # #994: a controller's published unit carries metadata.flow_paths, and
+    # the freshly extracted one does not have it yet. The unchanged check
+    # used to see that as a change, so every flow-bearing controller in the
+    # radius was rewritten with only extracted_at different, and counted.
+    #
+    # The fixture: FlowLedger is a plain class. FlowLedgersController and
+    # FlowReportsController call it, so both are in its blast radius and its
+    # flow radius. FlowQuietController does not call it. The written sets
+    # below are listed by hand, not derived from the run.
+    describe 'units written after a one-file edit (#994)' do
+      let(:ledger) { 'app/models/flow_ledger.rb' }
+      let(:flow_controllers) { %w[FlowLedgersController FlowReportsController FlowQuietController] }
+
+      def write_ledger(remark = nil)
+        write_file(ledger, <<~RUBY)
+          #{remark}class FlowLedger
+            def self.total = 0
+            def self.entries = []
+          end
+        RUBY
+        load app_path(ledger)
+        ledger
+      end
+
+      def write_flow_controllers
+        {
+          'flow_ledgers_controller' => "class FlowLedgersController < ApplicationController\n  " \
+                                       "def index\n    @total = FlowLedger.total\n  end\n\n  " \
+                                       "def show\n    @entries = FlowLedger.entries\n  end\nend\n",
+          'flow_reports_controller' => "class FlowReportsController < ApplicationController\n  " \
+                                       "def index\n    @total = FlowLedger.total\n  end\nend\n",
+          'flow_quiet_controller' => "class FlowQuietController < ApplicationController\n  " \
+                                     "def index\n    @posts = Post.recent\n  end\nend\n"
+        }.each do |name, source|
+          load app_path(write_file("app/controllers/#{name}.rb", source))
+        end
+      end
+
+      # The fixture's own controllers only: other examples leave controllers
+      # loaded whose names also start with Flow.
+      def controller_files(index_dir)
+        Dir[File.join(payload_dir(index_dir), 'controllers', 'Flow*.json')].each_with_object({}) do |path, files|
+          identifier = JSON.parse(File.read(path)).fetch('identifier')
+          files[identifier] = File.binread(path) if flow_controllers.include?(identifier)
+        end
+      end
+
+      def flow_paths(index_dir, identifier)
+        JSON.parse(controller_files(index_dir).fetch(identifier)).dig('metadata', 'flow_paths')
+      end
+
+      # Run the incremental from a published full index and return what it
+      # wrote, with the controller files before and after.
+      def one_file_incremental
+        write_ledger
+        write_flow_controllers
+        index_dir = full_extraction
+        before = controller_files(index_dir)
+        expect(before.keys).to match_array(flow_controllers)
+        yield(index_dir) if block_given?
+        write_ledger("# A remark that changes no unit but FlowLedger.\n")
+        touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([ledger])
+        [index_dir, touched, before, controller_files(index_dir)]
+      end
+
+      it 'writes only FlowLedger when a comment edit leaves the controllers that call it unchanged' do
+        index_dir, touched, before, after = one_file_incremental
+
+        # Not vacuous: both callers are in the radius and carry flows.
+        graph = read_json(index_dir, 'dependency_graph.json')
+        %w[FlowLedgersController FlowReportsController].each do |caller|
+          expect(graph.fetch('edges').fetch(caller, []).map { |edge| edge['target'] }).to include('FlowLedger')
+          expect(JSON.parse(before.fetch(caller)).dig('metadata', 'flow_paths')).not_to be_empty
+        end
+
+        expect(touched).to contain_exactly('FlowLedger')
+        expect(after).to eq(before)
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+
+      # Near miss: the controller's extracted form is the same, but its flow
+      # annotation really changes, because the show flow no longer assembles.
+      it 'still writes a controller whose flow annotation really changes' do
+        Woods.configuration.precompute_flows = :best_effort
+        index_dir, touched, before, after = one_file_incremental do
+          allow_any_instance_of(Woods::FlowAssembler).to receive(:assemble)
+            .and_wrap_original do |original, entry, **opts|
+              raise StandardError, "cannot trace #{entry}" if entry == 'FlowLedgersController#show'
+
+              original.call(entry, **opts)
+            end
+        end
+
+        expect(touched).to contain_exactly('FlowLedger', 'FlowLedgersController')
+        expect(flow_paths(index_dir, 'FlowLedgersController').keys).to contain_exactly('index')
+        expect(after.except('FlowLedgersController')).to eq(before.except('FlowLedgersController'))
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+
+      # Unknown: with no published flow family the refresh cannot reconcile
+      # the annotation, so the check keeps comparing it, as it did before.
+      it 'keeps comparing the annotation when no flow family was published' do
+        index_dir, touched, = one_file_incremental do |published|
+          FileUtils.rm_rf(File.join(payload_dir(published), 'flows'))
+        end
+
+        expect(touched).to contain_exactly('FlowLedger', 'FlowLedgersController', 'FlowReportsController')
+        expect(flow_paths(index_dir, 'FlowLedgersController')).to be_nil
+      end
+
+      after do
+        %w[flow_ledgers_controller flow_reports_controller flow_quiet_controller].each do |name|
+          created = app_path("app/controllers/#{name}.rb")
+          FileUtils.cp(created, File.join(@pristine_root, "app/controllers/#{name}.rb")) if File.exist?(created)
+        end
+        created = app_path(ledger)
+        FileUtils.cp(created, File.join(@pristine_root, ledger)) if File.exist?(created)
+      end
+    end
+
     # ThingsController stays in the controller descendants for the rest of
     # the process and resolves to this file. Fold it into the pristine tree
     # so the runtime and the filesystem keep agreeing in every later

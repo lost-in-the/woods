@@ -240,4 +240,43 @@ RSpec.describe Woods::Extractor, 'incremental flow scope' do
       end
     end
   end
+
+  # #994: the unchanged check now retains a controller without comparing its
+  # flow annotation. It records the controller instead, and the refresh takes
+  # it like a re-extracted one, so the flow decision does not depend on the
+  # controller being rewritten.
+  context 'when the unchanged check retained the controllers' do
+    before do
+      allow(extractor).to receive(:re_extract_unit) do |unit_id, **|
+        next unit_id unless unit_id.end_with?('Controller')
+
+        extractor.instance_variable_get(:@flow_retained_controllers).add(unit_id)
+        nil
+      end
+    end
+
+    it 'reassembles the retained controller inside the radius and carries the one outside' do
+      result = run
+      expect(result[:recomputed]).to eq(['NearController'])
+      expect(result[:rest][:carried_identifiers]).to eq(['FarController'])
+    end
+
+    it 'reassembles every retained controller when the run drops its flow scope' do
+      allow(extractor).to receive(:rerun_whole_app_extractors) do
+        extractor.instance_variable_set(:@flow_scope, nil)
+        Set.new
+      end
+
+      expect(run[:recomputed]).to eq(%w[FarController NearController])
+    end
+
+    it 'reports a retained controller as touched only when its annotation is rewritten' do
+      allow(extractor).to receive(:patch_flow_annotations).and_return(Set['FarController'])
+
+      touched = extractor.extract_changed(['app/models/modelleaf.rb'])
+
+      expect(touched).to include('FarController')
+      expect(touched).not_to include('NearController')
+    end
+  end
 end
