@@ -2481,7 +2481,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         path
       end
       tagged = lambda do |index, identifier|
-        document = unit_document(index, 'poros', identifier) || unit_document(index, 'models', identifier)
+        document = %w[poros models concerns].lazy.filter_map { |type| unit_document(index, type, identifier) }.first
         document.dig('metadata', 'references').map { |span| span.values_at('mixin', 'method', 'kind', 'confidence') }
       end
       index = run_sequence(
@@ -2494,6 +2494,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         ]
       )
 
+      # An ActiveSupport::Concern outside concerns/ is a concern unit (#996).
+      expect(unit_document(index, 'concerns', 'MixinTagConcern')).not_to be_nil
+      expect(unit_document(index, 'poros', 'MixinTagConcern')).to be_nil
       expect(tagged.call(index, 'MixinTagConcern')).to eq([['extend', nil, 'constant', 'verified']])
       expect(tagged.call(index, 'MixinTagHost')).to eq([[nil, 'name', 'constant', 'verified']])
       write.call(host, host_body.call(['prepend MixinTagShared']))
