@@ -28,11 +28,14 @@ RSpec.describe 'woods-mcp-start exec handoff' do
   # Runs the real launcher with exec intercepted. The harness records the argv
   # and the RUBYLIB it would have exec'd with (and the one it started with,
   # since a bundled spec run can already set one), then exits 42.
-  def handoff(ruby_flags: [], env: {})
+  # `bindir:` stands in for a Ruby installed under that directory.
+  def handoff(ruby_flags: [], env: {}, bindir: nil)
     log = File.join(@directory, 'exec.json')
     harness = <<~RUBY
       require 'json'
-      wrapper, index, log = ARGV
+      require 'rbconfig'
+      wrapper, index, log, bindir = ARGV
+      RbConfig::CONFIG['bindir'] = bindir unless bindir.empty?
       ARGV.replace([index])
       before = ENV.fetch('RUBYLIB', nil)
       Kernel.define_method(:exec) do |*argv|
@@ -45,7 +48,8 @@ RSpec.describe 'woods-mcp-start exec handoff' do
     # Outside the bundle: bundler/setup would put Woods' lib on the load path
     # itself and hide whether the launcher's own -I is what got carried.
     _out, errors, status = Bundler.with_unbundled_env do
-      Open3.capture3(env, RbConfig.ruby, *ruby_flags, '-e', harness, wrapper, @index, log, chdir: @directory)
+      Open3.capture3(env, RbConfig.ruby, *ruby_flags, '-e', harness, wrapper, @index, log, bindir.to_s,
+                     chdir: @directory)
     end
     expect(status.exitstatus).to eq(42), errors
     JSON.parse(File.read(log))
@@ -54,7 +58,19 @@ RSpec.describe 'woods-mcp-start exec handoff' do
   it 'execs woods-mcp through the running Ruby, not the script shebang' do
     argv = handoff.fetch('argv')
 
-    expect(argv).to eq([Gem.ruby, server, @index])
+    expect(argv).to eq([RbConfig.ruby, server, @index])
+  end
+
+  it 'execs an unquoted interpreter path when Ruby lives under a directory with a space' do
+    bindir = File.join(@directory, 'Ruby Install', 'bin')
+    FileUtils.mkdir_p(bindir)
+    interpreter = File.join(bindir, File.basename(RbConfig.ruby))
+    File.symlink(RbConfig.ruby, interpreter)
+
+    executable = handoff(bindir: bindir).fetch('argv').first
+
+    expect(executable).to eq(interpreter)
+    expect(File.executable?(executable)).to be(true)
   end
 
   it "carries an -I for Woods' own lib forward to woods-mcp" do
@@ -71,6 +87,14 @@ RSpec.describe 'woods-mcp-start exec handoff' do
     entries = rubylib.split(File::PATH_SEPARATOR)
     expect(entries).to include(existing)
     expect(entries.count(woods_lib)).to eq(1)
+  end
+
+  it "puts Woods' own lib first even when RUBYLIB already lists it behind another checkout" do
+    other_checkout = File.join(@directory, 'other_checkout', 'lib')
+    rubylib = handoff(ruby_flags: ['-I', woods_lib],
+                      env: { 'RUBYLIB' => [other_checkout, woods_lib].join(File::PATH_SEPARATOR) }).fetch('rubylib')
+
+    expect(rubylib.split(File::PATH_SEPARATOR)).to eq([woods_lib, other_checkout])
   end
 
   it "leaves RUBYLIB untouched when Woods' lib was not on the load path" do
