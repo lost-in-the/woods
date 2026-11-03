@@ -201,6 +201,10 @@ coordinates:
 `file_line`/`file_end_line` are the lines in the file a reader opens: the
 unit's own file, translated through `source_line_map`. Cite `file_line` when
 pointing at code. A line Woods added has a null `file_line`.
+The Markdown and Claude renderers of `lookup` print these entries as
+`file lines: 36-38` first and `published source lines: 41-43` after, with
+`in <concern>` when `file_unit` is set, so neither number appears under a bare
+`line` label.
 
 A concern's methods inlined as a commented display block keep the concern as
 `owner`, with `line` inside the block. Their `file_line` is the line in the
