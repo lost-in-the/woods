@@ -854,7 +854,8 @@ module Woods
           response[:scan][:limit_hit] = limit_hit if limit_hit
           if limit_hit
             response[:hint] = SearchResults.scan_budget_hint(
-              scanned: phase2_scanned, candidates: phase2_candidates, matched: response[:results].size
+              scanned: phase2_scanned, candidates: phase2_candidates, matched: response[:results].size,
+              limit_hit: limit_hit, knob: max_scan ? 'max_scan' : 'WOODS_SEARCH_MAX_SCAN'
             )
           end
         end

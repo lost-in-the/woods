@@ -162,6 +162,10 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
       expect(result[:scan]).to include(limit_hit: 'bytes', total_units: 620)
       expect(result[:scan][:scanned_units]).to be < 620
       expect(result[:scan][:scanned_bytes]).to be >= 1_000
+      # A count taken from this query's candidates would cap every later,
+      # broader search if set server-wide, so a size stop names none.
+      expect(result[:hint]).to include('size cap', 'Search again')
+      expect(result[:hint]).not_to include('WOODS_SEARCH_MAX_SCAN')
     end
 
     it 'stops at the default wall-time budget and names it' do
@@ -172,6 +176,22 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
 
       expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget')
       expect(result[:scan]).to include(scanned_units: 0, limit_hit: 'seconds')
+    end
+
+    it 'stops partway through a scan when the wall-time budget runs out' do
+      publish_large_index
+      stub_const('Woods::MCP::IndexReader::DEFAULT_SEARCH_MAX_SCAN_SECONDS', 5)
+      ticks = 0
+      allow(Process).to receive(:clock_gettime).and_wrap_original do |original, clock, *rest|
+        clock == Process::CLOCK_MONOTONIC ? (ticks += 1) : original.call(clock, *rest)
+      end
+
+      result = reader.search('rare_token_q', fields: %w[source_code])
+
+      expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget')
+      expect(result[:scan]).to include(limit_hit: 'seconds')
+      expect(result[:scan][:scanned_units]).to be_between(1, 619)
+      expect(result[:hint]).to include('time cap', 'Search again')
     end
 
     it 'lets WOODS_SEARCH_MAX_SCAN replace the default byte and time caps with a unit count' do
@@ -199,7 +219,7 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
       expect(result[:results]).to eq([])
       expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget', matched_lower_bound: 0)
       expect(result[:scan]).to include(scanned_units: 2, candidate_units: 5, total_units: 5, limit_hit: 'units')
-      expect(result[:hint]).to include('read 2 of 5', 'NOT evidence of absence', 'WOODS_SEARCH_MAX_SCAN')
+      expect(result[:hint]).to include('read 2 of 5', 'NOT evidence of absence', 'Raise WOODS_SEARCH_MAX_SCAN above 2')
     ensure
       ENV['WOODS_SEARCH_MAX_SCAN'] = original
     end
@@ -209,7 +229,9 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
       result = reader.search('needle', fields: %w[source_code], max_scan: 2)
 
       expect(identifiers(result)).to eq(%w[Thing0 Thing1])
-      expect(result[:hint]).to include('read 2 of 5', 'unread', 'WOODS_SEARCH_MAX_SCAN')
+      # The per-call argument outranks the variable, so the hint names it.
+      expect(result[:hint]).to include('read 2 of 5', 'unread', 'Raise max_scan above 2')
+      expect(result[:hint]).not_to include('WOODS_SEARCH_MAX_SCAN')
       expect(result[:hint]).not_to include('NOT evidence of absence')
     end
   end
