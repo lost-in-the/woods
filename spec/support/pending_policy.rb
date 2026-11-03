@@ -56,6 +56,12 @@ module PendingPolicy
      'unrelated reload detached and reconciliation pruned (N-ra-2)',
      'once-owned subclass fixture is unsupported before Rails 7.0',
      -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('7.0') }],
+    # `delegated_type` arrived in Rails 6.1; the 6.0 booted row cannot declare
+    # one, so the polymorphic inverse_of retention example skips there.
+    ['spec/integration/booted_extraction_spec.rb',
+     'Booted-app extraction keeps a model that declares delegated_type with inverse_of',
+     'delegated_type needs Rails 6.1',
+     -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('6.1') }],
     # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1; the 6.0 booted
     # row cannot write a draw file.
     *['tracks draw files, their routes and route lines through edits and removal',
