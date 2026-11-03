@@ -237,6 +237,17 @@ lexical snapshot, rebuilding after publication. Corrupt units fail explicitly;
 they cannot quietly become a successful partial index. Older flat indexes rebuild
 on each query because they lack an immutable generation identity.
 
+A rebuild in the same process re-tokenizes only the units whose indexed text
+changed. The server keeps each unit's tokens in memory, keyed by a digest of
+the text it indexes (identifier, file path, source and runtime fields) and by
+the lexical configuration (tokenizer version, fields and weights, stop words,
+singular rules). The unit itself, its key and every ranking statistic still
+come from the new generation, so answers match a cold build exactly. A change
+to unindexed metadata such as a package reuses the tokens but scopes by the new
+value. Entries unused by the last two builds are dropped, the cache stays under
+256 MB, and nothing is written to disk. A new process starts with an empty
+cache, so its first query still tokenizes the whole corpus.
+
 See [evaluation](EVALUATION.md) for measured query coverage and limits. Lexical
 matching cannot infer synonyms absent from the published text; a miss is not proof
 that application behavior is absent. Static Woods self-maps can opt into the same

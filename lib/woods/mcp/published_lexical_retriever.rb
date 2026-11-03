@@ -3,6 +3,7 @@
 require_relative 'hydration'
 require_relative 'index_reader'
 require_relative '../retriever'
+require_relative '../retrieval/lexical_token_cache'
 require_relative '../storage/metadata_store'
 require_relative '../storage_identity'
 
@@ -12,9 +13,20 @@ module Woods
     # snapshot construction AND the query, so a publication cannot mix units.
     # No provider, vector adapter, host source read, or context cache is involved.
     class PublishedLexicalRetriever
+      # Each unit file is parsed straight into deep-frozen JSON data, which
+      # the lexical index and the metadata store then share without a copy.
+      FROZEN_UNIT = ->(content) { JSON.parse(content, freeze: true) }
+      # The store's own bookkeeping key: a unit's copy is never indexed.
+      STORE_STAMP = 'updated_at'
+      private_constant :FROZEN_UNIT, :STORE_STAMP
+
       attr_reader :reader, :snapshot, :default_budget
 
-      def initialize(index_dir:, reader: nil, default_budget: 8000)
+      # @param token_cache [Retrieval::LexicalTokenCache, nil] tokenized
+      #   fields reused across generations; every retriever in the process
+      #   shares one unless a caller passes its own
+      def initialize(index_dir:, reader: nil, default_budget: 8000, token_cache: nil)
+        @token_cache = token_cache || Retrieval::LexicalTokenCache.shared
         @default_budget = default_budget
         @index_dir = Pathname.new(index_dir)
         @reader = reader || IndexReader.new(index_dir)
@@ -120,18 +132,31 @@ module Woods
         # each time instead of serving changed files from a permanent cache.
         return @snapshot.last if key.first && @snapshot&.first == key
 
-        metadata = Storage::MetadataStore::InMemory.new
-        reader.each_unit do |unit|
+        units = {}
+        reader.each_unit(decode: FROZEN_UNIT) do |unit|
           # The warm-up gives up its pins here when a reload or a refresh is
           # waiting for them (IndexReader#yielding_to_drains); nothing is
           # installed, and it rebuilds on the generation that follows.
           reader.yield_point!
-          metadata.store(StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')), unit)
+          unit = unit.except(STORE_STAMP).freeze if unit.key?(STORE_STAMP)
+          units[StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')).freeze] = unit
         end
-        candidate = Retriever.new(vector_store: nil, metadata_store: metadata, graph_store: nil,
-                                  embedding_provider: nil, mode: :lexical)
+        # Tokens may come from an earlier generation's build; each unit, its
+        # key and every statistic come from this one.
+        index = Retrieval::LexicalIndex.new(units: units, token_cache: @token_cache)
+        candidate = Retriever.new(vector_store: nil, metadata_store: metadata_store_for(units), graph_store: nil,
+                                  embedding_provider: nil, mode: :lexical, lexical_index: index)
         @snapshot = [key.freeze, candidate].freeze
         candidate
+      end
+
+      # The public store holds the same frozen units. A write replaces a
+      # record and never reaches the index; binding a reader discards it.
+      def metadata_store_for(units)
+        stamp = Time.now.iso8601
+        Storage::MetadataStore::InMemory.new.tap do |store|
+          store.bulk_load(units.map { |key, unit| [key, unit.merge(STORE_STAMP => stamp)] })
+        end
       end
     end
   end

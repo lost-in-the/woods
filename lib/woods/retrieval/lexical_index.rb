@@ -1,10 +1,12 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'json'
 require 'set'
 require 'active_support/inflector'
 require_relative 'query_classifier'
 require_relative 'search_executor'
+require_relative 'lexical_token_cache'
 
 module Woods
   module Retrieval
@@ -18,6 +20,9 @@ module Woods
       DEFAULT_LIMIT = 20
       K1 = 1.2
       B = 0.75
+      # Bump when {#tokenize} or {#field_values} would split the same text
+      # differently: it is part of every {LexicalTokenCache} key.
+      TOKENIZER_VERSION = 1
       # +terms+ is the document's distinct vocabulary and +lengths+ its
       # per-field token totals, tallied once at build so a view's statistics
       # come from the tallies, not from the token counts again.
@@ -31,15 +36,22 @@ module Woods
       attr_reader :units
 
       # @param metadata_store [MetadataStore::Interface] the records to index
+      # @param units [Hash{String => Hash}, nil] the records to index instead,
+      #   by key, each already deep-frozen JSON data owned by this index (for
+      #   example parsed with +JSON.parse(text, freeze: true)+). They are kept
+      #   as given: no copy and no second freeze.
+      # @param token_cache [LexicalTokenCache, nil] tokenized fields to reuse
+      #   from earlier builds in this process, and to keep for later ones
       # @param documents [Array<Document>, nil] an already-built, immutable
       #   document set to index instead (see {#restricted_to})
       # @param statistics [Array(Hash, Hash), nil] per-field length totals
       #   and document frequencies already known for +documents+
       # @param candidate_postings [Array(Hash, Hash), nil] the root's frozen
       #   token and exact-identifier postings, shared by restricted views
-      def initialize(metadata_store: nil, documents: nil, statistics: nil, candidate_postings: nil)
+      def initialize(metadata_store: nil, units: nil, token_cache: nil, documents: nil, statistics: nil,
+                     candidate_postings: nil)
         @stems = {}
-        @documents = (documents || build_documents(metadata_store)).freeze
+        @documents = (documents || build_documents(metadata_store, units, token_cache)).freeze
         @documents_by_key = @documents.to_h { |doc| [doc.key, doc] }.freeze
         @units = @documents_by_key.transform_values(&:unit).freeze
         @totals, @frequencies = statistics || tally(@documents)
@@ -51,6 +63,34 @@ module Woods
         @shared_postings = !candidate_postings.nil?
         @postings, @exact_identifiers = candidate_postings
         build_candidate_postings unless documents
+      end
+
+      # Everything besides the indexed text that decides how a unit is
+      # tokenized: the tokenizer version, the fields and their weights, the
+      # stop words and the English singular rules the stemmer applies.
+      #
+      # @return [String] hex digest
+      def self.configuration_key
+        inflections = ActiveSupport::Inflector.inflections(:en)
+        singulars = inflections.singulars.map { |rule, replacement| [rule.inspect, replacement] }
+        Digest::SHA256.hexdigest(Marshal.dump([TOKENIZER_VERSION, FIELD_WEIGHTS.to_a, RUNTIME_FIELDS, K1, B,
+                                               QueryClassifier::STOP_WORDS.to_a.sort, singulars,
+                                               inflections.uncountables.to_a.sort]))
+      end
+
+      # The digest of a unit's {#field_values}: the exact text, field by
+      # field, that tokenizing reads. Length-prefixed, so no two different
+      # field sets share an encoding.
+      #
+      # @param values [Hash{String => Object}]
+      # @return [String] raw SHA-256
+      def self.field_digest(values)
+        digest = Digest::SHA256.new
+        values.each do |field, value|
+          text = value.to_s
+          digest << field << "\0" << text.encoding.name << "\0" << text.bytesize.to_s << "\0" << text
+        end
+        digest.digest
       end
 
       # A view over the eligible subset of this index's documents, answering
@@ -140,17 +180,54 @@ module Woods
         selected.values
       end
 
-      def build_documents(metadata_store)
+      def build_documents(metadata_store, units, token_cache)
+        cache_build = token_cache&.begin_build(self.class.configuration_key)
+        documents = if units
+                      owned_documents(units, cache_build)
+                    else
+                      store_documents(metadata_store, cache_build)
+                    end
+        token_cache&.commit(cache_build)
+        documents
+      end
+
+      # One JSON round trip copies a store's record into plain, unshared
+      # JSON data, and the parse freezes it deeply.
+      def store_documents(metadata_store, cache_build)
         metadata_store.all_identifiers.sort.map do |key|
           unit = metadata_store.find(key)
           raise ArgumentError, "missing unit metadata for #{key.inspect}" unless unit.is_a?(Hash)
 
-          unit = JSON.parse(JSON.generate(unit))
-          fields = field_values(unit).transform_values { |value| tokenize(value).tally.freeze }.freeze
-          Document.new(key: key.freeze, unit: deep_freeze(unit), fields: fields,
-                       terms: fields.values.flat_map(&:keys).uniq.freeze,
-                       lengths: fields.transform_values { |counts| counts.values.sum }.freeze).freeze
+          document(key, JSON.parse(JSON.generate(unit), freeze: true), cache_build)
         end
+      end
+
+      def owned_documents(units, cache_build)
+        units.keys.sort.map do |key|
+          unit = units.fetch(key)
+          raise ArgumentError, "unit #{key.inspect} must be a frozen Hash" unless unit.is_a?(Hash) && unit.frozen?
+
+          document(key, unit, cache_build)
+        end
+      end
+
+      def document(key, unit, cache_build)
+        values = field_values(unit)
+        fields, terms, lengths = if cache_build
+                                   cache_build.fetch(self.class.field_digest(values)) { tokenized(values) }.drop(1)
+                                 else
+                                   tokenized(values)
+                                 end
+        Document.new(key: key.frozen? ? key : key.dup.freeze, unit: unit,
+                     fields: fields, terms: terms, lengths: lengths).freeze
+      end
+
+      # @return [Array(Hash, Array, Hash)] per-field token counts, distinct
+      #   terms and per-field token totals, all frozen
+      def tokenized(values)
+        fields = values.transform_values { |value| tokenize(value).tally.freeze }.freeze
+        [fields, fields.values.flat_map(&:keys).uniq.freeze,
+         fields.transform_values { |counts| counts.values.sum }.freeze]
       end
 
       # Per-field length totals and document frequencies over +documents+.
@@ -189,12 +266,14 @@ module Woods
              .map! { |term| stem(term) }
       end
 
+      # Interned, so a term reused from an earlier build and the same term
+      # tokenized now are one String.
       def stem(term)
-        @stems[term] ||= if term.length > 3 && term.match?(/\A\p{L}+\z/u)
-                           ActiveSupport::Inflector.singularize(term)
-                         else
-                           term
-                         end
+        @stems[term] ||= -(if term.length > 3 && term.match?(/\A\p{L}+\z/u)
+                             ActiveSupport::Inflector.singularize(term)
+                           else
+                             term
+                           end)
       end
 
       def field_values(unit)
@@ -245,17 +324,6 @@ module Woods
           end
         end
         [score, fields]
-      end
-
-      def deep_freeze(value)
-        case value
-        when Hash then value.each do |key, child|
-          key.freeze
-          deep_freeze(child)
-        end
-        when Array then value.each { |child| deep_freeze(child) }
-        end
-        value.freeze
       end
     end
   end

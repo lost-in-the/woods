@@ -231,18 +231,25 @@ module Woods
     # @param embedding_provider [Embedding::Provider::Interface] Embedding provider
     # @param formatter [#call, nil] Optional callable to post-process the context string
     # @param default_budget [Integer] Token budget when retrieve omits budget
+    # @param lexical_index [Retrieval::LexicalIndex, nil] lexical mode only:
+    #   an index the caller already built over the same records as
+    #   +metadata_store+, used for the first pipeline instead of building one
     def initialize(vector_store:, metadata_store:, graph_store:, embedding_provider:, formatter: nil, mode: :semantic,
-                   default_budget: 8000)
+                   default_budget: 8000, lexical_index: nil)
       raise ArgumentError, 'unknown retrieval mode' unless %i[semantic lexical].include?(mode)
+      raise ArgumentError, 'lexical_index needs lexical mode' if lexical_index && mode != :lexical
 
       @mode = mode
       @default_budget = default_budget
       @embedding_provider = embedding_provider
       @formatter = formatter
       @classifier = Retrieval::QueryClassifier.new
-      @pipeline = build_pipeline(vector_store: vector_store,
-                                 metadata_store: metadata_store,
-                                 graph_store: graph_store)
+      @pipeline = if lexical_index
+                    build_lexical_pipeline(metadata_store, graph_store, lexical_index)
+                  else
+                    build_pipeline(vector_store: vector_store, metadata_store: metadata_store,
+                                   graph_store: graph_store)
+                  end
     end
 
     # Replace the store bundle atomically (M7).
@@ -304,8 +311,8 @@ module Woods
 
     # The lexical index is immutable, so its scope corpus shares the index's
     # own units and lives as long as the pipeline.
-    def build_lexical_pipeline(metadata_store, graph_store)
-      executor = Retrieval::LexicalIndex.new(metadata_store: translate_store(metadata_store, :metadata))
+    def build_lexical_pipeline(metadata_store, graph_store, executor = nil)
+      executor ||= Retrieval::LexicalIndex.new(metadata_store: translate_store(metadata_store, :metadata))
       corpus = Retrieval::ScopeCorpusCell.pinned { Retrieval::ScopeCorpus.from_units(executor.units) }
       Pipeline.new(executor: executor, assembler: Retrieval::LexicalAssembler.new, metadata_store: metadata_store,
                    vector_store: nil, graph_store: graph_store, scope_corpus: corpus)
