@@ -252,9 +252,9 @@ an unrelated directory or a monorepo parent. Missing source remains unknown.
 
 ### A checkout served under another path
 
-**Included in Woods 2.2:** when the recorded root is not a directory for the MCP reader (the
-same checkout extracted at one path and served at another), the reader picks the
-root to check in this order:
+**Included in Woods 2.2:** when the recorded root is not a directory for the MCP
+reader (the same checkout extracted at one path and served at another), the reader
+picks the root to check in this order:
 
 | Source | `root_source` | When |
 |---|---|---|
@@ -262,11 +262,35 @@ root to check in this order:
 | Recorded root | `recorded` | The recorded path is a directory here. Same as before. |
 | Application that owns the served index | `re_resolved` | The nearest ancestor of the index directory with `config.ru` or `config/application.rb`. The walk never goes past the checkout (the nearest `.git`) that holds the index. |
 
-A re-resolved root is a guess from the index location, so it counts only on byte
-evidence. If no captured file there still has its captured bytes, the result is
-`unknown` with `source_root_unavailable` and `root_rejected:
-"no_captured_file_matches"`. An unrelated tree is never reported as drift. If no
-application root owns the index directory, the result is `unknown` with
+A re-resolved root is a guess from the index location, so it needs an **identity
+tie** with the index:
+
+| `config/application.rb` captured | It still has its bytes | Captured files verified | Tie |
+|---|---|---|---|
+| yes | yes | any | yes |
+| yes | no | any, even all the others | no |
+| no | n/a | at least one | yes |
+| no | n/a | none | no |
+
+`config/application.rb` names the application's module. So an unrelated app that
+shares generated boilerplate elsewhere in `config/` does not tie, and the same
+repository at another commit keeps the tie and reports its changes as drift.
+`coverage.application_verified` shows the application-file check when it was
+captured. `false` means changed, missing or not read. A quick check that stops at
+its budget before reading `config/application.rb` cannot establish the tie. It
+reports `unknown` and recommends `deep_check`.
+
+Without the tie, the result is `unknown` with `source_root_unavailable` and
+`root_rejected: "no_identity_match"`, not drift.
+
+**The tie is a heuristic.** It rejects a tree whose application file differs, or,
+when no application file was captured, a tree where no captured file matches. An
+unrelated tree with a byte-identical `config/application.rb` (or, without one, a
+single matching captured file) still ties, and its differences are reported as
+drift. `checked_root` and `root_source` always say which tree was checked. Set
+`WOODS_SOURCE_ROOT` to name the root instead.
+
+If no application owns the index directory, the result is `unknown` with
 `source_root_unavailable`, as before.
 
 Drift against a relocated root follows the same rules as any other check:
@@ -287,9 +311,9 @@ hidden entries are skipped, the hidden paths that are kept, and the index output
 The relocated check runs no `git` process. History (`history`) and Git enrichment
 still read the recorded root, so they stay `unknown` when it is unreachable.
 Saved-index answers are unaffected. The check runs on every `woods_status` call and
-is never cached. Finding the owning application costs well under a millisecond.
-The scan costs the same as a recorded-root check: a quick check stays within its
-250ms budget.
+is never cached. Finding the owning application runs on every call, even when the
+recorded root is reachable, and costs well under a millisecond. The scan costs
+the same as a recorded-root check: a quick check stays within its 250ms budget.
 
 The opt-in SessionStart hook uses `WOODS_HOOK_RAKE` and `WOODS_OUTPUT`, including a
 Docker command prefix without requiring a host application bundle. It prints

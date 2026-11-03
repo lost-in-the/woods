@@ -15,15 +15,26 @@ require 'woods/mcp/server'
 #
 # Root resolution, as the reader applies it:
 #
-# | WOODS_SOURCE_ROOT | recorded root here | app root owns index | a captured file matches | root_source | state   |
-# |-------------------|--------------------|---------------------|-------------------------|-------------|---------|
-# | set               | any                | any                 | any                     | explicit    | checked |
-# | unset             | yes                | any                 | any                     | recorded    | checked |
-# | unset             | no                 | yes                 | yes                     | re_resolved | checked |
-# | unset             | no                 | yes                 | no                      | re_resolved | unknown |
-# | unset             | no                 | no                  | n/a                     | recorded    | unknown |
+# | WOODS_SOURCE_ROOT | recorded root here | app root owns index | identity tie | root_source | state   |
+# |-------------------|--------------------|---------------------|--------------|-------------|---------|
+# | set               | any                | any                 | n/a          | explicit    | checked |
+# | unset             | yes                | any                 | n/a          | recorded    | checked |
+# | unset             | no                 | yes                 | yes          | re_resolved | checked |
+# | unset             | no                 | yes                 | no           | re_resolved | unknown |
+# | unset             | no                 | no                  | n/a          | recorded    | unknown |
 #
-# "unknown" here is always `source_root_unavailable`, never drift.
+# The identity tie for a re-resolved root:
+#
+# | config/application.rb captured | it matches | captured files verified | tie |
+# |--------------------------------|------------|-------------------------|-----|
+# | yes                            | yes        | any                     | yes |
+# | yes                            | no         | any (even all others)   | no  |
+# | no                             | n/a        | at least one            | yes |
+# | no                             | n/a        | none                    | no  |
+#
+# "unknown" here is always `source_root_unavailable` with `root_rejected`,
+# never drift. The tie is a heuristic: it cannot reject an unrelated tree
+# whose application file is byte-identical.
 RSpec.describe 'Source freshness for an index served from a relocated root' do
   around do |example|
     Dir.mktmpdir('woods-relocated-root') do |workspace|
@@ -177,6 +188,64 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
     end
   end
 
+  describe 'the identity tie' do
+    it 'accepts a relocation with a few changed files as drift' do
+      extract_and_relocate { |root| 4.times { |i| write(root, "app/services/step_#{i}.rb", "class Step#{i}; end") } }
+      write(@moved, 'app/services/step_0.rb', 'class Step0; def run; end; end')
+
+      result = freshness
+      expect(result).to include('state' => 'drifted', 'root_source' => 're_resolved')
+      expect(result['changes']['changed']).to eq(['app/services/step_0.rb'])
+    end
+
+    it 'accepts the same repository at another commit as drift while the application file is unchanged' do
+      extract_and_relocate { |root| 4.times { |i| write(root, "app/services/step_#{i}.rb", "class Step#{i}; end") } }
+      %w[app/models/order.rb app/services/checkout.rb].each { |path| write(@moved, path, 'rewritten later') }
+      4.times { |i| write(@moved, "app/services/step_#{i}.rb", 'rewritten later') }
+
+      result = freshness
+      expect(result['coverage']).to include('application_verified' => true)
+      expect(result).to include('state' => 'drifted', 'root_source' => 're_resolved')
+      expect(result['counts']['changed']).to eq(6)
+    end
+
+    context 'without a captured config/application.rb, as before' do
+      def build_rack_checkout(root)
+        FileUtils.mkdir_p(File.join(root, '.git'))
+        write(root, 'config.ru', 'run Shop::Application')
+        3.times { |i| write(root, "app/services/step_#{i}.rb", "class Step#{i}; end") }
+      end
+
+      def extract_rack_and_relocate
+        build_rack_checkout(@original)
+        publish(@original)
+        File.rename(@original, @moved)
+      end
+
+      it 'accepts the root when any captured file verifies' do
+        extract_rack_and_relocate
+        %w[app/services/step_0.rb app/services/step_1.rb app/services/step_2.rb].each do |path|
+          write(@moved, path, 'changed')
+        end
+
+        result = freshness
+        expect(result['coverage']).to include('recorded_files' => 4, 'verified_files' => 1)
+        expect(result['coverage']).not_to have_key('application_verified')
+        expect(result).to include('state' => 'drifted', 'root_source' => 're_resolved')
+      end
+
+      it 'rejects the root when no captured file verifies' do
+        extract_rack_and_relocate
+        write(@moved, 'config.ru', 'run Other::Application')
+        3.times { |i| write(@moved, "app/services/step_#{i}.rb", 'changed') }
+
+        result = freshness
+        expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
+                                  'root_rejected' => 'no_identity_match')
+      end
+    end
+  end
+
   describe 'Git dirtiness' do
     def git(root, *args)
       env = { 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_NOSYSTEM' => '1' }
@@ -230,9 +299,33 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
       result = freshness(other)
       expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
                                 'root_source' => 're_resolved', 'checked_root' => other,
-                                'root_rejected' => 'no_captured_file_matches')
+                                'root_rejected' => 'no_identity_match')
       expect(result).not_to have_key('changes')
       expect(result['recommendations']).to include('inspect_source_scan')
+    end
+
+    it 'is unavailable when only generated boilerplate matches and the application file differs' do
+      boilerplate = {
+        'config/boot.rb' => "require 'bundler/setup'",
+        'config/environment.rb' => "require_relative 'application'\nRails.application.initialize!",
+        'config/environments/development.rb' => 'Rails.application.configure { config.eager_load = false }',
+        'config/environments/production.rb' => 'Rails.application.configure { config.eager_load = true }',
+        'config/puma.rb' => 'threads 5, 5',
+        'config/initializers/filter_parameter_logging.rb' => 'Rails.application.config.filter_parameters += [:token]'
+      }
+      extract_and_relocate { |root| boilerplate.each { |path, bytes| write(root, path, bytes) } }
+      other = File.join(@workspace, 'other-app')
+      FileUtils.mkdir_p(File.join(other, '.git'))
+      boilerplate.each { |path, bytes| write(other, path, bytes) }
+      write(other, 'config/application.rb', 'module Other; class Application; end; end')
+      FileUtils.mkdir_p(File.join(other, 'tmp'))
+      File.rename(output(@moved), output(other))
+
+      result = freshness(other)
+      expect(result['coverage']['verified_files']).to be > result['coverage']['recorded_files'] / 2
+      expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
+                                'root_rejected' => 'no_identity_match')
+      expect(result).not_to have_key('changes')
     end
 
     it 'keeps a scan limit visible when it rejects a relocated root that matched nothing' do
@@ -244,7 +337,7 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
                  Woods::SourceInputs::Scanner::DEFAULT_LIMITS.merge(max_files: 1))
 
       result = freshness
-      expect(result).to include('state' => 'unknown', 'root_rejected' => 'no_captured_file_matches')
+      expect(result).to include('state' => 'unknown', 'root_rejected' => 'no_identity_match')
       expect(result['verification_reasons']).to include('scan_file_budget', 'source_root_unavailable')
     end
   end

@@ -417,7 +417,7 @@ module Woods
       # root the index recorded, or, when that path is not reachable here (a
       # checkout served under another path), the application that owns the
       # served index directory ({ServedIdentity.app_root}). A re-resolved root
-      # counts only when captured bytes in it match.
+      # counts only on an identity tie ({SourceInputs::RelocatedRoot}).
       def source_freshness(mode: 'quick')
         explicit = ENV.fetch(SOURCE_ROOT_ENV, '').to_s
         explicit = nil if explicit.strip.empty?

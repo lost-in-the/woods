@@ -764,10 +764,12 @@ for Git/path builds, the loaded revision before using them:
 
 - Builds containing #589 expose `recorded_root`, `checked_root`, and `root_source`.
   A recorded-root check does not certify a copied checkout. Woods 2.2
-  (check the installed version first) also report `root_source: re_resolved`
+  (check the installed version first) reports `root_source: re_resolved`
   when the recorded root is unreachable and the reader checked the application
-  that owns the served index. `root_rejected: no_captured_file_matches` means
-  that guess matched no captured bytes. Set `WOODS_SOURCE_ROOT` in the MCP
+  that owns the served index. `root_rejected: no_identity_match` means that
+  application failed the identity tie (its `config/application.rb`, or every
+  captured file, no longer matches). The tie is a heuristic, so check
+  `checked_root` before trusting drift there. Set `WOODS_SOURCE_ROOT` in the MCP
   server's environment to name the root instead. Follow `deep_check`
   for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
   problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
