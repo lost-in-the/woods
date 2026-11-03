@@ -12,12 +12,16 @@ module Woods
       DEFAULT_SECONDS = 0.25
       SUMMARY_LIMIT = 30
 
+      # @param root [String, nil] the root to check instead of the recorded one
+      # @param root_source [String, nil] how the caller chose +root+ (`explicit`
+      #   unless given; {Status} reports a re-resolved root as `re_resolved`)
       # rubocop:disable Metrics/ParameterLists -- caller chooses identity, served generation and bounded scan
-      def initialize(manifest:, output_dir:, root: nil, generation: nil, max_seconds: DEFAULT_SECONDS, **limits)
+      def initialize(manifest:, output_dir:, root: nil, root_source: nil, generation: nil,
+                     max_seconds: DEFAULT_SECONDS, **limits)
         @manifest = manifest.is_a?(Manifest) ? manifest : Manifest.new(manifest)
         @output_dir = output_dir
         @root = SourcePathEncoding.expand(root || @manifest.data.fetch('root'))
-        @root_source = root ? 'explicit' : 'recorded'
+        @root_source = root_source || (root ? 'explicit' : 'recorded')
         @generation = generation
         @limits = limits.merge(max_seconds: max_seconds)
       end

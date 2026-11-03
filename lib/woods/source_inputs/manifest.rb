@@ -37,6 +37,16 @@ module Woods
         end
       end
 
+      # What a check compares, as status reports it: the consumer scopes this
+      # generation captured (the file kinds each extractor reads) and the
+      # declared source roots. A file no scope claims was never captured, so
+      # its appearance is never drift.
+      #
+      # @return [Hash]
+      def scope_summary
+        { 'consumer_scopes' => @data.fetch('scopes').keys.sort, 'declared_roots' => @data.fetch('extra_roots') }
+      end
+
       # Older version-1 writers encoded missing comparison evidence only as
       # errors. Never interpret their empty ledger as proof of an empty tree.
       def comparison_complete?
