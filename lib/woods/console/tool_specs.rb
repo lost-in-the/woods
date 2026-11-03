@@ -82,6 +82,32 @@ module Woods
       QUERY_SCOPE_TEMPLATE_SCHEMA_PATTERN = "^(?:#{QUERY_SCOPE_TEMPLATE_GRAMMAR})$(?![\\s\\S])".freeze
       QUERY_SCOPE_TEMPLATE_REGEXP = Regexp.new("\\A(?:#{QUERY_SCOPE_TEMPLATE_GRAMMAR})\\z").freeze
 
+      # Top-level JSON Schema combinators kept out of the schema served by
+      # `tools/list`. Some MCP clients reject or mishandle a tool whose input
+      # schema has one at the root; the authoritative validator keeps them.
+      ADVERTISED_SCHEMA_EXCLUDED_KEYWORDS = %i[oneOf anyOf allOf].freeze
+
+      # Cross-argument rules that the authoritative schema enforces with a
+      # top-level combinator. The advertised schema drops the combinator, so
+      # each rule is stated in the tool description and its refusal carries
+      # this code, argument and hint. `violation` is a representative input
+      # the authoritative schema refuses and the advertised schema accepts.
+      FIND_LOCATOR_RULE = {
+        code: 'invalid_locator',
+        argument: 'id|by',
+        hint: 'Pass exactly one locator: id (e.g. id: 42) or a non-empty by ' \
+              '(e.g. by: {"email": "a@example.com"}). Not both, and not neither.',
+        violation: { model: 'Post', id: 1, by: { 'title' => 'Alpha' } }
+      }.freeze
+
+      AGGREGATE_COLUMN_RULE = {
+        code: 'column_required',
+        argument: 'column',
+        hint: 'Pass column (e.g. column: "amount") with sum, average, minimum or maximum. ' \
+              'Only count may omit column.',
+        violation: { model: 'Post', function: 'sum' }
+      }.freeze
+
       # Value object that holds a single MCP tool's declarative specification.
       #
       # @!attribute [r] name
@@ -98,10 +124,17 @@ module Woods
       #   @return [Proc] Lambda called with symbolised args hash; returns the
       #     request Hash forwarded to the bridge/executor. Any tier-specific
       #     objects (validators, guards) are captured in the lambda's closure.
+      # @!attribute [r] schema_constraints
+      #   @return [Hash, nil] Extra top-level keywords of the authoritative schema
+      # @!attribute [r] combination_rule
+      #   @return [Hash, nil] The cross-argument rule a top-level combinator in
+      #     schema_constraints enforces ({FIND_LOCATOR_RULE}, {AGGREGATE_COLUMN_RULE})
       ToolSpec = Struct.new(
-        :name, :description, :properties, :required, :tier, :handler, :schema_constraints,
+        :name, :description, :properties, :required, :tier, :handler, :schema_constraints, :combination_rule,
         keyword_init: true
       ) do
+        # The authoritative schema: every argument rule, including top-level
+        # combinators. Validation always runs against this one.
         def input_schema
           schema = { properties: properties }
           schema[:required] = required if required&.any?
@@ -109,19 +142,28 @@ module Woods
           schema
         end
 
+        # The schema served by `tools/list`: {#input_schema} without top-level
+        # combinators. The description states the rules they carried, and
+        # {#validate_arguments!} still enforces them.
+        def advertised_input_schema
+          input_schema.except(*ADVERTISED_SCHEMA_EXCLUDED_KEYWORDS)
+        end
+
         def validate_arguments!(arguments)
           schema = input_schema_value
           if arguments.is_a?(Hash)
             missing = schema.missing_required_arguments(arguments)
             unless missing.empty?
-              raise InputContract::ValidationError, "Missing required arguments: #{missing.join(', ')}"
+              raise InputContract::ValidationError.new(
+                "Missing required arguments: #{missing.join(', ')}", code: 'missing_required_arguments'
+              )
             end
           end
 
           schema.validate_arguments(arguments)
           arguments
         rescue ::MCP::Tool::InputSchema::ValidationError => e
-          raise InputContract::ValidationError, e.message
+          raise InputContract::ValidationError.new(e.message, **refusal_details(arguments))
         end
 
         def wrap_handler!
@@ -137,6 +179,27 @@ module Woods
 
         def input_schema_value
           @input_schema_value ||= ::MCP::Tool::InputSchema.new(input_schema)
+        end
+
+        def advertised_input_schema_value
+          @advertised_input_schema_value ||= ::MCP::Tool::InputSchema.new(advertised_input_schema)
+        end
+
+        # Label a refusal the authoritative schema made. When the advertised
+        # schema accepts the same arguments, only a top-level combinator
+        # refused them, so the refusal is this spec's combination rule. The
+        # label never decides: the authoritative schema already refused.
+        def refusal_details(arguments)
+          return { code: 'invalid_arguments' } unless combination_rule && combinator_only_refusal?(arguments)
+
+          combination_rule.slice(:code, :argument, :hint)
+        end
+
+        def combinator_only_refusal?(arguments)
+          advertised_input_schema_value.validate_arguments(arguments)
+          true
+        rescue ::MCP::Tool::InputSchema::ValidationError
+          false
         end
       end
 
@@ -189,7 +252,8 @@ module Woods
         ),
         ToolSpec.new(
           name: 'console_find',
-          description: 'Find a single record by primary key or unique column',
+          description: 'Find a single record by primary key or unique column. ' \
+                       'Pass exactly one of id or by (a non-empty {column: value} hash), never both.',
           properties: {
             model: { type: 'string', pattern: NON_WHITESPACE_SCHEMA_PATTERN, description: 'Model name' },
             id: { type: 'integer', minimum: MIN_INTEGER_INPUT, maximum: MAX_RECORD_ID,
@@ -205,13 +269,16 @@ module Woods
           # `find_by({})` (no locator at all) returns an arbitrary row:
           # this constraint is the schema half of closing that gap; the
           # executor enforces it again as defense-in-depth (see
-          # EmbeddedExecutor#validate_find_locator!).
+          # EmbeddedExecutor#validate_find_locator!). `tools/list` serves the
+          # schema without this oneOf (ToolSpec#advertised_input_schema); the
+          # description states the rule instead.
           schema_constraints: {
             oneOf: [
               { required: ['id'] },
               { required: ['by'] }
             ]
           },
+          combination_rule: FIND_LOCATOR_RULE,
           handler: lambda { |args|
             Tools::Tier1.console_find(
               model: args[:model], id: args[:id], by: args[:by], columns: args[:columns]
@@ -247,7 +314,8 @@ module Woods
         ToolSpec.new(
           name: 'console_aggregate',
           description: 'Run aggregate function on a column. ' \
-                       'count omits column to count all rows. ' \
+                       'column is required for sum, average, minimum and maximum; ' \
+                       'count may omit column to count all rows. ' \
                        'Supports scope predicates: {status: "paid", total_gt: 0}. ' \
                        'For complex queries use console_query.',
           properties: {
@@ -274,6 +342,7 @@ module Woods
               }
             ]
           },
+          combination_rule: AGGREGATE_COLUMN_RULE,
           handler: lambda { |args|
             Tools::Tier1.console_aggregate(
               model: args[:model], function: args[:function], column: args[:column], scope: args[:scope]
@@ -899,19 +968,37 @@ module Woods
                            }.freeze
                          end
 
+        rule = spec.combination_rule
+        combination_refusal = if rule
+                                {
+                                  arguments: rule.fetch(:violation),
+                                  error_contract: {
+                                    stage: :authoritative_schema_validation,
+                                    is_error: true,
+                                    text_prefix: 'Invalid arguments:',
+                                    **rule.slice(:code, :argument, :hint)
+                                  }.freeze
+                                }.freeze
+                              end
+
         {
           name: spec.name,
           executable_modes: modes,
           arguments: {
             required: required,
             optional: optional,
-            constraints: spec.input_schema
+            constraints: spec.input_schema,
+            advertised_constraints: spec.advertised_input_schema
           }.freeze,
           representative_valid_input: valid_input,
           representative_invalid_input: {
             arguments: invalid_arguments,
             error_contract: error_contract
           }.freeze,
+          # A rule carried only by a top-level combinator passes the SDK's
+          # check against the advertised schema, so the authoritative schema
+          # refuses it at dispatch, with the rule's code, argument and hint.
+          combination_refusal: combination_refusal,
           semantic_output: {
             availability: executable ? :executable : :inventory_only,
             shape: SEMANTIC_OUTPUT_SHAPES.fetch(spec.name)

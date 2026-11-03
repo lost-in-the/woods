@@ -205,12 +205,16 @@ module Woods
           end
         end
 
-        # Build the JSON Schema object for a ToolSpec.
+        # Build the JSON Schema object the SDK serves in `tools/list` and
+        # checks before dispatch: the advertised schema, with no top-level
+        # combinator. The rules those combinators carry are still refused at
+        # dispatch by the authoritative schema (ToolSpec#validate_arguments!,
+        # run by the wrapped handler and again by the executor).
         #
         # @param spec [ToolSpec]
         # @return [Hash]
         def spec_schema(spec)
-          spec.input_schema
+          spec.advertised_input_schema
         end
 
         # Build the SafeContext (Layer 3) pair the embedded server runs on:
