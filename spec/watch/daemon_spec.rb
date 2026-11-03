@@ -1416,6 +1416,32 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reason).not_to eq(:already_running)
     end
 
+    # A killed watcher that nothing reaps stays a zombie, and signal 0 still
+    # finds it. Its status record and claim must not keep a new watcher out
+    # (#993).
+    it 'does not stand down for a zombie predecessor recorded in the status and claim files',
+       if: RUBY_PLATFORM.include?('linux') && Process.respond_to?(:fork) do
+      FileUtils.mkdir_p(output_dir)
+      zombie = fork { exit!(0) }
+      begin
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        until File.read("/proc/#{zombie}/status")[/^State:\s*(\S)/, 1] == 'Z'
+          raise 'child never became a zombie' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 0.01
+        end
+        Woods::Watch::Status.new(output_dir: output_dir).write(state: :running, pid: zombie)
+        claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
+        File.write(claim_path, JSON.generate(pid: zombie, host: Woods::Watch::Status.host_identity))
+
+        reason = Timeout.timeout(10) { build_racer.run }
+
+        expect(reason).not_to eq(:already_running)
+      ensure
+        Process.wait(zombie)
+      end
+    end
+
     it 'reads a claim with a multibyte host under a US-ASCII default external encoding' do
       FileUtils.mkdir_p(output_dir)
       claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)

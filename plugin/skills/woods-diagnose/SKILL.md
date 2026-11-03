@@ -271,6 +271,16 @@ reader may not check). `recorded_state` keeps the daemon's own word. None of the
 three means the index is being kept fresh; on earlier versions, read `alive`, not
 `state`.
 
+A watcher killed in a container whose PID 1 does not reap orphans (no init such
+as `tini`) can be left as a zombie, and a version without the zombie liveness
+fix (#993; check the installed version's release notes) reads it as `running`
+with `alive: true`, so a new `woods:watch` stands down. On such a version,
+confirm with `grep '^State' /proc/<pid>/status` (a `Z` means exited; slim and
+busybox images often lack a `ps` that takes `-p`). Then start the new watcher
+with `WOODS_IGNORE_WATCH=1`, or, under the managed launcher (which ignores that
+variable), remove `watch_claim.json` and `watch_status.json` from the output
+directory first. With the fix, a Linux reader reports that pid `dead`.
+
 Writer-version provenance (#323) is available in Woods `2.0.0.beta3`: verify the installed
 gem version's release notes before expecting it. If `index.woods_version` exists, compare it
 with `server.version`; missing/null is unknown, not a failure. A validator
