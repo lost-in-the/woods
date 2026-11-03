@@ -46,6 +46,126 @@ RSpec.describe Woods::PayloadStore do
     end
   end
 
+  # Private stages (#1004): a writer's own directory, never a generation.
+  describe 'private writer stages' do
+    it 'names a stage by generation and owner, outside the gen-<n> pattern' do
+      expect(store.stage_path_for(5, 'abc123').basename.to_s).to eq('.stage-5-abc123')
+    end
+
+    it 'refuses an owner that could escape the payload root' do
+      ['../x', 'a/b', '', 'a b'].each do |owner|
+        expect { store.stage_path_for(5, owner) }.to raise_error(ArgumentError)
+      end
+    end
+
+    it "never empties another writer's stage for the same generation" do
+      theirs = store.create_stage(5, 'writer-b')
+      File.write(theirs.join('unit.json'), 'b')
+
+      mine = store.create_stage(5, 'writer-a')
+
+      expect(mine).not_to eq(theirs)
+      expect(File.read(theirs.join('unit.json'))).to eq('b')
+    end
+
+    it 'empties a stage the same owner left earlier' do
+      first = store.create_stage(5, 'writer-a')
+      File.write(first.join('leftover.json'), 'x')
+
+      expect(store.create_stage(5, 'writer-a').children).to be_empty
+    end
+
+    it 'promotes a stage to gen-<n> and leaves no stage behind' do
+      stage = store.create_stage(5, 'writer-a')
+      File.write(stage.join('manifest.json'), '{}')
+
+      promoted = store.promote(stage, 5)
+
+      expect(promoted).to eq(store.path_for(5))
+      expect(File.read(promoted.join('manifest.json'))).to eq('{}')
+      expect(stage).not_to exist
+    end
+
+    it 'is not a generation to retention' do
+      stage = store.create_stage(9, 'writer-a')
+      FileUtils.mkdir_p(store.path_for(1))
+
+      expect(store.prune(keep: 1, protect: 1)).to eq([])
+      expect(stage).to be_directory
+    end
+
+    describe '#discard_stage' do
+      it 'removes a stage' do
+        stage = store.create_stage(5, 'writer-a')
+
+        store.discard_stage(stage)
+
+        expect(stage).not_to exist
+      end
+
+      it 'never removes a generation, even when handed its path' do
+        FileUtils.mkdir_p(store.path_for(5))
+
+        store.discard_stage(store.path_for(5))
+
+        expect(store.path_for(5)).to be_directory
+      end
+
+      it 'never removes a stage-named directory outside the payload root' do
+        outside = Pathname.new(tmpdir).join('.stage-5-writer-a')
+        FileUtils.mkdir_p(outside)
+
+        store.discard_stage(outside)
+
+        expect(outside).to be_directory
+      end
+    end
+
+    # Age is the only evidence a stage is abandoned: a takeover never deletes
+    # a stage another writer may still be writing.
+    describe '#sweep_abandoned_stages' do
+      let(:day) { described_class::ABANDONED_STAGE_AGE }
+
+      def age(path, seconds)
+        old = Time.now - seconds
+        File.utime(old, old, path.to_s)
+      end
+
+      it "removes another writer's stage untouched for longer than a day" do
+        stage = store.create_stage(5, 'crashed')
+        age(stage, day + 60)
+
+        expect(store.sweep_abandoned_stages).to eq(['.stage-5-crashed'])
+        expect(stage).not_to exist
+      end
+
+      it "keeps another writer's stage younger than a day" do
+        stage = store.create_stage(5, 'paused')
+        age(stage, day - 60)
+
+        expect(store.sweep_abandoned_stages).to eq([])
+        expect(stage).to be_directory
+      end
+
+      it "keeps the caller's own stage whatever its age" do
+        stage = store.create_stage(5, 'mine')
+        age(stage, day + 60)
+
+        expect(store.sweep_abandoned_stages(except: stage)).to eq([])
+        expect(stage).to be_directory
+      end
+
+      it 'never removes a generation' do
+        FileUtils.mkdir_p(store.path_for(1))
+        age(store.path_for(1), day + 60)
+
+        store.sweep_abandoned_stages
+
+        expect(store.path_for(1)).to be_directory
+      end
+    end
+  end
+
   describe '#clone' do
     it 'reproduces the source tree' do
       source = store.create(1)

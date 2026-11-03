@@ -299,6 +299,14 @@ complete generation. Fix the named filesystem, permission, space, or mount
 failure and rerun the same task. Never edit `generation.json` or point a reader
 at the unreachable payload by hand.
 
+When the message also says the lock is `no longer held by this writer`, the run
+paused past its lock lease (a sleeping laptop, a stopped container) and another
+writer took over and published. Nothing needs repair: readers serve the
+successor's generation. Rerun only if this run's changes are still missing. A
+version without writer fencing (#1004; check the installed version's release
+notes) could instead publish over the successor; if a payload went missing after
+such a pause, rerun a full `woods:extract`.
+
 For slow extraction, use `WOODS_PROFILE=1` when supported by the installed
 version. Keep process boot and resident-cycle measurements separate. Older
 profiles nest payload sync and retention inside `publish`; current source

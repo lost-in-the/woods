@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'securerandom'
 require 'digest'
 require 'fileutils'
 require 'open3'
@@ -21,6 +22,8 @@ require_relative 'container_attribution'
 require_relative 'source_size'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
+require_relative 'publication_seam'
+require_relative 'coordination/pipeline_lock'
 require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
@@ -537,10 +540,14 @@ module Woods
     # @return [Hash] Results keyed by extractor type
     def extract_all
       with_parse_cache { perform_extract_all }
+    ensure
+      discard_unpromoted_stage
     end
 
     def extract_changed(changed_files)
       with_parse_cache { perform_extract_changed(changed_files) }
+    ensure
+      discard_unpromoted_stage
     end
 
     # One Prism parse per distinct source for the length of the run; see
@@ -675,8 +682,8 @@ module Woods
       # assembly, index write, annotation rewrite, sweep — raises and aborts
       # the run here, BEFORE the graph, manifest, snapshot, and generation
       # publish below. The previously published generation stays resolved
-      # and readable; the aborted run's payload directory is left
-      # unreachable for the next run's PayloadStore#create to reclaim.
+      # and readable; the aborted run's private stage is removed on the way
+      # out ({#discard_unpromoted_stage}).
       # Publishing a partial flow index, stale prior flow artifacts
       # alongside a new graph, or half-rewritten annotations would violate
       # the atomic-generation and full/incremental-equivalence contracts;
@@ -898,6 +905,7 @@ module Woods
 
       { types: known, touched: touched.to_a, unknown: unknown }
     ensure
+      discard_unpromoted_stage
       log_profile_total('refresh', profile_started)
     end
 
@@ -1176,17 +1184,32 @@ module Woods
     # reader that sees generation N knows N's files are already on disk. A run
     # that raised, or that changed nothing, never reaches this.
     #
+    # The irreversible steps — promoting the private stage to `gen-<n>`,
+    # writing the marker, and retention — run inside the writer fence
+    # ({#with_writer_fence}). A writer whose lock was taken over while it was
+    # paused reaches the fence, finds the token is no longer its own, and
+    # stops: it renames, publishes and prunes nothing, and its own stage is
+    # discarded. Everything before the fence touched only that stage.
+    #
     # @param reason [String] what produced this generation
     # @return [void]
     def publish_generation(reason)
       generation = Generation.new(output_dir: @output_dir)
-      # Resolve (and if necessary rename) the payload first, so the flush
-      # below covers the directory under the name the pointer will carry.
+      # Resolve the generation number first, so the source manifest written
+      # below names the generation the pointer will carry.
       payload = publishable_payload_name(generation)
       profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
-      marker = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
-      profile_phase('payload prune') { prune_payloads(marker.number) }
+      PublicationSeam.reach(:before_promotion, @output_dir)
+      marker = with_writer_fence do
+        promote_payload(generation)
+        PublicationSeam.reach(:promoted, @output_dir)
+        published = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
+        PublicationSeam.reach(:marker_published, @output_dir)
+        profile_phase('payload prune') { prune_payloads(published.number) }
+        published
+      end
+      PublicationSeam.reach(:published, @output_dir)
       marker
     rescue StandardError => e
       # A failed bump must not fail the extraction that produced a perfectly
@@ -1197,12 +1220,60 @@ module Woods
       # nothing either. Error, not warn — and `Watch::Daemon` cross-checks that
       # the number actually moved so the daemon reports degraded rather than
       # running.
+      discard_unpromoted_stage
       @publication_error = Woods::ExtractionError.new(
         "Could not publish generation for #{@output_dir} (#{e.class}: #{e.message}); " \
         'the previous generation remains active'
       )
       Rails.logger.error "[Woods] #{@publication_error.message}"
       nil
+    end
+
+    # Run the publish steps under the index writer lock this process holds,
+    # proving ownership under the same guard a takeover takes
+    # ({Coordination::PipelineLock#fenced}). A run that holds no lock (a
+    # direct library call outside {Woods.extract!}) has nothing to prove and
+    # runs the steps as before.
+    #
+    # @raise [Coordination::LockLostError] when the lock was taken over
+    def with_writer_fence(&block)
+      lock = @writer_lock || Coordination::PipelineLock.held_for_index(@output_dir)
+      lock ? lock.fenced(&block) : yield
+    end
+
+    # Move the finished private stage into place as `gen-<n>`. Inside the
+    # fence the marker cannot move except through this writer, so a number
+    # that changed since {#publishable_payload_name} means a writer that does
+    # not take the lock published meanwhile; refuse rather than publish over
+    # it.
+    #
+    # @param generation [Woods::Generation]
+    # @return [void]
+    def promote_payload(generation)
+      return unless @payload_dir && @payload_store.stage?(@payload_dir)
+
+      actual = generation.current.number + 1
+      unless actual == @payload_generation
+        raise Woods::ExtractionError,
+              "generation moved to #{actual - 1} during publication (expected #{@payload_generation - 1})"
+      end
+
+      @payload_dir = @payload_store.promote(@payload_dir, @payload_generation)
+    end
+
+    # Remove this run's private stage if it was never promoted: a no-op
+    # incremental run, a failed run, or a run whose lock was taken over. Only
+    # a path under the stage prefix is ever removed, and only this run's own.
+    #
+    # @return [void]
+    def discard_unpromoted_stage
+      return unless @payload_dir && @payload_store.stage?(@payload_dir)
+
+      @payload_store.discard_stage(@payload_dir)
+      @payload_dir = nil
+      @payload_generation = nil
+    rescue SystemCallError => e
+      Rails.logger.warn "[Woods] Could not remove unpublished stage #{@payload_dir}: #{e.message}"
     end
 
     # Capture before eager loading or extraction; only an explicit fresh-launch
@@ -1304,10 +1375,15 @@ module Woods
     #   payload-born index's payload directory could not be opened
     def begin_payload!(strict: false, rewritten_dirs: [])
       @publication_error = nil
+      discard_unpromoted_stage
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
-      @payload_dir = @payload_store.create(@payload_generation)
+      @writer_lock = Coordination::PipelineLock.held_for_index(@output_dir)
+      @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
       seed_payload(marker, rewritten_dirs: rewritten_dirs)
+      PublicationSeam.reach(:staged, @output_dir)
+    rescue Coordination::LockLostError
+      raise
     rescue StandardError => e
       if strict && marker&.payload
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -1546,30 +1622,27 @@ module Woods
 
     # The pointer to publish, or nil when this run built no payload directory.
     #
-    # The directory was named from the generation number this run expected to
-    # publish as. Writers serialize on `PipelineLock`, so that prediction holds
-    # — but if it ever did not, the pointer would name a directory belonging to
-    # a different generation, so the directory is renamed to match rather than
-    # published under a name that lies.
+    # The stage was opened expecting to publish as the generation after the
+    # one current then. Writers serialize on `PipelineLock`, so that holds; if
+    # it ever did not, the number is corrected here so the source manifest
+    # names the generation actually published, and {#promote_payload}
+    # re-checks it inside the fence.
     #
     # @param generation [Woods::Generation]
     # @return [String, nil]
     def publishable_payload_name(generation)
       return nil unless @payload_dir
 
-      actual = generation.current.number + 1
-      if actual != @payload_generation
-        @payload_dir = rename_payload(actual)
-        @payload_generation = actual
-      end
-
+      @payload_generation = generation.current.number + 1
       PayloadStore.name_for(@payload_generation)
     end
 
-    # @param number [Integer] the generation number actually being published
-    # @return [Pathname] the payload directory under its corrected name
-    def rename_payload(number)
-      @payload_store.rename(@payload_dir, number)
+    # A name only this run may stage under: the lock token when this process
+    # holds the index writer lock, otherwise a random one.
+    #
+    # @return [String]
+    def stage_owner
+      @writer_lock&.token || SecureRandom.hex(8)
     end
 
     # @param published [Integer] the generation just published
@@ -1580,6 +1653,7 @@ module Woods
       @payload_store.prune(keep: payload_retention, protect: published) do |number, _reason|
         Rails.logger.info "[Woods] Retaining generation #{number}: persistent pin"
       end
+      @payload_store.sweep_abandoned_stages if @writer_lock
     rescue StandardError => e
       Rails.logger.warn "[Woods] Payload retention failed: #{e.message}"
     end

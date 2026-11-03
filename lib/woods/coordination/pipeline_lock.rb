@@ -15,6 +15,12 @@ module Woods
   module Coordination
     class LockError < Woods::Error; end
 
+    # Raised by {PipelineLock#fenced} when this instance no longer owns the
+    # lock: another writer took it over after its lease expired. The work the
+    # fence guards (promoting a payload, publishing the marker, pruning) did
+    # not happen.
+    class LockLostError < LockError; end
+
     # File-based lock for preventing concurrent pipeline operations.
     #
     # Creates a lock file with PID, host and timestamp. A lock is stale when
@@ -49,6 +55,56 @@ module Woods
       # @return [PipelineLock]
       def self.for_index(output_dir)
         new(lock_dir: output_dir.to_s, name: INDEX_WRITER_NAME, stale_timeout: INDEX_WRITER_STALE_TIMEOUT)
+      end
+
+      @held_locks = {}
+      @held_locks_mutex = Mutex.new
+
+      # The index writer lock this process currently holds for +output_dir+,
+      # if any.
+      #
+      # A writer holds its lock around the whole run, but the publish step
+      # deep inside {Woods::Extractor} is where ownership has to be proven, and
+      # every caller (rake tasks, the watch daemon, the MCP operator tools,
+      # {Woods.extract!}) builds its extractor separately from its lock. A lock
+      # registers itself here when {#acquire} succeeds and leaves on
+      # {#release}, so the extractor finds it without each caller threading it
+      # through. A taken-over instance stays registered until it is released:
+      # it must still be found, so that {#fenced} can refuse it.
+      #
+      # @param output_dir [String, Pathname]
+      # @return [PipelineLock, nil]
+      def self.held_for_index(output_dir)
+        key = registry_key(output_dir, INDEX_WRITER_NAME)
+        @held_locks_mutex.synchronize { @held_locks[key]&.last }
+      end
+
+      # Kept as a list per directory: if one process ever holds two instances
+      # (an obsolete one and its successor), releasing either leaves the other
+      # findable, so the obsolete one is still fenced rather than forgotten.
+      #
+      # @api private
+      def self.register_held(lock, key)
+        @held_locks_mutex.synchronize do
+          held = (@held_locks[key] ||= [])
+          held << lock unless held.any? { |entry| entry.equal?(lock) }
+        end
+      end
+
+      # @api private
+      def self.unregister_held(lock, key)
+        @held_locks_mutex.synchronize do
+          held = @held_locks[key] or next
+          held.reject! { |entry| entry.equal?(lock) }
+          @held_locks.delete(key) if held.empty?
+        end
+      end
+
+      # @return [Array(String, String)] the canonical directory and lock name
+      def self.registry_key(dir, name)
+        [File.realpath(dir.to_s), name]
+      rescue SystemCallError
+        [File.expand_path(dir.to_s), name]
       end
 
       # The transaction-guard filename for a lock of +name+, exposed so
@@ -108,11 +164,49 @@ module Woods
             discard_partial_lock
             raise
           end
-          @held = true
+          mark_held
           true
         end
       rescue Errno::EEXIST
         false
+      end
+
+      # The ownership token this instance wrote when it last acquired the
+      # lock, or nil before any acquisition. Unique per acquisition, so a
+      # writer can name things that only it may touch (its private payload
+      # stage) after it.
+      #
+      # @return [String, nil]
+      attr_reader :token
+
+      # Run a block only while this instance provably owns the lock, under the
+      # same guard every takeover takes.
+      #
+      # This is the fence for a writer's irreversible steps. A check of the
+      # token followed by a separate rename leaves a window: the lease can
+      # expire and another writer take over between the two. Here the token
+      # check and the block both run inside the path guard, and {#acquire}
+      # retires a stale lock only inside that guard too, so a takeover either
+      # completes before the check (and the check fails) or waits until the
+      # block has finished. An unreadable lock file is not proof of ownership
+      # and fails closed.
+      #
+      # The block must not take this lock's guard again (flock does not
+      # nest across file descriptions); a heartbeat {#touch} on another thread
+      # simply waits for it.
+      #
+      # @yield the work that must not outlive ownership
+      # @return [Object] the block's value
+      # @raise [LockLostError] when the lock was taken over, released or lost
+      def fenced
+        with_path_guard do
+          unless @held && lock_ownership == :ours
+            raise LockLostError, "Lock '#{@name}' in #{@lock_dir} is no longer held by this writer " \
+                                 '(its lease expired and another writer took over)'
+          end
+
+          yield
+        end
       end
 
       # Retire the lock only when the file captured atomically from the public
@@ -150,6 +244,7 @@ module Woods
         nil
       ensure
         @held = false
+        self.class.unregister_held(self, registry_key)
       end
 
       # Execute a block while holding the lock.
@@ -219,6 +314,16 @@ module Woods
       end
 
       private
+
+      def registry_key
+        @registry_key ||= self.class.registry_key(@lock_dir, @name)
+      end
+
+      # @return [void]
+      def mark_held
+        @held = true
+        self.class.register_held(self, registry_key)
+      end
 
       # Remove a lock file this {#acquire} call created but could not finish
       # writing (INF-7).
