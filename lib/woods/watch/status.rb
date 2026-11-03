@@ -193,10 +193,12 @@ module Woods
 
       # @param pid [Integer]
       # @return [Boolean] true only when Linux /proc reports the pid as a zombie
+      #   (read as bytes: the `Name:` line holds the process name, which need
+      #   not be ASCII or valid UTF-8)
       def self.zombie?(pid)
         return false unless RUBY_PLATFORM.include?('linux')
 
-        File.read("/proc/#{pid}/status")[/^State:\s*(\S)/, 1] == 'Z'
+        File.binread("/proc/#{pid}/status")[/^State:\s*(\S)/n, 1] == 'Z'
       rescue SystemCallError, IOError
         false
       end

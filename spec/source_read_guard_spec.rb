@@ -36,8 +36,6 @@ module SourceReadGuard
       'kernel boot id under /proc: ASCII by definition',
     ['lib/woods/mcp/tasks/store.rb', 'linux_process_identity'] =>
       'kernel boot id and process stat under /proc: ASCII by definition',
-    ['lib/woods/watch/status.rb', 'zombie?'] =>
-      'process status under /proc: ASCII by definition',
     ['lib/woods/extractors/config_file_extractor.rb', 'read_outline'] =>
       'reports invalid UTF-8 as parse_error metadata (its own contract), never scrubs',
     ['lib/woods/extractors/test_support_catalog.rb', 'analyze'] =>

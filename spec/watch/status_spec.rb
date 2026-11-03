@@ -99,14 +99,14 @@ RSpec.describe Woods::Watch::Status do
       status.write(state: :running)
       allow(Process).to receive(:kill).and_call_original
       allow(Process).to receive(:kill).with(0, Process.pid).and_return(1)
-      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:binread).and_call_original
     end
 
     context 'on Linux' do
       before { stub_const('RUBY_PLATFORM', 'x86_64-linux') }
 
       it 'reads a pid whose /proc status is Z as dead' do
-        allow(File).to receive(:read).with(proc_status).and_return(proc_state('Z (zombie)'))
+        allow(File).to receive(:binread).with(proc_status).and_return(proc_state('Z (zombie)'))
 
         expect(status.alive?).to be false
         expect(status.report).to include('state' => 'dead', 'recorded_state' => 'running', 'alive' => false)
@@ -114,16 +114,24 @@ RSpec.describe Woods::Watch::Status do
 
       ['R (running)', 'S (sleeping)'].each do |state|
         it "reads a pid whose /proc status is #{state} as alive" do
-          allow(File).to receive(:read).with(proc_status).and_return(proc_state(state))
+          allow(File).to receive(:binread).with(proc_status).and_return(proc_state(state))
 
           expect(status.alive?).to be true
           expect(status.report).to include('state' => 'running', 'alive' => true)
         end
       end
 
+      it 'reads the state when the process name is not valid UTF-8' do
+        name = "caf\xC3\xA9 \xFF".b
+        allow(File).to receive(:binread).with(proc_status)
+                                        .and_return("Name:\t#{name}\nState:\tZ (zombie)\n".b)
+
+        expect(status.alive?).to be false
+      end
+
       [Errno::EACCES, Errno::ENOENT].each do |error|
         it "falls back to signal 0 when /proc status raises #{error}" do
-          allow(File).to receive(:read).with(proc_status).and_raise(error)
+          allow(File).to receive(:binread).with(proc_status).and_raise(error)
 
           expect(status.alive?).to be true
         end
@@ -131,7 +139,7 @@ RSpec.describe Woods::Watch::Status do
 
       it 'still reads a pid signal 0 cannot find as dead without consulting /proc' do
         allow(Process).to receive(:kill).with(0, Process.pid).and_raise(Errno::ESRCH)
-        expect(File).not_to receive(:read).with(proc_status)
+        expect(File).not_to receive(:binread).with(proc_status)
 
         expect(status.alive?).to be false
       end
@@ -139,7 +147,7 @@ RSpec.describe Woods::Watch::Status do
 
     it 'keeps signal 0 alone off Linux' do
       stub_const('RUBY_PLATFORM', 'arm64-darwin24')
-      expect(File).not_to receive(:read).with(proc_status)
+      expect(File).not_to receive(:binread).with(proc_status)
 
       expect(status.alive?).to be true
     end
@@ -148,7 +156,7 @@ RSpec.describe Woods::Watch::Status do
       pid = fork { exit!(0) }
       begin
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
-        until File.read("/proc/#{pid}/status")[/^State:\s*(\S)/, 1] == 'Z'
+        until File.binread("/proc/#{pid}/status")[/^State:\s*(\S)/, 1] == 'Z'
           raise 'child never became a zombie' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
           sleep 0.01
