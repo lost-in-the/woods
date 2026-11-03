@@ -1305,7 +1305,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       report = Woods::Impact::Report.compare(dir, from: 'gen:1', to: 'now', depth: 1, **budget).to_h
       [report.fetch('tests').map { |item| item.except('generation') },
        report.fetch('unknowns').select { |item| item['feature'] == 'related' || item['kind'].to_s.end_with?('budget') }
-                               .map { |item| item.except('generation') }]
+             .map { |item| item.except('generation') }]
     end
 
     def mapped(view)
