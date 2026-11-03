@@ -1553,10 +1553,10 @@ module Woods
         # @return [Boolean] whether the lock was acquired
         def acquire_lock_briefly(lock)
           deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + PIPELINE_LOCK_WAIT
-          acquired = lock.acquire
+          acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
           until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
             sleep 0.1
-            acquired = lock.acquire
+            acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
           end
           acquired
         end

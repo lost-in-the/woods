@@ -7,6 +7,8 @@ require 'digest'
 require 'woods/extractor'
 require 'woods/published_index'
 require 'woods/coordination/lock_heartbeat'
+require 'woods/rake_helpers'
+require 'woods/mcp/server'
 
 # The race behind #1004, run for real with two processes.
 #
@@ -74,7 +76,7 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
       Woods::PublicationSeam.hook = lambda do |point, _dir|
         next unless point == pause_at
 
-        File.write(ready, point.to_s)
+        File.write(ready, Woods::Coordination::PipelineLock.held_for_index(@output)&.token.to_s)
         Process.kill('STOP', Process.pid)
       end
       exit!(write_and_publish(label, WriterFencingCases::ENTRY_SHAPES.fetch(shape)))
@@ -137,6 +139,10 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
   def wait_stopped(pid, ready)
     wait_until('writer to pause') { File.exist?(ready) }
     wait_until('writer to stop') { File.read("/proc/#{pid}/stat")[/\) (\S)/, 1] == 'T' }
+  end
+
+  def lock_token_of(ready)
+    File.read(ready)
   end
 
   def finish(pid)
@@ -274,6 +280,31 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
         end
       end
 
+      # B holds the lock but has not published when A resumes: the token
+      # check at promotion is what stops A, not a moved generation number.
+      context 'when it was paused at before_promotion and B has taken over but not published' do
+        it 'refuses to publish, and B then publishes normally' do
+          a, a_ready = spawn_writer('A', shape: shape, pause_at: :before_promotion)
+          wait_stopped(a, a_ready)
+          expire_lease!
+          b, b_ready = spawn_writer('B', shape: shape, pause_at: :staged)
+          wait_stopped(b, b_ready)
+          b_stage = stages.find { |name| !name.end_with?(lock_token_of(a_ready)) }
+
+          Process.kill('CONT', a)
+          expect(finish(a)).to eq(2)
+          expect(marker.number).to eq(1)
+          expect(generation_dirs).to eq(%w[gen-1])
+          expect(stages).to eq([b_stage])
+
+          Process.kill('CONT', b)
+          expect(finish(b)).to eq(0)
+          expect(marker.number).to eq(2)
+          Woods::PublishedIndex.open(@output) { |index| expect(index.unit('Post')['written_by']).to eq('B') }
+          expect(stages).to be_empty
+        end
+      end
+
       context 'when it was paused after publishing' do
         it "leaves B's later publication alone" do
           a, ready = spawn_writer('A', shape: shape, pause_at: :published)
@@ -292,6 +323,89 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
           expect(generation_dirs).to eq(%w[gen-1 gen-2 gen-3])
         end
       end
+    end
+  end
+
+  # `woods:clean` deletes index entries one at a time, each inside the fence.
+  describe 'woods:clean resumed after a takeover' do
+    def spawn_clean(pause_at:)
+      ready = File.join(File.dirname(@output), 'clean.paused')
+      pid = fork do
+        Woods::PublicationSeam.hook = lambda do |point, _dir|
+          next unless point == pause_at && !File.exist?(ready)
+
+          File.write(ready, 'clean')
+          Process.kill('STOP', Process.pid)
+        end
+        Woods::RakeHelpers.woods_clean_index(@output, wait: 5)
+        exit!(0)
+      rescue Woods::Coordination::LockLostError
+        exit!(2)
+      end
+      (@children ||= []) << pid
+      [pid, ready]
+    end
+
+    it 'stops before deleting anything B published' do
+      # Sorted first, so the clean pauses before it reaches the index proper.
+      File.write(File.join(@output, 'a-scratch'), 'x')
+      clean, ready = spawn_clean(pause_at: :swept_entry)
+      wait_stopped(clean, ready)
+      expect(File.exist?(File.join(@output, 'a-scratch'))).to be(false)
+
+      expire_lease!
+      b, = spawn_writer('B', shape: :full)
+      expect(finish(b)).to eq(0)
+      published = marker
+      b_hashes = tree_hashes(published.number)
+
+      Process.kill('CONT', clean)
+      expect(finish(clean)).to eq(2)
+
+      expect(marker.to_h).to eq(published.to_h)
+      expect(tree_hashes(published.number)).to eq(b_hashes)
+      Woods::PublishedIndex.open(@output) { |index| expect(index.unit('Post')['written_by']).to eq('B') }
+    end
+
+    it 'still cleans the whole index when uncontested' do
+      clean, = spawn_clean(pause_at: nil)
+
+      expect(finish(clean)).to eq(0)
+      expect(Dir.children(@output).sort).to eq(['.extraction.lock.guard'])
+    end
+  end
+
+  # A writer stopped inside the fence holds the guard. Contenders must give up
+  # within their own deadline instead of blocking on the flock.
+  describe 'contenders while a stopped writer holds the guard' do
+    def elapsed
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      result = yield
+      [result, Process.clock_gettime(Process::CLOCK_MONOTONIC) - started]
+    end
+
+    it 'returns within each caller\'s deadline' do
+      a, ready = spawn_writer('A', shape: :full, pause_at: :promoted)
+      wait_stopped(a, ready)
+      expire_lease!
+      contender = Woods::Coordination::PipelineLock.for_index(@output)
+
+      acquired, seconds = elapsed { contender.acquire }
+      expect(acquired).to be(false)
+      expect(seconds).to be < Woods::Coordination::PipelineLock::DEFAULT_GUARD_WAIT + 0.5
+
+      acquired, seconds = elapsed { Woods::MCP::Server.send(:acquire_lock_briefly, contender) }
+      expect(acquired).to be(false)
+      expect(seconds).to be < Woods::MCP::Server::PIPELINE_LOCK_WAIT + 0.5
+
+      acquired, seconds = elapsed { Object.new.extend(Woods::RakeHelpers).send(:woods_acquire_within, contender, 1.0) }
+      expect(acquired).to be(false)
+      expect(seconds).to be < 1.5
+
+      Process.kill('CONT', a)
+      expect(finish(a)).to eq(0)
+      expect(contender.acquire).to be(true)
+      contender.release
     end
   end
 end

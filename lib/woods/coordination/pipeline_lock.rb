@@ -57,6 +57,15 @@ module Woods
         new(lock_dir: output_dir.to_s, name: INDEX_WRITER_NAME, stale_timeout: INDEX_WRITER_STALE_TIMEOUT)
       end
 
+      # The guard wait that keeps one {#acquire} attempt inside a caller's
+      # deadline: the time left, capped at {DEFAULT_GUARD_WAIT}.
+      #
+      # @param deadline [Float] a CLOCK_MONOTONIC deadline
+      # @return [Float]
+      def self.guard_wait_until(deadline)
+        (deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).clamp(0.0, DEFAULT_GUARD_WAIT)
+      end
+
       @held_locks = {}
       @held_locks_mutex = Mutex.new
 
@@ -77,6 +86,19 @@ module Woods
       def self.held_for_index(output_dir)
         key = registry_key(output_dir, INDEX_WRITER_NAME)
         @held_locks_mutex.synchronize { @held_locks[key]&.last }
+      end
+
+      # Directories whose index writer lock an instance in this process
+      # currently owns: it believes it holds the lock and the lock file still
+      # carries its token. A registered instance whose directory or lock file
+      # is gone, or that was taken over, does not count.
+      #
+      # @return [Array<String>]
+      def self.owned_index_writer_dirs
+        locks = @held_locks_mutex.synchronize do
+          @held_locks.select { |(_, name), _| name == INDEX_WRITER_NAME }.values.flatten
+        end
+        locks.select(&:owns_lock_file?).map { |lock| lock.instance_variable_get(:@lock_dir).to_s }.uniq
       end
 
       # Kept as a list per directory: if one process ever holds two instances
@@ -138,11 +160,29 @@ module Woods
         @held = false
       end
 
+      # How long {#acquire} waits for the transaction guard by default. The
+      # guard is normally held for milliseconds; a holder inside {#fenced}
+      # (promotion, marker and retention) can hold it for as long as its
+      # retention takes, or indefinitely if it is stopped there.
+      DEFAULT_GUARD_WAIT = 0.5
+
+      # Raised inside {#with_path_guard} when a bounded wait for the guard runs
+      # out; {#acquire} turns it into an ordinary "not acquired".
+      class GuardBusy < StandardError; end
+      private_constant :GuardBusy
+
       # Attempt to acquire the lock.
       #
-      # @return [Boolean] true if lock acquired, false if already held
-      def acquire
-        with_path_guard do
+      # Never blocks past +guard_wait+: the guard is polled without blocking,
+      # so a contender whose holder is stopped inside {#fenced} gets +false+
+      # back within its own deadline instead of hanging on the flock. Callers
+      # that wait for the lock loop on this with their deadline's remainder.
+      #
+      # @param guard_wait [Numeric] seconds to wait for the transaction guard
+      # @return [Boolean] true if lock acquired, false if already held or the
+      #   guard stayed busy for +guard_wait+
+      def acquire(guard_wait: DEFAULT_GUARD_WAIT)
+        with_path_guard(wait: guard_wait) do
           if File.exist?(@lock_path)
             return false unless stale?
             # Retire the stale lock atomically. A bare rm_f + create here is
@@ -167,7 +207,7 @@ module Woods
           mark_held
           true
         end
-      rescue Errno::EEXIST
+      rescue Errno::EEXIST, GuardBusy
         false
       end
 
@@ -178,6 +218,15 @@ module Woods
       #
       # @return [String, nil]
       attr_reader :token
+
+      # Whether this instance believes it holds the lock and the lock file
+      # carries its token. Read without the guard: an advisory answer for
+      # diagnostics, never a substitute for {#fenced}.
+      #
+      # @return [Boolean]
+      def owns_lock_file?
+        @held && lock_ownership == :ours
+      end
 
       # Run a block only while this instance provably owns the lock, under the
       # same guard every takeover takes.
@@ -346,15 +395,27 @@ module Woods
         nil
       end
 
-      def with_path_guard
+      # @param wait [Numeric, nil] nil blocks for the guard (this instance's
+      #   own release, touch and fenced work); a number polls without blocking
+      #   for at most that many seconds, then raises {GuardBusy}
+      def with_path_guard(wait: nil)
         # Ensure the lock directory itself exists — never its parent. A guard
         # that lived beside @lock_dir needed the parent writable too, which a
         # deployment that only grants write access to the lock directory
         # can't satisfy.
         FileUtils.mkdir_p(@lock_dir)
         File.open(guard_path, File::RDWR | File::CREAT, 0o600) do |guard|
-          guard.flock(File::LOCK_EX)
+          wait.nil? ? guard.flock(File::LOCK_EX) : poll_guard(guard, wait)
           yield
+        end
+      end
+
+      def poll_guard(guard, wait)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+        until guard.flock(File::LOCK_EX | File::LOCK_NB)
+          raise GuardBusy if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+          sleep 0.01
         end
       end
 

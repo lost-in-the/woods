@@ -20,8 +20,12 @@ module Woods
   # * `:marker_published` — inside the fence: the marker names `n`; retention
   #   has not run.
   # * `:published` — the fence is released; the run is done publishing.
+  #
+  # And one for `woods:clean`:
+  #
+  # * `:swept_entry` — one index entry has been removed, outside the fence.
   module PublicationSeam
-    POINTS = %i[staged before_promotion promoted marker_published published].freeze
+    POINTS = %i[staged before_promotion promoted marker_published published swept_entry].freeze
 
     @hook = nil
 

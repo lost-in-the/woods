@@ -653,6 +653,11 @@ pruning anything, removes its own stage, and reports `Could not publish
 generation … no longer held by this writer`. The successor's generation and every
 pinned reader are unaffected.
 
+The same fence covers the snapshot store write after a full run's publish, and
+each deletion `woods:clean` makes, so neither can touch a successor's state. The
+lock is not supported on NFS; see
+[writers serialize](WATCH_DAEMON.md#within-one-worktree-writers-serialize).
+
 A run that publishes nothing (a no-op incremental run, a failed run) removes its
 own stage. A stage left by a crashed writer is removed by a later lock holder
 once it has been untouched for 24 hours.

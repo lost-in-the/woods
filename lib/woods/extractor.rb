@@ -708,9 +708,11 @@ module Woods
         write_manifest
         write_structural_summary
       end
-      profile_phase('snapshot') { capture_snapshot }
       @source_inputs.full_units(@results, consumers: @extractors)
-      publish_generation('full')
+      published = publish_generation('full')
+      # After the publish, and only when it succeeded: an obsolete writer
+      # (lock taken over) never reaches the snapshot store.
+      profile_phase('snapshot') { capture_published_snapshot } if published
 
       log_summary
 
@@ -1237,8 +1239,30 @@ module Woods
     #
     # @raise [Coordination::LockLostError] when the lock was taken over
     def with_writer_fence(&block)
-      lock = @writer_lock || Coordination::PipelineLock.held_for_index(@output_dir)
+      lock = @writer_lock || index_writer_lock
       lock ? lock.fenced(&block) : yield
+    end
+
+    # The index writer lock this process holds for this output directory.
+    #
+    # A process that holds the writer lock for some *other* index while
+    # writing this one is a wiring mistake (a lock taken on one path, an
+    # extractor pointed at another), and publishing unfenced there would
+    # silently drop the protection. Refuse instead.
+    #
+    # @return [Coordination::PipelineLock, nil] nil only when this process
+    #   owns no index writer lock at all
+    # @raise [Woods::ExtractionError] when it owns one for another directory
+    def index_writer_lock
+      lock = Coordination::PipelineLock.held_for_index(@output_dir)
+      return lock if lock
+
+      elsewhere = Coordination::PipelineLock.owned_index_writer_dirs
+      return if elsewhere.empty?
+
+      raise Woods::ExtractionError,
+            "This process holds the index writer lock for #{elsewhere.join(', ')} but is writing " \
+            "#{@output_dir}; take the lock for the directory being written"
     end
 
     # Move the finished private stage into place as `gen-<n>`. Inside the
@@ -1378,11 +1402,11 @@ module Woods
       discard_unpromoted_stage
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
-      @writer_lock = Coordination::PipelineLock.held_for_index(@output_dir)
+      @writer_lock = index_writer_lock
       @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
       seed_payload(marker, rewritten_dirs: rewritten_dirs)
       PublicationSeam.reach(:staged, @output_dir)
-    rescue Coordination::LockLostError
+    rescue Coordination::LockLostError, Woods::ExtractionError
       raise
     rescue StandardError => e
       if strict && marker&.payload
@@ -3190,6 +3214,17 @@ module Woods
       Rails.logger.info "[Woods] Snapshot captured for #{manifest['git_sha'][0..7]}"
     rescue StandardError => e
       Rails.logger.error "[Woods] Snapshot capture failed (#{e.class}): #{e.message}"
+    end
+
+    # {#capture_snapshot} for a run that has just published, inside the
+    # writer fence so a writer taken over after its publish does not write
+    # the snapshot store either.
+    #
+    # @return [void]
+    def capture_published_snapshot
+      with_writer_fence { capture_snapshot }
+    rescue Coordination::LockLostError => e
+      Rails.logger.warn "[Woods] Snapshot skipped: #{e.message}"
     end
 
     # Build a snapshot store, preferring SQLite with JSON file fallback.

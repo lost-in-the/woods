@@ -150,4 +150,65 @@ RSpec.describe Woods::Extractor, 'writer fence' do
     expect(stages).to be_empty
     expect(store.path_for(1)).to be_directory
   end
+
+  # The snapshot store is shared state too: only a writer that still owns the
+  # lock after publishing writes it.
+  describe 'snapshot capture after publication' do
+    it 'captures while this run still holds the lock' do
+      hold_lock
+      extractor = described_class.new(output_dir: output)
+      allow(extractor).to receive(:capture_snapshot)
+
+      extractor.send(:capture_published_snapshot)
+
+      expect(extractor).to have_received(:capture_snapshot)
+    end
+
+    it 'skips the capture once the lock was taken over' do
+      hold_lock
+      extractor = staged_run
+      successor = take_over!
+      allow(extractor).to receive(:capture_snapshot)
+
+      extractor.send(:capture_published_snapshot)
+
+      expect(extractor).not_to have_received(:capture_snapshot)
+    ensure
+      successor&.release
+    end
+
+    it 'captures without a fence when this process holds no lock' do
+      extractor = described_class.new(output_dir: output)
+      allow(extractor).to receive(:capture_snapshot)
+
+      extractor.send(:capture_published_snapshot)
+
+      expect(extractor).to have_received(:capture_snapshot)
+    end
+  end
+
+  # A lock held for one directory while writing another must not quietly
+  # leave the publish unfenced.
+  describe 'a writer lock held for another directory' do
+    let(:other) { Dir.mktmpdir('woods-writer-fence-other') }
+
+    after { FileUtils.rm_rf(other) }
+
+    it 'refuses to stage' do
+      @lock = Woods::Coordination::PipelineLock.for_index(other)
+      @lock.acquire
+
+      expect { described_class.new(output_dir: output).send(:begin_payload!) }
+        .to raise_error(Woods::ExtractionError, /writer lock for .* but is writing/)
+      expect(stages).to be_empty
+    end
+
+    it 'ignores a registered lock that this process no longer owns' do
+      @lock = Woods::Coordination::PipelineLock.for_index(other)
+      @lock.acquire
+      FileUtils.rm_f(File.join(other, 'extraction.lock'))
+
+      expect(staged_run.send(:publish_generation, 'full').number).to eq(2)
+    end
+  end
 end
