@@ -26,7 +26,8 @@ module Woods
     #
     # * **stale** — the record claims `running` or `degraded` but is older than
     #   {STALE_AFTER}; whatever wrote it has stopped heartbeating.
-    # * **dead** — the record names a same-host pid that no longer exists.
+    # * **dead** — the record names a same-host pid that no longer exists, or
+    #   (on Linux) one that has exited and is waiting to be reaped.
     # * **unverified** — a fresh record from another host that this reader is
     #   not opted in to trust (see {#alive?}); the daemon may well be alive in
     #   its container, but nothing here can say so.
@@ -167,6 +168,40 @@ module Woods
         'unknown'
       end
 
+      # Does a same-host pid name a process that is still running?
+      #
+      # Signal 0 asks "could I signal this process?" without sending anything;
+      # EPERM means it exists but belongs to someone else, so it counts as
+      # alive. Signal 0 also succeeds for a zombie, a process that has exited
+      # but whose parent has not reaped it. A watcher re-parented to a PID 1
+      # that never reaps (a container without an init) stays one after it is
+      # killed, so on Linux a pid whose `/proc/<pid>/status` reports `State: Z`
+      # is dead. Elsewhere, and when that file cannot be read, signal 0 decides.
+      #
+      # @param pid [Integer]
+      # @return [Boolean]
+      def self.pid_alive?(pid)
+        return false unless pid.is_a?(Integer) && pid.positive?
+
+        Process.kill(0, pid)
+        !zombie?(pid)
+      rescue Errno::ESRCH
+        false
+      rescue Errno::EPERM
+        !zombie?(pid)
+      end
+
+      # @param pid [Integer]
+      # @return [Boolean] true only when Linux /proc reports the pid as a zombie
+      def self.zombie?(pid)
+        return false unless RUBY_PLATFORM.include?('linux')
+
+        File.read("/proc/#{pid}/status")[/^State:\s*(\S)/, 1] == 'Z'
+      rescue SystemCallError, IOError
+        false
+      end
+      private_class_method :zombie?
+
       private
 
       # `dead` outranks `stale`: a vanished pid is direct evidence, an old
@@ -204,17 +239,9 @@ module Woods
         host.nil? || host == self.class.host_identity
       end
 
-      # Signal 0 asks "could I signal this process?" without sending anything.
-      # EPERM means it exists but belongs to someone else — still alive.
+      # See {.pid_alive?}.
       def process_alive?(pid)
-        return false unless pid.is_a?(Integer) && pid.positive?
-
-        Process.kill(0, pid)
-        true
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        true
+        self.class.pid_alive?(pid)
       end
 
       # Both sides of this comparison must come from the same clock.

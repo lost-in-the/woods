@@ -1539,17 +1539,10 @@ module Woods
         host.nil? || host == Status.host_identity
       end
 
-      # Same semantics as {Status#alive?}'s pid check: signal 0 asks "could I
-      # signal this process?" without sending anything.
+      # The same pid check {Status#alive?} uses ({Status.pid_alive?}), so a
+      # zombie predecessor's claim is reclaimed like a vanished one's.
       def claim_pid_alive?(pid)
-        return false unless pid.is_a?(Integer) && pid.positive?
-
-        Process.kill(0, pid)
-        true
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        true
+        Status.pid_alive?(pid)
       end
 
       # Drop this daemon's startup claim at shutdown.

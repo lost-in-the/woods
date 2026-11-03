@@ -84,6 +84,85 @@ RSpec.describe Woods::Watch::Status do
     end
   end
 
+  # Signal 0 succeeds for a zombie: a process that has exited but that its
+  # parent has not reaped. A watcher re-parented to a PID 1 that never reaps
+  # (a container without an init) leaves one behind when killed (#993).
+  describe 'zombie liveness (#993)' do
+    let(:status) { described_class.new(output_dir: output_dir) }
+    let(:proc_status) { "/proc/#{Process.pid}/status" }
+
+    def proc_state(letter)
+      "Name:\truby\nUmask:\t0022\nState:\t#{letter}\nTgid:\t#{Process.pid}\n"
+    end
+
+    before do
+      status.write(state: :running)
+      allow(Process).to receive(:kill).and_call_original
+      allow(Process).to receive(:kill).with(0, Process.pid).and_return(1)
+      allow(File).to receive(:read).and_call_original
+    end
+
+    context 'on Linux' do
+      before { stub_const('RUBY_PLATFORM', 'x86_64-linux') }
+
+      it 'reads a pid whose /proc status is Z as dead' do
+        allow(File).to receive(:read).with(proc_status).and_return(proc_state('Z (zombie)'))
+
+        expect(status.alive?).to be false
+        expect(status.report).to include('state' => 'dead', 'recorded_state' => 'running', 'alive' => false)
+      end
+
+      ['R (running)', 'S (sleeping)'].each do |state|
+        it "reads a pid whose /proc status is #{state} as alive" do
+          allow(File).to receive(:read).with(proc_status).and_return(proc_state(state))
+
+          expect(status.alive?).to be true
+          expect(status.report).to include('state' => 'running', 'alive' => true)
+        end
+      end
+
+      [Errno::EACCES, Errno::ENOENT].each do |error|
+        it "falls back to signal 0 when /proc status raises #{error}" do
+          allow(File).to receive(:read).with(proc_status).and_raise(error)
+
+          expect(status.alive?).to be true
+        end
+      end
+
+      it 'still reads a pid signal 0 cannot find as dead without consulting /proc' do
+        allow(Process).to receive(:kill).with(0, Process.pid).and_raise(Errno::ESRCH)
+        expect(File).not_to receive(:read).with(proc_status)
+
+        expect(status.alive?).to be false
+      end
+    end
+
+    it 'keeps signal 0 alone off Linux' do
+      stub_const('RUBY_PLATFORM', 'arm64-darwin24')
+      expect(File).not_to receive(:read).with(proc_status)
+
+      expect(status.alive?).to be true
+    end
+
+    it 'reads a real unreaped child as dead', if: RUBY_PLATFORM.include?('linux') && Process.respond_to?(:fork) do
+      pid = fork { exit!(0) }
+      begin
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        until File.read("/proc/#{pid}/status")[/^State:\s*(\S)/, 1] == 'Z'
+          raise 'child never became a zombie' if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+
+          sleep 0.01
+        end
+        status.write(state: :running, pid: pid)
+
+        expect(status.alive?).to be false
+        expect(status.report).to include('state' => 'dead')
+      ensure
+        Process.wait(pid)
+      end
+    end
+  end
+
   # The one artifact with a documented cross-boundary consumer: host-side
   # worktree hooks read watch_status.json through a bind mount, so it must
   # be world-readable (O1). Everything else Woods writes stays at 0600.

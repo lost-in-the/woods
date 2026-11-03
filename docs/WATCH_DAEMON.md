@@ -357,7 +357,8 @@ The file holds the daemon's last word, and a daemon that dies cannot amend it.
 Readers (`woods:watch_status`, `woods_status`) therefore derive the `state`
 they report from liveness at read time: `stale` when the record is older than
 `stale_after_seconds` (15 minutes, two missed heartbeats), `dead` when it names
-a same-host pid that no longer exists. `running` and `degraded` are reported
+a same-host pid that no longer exists or, on Linux, one that `/proc` reports as
+a zombie (exited, not yet reaped). `running` and `degraded` are reported
 only while the daemon is alive. The raw value travels alongside as
 `recorded_state`, and `alive` is the same verdict as the exit status. A fresh
 record from another host that the reader is not opted in to trust (below) is
