@@ -46,7 +46,8 @@ module Woods
         return [] unless placement
 
         @original_offsets = line_offsets(original)
-        records.filter_map { |record| project(record, original, unit['source_code'], placement) }
+        own_file = path == unit['file_path']
+        records.filter_map { |record| project(record, original, unit['source_code'], placement, own_file) }
       end
 
       def placement(unit, path, original, contributors)
@@ -83,7 +84,10 @@ module Woods
         ->(line) { fragment['published_start_line'] + line - fragment['source_start_line'] }
       end
 
-      def project(record, original, source, placement)
+      # A reference in the unit's own file keeps that file's line as
+      # `file_line`; one from a composite unit's contributor file is located
+      # through `source_contributors` instead.
+      def project(record, original, source, placement, own_file)
         first, column, length = record.values_at('line', 'column', 'length')
         bytes = slice(original, @original_offsets, first, column, length)
         return unless bytes
@@ -92,7 +96,8 @@ module Woods
         return unless line && contiguous?(placement, first, line, bytes.count("\n"))
         return unless slice(source, @published_offsets, line, column, length)&.b == bytes.b
 
-        record.except('file_path').merge('line' => line)
+        projected = record.except('file_path').merge('line' => line)
+        own_file ? projected.merge('file_line' => first) : projected
       end
 
       def slice(source, offsets, line, column, length)

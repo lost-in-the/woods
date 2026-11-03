@@ -2,6 +2,7 @@
 
 require 'prism'
 require_relative '../parse_cache'
+require_relative '../method_table'
 
 module Woods
   module Extractors
@@ -68,7 +69,8 @@ module Woods
 
         table = call(unit.source_code, framework: unit.metadata[:test_framework])
         if table
-          unit.metadata[:examples] = table
+          locator = FileLines.for(unit)
+          unit.metadata[:examples] = table.each { |entry| locator.annotate(entry) }
         else
           unit.metadata.delete(:examples)
         end

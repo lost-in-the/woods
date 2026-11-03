@@ -52,7 +52,7 @@ RSpec.describe Woods::Extractor, 'unchanged re-derived units' do
 
   it 'publishes the tables the first time' do
     expect(published['metadata']['methods'].map { |entry| entry['name'] }).to eq(['total'])
-    expect(published['metadata']['callbacks'].first).to include('declaration' => { 'line' => 2, 'end_line' => 2 })
+    expect(published['metadata']['callbacks'].first['declaration']).to include('line' => 2, 'end_line' => 2)
   end
 
   it 'skips the table passes and the write for a unit re-derived unchanged' do

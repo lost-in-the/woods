@@ -2,12 +2,14 @@
 
 require 'prism'
 require_relative 'parse_cache'
+require_relative 'file_lines'
 
 module Woods
   # Method definitions in a unit's published `source_code` (#752): name, kind,
-  # line range, visibility and owner, in annotated-source coordinates (the
-  # same coordinates as `metadata.references`; `source_line_map` translates
-  # them to the primary file).
+  # line range, visibility and owner. `line`/`end_line` are in annotated-source
+  # coordinates (the same as `metadata.references`); `file_line`/`file_end_line`
+  # give the line in the file a reader opens, and `file_unit` names the concern
+  # whose file that is for a definition inside an inlined block ({FileLines}).
   #
   # Definitions come from one Prism walk of the published text. Concern
   # source that an extractor inlined as a commented display block is decoded
@@ -39,7 +41,8 @@ module Woods
 
       table = call(unit.source_code)
       if table
-        unit.metadata[:methods] = table
+        locator = FileLines.for(unit)
+        unit.metadata[:methods] = table.each { |entry| locator.annotate(entry) }
       else
         unit.metadata.delete(:methods)
       end
@@ -75,12 +78,25 @@ module Woods
     # @return [Array<Array(Integer, String)>] the first code line of each
     #   block and its decoded Ruby; the frame's two closing lines follow the header
     def blocks(lines)
+      named_blocks(lines).map { |first_line, text, _name| [first_line, text] }
+    end
+
+    # @return [Array<Array(Integer, Integer, String)>] each block's first and
+    #   last code line in the annotated source and the concern it was inlined
+    #   from
+    def block_ranges(lines)
+      named_blocks(lines).map { |first_line, text, name| [first_line, first_line + text.count("\n"), name] }
+    end
+
+    # @return [Array<Array(Integer, String, String)>] first code line, decoded
+    #   Ruby and concern name of each block
+    def named_blocks(lines)
       found = []
       index = 0
       while index < lines.size
         name = lines[index][BLOCK_HEADER, 1]
         block, index = name ? block_after(lines, index, name.strip) : [nil, index + 1]
-        found << block if block
+        found << [*block, name.strip] if block
       end
       found
     end

@@ -43,6 +43,11 @@ RSpec.describe Woods::CallbackSites do
     RUBY
   end
 
+  # A declaration in the unit's own file, where annotated and file lines agree.
+  def site(line, end_line)
+    { 'line' => line, 'end_line' => end_line, 'file_line' => line, 'file_end_line' => end_line }
+  end
+
   it 'records the line range of the single call that declares each callback' do
     callbacks = [callback(:before_save, 'set_slug'), callback(:after_commit, 'notify'),
                  callback(:after_commit, 'ping'), callback(:before_validation, 'trim')]
@@ -50,8 +55,8 @@ RSpec.describe Woods::CallbackSites do
     described_class.record(record)
 
     expect(record.metadata[:callbacks].map { |c| c[:declaration] })
-      .to eq([{ 'line' => 3, 'end_line' => 4 }, { 'line' => 5, 'end_line' => 5 }, { 'line' => 6, 'end_line' => 6 },
-              { 'line' => 7, 'end_line' => 7 }])
+      .to eq([site(3, 4), site(5, 5),
+              site(6, 6), site(7, 7)])
   end
 
   it 'leaves procs, framework callbacks and ambiguous or mistyped declarations without a site' do
@@ -71,14 +76,17 @@ RSpec.describe Woods::CallbackSites do
     described_class.record(record)
 
     line = composite.lines.index { |l| l.include?('before_save :normalize_tags') } + 1
-    expect(record.metadata[:callbacks].first[:declaration]).to eq('line' => line, 'end_line' => line)
+    # The file line is the declaration's line in the concern's own file.
+    expect(record.metadata[:callbacks].first[:declaration])
+      .to eq('line' => line, 'end_line' => line, 'file_line' => 2, 'file_end_line' => 2, 'file_unit' => 'Taggable')
   end
 
   it 'is idempotent on string-keyed callbacks read back from disk and ignores a source that does not parse' do
     callbacks = [{ 'type' => 'before_save', 'filter' => 'set_slug', 'declaration' => { 'line' => 99 } }]
     record = unit(source, callbacks)
     2.times { described_class.record(record) }
-    expect(record.metadata[:callbacks].first['declaration']).to eq('line' => 3, 'end_line' => 4)
+    expect(record.metadata[:callbacks].first['declaration'])
+      .to eq('line' => 3, 'end_line' => 4, 'file_line' => 3, 'file_end_line' => 4)
 
     broken = unit("class Post\n  before_save :x\n", [callback(:before_save, 'x')])
     described_class.record(broken)
@@ -115,8 +123,8 @@ RSpec.describe Woods::CallbackSites do
       described_class.record(unit)
 
       expect(unit.metadata[:filters].map { |f| f[:declaration] })
-        .to eq([{ 'line' => 2, 'end_line' => 3 }, { 'line' => 4, 'end_line' => 4 }, { 'line' => 5, 'end_line' => 5 },
-                { 'line' => 6, 'end_line' => 6 }])
+        .to eq([site(2, 3), site(4, 4),
+                site(5, 5), site(6, 6)])
     end
 
     it 'leaves inherited, skipped, proc and mistyped filters without a site' do

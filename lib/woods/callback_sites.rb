@@ -9,7 +9,8 @@ module Woods
   # declared in a unit's published `source_code`: the line range of the
   # `before_save :name` or `before_action :name` style call, in
   # annotated-source coordinates (the same as `metadata.methods` and
-  # `metadata.references`), recorded on the entry as `declaration`. With the
+  # `metadata.references`) with the file's own lines beside them
+  # ({FileLines}), recorded on the entry as `declaration`. With the
   # method table it lets a reader tie a changed line to the lifecycle step or
   # filter it declares or defines.
   #
@@ -39,6 +40,8 @@ module Woods
       return if callbacks.empty? && filters.empty?
 
       sites = call(unit.source_code)
+      locator = FileLines.for(unit)
+      sites.each_value { |found| found.each { |site| locator.annotate(site) } }
       callbacks.each { |callback| annotate(callback, sites, :type) }
       filters.each { |filter| annotate(filter, sites, :kind) }
     end

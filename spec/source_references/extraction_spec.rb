@@ -107,7 +107,7 @@ RSpec.describe 'Source-reference extraction integration' do
   end
 
   def expected_span
-    { 'line' => 1, 'column' => 38, 'length' => 20, 'target' => 'RefIntegrationTarget',
+    { 'line' => 1, 'file_line' => 1, 'column' => 38, 'length' => 20, 'target' => 'RefIntegrationTarget',
       'target_type' => 'poro', 'kind' => 'constant', 'confidence' => 'verified', 'method' => 'new' }
   end
 
