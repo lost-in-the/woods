@@ -87,7 +87,7 @@ record="$(mktemp "${TMPDIR:-/tmp}/woods-source-status.XXXXXX")" || exit 0
 runner=""; timer=""
 cleanup() {
   [ -z "$runner" ] || kill -KILL -- "-$runner" 2>/dev/null || true
-  [ -z "$timer" ] || kill -TERM -- "-$timer" 2>/dev/null || true
+  [ -z "$timer" ] || kill -KILL -- "-$timer" 2>/dev/null || true
   rm -f "$record"
 }
 trap cleanup EXIT
@@ -107,7 +107,7 @@ wait "$runner" 2>/dev/null
 result=$?
 kill -KILL -- "-$runner" 2>/dev/null || true
 runner=""
-kill -TERM -- "-$timer" 2>/dev/null || true
+kill -KILL -- "-$timer" 2>/dev/null || true
 timer=""
 set +m
 if [ "$result" -ne 0 ]; then

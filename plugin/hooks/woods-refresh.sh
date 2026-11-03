@@ -196,14 +196,14 @@ run_batch() {
   result=$?
   kill -KILL -- "-$runner" 2>/dev/null || true
   runner=""
-  kill -TERM -- "-$timer" 2>/dev/null || true
+  kill -KILL -- "-$timer" 2>/dev/null || true
   timer=""
   set +m
   return "$result"
 }
 cleanup() {
   [ -z "${runner:-}" ] || kill -KILL -- "-$runner" 2>/dev/null || true
-  [ -z "${timer:-}" ] || kill -TERM -- "-$timer" 2>/dev/null || true
+  [ -z "${timer:-}" ] || kill -KILL -- "-$timer" 2>/dev/null || true
   if [ "${legacy_directory_owned:-0}" = 1 ]; then
     rmdir "$tmp_dir/hook-pending.lock.d" 2>/dev/null || true
   fi
