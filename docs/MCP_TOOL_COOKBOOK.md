@@ -522,6 +522,13 @@ Static tools miss all of these because they only exist after Rails processes the
 
 **What you'll get:** Execution flow from the controller action through services, callbacks, jobs enqueued, and mailers sent, assembled from the dependency graph. Increase `depth` to trace deeper call chains.
 
+How a call target becomes a step. This is a static approximation of Ruby's constant lookup, not lexical resolution:
+
+- An exact identifier wins. A rooted name (`::Billing::Invoice`) matches only its exact unit, from the graph or from disk, never a unit of the same short name elsewhere.
+- An unrooted short name with no exact unit resolves by short-name suffix. Several matches make the operation ambiguous, with `ambiguous_candidates` naming them, and nothing is expanded.
+- One match is expanded, unless the precompute found a top-level constant of that name already defined in the booted app (#967). Then the operation is ambiguous with both candidates, the rooted top-level constant first (`["::I18n", "Lint::I18n"]`). The verdicts are published in `flows/top_level_constants.json`, so a flow assembled on demand reaches the same answer; an index without them resolves the single match.
+- The caller's nesting is not consulted, so a compact `class A::B` body can be shown reaching `A::Widget` where Ruby would raise `NameError`. Use `lookup` at ambiguous steps.
+
 ---
 
 ### "What runs when a Post is created?"

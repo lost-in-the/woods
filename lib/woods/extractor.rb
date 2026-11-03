@@ -2374,7 +2374,8 @@ module Woods
       end
 
       keep = parse_flow_index_for_sweep(index_path)
-             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json'
+             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json' <<
+             File.basename(FlowAssembler::TOP_LEVEL_CONSTANTS_PATH)
       orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
       return if orphans.empty?
 

@@ -33,6 +33,7 @@ A typical structural index looks like this; optional entries need not exist:
 │       └── flows/
 │           ├── flow_index.json
 │           ├── by_unit.json             # optional inverted flow membership
+│           ├── top_level_constants.json # optional top-level constant verdicts
 │           └── <flow filename>.json
 ├── woods.json                 # optional configuration artifact
 ├── dumps/                     # optional semantic-store snapshots
@@ -82,6 +83,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `git_commits.json` | Optional [commit table](#commit-table): HEAD-reachable commits in a bounded window that touched an indexed path, with their files, and a path => commits index. Absent when the writer had no readable git history or predates the table; absence is unknown history, not "no commits". |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
 | `flows/by_unit.json` | Optional inverted precomputed-flow membership, keyed by unit identifier, then unit type, with sorted unique entry-point arrays. See [inverted flow membership](#inverted-flow-membership). |
+| `flows/top_level_constants.json` | Optional, written by flow precomputation: `{ "top_level_constants": [...] }`, the sorted short names of graph identifiers that the booted application already defined as top-level constants (`Object.const_defined?(name, false)`, never by autoloading). Flow assembly reads it to mark such a short-name call ambiguous (#967). Derived from the whole graph, so full and incremental runs publish the same list. Absent in older indexes; a reader then resolves as before. |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
 
 Unit summaries identify units, but do not carry an artifact filename. Their

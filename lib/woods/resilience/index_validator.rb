@@ -447,7 +447,8 @@ module Woods
       end
 
       # Validate the flows/ artifact family (G-2): `flow_index.json` parses,
-      # and every entry points at a flow document that exists and parses.
+      # every entry points at a flow document that exists and parses, and
+      # the optional top-level constant verdicts are well formed.
       #
       # A payload from a run that never enabled flow precomputation has no
       # flows directory at all, and an empty one holds nothing — both are
@@ -480,6 +481,29 @@ module Woods
 
           parse_artifact(document, "flows/#{filename}", errors)
         end
+
+        validate_top_level_constants(flows_dir, errors)
+      end
+
+      # `flows/top_level_constants.json` (#967) is optional: indexes written
+      # before it existed omit it. When present its `top_level_constants`
+      # must list constant names, or a reader would resolve targets the
+      # precompute marked ambiguous. The validator loads without the flow
+      # assembler, so the shape check is repeated here rather than shared.
+      #
+      # @param flows_dir [String]
+      # @param errors [Array<String>] accumulated errors
+      def validate_top_level_constants(flows_dir, errors)
+        path = File.join(flows_dir, 'top_level_constants.json')
+        return unless File.exist?(path)
+
+        document = parse_artifact(path, 'flows/top_level_constants.json', errors)
+        return if document.nil?
+
+        names = document.is_a?(Hash) ? document['top_level_constants'] : nil
+        return if names.is_a?(Array) && names.all?(String)
+
+        errors << 'flows/top_level_constants.json: expected top_level_constants to list constant names'
       end
 
       # @param path [String] artifact path
