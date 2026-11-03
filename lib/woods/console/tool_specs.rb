@@ -97,7 +97,12 @@ module Woods
         argument: 'id|by',
         hint: 'Pass exactly one locator: id (e.g. id: 42) or a non-empty by ' \
               '(e.g. by: {"email": "a@example.com"}). Not both, and not neither.',
-        violation: { model: 'Post', id: 1, by: { 'title' => 'Alpha' } }
+        violation: { model: 'Post', id: 1, by: { 'title' => 'Alpha' } },
+        # An empty `by` is the `find_by({})` case this rule exists for. Its
+        # `minProperties` stays in the authoritative schema but is left out
+        # of the advertised one, so the SDK pre-check lets it through and the
+        # refusal carries this rule's code and hint.
+        advertised_property_omissions: { by: %i[minProperties] }
       }.freeze
 
       AGGREGATE_COLUMN_RULE = {
@@ -143,10 +148,16 @@ module Woods
         end
 
         # The schema served by `tools/list`: {#input_schema} without top-level
-        # combinators. The description states the rules they carried, and
-        # {#validate_arguments!} still enforces them.
+        # combinators, and without any property keyword the combination rule
+        # names in `advertised_property_omissions`. The description states the
+        # rules they carried, and {#validate_arguments!} still enforces them.
         def advertised_input_schema
-          input_schema.except(*ADVERTISED_SCHEMA_EXCLUDED_KEYWORDS)
+          schema = input_schema.except(*ADVERTISED_SCHEMA_EXCLUDED_KEYWORDS)
+          omissions = combination_rule&.fetch(:advertised_property_omissions, nil)
+          return schema unless omissions
+
+          relaxed = omissions.to_h { |name, keywords| [name, schema[:properties].fetch(name).except(*keywords)] }
+          schema.merge(properties: schema[:properties].merge(relaxed))
         end
 
         def validate_arguments!(arguments)

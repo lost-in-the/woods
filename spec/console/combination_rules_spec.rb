@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'json'
+require 'woods'
 require 'active_support/core_ext/string/inflections'
 require 'woods/console/embedded_executor'
 require 'woods/console/server'
@@ -59,23 +60,31 @@ RSpec.describe 'Console cross-argument rules after the advertised schema drops i
 
     expect(find.input_schema[:oneOf]).to eq([{ required: ['id'] }, { required: ['by'] }])
     expect(aggregate.input_schema[:allOf].first[:then]).to eq(required: ['column'])
-    expect(find.advertised_input_schema).to eq(find.input_schema.except(:oneOf))
+    relaxed_by = find.input_schema[:properties][:by].except(:minProperties)
+    expect(find.advertised_input_schema).to eq(
+      find.input_schema.except(:oneOf).merge(properties: find.input_schema[:properties].merge(by: relaxed_by))
+    )
+    expect(find.input_schema[:properties][:by][:minProperties]).to eq(1)
     expect(aggregate.advertised_input_schema).to eq(aggregate.input_schema.except(:allOf))
   end
 
   describe 'console_find: exactly one of id or by' do
     let(:rule) { Woods::Console::Server::FIND_LOCATOR_RULE }
 
-    # Truth table over the two locators. by: {} is a near miss: present but
-    # empty, refused by the property's own minProperties, not by the rule.
+    # Truth table over the two locators. An empty by is the find_by({}) case
+    # the rule exists for, so it is a rule refusal, alone or beside id. A by
+    # key that is not a column name is the near miss: refused by the
+    # property's own propertyNames at the SDK pre-check, not by the rule.
     [
       [{ id: 1 }, :allowed],
       [{ by: { 'title' => 'Alpha' } }, :allowed],
       [{ id: 1, by: { 'title' => 'Alpha' } }, :rule_refusal],
       [{}, :rule_refusal],
-      [{ by: {} }, :property_refusal]
+      [{ by: {} }, :rule_refusal],
+      [{ id: 1, by: {} }, :rule_refusal],
+      [{ by: { 'bad key' => 'x' } }, :property_refusal]
     ].each do |locators, outcome|
-      it "#{outcome} for #{locators.keys.inspect}" do
+      it "#{outcome} for #{locators.inspect}" do
         arguments = { model: 'Post' }.merge(locators)
         result = tools_call('console_find', arguments)
 
@@ -152,6 +161,31 @@ RSpec.describe 'Console cross-argument rules after the advertised schema drops i
         'content' => [{ 'type' => 'text', 'text' => 'Missing required arguments: function' }],
         'isError' => true
       )
+    end
+  end
+
+  describe 'order against the table gate' do
+    let(:config) do
+      Woods::Configuration.new.tap { |value| value.console_blocked_tables = ['posts'] }
+    end
+    let(:server) do
+      Woods::Console::Server.build_embedded(model_validator: validator, safe_context: safe_context,
+                                            connection: connection, model_tables: { 'Post' => 'posts' })
+    end
+
+    before { allow(Woods).to receive(:configuration).and_return(config) }
+
+    # The table gate runs at dispatch before the handler's schema check, so a
+    # blocked model answers with the table refusal even when its locators
+    # also break the rule. Either refusal stops the call before any query.
+    it 'answers a find with both id and by on a blocked table with the table refusal' do
+      result = tools_call('console_find', model: 'Post', id: 1, by: { 'title' => 'Alpha' })
+
+      expect(result['isError']).to be(true)
+      expect(result.dig('content', 0, 'text')).to include('posts')
+      expect(result.dig('content', 0, 'text')).not_to include('Hint:')
+      expect(result).not_to have_key('_meta')
+      expect(post_model).not_to have_received(:find_by)
     end
   end
 
