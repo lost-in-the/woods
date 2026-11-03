@@ -252,6 +252,16 @@ RSpec.describe 'Route type selector' do
       expect(recent(['route_file'])).to eq([['route_file', 'config/routes.rb']])
     end
 
+    # Overlapping selectors must not list a row twice: a duplicate can push a
+    # distinct change past the limit.
+    it 'lists each row once when selectors overlap' do
+      expect(recent(%w[rails_source gem_source])).to contain_exactly(
+        ['rails_source', 'ActiveRecord::Base'], ['gem_source', 'Devise::Models']
+      )
+      expect(recent(%w[graphql graphql_mutation]).count(['graphql_mutation', 'Graph::Unit1'])).to eq(1)
+      expect(reader.recent_changes(limit: 2, types: %w[gem_source rails_source]).size).to eq(2)
+    end
+
     it 'still expands the family aliases and returns nothing for an unknown type' do
       expect(recent(['rails_source']).map(&:first)).to contain_exactly('rails_source', 'gem_source')
       expect(recent(['graphql']).map(&:first)).to match_array(graphql_types)

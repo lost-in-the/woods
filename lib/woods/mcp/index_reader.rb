@@ -1187,12 +1187,11 @@ module Woods
                              # An unknown type selects nothing; a family alias
                              # selects its whole directory; any other type
                              # selects its own rows of a shared directory.
-                             types.flat_map do |requested|
-                               expanded = unit_types_for(requested)
-                               next [] if expanded.empty?
-
-                               recent_changes_for_directory(UNIT_TYPE_TO_DIR.fetch(expanded.first))
-                                 .select { |row| expanded.include?(row[:type]) }
+                             # Overlapping selectors (`rails_source` with
+                             # `gem_source`) select each row once.
+                             selected = types.flat_map { |requested| unit_types_for(requested) }.uniq
+                             selected.group_by { |type| UNIT_TYPE_TO_DIR.fetch(type) }.flat_map do |dir, dir_types|
+                               recent_changes_for_directory(dir).select { |row| dir_types.include?(row[:type]) }
                              end
                            else
                              TYPE_DIRS.flat_map { |dir| recent_changes_for_directory(dir) }
