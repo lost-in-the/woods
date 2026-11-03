@@ -86,6 +86,21 @@ RSpec.describe Woods::PayloadStore do
       expect(stage).not_to exist
     end
 
+    # A durable marker must never name a generation whose directory entry a
+    # crash could still lose: the rename itself is flushed.
+    it 'fsyncs the payload root after the rename' do
+      stage = store.create_stage(5, 'writer-a')
+      synced = []
+      allow(Woods::AtomicFile).to receive(:fsync_directory).and_wrap_original do |original, dir|
+        synced << [dir.to_s, store.path_for(5).directory?]
+        original.call(dir)
+      end
+
+      store.promote(stage, 5)
+
+      expect(synced).to eq([[store.root.to_s, true]])
+    end
+
     it 'is not a generation to retention' do
       stage = store.create_stage(9, 'writer-a')
       FileUtils.mkdir_p(store.path_for(1))

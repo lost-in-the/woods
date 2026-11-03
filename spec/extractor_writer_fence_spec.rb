@@ -13,7 +13,8 @@ require 'woods/extractor'
 # | held by this run               | yes      | yes    | yes    | promoted  |
 # | taken over by another writer   | no       | no     | no     | removed   |
 # | lock file unreadable (unknown) | no       | no     | no     | removed   |
-# | no lock in this process        | yes      | yes    | yes    | promoted  |
+# | no lock held: takes it itself  | yes      | yes    | yes    | promoted  |
+# | no lock held, another holds it | no       | no     | no     | removed   |
 RSpec.describe Woods::Extractor, 'writer fence' do
   let(:output) { Dir.mktmpdir('woods-writer-fence') }
   let(:store) { Woods::PayloadStore.new(output) }
@@ -103,11 +104,56 @@ RSpec.describe Woods::Extractor, 'writer fence' do
     expect(stages).to be_empty
   end
 
-  it 'publishes unfenced when this process holds no writer lock' do
-    extractor = staged_run
+  # A direct library call (`Extractor#refresh` from a console) holds no lock.
+  # It takes the index writer lock for its publish, so the number check and
+  # the promotion are serialized against every locked writer.
+  context 'when this process holds no writer lock' do
+    around do |example|
+      original = ENV.fetch('WOODS_LOCK_WAIT', nil)
+      ENV['WOODS_LOCK_WAIT'] = '0.3'
+      example.run
+    ensure
+      ENV['WOODS_LOCK_WAIT'] = original
+    end
 
-    expect(extractor.send(:publish_generation, 'full').number).to eq(2)
-    expect(stages).to be_empty
+    it 'takes the index writer lock for its publish, and releases it' do
+      extractor = staged_run
+      fence_held = nil
+      Woods::PublicationSeam.hook = lambda do |point, _dir|
+        next unless point == :number_checked
+
+        fence_held = File.exist?(lock_path)
+      end
+
+      expect(extractor.send(:publish_generation, 'full').number).to eq(2)
+      expect(fence_held).to be(true)
+      expect(File.exist?(lock_path)).to be(false)
+      expect(stages).to be_empty
+    ensure
+      Woods::PublicationSeam.hook = nil
+    end
+
+    it 'refuses to publish while another writer holds the lock' do
+      extractor = staged_run
+      other = Woods::Coordination::PipelineLock.for_index(output)
+      fork_holder = fork do
+        other.acquire
+        sleep
+      end
+      sleep 0.05 until File.exist?(lock_path)
+
+      expect(extractor.send(:publish_generation, 'refresh:models')).to be_nil
+      expect { extractor.raise_on_publication_failure! }
+        .to raise_error(Woods::ExtractionError, /Could not take the index writer lock/)
+      expect(marker_number).to eq(1)
+      expect(store.path_for(2)).not_to exist
+      expect(stages).to be_empty
+    ensure
+      if fork_holder
+        Process.kill('KILL', fork_holder)
+        Process.wait(fork_holder)
+      end
+    end
   end
 
   it 'refuses to publish when the lock was taken over and then released' do
@@ -177,7 +223,7 @@ RSpec.describe Woods::Extractor, 'writer fence' do
       successor&.release
     end
 
-    it 'captures without a fence when this process holds no lock' do
+    it 'captures under a lock it takes itself when this process holds none' do
       extractor = described_class.new(output_dir: output)
       allow(extractor).to receive(:capture_snapshot)
 

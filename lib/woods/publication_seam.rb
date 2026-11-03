@@ -15,6 +15,8 @@ module Woods
   # * `:staged` — the private stage is seeded; the run is about to write.
   # * `:before_promotion` — the stage is complete and flushed, outside the
   #   writer fence.
+  # * `:number_checked` — inside the fence: the generation number is
+  #   confirmed and the stage is about to be promoted.
   # * `:promoted` — inside the fence: the stage is now `gen-<n>`, the marker
   #   still names `n - 1`.
   # * `:marker_published` — inside the fence: the marker names `n`; retention
@@ -25,7 +27,7 @@ module Woods
   #
   # * `:swept_entry` — one index entry has been removed, outside the fence.
   module PublicationSeam
-    POINTS = %i[staged before_promotion promoted marker_published published swept_entry].freeze
+    POINTS = %i[staged before_promotion number_checked promoted marker_published published swept_entry].freeze
 
     @hook = nil
 

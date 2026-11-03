@@ -1231,16 +1231,53 @@ module Woods
       nil
     end
 
-    # Run the publish steps under the index writer lock this process holds,
-    # proving ownership under the same guard a takeover takes
-    # ({Coordination::PipelineLock#fenced}). A run that holds no lock (a
-    # direct library call outside {Woods.extract!}) has nothing to prove and
-    # runs the steps as before.
+    # Run the publish steps under the index writer lock, proving ownership
+    # under the same guard a takeover takes ({Coordination::PipelineLock#fenced}).
+    #
+    # A run whose caller holds the lock (every rake task, the watch daemon,
+    # the MCP operator tools, {Woods.extract!}) uses that lock. A run that
+    # holds none — a direct `Extractor#refresh`, `#extract_changed` or
+    # `#extract_all` from a console or a resident process — takes the same
+    # lock itself for the publish, waiting as the rake writers do
+    # (`WOODS_LOCK_WAIT`, default {Coordination::PipelineLock::INDEX_WRITER_STALE_TIMEOUT}
+    # seconds). Publishing is never unfenced: without the lock, the number
+    # check and the promotion would not be serialized against a locked
+    # writer publishing the same number.
     #
     # @raise [Coordination::LockLostError] when the lock was taken over
+    # @raise [Coordination::LockError] when the lock could not be taken
     def with_writer_fence(&block)
       lock = @writer_lock || index_writer_lock
-      lock ? lock.fenced(&block) : yield
+      return lock.fenced(&block) if lock
+
+      with_publication_lock(&block)
+    end
+
+    # @return [Object] the block's value, run inside a lock taken for it
+    def with_publication_lock(&block)
+      lock = Coordination::PipelineLock.for_index(@output_dir)
+      unless acquire_publication_lock(lock)
+        raise Coordination::LockError,
+              "Could not take the index writer lock for #{@output_dir} to publish; another writer holds it. " \
+              'Run `woods:refresh`/`woods:incremental`/`woods:extract`, or `Woods.extract!`, which wait for it'
+      end
+
+      begin
+        lock.fenced(&block)
+      ensure
+        lock.release
+      end
+    end
+
+    def acquire_publication_lock(lock)
+      wait = Float(ENV.fetch('WOODS_LOCK_WAIT', Coordination::PipelineLock::INDEX_WRITER_STALE_TIMEOUT))
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+      loop do
+        return true if lock.acquire(guard_wait: Coordination::PipelineLock.guard_wait_until(deadline))
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.05
+      end
     end
 
     # The index writer lock this process holds for this output directory.
@@ -1282,6 +1319,7 @@ module Woods
               "generation moved to #{actual - 1} during publication (expected #{@payload_generation - 1})"
       end
 
+      PublicationSeam.reach(:number_checked, @output_dir)
       @payload_dir = @payload_store.promote(@payload_dir, @payload_generation)
     end
 

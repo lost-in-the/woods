@@ -4,6 +4,7 @@ require 'pathname'
 require 'fileutils'
 require 'forwardable'
 require_relative 'generation_pins'
+require_relative 'atomic_file'
 
 module Woods
   # Writer-side owner of the per-generation payload directories.
@@ -134,11 +135,19 @@ module Woods
     # replaced, exactly as {#create} always did; a persistently pinned one is
     # refused.
     #
+    # The rename is made durable before this returns: `payloads/` itself is
+    # fsynced, so a marker written durably afterwards can never name a
+    # `gen-<n>` whose directory entry a crash could still lose. (The tree
+    # flush before promotion persists the stage's contents and its
+    # `.stage-*` entry, not the rename.)
+    #
     # @param stage [Pathname] a directory from {#create_stage}
     # @param number [Integer]
     # @return [Pathname] the promoted payload directory
     def promote(stage, number)
-      rename(stage, number)
+      promoted = rename(stage, number)
+      AtomicFile.fsync_directory(root.to_s)
+      promoted
     end
 
     # Remove this writer's own stage. Only a path under {STAGE_PREFIX} is

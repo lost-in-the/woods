@@ -70,7 +70,7 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
 
   # One writer, in its own process. Exit 0: published. Exit 2: the run
   # reported a publication failure. Exit 3: could not take the lock.
-  def spawn_writer(label, shape:, pause_at: nil)
+  def spawn_writer(label, shape:, pause_at: nil, locked: true, wait: 10)
     ready = File.join(File.dirname(@output), "#{label}.paused")
     pid = fork do
       Woods::PublicationSeam.hook = lambda do |point, _dir|
@@ -79,15 +79,16 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
         File.write(ready, Woods::Coordination::PipelineLock.held_for_index(@output)&.token.to_s)
         Process.kill('STOP', Process.pid)
       end
-      exit!(write_and_publish(label, WriterFencingCases::ENTRY_SHAPES.fetch(shape)))
+      shape = WriterFencingCases::ENTRY_SHAPES.fetch(shape)
+      exit!(locked ? write_and_publish(label, shape, wait: wait) : write_and_publish_unlocked(label, shape))
     end
     (@children ||= []) << pid
     [pid, ready]
   end
 
-  def write_and_publish(label, shape)
+  def write_and_publish(label, shape, wait: 10)
     lock = Woods::Coordination::PipelineLock.for_index(@output)
-    return 3 unless acquired_waiting?(lock)
+    return 3 unless acquired_waiting?(lock, wait)
 
     begin
       Woods::Coordination::LockHeartbeat.run(lock, tick: 0.05) do
@@ -105,6 +106,19 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
     end
   end
 
+  # A direct library call, as `Extractor#refresh` from a console makes it:
+  # no lock taken by the caller.
+  def write_and_publish_unlocked(label, shape)
+    extractor = Woods::Extractor.new(output_dir: @output)
+    extractor.send(:begin_payload!, **shape[:begin])
+    label_payload(extractor.payload_dir, label)
+    extractor.send(:publish_generation, shape[:reason])
+    extractor.raise_on_publication_failure!
+    0
+  rescue Woods::ExtractionError
+    2
+  end
+
   # What this writer changed: one unit and the manifest, both through
   # AtomicFile as every real writer does.
   def label_payload(payload, label)
@@ -116,8 +130,8 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
 
   # A contender that finds the guard held waits on it, as `woods:extract`
   # does; one that finds a fresh lock retries briefly.
-  def acquired_waiting?(lock)
-    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 10
+  def acquired_waiting?(lock, wait = 10)
+    deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
     until lock.acquire
       return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
 
@@ -167,6 +181,8 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
 
   def guard_held?
     guard = File.join(@output, Woods::Coordination::PipelineLock.guard_filename('extraction'))
+    return false unless File.exist?(guard)
+
     File.open(guard, File::RDWR) { |file| !file.flock(File::LOCK_EX | File::LOCK_NB) }
   end
 
@@ -323,6 +339,35 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
           expect(generation_dirs).to eq(%w[gen-1 gen-2 gen-3])
         end
       end
+    end
+  end
+
+  # A direct `Extractor#refresh` (no lock held by its caller) must not be able
+  # to confirm the next number, pause, and then promote over a generation a
+  # locked writer published meanwhile.
+  describe 'a direct refresh with no caller-held lock' do
+    it 'serializes its number check and promotion against a locked writer' do
+      direct, ready = spawn_writer('direct', shape: :refresh, pause_at: :number_checked, locked: false)
+      wait_stopped(direct, ready)
+
+      expect(guard_held?).to be(true)
+      blocked, = spawn_writer('B', shape: :full, wait: 1)
+      expect(finish(blocked)).to eq(3)
+      expect(marker.number).to eq(1)
+
+      Process.kill('CONT', direct)
+      expect(finish(direct)).to eq(0)
+      expect(marker.number).to eq(2)
+      direct_hashes = tree_hashes(2)
+
+      b, = spawn_writer('B', shape: :full)
+      expect(finish(b)).to eq(0)
+
+      expect(marker.number).to eq(3)
+      expect(tree_hashes(2)).to eq(direct_hashes)
+      Woods::PublishedIndex.open(@output, generation: 2) { |i| expect(i.unit('Post')['written_by']).to eq('direct') }
+      Woods::PublishedIndex.open(@output) { |i| expect(i.unit('Post')['written_by']).to eq('B') }
+      expect(stages).to be_empty
     end
   end
 

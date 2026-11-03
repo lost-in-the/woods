@@ -24,6 +24,8 @@ RSpec.describe Woods::Extractor, 'phase accounting' do
     allow(extractor).to receive(:publishable_payload_name).and_return('payloads/gen-2')
     allow(extractor).to receive(:sync_payload)
     allow(extractor).to receive(:prune_payloads)
+    # The writer fence is not under test; its lock polling reads the same clock.
+    allow(extractor).to receive(:with_writer_fence).and_yield
     allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0, 1, 1, 3, 3, 6, 6, 11)
 
     expect(extractor.send(:publish_generation, 'full')).to eq(marker)
