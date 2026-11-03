@@ -94,6 +94,12 @@ module Woods
       DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
       DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
+      # The two groups of lookup controls that combine. Served with the
+      # refusal of any call that mixes them.
+      LOOKUP_EVIDENCE_HINT = 'Valid combinations: evidence: "full" (the default) with include_source and ' \
+                             'sections; or evidence: "compact" or "outline" with query and budget. ' \
+                             'Do not mix the two groups.'
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -561,7 +567,8 @@ module Woods
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
               end
             rescue ArgumentError => e
-              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
+                                               hint: LOOKUP_EVIDENCE_HINT)
             end
             if type && !reader.lookup_type?(type)
               # Same contract as search: an unknown type is a bad argument, not

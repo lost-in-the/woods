@@ -589,6 +589,9 @@ structured provenance add transport/output tokens. Very small budgets may return
 no evidence text. Check omission counts and increase the budget or request full
 source. `query` and `budget` apply only to compact/outline lookup; combining those
 modes with `include_source: false` or nonempty `sections` is an argument error.
+The refusal's `_meta` has `error_code: unsupported_argument`, `argument: evidence`
+and a `hint` naming the two groups that combine: `full` (the default) with
+`include_source` and `sections`, or `compact`/`outline` with `query` and `budget`.
 
 ### Provenance and full-source verification
 
