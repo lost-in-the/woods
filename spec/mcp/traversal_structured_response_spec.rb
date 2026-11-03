@@ -48,6 +48,9 @@ RSpec.describe 'Traversal structured responses' do
                 "Identifier 'Absent' not found in the index. Use 'search' to find valid identifiers."
             end
             Woods::MCP::TraversalResponse.annotate(raw)
+            if name == 'dependents'
+              Woods::MCP::DependentFamilies.annotate(raw, vias: reader.method(:recorded_vias))
+            end
             Woods::MCP::Server.send(:paginate_traversal_nodes, raw, options.fetch(:limit, 50),
                                     options.fetch(:offset, 0))
             Woods::MCP::TraversalEvidencePage.apply(raw)

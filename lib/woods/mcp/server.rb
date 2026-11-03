@@ -39,6 +39,7 @@ require_relative 'tasks/store'
 require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'traversal_response'
+require_relative 'dependent_families'
 require_relative 'version_aware_tool_dispatch'
 require_relative 'worktree_routing'
 
@@ -763,6 +764,10 @@ module Woods
                 "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
             end
             TraversalResponse.annotate(result)
+            # Families and counts cover the whole walk, so they are taken before paging.
+            if render_key == :dependents
+              DependentFamilies.annotate(result, vias: ->(source, target) { reader.recorded_vias(source, target) })
+            end
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
             respond.call(renderer.render(render_key, result), data: result)
@@ -2948,7 +2953,9 @@ module Woods
               (config.respond_to?(:vector_store) ? config.vector_store : nil)),
             session_tracer_enabled: config.respond_to?(:session_tracer_enabled) ? config.session_tracer_enabled : false,
             snapshots_enabled: config.respond_to?(:enable_snapshots) ? config.enable_snapshots : false,
-            notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?
+            notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?,
+            # Read per query by `dependents`; reported so a client can tell what its headline counts.
+            reverse_includes_tests: DependentFamilies.include_tests?
           }
         end
 
