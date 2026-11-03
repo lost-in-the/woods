@@ -108,8 +108,9 @@ RSpec.describe Woods::MCP::IndexReader, 'recent changes generation reads' do
     expect(reader.recent_changes(types: ['graphql_mutation'])).to eq([mutation])
     expect(reader.recent_changes(types: ['graphql'])).to eq([mutation])
     expect(reader.recent_changes(types: ['graphql_type'])).to eq([])
+    # A repeated filter selects each row once; filter order still orders ties.
     expect(reader.recent_changes(types: %w[controller model model])).to eq(
-      [row('Shared', 'model', '2026-04-01', author: nil), row('Shared', 'model', '2026-04-01', author: nil),
+      [row('Shared', 'model', '2026-04-01', author: nil),
        row('Shared', 'controller', '2026-04-01'), row('Earlier', 'controller', '2026-03-01')]
     )
     expect(reader.recent_changes(limit: 2)).to eq(expected.first(2))

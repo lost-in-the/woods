@@ -1205,8 +1205,8 @@ module Woods
       end
 
       # Lazily retain only response fields, never full unit payloads. Cache by
-      # directory rather than query: the order and duplication of the caller's
-      # type filters still determine the order of equal timestamps. A flat
+      # directory rather than query: the order of the caller's type filters
+      # still determines the order of equal timestamps. A flat
       # index can be rewritten in place, even if it has a generation marker,
       # so it must continue reading units on every request.
       def recent_changes_for_directory(dir)
