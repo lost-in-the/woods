@@ -95,8 +95,15 @@ end
 # lib is carried forward through RUBYLIB, first, so it wins over another
 # checkout's lib already listed there; other entries are kept and, unlike
 # RUBYOPT, RUBYLIB takes paths that contain spaces.
+# Compare real paths: __dir__ is already resolved, so an -I through a
+# symlinked checkout would otherwise never match.
 woods_lib = File.expand_path('../lib', __dir__)
-if $LOAD_PATH.any? { |entry| File.expand_path(entry.to_s) == woods_lib }
+woods_lib_entry = lambda do |entry|
+  File.realpath(entry.to_s) == woods_lib
+rescue SystemCallError
+  false
+end
+if $LOAD_PATH.any?(&woods_lib_entry)
   rubylib = ENV.fetch('RUBYLIB', '').split(File::PATH_SEPARATOR).reject(&:empty?)
   ENV['RUBYLIB'] = [woods_lib, *(rubylib - [woods_lib])].join(File::PATH_SEPARATOR)
 end

@@ -82,6 +82,15 @@ RSpec.describe 'woods-mcp-start exec handoff' do
     expect(rubylib.to_s.split(File::PATH_SEPARATOR)).to include(woods_lib)
   end
 
+  it "recognizes Woods' lib when the -I reaches it through a symlinked checkout" do
+    linked_lib = File.join(@directory, 'linked_lib')
+    File.symlink(woods_lib, linked_lib)
+
+    rubylib = handoff(ruby_flags: ['-I', linked_lib]).fetch('rubylib')
+
+    expect(rubylib.to_s.split(File::PATH_SEPARATOR).first).to eq(woods_lib)
+  end
+
   it 'keeps an existing RUBYLIB and adds the lib only once' do
     existing = File.join(@directory, 'other_lib')
     rubylib = handoff(ruby_flags: ['-I', woods_lib],
