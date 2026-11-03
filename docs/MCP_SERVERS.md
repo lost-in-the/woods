@@ -444,6 +444,8 @@ family aliases. `search.types: ["route"]` returns `route` units only, not the
 those. `routes` is not a type and returns `invalid_params`. `recent_changes`
 filters `types` the same way and labels each result with its unit's own type
 (`route_file`, `gem_source`, `graphql_mutation`) instead of its directory name.
+The `codebase://type/{type}` resource follows the same rule: `codebase://type/route`
+lists route units only, and `codebase://type/route_file` lists route files.
 
 **Included in Woods 2.1:** typed `lookup` also accepts the `graphql` family
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;

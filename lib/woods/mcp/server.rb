@@ -3043,7 +3043,10 @@ module Woods
               raise TypeError if value && (!value.is_a?(Hash) || value['identifier'] != target)
             end
           when :type
-            return nil unless IndexReader::TYPE_TO_DIR.key?(target)
+            # The same type meaning as search and lookup (#969): `route`
+            # lists route units only; `graphql` and `rails_source` list
+            # their whole directory.
+            return nil if reader.unit_types_for(target).empty?
 
             reader.list_units(type: target).tap do |value|
               raise TypeError unless value.is_a?(Array) && value.all?(Hash)

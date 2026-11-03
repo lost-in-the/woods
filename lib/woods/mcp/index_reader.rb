@@ -612,21 +612,51 @@ module Woods
         end.uniq.sort
       end
 
-      # List units, optionally filtered by type.
+      # List index entries, optionally filtered by type or by type directory.
       #
-      # @param type [String, nil] Singular type name (e.g. "model", "controller")
+      # +type:+ follows {#unit_types_for}: a unit type lists that type only
+      # (`route` never lists the `route_file` units that share `routes/`), a
+      # family alias lists its whole directory, and an unknown type lists
+      # nothing. An entry of a shared directory that names no type of its own
+      # (an older index) is typed by reading its unit. +directory:+ lists one
+      # type directory whole, whatever types it holds.
+      #
+      # @param type [String, nil] unit type or family alias (e.g. "model", "graphql")
+      # @param directory [String, nil] type directory (e.g. "routes")
       # @return [Array<Hash>] Index entries for matching units
-      def list_units(type: nil)
+      # @raise [ArgumentError] when both +type:+ and +directory:+ are given
+      # @raise [IOError] when typing an older entry fails a payload guard
+      def list_units(type: nil, directory: nil)
+        raise ArgumentError, 'list_units takes type: or directory:, not both' if type && directory
+
+        return list_units_of_type(type) if type
+
         ensure_fresh!
-        dirs = if type
-                 dir = TYPE_TO_DIR[type]
-                 dir ? [dir] : []
+        dirs = if directory
+                 TYPE_DIRS.include?(directory) ? [directory] : []
                else
                  TYPE_DIRS
                end
-
         dirs.flat_map { |dir| read_index(dir) }
       end
+
+      def list_units_of_type(type)
+        expanded = unit_types_for(type)
+        return [] if expanded.empty?
+
+        dir = UNIT_TYPE_TO_DIR.fetch(expanded.first)
+        members = UNIT_TYPES_BY_DIR.fetch(dir)
+        with_pinned_generation do
+          entries = read_index(dir)
+          next entries if (members - expanded).empty?
+
+          entries.select do |entry|
+            actual = members.include?(entry['type']) ? entry['type'] : typed_unit(dir, entry['identifier'])&.fetch('type')
+            expanded.include?(actual)
+          end
+        end
+      end
+      private :list_units_of_type
 
       # Enumerate complete typed published units, holding one generation pin.
       # Bulk consumers must fail closed on a corrupt/missing entry instead of

@@ -7,6 +7,7 @@ require 'tmpdir'
 require 'woods/filename_utils'
 require 'woods/mcp/index_reader'
 require 'woods/published_index'
+require 'woods/mcp/server'
 
 # `routes/` holds two unit types: `route` (one per routing rule) and
 # `route_file` (one per routes source file). Only `graphql` and
@@ -185,6 +186,53 @@ RSpec.describe 'Route type selector' do
       it 'searches untyped entries by their read type' do
         expect(search_types('route')).to eq([['route', 'GET /widgets']])
       end
+    end
+  end
+
+  describe 'IndexReader#list_units' do
+    def listed(**options)
+      reader.list_units(**options).map { |entry| entry['identifier'] }
+    end
+
+    it 'lists route units only for route and the route file only for route_file' do
+      expect(listed(type: 'route')).to eq(['GET /widgets'])
+      expect(listed(type: 'route_file')).to eq(['config/routes.rb'])
+      expect(listed(type: 'routes')).to eq([])
+    end
+
+    it 'still lists every member of a family alias and the whole directory on request' do
+      expect(listed(type: 'graphql').size).to eq(4)
+      expect(listed(type: 'rails_source')).to contain_exactly('ActiveRecord::Base', 'Devise::Models')
+      expect(listed(directory: 'routes')).to contain_exactly('GET /widgets', 'config/routes.rb')
+      expect { reader.list_units(type: 'route', directory: 'routes') }.to raise_error(ArgumentError)
+    end
+
+    context 'with an older index whose entries carry no type' do
+      before { write_index(typed_entries: false) }
+
+      it 'filters by each unit\'s read type' do
+        expect(listed(type: 'route')).to eq(['GET /widgets'])
+        expect(listed(type: 'route_file')).to eq(['config/routes.rb'])
+      end
+    end
+  end
+
+  describe 'codebase://type/{type} resource' do
+    let(:server) { Woods::MCP::Server.build(index_dir: index_dir, response_format: :json) }
+
+    def resource(type)
+      handler = server.instance_variable_get(:@handlers)[MCP::Methods::RESOURCES_READ]
+      JSON.parse(handler.call(uri: "codebase://type/#{type}").first[:text]).map { |entry| entry['identifier'] }
+    end
+
+    it 'lists route units only for route' do
+      expect(resource('route')).to eq(['GET /widgets'])
+      expect(resource('route_file')).to eq(['config/routes.rb'])
+      expect(resource('graphql').size).to eq(4)
+    end
+
+    it 'does not resolve a plural routes type' do
+      expect { resource('routes') }.to raise_error(MCP::Server::ResourceNotFoundError)
     end
   end
 

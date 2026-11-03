@@ -186,7 +186,7 @@ module Woods
                Woods::MCP::IndexReader::TYPE_DIRS
              end
       dirs.flat_map do |dir|
-        @reader.list_units(type: Woods::MCP::IndexReader::DIR_TO_TYPE[dir])
+        @reader.list_units(directory: dir)
                .filter_map { |entry| TypedUnitReader.entry(@reader, entry, dir, type&.to_s) }
       end
     end

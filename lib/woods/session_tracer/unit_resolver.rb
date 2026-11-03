@@ -40,7 +40,7 @@ module Woods
         path = @reader.payload_dir.join(dir, '_index.json')
         raise IOError, "symlink unit index: #{dir}" if path.symlink?
 
-        entries = @reader.list_units(type: MCP::IndexReader::DIR_TO_TYPE.fetch(dir))
+        entries = @reader.list_units(directory: dir)
         expected = @reader.manifest.dig('counts', dir)
         if expected.is_a?(Integer) && expected != entries.size
           raise IOError, "unit count mismatch in #{dir}: expected #{expected}, found #{entries.size}"
