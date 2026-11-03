@@ -1,0 +1,1 @@
+- Add Woods-checkout `woods:self_docs` and `woods:self_impact` tasks for atomic, browsable static guides and generation-bound impact reports without MCP or Rails boot. Preserve explicit owner-inference, parse, input and budget limits; support selected retained baselines for deletions. Map reference-only Ruby helpers under `spec/` and ignore comment/string-only constant mentions.

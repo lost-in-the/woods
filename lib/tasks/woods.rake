@@ -712,6 +712,29 @@ namespace :woods do
     puts "Woods self-map #{result[:status]} (generation #{result[:generation]}) at #{output_dir}"
   end
 
+  desc 'Generate a static development guide for the Woods source checkout (no Rails boot)'
+  task :self_docs do
+    require 'woods/self_map/task'
+
+    root = File.expand_path('../..', __dir__)
+    puts Woods::SelfMap::Task.from_environment(root).docs
+  end
+
+  desc 'Explain static candidate impact of Woods paths; optional explicit retained baseline generation'
+  task :self_impact, %i[paths base_generation] do |_task, args|
+    require 'shellwords'
+    require 'woods/self_map/task'
+
+    root = File.expand_path('../..', __dir__)
+    given = args[:paths] || ENV.fetch('CHANGED_FILES', nil)
+    paths = given ? Shellwords.split(given) : Woods::GemMapAffectedSpecs.changed_paths(root)
+    options = JSON.parse(ENV.fetch('WOODS_SELF_IMPACT_OPTIONS', '{}'), symbolize_names: true)
+    raise ArgumentError, 'Self-impact options must be a JSON object' unless options.is_a?(Hash)
+
+    puts Woods::SelfMap::Task.from_environment(root).impact(paths: paths, base_generation: args[:base_generation],
+                                                            options: options)
+  end
+
   # Internal developer tool (#926): the specs a change to this gem reaches,
   # read off the self-map, one path per line. Changed paths come from the
   # argument (space-separated), CHANGED_FILES, or the diff against

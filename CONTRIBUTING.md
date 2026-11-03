@@ -67,22 +67,16 @@ Read [CLAUDE.md](https://github.com/lost-in-the/woods/blob/main/CLAUDE.md) for a
 
 ### Agent orientation and static self-map
 
-When investigating Woods itself, agents can create a disposable, MCP-queryable
-map of the gem source before planning a broad change or debugging a cross-cutting
-problem:
+When investigating Woods itself, run `bin/rake woods:self_docs`, then open the
+printed directory's `START_HERE.md`. Use `bin/rake "woods:self_impact[path/to/file.rb]"`
+for generation-bound candidate relationships and suggested specs. Both refresh
+the normal static self-map without booting Rails or starting MCP.
 
-```bash
-output_dir="$(mktemp -d)"
-bin/rake "woods:self_map[$output_dir]"
-bundle exec woods-mcp-start "$output_dir"
-```
-
-This internal developer task publishes an atomic standard index generation.
-Use `woods_status`, `structure`, `search`, `lookup`, `dependencies`, and
-`dependents` to identify ownership and estimate the static blast radius. The
-map is Woods-only, has no embeddings, and must remain out of version control.
-It is not a replacement for booted Rails extraction or evidence of runtime
-Rails behavior; use the normal host-app pipeline for that.
+Read [Development context](docs/SELF_CONTEXT.md) for output locations, explicit
+baseline selection for deletions, coverage states, budgets and freshness limits.
+Generated guides stay in ignored tmp. Follow the validation policy below even
+when a static query suggests no tests. These tools do not establish runtime Rails
+behavior or executed test coverage.
 
 ## Make the change
 
