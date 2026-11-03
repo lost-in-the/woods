@@ -425,8 +425,8 @@ generation. This contract is included in Woods `2.0.0`.
 `matched_lower_bound` counts distinct observed `(type, identifier)` matches,
 including at most one lookahead match beyond `limit`. A result-limit response
 therefore establishes another match; an exactly full page can instead be
-complete if the requested domain is exhausted. Deep lookahead shares
-`WOODS_SEARCH_MAX_SCAN` with the initial scan and retains round-robin scanning
+complete if the requested domain is exhausted. Deep lookahead shares the
+deep-field scan budget with the initial scan and retains round-robin scanning
 across types. Search does not count the entire omitted tail or offer pagination.
 **Included in Woods 2.1 (#593):** `search.types` accepts concrete unit types
 such as `graphql_mutation` and `gem_source`, plus the directory-family aliases
@@ -458,11 +458,26 @@ every generation of the same source, and a broad query no longer cuts the exact
 name or its table from the page. Deep-field matches follow identifier matches
 in scan order.
 
-An in-process caller of `IndexReader#search` can pass `max_scan:` to size the
-deep-field budget for one call (a positive Integer, in unit bodies); the MCP
-tool keeps `WOODS_SEARCH_MAX_SCAN`. A deep search's Ruby result also carries
-`scan: { scanned_units:, candidate_units: }`, so a caller stopped by
-`scan_budget` can say how much it read.
+**Deep-field scan budget.** A `metadata` or `source_code` search reads unit
+bodies one by one. By default it reads every candidate unit in the requested
+types, so a mid-size index is searched completely, and stops early only past
+256 MiB of unit JSON or 10 seconds of wall time. On 10,000-unit indexes of 75
+to 95 MB, a full `source_code` scan took 0.3 to 0.8 seconds with a warm page
+cache and 1.3 to 4.6 seconds from a cold one; the caps cover roughly 2.5 times
+such an index. `WOODS_SEARCH_MAX_SCAN` replaces both caps with an exact unit
+count. An in-process caller of `IndexReader#search` can pass `max_scan:` for
+one call (a positive Integer, in unit bodies), which takes precedence; the MCP
+tool uses `WOODS_SEARCH_MAX_SCAN` or the default.
+
+A deep search's response (JSON `scan`, and the Ruby result) reports
+`scanned_units` and `scanned_bytes` read of `candidate_units` queued,
+`total_units` in the requested types and scope, the `budget` applied
+(`units`, `bytes`, `seconds`; `null` is unbounded) and, when a cap stopped it,
+`limit_hit` (`units`, `bytes` or `seconds`). A stopped scan keeps
+`status: partial` and `reason: scan_budget`; its `hint` names how many units
+were read of how many and `WOODS_SEARCH_MAX_SCAN`. When nothing matched, the
+hint says plainly that zero results is not evidence of absence: the unread
+units were never searched.
 
 All partial responses retain `partial: true` and include a narrowing `hint`.
 JSON exposes these fields; Markdown, plain text, and Claude formats label the

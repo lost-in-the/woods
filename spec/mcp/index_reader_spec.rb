@@ -349,8 +349,8 @@ RSpec.describe Woods::MCP::IndexReader do
       ENV['WOODS_SEARCH_MAX_SCAN'] = ''
       begin
         result = reader.search('has_many', fields: %w[source_code])
-        # With empty env var, default 500 applies — fixtures have <500 units so
-        # phase-2 completes without hitting the cap.
+        # With empty env var the default byte/time caps apply, so phase-2 reads
+        # every fixture unit and completes.
         expect(result[:partial]).to be_falsey
       ensure
         ENV.delete('WOODS_SEARCH_MAX_SCAN')

@@ -646,9 +646,16 @@ module Woods
         end
       end
 
-      # Default maximum number of unit files to load during phase-2 search.
-      # Override with WOODS_SEARCH_MAX_SCAN env var.
-      DEFAULT_SEARCH_MAX_SCAN = 500
+      # Default phase-2 (metadata/source_code) budget. With no explicit unit
+      # count, search reads every candidate unit body the published index
+      # lists, stopping early only past this many bytes of unit JSON or this
+      # many seconds of wall time. Measured on ~10k-unit indexes (75-95 MB of
+      # unit JSON), a full source_code scan takes 0.3-0.8s warm and 1.3-4.6s
+      # from a cold page cache; these caps cover roughly 2.5x such an index
+      # and bound a cold worst case. WOODS_SEARCH_MAX_SCAN (or +max_scan:+)
+      # replaces both caps with an exact unit count.
+      DEFAULT_SEARCH_MAX_SCAN_BYTES = 256 * 1024 * 1024
+      DEFAULT_SEARCH_MAX_SCAN_SECONDS = 10
       DOMAIN_CLUSTERS_CACHE_SIZE = 8
 
       # Wall-clock budget for a single match against the user-supplied search
@@ -670,11 +677,16 @@ module Woods
       # A "broad" pattern is one that matches more than 50% of the entries in a
       # type directory. Broad patterns still run but the result includes a :note.
       #
-      # Phase-2 scan is capped at WOODS_SEARCH_MAX_SCAN unit files (default 500),
-      # or at +max_scan+ for one call. When the cap is reached the result
-      # includes :partial => true. A deep search's +:scan+ names how many
-      # candidate bodies it read (+scanned_units+) of how many it had queued
-      # (+candidate_units+).
+      # Phase-2 scan reads every candidate unit by default, bounded by
+      # {DEFAULT_SEARCH_MAX_SCAN_BYTES} and {DEFAULT_SEARCH_MAX_SCAN_SECONDS}.
+      # WOODS_SEARCH_MAX_SCAN, or +max_scan+ for one call, replaces both caps
+      # with a unit count. When a cap stops the scan the result includes
+      # :partial => true and a hint that names the unread remainder; an empty
+      # partial result is not evidence of absence. A deep search's +:scan+
+      # names how many candidate bodies it read (+scanned_units+, +scanned_bytes+)
+      # of how many it had queued (+candidate_units+), how many units the
+      # searched types hold (+total_units+), the +budget+ applied and, when it
+      # stopped early, which cap it hit (+limit_hit+: units, bytes or seconds).
       #
       # Identifier matches rank by match quality, independent of directory
       # and summary order: the exact identifier, then an exact short name
@@ -697,9 +709,8 @@ module Woods
       # @param exact_prefix [String, nil] Literal identifier prefix filter (case-insensitive)
       # @param exact_suffix [String, nil] Literal identifier suffix filter (case-insensitive)
       # @param max_scan [Integer, nil] deep-field scan budget for this call, in
-      #   unit bodies; nil keeps WOODS_SEARCH_MAX_SCAN or the default. An
-      #   in-process caller that is not bound by an agent's token budget can
-      #   size it to the index.
+      #   unit bodies; nil keeps WOODS_SEARCH_MAX_SCAN or the default byte and
+      #   time caps. An in-process caller can size it to the index.
       # @return [Hash] results, optional note/partial, and explicit completeness evidence
       # @raise [ArgumentError] when all of query, exact_prefix, and exact_suffix are blank,
       #   or +max_scan+ is not a positive Integer
@@ -732,13 +743,17 @@ module Woods
         # When only prefix/suffix are provided, the regex acts as a match-all
         # wildcard so the existing phase-1/phase-2 pipeline still works.
         pattern = compile_search_pattern(query.to_s.empty? ? '.*' : query)
-        max_scan ||= search_max_scan_from_env
+        budget = search_scan_budget(max_scan)
+        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         literal = search_literal(query, prefix)
 
         results = SearchResults.new(limit: limit)
         notes = []
         phase2_scanned = 0
+        phase2_bytes = 0
         phase2_candidates = 0
+        total_units = 0
+        limit_hit = nil
         identifier_matches = []
 
         begin
@@ -756,6 +771,7 @@ module Woods
                         else
                           entries
                         end
+              total_units += entries.size
               if entries.size > 1
                 matching_count = entries.count do |entry|
                   identifier_passes_filters?(entry['identifier'], pattern, prefix, suffix)
@@ -789,7 +805,8 @@ module Woods
               queues.each do |queue|
                 next if queue.empty?
 
-                if phase2_scanned >= max_scan
+                limit_hit = search_scan_limit_hit(budget, phase2_scanned, phase2_bytes, started)
+                if limit_hit
                   results.stop('scan_budget')
                   throw :search_done
                 end
@@ -806,6 +823,7 @@ module Woods
                 unit = readable_search_unit(type_name, id, results)
                 next unless unit
 
+                phase2_bytes += search_unit_bytes(dir, id)
                 type_name = unit['type']
                 field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
                           'source_code'
@@ -831,7 +849,15 @@ module Woods
 
         response = results.finish.response(note: notes.join('; '))
         if fields.include?('metadata') || fields.include?('source_code')
-          response[:scan] = { scanned_units: phase2_scanned, candidate_units: phase2_candidates }
+          response[:scan] = { scanned_units: phase2_scanned, candidate_units: phase2_candidates,
+                              total_units: total_units, scanned_bytes: phase2_bytes, budget: budget }
+          response[:scan][:limit_hit] = limit_hit if limit_hit
+          if limit_hit
+            response[:hint] = SearchResults.scan_budget_hint(
+              scanned: phase2_scanned, candidates: phase2_candidates, matched: response[:results].size,
+              limit_hit: limit_hit, knob: max_scan ? 'max_scan' : 'WOODS_SEARCH_MAX_SCAN'
+            )
+          end
         end
         response[:applied_scope] = scope.summary if scope
         response
@@ -851,11 +877,40 @@ module Woods
       end
       private :add_ranked_identifier_matches
 
-      def search_max_scan_from_env
-        value = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip.to_i
-        value.positive? ? value : DEFAULT_SEARCH_MAX_SCAN
+      # The deep-field budget for one search: an explicit unit count
+      # (+max_scan+, then WOODS_SEARCH_MAX_SCAN) alone, or by default no unit
+      # count and the byte and wall-time caps.
+      #
+      # @param max_scan [Integer, nil] per-call unit count
+      # @return [Hash{Symbol => Numeric, nil}] +units+, +bytes+, +seconds+; nil is unbounded
+      def search_scan_budget(max_scan)
+        env = ENV.fetch('WOODS_SEARCH_MAX_SCAN', '').to_s.strip.to_i
+        units = max_scan || (env if env.positive?)
+        return { units: units, bytes: nil, seconds: nil } if units
+
+        { units: nil, bytes: DEFAULT_SEARCH_MAX_SCAN_BYTES, seconds: DEFAULT_SEARCH_MAX_SCAN_SECONDS }
       end
-      private :search_max_scan_from_env
+      private :search_scan_budget
+
+      # The cap that forbids reading one more candidate, if any.
+      #
+      # @return [String, nil] "units", "bytes" or "seconds"
+      def search_scan_limit_hit(budget, scanned, bytes, started)
+        return 'units' if budget[:units] && scanned >= budget[:units]
+        return 'bytes' if budget[:bytes] && bytes >= budget[:bytes]
+
+        seconds = budget[:seconds]
+        'seconds' if seconds && Process.clock_gettime(Process::CLOCK_MONOTONIC) - started >= seconds
+      end
+      private :search_scan_limit_hit
+
+      # On-disk size of one unit body just read, for the byte budget.
+      def search_unit_bytes(dir, identifier)
+        current_payload_dir.join(dir, unit_filename(identifier)).size
+      rescue SystemCallError
+        0
+      end
+      private :search_unit_bytes
 
       # The literal a query names, for ranking: an escaped or plain-word
       # query compares as text; any other pattern ranks every match alike.

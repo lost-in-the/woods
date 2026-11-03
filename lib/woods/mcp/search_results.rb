@@ -16,6 +16,39 @@ module Woods
           total_matches: nil, matched_lower_bound: nil }
       end
 
+      # Guidance for a deep search its scan budget stopped: how much it read,
+      # and, when nothing matched, that the empty answer proves nothing about
+      # the unread units. A byte or time stop names no unit count: the
+      # candidate count is this query's types only, and a server-wide
+      # WOODS_SEARCH_MAX_SCAN set from it would cap every later, broader
+      # search and drop both default caps.
+      #
+      # @param scanned [Integer] candidate unit bodies read
+      # @param candidates [Integer] candidate unit bodies queued
+      # @param matched [Integer] results returned
+      # @param limit_hit [String] "units", "bytes" or "seconds"
+      # @param knob [String] what set the unit cap: "max_scan" or "WOODS_SEARCH_MAX_SCAN"
+      # @return [String]
+      def self.scan_budget_hint(scanned:, candidates:, matched:, limit_hit:, knob: 'WOODS_SEARCH_MAX_SCAN')
+        unread = candidates - scanned
+        cap = { 'units' => 'unit-count cap', 'bytes' => 'size cap', 'seconds' => 'time cap' }.fetch(limit_hit)
+        read = "Deep-field scan read #{scanned} of #{candidates} candidate units before its #{cap} stopped it; "
+        verdict = if matched.zero?
+                    "the other #{unread} were never searched, so 0 results is NOT evidence of absence. "
+                  else
+                    "matches in the #{unread} unread units are unknown. "
+                  end
+        "#{read}#{verdict}#{scan_budget_action(limit_hit, scanned, knob)}"
+      end
+
+      def self.scan_budget_action(limit_hit, scanned, knob)
+        narrow = 'narrow types, exact_prefix/exact_suffix, or fields'
+        return "Raise #{knob} above #{scanned}, or #{narrow}, and search again." if limit_hit == 'units'
+
+        "Search again (a warm cache is usually much faster), or #{narrow}."
+      end
+      private_class_method :scan_budget_action
+
       # Same completeness keys as {#response}, for a bounded sync report.
       # Adds +failed+ (nothing landed), which search never emits. +has_more+ is true when listed errors are fewer
       # than the total, and the total sits inside the hash like +total_matches+.

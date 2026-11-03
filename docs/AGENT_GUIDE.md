@@ -149,7 +149,9 @@ Start with identifier search. Add source or metadata only when name discovery fa
 
 On supporting versions, read `completeness` before calling search exhaustive.
 `result_count` counts returned rows. `result_limit` proves one more match exists;
-`scan_budget` and `regex_timeout` leave that unknown. Only `exhausted` establishes
+`scan_budget` and `regex_timeout` leave that unknown; a `scan_budget` answer
+reports `scan.scanned_units` of `scan.candidate_units`, and zero results there is
+not evidence of absence. Only `exhausted` establishes
 an exact total within the requested index/query domain. Narrow types, literal
 prefix/suffix filters, or deep fields when `partial` is true. A detected artifact
 failure remains an error with unknown completeness, never proof of no matches.
