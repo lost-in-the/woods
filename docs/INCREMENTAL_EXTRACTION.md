@@ -42,6 +42,16 @@ earlier writers compared them, and a unit with one dependent never matched).
 Controller flow annotations are compared, so a re-extracted controller with
 precomputed flows is always registered and its flows reassembled.
 
+The top-level constant verdicts in `flows/top_level_constants.json` (#967) are
+derived from the whole graph on every flow refresh. When they differ from the
+previous generation's, every controller whose carried flow calls a receiver
+whose verdict changed (`Name`, `Name.new` or `Name.action`, unrooted) is
+reassembled, so its stored flow matches both a full run and an on-demand
+`trace_flow` assembly. The verdicts are read from the booted process, so a
+change that defines or removes a top-level constant without touching an
+indexed file (a new gem) is picked up only by the next run that refreshes
+flows.
+
 The comparison runs before the method table, callback and filter declaration
 sites and test examples are recorded, and leaves them out on both sides: they
 are derived from the source and metadata it already compares. A unit re-derived

@@ -79,4 +79,39 @@ RSpec.describe Woods::Extraction::FlowReach do
     File.write(payload.join('flows', 'posts_show.json'), '{not json')
     expect { reach.controllers_through(['Tracker']) }.to raise_error(Woods::ExtractionError, /posts_show\.json/)
   end
+
+  # #967: which controllers call a receiver whose top-level constant verdict
+  # changed. The receiver is the target up to its first `.`.
+  #
+  #   | target in a flow           | changed name | named?            |
+  #   |----------------------------|--------------|-------------------|
+  #   | Probe / Probe.new / nested | Probe        | yes               |
+  #   | ProbeMailer.welcome        | ProbeMailer  | yes               |
+  #   | ::Probe (rooted)           | Probe        | no                |
+  #   | Other                      | Probe        | no                |
+  describe '#controllers_calling' do
+    let(:index) do
+      { 'AController#show' => 'flows/a.json', 'BController#show' => 'flows/b.json',
+        'CController#show' => 'flows/c.json', 'DController#show' => 'flows/d.json' }
+    end
+
+    before do
+      nested = { 'type' => 'conditional', 'then_ops' => [{ 'type' => 'call', 'target' => 'Probe.new' }] }
+      write_document('flows/a.json', 'AController#show', [{ 'unit' => 'AController#show', 'operations' => [nested] }])
+      write_document('flows/b.json', 'BController#show',
+                     [{ 'unit' => 'BController#show', 'operations' => [{ 'target' => 'ProbeMailer.welcome' }] }])
+      write_document('flows/c.json', 'CController#show',
+                     [{ 'unit' => 'CController#show', 'operations' => [{ 'target' => '::Probe' }] }])
+      write_document('flows/d.json', 'DController#show',
+                     [{ 'unit' => 'DController#show', 'operations' => [{ 'target' => 'Other' }] }])
+    end
+
+    it 'names the controllers whose flows call a changed receiver, unrooted, at any depth' do
+      expect(reach.controllers_calling(%w[Probe ProbeMailer])).to eq(Set['AController', 'BController'])
+    end
+
+    it 'names none when no verdict changed' do
+      expect(reach.controllers_calling([])).to eq(Set.new)
+    end
+  end
 end
