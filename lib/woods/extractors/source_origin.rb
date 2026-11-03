@@ -123,6 +123,60 @@ module Woods
         site(path, root: root).location
       end
 
+      # Who defines a class or module, from the file that defines its
+      # constant (#995).
+      #
+      # Ruby records the site of the constant's first definition
+      # (+Module#const_source_location+), so a gem class that the application
+      # reopens keeps the gem's origin. A constant that cannot be placed
+      # without loading code is {UNKNOWN}. See {constant_definition_path}.
+      #
+      # @param klass [Module]
+      # @param root [String, Pathname, nil]
+      # @return [String] one of {APP}, {FRAMEWORK}, {GEM}, {UNKNOWN}
+      def constant_origin(klass, root: application_root)
+        origin(constant_definition_path(klass), root: root)
+      end
+
+      # The file that first defined +klass+'s constant, found without loading
+      # anything.
+      #
+      # Nil, which {origin} reads as {UNKNOWN}, when:
+      # - the class has no name, or its name no longer resolves to it (a
+      #   class a reload replaced);
+      # - any segment of the name is a pending autoload. Ruby reports the
+      #   site of the +autoload+ call for one (Zeitwerk's own file), and
+      #   resolving a nested name would load the namespace;
+      # - Ruby knows no site (a constant defined in C).
+      #
+      # @param klass [Module]
+      # @return [String, nil] an absolute path, as Ruby reports it
+      def constant_definition_path(klass)
+        name = klass.name
+        return nil if name.nil? || name.empty?
+
+        *namespace, last = name.split('::')
+        scope = namespace.reduce(Object) { |mod, segment| loaded_constant(mod, segment) or return nil }
+        return nil unless loaded_constant(scope, last).equal?(klass)
+
+        scope.const_source_location(last, false)&.first
+      rescue StandardError, ScriptError
+        nil
+      end
+
+      # A constant of +scope+ that is already loaded, or nil.
+      #
+      # @param scope [Module]
+      # @param segment [String]
+      # @return [Object, nil]
+      def loaded_constant(scope, segment)
+        return nil unless scope.is_a?(Module)
+        return nil if scope.autoload?(segment, false)
+        return nil unless scope.const_defined?(segment, false)
+
+        scope.const_get(segment, false)
+      end
+
       # Whether a gem name is one of the Rails gems.
       #
       # @param name [String]
@@ -251,7 +305,8 @@ module Woods
         framework_gem?(name) ? FRAMEWORK : GEM
       end
 
-      private_class_method :application_site, :gem_site, :loaded_gem_site, :stdlib_site, :gem_origin
+      private_class_method :application_site, :gem_site, :loaded_gem_site, :stdlib_site, :gem_origin,
+                           :loaded_constant
     end
   end
 end
