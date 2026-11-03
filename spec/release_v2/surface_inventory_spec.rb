@@ -163,7 +163,8 @@ RSpec.describe 'release-v2 public-surface inventory' do
   it 'derives internal registration guards from the server implementation' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
     original = File.read(server_path, encoding: Encoding::UTF_8)
-    registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)'
+    registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store, ' \
+                   'index_dir)'
     changed = original.sub(registration, "#{registration} if pipeline_enabled?")
     expect(changed).not_to eq(original)
 
@@ -179,7 +180,8 @@ RSpec.describe 'release-v2 public-surface inventory' do
   it 'derives block registration guards from the complete helper source' do
     server_path = File.join(root, 'lib/woods/mcp/server.rb')
     original = File.read(server_path, encoding: Encoding::UTF_8)
-    registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)'
+    registration = 'define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store, ' \
+                   'index_dir)'
     changed = original.sub(registration, "if pipeline_enabled?\n            #{registration}\n          end")
     expect(changed).not_to eq(original)
 

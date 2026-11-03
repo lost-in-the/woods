@@ -9,6 +9,7 @@ require 'securerandom'
 # whole gem first).
 require 'woods'
 require 'woods/watch/status'
+require 'woods/coordination/liveness'
 
 module Woods
   module Coordination
@@ -28,6 +29,27 @@ module Woods
     #
     class PipelineLock
       DEFAULT_STALE_TIMEOUT = 3600 # 1 hour
+
+      # The lock every writer of one index serializes on: `woods:extract`,
+      # `woods:incremental`, `woods:refresh`, the watch daemon, the MCP
+      # operator tools and `woods_reload`. Its name and stale window live here,
+      # beside {.for_index}, so no writer can build a lock the others do not
+      # contend with.
+      INDEX_WRITER_NAME = 'extraction'
+
+      # A daemon cycle is milliseconds; a manual full extraction is seconds to
+      # minutes, and a healthy holder heartbeats ({LockHeartbeat}). This bounds
+      # how long a crashed writer can block the others.
+      INDEX_WRITER_STALE_TIMEOUT = 600
+
+      # The writer lock for the index published in +output_dir+.
+      #
+      # @param output_dir [String, Pathname] the index directory the writer
+      #   publishes into; the lock lives inside it
+      # @return [PipelineLock]
+      def self.for_index(output_dir)
+        new(lock_dir: output_dir.to_s, name: INDEX_WRITER_NAME, stale_timeout: INDEX_WRITER_STALE_TIMEOUT)
+      end
 
       # The transaction-guard filename for a lock of +name+, exposed so
       # cleanup code that empties a lock directory (woods:clean) can skip the
@@ -372,44 +394,38 @@ module Woods
       end
 
       # Whether the lock at +path+ was written on this host by a process that
-      # no longer exists.
+      # is gone: dead, or (on Linux) exited and waiting to be reaped.
       #
       # A holder killed mid-run (a container restart's grace period ending,
       # SIGKILL, an OOM kill) never releases its lock, and a fresh lock would
-      # otherwise block every writer for the whole stale window. A pid is only
-      # evidence inside the namespace that issued it, so this mirrors
-      # {Watch::Status#alive?}: the recorded host must match before the pid is
-      # checked. A lock from another host, from a version that recorded no
-      # host, or without a usable pid is judged by its age alone. A reused or
-      # shared hostname cannot establish pid-namespace identity, the residual
-      # Watch::Status documents too; a pid that has been reused by another
-      # process reads as alive, which only delays the takeover.
+      # otherwise block every writer for the whole stale window. A container
+      # whose PID 1 never reaps leaves that holder a zombie, which signal 0
+      # still answers for.
+      #
+      # Only {Liveness.gone?} evidence takes over a fresh lock. Every other
+      # answer leaves the lock to its age ({#stale?}): a live holder, and an
+      # unknown one — a lock from another host, from a version that recorded
+      # no host, without a usable pid, or whose holder answers EPERM with no
+      # readable `/proc` status. A reused or shared hostname cannot establish
+      # pid-namespace identity, the residual Watch::Status documents too; a
+      # pid that has been reused by another process reads as alive, which
+      # only delays the takeover.
       #
       # @param path [String]
       # @return [Boolean]
       def abandoned?(path)
         record = JSON.parse(File.read(path))
-        host = Watch::Status.host_identity
-        return false unless record.is_a?(Hash) && host != 'unknown' && record['host'] == host
+        return false unless record.is_a?(Hash)
 
-        pid = record['pid']
-        pid.is_a?(Integer) && pid.positive? && !process_alive?(pid)
+        Liveness.gone?(holder_liveness(record))
       rescue JSON::ParserError, SystemCallError, EncodingError
         false
       end
 
-      # Signal 0 asks whether the process could be signalled without sending
-      # anything. EPERM means it exists but belongs to someone else.
-      #
-      # @param pid [Integer]
-      # @return [Boolean]
-      def process_alive?(pid)
-        Process.kill(0, pid)
-        true
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        true
+      # @param record [Hash] a parsed lock file
+      # @return [Symbol] see {Liveness::STATES}
+      def holder_liveness(record)
+        Liveness.check(record['pid'], host: record['host'], local_host: Watch::Status.host_identity)
       end
 
       # Three-state, deliberately — a boolean here conflates the two states
