@@ -531,7 +531,9 @@ module Woods
 
         def file_lines(entry)
           first = entry['file_line']
-          return 'file line: none (Woods annotation)' unless first.is_a?(Integer)
+          # Null covers both a line Woods added and real code it cannot map
+          # (a library unit's secondary contributor file), so claim neither.
+          return 'file line: not mapped' unless first.is_a?(Integer)
 
           range = line_range(first, entry['file_end_line'])
           entry['file_unit'] ? "file lines: #{range} in #{entry['file_unit']}" : "file lines: #{range}"

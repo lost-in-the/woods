@@ -200,10 +200,13 @@ coordinates:
 `source_code`, which carries Woods' headers and inlined concern blocks.
 `file_line`/`file_end_line` are the lines in the file a reader opens: the
 unit's own file, translated through `source_line_map`. Cite `file_line` when
-pointing at code. A line Woods added has a null `file_line`.
+pointing at code. `file_line` is null when the line has no mapped file line:
+a line Woods added, or code from a library unit's secondary contributor file,
+which `source_contributors` locates instead.
 The Markdown and Claude renderers of `lookup` print these entries as
 `file lines: 36-38` first and `published source lines: 41-43` after, with
-`in <concern>` when `file_unit` is set, so neither number appears under a bare
+`in <concern>` when `file_unit` is set and `file line: not mapped` when
+`file_line` is null, so neither number appears under a bare
 `line` label.
 
 A concern's methods inlined as a commented display block keep the concern as

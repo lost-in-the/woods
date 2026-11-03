@@ -130,6 +130,27 @@ RSpec.describe Woods::FileLines do
     expect(locator.annotate('line' => 1, 'end_line' => 1)).to include('file_line' => nil, 'file_end_line' => nil)
   end
 
+  # A library unit concatenates every file that reopens one module; the map
+  # covers only the primary file, so a real method from another contributor
+  # has no file line here. It must read as unmapped, not as Woods' own text.
+  it 'leaves a method from a secondary library contributor without a file line' do
+    primary = "module Util\n  def first; end\nend\n"
+    secondary = "module Util\n  def second; end\nend\n"
+    published = "#{primary}\n# Library contributor: lib/util/second.rb\n#{secondary}"
+    unit = Woods::ExtractedUnit.new(type: :lib, identifier: 'Util', file_path: 'lib/util.rb').tap do |lib|
+      lib.source_code = published
+      map = Woods::SourceLineMap.build(primary, published)
+      lib.metadata[:source_line_map] = map if map
+    end
+
+    Woods::MethodTable.record(unit)
+
+    expect(method_named(unit, 'first')['file_line']).to eq(2)
+    second = method_named(unit, 'second')
+    expect(second['line']).to eq(file_line_of(published, 'def second'))
+    expect(second['file_line']).to be_nil
+  end
+
   it 'gives test examples their file lines' do
     spec_file = "RSpec.describe Invoice do\n  it 'totals' do\n  end\nend\n"
     unit = Woods::ExtractedUnit.new(type: :test_mapping, identifier: 'spec/models/invoice_spec.rb',

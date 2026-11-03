@@ -56,7 +56,8 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
             { 'name' => 'activate', 'line' => 276, 'end_line' => 280, 'file_line' => 271, 'file_end_line' => 275 },
             { 'name' => 'archived?', 'line' => 753, 'end_line' => 753, 'file_line' => 4, 'file_end_line' => 4,
               'file_unit' => 'Archivable' },
-            { 'name' => 'generated', 'line' => 2, 'end_line' => 2, 'file_line' => nil, 'file_end_line' => nil }
+            { 'name' => 'from_second_contributor', 'line' => 2, 'end_line' => 2,
+              'file_line' => nil, 'file_end_line' => nil }
           ],
           'callbacks' => [
             { 'type' => 'before_save', 'method' => 'normalize',
@@ -75,8 +76,11 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
         expect(out).to include('  - file lines: 4 in Archivable, published source lines: 753, name: archived?')
       end
 
-      it 'says a line with no file line came from Woods annotation' do
-        expect(out).to include('  - file line: none (Woods annotation), published source lines: 2, name: generated')
+      # Null also covers real code Woods cannot map (a secondary library
+      # contributor), so the label must not claim the line is Woods' own.
+      it 'labels a line with no file line as not mapped without guessing its origin' do
+        expect(out).to include('  - file line: not mapped, published source lines: 2, name: from_second_contributor')
+        expect(out).not_to include('annotation')
       end
 
       it 'labels a nested declaration site instead of printing a raw hash' do

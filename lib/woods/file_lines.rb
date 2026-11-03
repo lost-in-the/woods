@@ -17,8 +17,9 @@ module Woods
   # - `file_unit`: present only for an inlined block, naming the concern unit
   #   whose file `file_line` refers to.
   #
-  # A line Woods added (a header or a block frame) has no file line and
-  # reports nil.
+  # A line with no mapped file line reports nil: one Woods added (a header or
+  # a block frame), or real code from a library unit's secondary contributor
+  # file, which the map does not cover (`source_contributors` locates it).
   module FileLines
     # The inlined concern blocks of +source+ and the unit's line map, ready to
     # annotate entries.
