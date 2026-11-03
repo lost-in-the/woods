@@ -28,10 +28,8 @@ RSpec.describe 'woods-mcp-start exec handoff' do
   # Runs the real launcher with exec intercepted. The harness records the argv
   # and the RUBYLIB it would have exec'd with (and the one it started with,
   # since a bundled spec run can already set one), then exits 42.
-  # `bindir:` stands in for a Ruby installed under that directory.
-  def handoff(ruby_flags: [], env: {}, bindir: nil)
-    log = File.join(@directory, 'exec.json')
-    harness = <<~RUBY
+  let(:harness) do
+    <<~RUBY
       require 'json'
       require 'rbconfig'
       wrapper, index, log, bindir = ARGV
@@ -44,6 +42,11 @@ RSpec.describe 'woods-mcp-start exec handoff' do
       end
       load wrapper
     RUBY
+  end
+
+  # `bindir:` stands in for a Ruby installed under that directory.
+  def handoff(ruby_flags: [], env: {}, bindir: nil)
+    log = File.join(@directory, 'exec.json')
     env = { 'RUBYLIB' => nil, 'WOODS_MCP_ALLOW_MISMATCH' => '1' }.merge(env)
     # Outside the bundle: bundler/setup would put Woods' lib on the load path
     # itself and hide whether the launcher's own -I is what got carried.
