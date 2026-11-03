@@ -438,6 +438,13 @@ apparently complete empty result. This corrects the older unscoped family
 labels. Retrieval tools continue to use their own documented concrete-type
 filters; search aliases do not change those contracts.
 
+**Included in Woods 2.2 (#969):** `graphql` and `rails_source` are the only
+family aliases. `search.types: ["route"]` returns `route` units only, not the
+`route_file` units that share the `routes/` directory; pass `route_file` for
+those. `routes` is not a type and returns `invalid_params`. `recent_changes`
+filters `types` the same way and labels each result with its unit's own type
+(`route_file`, `gem_source`, `graphql_mutation`) instead of its directory name.
+
 **Included in Woods 2.1:** typed `lookup` also accepts the `graphql` family
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.

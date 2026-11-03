@@ -61,6 +61,14 @@ module Woods
         types.each { |type| result[type] = directory }
       end.freeze
 
+      # The directory names that stand for every type their directory holds:
+      # the documented `graphql` and `rails_source` family aliases. Any other
+      # name, including `route` (whose `routes/` directory also holds
+      # `route_file` units), means its own unit type only. UNIT_TYPES_BY_DIR
+      # still says which types a directory may hold; this says which names
+      # select a whole directory.
+      DIRECTORY_FAMILY_ALIASES = %w[graphql rails_source].freeze
+
       # Maximum number of loaded unit files to cache in memory.
       MAX_UNIT_CACHE = 50
 
@@ -535,8 +543,13 @@ module Woods
       # the family-alias meaning {Woods::PublishedIndex} documents, kept apart
       # from {#find_unit}, where `rails_source` names the unit type.
       #
+      # +family+ is read as a directory name, not checked against
+      # {DIRECTORY_FAMILY_ALIASES}: {Woods::PublishedIndex} also uses it to
+      # learn the type of an older `routes/` index entry that carries none.
+      #
       # @param identifier [String]
-      # @param family [String] directory family name (`graphql`, `rails_source`)
+      # @param family [String] directory name in singular form (`graphql`,
+      #   `rails_source`, `route`)
       # @return [Hash, nil] nil when +family+ is not a directory or does not
       #   list +identifier+
       # @raise [IOError] when the read fails a payload guard
@@ -565,19 +578,20 @@ module Woods
       end
 
       # The actual unit types a +type:+ argument stands for: itself for a unit
-      # type (`model`, `gem_source`), every member of the directory for a family
-      # name (`graphql`, and `rails_source`, which is also a member and comes
-      # first), nothing for an unknown type. {Woods::PublishedIndex#unit} uses
-      # this to expand a family alias over {#find_unit}.
+      # type (`model`, `gem_source`, `route`), every member of the directory for
+      # a {DIRECTORY_FAMILY_ALIASES} name (`graphql`, and `rails_source`, which
+      # is also a member and comes first), nothing for an unknown type.
+      # `route` is not an alias: it never selects the `route_file` units that
+      # share `routes/`. `search`, {#recent_changes} and
+      # {Woods::PublishedIndex#unit}/{Woods::PublishedIndex#units} all read
+      # their type filter through this.
       #
       # @param type [String]
       # @return [Array<String>]
       def unit_types_for(type)
-        dir = UNIT_TYPE_TO_DIR[type] || TYPE_TO_DIR[type]
-        return [] unless dir
+        return UNIT_TYPES_BY_DIR.fetch(TYPE_TO_DIR.fetch(type)) if DIRECTORY_FAMILY_ALIASES.include?(type)
 
-        members = UNIT_TYPES_BY_DIR.fetch(dir)
-        TYPE_TO_DIR[type] == dir ? members : [type]
+        UNIT_TYPE_TO_DIR.key?(type) ? [type] : []
       end
 
       # Every published type an identifier is indexed under, read from the
@@ -985,12 +999,8 @@ module Woods
         end
 
         types.flat_map do |type|
-          if TYPE_TO_DIR.key?(type)
-            UNIT_TYPES_BY_DIR.fetch(TYPE_TO_DIR.fetch(type))
-          elsif UNIT_TYPE_TO_DIR.key?(type)
-            [type]
-          else
-            raise ArgumentError, "unknown search type: #{type}"
+          unit_types_for(type).tap do |expanded|
+            raise ArgumentError, "unknown search type: #{type}" if expanded.empty?
           end
         end.uniq
       end
@@ -1143,13 +1153,20 @@ module Woods
 
       # @api private
       def recent_changes_within_pin(limit: 10, types: nil)
-        dirs = if types
-                 types.filter_map { |t| TYPE_TO_DIR[t] }
-               else
-                 TYPE_DIRS
-               end
+        units_with_dates = if types
+                             # An unknown type selects nothing; a family alias
+                             # selects its whole directory; any other type
+                             # selects its own rows of a shared directory.
+                             types.flat_map do |requested|
+                               expanded = unit_types_for(requested)
+                               next [] if expanded.empty?
 
-        units_with_dates = dirs.flat_map { |dir| recent_changes_for_directory(dir) }
+                               recent_changes_for_directory(UNIT_TYPE_TO_DIR.fetch(expanded.first))
+                                 .select { |row| expanded.include?(row[:type]) }
+                             end
+                           else
+                             TYPE_DIRS.flat_map { |dir| recent_changes_for_directory(dir) }
+                           end
         result = units_with_dates.sort_by { |u| u[:last_modified] }.reverse.first(limit)
         return result if current_payload_dir == @index_dir
 
@@ -1183,7 +1200,9 @@ module Woods
           last_modified = unit.dig('metadata', 'git', 'last_modified')
           next unless last_modified
 
-          { identifier: id, type: DIR_TO_TYPE[dir], file_path: unit['file_path'],
+          # The unit's own type: a shared directory's name is not the type of
+          # every unit in it (`routes/` also holds `route_file` units).
+          { identifier: id, type: unit['type'], file_path: unit['file_path'],
             last_modified: last_modified, author: unit.dig('metadata', 'git', 'last_author') }
         end
       end

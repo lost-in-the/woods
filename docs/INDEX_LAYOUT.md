@@ -107,6 +107,9 @@ Extractor directories can contain multiple unit types: `graphql/` contains
 `rails_source/` contains `rails_source` and `gem_source`, and `routes/` contains
 `route` and `route_file`. Validate and retain the
 artifact's actual type instead of deriving it by singularizing the directory.
+A directory name is not a type filter: only `graphql` and `rails_source` are
+family aliases that select a whole directory, and `route` selects `route`
+units only.
 
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type

@@ -82,7 +82,10 @@ RSpec.describe Woods::MCP::IndexReader, 'recent changes generation reads' do
     expect(reader.instance_variable_get(:@unit_cache).size).to be <= described_class::MAX_UNIT_CACHE
   end
 
-  it 'preserves ordering, ties, duplicate filters, family types, missing metadata and typed collisions' do
+  # Rows carry the unit's own type, not its directory name (#969): a
+  # GraphQL mutation is labelled graphql_mutation and is selected by that
+  # type or by the graphql family alias.
+  it 'preserves ordering, ties, duplicate filters, unit types, missing metadata and typed collisions' do
     write_payload('one', {
                     'models' => [unit('Shared', 'model', date: '2026-04-01', author: nil),
                                  unit('NoMetadata', 'model', metadata: nil),
@@ -93,7 +96,8 @@ RSpec.describe Woods::MCP::IndexReader, 'recent changes generation reads' do
                     'graphql' => [unit('Mutation', 'graphql_mutation', date: '2026-05-01')]
                   }, legacy: true)
     publish('one')
-    expected = [row('Mutation', 'graphql', '2026-05-01', path: 'app/graphql_mutation/Mutation.rb'),
+    mutation = row('Mutation', 'graphql_mutation', '2026-05-01', path: 'app/graphql_mutation/Mutation.rb')
+    expected = [mutation,
                 row('Shared', 'controller', '2026-04-01'),
                 row('Shared', 'model', '2026-04-01', author: nil),
                 row('Earlier', 'controller', '2026-03-01')]
@@ -101,7 +105,9 @@ RSpec.describe Woods::MCP::IndexReader, 'recent changes generation reads' do
     2.times { expect(reader.recent_changes).to eq(expected) }
     expect(reader.recent_changes(types: [])).to eq([])
     expect(reader.recent_changes(types: ['unknown'])).to eq([])
-    expect(reader.recent_changes(types: ['graphql_mutation'])).to eq([])
+    expect(reader.recent_changes(types: ['graphql_mutation'])).to eq([mutation])
+    expect(reader.recent_changes(types: ['graphql'])).to eq([mutation])
+    expect(reader.recent_changes(types: ['graphql_type'])).to eq([])
     expect(reader.recent_changes(types: %w[controller model model])).to eq(
       [row('Shared', 'model', '2026-04-01', author: nil), row('Shared', 'model', '2026-04-01', author: nil),
        row('Shared', 'controller', '2026-04-01'), row('Earlier', 'controller', '2026-03-01')]

@@ -73,21 +73,30 @@ RSpec.describe Woods::PublishedIndex, 'published unit types' do
       write_typed_index('routes', [{ 'identifier' => 'GET /', 'type' => 'route', 'namespace' => nil },
                                    { 'identifier' => 'config/routes.rb', 'type' => 'route_file', 'namespace' => nil }])
       allow(Woods::PublishedIndex::TypedUnitReader).to receive(:call).and_call_original
+      @reader = @index.instance_variable_get(:@reader)
+      allow(@reader).to receive(:find_family_unit).and_call_original
     end
 
+    # `route` is the route unit type, not a family alias for routes/ (#969):
+    # it lists the route only, while the unfiltered listing keeps both.
     it 'labels them without reading the units' do
       expect(@index.units(type: 'route_file'))
         .to eq([{ 'identifier' => 'config/routes.rb', 'type' => 'route_file', 'namespace' => nil }])
-      expect(@index.units(type: 'route').map { |entry| entry['type'] }).to eq(%w[route route_file])
+      expect(@index.units(type: 'route').map { |entry| entry['type'] }).to eq(%w[route])
+      expect(@index.units.map { |entry| entry['type'] }).to include('route', 'route_file')
       expect(Woods::PublishedIndex::TypedUnitReader).not_to have_received(:call)
+      expect(@reader).not_to have_received(:find_family_unit).with(anything, 'route')
     end
 
-    it 'reads the unit when the named type does not belong to the directory' do
+    # The directory read, not a `route`-typed read: a typed read would hide
+    # a route_file behind a misnamed entry instead of labelling it.
+    it 'reads the unit from its directory when the named type does not belong to the directory' do
       write_typed_index('routes', [{ 'identifier' => 'GET /', 'type' => 'model', 'namespace' => nil }])
       filename = Class.new { include Woods::FilenameUtils }.new.collision_safe_filename('GET /')
       File.write(File.join(@dir, 'routes', filename), JSON.generate('identifier' => 'GET /', 'type' => 'route'))
       expect(@index.units(type: 'route_file')).to eq([])
-      expect(Woods::PublishedIndex::TypedUnitReader).to have_received(:call).with(anything, 'GET /', 'route')
+      expect(@index.units(type: 'route').map { |entry| entry['type'] }).to eq(%w[route])
+      expect(@reader).to have_received(:find_family_unit).with('GET /', 'route').at_least(:once)
     end
   end
 
