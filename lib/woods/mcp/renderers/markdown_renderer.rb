@@ -8,6 +8,9 @@ module Woods
       # Renders MCP tool responses as pure Markdown.
       # Headers, tables, code blocks, and bullet lists — no JSON structural markers.
       class MarkdownRenderer < ToolResponseRenderer
+        # Coordinate keys {#metadata_item_summary} renders as labelled ranges.
+        COORDINATE_KEYS = %w[line end_line file_line file_end_line file_unit].freeze
+
         # ── lookup ──────────────────────────────────────────────────
 
         # @param data [Hash] Unit data from IndexReader#find_unit
@@ -488,12 +491,11 @@ module Woods
 
               lines << "**#{key}:**"
               value.each do |item|
-                if item.is_a?(Hash)
-                  summary = item.map { |k, v| "#{k}: #{v}" }.join(', ')
-                  lines << "  - #{summary}"
-                else
-                  lines << "  - #{item}"
-                end
+                lines << if item.is_a?(Hash)
+                           "  - #{metadata_item_summary(item)}"
+                         else
+                           "  - #{item}"
+                         end
               end
             when Hash
               lines << "**#{key}:** #{value.map { |k, v| "#{k}=#{v}" }.join(', ')}"
@@ -503,6 +505,46 @@ module Woods
           end
           lines << ''
           lines.join("\n")
+        end
+
+        # One metadata entry as `key: value` pairs. An entry carrying file
+        # coordinates leads with its file lines and labels the annotated
+        # `line`/`end_line` as published-source lines, so a reader never
+        # cites a published line as a file line. Nested hashes (a callback's
+        # `declaration`) are summarized the same way.
+        #
+        # @param item [Hash]
+        # @return [String]
+        def metadata_item_summary(item)
+          entry = item.transform_keys(&:to_s)
+          return entry.map { |k, v| "#{k}: #{metadata_value(v)}" }.join(', ') unless entry.key?('file_line')
+
+          pairs = entry.except(*COORDINATE_KEYS).map { |k, v| "#{k}: #{metadata_value(v)}" }
+          pairs.unshift(published_lines(entry)) if entry['line']
+          pairs.unshift(file_lines(entry))
+          pairs.join(', ')
+        end
+
+        def metadata_value(value)
+          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : value
+        end
+
+        def file_lines(entry)
+          first = entry['file_line']
+          # Null covers both a line Woods added and real code it cannot map
+          # (a library unit's secondary contributor file), so claim neither.
+          return 'file line: not mapped' unless first.is_a?(Integer)
+
+          range = line_range(first, entry['file_end_line'])
+          entry['file_unit'] ? "file lines: #{range} in #{entry['file_unit']}" : "file lines: #{range}"
+        end
+
+        def published_lines(entry)
+          "published source lines: #{line_range(entry['line'], entry['end_line'])}"
+        end
+
+        def line_range(first, last)
+          last.is_a?(Integer) && last != first ? "#{first}-#{last}" : first.to_s
         end
 
         def render_hash_as_markdown(hash)

@@ -48,6 +48,56 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
       expect(out).to include('### Dependents')
       expect(out).to include('- UserController')
     end
+
+    context 'when metadata entries carry file coordinates beside published lines' do
+      let(:metadata) do
+        {
+          'methods' => [
+            { 'name' => 'activate', 'line' => 276, 'end_line' => 280, 'file_line' => 271, 'file_end_line' => 275 },
+            { 'name' => 'archived?', 'line' => 753, 'end_line' => 753, 'file_line' => 4, 'file_end_line' => 4,
+              'file_unit' => 'Archivable' },
+            { 'name' => 'from_second_contributor', 'line' => 2, 'end_line' => 2,
+              'file_line' => nil, 'file_end_line' => nil }
+          ],
+          'callbacks' => [
+            { 'type' => 'before_save', 'method' => 'normalize',
+              'declaration' => { 'line' => 18, 'end_line' => 18, 'file_line' => 13, 'file_end_line' => 13 } }
+          ]
+        }
+      end
+
+      let(:out) { renderer.render(:lookup, { 'identifier' => 'Account', 'type' => 'model', 'metadata' => metadata }) }
+
+      it 'leads with the file range and labels the annotated range as published source' do
+        expect(out).to include('  - file lines: 271-275, published source lines: 276-280, name: activate')
+      end
+
+      it 'names the concern that owns a line inside an inlined block' do
+        expect(out).to include('  - file lines: 4 in Archivable, published source lines: 753, name: archived?')
+      end
+
+      # Null also covers real code Woods cannot map (a secondary library
+      # contributor), so the label must not claim the line is Woods' own.
+      it 'labels a line with no file line as not mapped without guessing its origin' do
+        expect(out).to include('  - file line: not mapped, published source lines: 2, name: from_second_contributor')
+        expect(out).not_to include('annotation')
+      end
+
+      it 'labels a nested declaration site instead of printing a raw hash' do
+        expect(out).to include('declaration: (file lines: 13, published source lines: 18)')
+        expect(out).not_to include('=>')
+      end
+
+      it 'never prints a bare line key for an entry that has file coordinates' do
+        expect(out).not_to match(/(?:- |, |\()line: /)
+      end
+    end
+
+    it 'leaves entries without file coordinates as plain key-value pairs' do
+      out = renderer.render(:lookup, { 'identifier' => 'X', 'type' => 'service',
+                                       'metadata' => { 'routes' => [{ 'verb' => 'GET', 'line' => 3 }] } })
+      expect(out).to include('  - verb: GET, line: 3')
+    end
   end
 
   describe '#render_trace_flow' do

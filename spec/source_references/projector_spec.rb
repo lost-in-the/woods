@@ -17,14 +17,15 @@ RSpec.describe Woods::SourceReferences::Projector do
   let(:projector) { described_class.new(source_reader: ->(_path) { original }) }
 
   it 'publishes every occurrence in byte coordinates only for identical original source' do
-    expect(projector.call(unit, references)).to eq(references.map { |record| record.except('file_path') })
+    expect(projector.call(unit, references))
+      .to eq(references.map { |record| record.except('file_path').merge('file_line' => 2) })
   end
 
   it 'preserves optional selector evidence alongside bare constant spans through annotated source mapping' do
     references.first['method'] = 'call'
     unit['source_code'] = "# header\n#{original}"
     unit['metadata']['source_line_map'] = Woods::SourceLineMap.build(original, unit['source_code'])
-    expected = references.map { |record| record.except('file_path').merge('line' => 3) }
+    expected = references.map { |record| record.except('file_path').merge('line' => 3, 'file_line' => 2) }
     expect(projector.call(unit, references)).to eq(expected)
     expect(projector.call(unit, references).last).not_to have_key('method')
   end
@@ -73,6 +74,7 @@ RSpec.describe Woods::SourceReferences::Projector do
       create_file('lib/second/ref_parts.rb', second)
       aggregate = Woods::Extractors::LibExtractor.new.extract_all.first
       data = JSON.parse(JSON.generate(aggregate.to_h))
+      data['file_path'] = 'lib/first/ref_parts.rb' # root-relative, as path normalization publishes it
       originals = { 'lib/first/ref_parts.rb' => first, 'lib/second/ref_parts.rb' => second }
       mapper = described_class.new(source_reader: ->(source_path) { originals.fetch(source_path) })
       raw = originals.keys.map do |source_path|
@@ -81,6 +83,9 @@ RSpec.describe Woods::SourceReferences::Projector do
       projected = mapper.call(data, raw.reverse)
       expect(projected.map { |record| record['line'] })
         .to eq(Woods::SourceContributors.records(data).map { |record| record['published_start_line'] + 1 })
+      # Only a reference in the unit's own file carries that file's line; one
+      # from another contributor file is located through source_contributors.
+      expect(projected.map { |record| record['file_line'] }).to eq([2, nil])
       originals['lib/second/ref_parts.rb'] = first
       expect(mapper.call(data, raw).size).to eq(1)
       data['metadata']['source_contributors'].last['source_sha256'] = '0' * 64

@@ -518,10 +518,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         'type' => 'lib', 'target' => 'ReferenceGraphTarget', 'via' => 'code_reference'
       )
       expected_references = [
-        { 'line' => 8, 'column' => 4, 'length' => 'ReferenceGraphTarget'.bytesize,
+        { 'line' => 8, 'file_line' => 3, 'column' => 4, 'length' => 'ReferenceGraphTarget'.bytesize,
           'target' => 'ReferenceGraphTarget', 'target_type' => 'lib',
           'kind' => 'constant', 'confidence' => 'verified', 'method' => 'generate' },
-        { 'line' => 9, 'column' => 10, 'length' => '::ReferenceGraphTarget'.bytesize,
+        { 'line' => 9, 'file_line' => 4, 'column' => 10, 'length' => '::ReferenceGraphTarget'.bytesize,
           'target' => 'ReferenceGraphTarget', 'target_type' => 'lib', 'kind' => 'constant', 'confidence' => 'verified',
           'method' => 'generate' }
       ]
@@ -594,7 +594,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       require 'woods/mcp/index_reader'
       reader = Woods::MCP::IndexReader.new(index)
       initial = reader.find_unit('ReferenceRefreshCaller', type: 'poro')
-      first_reference = { 'line' => 8, 'column' => 4, 'length' => 'ReferenceRefreshFirst'.bytesize,
+      first_reference = { 'line' => 8, 'file_line' => 3, 'column' => 4, 'length' => 'ReferenceRefreshFirst'.bytesize,
                           'target' => 'ReferenceRefreshFirst', 'target_type' => 'lib',
                           'kind' => 'constant', 'confidence' => 'verified', 'method' => 'call' }
       expect(initial.fetch('metadata').fetch('references')).to eq([first_reference])

@@ -125,9 +125,10 @@ The array preserves repeated reads and uses the actual typed registry target.
 Line numbers are 1-based in that unit's published `source_code`; columns are
 0-based UTF-8 byte offsets from the line start, and length is a byte count
 (including original newlines for a multiline qualified constant). Do not use
-character or UTF-16 string offsets to slice spans. Use `source_line_map` to
-translate annotated lines to the primary source, or validated
-`source_contributors` ranges for a composite library unit. Generated lines and
+character or UTF-16 string offsets to slice spans. A span in the unit's own
+file also carries `file_line`, the line in that file; otherwise use
+`source_line_map` to translate annotated lines to the primary source, or
+validated `source_contributors` ranges for a composite library unit. Generated lines and
 unproven source placement have no spans. An empty array reports no admitted,
 placeable occurrences in this bounded pass; older indexes may omit the field.
 It does not prove complete call coverage or method-level reachability.
@@ -192,11 +193,28 @@ Static, ambiguous and declaration spans share the array (#751):
 coordinates:
 
 ```json
-{"name": "set_slug", "kind": "instance", "line": 41, "end_line": 43, "visibility": "private", "owner": "Post"}
+{"name": "set_slug", "kind": "instance", "line": 41, "end_line": 43, "file_line": 36, "file_end_line": 38, "visibility": "private", "owner": "Post"}
 ```
 
+**Two line systems.** `line`/`end_line` count lines of the unit's published
+`source_code`, which carries Woods' headers and inlined concern blocks.
+`file_line`/`file_end_line` are the lines in the file a reader opens: the
+unit's own file, translated through `source_line_map`. Cite `file_line` when
+pointing at code. `file_line` is null when the line has no mapped file line:
+a line Woods added, code from a library unit's secondary contributor file
+(`source_contributors` locates it), or any line of a unit whose placement in its
+file was not proven (a slice of the file, or a file that could not be read).
+The Markdown and Claude renderers of `lookup` print these entries as
+`file lines: 36-38` first and `published source lines: 41-43` after, with
+`in <concern>` when `file_unit` is set and `file line: not mapped` when
+`file_line` is null. Entries without a `file_line` key (an index written
+before these fields, or a reference span in another file) still print `line`.
+
 A concern's methods inlined as a commented display block keep the concern as
-`owner`, with lines inside the block. Absence of the key means the table is
+`owner`, with `line` inside the block. Their `file_line` is the line in the
+concern's own file, and `file_unit` names that concern's unit; resolve its
+`file_path` to open it. `file_unit` is absent for the unit's own definitions.
+An index written before these fields has only `line`/`end_line`. Absence of the key means the table is
 unavailable (an older writer, or source that does not parse); an empty array
 means no literal definitions.
 
@@ -204,8 +222,11 @@ A model callback entry can carry `declaration` (#817), the range of the single
 call that declares it, in the same coordinates:
 
 ```json
-{"type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {}, "declaration": {"line": 3, "end_line": 3}}
+{"type": "before_save", "filter": "set_slug", "kind": "before", "conditions": {}, "declaration": {"line": 8, "end_line": 8, "file_line": 3, "file_end_line": 3}}
 ```
+
+`declaration` carries the same two line systems and, inside an inlined
+concern block, the same `file_unit`.
 
 Absence means the declaration is not a single literal-symbol macro call (a
 proc, a framework callback, metaprogramming, two declaring calls) or the writer
@@ -345,7 +366,7 @@ day boundary, so near the boundary the two can differ by up to a day.
 A `test_mapping` unit publishes `metadata.examples` (#870): the groups and
 examples of its file, read by static parsing of the published `source_code`.
 No test runs and no framework loads. Lines are 1-based in the same published
-coordinates as `metadata.methods`.
+coordinates as `metadata.methods`, with `file_line`/`file_end_line` beside them.
 
 ```json
 {"kind": "example", "name": "returns the name", "label": "User#name returns the name", "chain": ["User", "#name"], "line": 3, "end_line": 5}
