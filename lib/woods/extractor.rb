@@ -579,6 +579,7 @@ module Woods
       @package_resolver = nil
       @incremental_extractors = nil
       @source_collector = nil
+      @concern_classification = nil
       @persisted_index_stats = nil
       @graph_sha = nil
       @symlinked_root = nil
@@ -1093,6 +1094,7 @@ module Woods
       @previous_flow_index_entries = nil
       @incremental_extractors = nil
       @source_collector = nil
+      @concern_classification = nil
       @hybrid_discovery_keys = Set.new
       @active_record_names = nil
       @package_resolver = nil
@@ -1740,6 +1742,10 @@ module Woods
       ModelNameCache.model_names_regex
       ModelNameCache.short_name_map if ModelNameCache.respond_to?(:short_name_map)
       ModelNameCache.short_names_regex if ModelNameCache.respond_to?(:short_names_regex)
+
+      # One classification (and its parser) for every worker: build it before
+      # the threads start, so no two workers race to build their own.
+      concern_classification
 
       results_mutex = Mutex.new
       failures = []
@@ -3397,7 +3403,17 @@ module Woods
 
     def share_source_collector(extractor)
       extractor.collector = source_collector if extractor.respond_to?(:collector=)
+      extractor.concern_classification = concern_classification if extractor.respond_to?(:concern_classification=)
       extractor
+    end
+
+    # One concern classification per run, shared by the concern, PORO and
+    # library extractors and by module reconciliation, so every reader sees
+    # the same mixin and promoted-module sets (#996).
+    #
+    # @return [Extractors::ConcernClassification]
+    def concern_classification
+      @concern_classification ||= Extractors::ConcernClassification.new(collector: source_collector)
     end
 
     # ActiveRecord model names, needed by PoroExtractor to tell a plain class

@@ -1069,6 +1069,71 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # #996: a module is a concern when it extends ActiveSupport::Concern, or when
+  # it lives in a concerns directory. Promotion and demotion move the unit
+  # between families; incremental must land where a full extraction does.
+  describe 'modules that extend ActiveSupport::Concern outside concerns/ (#996)' do
+    def write_rule_module(relative, name, concern:)
+      Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      write_file(relative, <<~RUBY)
+        module #{name}
+          #{concern ? 'extend ::ActiveSupport::Concern' : '# extend ActiveSupport::Concern (not yet)'}
+          def rule_value; end
+        end
+      RUBY
+      load app_path(relative)
+      relative
+    end
+
+    def rule_types(index, name)
+      read_json(index, 'dependency_graph.json').fetch('type_index').select { |_type, ids| ids.include?(name) }.keys
+    end
+
+    after do
+      %i[RuledController RuledTracker RuledLibrary].each do |name|
+        Object.send(:remove_const, name) if Object.const_defined?(name, false)
+      end
+    end
+
+    { 'app/models/ruled_tracker.rb' => %w[RuledTracker poro],
+      'lib/ruled_library.rb' => %w[RuledLibrary lib] }.each do |relative, (name, plain_type)|
+      it "promotes #{relative} to a concern and demotes it back, matching full extraction each time" do
+        write_rule_module(relative, name.to_sym, concern: false)
+        index = full_extraction
+        expect(rule_types(index, name)).to eq([plain_type])
+
+        [true, false].each do |concern|
+          write_rule_module(relative, name.to_sym, concern: concern)
+          Woods::Extractor.new(output_dir: index).extract_changed([relative])
+          expect(rule_types(index, name)).to eq([concern ? 'concern' : plain_type])
+          expect(differences(index, full_extraction)).to be_empty
+        end
+      end
+    end
+
+    it "points a controller's inlined concern at the promoted concern unit, incrementally as in full" do
+      module_path = write_rule_module('app/models/ruled_tracker.rb', :RuledTracker, concern: false)
+      controller_path = write_file('app/controllers/ruled_controller.rb', <<~RUBY)
+        class RuledController < ApplicationController
+          include RuledTracker
+          def index; end
+        end
+      RUBY
+      load app_path(controller_path)
+      index = full_extraction
+
+      # A reload redefines both constants; only the module file changed.
+      write_rule_module(module_path, :RuledTracker, concern: true)
+      Object.send(:remove_const, :RuledController)
+      load app_path(controller_path)
+      Woods::Extractor.new(output_dir: index).extract_changed([module_path])
+      controller = unit_snapshot(index).values.find { |unit| unit['identifier'] == 'RuledController' }
+      expect(controller.dig('metadata', 'inlined_concerns')).to include('RuledTracker')
+      expect(rule_types(index, 'RuledTracker')).to eq(['concern'])
+      expect(differences(index, full_extraction)).to be_empty
+    end
+  end
+
   # ── Harness driver ───────────────────────────────────────────────────────
 
   # Run a cold full extraction of the current tree into a throwaway directory.

@@ -201,6 +201,13 @@ including inlined code and callback analysis. Multiple runtime mixins sharing a 
 file retain separate identities and refresh all their includers. Run a full extraction after upgrading
 to populate these previously missing source mappings.
 
+A loaded module that extends `ActiveSupport::Concern` is a concern unit wherever it
+lives (#996). Adding or removing that `extend` moves the unit between `concern` and
+`poro` (or `lib`) in an incremental run as in a full one: the changed file routes to the
+concern runtime entry point and to its path owner, and module reconciliation removes
+the unit from the family that no longer owns it. A module that is never loaded keeps
+its current type.
+
 ### GitHub Actions with an exact baseline
 
 The restored index must describe the first commit in the selected diff.
@@ -517,8 +524,8 @@ automatically.
 | `app/decorators`, `app/presenters`, `app/form_objects` | decorators |
 | `app/managers` / `app/policies` / `app/validators` | managers / policies + pundit_policies / validators |
 | `app/**/concerns/**/*.rb` | concerns |
-| `app/models/**/*.rb` (outside `concerns/`) | poros, caching; concerns when runtime model inclusion confirms a mixin |
-| `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins also dispatch to concerns |
+| `app/models/**/*.rb` (outside `concerns/`) | poros, caching; concerns when runtime model inclusion or `extend ActiveSupport::Concern` confirms a concern |
+| `app/**/*.rb`, `lib/**/*.rb` (outside `concerns/`) | runtime model mixins and loaded `ActiveSupport::Concern` modules also dispatch to concerns |
 | `app/controllers/**/*.rb` | caching |
 | `app/views/**/*.erb` | view_templates, caching |
 | `app/views/**/*.haml`, `app/views/**/*.jbuilder` | view_templates, caching |
