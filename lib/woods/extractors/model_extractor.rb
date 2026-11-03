@@ -249,7 +249,8 @@ module Woods
       # @param model [Class] The ActiveRecord model class
       # @param source [String, nil] Pre-read model source (read from disk when nil)
       # @return [Array(String, Array<String>)] The concern-inlined source and
-      #   the demodulized names of the concerns actually inlined into it.
+      #   the full names of the concerns actually inlined into it — the same
+      #   string as each concern unit's identifier and its +:include+ edge.
       #   Returning the pair keeps metadata[:inlined_concerns] truthful —
       #   it is derived from the insertion result, never recomputed
       #   independently of what the composite source carries.
@@ -265,7 +266,7 @@ module Woods
         return [source, []] if concern_sources.empty?
 
         [insert_concern_block(model, source, build_concern_block(concern_sources)),
-         concern_sources.map { |name, _code| name.demodulize }]
+         concern_sources.map(&:first)]
       end
 
       # Resolve [name, code] pairs for every concern included in the model
@@ -431,7 +432,7 @@ module Woods
       #
       # @param model [Class] The ActiveRecord model class
       # @param source [String, nil] The model source code
-      # @param inlined_concerns [Array<String>, nil] Demodulized names of the
+      # @param inlined_concerns [Array<String>, nil] Full names of the
       #   concerns actually inlined into the unit's source_code (from
       #   {#build_model_source_with_concerns}). When nil, derived by running
       #   the same inlining — the metadata must never claim a concern the

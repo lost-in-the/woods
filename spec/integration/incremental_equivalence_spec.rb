@@ -2126,6 +2126,112 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
+    it 'records a namespaced concern a model inlines by the identifier of its concern unit' do
+      load app_path(write_file('app/models/concerns/ownership_ledger/money_columns.rb', <<~RUBY))
+        module OwnershipLedger
+          module MoneyColumns
+            extend ActiveSupport::Concern
+            def rounded_amount; end
+          end
+        end
+      RUBY
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipHost)
+      load app_path(write_file('app/models/ownership_host.rb', <<~RUBY))
+        class OwnershipHost < ApplicationRecord
+          self.table_name = 'posts'
+          include OwnershipLedger::MoneyColumns
+        end
+      RUBY
+      index = full_extraction
+
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      host = Dir[File.join(payload, 'models', '*.json')]
+             .map { |path| JSON.parse(File.read(path, encoding: 'UTF-8')) }
+             .find { |doc| doc.is_a?(Hash) && doc['identifier'] == 'OwnershipHost' }
+      expect(host.dig('metadata', 'inlined_concerns')).to eq(['OwnershipLedger::MoneyColumns'])
+      expect(type_index(index).fetch('concern')).to include('OwnershipLedger::MoneyColumns')
+      expect(unit_edges(index, 'models', 'OwnershipHost'))
+        .to include(a_hash_including('target' => 'OwnershipLedger::MoneyColumns', 'via' => 'include'))
+    ensure
+      remove_constants(:OwnershipLedger)
+    end
+
+    it 'rewrites short concern names an older index recorded, then leaves the units alone on a no-op run' do
+      load app_path(write_file('app/models/concerns/ownership_ledger/money_columns.rb', <<~RUBY))
+        module OwnershipLedger
+          module MoneyColumns
+            extend ActiveSupport::Concern
+            def rounded_amount; end
+          end
+        end
+      RUBY
+      load app_path(write_file('app/controllers/concerns/ownership_gate/requires_owner.rb', <<~RUBY))
+        module OwnershipGate
+          module RequiresOwner
+            extend ActiveSupport::Concern
+            def require_owner; end
+          end
+        end
+      RUBY
+      OwnershipHost.abstract_class = true if Object.const_defined?(:OwnershipHost, false)
+      remove_constants(:OwnershipHost, :OwnershipHostsController)
+      host_path = write_file('app/models/ownership_host.rb', <<~RUBY)
+        class OwnershipHost < ApplicationRecord
+          self.table_name = 'posts'
+          include OwnershipLedger::MoneyColumns
+        end
+      RUBY
+      load app_path(host_path)
+      controller_path = write_file('app/controllers/ownership_hosts_controller.rb', <<~RUBY)
+        class OwnershipHostsController < ApplicationController
+          include OwnershipGate::RequiresOwner
+          def index; end
+        end
+      RUBY
+      load app_path(controller_path)
+      index = full_extraction
+      expected = { %w[models OwnershipHost] => ['OwnershipLedger::MoneyColumns'],
+                   %w[controllers OwnershipHostsController] => ['OwnershipGate::RequiresOwner'] }
+
+      # Write the units back the way an index from before full names was
+      # published: each entry demodulized, everything else unchanged.
+      expected.each_key do |dir, identifier|
+        path = published_unit_path(index, dir, identifier)
+        doc = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        doc['metadata']['inlined_concerns'] = doc['metadata']['inlined_concerns'].map { |name| name.split('::').last }
+        Woods::AtomicFile.write(path, JSON.generate(doc))
+      end
+      short = expected.transform_values { |names| names.map { |name| name.split('::').last } }
+      expect(inlined_concerns_of(index, expected.keys)).to eq(short)
+
+      Woods::Extractor.new(output_dir: index).extract_all
+
+      expect(inlined_concerns_of(index, expected.keys)).to eq(expected)
+      expect(Woods::Extractor.new(output_dir: index).extract_changed([host_path, controller_path])).to be_empty
+      expect(inlined_concerns_of(index, expected.keys)).to eq(expected)
+      expect(differences(index, full_extraction)).to be_empty
+    ensure
+      remove_constants(:OwnershipHostsController, :OwnershipGate, :OwnershipLedger)
+    end
+
+    # @return [String] the payload file of one published unit
+    def published_unit_path(index, dir, identifier)
+      payload = Woods::Generation.new(output_dir: index).payload_dir
+      Dir[File.join(payload, dir, '*.json')].find do |path|
+        doc = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        doc.is_a?(Hash) && doc['identifier'] == identifier
+      end
+    end
+
+    # @return [Hash{Array(String, String) => Array<String>}]
+    def inlined_concerns_of(index, keys)
+      keys.to_h do |dir, identifier|
+        doc = JSON.parse(File.read(published_unit_path(index, dir, identifier), encoding: 'UTF-8'))
+        [[dir, identifier], doc.dig('metadata', 'inlined_concerns')]
+      end
+    end
+
     it 'publishes a descendant of an application serializer base as a serializer only' do
       load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
       summary = 'app/models/ownership_summary.rb'

@@ -716,6 +716,35 @@ RSpec.describe Woods::Extractors::ModelExtractor do
       expect(extractor.warnings.first).to include('Ledger')
     end
 
+    # The recorded name is the concern unit's identifier, so includer lookups
+    # by identifier reach a namespaced concern.
+    it 'records a namespaced concern by its full name' do
+      stub_inlined_concern('Canopy::MoneyColumns', "module Canopy\n  module MoneyColumns\n  end\nend\n")
+      model = double('Model', name: 'Payouts::Earning')
+      source = "class Payouts::Earning < ApplicationRecord\nend\n"
+
+      inlined, names = extractor.send(:build_model_source_with_concerns, model, source)
+
+      expect(names).to eq(['Canopy::MoneyColumns'])
+      expect(inlined).to include('Included from: Canopy::MoneyColumns')
+    end
+
+    it 'keeps two concerns with the same short name in different namespaces distinguishable' do
+      mods = %w[Canopy::MoneyColumns Ledger::MoneyColumns].map do |name|
+        Module.new.tap do |mod|
+          allow(mod).to receive(:name).and_return(name)
+          allow(extractor).to receive(:concern_source).with(mod).and_return([name, "module #{name}\nend\n", nil])
+        end
+      end
+      allow(extractor).to receive(:extract_included_modules).and_return(mods)
+      model = double('Model', name: 'Payouts::Earning')
+      source = "class Payouts::Earning < ApplicationRecord\nend\n"
+
+      _, names = extractor.send(:build_model_source_with_concerns, model, source)
+
+      expect(names).to eq(%w[Canopy::MoneyColumns Ledger::MoneyColumns])
+    end
+
     it 'returns the source untouched with no inlined names when no concern resolves' do
       allow(extractor).to receive(:extract_included_modules).and_return([])
       model = double('Model', name: 'Plain')

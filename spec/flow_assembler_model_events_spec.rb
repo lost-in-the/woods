@@ -110,6 +110,24 @@ RSpec.describe Woods::FlowAssembler, 'model callback event entries' do
     expect(flow.steps.map { |step| step[:unit] }).to include('Taggable#normalize_tags')
   end
 
+  it 'reads a callback a namespaced inlined concern defines from the concern unit of that full name' do
+    callbacks = post_callbacks + [callback('before_save', 'round_amounts', 'before')]
+    write_unit('Post', type: 'model',
+                       metadata: { 'callbacks' => callbacks, 'inlined_concerns' => ['Canopy::MoneyColumns'] },
+                       source_code: "class Post < ApplicationRecord\n  include Canopy::MoneyColumns\nend\n")
+    write_unit('Canopy::MoneyColumns', type: 'concern', source_code: <<~RUBY)
+      module Canopy
+        module MoneyColumns
+          extend ActiveSupport::Concern
+          def round_amounts = self.amount = amount.round(2)
+        end
+      end
+    RUBY
+
+    ops = assembler.assemble('Post@create').steps.first[:operations]
+    expect(ops.find { |op| op[:method] == 'round_amounts' }).to include(defined_in: 'Canopy::MoneyColumns')
+  end
+
   it 'expands each application callback into its own step, following async hops' do
     units = assembler.assemble('Post@create').steps.map { |step| step[:unit] }
     expect(units).to eq(['Post@create', 'Post#normalize_title', 'Post#set_slug', 'Post#log_creation',
