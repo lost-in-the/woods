@@ -16,6 +16,26 @@ module Woods
           total_matches: nil, matched_lower_bound: nil }
       end
 
+      # Guidance for a deep search its scan budget stopped: how much it read,
+      # and, when nothing matched, that the empty answer proves nothing about
+      # the unread units.
+      #
+      # @param scanned [Integer] candidate unit bodies read
+      # @param candidates [Integer] candidate unit bodies queued
+      # @param matched [Integer] results returned
+      # @return [String]
+      def self.scan_budget_hint(scanned:, candidates:, matched:)
+        unread = candidates - scanned
+        read = "Deep-field scan read #{scanned} of #{candidates} candidate units before its budget stopped it; "
+        verdict = if matched.zero?
+                    "the other #{unread} were never searched, so 0 results is NOT evidence of absence. "
+                  else
+                    "matches in the #{unread} unread units are unknown. "
+                  end
+        "#{read}#{verdict}Raise WOODS_SEARCH_MAX_SCAN (a unit count, e.g. WOODS_SEARCH_MAX_SCAN=#{candidates}) " \
+          'or narrow types, exact_prefix/exact_suffix, or fields, and search again.'
+      end
+
       # Same completeness keys as {#response}, for a bounded sync report.
       # Adds +failed+ (nothing landed), which search never emits. +has_more+ is true when listed errors are fewer
       # than the total, and the total sits inside the hash like +total_matches+.

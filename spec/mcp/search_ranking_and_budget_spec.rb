@@ -100,7 +100,7 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
 
       expect(result[:results]).to eq([])
       expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget')
-      expect(result[:scan]).to eq(scanned_units: 2, candidate_units: 5)
+      expect(result[:scan]).to include(scanned_units: 2, candidate_units: 5)
     end
 
     it 'overrides the environment budget for one call' do
@@ -110,7 +110,7 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
 
       expect(identifiers(result)).to eq(['Thing4'])
       expect(result[:completeness]).to include(status: 'complete')
-      expect(result[:scan]).to eq(scanned_units: 5, candidate_units: 5)
+      expect(result[:scan]).to include(scanned_units: 5, candidate_units: 5)
     ensure
       ENV['WOODS_SEARCH_MAX_SCAN'] = original
     end
@@ -124,6 +124,93 @@ RSpec.describe 'Index search ranking and per-call scan budget' do
 
     it 'reports no scan counts for an identifier-only search' do
       expect(reader.search('Thing')).not_to have_key(:scan)
+    end
+  end
+
+  describe 'default deep-scan budget' do
+    around do |example|
+      original = ENV.delete('WOODS_SEARCH_MAX_SCAN')
+      example.run
+    ensure
+      ENV['WOODS_SEARCH_MAX_SCAN'] = original
+    end
+
+    # 620 bodies, the token only in three past the 500th: a fixed 500-file
+    # budget never reads them.
+    def publish_large_index
+      rows = Array.new(620) { |i| [format('Bulk%04d', i), [550, 580, 610].include?(i) ? 'calls rare_token_q' : 'hay'] }
+      publish_units('model', rows)
+    end
+
+    it 'searches an index larger than 500 units completely by default' do
+      publish_large_index
+
+      result = reader.search('rare_token_q', fields: %w[source_code], limit: 20)
+
+      expect(identifiers(result)).to eq(%w[Bulk0550 Bulk0580 Bulk0610])
+      expect(result[:completeness]).to include(status: 'complete', reason: 'exhausted', total_matches: 3)
+      expect(result[:scan]).to include(scanned_units: 620, candidate_units: 620, total_units: 620)
+    end
+
+    it 'stops at the default byte budget and names it' do
+      publish_large_index
+      stub_const('Woods::MCP::IndexReader::DEFAULT_SEARCH_MAX_SCAN_BYTES', 1_000)
+
+      result = reader.search('rare_token_q', fields: %w[source_code])
+
+      expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget')
+      expect(result[:scan]).to include(limit_hit: 'bytes', total_units: 620)
+      expect(result[:scan][:scanned_units]).to be < 620
+      expect(result[:scan][:scanned_bytes]).to be >= 1_000
+    end
+
+    it 'stops at the default wall-time budget and names it' do
+      publish_large_index
+      stub_const('Woods::MCP::IndexReader::DEFAULT_SEARCH_MAX_SCAN_SECONDS', 0)
+
+      result = reader.search('rare_token_q', fields: %w[source_code])
+
+      expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget')
+      expect(result[:scan]).to include(scanned_units: 0, limit_hit: 'seconds')
+    end
+
+    it 'lets WOODS_SEARCH_MAX_SCAN replace the default byte and time caps with a unit count' do
+      publish_large_index
+      stub_const('Woods::MCP::IndexReader::DEFAULT_SEARCH_MAX_SCAN_BYTES', 1_000)
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '1000'
+
+      result = reader.search('rare_token_q', fields: %w[source_code])
+
+      expect(result[:completeness]).to include(status: 'complete')
+      expect(result[:scan]).to include(scanned_units: 620, budget: { units: 1000, bytes: nil, seconds: nil })
+    end
+  end
+
+  describe 'a partial deep search' do
+    before do
+      publish_units('model', Array.new(5) { |i| ["Thing#{i}", i == 4 ? 'needle' : 'hay'] })
+    end
+
+    it 'reports scanned and total units and says zero results is not evidence of absence' do
+      original = ENV.fetch('WOODS_SEARCH_MAX_SCAN', nil)
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '2'
+      result = reader.search('needle', fields: %w[source_code])
+
+      expect(result[:results]).to eq([])
+      expect(result[:completeness]).to include(status: 'partial', reason: 'scan_budget', matched_lower_bound: 0)
+      expect(result[:scan]).to include(scanned_units: 2, candidate_units: 5, total_units: 5, limit_hit: 'units')
+      expect(result[:hint]).to include('read 2 of 5', 'NOT evidence of absence', 'WOODS_SEARCH_MAX_SCAN')
+    ensure
+      ENV['WOODS_SEARCH_MAX_SCAN'] = original
+    end
+
+    it 'says more matches may be unread when the partial page is not empty' do
+      publish_units('model', Array.new(5) { |i| ["Thing#{i}", 'needle'] })
+      result = reader.search('needle', fields: %w[source_code], max_scan: 2)
+
+      expect(identifiers(result)).to eq(%w[Thing0 Thing1])
+      expect(result[:hint]).to include('read 2 of 5', 'unread', 'WOODS_SEARCH_MAX_SCAN')
+      expect(result[:hint]).not_to include('NOT evidence of absence')
     end
   end
 end

@@ -693,6 +693,7 @@ module Woods
               completeness: search_result[:completeness]
             }
             payload[:applied_scope] = search_result[:applied_scope] if search_result[:applied_scope]
+            payload[:scan] = search_result[:scan] if search_result[:scan]
             payload[:note] = search_result[:note] if search_result[:note]
             payload[:partial] = true if search_result[:partial]
             payload[:hint] = search_result[:hint] if search_result[:hint]

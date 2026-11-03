@@ -93,5 +93,24 @@ RSpec.describe 'MCP search completeness contract' do
     ensure
       ENV['WOODS_SEARCH_MAX_SCAN'] = previous
     end
+
+    it "reports scanned and total units and that zero results is not absence at a scan cutoff in #{format}" do
+      previous = ENV.fetch('WOODS_SEARCH_MAX_SCAN', nil)
+      ENV['WOODS_SEARCH_MAX_SCAN'] = '1'
+      result = call_search(format: format, query: 'zz_absent_token', fields: ['source_code'], types: ['model'])
+
+      if format == :json
+        payload = result.dig('structuredContent', 'data')
+        expect(payload['completeness']).to include('status' => 'partial', 'reason' => 'scan_budget',
+                                                   'matched_lower_bound' => 0)
+        expect(payload['scan']).to include('scanned_units' => 1, 'total_units' => 2)
+        expect(payload['hint']).to include('NOT evidence of absence', 'WOODS_SEARCH_MAX_SCAN')
+      else
+        expect(result.dig('structuredContent', 'text'))
+          .to include('read 1 of 2', 'NOT evidence of absence', 'WOODS_SEARCH_MAX_SCAN')
+      end
+    ensure
+      ENV['WOODS_SEARCH_MAX_SCAN'] = previous
+    end
   end
 end

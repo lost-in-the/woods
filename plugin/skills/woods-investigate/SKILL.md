@@ -48,6 +48,11 @@ the gem. On supporting versions, `result_count` counts returned rows, while
 index/query domain. `result_limit` proves at least one additional match;
 `scan_budget` and `regex_timeout` leave more matches and totals unknown. Narrow
 types, literal prefix/suffix filters, or deep fields when `partial` is true.
+A `source_code`/`metadata` search stopped by `scan_budget` read only part of the
+index: zero results then is not evidence that the code is absent. Newer servers
+report `scan.scanned_units` of `scan.candidate_units` and say so in the hint;
+on any version, ask the user to raise `WOODS_SEARCH_MAX_SCAN` (a unit count)
+for the MCP server or narrow the search, and never report absence from it.
 Artifact errors have unknown completeness. Missing metadata on older servers,
 a full page, and an empty partial result never establish exhaustive absence.
 See the [search contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/MCP_SERVERS.md#search-completeness).
