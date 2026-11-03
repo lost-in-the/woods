@@ -1276,7 +1276,9 @@ Mapped tests are listed either way; the setting changes only
 never reads it, and it is not part of the configuration fingerprint, so
 changing it needs no re-extraction. An MCP server started without the host
 initializer takes it from `WOODS_REVERSE_INCLUDES_TESTS` (`1`/`true`/`yes`/`on`
-or `0`/`false`/`no`/`off`), which wins over the configuration value.
+or `0`/`false`/`no`/`off`), which wins over the configuration value. Any
+other value is ignored with a warning on stderr, and the configuration value
+applies.
 `woods_status` reports the value in use as `features.reverse_includes_tests`.
 See [dependents families](MCP_SERVERS.md#dependents-families-and-headline).
 

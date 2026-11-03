@@ -756,17 +756,23 @@ module Woods
             depth = coerce_int.call(depth)
             limit = coerce_int.call(limit)
             offset = coerce_int.call(offset)
-            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
-                                                            max_nodes: coerce_int.call(max_nodes) || 1000,
-                                                            max_edges: coerce_int.call(max_edges) || 10_000, explain: explain || false)
-            if result[:found] == false
-              result[:message] =
-                "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
-            end
-            TraversalResponse.annotate(result)
-            # Families and counts cover the whole walk, so they are taken before paging.
-            if render_key == :dependents
-              DependentFamilies.annotate(result, vias: ->(source, target) { reader.recorded_vias(source, target) })
+            # The walk and the family annotation read one generation: the
+            # mapped-test check reads edges again, and must not see a newer graph.
+            result = reader.with_pinned_generation do
+              walked = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
+                                                              max_nodes: coerce_int.call(max_nodes) || 1000,
+                                                              max_edges: coerce_int.call(max_edges) || 10_000,
+                                                              explain: explain || false)
+              if walked[:found] == false
+                walked[:message] =
+                  "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+              end
+              TraversalResponse.annotate(walked)
+              # Families and counts cover the whole walk, so they are taken before paging.
+              if render_key == :dependents
+                DependentFamilies.annotate(walked, vias: ->(source, target) { reader.recorded_vias(source, target) })
+              end
+              walked
             end
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)

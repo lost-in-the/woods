@@ -74,8 +74,11 @@ module DependentsFixture
                JSON.generate('git_sha' => 'a' * 40, 'total_units' => by_dir.values.sum(&:size),
                              'counts' => by_dir.transform_values(&:size)))
     File.write(File.join(payload, 'dependency_graph.json'), JSON.generate(graph.to_h))
-    File.write(File.join(root, 'generation.json'),
-               JSON.generate('number' => number, 'token' => "token-#{number}", 'payload' => "payloads/gen-#{number}"))
+    # Renamed into place, as the writer publishes, so a reader sees a new marker.
+    marker = File.join(root, "generation.json.#{number}.tmp")
+    File.write(marker, JSON.generate('number' => number, 'token' => "token-#{number}",
+                                     'payload' => "payloads/gen-#{number}"))
+    File.rename(marker, File.join(root, 'generation.json'))
   end
 
   # A type no reader knows stays in the graph only, as an unrecognized
@@ -140,6 +143,8 @@ RSpec.describe 'dependents families and headline' do
       %w[database_table] => 'schema', %w[migration] => 'schema', %w[database_view] => 'schema',
       %w[doc] => 'docs',
       %w[route] => 'other', %w[config_file] => 'other', %w[custom_thing] => 'other', [nil] => 'other', [] => 'other',
+      %w[scheduled_job] => 'code', %w[event] => 'code', %w[caching] => 'code',
+      %w[external_consumer] => 'schema',
       %w[model service] => 'code', %w[model test_mapping] => 'other'
     }.each do |types, family|
       it "classifies #{types.inspect} as #{family}" do
@@ -154,6 +159,27 @@ RSpec.describe 'dependents families and headline' do
         Woods.configuration.reverse_includes_tests = config
         env.nil? ? ENV.delete(described_class::ENV_KEY) : ENV[described_class::ENV_KEY] = env
         expect(described_class.include_tests?).to be(expected)
+      end
+    end
+
+    it 'gives every published unit type a family on purpose' do
+      lists = { 'code' => described_class::CODE, 'tests' => described_class::TESTS,
+                'schema' => described_class::SCHEMA, 'docs' => described_class::DOCS,
+                'other' => described_class::OTHER }
+      Woods::MCP::IndexReader::UNIT_TYPE_TO_DIR.each_key do |type|
+        named = lists.select { |_family, types| types.include?(type) }.keys
+        expect(named.size).to eq(1), "#{type} is listed under #{named.inspect}; list it under exactly one family"
+        expect(described_class.family_for([type])).to eq(named.first), type
+      end
+      expect(lists.values.flatten - Woods::MCP::IndexReader::UNIT_TYPE_TO_DIR.keys).to be_empty
+    end
+
+    it 'ignores an unrecognized environment value with a warning and keeps the configuration' do
+      ENV[described_class::ENV_KEY] = 'maybe'
+      [true, false].each do |config|
+        Woods.configuration.reverse_includes_tests = config
+        expect { expect(described_class.include_tests?).to be(config) }
+          .to output(/Ignoring WOODS_REVERSE_INCLUDES_TESTS="maybe"/).to_stderr
       end
     end
 
@@ -260,6 +286,44 @@ RSpec.describe 'dependents families and headline' do
     end
   end
 
+  describe 'one generation per answer' do
+    # A generation that publishes after the walk and before the mapped-test
+    # check must not change the answer: the spec's edge becomes a
+    # code_reference in generation 2, so reading it there would unmark it.
+    def republish_after_walk
+      reader_class = Woods::MCP::IndexReader
+      allow_any_instance_of(reader_class).to receive(:traverse_dependents).and_wrap_original do |walk, *args, **options|
+        walked = walk.call(*args, **options)
+        units = fx.fixture_units.map do |record|
+          next record unless record.identifier == 'spec/models/widget_spec.rb'
+
+          fx.unit(record.identifier, :test_mapping, [[fx::ANCHOR, :model, :code_reference]])
+        end
+        fx.publish(@root, 2, units)
+        walked
+      end
+    end
+
+    def mapped_rows(payload)
+      payload.fetch('nodes').select { |_id, entry| entry.key?('mapped_test') }.keys.sort
+    end
+
+    [false, true].each do |explain|
+      it "classifies the rows of the generation it walked, explain=#{explain}" do
+        fx.publish(@root, 1, fx.fixture_units)
+        server = Woods::MCP::Server.build(index_dir: @root, response_format: :json, warmup: false)
+        republish_after_walk
+        # The handler itself, without the per-request pin the dispatcher adds.
+        response = server.tools.fetch('dependents').call(identifier: fx::ANCHOR, depth: 1, explain: explain,
+                                                         server_context: {})
+        payload = response.structured_content.fetch(:data)
+        payload = JSON.parse(JSON.generate(payload))
+        expect(mapped_rows(payload)).to eq(fx::EXPECTED_DIRECT_MAPPED_TESTS)
+        expect(payload.dig('dependent_counts', 'mapped_tests')).to eq(1)
+      end
+    end
+  end
+
   describe 'rendering' do
     before { fx.publish(@root, 1, fx.fixture_units) }
 
@@ -352,36 +416,57 @@ RSpec.describe 'dependents families and headline' do
   end
 
   describe 'hub cost', :perf do
-    # Report only (no threshold): what classifying adds to one call over a hub.
-    it 'measures the per-query cost of families on a hub-sized traversal' do
-      hub = [fx.unit('Hub', :model)]
+    def median_ms(samples)
+      samples.sort[samples.size / 2] * 1000
+    end
+
+    def timed
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      yield
+      Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+    end
+
+    # 4000 direct dependents, a third of them mapped specs; every code caller
+    # has its own mapped spec one hop further out.
+    def hub_units
       dependents = Array.new(4000) do |i|
         if (i % 3).zero?
-          fx.unit("spec/models/hub_#{i}_spec.rb", :test_mapping, [['Hub', :model, :test_coverage]])
+          [fx.unit("spec/models/hub_#{i}_spec.rb", :test_mapping, [['Hub', :model, :test_coverage]])]
         else
-          fx.unit("HubCaller#{i}", :service, [['Hub', :model, :code_reference]])
+          [fx.unit("HubCaller#{i}", :service, [['Hub', :model, :code_reference]]),
+           fx.unit("spec/services/hub_caller_#{i}_spec.rb", :test_mapping,
+                   [["HubCaller#{i}", :service, :test_coverage]])]
         end
       end
-      fx.publish(@root, 1, hub + dependents)
+      [fx.unit('Hub', :model)] + dependents.flatten
+    end
+
+    # Report only (no threshold): what classifying adds to one call over a hub.
+    it 'measures the per-query cost of families on a hub-sized traversal' do
+      fx.publish(@root, 1, hub_units)
       server = Woods::MCP::Server.build(index_dir: @root, response_format: :markdown, warmup: false)
-      arguments = { identifier: 'Hub', depth: 1, max_nodes: 10_000 }
-      request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call',
-                              params: { name: 'dependents', arguments: arguments })
-      server.handle_json(request)
-      timings = Array.new(5) do
-        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      [{ depth: 1, max_nodes: 10_000 }, { depth: 2, max_nodes: 1000 }, { depth: 2, max_nodes: 10_000 }].each do |walk|
+        request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call',
+                                params: { name: 'dependents', arguments: { identifier: 'Hub', **walk } })
         server.handle_json(request)
-        Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
-      end
-      classify = Array.new(5) do
+        calls = Array.new(5) { timed { server.handle_json(request) } }
+        # Cold: the first classification after a generation loads also
+        # normalizes its forward edges, once. Warm: every later query.
         reader = Woods::MCP::IndexReader.new(@root)
-        result = reader.traverse_dependents('Hub', depth: 1, max_nodes: 10_000)
-        started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        Woods::MCP::DependentFamilies.annotate(result, vias: reader.method(:recorded_vias), include_tests: false)
-        Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+        rows = reader.traverse_dependents('Hub', **walk).fetch(:nodes).size - 1
+        cold = timed do
+          Woods::MCP::DependentFamilies.annotate(reader.traverse_dependents('Hub', **walk),
+                                                 vias: reader.method(:recorded_vias))
+        end
+        classify = Array.new(5) do
+          result = reader.traverse_dependents('Hub', **walk)
+          timed { Woods::MCP::DependentFamilies.annotate(result, vias: reader.method(:recorded_vias)) }
+        end
+        warn format('dependents hub %<walk>s: %<rows>d rows, call median %<call>.1f ms, ' \
+                    'classify median %<classify>.1f ms (first after load %<cold>.1f ms)',
+                    walk: walk.inspect, rows: rows, call: median_ms(calls), classify: median_ms(classify),
+                    cold: cold * 1000)
       end
-      warn format('dependents hub (4000 rows): call median %<call>.1f ms, classify median %<classify>.1f ms',
-                  call: timings.sort[2] * 1000, classify: classify.sort[2] * 1000)
     end
   end
 end

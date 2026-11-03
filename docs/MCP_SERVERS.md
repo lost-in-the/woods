@@ -554,11 +554,11 @@ published unit type, never by path:
 
 | Family | Unit types |
 |---|---|
-| `code` | application code: models, controllers, concerns, services, jobs, mailers, views, components, GraphQL, POROs, lib and similar |
+| `code` | application code: models, controllers, concerns, services, jobs, mailers, views, components, GraphQL, POROs, lib and similar, plus `scheduled_job`, `event` and `caching` (declared at code sites) |
 | `tests` | `test_mapping`, `test_support`, `factory` |
-| `schema` | `database_table`, `database_view`, `migration` |
+| `schema` | `database_table`, `database_view`, `migration`, `external_consumer` |
 | `docs` | `doc`, including agent instruction files such as `AGENTS.md` and `CLAUDE.md` |
-| `other` | everything else (routes, configuration, framework source), any type this list does not name, and an identifier whose types fall in different families |
+| `other` | `route`, `route_file`, `i18n`, `configuration`, `config_file`, `engine`, `package`, `rails_source`, `gem_source`; also any type this list does not name, and an identifier whose types fall in different families |
 
 Each row carries `family`. A **mapped test** is a `test_mapping` row whose
 recorded edge to the row it was reached from is `test_coverage`: a static

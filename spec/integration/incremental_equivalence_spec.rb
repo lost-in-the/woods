@@ -1254,9 +1254,6 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     @scratch_dirs = []
   end
 
-  # Annotated source_code shifts lines away from the file; the map back to the
-  # file is recorded while the absolute path is still readable, on the full
-  # path's normalization phase and on each incremental write.
   # `dependents` families and headline: the setting is read at query time
   # only, so the graph cannot depend on it, and what a client is shown must
   # match after full and incremental extraction alike.
@@ -1372,6 +1369,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
+  # Annotated source_code shifts lines away from the file; the map back to the
+  # file is recorded while the absolute path is still readable, on the full
+  # path's normalization phase and on each incremental write.
   describe 'source line maps' do
     def line_map(dir, identifier)
       payload = Woods::Generation.new(output_dir: dir).payload_dir

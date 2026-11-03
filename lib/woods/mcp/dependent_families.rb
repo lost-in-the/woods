@@ -21,16 +21,23 @@ module Woods
       FAMILIES = %w[code tests schema docs other].freeze
 
       TESTS = %w[test_mapping test_support factory].freeze
-      SCHEMA = %w[database_table database_view migration].freeze
+      # The database and what reads it from outside, as DependencyGraph's
+      # schema unit types are.
+      SCHEMA = %w[database_table database_view migration external_consumer].freeze
       DOCS = %w[doc].freeze
-      # Application code a change can reach. A type outside every list,
-      # including a missing type, is `other`.
+      # Application code a change can reach: classes, templates and the code
+      # sites a schedule entry, event or cache key is declared at.
       CODE = %w[
         model controller concern service job mailer serializer manager policy pundit_policy validator decorator
         component view_component view_template middleware action_cable_channel state_machine rake_task
         graphql_type graphql_mutation graphql_resolver graphql_query graphql_operation
         poro lib js_module ruby_class ruby_module ruby_method ruby_file
+        scheduled_job event caching
       ].freeze
+      # Published types that are deliberately `other`: routing, configuration,
+      # packaging and framework source. A type in no list (a missing type, or
+      # one a newer writer added) is `other` too.
+      OTHER = %w[route route_file i18n configuration config_file engine package rails_source gem_source].freeze
 
       MAPPED_TEST_TYPE = 'test_mapping'
       MAPPED_TEST_VIA = 'test_coverage'
@@ -39,6 +46,8 @@ module Woods
       MAPPED_TEST_RELATIONSHIP = { via: MAPPED_TEST_VIA, direction: 'test_to_subject' }.freeze
 
       ENV_KEY = 'WOODS_REVERSE_INCLUDES_TESTS'
+      TRUE_VALUES = %w[1 true yes on].freeze
+      FALSE_VALUES = %w[0 false no off].freeze
 
       class << self
         # Whether mapped tests count toward the `dependents` headline. An MCP
@@ -48,8 +57,8 @@ module Woods
         #
         # @return [Boolean]
         def include_tests?
-          override = ENV[ENV_KEY].to_s.strip.downcase
-          return %w[1 true yes on].include?(override) unless override.empty?
+          override = env_override
+          return override unless override.nil?
 
           config = Woods.configuration if Woods.respond_to?(:configuration)
           config.respond_to?(:reverse_includes_tests) && config.reverse_includes_tests == true
@@ -97,6 +106,20 @@ module Woods
         end
 
         private
+
+        # @return [Boolean, nil] the environment's answer; nil when unset,
+        #   empty or unrecognized (which warns and leaves the configuration in charge)
+        def env_override
+          raw = ENV.fetch(ENV_KEY, nil)
+          value = raw.to_s.strip.downcase
+          return if value.empty?
+          return true if TRUE_VALUES.include?(value)
+          return false if FALSE_VALUES.include?(value)
+
+          warn "[woods] Ignoring #{ENV_KEY}=#{raw.inspect}: expected one of " \
+               "#{(TRUE_VALUES + FALSE_VALUES).join(', ')}; using config.reverse_includes_tests."
+          nil
+        end
 
         def type_family(type)
           return 'code' if CODE.include?(type)
