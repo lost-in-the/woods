@@ -36,6 +36,11 @@ bin/rake 'woods:self_impact[lib/woods/store.rb lib/woods/runner.rb]'
 
 The task prints the completed report directory. Read `impact.md` for a bounded
 summary and `impact.json` for all recorded results within traversal budgets.
+
+Affected rows are capped at 20 per endpoint in Markdown, but the suggested-spec
+list has no independent Markdown cap. High-fanout reports may still be large;
+the JSON retains the full list within the traversal budgets.
+
 Paths come from the argument, then `CHANGED_FILES` (shell-style quoted paths),
 then the local diff against the merge base with `origin/main`, including
 uncommitted and untracked work. Without a local base, only uncommitted paths are
@@ -49,6 +54,13 @@ JSON. File-level reports do not establish exact method-call coverage. Suggested
 specs may be opt-in or require services: inspect their metadata and the required
 lanes in CONTRIBUTING.md. `woods:affected_specs` remains available with its
 existing newline-separated spec output.
+
+Changed reopened definitions seed both their recorded occurrence and an existing
+canonical identity of the same type, so consumers of the canonical class/module
+remain reachable. Modules containing only `include` or `extend` are meaningful
+definitions; pure namespace wrappers remain excluded from definition seeds.
+Retained maps with an older, incorrect wrapper flag can still seed a module
+when its published graph records an `include` or `extend` relationship.
 
 ### Deletions and an explicit baseline
 
@@ -75,9 +87,9 @@ reference-only constant and literal-require relationships; its bodies and test
 classes are not published as production units. Comments and plain strings do
 not create constant references. Literal load-path requires consider existing
 `lib/` and `spec/` candidates, including `require "spec_helper"`; if both exist,
-both remain candidates rather than a claim about runtime load-path order. A literal tree-glob read can conservatively
-reference the whole library. Dynamic requires and unresolved dispatch remain
-outside exhaustive coverage.
+both remain candidates rather than a claim about runtime load-path order. A
+literal tree-glob read can conservatively reference the whole library. Dynamic
+requires and unresolved dispatch remain outside exhaustive coverage.
 
 The self-map manifest's optional `self_map` object records per-file states
 (`parsed`, `reference_only`, `parse_failed`), source hashes, parser identity and

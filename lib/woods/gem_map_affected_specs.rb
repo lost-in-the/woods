@@ -121,7 +121,8 @@ module Woods
 
     def wrapper?(listed, unit)
       listed['type'] == 'ruby_module' && unit &&
-        unit.dig('metadata', 'method_count').to_i.zero? && Array(unit.dig('metadata', 'constants')).empty?
+        unit.dig('metadata', 'method_count').to_i.zero? &&
+        %w[constants includes extends].all? { |key| Array(unit.dig('metadata', key)).empty? }
     end
 
     def owner_of(identifier)

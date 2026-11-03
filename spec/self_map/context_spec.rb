@@ -43,6 +43,58 @@ RSpec.describe Woods::SelfMap::Task do
     expect(report.dig('coverage', 'baseline')).to eq('unavailable')
   end
 
+  it 'seeds a constant-only reopening canonically while retaining its occurrence' do
+    write('lib/woods/target.rb', 'module Example; class Target; end; end')
+    write('lib/woods/target_constants.rb', 'module Example; class Target; VALUE = :changed; end; end')
+    write('lib/woods/target_consumer.rb',
+          'module Example; class TargetConsumer; def call; Target.new; end; end; end')
+    write('spec/target_consumer_spec.rb', 'RSpec.describe Example::TargetConsumer do; end')
+
+    result = task.impact(paths: ['lib/woods/target_constants.rb'])
+    report = JSON.parse(File.read(File.join(result, 'impact.json')))
+    expect(report['suggested_specs']).to include('spec/target_consumer_spec.rb')
+    expect(report['endpoints'].first['seeds']).to include(
+      ['Example::Target', 'ruby_class'],
+      ['Example::Target [lib/woods/target_constants.rb]', 'ruby_class']
+    )
+  end
+
+  %w[include extend].each do |operation|
+    it "reaches a consumer and its spec from a module containing only #{operation}" do
+      write('lib/woods/feature.rb', 'module Example; module Feature; end; end')
+      write('lib/woods/mixins_only.rb', "module Example; module MixinsOnly; #{operation} Feature; end; end")
+      write('lib/woods/mixin_consumer.rb', 'module Example; class MixinConsumer; include MixinsOnly; end; end')
+      write('spec/mixin_consumer_spec.rb', 'RSpec.describe Example::MixinConsumer do; end')
+
+      result = task.impact(paths: ['lib/woods/mixins_only.rb'])
+      report = JSON.parse(File.read(File.join(result, 'impact.json')))
+      expect(report['suggested_specs']).to include('spec/mixin_consumer_spec.rb')
+      expect(report['endpoints'].first['seeds']).to include(['Example::MixinsOnly', 'ruby_module'])
+      expect(report['endpoints'].first['seeds']).not_to include(%w[Example ruby_module])
+    end
+  end
+
+  it 'recognizes mixin evidence in a retained baseline with the old wrapper flag' do
+    write('lib/woods/mixins_only.rb', 'module Example; module MixinsOnly; include Enumerable; end; end')
+    write('lib/woods/mixin_consumer.rb', 'module Example; class MixinConsumer; include MixinsOnly; end; end')
+    write('spec/mixin_consumer_spec.rb', 'RSpec.describe Example::MixinConsumer do; end')
+    task.docs
+    # Manufacture the previous writer's index flag while retaining its real
+    # include relationship. The fixture is disposable, not a repository index.
+    Woods::PublishedIndex.open(@index) do |index|
+      path = index.payload_dir.join('ruby_modules/_index.json')
+      rows = JSON.parse(File.read(path))
+      rows.find { |row| row['identifier'] == 'Example::MixinsOnly' }['definition'] = false
+      File.write(path, JSON.generate(rows))
+    end
+    File.delete(@root.join('lib/woods/mixins_only.rb'))
+
+    result = task.impact(paths: ['lib/woods/mixins_only.rb'], base_generation: 1)
+    report = JSON.parse(File.read(File.join(result, 'impact.json')))
+    expect(report['suggested_specs']).to include('spec/mixin_consumer_spec.rb')
+    expect(report['endpoints'].last['seeds']).to include(['Example::MixinsOnly', 'ruby_module'])
+  end
+
   it 'uses an explicit old generation for deletions and refuses missing baselines' do
     task.docs
     File.delete(@root.join('lib/woods/store.rb'))

@@ -97,3 +97,26 @@ The final runtime/mount/permissions setup resolved those failures; no unrelated
 production fix or dependency lock change was made. Booted Rails, live backends,
 other Ruby rows and hosted CI remain separate, unrun lanes for this source-only
 workflow. Runtime execution coverage and agent ablation remain future work.
+
+## Review corrections: definition seeds
+
+The constant-only reopening fixture and include/extend-only module fixtures
+reproduced five misses across the context report and existing spec selector.
+Reopenings now seed an existing canonical identity of the same type alongside
+their occurrence. Mixin-only modules count as definitions in both selectors;
+pure namespace wrappers remain excluded. The fixtures reach consumer specs
+without a direct require masking the relationship.
+
+An additional deletion fixture reproduced the same module miss in a retained
+baseline whose old index still marked that module as a wrapper. Existing
+published include/extend edges now supply the evidence for selecting that seed,
+without modifying the retained payload or decoding all source bodies.
+
+Final revalidation: 36 focused examples and five real self-map accuracy examples
+passed. `script/ci-local --skip-booted` passed inventory verification, lint,
+retrieval quality and 17,396 default-suite examples (zero failures, two allowed
+pending); line coverage 94.27%, branch coverage 83.19%. Other runtime/booted lanes
+remain separate. Markdown's suggested-spec list remains independently uncapped
+and is now documented explicitly. Historical-change and paired-agent outcome
+comparisons remain follow-up work; these regressions establish the named seed
+cases, not exhaustive impact recall or agent/context-efficiency improvements.

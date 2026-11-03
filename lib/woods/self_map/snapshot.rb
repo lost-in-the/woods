@@ -35,9 +35,26 @@ module Woods
           when 'ruby_file' then [identity(entry)]
           when 'ruby_method' then owners(entry).map { |owner| identity(owner) }
           else
-            entry['definition'] == false ? [] : [identity(entry)]
+            definition_seeds(entry)
           end
         end.uniq.sort
+      end
+
+      # Reopenings retain their occurrence identity, but consumers name the
+      # canonical definition. Seed both only when that typed identity exists.
+      def definition_seeds(entry)
+        return [] if entry['definition'] == false && !mixin_definition?(entry)
+
+        canonical = @owners.fetch(entry['canonical_identifier'], []).select { |owner| owner['type'] == entry['type'] }
+        [identity(entry)] + canonical.map { |owner| identity(owner) }
+      end
+
+      # Older retained maps misclassified mixin-only modules. Their published
+      # relationship is still usable without decoding or rewriting source units.
+      def mixin_definition?(entry)
+        Array(graph.fetch('edges', {})[entry['identifier']]).any? do |edge|
+          edge.is_a?(Hash) && %w[include extend].include?(edge['via'])
+        end
       end
 
       def owners(method)

@@ -316,7 +316,8 @@ module Woods
 
     def own_definition?(unit)
       unit.type == :ruby_class || (unit.type == :ruby_module &&
-        (unit.metadata[:method_count].to_i.positive? || Array(unit.metadata[:constants]).any?))
+        (unit.metadata[:method_count].to_i.positive? ||
+         %i[constants includes extends].any? { |key| Array(unit.metadata[key]).any? }))
     end
 
     def write_graph

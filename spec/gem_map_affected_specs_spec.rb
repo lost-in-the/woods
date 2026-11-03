@@ -94,6 +94,16 @@ RSpec.describe Woods::GemMapAffectedSpecs do
     expect(affected('spec/support/store_helper.rb')).to eq(['spec/using_helper_spec.rb'])
   end
 
+  %w[include extend].each do |operation|
+    it "treats a module containing only #{operation} as a definition, not a namespace wrapper" do
+      write('lib/woods/mixins_only.rb', "module Woods; module MixinsOnly; #{operation} Enumerable; end; end")
+      write('lib/woods/mixin_consumer.rb', 'module Woods; class MixinConsumer; include MixinsOnly; end; end')
+      write('spec/mixin_consumer_spec.rb', 'RSpec.describe Woods::MixinConsumer do; end')
+
+      expect(affected('lib/woods/mixins_only.rb')).to eq(['spec/mixin_consumer_spec.rb'])
+    end
+  end
+
   it 'publishes parse failures even when a broken file still has a file unit' do
     write('lib/woods/broken.rb', 'class Broken; def run(')
     output = @root.join('map')
