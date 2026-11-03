@@ -87,4 +87,17 @@ if ENV['MCP_PROTOCOL_VERSION'] && !ENV['MCP_PROTOCOL_VERSION'].empty?
   warn "Pinning MCP protocol version to #{ENV.fetch('MCP_PROTOCOL_VERSION')} (unset it to negotiate)."
 end
 
-exec(File.expand_path('woods-mcp', __dir__), index_dir)
+# Hand over to woods-mcp under this same Ruby. Execing the script path would
+# go through its `#!/usr/bin/env ruby` line, which can pick another Ruby off
+# PATH, and a fresh interpreter forgets any `-I` this launcher was started
+# with (`ruby -I <checkout>/lib exe/woods-mcp-start`): a plain `require
+# 'woods/...'` would then activate an installed Woods gem instead. Woods' own
+# lib is carried forward through RUBYLIB, which keeps other entries and, unlike
+# RUBYOPT, takes paths that contain spaces.
+woods_lib = File.expand_path('../lib', __dir__)
+if $LOAD_PATH.any? { |entry| File.expand_path(entry.to_s) == woods_lib }
+  rubylib = ENV.fetch('RUBYLIB', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  ENV['RUBYLIB'] = [woods_lib, *rubylib].join(File::PATH_SEPARATOR) unless rubylib.include?(woods_lib)
+end
+
+exec(Gem.ruby, File.expand_path('woods-mcp', __dir__), index_dir)
