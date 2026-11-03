@@ -129,8 +129,11 @@ RSpec.describe 'plugin hooks (#280)' do
         text = File.read(script)
         next unless text.include?('timer=$!')
 
-        expect(text).not_to match(/kill -(?:TERM|INT|HUP)\b[^\n]*"-?\$timer"/), File.basename(script)
-        expect(text).to match(/kill -KILL -- "-\$timer"/), File.basename(script)
+        timer_kills = text.each_line.grep(/\bkill\b.*\$timer/)
+        expect(timer_kills).not_to be_empty, File.basename(script)
+        timer_kills.each do |line|
+          expect(line).to match(/kill -KILL -- "-\$timer"/), "#{File.basename(script)}: #{line.strip}"
+        end
       end
     end
   end

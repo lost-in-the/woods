@@ -187,6 +187,9 @@ run_batch() {
   set -m
   ( exec 8>&-; cd "$cwd" || exit 1; exec $rake "woods:hook_refresh[$encoded]" ) >>"$log" 2>&1 &
   runner=$!
+  # The runner may get TERM (a chance to shut down cleanly) because the timer
+  # sends it no sooner than a second after the fork, long after the runner has
+  # shed the hook's inherited traps. The timer itself is stopped with KILL.
   ( exec 8>&-; sleep "$remaining"; kill -TERM -- "-$runner" 2>/dev/null; sleep 1; kill -KILL -- "-$runner" 2>/dev/null ) >/dev/null 2>&1 &
   timer=$!
   # Not a tracked job: bash prints "Terminated" for a tracked job it reaps
