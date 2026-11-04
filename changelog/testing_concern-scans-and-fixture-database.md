@@ -1,0 +1,1 @@
+- Bound concern callback/validation scans to whole identifiers, and keep the source-input fixture database and SQLite sidecars under its excluded temporary directory.

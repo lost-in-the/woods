@@ -434,7 +434,7 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<String>] Callback names
       def detect_callbacks(source)
-        source.scan(/(before_\w+|after_\w+|around_\w+)\s/).flatten.uniq
+        source.scan(/\b((?:before_|after_|around_)\w++)\s/).flatten.uniq
       end
 
       # Detect scope declarations.
@@ -450,7 +450,7 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<String>] Validation types
       def detect_validations(source)
-        source.scan(/(validates?(?:_\w+)?)\s/).flatten.uniq
+        source.scan(/\b(validates?(?:_\w++)?)\s/).flatten.uniq
       end
 
       # ──────────────────────────────────────────────────────────────────────
