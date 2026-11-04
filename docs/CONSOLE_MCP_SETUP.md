@@ -395,11 +395,21 @@ servers register only executable tools: the 9 Tier 1 tools by default, plus
 | `console_schema` | Column types, nullability, defaults; optionally includes indexes |
 | `console_count` | Record count matching scope conditions |
 | `console_sample` | Random sample of records (max 25) |
-| `console_find` | Find a record by primary key or unique column |
+| `console_find` | Find a record by primary key or unique column. Pass exactly one of `id` or a non-empty `by` |
 | `console_pluck` | Extract column values with optional distinct (max 1000 rows) |
-| `console_aggregate` | Run `sum`, `average`, `minimum`, `maximum`, or `count` on a column (column optional for `count`) |
+| `console_aggregate` | Run `sum`, `average`, `minimum`, `maximum`, or `count` on a column. `column` is required except for `count` |
 | `console_association_count` | Count associated records for a specific record |
 | `console_recent` | Recently created/updated records (max 50) |
+
+**Cross-argument rules.** Those two rules span more than one argument. The
+schema each tool serves in `tools/list` has no top-level `oneOf`, `anyOf` or
+`allOf`, because some MCP clients reject or mishandle a tool schema with one
+at its root. The tool descriptions state the rules instead, and the Console
+still refuses a call that breaks one, using the full schema, before any query
+runs. That refusal is a tool error whose text starts with `Invalid arguments:`
+and ends with a `Hint:` line. Its `_meta` carries `error_code`
+(`invalid_locator` or `column_required`), `tool`, `argument` (`id|by` or
+`column`) and `hint`.
 
 **Included in Woods 2.1:** `console_association_count` returns `0` or `1` for
 `belongs_to` and `has_one`, including missing targets. It counts the association's
