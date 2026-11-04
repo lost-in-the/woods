@@ -37,9 +37,9 @@ module Woods
       merge_base, _error, status = Open3.capture3(*GitCommand.argv(root, 'merge-base', base, 'HEAD'))
       # Without the base fetched, the uncommitted work is all that is known.
       since = status.success? ? merge_base.strip : 'HEAD'
-      committed, = Open3.capture2(*GitCommand.argv(root, 'diff', '--name-only', since))
-      untracked, = Open3.capture2(*GitCommand.argv(root, 'ls-files', '--others', '--exclude-standard'))
-      (committed.lines + untracked.lines).map(&:strip).reject(&:empty?).uniq.sort
+      committed, = Open3.capture2(*GitCommand.argv(root, 'diff', '--name-only', '-z', since))
+      untracked, = Open3.capture2(*GitCommand.argv(root, 'ls-files', '-z', '--others', '--exclude-standard'))
+      (committed.split("\0") + untracked.split("\0")).reject(&:empty?).uniq.sort
     end
 
     # @param index [PublishedIndex] an open self-map generation
@@ -72,7 +72,7 @@ module Woods
 
         next_frontier = []
         frontier.flat_map { |identifier| @index.dependents_of(identifier) }.each do |dependent|
-          if dependent.start_with?(SPEC_PREFIX)
+          if spec_file?(dependent)
             specs.add(dependent.delete_prefix('file:'))
             next
           end
@@ -84,6 +84,10 @@ module Woods
         end
         frontier = next_frontier
       end
+    end
+
+    def spec_file?(identifier)
+      identifier.start_with?(SPEC_PREFIX) && identifier.end_with?('_spec.rb')
     end
 
     # Each changed file's own unit, plus the constants it defines. A module
@@ -117,7 +121,8 @@ module Woods
 
     def wrapper?(listed, unit)
       listed['type'] == 'ruby_module' && unit &&
-        unit.dig('metadata', 'method_count').to_i.zero? && Array(unit.dig('metadata', 'constants')).empty?
+        unit.dig('metadata', 'method_count').to_i.zero? &&
+        %w[constants includes extends].all? { |key| Array(unit.dig('metadata', key)).empty? }
     end
 
     def owner_of(identifier)
