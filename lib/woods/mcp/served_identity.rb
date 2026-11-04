@@ -86,6 +86,33 @@ module Woods
           nil
         end
 
+        # Files that mark a Rails application root. `config.ru` is the flag
+        # Rails itself looks for; `config/application.rb` is the file every
+        # generated application has.
+        APP_ROOT_MARKERS = %w[config.ru config/application.rb].freeze
+
+        # The application that owns +path+: the nearest ancestor holding an
+        # application-root marker. The walk never leaves the checkout that
+        # contains +path+ ({.checkout_root}), so it cannot settle on another
+        # repository above it; outside any checkout it still stops at the
+        # first application root. It reads only the file system and runs no
+        # `git` process.
+        #
+        # @param path [String, nil] usually a served index directory
+        # @return [String, nil] real path
+        def app_root(path)
+          return unless path.is_a?(String) && !path.empty? && File.directory?(path)
+
+          boundary = checkout_root(path)
+          Pathname.new(File.realpath(path)).ascend do |dir|
+            return dir.to_s if APP_ROOT_MARKERS.any? { |marker| File.file?(dir.join(marker)) }
+            return nil if boundary && dir.to_s == boundary
+          end
+          nil
+        rescue SystemCallError
+          nil
+        end
+
         # The branch checked out in +checkout+, read from its HEAD file.
         #
         # @param checkout [String, nil]

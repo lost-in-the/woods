@@ -13,6 +13,7 @@ require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
 require_relative '../resilience/incremental_readiness'
 require_relative 'search_results'
+require_relative 'served_identity'
 require_relative '../retrieval/scope'
 require_relative '../retrieval/scope_corpus'
 require_relative 'traversal_evidence'
@@ -405,12 +406,25 @@ module Woods
         current_payload_dir
       end
 
+      # Environment variable naming the source root to verify against,
+      # overriding both the recorded root and the re-resolved one.
+      SOURCE_ROOT_ENV = 'WOODS_SOURCE_ROOT'
+
       # Verify the immutable payload this reader is actually serving. Do not
       # cache source results: an edit can occur without an index generation move.
+      #
+      # The source root is +WOODS_SOURCE_ROOT+ when set. Otherwise it is the
+      # root the index recorded, or, when that path is not reachable here (a
+      # checkout served under another path), the application that owns the
+      # served index directory ({ServedIdentity.app_root}). A re-resolved root
+      # counts only on an identity tie ({SourceInputs::RelocatedRoot}).
       def source_freshness(mode: 'quick')
+        explicit = ENV.fetch(SOURCE_ROOT_ENV, '').to_s
+        explicit = nil if explicit.strip.empty?
         with_pinned_generation do
           SourceInputs::Status.new(output_dir: @index_dir, payload_dir: current_payload_dir,
-                                   generation: @payload_dir ? @loaded_generation : 0, mode: mode).call
+                                   generation: @payload_dir ? @loaded_generation : 0, mode: mode, root: explicit,
+                                   relocated_root: explicit ? nil : ServedIdentity.app_root(@index_dir.to_s)).call
         end
       end
 
