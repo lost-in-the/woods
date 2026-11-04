@@ -10,6 +10,7 @@ require_relative 'constant_paths'
 require_relative 'config_source_guard'
 require_relative 'comment_blanking'
 require_relative 'concern_classification'
+require_relative 'concern_source'
 
 module Woods
   module Extractors
@@ -77,6 +78,11 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
       def extract_concern_file(file_path, module_name: nil)
         source = SourceFile.read(file_path)
+        published = source
+        if module_name
+          source = ConcernSource.new(source).for_owner(module_name)
+          return nil unless source
+        end
         # Runtime discovery supplies each included module's identity. Ordinary
         # concern files retain their canonical identity, including nested helpers.
         module_name ||= extract_module_name(file_path, source)
@@ -93,8 +99,8 @@ module Woods
         )
 
         unit.namespace = extract_namespace(module_name)
-        unit.source_code = annotate_source(published_source(file_path, source), module_name,
-                                           active_support_concern?(code, module_name))
+        unit.source_code = annotate_source(published_source(file_path, published), module_name,
+                                           active_support_concern?(code, module_name), method_source: source)
         unit.metadata = extract_metadata(source, file_path, active_support_concern?(code, module_name))
         unit.dependencies = extract_dependencies(source, module_name)
 
@@ -316,9 +322,9 @@ module Woods
       # @param module_name [String] The concern module name
       # @param active_support [Boolean] whether the module extends ActiveSupport::Concern
       # @return [String] Annotated source
-      def annotate_source(source, module_name, active_support)
+      def annotate_source(source, module_name, active_support, method_source: source)
         concern_type = detect_concern_type(active_support)
-        instance_methods = extract_instance_method_names(source)
+        instance_methods = extract_instance_method_names(method_source)
 
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -348,7 +354,7 @@ module Woods
           has_class_methods_block: source.match?(/class_methods\s+do/) || false,
           included_modules: detect_included_modules(source),
           instance_methods: extract_instance_method_names(source),
-          class_methods: extract_class_methods(source),
+          class_methods: (extract_class_methods(source) + ConcernSource.new(source).class_methods).uniq,
           public_methods: extract_public_methods(source),
           callbacks_defined: detect_callbacks(source),
           scopes_defined: detect_scopes(source),

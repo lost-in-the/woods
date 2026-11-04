@@ -881,6 +881,8 @@ excluded). They never decide the unit type.
 **Key details:**
 - Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
+- For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
+- Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked
 - Note: concerns are *also* inlined into model/controller source by ModelExtractor and ControllerExtractor. ConcernExtractor produces standalone units for direct lookup
 

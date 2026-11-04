@@ -108,6 +108,59 @@ RSpec.describe Woods::Extractors::ConcernClassification do
     end
   end
 
+  describe 'declaration ownership' do
+    it 'retains reopened declarations and byte positions while refusing an unknown owner' do
+      source = <<~RUBY
+        # café
+        module ConcernRuleFixture::Promoted; def first; end; end
+        module ConcernRuleFixture::Sibling; def sibling; end; end
+        module ConcernRuleFixture::Promoted; def second; end; end
+      RUBY
+      selected = Woods::Extractors::ConcernSource.new(source).for_owner('ConcernRuleFixture::Promoted')
+
+      expect(selected.bytesize).to eq(source.bytesize)
+      expect(selected.lines.size).to eq(source.lines.size)
+      expect(selected).to include('def first', 'def second')
+      expect(selected).not_to include('def sibling')
+      expect(Woods::Extractors::ConcernSource.new(source).for_owner('Unknown')).to be_nil
+    end
+
+    it 'keeps a promoted concern independent of sibling methods and includes', :aggregate_failures do
+      path = write('app/models/rule/shared.rb', <<~RUBY)
+        module ConcernRuleFixture::SiblingMixin; end
+        module ConcernRuleFixture::OwnedMixin; end
+        module ConcernRuleFixture::Promoted
+          extend ActiveSupport::Concern
+          include ConcernRuleFixture::OwnedMixin
+          def owned_instance; end
+          module Helper
+            include ConcernRuleFixture::SiblingMixin
+            def helper_instance; end
+          end
+          class_methods do
+            def from_block; end
+          end
+          module ClassMethods
+            def from_module; end
+          end
+        end
+        module ConcernRuleFixture::Sibling
+          include ConcernRuleFixture::SiblingMixin
+          def sibling_instance; end
+          def self.sibling_class; end
+        end
+      RUBY
+      unit = shared(Woods::Extractors::ConcernExtractor.new)
+             .extract_model_mixin_file(path).find { |candidate| candidate.identifier == 'ConcernRuleFixture::Promoted' }
+
+      expect(unit.metadata[:included_modules]).to eq(['ConcernRuleFixture::OwnedMixin'])
+      expect(unit.dependencies.map { |edge| edge[:target] }).not_to include('ConcernRuleFixture::SiblingMixin')
+      expect(unit.metadata[:instance_methods]).to include('owned_instance')
+      expect(unit.metadata[:instance_methods]).not_to include('sibling_instance', 'helper_instance')
+      expect(unit.metadata[:class_methods]).to contain_exactly('from_block', 'from_module')
+    end
+  end
+
   describe 'fixtures' do
     it 'publishes a nested concern and its concern dependency once each, joined by a concern edge' do
       write('app/models/rule/billing/ledgered.rb', <<~RUBY)
