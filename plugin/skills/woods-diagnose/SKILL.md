@@ -300,9 +300,10 @@ failure and rerun the same task. Never edit `generation.json` or point a reader
 at the unreachable payload by hand.
 
 When the message also says the lock is `no longer held by this writer`, the run
-paused past its lock lease (a sleeping laptop, a stopped container) and another
-writer took over and published. Nothing needs repair: readers serve the
-successor's generation. Rerun only if this run's changes are still missing. A
+cannot prove it still owns the lock. A paused writer may have lost its lease to
+another writer, which need not have published yet. The fenced run refuses to
+publish, and readers keep the last complete generation. Check the current
+writer and rerun only if this run's changes are still missing. A
 version without writer fencing (#1004; check the installed version's release
 notes) could instead publish over the successor; if a payload went missing after
 such a pause, rerun a full `woods:extract`.

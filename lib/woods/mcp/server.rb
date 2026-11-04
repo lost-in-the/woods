@@ -94,6 +94,13 @@ module Woods
       DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
       DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
+      # Names exactly the controls each evidence mode refuses, so the hint is
+      # no stricter than the rule: compact with include_source: true or empty
+      # sections is accepted.
+      LOOKUP_EVIDENCE_HINT = 'Incompatible controls: evidence: "compact" or "outline" cannot take ' \
+                             'include_source: false or non-empty sections, and evidence: "full" (the default) ' \
+                             'cannot take query or budget. Drop the incompatible control, or change evidence.'
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -561,7 +568,8 @@ module Woods
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
               end
             rescue ArgumentError => e
-              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
+                                               hint: LOOKUP_EVIDENCE_HINT)
             end
             if type && !reader.lookup_type?(type)
               # Same contract as search: an unknown type is a bad argument, not
