@@ -30,8 +30,10 @@ RSpec.describe Woods::Console::Server::CONTRACT_MATRIX do
       expect(row.fetch(:arguments)).to eq(
         required: required,
         optional: spec.properties.keys.map(&:to_s) - required,
-        constraints: spec.input_schema
+        constraints: spec.input_schema,
+        advertised_constraints: spec.advertised_input_schema
       )
+      expect(row.dig(:arguments, :advertised_constraints).keys).not_to include(:oneOf, :anyOf, :allOf)
     end
   end
 

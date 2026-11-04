@@ -62,7 +62,9 @@ module Woods
       rescue TableGateError => e
         log_table_gate_rejection(args, e)
         error_response(scan_early_error(e.message))
-      rescue InputContract::ValidationError, SqlValidationError, ForbiddenExpressionError => e
+      rescue InputContract::ValidationError => e
+        error_response(scan_early_error(RefusalDetails.text_with_hint(e.message, e.hint)), e.details)
+      rescue SqlValidationError, ForbiddenExpressionError => e
         error_response(scan_early_error(e.message))
       rescue StandardError => e
         # Catch-all for pipeline bugs — a renderer NoMethodError, an encoding
@@ -120,9 +122,10 @@ module Woods
       end
 
       def error_from_response(response, request)
-        error_text = "#{response['error_type']}: #{response['error']}"
+        details = { code: response['code'], argument: response['argument'], hint: response['hint'] }.compact
+        error_text = RefusalDetails.text_with_hint("#{response['error_type']}: #{response['error']}", details[:hint])
         error_text = scan_for_credentials(error_text, request)
-        error_response(error_text)
+        error_response(error_text, details)
       end
 
       def scan_for_credentials(result, request)
@@ -167,8 +170,10 @@ module Woods
         ::MCP::Tool::Response.new([{ type: 'text', text: text }])
       end
 
-      def error_response(text)
-        ::MCP::Tool::Response.new([{ type: 'text', text: text }], error: true)
+      # @param details [Hash] Optional `code`, `argument` and `hint`, served in `_meta`
+      def error_response(text, details = {})
+        ::MCP::Tool::Response.new([{ type: 'text', text: text }], error: true,
+                                                                  meta: RefusalDetails.meta(details, @tool_name))
       end
     end
   end
