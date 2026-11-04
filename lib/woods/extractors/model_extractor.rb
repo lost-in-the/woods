@@ -445,6 +445,10 @@ module Woods
           table_name: model.table_name,
           primary_key: model.primary_key,
           database: database_name_for(model),
+          # Who defines the class, from the file that first defines its
+          # constant (#995). A gem model the application reopens stays
+          # +gem+ while file_path names the application file.
+          origin: SourceOrigin.constant_origin(model),
 
           # Relationships and behaviors
           associations: extract_associations(model),
