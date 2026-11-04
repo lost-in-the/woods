@@ -45,7 +45,13 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
     end
   end
 
-  before { stub_const('ENV', ENV.to_h.except('WOODS_SOURCE_ROOT')) }
+  around do |example|
+    previous = ENV.fetch('WOODS_SOURCE_ROOT', nil)
+    ENV.delete('WOODS_SOURCE_ROOT')
+    example.run
+  ensure
+    ENV['WOODS_SOURCE_ROOT'] = previous
+  end
 
   def write(root, path, bytes)
     target = File.join(root, path)
@@ -123,7 +129,7 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
       mapped = File.join(@workspace, 'mapped')
       FileUtils.cp_r(@moved, mapped)
       write(mapped, 'app/models/order.rb', 'edited in the mapped tree')
-      stub_const('ENV', ENV.to_h.merge('WOODS_SOURCE_ROOT' => mapped))
+      ENV['WOODS_SOURCE_ROOT'] = mapped
 
       result = freshness
       expect(result).to include('state' => 'drifted', 'root_source' => 'explicit', 'checked_root' => mapped)
