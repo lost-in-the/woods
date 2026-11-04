@@ -26,8 +26,9 @@ module Woods
       #   absolute file path. This lets callers analyze one consistent source
       #   snapshot rather than re-reading files while they may be changing.
       # @param trace_data [Array<Hash>, nil] Optional runtime trace data for enrichment
+      # @param diagnostics [Array<Hash>, nil] Optional collector for skipped parse failures
       # @return [Array<ExtractedUnit>] All extracted units
-      def analyze(paths: nil, sources: nil, trace_data: nil)
+      def analyze(paths: nil, sources: nil, trace_data: nil, diagnostics: nil)
         files = sources ? sources.keys.sort : discover_files(Array(paths))
         return [] if files.empty?
 
@@ -45,6 +46,7 @@ module Woods
           units.concat(class_analyzer.analyze(source: source, file_path: file_path))
           units.concat(method_analyzer.analyze(source: source, file_path: file_path))
         rescue Woods::ExtractionError
+          record_parse_failure(diagnostics, file_path)
           # Skip files that fail to parse
           next
         end
@@ -56,6 +58,10 @@ module Woods
       end
 
       private
+
+      def record_parse_failure(diagnostics, path)
+        diagnostics << { path: path, reason: 'parse_error' } if diagnostics
+      end
 
       # Discover .rb files from a list of paths (files and/or directories).
       #

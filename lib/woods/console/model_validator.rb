@@ -1,11 +1,15 @@
 # frozen_string_literal: true
 
+require_relative 'refusal_details'
+
 # @see Woods
 module Woods
   class Error < StandardError; end unless defined?(Woods::Error)
 
   module Console
-    class ValidationError < Woods::Error; end
+    class ValidationError < Woods::Error
+      include RefusalDetails
+    end
 
     # Validates model names and column names against the Rails schema.
     #

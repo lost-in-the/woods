@@ -65,6 +65,56 @@ RSpec.describe Woods::GemMapAffectedSpecs do
     expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 10
   end
 
+  it 'ignores constant names in comments and ordinary strings' do
+    write('spec/comment_spec.rb', "# Woods::Store\nRSpec.describe 'Woods::Store' do; end\n")
+
+    expect(affected('lib/woods/store.rb')).not_to include('spec/comment_spec.rb')
+  end
+
+  it 'finds executable constant references nested in hash literals' do
+    write('spec/hash_spec.rb', "RSpec.describe 'hash' do; it { {target: Woods::Store} }; end")
+
+    expect(affected('lib/woods/store.rb')).to include('spec/hash_spec.rb')
+  end
+
+  it 'follows helper requires without suggesting the helper as a spec' do
+    write('spec/support/store_helper.rb', "Woods::Store.new\n")
+    write('spec/helper_spec.rb', "require_relative 'support/store_helper'\n")
+
+    expect(affected('lib/woods/store.rb')).to include('spec/helper_spec.rb')
+    expect(affected('spec/support/store_helper.rb')).to eq(['spec/helper_spec.rb'])
+    expect(affected('lib/woods/store.rb')).not_to include('spec/support/store_helper.rb')
+  end
+
+  it 'follows the standard spec_helper load-path require through support files' do
+    write('spec/support/store_helper.rb', 'Woods::Store.new')
+    write('spec/spec_helper.rb', "require_relative 'support/store_helper'")
+    write('spec/using_helper_spec.rb', "require 'spec_helper'")
+
+    expect(affected('spec/support/store_helper.rb')).to eq(['spec/using_helper_spec.rb'])
+  end
+
+  %w[include extend].each do |operation|
+    it "treats a module containing only #{operation} as a definition, not a namespace wrapper" do
+      write('lib/woods/mixins_only.rb', "module Woods; module MixinsOnly; #{operation} Enumerable; end; end")
+      write('lib/woods/mixin_consumer.rb', 'module Woods; class MixinConsumer; include MixinsOnly; end; end')
+      write('spec/mixin_consumer_spec.rb', 'RSpec.describe Woods::MixinConsumer do; end')
+
+      expect(affected('lib/woods/mixins_only.rb')).to eq(['spec/mixin_consumer_spec.rb'])
+    end
+  end
+
+  it 'publishes parse failures even when a broken file still has a file unit' do
+    write('lib/woods/broken.rb', 'class Broken; def run(')
+    output = @root.join('map')
+    Woods::GemMapper.new(root: @root, output_dir: output).map!
+    Woods::PublishedIndex.open(output.to_s) do |index|
+      expect(index.manifest.dig('self_map', 'parse_failures')).to include(
+        include('path' => 'lib/woods/broken.rb', 'reason' => 'parse_error')
+      )
+    end
+  end
+
   it 'does not publish spec source in the map' do
     output = @root.join('map')
     Woods::GemMapper.new(root: @root, output_dir: output).map!

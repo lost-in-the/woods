@@ -5,6 +5,7 @@ require 'fileutils'
 require 'json'
 require 'pathname'
 require 'time'
+require 'prism'
 
 require_relative 'atomic_file'
 require_relative 'version'
@@ -24,6 +25,7 @@ module Woods
   class GemMapper
     include FilenameUtils
 
+    ANALYSIS_VERSION = 2
     SOURCE_GLOBS = %w[lib/woods.rb lib/woods/**/*.rb lib/tasks/**/*.rake exe/*].freeze
     TYPE_DIRECTORIES = {
       ruby_class: 'ruby_classes', ruby_module: 'ruby_modules',
@@ -31,7 +33,7 @@ module Woods
     }.freeze
     PROVENANCE = {
       mode: 'woods_static_ruby_source', runtime_fidelity: 'none', embeddings: 'absent',
-      included: SOURCE_GLOBS, references_only: GemMapSpecs::GLOBS, excluded: %w[spec/support docs .git tmp vendor]
+      included: SOURCE_GLOBS, references_only: GemMapSpecs::GLOBS, excluded: %w[docs .git tmp vendor]
     }.freeze
 
     def initialize(root:, output_dir:)
@@ -44,15 +46,22 @@ module Woods
       Woods::ParseCache.with { with_lock { map_locked } }
     end
 
+    # Current covered-source identity, including the analyzer runtime.
+    def source_checksum
+      source_snapshot[:checksum]
+    end
+
     private
 
     def map_locked
       snapshot = source_snapshot
       return { status: :skipped, generation: current_generation.number } if current_checksum == snapshot[:checksum]
 
-      units, graph = GemMapSource.new(root: @root).build(snapshot[:sources])
+      source = GemMapSource.new(root: @root)
+      units, graph = source.build(snapshot[:sources])
       payload = create_payload
-      GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum]).write
+      GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum],
+                          health: source.health).write
       # The publisher writes every file without its own flush; one flush of
       # the payload tree makes them all durable before the pointer moves,
       # the same contract the app pipeline keeps (see Extractor#sync_payload).
@@ -78,13 +87,19 @@ module Woods
 
     def checksum_for(sources)
       digest = Digest::SHA256.new
+      digest << [ANALYSIS_VERSION, RUBY_ENGINE, RUBY_VERSION, Prism::VERSION].join(':') << "\0"
       sources.sort.each { |path, source| digest << relative_path(path) << "\0" << source << "\0" }
       digest.hexdigest
     end
 
     def read_source(path)
       source = File.read(path, encoding: Encoding::UTF_8)
-      source.valid_encoding? ? source : source.scrub
+      unless source.valid_encoding?
+        raise Woods::ExtractionError,
+              "Invalid UTF-8 in Woods source: #{relative_path(path)}"
+      end
+
+      source
     end
 
     def ensure_snapshot_unchanged!(checksum)
@@ -136,8 +151,12 @@ module Woods
       @root = root
     end
 
+    attr_reader :health
+
     def build(sources)
+      @diagnostics = []
       units = build_units(sources)
+      @health = build_health(sources)
       graph = DependencyGraph.new
       units.each { |unit| graph.register(unit) }
       [units, graph]
@@ -155,14 +174,31 @@ module Woods
       units.sort_by { |unit| [unit.identifier, unit.type.to_s, unit.file_path] }
     end
 
+    def build_health(sources)
+      failures = @diagnostics.map { |item| item.transform_keys(&:to_s) }.sort_by { |item| item['path'] }
+      failed = failures.map { |item| item['path'] }
+      files = sources.sort.map { |path, source| file_health(path, source, failed) }
+      { schema_version: 1, analysis_version: GemMapper::ANALYSIS_VERSION,
+        parser: Prism::VERSION, files: files, parse_failures: failures }
+    end
+
+    def file_health(path, source, failed)
+      relative = relative_path(path)
+      mode = GemMapSpecs.spec?(relative) ? 'reference_only' : 'parsed'
+      mode = 'parse_failed' if failed.include?(relative)
+      { path: relative, mode: mode, source_hash: Digest::SHA256.hexdigest(source) }
+    end
+
     def spec_units(specs, paths)
       library = paths.select { |path| path.start_with?('lib/') && !specs.key?(path) }
-      GemMapSpecs.new(library: library).units(specs)
+      GemMapSpecs.new(library: library, paths: paths, diagnostics: @diagnostics).units(specs)
     end
 
     def source_units(sources)
       analyzable = sources.select { |path, _| path.end_with?('.rb', '.rake') || executable?(path) }
-      units = RubyAnalyzer.analyze(sources: analyzable)
+      diagnostics = []
+      units = RubyAnalyzer.analyze(sources: analyzable, diagnostics: diagnostics)
+      @diagnostics.concat(diagnostics.map { |item| item.merge(path: relative_path(item[:path])) })
       units.each { |unit| unit.file_path = relative_path(unit.file_path) }
       units.concat(file_units(sources))
       disambiguate!(units)
@@ -236,11 +272,12 @@ module Woods
   class GemMapPublisher
     include FilenameUtils
 
-    def initialize(payload:, units:, graph:, checksum:)
+    def initialize(payload:, units:, graph:, checksum:, health:)
       @payload = payload
       @units = units
       @graph = graph
       @checksum = checksum
+      @health = health
     end
 
     def write
@@ -267,11 +304,20 @@ module Woods
       units.each do |unit|
         write_file(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
       end
-      index = units.map do |unit|
-        { identifier: unit.identifier, type: unit.type.to_s, file_path: unit.file_path, namespace: unit.namespace,
-          estimated_tokens: unit.estimated_tokens, chunk_count: unit.chunks.size }
-      end
+      index = units.map { |unit| index_entry(unit) }
       write_file(directory.join('_index.json'), JSON.pretty_generate(index))
+    end
+
+    def index_entry(unit)
+      { identifier: unit.identifier, type: unit.type.to_s, file_path: unit.file_path, namespace: unit.namespace,
+        estimated_tokens: unit.estimated_tokens, chunk_count: unit.chunks.size,
+        canonical_identifier: unit.metadata[:canonical_identifier], definition: own_definition?(unit) }
+    end
+
+    def own_definition?(unit)
+      unit.type == :ruby_class || (unit.type == :ruby_module &&
+        (unit.metadata[:method_count].to_i.positive? ||
+         %i[constants includes extends].any? { |key| Array(unit.metadata[key]).any? }))
     end
 
     def write_graph
@@ -290,7 +336,7 @@ module Woods
         extracted_at: Time.now.utc.iso8601, rails_version: nil, ruby_version: RUBY_VERSION,
         woods_version: Woods::VERSION,
         counts: counts, total_units: @units.size, total_chunks: 0, git_sha: nil, git_branch: nil,
-        provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum),
+        provenance: GemMapper::PROVENANCE.merge(source_checksum: @checksum), self_map: @health,
         graph_nodes: stats[:node_count], graph_edges: stats[:edge_count]
       }
       write_file(@payload.join('manifest.json'), JSON.pretty_generate(manifest))

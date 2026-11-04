@@ -70,6 +70,10 @@ and stdio or Streamable HTTP endpoints directly.
 
 ## Maintainer material
 
+- [Woods development context](SELF_CONTEXT.md): Rake-driven static guides,
+  candidate impact, explicit retained baselines and coverage limits for agents
+  developing the gem itself.
+
 Historical build-phase documents are not user guides. Source checkouts also contain the [MCP protocol decision record](https://github.com/lost-in-the/woods/blob/main/docs/design/MCP_2026_STRATEGY.md) and [self-analysis instructions and historical audits](https://github.com/lost-in-the/woods/tree/main/docs/self-analysis); these maintainer-only paths are not packaged with the gem.
 
 [GitHub issues](https://github.com/lost-in-the/woods/issues) track active work
