@@ -913,6 +913,52 @@ RSpec.describe 'Model callbacks across Rails processes', :booted_app do
   end
 end
 
+# Model origin (#995): who first defined each model's constant. The fixture's
+# table, with the expected origin per model, is in spec/fixtures/model_origin/boot.rb.
+RSpec.describe 'Model origin across extraction modes in a real Rails process', :booted_app do
+  before(:all) do
+    script = File.expand_path('../fixtures/model_origin/boot.rb', __dir__)
+    output, error, status = Open3.capture3(RbConfig.ruby, '-Ilib', script)
+    raise "model origin fixture failed:\n#{error}" unless status.success?
+
+    @result = JSON.parse(output.lines.last)
+  end
+
+  # Before Rails 7.1, SchemaMigration and InternalMetadata are Active Record
+  # models the framework defines; from 7.1 they are plain classes, not models.
+  def framework_models
+    return {} if Gem::Version.new(@result.fetch('rails')) >= Gem::Version.new('7.1')
+
+    %w[ActiveRecord::InternalMetadata ActiveRecord::SchemaMigration].to_h do |name|
+      [name, { 'origin' => 'framework', 'file_path' => 'activerecord' }]
+    end
+  end
+
+  it 'publishes app, gem, framework and unknown origins from each defining file' do
+    expected = {
+      'Post' => { 'origin' => 'app', 'file_path' => 'app/models/post.rb' },
+      'CatalogKit::Listing' => { 'origin' => 'gem', 'file_path' => 'catalog_kit_gem/catalog_kit/listing.rb' },
+      'VendoredRecord' => { 'origin' => 'unknown', 'file_path' => 'vendor/models/vendored_record.rb' },
+      'StrayRecord' => { 'origin' => 'unknown', 'file_path' => 'elsewhere/stray_record.rb' }
+    }
+
+    expect(@result.fetch('full')).to include(expected.merge(framework_models))
+    expect(@result.fetch('full').key?('ActiveRecord::SchemaMigration')).to eq(framework_models.any?)
+  end
+
+  it 'keeps a reopened gem model at gem while its file_path names the application file' do
+    expect(@result.fetch('full').fetch('CatalogKit::Item'))
+      .to eq('origin' => 'gem', 'file_path' => 'app/models/catalog_kit/item.rb')
+  end
+
+  it 'publishes the same origins after an incremental run and a refresh as after a full extraction' do
+    expect(@result.fetch('incremental')).to eq(@result.fetch('full'))
+    expect(@result.fetch('refresh')).to eq(@result.fetch('full'))
+    expect(@result.fetch('incremental_differences')).to eq([])
+    expect(@result.fetch('refresh_differences')).to eq([])
+  end
+end
+
 RSpec.describe 'Controller callbacks across Rails processes', :booted_app do
   def extract_callbacks(kind)
     script = File.expand_path('../fixtures/controller_callbacks/boot.rb', __dir__)

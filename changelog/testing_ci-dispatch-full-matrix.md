@@ -1,0 +1,1 @@
+- CI can run its full matrix on any branch on request (`workflow_dispatch`). A pull request skips the Ruby 3.0–3.2 and Rails 6.0–7.1 rows, so a change those rows guard can now be checked on its branch before merge instead of first failing on `main`.

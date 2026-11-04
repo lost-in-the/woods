@@ -684,6 +684,11 @@ Clients without the extension still receive a background-start acknowledgement,
 which does not establish completion. This correction (#584) is included in Woods 2.1; check the loaded server revision. See the
 [publication failure recovery](TROUBLESHOOTING.md#extraction-exits-non-zero-after-could-not-publish-generation).
 
+Both operator pipeline tools write the index the server serves (its
+`index_dir`) and take that directory's writer lock, the same lock the rake
+writers and the watch daemon use. `config.output_dir` does not pick either one,
+so a server started on one index cannot lock it while writing another.
+
 ### HTTP transport
 
 Use HTTP only for a deliberate shared or remote deployment. It expands the network boundary and requires authentication, origin restrictions, and TLS termination. Follow [MCP HTTP transport](MCP_HTTP_TRANSPORT.md); do not translate the stdio example into an unauthenticated public listener.

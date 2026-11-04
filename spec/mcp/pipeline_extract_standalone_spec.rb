@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'open3'
 require 'rbconfig'
+require 'tmpdir'
+require 'fileutils'
 
 # Regression coverage for the pipeline_extract tool running in a process
 # shaped like exe/woods-mcp, which deliberately loads no extraction
@@ -46,7 +48,11 @@ RSpec.describe 'pipeline_extract in a standalone index-server process' do
     RUBY
 
     lib = File.expand_path('../../lib', __dir__)
-    stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-I', lib, '-e', script, fixture_dir)
+    # The tool locks and writes the index it serves, so serve a copy.
+    stdout, stderr, status = Dir.mktmpdir('woods-standalone-index') do |served|
+      FileUtils.cp_r(File.join(fixture_dir, '.'), served)
+      Open3.capture3(RbConfig.ruby, '-I', lib, '-e', script, served)
+    end
 
     expect(status).to be_success, "subprocess failed:\nstdout: #{stdout}\nstderr: #{stderr}"
     expect(stdout).to include('started')

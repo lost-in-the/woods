@@ -138,11 +138,7 @@ module Woods
 
       wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
 
-      lock = Woods::Coordination::PipelineLock.new(
-        lock_dir: output_dir.to_s,
-        name: Woods::Watch::Daemon::LOCK_NAME,
-        stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
-      )
+      lock = Woods::Coordination::PipelineLock.for_index(output_dir)
 
       woods_abort_on_lock_timeout(wait, raise_error: raise_on_timeout) unless woods_acquire_within(lock, wait)
 

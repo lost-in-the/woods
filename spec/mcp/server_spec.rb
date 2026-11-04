@@ -21,6 +21,18 @@ RSpec.describe Woods::MCP::Server do
   let(:fixture_dir) { File.expand_path('../fixtures/woods', __dir__) }
   let(:server) { described_class.build(index_dir: fixture_dir, response_format: :json) }
 
+  # The pipeline tools lock the index they serve and write into it, so a server
+  # wired with an operator gets a writable copy of the fixture rather than the
+  # tracked one.
+  let(:served_index_dir) do
+    Dir.mktmpdir('woods-mcp-served').tap do |dir|
+      FileUtils.cp_r(File.join(fixture_dir, '.'), dir)
+      @served_index_dirs = [*@served_index_dirs, dir]
+    end
+  end
+
+  after { Array(@served_index_dirs).each { |dir| FileUtils.rm_rf(dir) } }
+
   describe '.build' do
     it 'returns an MCP::Server' do
       expect(server).to be_a(MCP::Server)
@@ -1173,7 +1185,7 @@ RSpec.describe Woods::MCP::Server do
       let(:operator) { { status_reporter: status_reporter } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+        described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
       end
 
       it 'returns pipeline status' do
@@ -1205,7 +1217,7 @@ RSpec.describe Woods::MCP::Server do
       let(:operator) { { pipeline_guard: guard } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+        described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
       end
 
       it 'returns started status and spawns a background thread' do
@@ -1266,7 +1278,7 @@ RSpec.describe Woods::MCP::Server do
       let(:operator) { { pipeline_guard: guard } }
 
       let(:server_with_operator) do
-        described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+        described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
       end
 
       it 'returns started status and spawns a background thread' do
@@ -1298,7 +1310,7 @@ RSpec.describe Woods::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+      described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
     end
 
     let(:mock_extractor) do
@@ -1357,7 +1369,7 @@ RSpec.describe Woods::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+      described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
     end
 
     let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-lock') }
@@ -1380,11 +1392,11 @@ RSpec.describe Woods::MCP::Server do
     end
 
     # A fresh lock held by "another process" — same name and directory the
-    # rake writers and the daemon use.
+    # rake writers and the daemon use: the index this server serves.
     def seed_foreign_lock!
       require 'woods/coordination/pipeline_lock'
       lock = Woods::Coordination::PipelineLock.new(
-        lock_dir: tmp_output_dir, name: 'extraction', stale_timeout: 600
+        lock_dir: served_index_dir, name: 'extraction', stale_timeout: 600
       )
       raise 'could not seed foreign lock' unless lock.acquire
     end
@@ -1419,7 +1431,42 @@ RSpec.describe Woods::MCP::Server do
       wait_for_threads { call_tool(server_with_operator, 'pipeline_extract') }
 
       expect(mock_extractor).to have_received(:extract_all)
-      expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
+      expect(Dir.children(served_index_dir).grep(/\.lock\z/)).to be_empty
+    end
+
+    # The served index and the configured output directory differ here: the
+    # operator tool must lock the index it serves and extract into the same
+    # place, never take a lock in `config.output_dir` while writing elsewhere.
+    context 'when the configured output_dir is not the served index' do
+      it 'ignores a lock held in the configured output_dir' do
+        require 'woods/coordination/pipeline_lock'
+        other = Woods::Coordination::PipelineLock.new(lock_dir: tmp_output_dir, name: 'extraction',
+                                                      stale_timeout: 600)
+        raise 'could not seed lock' unless other.acquire
+
+        wait_for_threads { call_tool(server_with_operator, 'pipeline_extract') }
+
+        expect(mock_extractor).to have_received(:extract_all)
+      ensure
+        other&.release
+      end
+
+      it 'extracts into the directory it locked' do
+        locked_dirs = []
+        allow(described_class).to receive(:build_extraction_lock).and_wrap_original do |original, dir|
+          locked_dirs << dir
+          original.call(dir)
+        end
+        extractor_class = double('ExtractorClass')
+        allow(extractor_class).to receive(:new).and_return(mock_extractor)
+        stub_const('Woods::Extractor', extractor_class)
+
+        wait_for_threads { call_tool(server_with_operator, 'pipeline_extract') }
+
+        expect(locked_dirs).to eq([served_index_dir])
+        expect(extractor_class).to have_received(:new).with(output_dir: served_index_dir)
+        expect(Dir.children(tmp_output_dir)).to be_empty
+      end
     end
   end
 
@@ -1438,7 +1485,7 @@ RSpec.describe Woods::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+      described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
     end
 
     let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-embed-lock') }
@@ -1461,11 +1508,11 @@ RSpec.describe Woods::MCP::Server do
     end
 
     # A fresh lock held by "another process" — same name and directory the
-    # rake writers and the daemon use.
+    # rake writers and the daemon use: the index this server serves.
     def seed_foreign_lock!
       require 'woods/coordination/pipeline_lock'
       lock = Woods::Coordination::PipelineLock.new(
-        lock_dir: tmp_output_dir, name: 'extraction', stale_timeout: 600
+        lock_dir: served_index_dir, name: 'extraction', stale_timeout: 600
       )
       raise 'could not seed foreign lock' unless lock.acquire
     end
@@ -1500,18 +1547,31 @@ RSpec.describe Woods::MCP::Server do
       wait_for_threads { call_tool(server_with_operator, 'pipeline_embed') }
 
       expect(mock_indexer).to have_received(:index_all)
-      expect(Dir.children(tmp_output_dir).grep(/\.lock\z/)).to be_empty
+      expect(Dir.children(served_index_dir).grep(/\.lock\z/)).to be_empty
     end
 
-    it 'still runs on an unconfigured host (no output_dir, no lock domain)' do
+    it 'still locks the served index on an unconfigured host' do
       Woods.configuration = nil
+      seed_foreign_lock!
 
-      wait_for_threads do
-        response = call_tool(server_with_operator, 'pipeline_embed')
-        expect(parse_response(response)['status']).to eq('started')
+      response = call_tool(server_with_operator, 'pipeline_embed')
+
+      expect(response.meta[:error_code]).to eq(:locked)
+      expect(mock_indexer).not_to have_received(:index_all)
+    end
+
+    it 'embeds into the directory it locked, not the configured output_dir' do
+      locked_dirs = []
+      allow(described_class).to receive(:build_extraction_lock).and_wrap_original do |original, dir|
+        locked_dirs << dir
+        original.call(dir)
       end
 
-      expect(mock_indexer).to have_received(:index_all)
+      wait_for_threads { call_tool(server_with_operator, 'pipeline_embed') }
+
+      expect(locked_dirs).to eq([served_index_dir])
+      expect(Woods::Tasks).to have_received(:build_embed_indexer).with(output_dir: served_index_dir)
+      expect(Dir.children(tmp_output_dir)).to be_empty
     end
   end
 
@@ -1589,7 +1649,7 @@ RSpec.describe Woods::MCP::Server do
     end
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: { pipeline_guard: guard }, response_format: :json)
+      described_class.build(index_dir: served_index_dir, operator: { pipeline_guard: guard }, response_format: :json)
     end
 
     let(:tmp_output_dir) { Dir.mktmpdir('woods-mcp-lock-raise') }
@@ -1654,7 +1714,7 @@ RSpec.describe Woods::MCP::Server do
     let(:operator) { { pipeline_guard: guard } }
 
     let(:server_with_operator) do
-      described_class.build(index_dir: fixture_dir, operator: operator, response_format: :json)
+      described_class.build(index_dir: served_index_dir, operator: operator, response_format: :json)
     end
 
     let(:mock_indexer) do

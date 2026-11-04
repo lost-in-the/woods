@@ -94,6 +94,13 @@ module Woods
       DEFAULT_DOMAIN_CLUSTERS_LIMIT = 20
       DEFAULT_DOMAIN_CLUSTERS_MEMBER_LIMIT = 50
 
+      # Names exactly the controls each evidence mode refuses, so the hint is
+      # no stricter than the rule: compact with include_source: true or empty
+      # sections is accepted.
+      LOOKUP_EVIDENCE_HINT = 'Incompatible controls: evidence: "compact" or "outline" cannot take ' \
+                             'include_source: false or non-empty sections, and evidence: "full" (the default) ' \
+                             'cannot take query or budget. Drop the incompatible control, or change evidence.'
+
       class << self
         # Build a configured MCP::Server with all tools and resources.
         #
@@ -239,7 +246,7 @@ module Woods
           # try tools guaranteed to fail. Only register when the collaborator
           # is wired, so tools/list reflects what the server can actually do.
           define_session_trace_tool(server, launch_reader, respond, respond_err) if session_tracer_wired?
-          define_operator_tools(server, operator, respond, respond_err, op_missing, task_store) if operator
+          define_operator_tools(server, operator, respond, respond_err, op_missing, task_store, index_dir) if operator
           define_feedback_tools(server, feedback_store, respond, respond_err, fb_missing) if feedback_store
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
           define_change_impact_tool(server, index_dir, respond, respond_err) if snapshot_store
@@ -561,7 +568,8 @@ module Woods
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
               end
             rescue ArgumentError => e
-              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence')
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
+                                               hint: LOOKUP_EVIDENCE_HINT)
             end
             if type && !reader.lookup_type?(type)
               # Same contract as search: an unknown type is a bad argument, not
@@ -1451,9 +1459,11 @@ module Woods
           end
         end
 
-        def define_operator_tools(server, operator, respond, respond_err, op_missing, task_store)
-          define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
-          define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
+        # @param index_dir [String] the served index directory: the pipeline
+        #   tools lock it and write into it
+        def define_operator_tools(server, operator, respond, respond_err, op_missing, task_store, index_dir)
+          define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store, index_dir)
+          define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store, index_dir)
           define_pipeline_status_tool(server, operator, respond, respond_err, op_missing)
           define_pipeline_diagnose_tool(server, operator, respond, respond_err, op_missing)
           define_pipeline_repair_tool(server, operator, respond, respond_err, op_missing)
@@ -1466,7 +1476,7 @@ module Woods
           define_retrieval_suggest_tool(server, feedback_store, respond, fb_missing)
         end
 
-        def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store)
+        def define_pipeline_extract_tool(server, operator, respond, respond_err, op_missing, task_store, index_dir)
           cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_extract',
@@ -1522,7 +1532,7 @@ module Woods
 
             next Woods::MCP::Server.send(
               :start_pipeline_run,
-              kind: :extraction, tool: 'pipeline_extract',
+              kind: :extraction, tool: 'pipeline_extract', index_dir: index_dir,
               task_store: task_store, respond: respond, respond_err: respond_err,
               runner_builder: build_extraction_runner,
               started: -> { guard&.record!(:extraction) },
@@ -1531,23 +1541,17 @@ module Woods
           end
         end
 
-        # The same lock every other writer against this index uses —
-        # `woods:extract`/`incremental`/`refresh` and the watch daemon all
-        # build it from the daemon's constants (see CLAUDE.md, "writers
-        # serialize on PipelineLock").
+        # The same lock every other writer against this index uses
+        # ({Woods::Coordination::PipelineLock.for_index}; see CLAUDE.md,
+        # "writers serialize on PipelineLock").
         #
         # @param output_dir [String, Pathname] index directory
         # @return [Woods::Coordination::PipelineLock]
         def build_extraction_lock(output_dir)
           require_relative '../coordination/pipeline_lock'
           require_relative '../coordination/lock_heartbeat'
-          require_relative '../watch/daemon'
 
-          Woods::Coordination::PipelineLock.new(
-            lock_dir: output_dir.to_s,
-            name: Woods::Watch::Daemon::LOCK_NAME,
-            stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
-          )
+          Woods::Coordination::PipelineLock.for_index(output_dir)
         end
 
         # Poll for the lock until {PIPELINE_LOCK_WAIT} elapses. Monotonic, so
@@ -1609,7 +1613,7 @@ module Woods
           end
         end
 
-        def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store)
+        def define_pipeline_embed_tool(server, operator, respond, respond_err, op_missing, task_store, index_dir)
           cooldown = method(:cooldown_error)
           server.define_tool(
             name: 'pipeline_embed',
@@ -1627,21 +1631,21 @@ module Woods
               next blocked
             end
 
-            build_embed_runner = lambda do |_output_dir|
+            build_embed_runner = lambda do |output_dir|
               lambda do
                 # Share the rake-task wiring so the MCP path picks up the
                 # provider-tuned TextPreparer + token-aware chunker. Without
                 # this, MCP-triggered embedding still hit Ollama's "input
                 # length exceeds context length" error after the rake path
                 # was fixed in PR #70.
-                indexer = Woods::Tasks.build_embed_indexer
+                indexer = Woods::Tasks.build_embed_indexer(output_dir: output_dir)
                 incremental ? indexer.index_incremental : indexer.index_all
               end
             end
 
             next Woods::MCP::Server.send(
               :start_pipeline_run,
-              kind: :embedding, tool: 'pipeline_embed',
+              kind: :embedding, tool: 'pipeline_embed', index_dir: index_dir,
               task_store: task_store, respond: respond, respond_err: respond_err,
               runner_builder: build_embed_runner,
               started: -> { guard&.record!(:embedding) },
@@ -1675,17 +1679,20 @@ module Woods
         # wait is short and the failure explicit — an MCP tool must not sit on
         # a lock queue for minutes the way `woods:extract` does.
         #
-        # A nil/duck-typed configuration (no output_dir) yields no lock: there
-        # is no known lock domain, and the run fails in the background exactly
-        # as it always has on an unconfigured host.
+        # The lock domain and the write target are one directory: the index
+        # this server serves. Locking `config.output_dir` instead let a server
+        # started on another index take a lock no writer of the served index
+        # contends with, while its runner wrote wherever the configuration
+        # pointed. Both now come from +index_dir+.
         #
         # @param kind [Symbol] :extraction or :embedding
         # @param tool [String] tool name, for the error payloads
-        # @param runner_builder [Proc] called with the resolved output_dir;
-        #   returns the runner lambda {run_pipeline_in_background} executes
+        # @param index_dir [String, Pathname] the served index directory
+        # @param runner_builder [Proc] called with that directory; returns the
+        #   runner lambda {run_pipeline_in_background} executes
         # @return [Hash, MCP::Tool::Response]
-        def start_pipeline_run(kind:, tool:, task_store:, respond:, respond_err:, runner_builder:, started:,
-                               started_message:)
+        def start_pipeline_run(kind:, tool:, index_dir:, task_store:, respond:, respond_err:, runner_builder:,
+                               started:, started_message:)
           # Claim the slot BEFORE recording to the guard. Otherwise a refused
           # "already running" request still resets the cooldown clock and
           # blocks the next legitimate attempt for the full window.
@@ -1700,21 +1707,18 @@ module Woods
           handed_off = false
           held_lock = nil
           begin
-            config = Woods.configuration
-            output_dir = config.output_dir if config.respond_to?(:output_dir)
-            lock = output_dir && build_extraction_lock(output_dir)
-            if lock
-              unless acquire_lock_briefly(lock)
-                return respond_err.call(
-                  'Another writer holds the extraction lock (a rake task or the watch daemon ' \
-                  'is writing this index). Try again shortly.',
-                  code: :locked,
-                  tool: tool
-                )
-              end
-
-              held_lock = lock
+            output_dir = index_dir.to_s
+            lock = build_extraction_lock(output_dir)
+            unless acquire_lock_briefly(lock)
+              return respond_err.call(
+                'Another writer holds the extraction lock (a rake task or the watch daemon ' \
+                'is writing this index). Try again shortly.',
+                code: :locked,
+                tool: tool
+              )
             end
+
+            held_lock = lock
 
             # Built before the flag flips: a runner_builder that raises must
             # still release the lock and the slot on the way out.

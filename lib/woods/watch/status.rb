@@ -5,6 +5,7 @@ require 'time'
 require 'socket'
 
 require_relative '../atomic_file'
+require_relative '../coordination/liveness'
 
 module Woods
   module Watch
@@ -170,39 +171,27 @@ module Woods
 
       # Does a same-host pid name a process that is still running?
       #
-      # Signal 0 asks "could I signal this process?" without sending anything;
-      # EPERM means it exists but belongs to someone else, so it counts as
-      # alive. Signal 0 also succeeds for a zombie, a process that has exited
-      # but whose parent has not reaped it. A watcher re-parented to a PID 1
-      # that never reaps (a container without an init) stays one after it is
-      # killed, so on Linux a pid whose `/proc/<pid>/status` reports `State: Z`
-      # is dead. Elsewhere, and when that file cannot be read, signal 0 decides.
+      # The four-state answer comes from {Coordination::Liveness.check}: a
+      # dead pid and (on Linux) an exited, unreaped zombie are not running.
+      # An unknown answer — EPERM with no readable `/proc` status — counts as
+      # running here, as it always has: a status reader that believes a daemon
+      # only stands down, and the record still ages out after {STALE_AFTER}.
       #
       # @param pid [Integer]
       # @return [Boolean]
       def self.pid_alive?(pid)
-        return false unless pid.is_a?(Integer) && pid.positive?
-
-        Process.kill(0, pid)
-        !zombie?(pid)
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        !zombie?(pid)
+        !Coordination::Liveness.gone?(liveness(pid))
       end
 
       # @param pid [Integer]
-      # @return [Boolean] true only when Linux /proc reports the pid as a zombie
-      #   (read as bytes: the `Name:` line holds the process name, which need
-      #   not be ASCII or valid UTF-8)
-      def self.zombie?(pid)
-        return false unless RUBY_PLATFORM.include?('linux')
+      # @return [Symbol] see {Coordination::Liveness::STATES}; a pid that is
+      #   not a positive Integer is :dead here, because a status record that
+      #   names none cannot describe a running daemon
+      def self.liveness(pid)
+        return :dead unless pid.is_a?(Integer) && pid.positive?
 
-        File.binread("/proc/#{pid}/status")[/^State:\s*(\S)/n, 1] == 'Z'
-      rescue SystemCallError, IOError
-        false
+        Coordination::Liveness.check(pid)
       end
-      private_class_method :zombie?
 
       private
 
