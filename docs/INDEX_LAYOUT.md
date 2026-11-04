@@ -19,6 +19,7 @@ A typical structural index looks like this; optional entries need not exist:
 <index root>/
 ├── generation.json
 ├── payloads/
+│   ├── .stage-43-<token>/          # a writer's private stage; never a generation
 │   └── gen-42/
 │       ├── manifest.json
 │       ├── source_inputs.json          # optional on older indexes
@@ -635,6 +636,31 @@ immutable snapshot if that protection is unavailable. Flat indexes (including
 the opt-in `WOODS_ALLOW_FLAT_FALLBACK=1` full-extraction fallback) have
 individually replaced files, not multi-file atomicity; read/copy them only with
 writers stopped.
+
+### Writer stages and lock takeover
+
+Each writer builds its payload in a private stage, `payloads/.stage-<n>-<token>`,
+named with the token of the writer lock it holds. A stage is not a generation:
+readers, pins and retention only consider `gen-<n>`. Ignore stages, and never
+read or copy one.
+
+Moving the stage to `gen-<n>`, replacing `generation.json` and retention all run
+while the writer proves it still owns `extraction.lock`, under the same guard
+(`.extraction.lock.guard`) a takeover takes. A writer that paused past its lease
+(a laptop sleeping mid-run) and was taken over finds the lock is no longer its
+own when it reaches that step. It then stops without renaming, publishing or
+pruning anything, removes its own stage, and reports `Could not publish
+generation … no longer held by this writer`. The successor's generation and every
+pinned reader are unaffected.
+
+The same fence covers the snapshot store write after a full run's publish, and
+each deletion `woods:clean` makes, so neither can touch a successor's state. The
+lock is not supported on NFS; see
+[writers serialize](WATCH_DAEMON.md#within-one-worktree-writers-serialize).
+
+A run that publishes nothing (a no-op incremental run, a failed run) removes its
+own stage. A stage left by a crashed writer is removed by a later lock holder
+once it has been untouched for 24 hours.
 
 ### Payload directory failure
 

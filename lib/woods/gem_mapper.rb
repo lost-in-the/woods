@@ -10,6 +10,8 @@ require 'prism'
 require_relative 'atomic_file'
 require_relative 'version'
 require_relative 'coordination/pipeline_lock'
+require_relative 'coordination/lock_heartbeat'
+require_relative 'publication_seam'
 require_relative 'dependency_graph'
 require_relative 'extracted_unit'
 require_relative 'gem_map_qualifier'
@@ -21,8 +23,84 @@ require_relative 'payload_store'
 require_relative 'ruby_analyzer'
 
 module Woods
+  # The self-map's writer lock and publish step.
+  #
+  # `bin/woods-self-mcp` refreshes the map in the background, so two writers
+  # of one map are ordinary. Each stages privately and publishes only inside
+  # {Coordination::PipelineLock#fenced}, the same contract as the application
+  # pipeline; the heartbeat keeps a long map from looking abandoned.
+  class GemMapPublication
+    LOCK_NAME = 'woods_self_map'
+
+    def initialize(output_dir)
+      @output_dir = Pathname.new(output_dir)
+      @payloads = PayloadStore.new(@output_dir)
+    end
+
+    # @yieldparam publication [GemMapPublication] holding the lock
+    def with_lock
+      @lock = Coordination::PipelineLock.new(lock_dir: @output_dir.to_s, name: LOCK_NAME)
+      unless @lock.acquire
+        raise Coordination::LockError,
+              "Cannot acquire lock '#{LOCK_NAME}' — another process is running"
+      end
+
+      begin
+        Coordination::LockHeartbeat.run(@lock) { yield self }
+      ensure
+        @lock.release
+      end
+    end
+
+    # Stage, let the caller write, flush, then promote, publish and prune
+    # inside the fence. The stage is removed on every path that does not
+    # promote it.
+    #
+    # @yieldparam stage [Pathname] the private stage to write into
+    # @return [Generation::Marker]
+    # @raise [Coordination::LockLostError] when the lock was taken over
+    def publish
+      number = current_number + 1
+      stage = @payloads.create_stage(number, @lock.token)
+      PublicationSeam.reach(:staged, @output_dir)
+      yield stage
+      # The publisher writes every file without its own flush; one flush of
+      # the payload tree makes them all durable before the pointer moves,
+      # the same contract the app pipeline keeps (see Extractor#sync_payload).
+      AtomicFile.sync_directory_tree(stage)
+      PublicationSeam.reach(:before_promotion, @output_dir)
+      @lock.fenced { promote_and_publish(stage, number) }
+    ensure
+      @payloads.discard_stage(stage) if stage
+    end
+
+    private
+
+    def current_number
+      Generation.new(output_dir: @output_dir).current.number
+    end
+
+    def promote_and_publish(stage, number)
+      unless current_number + 1 == number
+        raise Woods::ExtractionError,
+              "self-map generation moved to #{current_number} during publication (expected #{number - 1})"
+      end
+
+      @payloads.promote(stage, number)
+      marker = Generation.new(output_dir: @output_dir).bump!(
+        reason: 'woods_static_source_map', payload: PayloadStore.name_for(number)
+      )
+      PublicationSeam.reach(:marker_published, @output_dir)
+      @payloads.prune(keep: PayloadStore::DEFAULT_RETENTION, protect: marker.number)
+      marker
+    end
+  end
+
   # Publishes a static, source-only index of the Woods implementation.
   class GemMapper
+    # Name of the self-map's writer lock (`woods_self_map.lock`).
+    LOCK_NAME = GemMapPublication::LOCK_NAME
+
     include FilenameUtils
 
     ANALYSIS_VERSION = 2
@@ -43,7 +121,7 @@ module Woods
 
     # Publishes one complete source snapshot, or skips when it is unchanged.
     def map!
-      Woods::ParseCache.with { with_lock { map_locked } }
+      Woods::ParseCache.with { GemMapPublication.new(@output_dir).with_lock { |publication| map_locked(publication) } }
     end
 
     # Current covered-source identity, including the analyzer runtime.
@@ -53,26 +131,18 @@ module Woods
 
     private
 
-    def map_locked
+    def map_locked(publication)
       snapshot = source_snapshot
       return { status: :skipped, generation: current_generation.number } if current_checksum == snapshot[:checksum]
 
       source = GemMapSource.new(root: @root)
       units, graph = source.build(snapshot[:sources])
-      payload = create_payload
-      GemMapPublisher.new(payload: payload, units: units, graph: graph, checksum: snapshot[:checksum],
-                          health: source.health).write
-      # The publisher writes every file without its own flush; one flush of
-      # the payload tree makes them all durable before the pointer moves,
-      # the same contract the app pipeline keeps (see Extractor#sync_payload).
-      AtomicFile.sync_directory_tree(payload)
-      ensure_snapshot_unchanged!(snapshot[:checksum])
-      marker = publish_generation
+      marker = publication.publish do |stage|
+        GemMapPublisher.new(payload: stage, units: units, graph: graph, checksum: snapshot[:checksum],
+                            health: source.health).write
+        ensure_snapshot_unchanged!(snapshot[:checksum])
+      end
       { status: :published, generation: marker.number, units: units.size }
-    end
-
-    def with_lock(&block)
-      Coordination::PipelineLock.new(lock_dir: @output_dir.to_s, name: 'woods_self_map').with_lock(&block)
     end
 
     def source_files
@@ -112,10 +182,6 @@ module Woods
       Generation.new(output_dir: @output_dir).current
     end
 
-    def next_generation
-      current_generation.number + 1
-    end
-
     def current_checksum
       payload = Generation.new(output_dir: @output_dir).payload_dir(current_generation)
       manifest = payload.join('manifest.json')
@@ -130,18 +196,6 @@ module Woods
       Pathname.new(path).expand_path.relative_path_from(@root).to_s
     rescue ArgumentError
       raise Woods::ExtractionError, "Source path escapes gem root: #{path}"
-    end
-
-    def create_payload
-      PayloadStore.new(@output_dir).create(next_generation)
-    end
-
-    def publish_generation
-      marker = Generation.new(output_dir: @output_dir).bump!(
-        reason: 'woods_static_source_map', payload: PayloadStore.name_for(next_generation)
-      )
-      PayloadStore.new(@output_dir).prune(keep: PayloadStore::DEFAULT_RETENTION, protect: marker.number)
-      marker
     end
   end
 

@@ -718,10 +718,10 @@ module Woods
 
       def self.acquire_writer_lock_briefly(lock)
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WRITER_LOCK_WAIT
-        acquired = lock.acquire
+        acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
         until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
           sleep 0.1
-          acquired = lock.acquire
+          acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
         end
         acquired
       end
