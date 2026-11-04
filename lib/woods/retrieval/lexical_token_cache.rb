@@ -156,12 +156,25 @@ module Woods
         end
       end
 
-      # Tokens are interned Strings shared with every other entry and index,
-      # so an entry's own cost is its containers.
+      # Charge every retained object once within an entry. Strings can share
+      # backing storage (including interned tokens), so charge their full bytes
+      # conservatively even when another entry or live index also holds them.
       def entry_bytes(entry)
-        _digest, fields, terms, lengths = entry
-        objects = [entry, entry.first, terms, lengths, fields, *fields.values]
-        objects.sum { |object| [ObjectSpace.memsize_of(object), ENTRY_FLOOR_BYTES].max }
+        seen = {}.compare_by_identity
+        pending = [entry]
+        total = 0
+        until pending.empty?
+          object = pending.pop
+          next if seen.key?(object)
+
+          seen[object] = true
+          size = [ObjectSpace.memsize_of(object), ENTRY_FLOOR_BYTES].max
+          size = [size, ENTRY_FLOOR_BYTES + object.bytesize].max if object.is_a?(String)
+          total += size
+          pending.concat(object) if object.is_a?(Array)
+          pending.concat(object.to_a.flatten(1)) if object.is_a?(Hash)
+        end
+        total
       end
 
       # Created at load, so concurrent first callers cannot make two.

@@ -124,6 +124,16 @@ RSpec.describe Woods::Retrieval::LexicalTokenCache do
       expect(cache.stats[:last_build]).to eq(hits: 2, misses: 0)
     end
 
+    it 'evicts retained long tokens against an independently chosen byte budget' do
+      cache = described_class.new(max_bytes: 32_768)
+      records = frozen_units([unit('Ledger', 'z' * 100_000)])
+      index = build(records, cache)
+
+      expect(cache.stats[:entries]).to eq(0)
+      expect(cache.entries).to be_empty
+      expect(candidates(index, 'ledger')).to eq(candidates(build(records, nil), 'ledger'))
+    end
+
     it 'keeps nothing with a zero byte budget and still builds correct indexes' do
       cache = described_class.new(max_bytes: 0)
       build(units_a, cache)
