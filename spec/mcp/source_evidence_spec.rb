@@ -108,6 +108,52 @@ RSpec.describe 'Published compact evidence tools' do
     end
   end
 
+  describe 'lookup evidence control combinations' do
+    let(:hint) do
+      'Incompatible controls: evidence: "compact" or "outline" cannot take include_source: false or ' \
+        'non-empty sections, and evidence: "full" (the default) cannot take query or budget. ' \
+        'Drop the incompatible control, or change evidence.'
+    end
+
+    # Truth table: full-only controls (include_source: false, sections) and
+    # compact/outline-only controls (query, budget) never mix. include_source:
+    # true with compact is the near miss: it asks for nothing compact refuses.
+    # An omitted evidence is the implicit case: it means full.
+    {
+      { evidence: 'full', include_source: false } => :allowed,
+      { evidence: 'full', sections: ['metadata'] } => :allowed,
+      { evidence: 'compact', query: 'refund', budget: 400 } => :allowed,
+      { evidence: 'outline', budget: 400 } => :allowed,
+      { evidence: 'compact', include_source: true } => :allowed,
+      { evidence: 'compact', include_source: false } => :refused,
+      { evidence: 'outline', sections: ['metadata'] } => :refused,
+      { evidence: 'full', query: 'refund' } => :refused,
+      { evidence: 'full', budget: 200 } => :refused,
+      { query: 'refund' } => :refused,
+      { budget: 200 } => :refused
+    }.each do |options, outcome|
+      it "#{outcome} for #{options.inspect}" do
+        result = call_tool('lookup', identifier: 'Invoice', **options)
+
+        if outcome == :allowed
+          expect(result[:isError]).not_to be(true), result.inspect
+        else
+          expect(result[:isError]).to be(true)
+          expect(result[:_meta]).to eq(error_code: 'unsupported_argument', tool: 'lookup',
+                                       argument: 'evidence', hint: hint)
+        end
+      end
+    end
+
+    it 'does not attach the evidence hint to an unrelated lookup refusal' do
+      result = call_tool('lookup', identifier: 'Invoice', type: 'no_such_type')
+
+      expect(result[:isError]).to be(true)
+      expect(result[:_meta]).to include(argument: 'type')
+      expect(result[:_meta][:hint]).not_to eq(hint)
+    end
+  end
+
   it 'advertises the additive controls while keeping omitted and explicit full retrieval identical' do
     omitted = call_tool('codebase_retrieve', query: 'refund', budget: 400)
     explicit = call_tool('codebase_retrieve', query: 'refund', budget: 400, evidence: 'full')

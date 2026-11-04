@@ -45,22 +45,27 @@ a change to this gem, create a disposable static map of the Woods source before
 making broad assumptions about the tree:
 
 ```bash
-output_dir="$(mktemp -d)"
-bin/rake "woods:self_map[$output_dir]"
-bundle exec woods-mcp-start "$output_dir"
+bin/rake woods:self_docs
+bin/rake "woods:self_impact[lib/woods/example.rb]"
 ```
 
-The task is an internal, Woods-only developer tool. It publishes the normal
-atomic generation layout, so `woods-mcp` can query `woods_status`, `structure`,
-`search`, `lookup`, `dependencies`, and `dependents` without Rails, a database,
-or embeddings. Use it to orient on source ownership, inspect known constants,
-trace conservative static relationships, and assess likely change impact. Keep
-the output outside the checkout (or in ignored `tmp/`); never commit it.
+The first command refreshes the static self-map and prints a completed guide
+folder; open `START_HERE.md`. The second prints a focused candidate-impact report.
+Output defaults to ignored `tmp/woods_agent/`, backed by `tmp/woods_self_map/`.
+No MCP connection, Rails boot, database or embeddings are required. Read
+[the development context guide](docs/SELF_CONTEXT.md) for explicit baseline
+selection, limits, file states and retention. Keep generated output untracked.
 
-It is not Rails extraction: the map is static and cannot establish runtime
-Rails behavior, resolved callbacks, routes, Active Record reflections, or
-Zeitwerk results. For a host application's runtime behavior, boot that Rails
-application and use the ordinary extraction pipeline instead.
+These are static reference and owner-candidate relationships, not exhaustive
+method-call or executed-test coverage. Check reported parse failures, unmapped
+paths and traversal limits. A previous generation is not a Git merge base;
+select a retained baseline explicitly for deleted paths. Inspect source and
+required validation policy even when the suggested spec list is empty.
+
+The lower-level `bin/rake "woods:self_map[OUTPUT_DIR]"` and optional Index MCP
+remain available. This is not Rails extraction: use a booted host application's
+normal extraction pipeline for resolved callbacks, routes, Active Record
+reflections or Zeitwerk behavior.
 
 The default suite excludes booted Rails and live backends. Run the relevant opt-in lane when behavior depends on them:
 
