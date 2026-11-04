@@ -299,6 +299,15 @@ complete generation. Fix the named filesystem, permission, space, or mount
 failure and rerun the same task. Never edit `generation.json` or point a reader
 at the unreachable payload by hand.
 
+When the message also says the lock is `no longer held by this writer`, the run
+cannot prove it still owns the lock. A paused writer may have lost its lease to
+another writer, which need not have published yet. The fenced run refuses to
+publish, and readers keep the last complete generation. Check the current
+writer and rerun only if this run's changes are still missing. A
+version without writer fencing (#1004; check the installed version's release
+notes) could instead publish over the successor; if a payload went missing after
+such a pause, rerun a full `woods:extract`.
+
 For slow extraction, use `WOODS_PROFILE=1` when supported by the installed
 version. Keep process boot and resident-cycle measurements separate. Older
 profiles nest payload sync and retention inside `publish`; current source
@@ -763,7 +772,14 @@ These diagnostics are included in Woods 2.1. Check the installed version and,
 for Git/path builds, the loaded revision before using them:
 
 - Builds containing #589 expose `recorded_root`, `checked_root`, and `root_source`.
-  A recorded-root check does not certify a copied checkout. Follow `deep_check`
+  A recorded-root check does not certify a copied checkout. Woods 2.2
+  (check the installed version first) reports `root_source: re_resolved`
+  when the recorded root is unreachable and the reader checked the application
+  that owns the served index. `root_rejected: no_identity_match` means that
+  application failed the identity tie (its `config/application.rb`, or every
+  captured file, no longer matches). The tie is a heuristic, so check
+  `checked_root` before trusting drift there. Set `WOODS_SOURCE_ROOT` in the MCP
+  server's environment to name the root instead. Follow `deep_check`
   for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
   problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
   mixed recommendations. Missing evidence cannot prove all files were added or

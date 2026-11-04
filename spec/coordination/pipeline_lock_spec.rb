@@ -16,6 +16,145 @@ RSpec.describe Woods::Coordination::PipelineLock do
 
   subject(:lock) { described_class.new(lock_dir: lock_dir, name: 'extraction') }
 
+  # One factory for the lock every writer of an index contends on, so the
+  # name, directory and stale window cannot drift apart between writers.
+  describe '.for_index' do
+    it 'builds the index writer lock inside the index directory' do
+      built = described_class.for_index(Pathname(lock_dir))
+
+      expect(built.stale_timeout).to eq(described_class::INDEX_WRITER_STALE_TIMEOUT)
+      expect(built.acquire).to be true
+      expect(File.exist?(File.join(lock_dir, 'extraction.lock'))).to be true
+      expect(described_class.new(lock_dir: lock_dir, name: 'extraction').acquire).to be false
+    end
+
+    it 'is the lock the watch daemon names' do
+      require 'woods/watch/daemon'
+
+      expect(Woods::Watch::Daemon::LOCK_NAME).to eq(described_class::INDEX_WRITER_NAME)
+      expect(Woods::Watch::Daemon::LOCK_STALE_TIMEOUT).to eq(described_class::INDEX_WRITER_STALE_TIMEOUT)
+    end
+
+    it 'is what the MCP operator tools, woods_reload, the rake writers and the daemon build' do
+      require 'woods/mcp/server'
+      require 'woods/mcp/bootstrapper'
+      require 'woods/rake_helpers'
+      require 'woods/watch/daemon'
+      allow(described_class).to receive(:for_index).and_call_original
+      helper = Object.new.extend(Woods::RakeHelpers)
+      allow(helper).to receive(:woods_acquire_within).and_return(true)
+
+      Woods::MCP::Server.send(:build_extraction_lock, lock_dir)
+      Woods::MCP::Bootstrapper.send(:reload_extraction_lock, lock_dir)
+      helper.send(:woods_with_extraction_lock, lock_dir, wait: 0) { nil }
+      Woods::Watch::Daemon.allocate.tap { |daemon| daemon.instance_variable_set(:@output_dir, lock_dir) }
+                          .send(:default_lock)
+
+      expect(described_class).to have_received(:for_index).with(lock_dir).exactly(4).times
+    end
+  end
+
+  # The writer fence (#1004): the token check and the guarded work share the
+  # guard a takeover takes, so there is no window between them.
+  describe '#fenced' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:contender) { described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 600) }
+
+    def expire!(path = lock_path)
+      old = Time.now - 3600
+      File.utime(old, old, path)
+    end
+
+    it 'runs the block and returns its value while this instance owns the lock' do
+      lock.acquire
+
+      expect(lock.fenced { :done }).to eq(:done)
+    end
+
+    it 'refuses once another writer has taken the lock over' do
+      lock.acquire
+      expire!
+      contender.acquire
+      ran = false
+
+      expect { lock.fenced { ran = true } }.to raise_error(Woods::Coordination::LockLostError, /no longer held/)
+      expect(ran).to be(false)
+    end
+
+    it 'refuses when the lock file cannot be read (unknown is not ownership)' do
+      lock.acquire
+      File.write(lock_path, '{torn')
+
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+
+    it 'refuses after release, and before any acquire' do
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+      lock.acquire
+      lock.release
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+
+    # The contender is forked before the fence is entered: a child forked
+    # inside it would inherit the guard's flock and wait on itself.
+    it 'makes a takeover in another process wait for the block', if: Process.respond_to?(:fork) do
+      lock.acquire
+      expire!
+      go_reader, go_writer = IO.pipe
+      result_reader, result_writer = IO.pipe
+      child = fork do
+        go_writer.close
+        result_reader.close
+        go_reader.read(1)
+        result_writer.write(contender.acquire ? 'took' : 'refused')
+        exit!(0)
+      end
+      go_reader.close
+      result_writer.close
+
+      lock.fenced do
+        go_writer.write('x')
+        go_writer.close
+        expect(result_reader.wait_readable(0.3)).to be_nil
+      end
+
+      expect(result_reader.read).to eq('took')
+      Process.wait(child)
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+  end
+
+  describe '.held_for_index' do
+    it 'finds the writer lock this process holds for an index, and forgets it on release' do
+      held = described_class.for_index(lock_dir)
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+
+      held.acquire
+      expect(described_class.held_for_index(lock_dir)).to equal(held)
+
+      held.release
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+    end
+
+    it 'resolves the index directory through a symlink' do
+      alias_dir = "#{lock_dir}-alias"
+      File.symlink(lock_dir, alias_dir)
+      held = described_class.for_index(lock_dir)
+      held.acquire
+
+      expect(described_class.held_for_index(alias_dir)).to equal(held)
+    ensure
+      held&.release
+      FileUtils.rm_f(alias_dir)
+    end
+
+    it 'ignores locks of another name' do
+      described_class.new(lock_dir: lock_dir, name: 'woods_self_map').acquire
+
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+    end
+  end
+
   describe '#acquire' do
     it 'creates a lock file' do
       lock.acquire
@@ -244,6 +383,70 @@ RSpec.describe Woods::Coordination::PipelineLock do
       FileUtils.touch(lock_path, mtime: Time.now - 3600)
 
       expect(contender.acquire).to be true
+    end
+
+    # A holder killed in a container whose PID 1 never reaps stays a zombie,
+    # and signal 0 still answers for it (#1002).
+    context 'when the same-host holder exited but was never reaped', if: UnreapedChild::SUPPORTED do
+      it 'takes over the fresh lock at once' do
+        UnreapedChild.with_zombie do |zombie|
+          write_lock(pid: zombie, host: host)
+
+          expect(contender.acquire).to be true
+          expect(JSON.parse(File.read(lock_path))['pid']).to eq(Process.pid)
+        end
+      end
+
+      it 'retires the fresh lock' do
+        UnreapedChild.with_zombie do |zombie|
+          write_lock(pid: zombie, host: host)
+
+          expect(contender.retire_stale).to eq(:cleared)
+        end
+      end
+
+      it 'takes over when signal 0 answers EPERM but /proc shows the zombie' do
+        UnreapedChild.with_zombie do |zombie|
+          write_lock(pid: zombie, host: host)
+          allow(Process).to receive(:kill).and_call_original
+          allow(Process).to receive(:kill).with(0, zombie).and_raise(Errno::EPERM)
+
+          expect(contender.acquire).to be true
+        end
+      end
+
+      it 'keeps the fresh lock of a zombie recorded on another host' do
+        UnreapedChild.with_zombie do |zombie|
+          write_lock(pid: zombie, host: "#{host}-elsewhere")
+
+          expect(contender.acquire).to be false
+        end
+      end
+    end
+
+    # Unknown liveness alone never takes over; the heartbeat-expiry rule still
+    # does. Unknown here: EPERM, and no /proc status to read.
+    context 'when the holder\'s liveness is unknown' do
+      let(:pid) { dead_pid }
+
+      before do
+        write_lock(pid: pid, host: host)
+        allow(Process).to receive(:kill).and_call_original
+        allow(Process).to receive(:kill).with(0, pid).and_raise(Errno::EPERM)
+        allow(File).to receive(:binread).and_call_original
+        allow(File).to receive(:binread).with("/proc/#{pid}/status").and_raise(Errno::EACCES)
+      end
+
+      it 'keeps a fresh lock' do
+        expect(contender.acquire).to be false
+        expect(contender.retire_stale).to eq(:not_stale)
+      end
+
+      it 'takes over once the heartbeat has expired' do
+        FileUtils.touch(lock_path, mtime: Time.now - 601)
+
+        expect(contender.acquire).to be true
+      end
     end
   end
 

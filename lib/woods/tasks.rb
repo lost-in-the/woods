@@ -26,9 +26,9 @@ module Woods
     # provider's input budget (e.g. Ollama's num_ctx, OpenAI's 8k cap).
     #
     # @return [Embedding::Indexer]
-    def build_embed_indexer
+    def build_embed_indexer(output_dir: nil)
       config = Woods.configuration
-      output_dir = ENV.fetch('WOODS_OUTPUT', config.output_dir)
+      output_dir ||= ENV.fetch('WOODS_OUTPUT', config.output_dir)
       # The documented fallback for an unset metadata or graph store is
       # :in_memory; ConfigResolver applies it when woods.json is read back.
       # Apply it here as well, before the resolved config is captured, so the

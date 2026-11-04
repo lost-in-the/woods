@@ -842,6 +842,15 @@ bundle exec rake "woods:refresh[state_machines,factories]"
 bundle exec rake woods:refresh          # lists the valid keys
 ```
 
+A direct call holds no writer lock of its own, so `Extractor#refresh` (like
+`#extract_changed` and `#extract_all`) takes the index writer lock for its
+publish step: the number check, the promotion of its stage, the generation
+marker and retention all run under that lock. It waits for another writer as
+the rake tasks do (`WOODS_LOCK_WAIT`, default 600 seconds). If the lock stays
+held, the run does not publish and `raise_on_publication_failure!` raises.
+Prefer `woods:refresh` or `Woods.extract!`, which hold the lock for the whole
+run.
+
 Any extractor key works, not only the whole-app ones, `refresh(:models)` is a
 legitimate way to re-derive every model after a schema change. A routes refresh
 cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an

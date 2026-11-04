@@ -12,6 +12,7 @@ require 'open3'
 # rubocop:disable Metrics/CyclomaticComplexity, Metrics/PerceivedComplexity
 module CiLocalEnvironment
   ROOT = File.expand_path('..', __dir__)
+  HOSTED_EVENTS = %w[pull_request push workflow_dispatch].freeze
   ROWS = {
     'lint' => { ruby: '3.3', gemfile: 'Gemfile', job: 'lint', puma: nil, sqlite: nil },
     'unit' => { ruby: '3.3', gemfile: 'Gemfile', job: 'test-required', puma: '~> 8.0', sqlite: nil },
@@ -158,7 +159,7 @@ module CiLocalEnvironment
     raise Error, 'wrong Ruby line for capture' unless identity['ruby_version'].start_with?("#{config[:ruby]}.")
 
     run, attempt, event = ENV.values_at('GITHUB_RUN_ID', 'GITHUB_RUN_ATTEMPT', 'GITHUB_EVENT_NAME')
-    unless positive?(run) && positive?(attempt) && %w[pull_request push].include?(event)
+    unless positive?(run) && positive?(attempt) && HOSTED_EVENTS.include?(event)
       raise Error, 'invalid hosted run identity'
     end
 
@@ -267,9 +268,11 @@ module CiLocalEnvironment
               'job' => config[:job], 'gemfile' => config[:gemfile], 'run_id' => run, 'attempt' => attempt }
     image = record['image']
     event = record['event']
-    expected_profile = profile(event == 'push', event == 'pull_request', config[:ruby]) if row.start_with?('rails-')
+    expected_profile = if row.start_with?('rails-')
+                         profile(event != 'pull_request', event == 'pull_request', config[:ruby])
+                       end
     valid = fixed.all? { |key, value| record[key] == value } && positive?(run) && positive?(attempt) &&
-            %w[pull_request push].include?(event) && hex?(record['reference_source_sha'], [40, 64]) &&
+            HOSTED_EVENTS.include?(event) && hex?(record['reference_source_sha'], [40, 64]) &&
             record.key?('profile') && record['profile'] == expected_profile &&
             image.is_a?(Hash) && %w[ImageOS ImageVersion].all? { |key| nonempty?(image[key]) } &&
             valid_hashes?(record['dependency_hashes'], dependencies(row)) &&

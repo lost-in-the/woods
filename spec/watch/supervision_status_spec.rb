@@ -75,4 +75,73 @@ RSpec.describe Woods::Watch::SupervisionStatus do
     status.write(**fields)
     expect(File.exist?(other_path)).to be(true)
   end
+
+  # A launcher killed in a container whose PID 1 never reaps stays a zombie,
+  # and signal 0 still answers for it (#1002). These records name a pid
+  # directly, so each case writes the record by hand.
+  describe 'owner liveness' do
+    let(:other_token) { 'c' * 32 }
+    let(:other_path) { File.join(index, described_class::DIRECTORY, "#{other_token}.json") }
+
+    def write_owner(pid:, age: 0, host: Woods::Watch::Status.host_identity)
+      FileUtils.mkdir_p(File.dirname(other_path))
+      File.write(other_path, JSON.generate(
+                               version: 1, launcher: other_token, pid: pid, host: host, state: 'ready',
+                               updated_at: (Time.now - age).utc.iso8601
+                             ))
+    end
+
+    def owner
+      described_class.read(index)[:records].find { |record| record['launcher'] == other_token }
+    end
+
+    it 'reads a live same-host owner as alive' do
+      write_owner(pid: Process.pid)
+
+      expect(owner['alive']).to be(true)
+    end
+
+    context 'with a real unreaped owner', if: UnreapedChild::SUPPORTED do
+      it 'reads the owner as not alive' do
+        UnreapedChild.with_zombie do |zombie|
+          write_owner(pid: zombie)
+
+          expect(owner['alive']).to be(false)
+        end
+      end
+
+      it 'prunes its expired record' do
+        UnreapedChild.with_zombie do |zombie|
+          write_owner(pid: zombie, age: 60)
+
+          status.write(**fields)
+          expect(File.exist?(other_path)).to be(false)
+        end
+      end
+
+      it 'keeps the expired record of a zombie pid recorded on another host' do
+        UnreapedChild.with_zombie do |zombie|
+          write_owner(pid: zombie, age: 60, host: 'another-host')
+
+          status.write(**fields)
+          expect(File.exist?(other_path)).to be(true)
+        end
+      end
+    end
+
+    # EPERM with no readable /proc status: unknown, which is not enough to
+    # prune another owner's record.
+    it 'keeps the expired record of an owner whose liveness is unknown', if: Process.respond_to?(:fork) do
+      pid = fork { exit!(0) }
+      Process.wait(pid)
+      write_owner(pid: pid, age: 60)
+      allow(Process).to receive(:kill).and_call_original
+      allow(Process).to receive(:kill).with(0, pid).and_raise(Errno::EPERM)
+      allow(File).to receive(:binread).and_call_original
+      allow(File).to receive(:binread).with("/proc/#{pid}/status").and_raise(Errno::EACCES)
+
+      status.write(**fields)
+      expect(File.exist?(other_path)).to be(true)
+    end
+  end
 end
