@@ -23,8 +23,9 @@ module Woods
       end
 
       # Read one unit through the reader's guarded typed path. A directory
-      # family (`graphql`; `rails_source`, which the MCP `lookup` tool treats
-      # as the unit type) selects any member, as {PublishedIndex} documents.
+      # family alias (`graphql`; `rails_source`, which the MCP `lookup` tool
+      # treats as the unit type) selects any member, as {PublishedIndex}
+      # documents. Any other type, `route` included, selects that type only.
       #
       # @param reader [Woods::MCP::IndexReader]
       # @param identifier [String]
@@ -52,21 +53,24 @@ module Woods
       # @return [Hash, nil] entry with actual type, or nil when filtered out
       # @raise [IOError] when a multi-type directory's unit fails the reader's guards
       def self.entry(reader, entry, dir, requested_type)
-        family = Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir)
-        actual_type = entry_type(reader, entry, dir, family)
+        actual_type = entry_type(reader, entry, dir)
         return unless actual_type
-        return if requested_type && requested_type != family && requested_type != actual_type
+        return if requested_type && !reader.unit_types_for(requested_type).include?(actual_type)
 
         entry.merge('type' => actual_type)
       end
 
-      # @return [String, nil] the entry's actual type
-      def self.entry_type(reader, entry, dir, family)
+      # The entry's actual type. An entry without a usable type is read from
+      # its directory whatever the requested type, so an older `routes/` entry
+      # is labelled `route` or `route_file` before the filter applies.
+      #
+      # @return [String, nil]
+      def self.entry_type(reader, entry, dir)
         types = Woods::MCP::IndexReader::UNIT_TYPES_BY_DIR.fetch(dir)
-        return family if types.one?
+        return types.first if types.one?
         return entry['type'] if types.include?(entry['type'])
 
-        call(reader, entry['identifier'], family)&.fetch('type')
+        reader.find_family_unit(entry['identifier'], Woods::MCP::IndexReader::DIR_TO_TYPE.fetch(dir))&.fetch('type')
       end
       private_class_method :entry_type
     end

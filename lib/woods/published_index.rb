@@ -164,7 +164,8 @@ module Woods
     # @param identifier [String]
     # @param type [String, Symbol, nil] singular type name or directory-family
     #   alias (`graphql`, `rails_source`); disambiguates an identifier shared
-    #   by more than one type
+    #   by more than one type. `route` is the route unit type only, never a
+    #   `route_file`
     # @return [Hash, nil] string-keyed unit, or nil
     # @raise [IOError] when a typed read fails the payload guards
     def unit(identifier, type: nil)
@@ -173,7 +174,9 @@ module Woods
 
     # Index entries, each with a `'type'` key added.
     #
-    # @param type [String, Symbol, nil] singular type name to restrict to
+    # @param type [String, Symbol, nil] singular type name to restrict to, or
+    #   a directory-family alias (`graphql`, `rails_source`). `route` lists
+    #   route units only; list `route_file` units with `route_file`
     # @return [Array<Hash>]
     def units(type: nil)
       dirs = if type
@@ -183,7 +186,7 @@ module Woods
                Woods::MCP::IndexReader::TYPE_DIRS
              end
       dirs.flat_map do |dir|
-        @reader.list_units(type: Woods::MCP::IndexReader::DIR_TO_TYPE[dir])
+        @reader.list_units(directory: dir)
                .filter_map { |entry| TypedUnitReader.entry(@reader, entry, dir, type&.to_s) }
       end
     end

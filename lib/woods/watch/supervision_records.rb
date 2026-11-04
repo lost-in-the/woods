@@ -60,17 +60,16 @@ module Woods
       end
       private_class_method :valid_record?
 
+      # A record from another host is never judged alive here: its pid names a
+      # slot in a namespace this reader cannot see. A same-host pid goes
+      # through the shared four-state check ({Status.pid_alive?}), so a dead
+      # launcher and an exited, unreaped one both read as not alive, and an
+      # unknown answer (EPERM with no readable `/proc` status) is not enough
+      # to prune the record.
       def self.local_alive?(record)
-        unless record['host'] == Status.host_identity && record['pid'].is_a?(Integer) && record['pid'].positive?
-          return false
-        end
+        return false unless record['host'] == Status.host_identity
 
-        Process.kill(0, record['pid'])
-        true
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        true
+        Status.pid_alive?(record['pid'])
       end
       private_class_method :local_alive?
 

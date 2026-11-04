@@ -701,19 +701,12 @@ module Woods
       end
       private_class_method :commit_reload!
 
-      # The same lock every other writer against this index uses — rake
-      # extract/incremental/embed and the watch daemon all build it from the
-      # daemon's constants (keep in agreement with
-      # {Woods::MCP::Server.build_extraction_lock} and the rake helper).
+      # The same lock every other writer against this index uses
+      # ({Woods::Coordination::PipelineLock.for_index}).
       def self.reload_extraction_lock(output_dir)
         require 'woods/coordination/pipeline_lock'
-        require 'woods/watch/daemon'
 
-        Woods::Coordination::PipelineLock.new(
-          lock_dir: output_dir.to_s,
-          name: Woods::Watch::Daemon::LOCK_NAME,
-          stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
-        )
+        Woods::Coordination::PipelineLock.for_index(output_dir)
       end
       private_class_method :reload_extraction_lock
 
@@ -725,10 +718,10 @@ module Woods
 
       def self.acquire_writer_lock_briefly(lock)
         deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + WRITER_LOCK_WAIT
-        acquired = lock.acquire
+        acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
         until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
           sleep 0.1
-          acquired = lock.acquire
+          acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
         end
         acquired
       end

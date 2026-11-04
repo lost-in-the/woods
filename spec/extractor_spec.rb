@@ -3205,7 +3205,7 @@ RSpec.describe Woods::Extractor do
       require 'woods'
       publish_payload_born_generation
       store = extractor.instance_variable_get(:@payload_store)
-      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+      allow(store).to receive(:create_stage).and_raise(Errno::EACCES, 'denied')
 
       expect { extractor.extract_changed(['app/models/user.rb']) }
         .to raise_error(Woods::ExtractionError, /payload/i)
@@ -3217,7 +3217,7 @@ RSpec.describe Woods::Extractor do
       require 'woods'
       publish_payload_born_generation
       store = extractor.instance_variable_get(:@payload_store)
-      allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+      allow(store).to receive(:create_stage).and_raise(Errno::EACCES, 'denied')
 
       expect { extractor.refresh(:routes) }
         .to raise_error(Woods::ExtractionError, /payload/i)
@@ -3247,7 +3247,8 @@ RSpec.describe Woods::Extractor do
     end
 
     def deny_payload_creation
-      allow(extractor.instance_variable_get(:@payload_store)).to receive(:create).and_raise(Errno::EACCES, 'denied')
+      allow(extractor.instance_variable_get(:@payload_store))
+        .to receive(:create_stage).and_raise(Errno::EACCES, 'denied')
     end
 
     def stub_full_extraction_with_denied_payload
@@ -3310,7 +3311,7 @@ RSpec.describe Woods::Extractor do
         require 'woods'
         publish_payload_born_generation
         store = extractor.instance_variable_get(:@payload_store)
-        allow(store).to receive(:create).and_raise(Errno::EACCES, 'denied')
+        allow(store).to receive(:create_stage).and_raise(Errno::EACCES, 'denied')
 
         expect { extractor.extract_changed(['app/models/user.rb']) }
           .to raise_error(Woods::ExtractionError, /payload/i)

@@ -201,3 +201,14 @@ dependents and suggested tests manually; silence is not no impact. Do not clear
 refresh queues when optional hints time out. See the canonical
 [context guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#optional-bounded-context-hints)
 for output/time limits, container root mapping and emitted-hint suppression.
+
+## Developing the Woods gem itself
+
+For a Woods source checkout, read its AGENTS.md and inspect `bin/rake -T woods:self`.
+On checkouts exposing `woods:self_docs` and `woods:self_impact`, use the generated
+START_HERE guide and focused reports without starting MCP. These are development
+capabilities: verify the loaded checkout and tasks; this plugin does not install
+or upgrade Woods. Keep generated context in ignored tmp and consult the checkout's
+`docs/SELF_CONTEXT.md`. Preserve parse/unmapped/budget notices, treat
+`owner_expansion` as inference, and select an explicit retained baseline for
+removed paths. Suggested specs do not replace the repository's required lanes.

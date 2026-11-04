@@ -9,10 +9,17 @@ require 'securerandom'
 # whole gem first).
 require 'woods'
 require 'woods/watch/status'
+require 'woods/coordination/liveness'
 
 module Woods
   module Coordination
     class LockError < Woods::Error; end
+
+    # Raised by {PipelineLock#fenced} when this instance no longer owns the
+    # lock: another writer took it over after its lease expired. The work the
+    # fence guards (promoting a payload, publishing the marker, pruning) did
+    # not happen.
+    class LockLostError < LockError; end
 
     # File-based lock for preventing concurrent pipeline operations.
     #
@@ -28,6 +35,99 @@ module Woods
     #
     class PipelineLock
       DEFAULT_STALE_TIMEOUT = 3600 # 1 hour
+
+      # The lock every writer of one index serializes on: `woods:extract`,
+      # `woods:incremental`, `woods:refresh`, the watch daemon, the MCP
+      # operator tools and `woods_reload`. Its name and stale window live here,
+      # beside {.for_index}, so no writer can build a lock the others do not
+      # contend with.
+      INDEX_WRITER_NAME = 'extraction'
+
+      # A daemon cycle is milliseconds; a manual full extraction is seconds to
+      # minutes, and a healthy holder heartbeats ({LockHeartbeat}). This bounds
+      # how long a crashed writer can block the others.
+      INDEX_WRITER_STALE_TIMEOUT = 600
+
+      # The writer lock for the index published in +output_dir+.
+      #
+      # @param output_dir [String, Pathname] the index directory the writer
+      #   publishes into; the lock lives inside it
+      # @return [PipelineLock]
+      def self.for_index(output_dir)
+        new(lock_dir: output_dir.to_s, name: INDEX_WRITER_NAME, stale_timeout: INDEX_WRITER_STALE_TIMEOUT)
+      end
+
+      # The guard wait that keeps one {#acquire} attempt inside a caller's
+      # deadline: the time left, capped at {DEFAULT_GUARD_WAIT}.
+      #
+      # @param deadline [Float] a CLOCK_MONOTONIC deadline
+      # @return [Float]
+      def self.guard_wait_until(deadline)
+        (deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)).clamp(0.0, DEFAULT_GUARD_WAIT)
+      end
+
+      @held_locks = {}
+      @held_locks_mutex = Mutex.new
+
+      # The index writer lock this process currently holds for +output_dir+,
+      # if any.
+      #
+      # A writer holds its lock around the whole run, but the publish step
+      # deep inside {Woods::Extractor} is where ownership has to be proven, and
+      # every caller (rake tasks, the watch daemon, the MCP operator tools,
+      # {Woods.extract!}) builds its extractor separately from its lock. A lock
+      # registers itself here when {#acquire} succeeds and leaves on
+      # {#release}, so the extractor finds it without each caller threading it
+      # through. A taken-over instance stays registered until it is released:
+      # it must still be found, so that {#fenced} can refuse it.
+      #
+      # @param output_dir [String, Pathname]
+      # @return [PipelineLock, nil]
+      def self.held_for_index(output_dir)
+        key = registry_key(output_dir, INDEX_WRITER_NAME)
+        @held_locks_mutex.synchronize { @held_locks[key]&.last }
+      end
+
+      # Directories whose index writer lock an instance in this process
+      # currently owns: it believes it holds the lock and the lock file still
+      # carries its token. A registered instance whose directory or lock file
+      # is gone, or that was taken over, does not count.
+      #
+      # @return [Array<String>]
+      def self.owned_index_writer_dirs
+        locks = @held_locks_mutex.synchronize do
+          @held_locks.select { |(_, name), _| name == INDEX_WRITER_NAME }.values.flatten
+        end
+        locks.select(&:owns_lock_file?).map { |lock| lock.instance_variable_get(:@lock_dir).to_s }.uniq
+      end
+
+      # Kept as a list per directory: if one process ever holds two instances
+      # (an obsolete one and its successor), releasing either leaves the other
+      # findable, so the obsolete one is still fenced rather than forgotten.
+      #
+      # @api private
+      def self.register_held(lock, key)
+        @held_locks_mutex.synchronize do
+          held = (@held_locks[key] ||= [])
+          held << lock unless held.any? { |entry| entry.equal?(lock) }
+        end
+      end
+
+      # @api private
+      def self.unregister_held(lock, key)
+        @held_locks_mutex.synchronize do
+          held = @held_locks[key] or next
+          held.reject! { |entry| entry.equal?(lock) }
+          @held_locks.delete(key) if held.empty?
+        end
+      end
+
+      # @return [Array(String, String)] the canonical directory and lock name
+      def self.registry_key(dir, name)
+        [File.realpath(dir.to_s), name]
+      rescue SystemCallError
+        [File.expand_path(dir.to_s), name]
+      end
 
       # The transaction-guard filename for a lock of +name+, exposed so
       # cleanup code that empties a lock directory (woods:clean) can skip the
@@ -60,11 +160,29 @@ module Woods
         @held = false
       end
 
+      # How long {#acquire} waits for the transaction guard by default. The
+      # guard is normally held for milliseconds; a holder inside {#fenced}
+      # (promotion, marker and retention) can hold it for as long as its
+      # retention takes, or indefinitely if it is stopped there.
+      DEFAULT_GUARD_WAIT = 0.5
+
+      # Raised inside {#with_path_guard} when a bounded wait for the guard runs
+      # out; {#acquire} turns it into an ordinary "not acquired".
+      class GuardBusy < StandardError; end
+      private_constant :GuardBusy
+
       # Attempt to acquire the lock.
       #
-      # @return [Boolean] true if lock acquired, false if already held
-      def acquire
-        with_path_guard do
+      # Never blocks past +guard_wait+: the guard is polled without blocking,
+      # so a contender whose holder is stopped inside {#fenced} gets +false+
+      # back within its own deadline instead of hanging on the flock. Callers
+      # that wait for the lock loop on this with their deadline's remainder.
+      #
+      # @param guard_wait [Numeric] seconds to wait for the transaction guard
+      # @return [Boolean] true if lock acquired, false if already held or the
+      #   guard stayed busy for +guard_wait+
+      def acquire(guard_wait: DEFAULT_GUARD_WAIT)
+        with_path_guard(wait: guard_wait) do
           if File.exist?(@lock_path)
             return false unless stale?
             # Retire the stale lock atomically. A bare rm_f + create here is
@@ -86,11 +204,58 @@ module Woods
             discard_partial_lock
             raise
           end
-          @held = true
+          mark_held
           true
         end
-      rescue Errno::EEXIST
+      rescue Errno::EEXIST, GuardBusy
         false
+      end
+
+      # The ownership token this instance wrote when it last acquired the
+      # lock, or nil before any acquisition. Unique per acquisition, so a
+      # writer can name things that only it may touch (its private payload
+      # stage) after it.
+      #
+      # @return [String, nil]
+      attr_reader :token
+
+      # Whether this instance believes it holds the lock and the lock file
+      # carries its token. Read without the guard: an advisory answer for
+      # diagnostics, never a substitute for {#fenced}.
+      #
+      # @return [Boolean]
+      def owns_lock_file?
+        @held && lock_ownership == :ours
+      end
+
+      # Run a block only while this instance provably owns the lock, under the
+      # same guard every takeover takes.
+      #
+      # This is the fence for a writer's irreversible steps. A check of the
+      # token followed by a separate rename leaves a window: the lease can
+      # expire and another writer take over between the two. Here the token
+      # check and the block both run inside the path guard, and {#acquire}
+      # retires a stale lock only inside that guard too, so a takeover either
+      # completes before the check (and the check fails) or waits until the
+      # block has finished. An unreadable lock file is not proof of ownership
+      # and fails closed.
+      #
+      # The block must not take this lock's guard again (flock does not
+      # nest across file descriptions); a heartbeat {#touch} on another thread
+      # simply waits for it.
+      #
+      # @yield the work that must not outlive ownership
+      # @return [Object] the block's value
+      # @raise [LockLostError] when the lock was taken over, released or lost
+      def fenced
+        with_path_guard do
+          unless @held && lock_ownership == :ours
+            raise LockLostError, "Lock '#{@name}' in #{@lock_dir} is no longer held by this writer " \
+                                 '(its lease expired and another writer took over)'
+          end
+
+          yield
+        end
       end
 
       # Retire the lock only when the file captured atomically from the public
@@ -128,6 +293,7 @@ module Woods
         nil
       ensure
         @held = false
+        self.class.unregister_held(self, registry_key)
       end
 
       # Execute a block while holding the lock.
@@ -198,6 +364,16 @@ module Woods
 
       private
 
+      def registry_key
+        @registry_key ||= self.class.registry_key(@lock_dir, @name)
+      end
+
+      # @return [void]
+      def mark_held
+        @held = true
+        self.class.register_held(self, registry_key)
+      end
+
       # Remove a lock file this {#acquire} call created but could not finish
       # writing (INF-7).
       #
@@ -219,15 +395,27 @@ module Woods
         nil
       end
 
-      def with_path_guard
+      # @param wait [Numeric, nil] nil blocks for the guard (this instance's
+      #   own release, touch and fenced work); a number polls without blocking
+      #   for at most that many seconds, then raises {GuardBusy}
+      def with_path_guard(wait: nil)
         # Ensure the lock directory itself exists — never its parent. A guard
         # that lived beside @lock_dir needed the parent writable too, which a
         # deployment that only grants write access to the lock directory
         # can't satisfy.
         FileUtils.mkdir_p(@lock_dir)
         File.open(guard_path, File::RDWR | File::CREAT, 0o600) do |guard|
-          guard.flock(File::LOCK_EX)
+          wait.nil? ? guard.flock(File::LOCK_EX) : poll_guard(guard, wait)
           yield
+        end
+      end
+
+      def poll_guard(guard, wait)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+        until guard.flock(File::LOCK_EX | File::LOCK_NB)
+          raise GuardBusy if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+          sleep 0.01
         end
       end
 
@@ -372,44 +560,38 @@ module Woods
       end
 
       # Whether the lock at +path+ was written on this host by a process that
-      # no longer exists.
+      # is gone: dead, or (on Linux) exited and waiting to be reaped.
       #
       # A holder killed mid-run (a container restart's grace period ending,
       # SIGKILL, an OOM kill) never releases its lock, and a fresh lock would
-      # otherwise block every writer for the whole stale window. A pid is only
-      # evidence inside the namespace that issued it, so this mirrors
-      # {Watch::Status#alive?}: the recorded host must match before the pid is
-      # checked. A lock from another host, from a version that recorded no
-      # host, or without a usable pid is judged by its age alone. A reused or
-      # shared hostname cannot establish pid-namespace identity, the residual
-      # Watch::Status documents too; a pid that has been reused by another
-      # process reads as alive, which only delays the takeover.
+      # otherwise block every writer for the whole stale window. A container
+      # whose PID 1 never reaps leaves that holder a zombie, which signal 0
+      # still answers for.
+      #
+      # Only {Liveness.gone?} evidence takes over a fresh lock. Every other
+      # answer leaves the lock to its age ({#stale?}): a live holder, and an
+      # unknown one — a lock from another host, from a version that recorded
+      # no host, without a usable pid, or whose holder answers EPERM with no
+      # readable `/proc` status. A reused or shared hostname cannot establish
+      # pid-namespace identity, the residual Watch::Status documents too; a
+      # pid that has been reused by another process reads as alive, which
+      # only delays the takeover.
       #
       # @param path [String]
       # @return [Boolean]
       def abandoned?(path)
         record = JSON.parse(File.read(path))
-        host = Watch::Status.host_identity
-        return false unless record.is_a?(Hash) && host != 'unknown' && record['host'] == host
+        return false unless record.is_a?(Hash)
 
-        pid = record['pid']
-        pid.is_a?(Integer) && pid.positive? && !process_alive?(pid)
+        Liveness.gone?(holder_liveness(record))
       rescue JSON::ParserError, SystemCallError, EncodingError
         false
       end
 
-      # Signal 0 asks whether the process could be signalled without sending
-      # anything. EPERM means it exists but belongs to someone else.
-      #
-      # @param pid [Integer]
-      # @return [Boolean]
-      def process_alive?(pid)
-        Process.kill(0, pid)
-        true
-      rescue Errno::ESRCH
-        false
-      rescue Errno::EPERM
-        true
+      # @param record [Hash] a parsed lock file
+      # @return [Symbol] see {Liveness::STATES}
+      def holder_liveness(record)
+        Liveness.check(record['pid'], host: record['host'], local_host: Watch::Status.host_identity)
       end
 
       # Three-state, deliberately — a boolean here conflates the two states

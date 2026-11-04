@@ -438,6 +438,15 @@ apparently complete empty result. This corrects the older unscoped family
 labels. Retrieval tools continue to use their own documented concrete-type
 filters; search aliases do not change those contracts.
 
+**Included in Woods 2.2 (#969):** `graphql` and `rails_source` are the only
+family aliases. `search.types: ["route"]` returns `route` units only, not the
+`route_file` units that share the `routes/` directory; pass `route_file` for
+those. `routes` is not a type and returns `invalid_params`. `recent_changes`
+filters `types` the same way and labels each result with its unit's own type
+(`route_file`, `gem_source`, `graphql_mutation`) instead of its directory name.
+The `codebase://type/{type}` resource follows the same rule: `codebase://type/route`
+lists route units only, and `codebase://type/route_file` lists route files.
+
 **Included in Woods 2.1:** typed `lookup` also accepts the `graphql` family
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.
@@ -731,6 +740,11 @@ a generation-marker or final source-verification failure marks the task
 Clients without the extension still receive a background-start acknowledgement,
 which does not establish completion. This correction (#584) is included in Woods 2.1; check the loaded server revision. See the
 [publication failure recovery](TROUBLESHOOTING.md#extraction-exits-non-zero-after-could-not-publish-generation).
+
+Both operator pipeline tools write the index the server serves (its
+`index_dir`) and take that directory's writer lock, the same lock the rake
+writers and the watch daemon use. `config.output_dir` does not pick either one,
+so a server started on one index cannot lock it while writing another.
 
 ### HTTP transport
 
