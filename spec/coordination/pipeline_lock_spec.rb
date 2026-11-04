@@ -54,6 +54,107 @@ RSpec.describe Woods::Coordination::PipelineLock do
     end
   end
 
+  # The writer fence (#1004): the token check and the guarded work share the
+  # guard a takeover takes, so there is no window between them.
+  describe '#fenced' do
+    let(:lock_path) { File.join(lock_dir, 'extraction.lock') }
+    let(:contender) { described_class.new(lock_dir: lock_dir, name: 'extraction', stale_timeout: 600) }
+
+    def expire!(path = lock_path)
+      old = Time.now - 3600
+      File.utime(old, old, path)
+    end
+
+    it 'runs the block and returns its value while this instance owns the lock' do
+      lock.acquire
+
+      expect(lock.fenced { :done }).to eq(:done)
+    end
+
+    it 'refuses once another writer has taken the lock over' do
+      lock.acquire
+      expire!
+      contender.acquire
+      ran = false
+
+      expect { lock.fenced { ran = true } }.to raise_error(Woods::Coordination::LockLostError, /no longer held/)
+      expect(ran).to be(false)
+    end
+
+    it 'refuses when the lock file cannot be read (unknown is not ownership)' do
+      lock.acquire
+      File.write(lock_path, '{torn')
+
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+
+    it 'refuses after release, and before any acquire' do
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+      lock.acquire
+      lock.release
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+
+    # The contender is forked before the fence is entered: a child forked
+    # inside it would inherit the guard's flock and wait on itself.
+    it 'makes a takeover in another process wait for the block', if: Process.respond_to?(:fork) do
+      lock.acquire
+      expire!
+      go_reader, go_writer = IO.pipe
+      result_reader, result_writer = IO.pipe
+      child = fork do
+        go_writer.close
+        result_reader.close
+        go_reader.read(1)
+        result_writer.write(contender.acquire ? 'took' : 'refused')
+        exit!(0)
+      end
+      go_reader.close
+      result_writer.close
+
+      lock.fenced do
+        go_writer.write('x')
+        go_writer.close
+        expect(result_reader.wait_readable(0.3)).to be_nil
+      end
+
+      expect(result_reader.read).to eq('took')
+      Process.wait(child)
+      expect { lock.fenced { nil } }.to raise_error(Woods::Coordination::LockLostError)
+    end
+  end
+
+  describe '.held_for_index' do
+    it 'finds the writer lock this process holds for an index, and forgets it on release' do
+      held = described_class.for_index(lock_dir)
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+
+      held.acquire
+      expect(described_class.held_for_index(lock_dir)).to equal(held)
+
+      held.release
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+    end
+
+    it 'resolves the index directory through a symlink' do
+      alias_dir = "#{lock_dir}-alias"
+      File.symlink(lock_dir, alias_dir)
+      held = described_class.for_index(lock_dir)
+      held.acquire
+
+      expect(described_class.held_for_index(alias_dir)).to equal(held)
+    ensure
+      held&.release
+      FileUtils.rm_f(alias_dir)
+    end
+
+    it 'ignores locks of another name' do
+      described_class.new(lock_dir: lock_dir, name: 'woods_self_map').acquire
+
+      expect(described_class.held_for_index(lock_dir)).to be_nil
+    end
+  end
+
   describe '#acquire' do
     it 'creates a lock file' do
       lock.acquire

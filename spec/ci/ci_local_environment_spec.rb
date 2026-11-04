@@ -18,6 +18,19 @@ module CiLocalRunnerSpecHarness
 end
 
 RSpec.describe CiLocalEnvironment do
+  it 'runs booted writer-fencing entry points in hosted and local Rails lanes', :aggregate_failures do
+    path = File.expand_path('../../.github/workflows/ci.yml', __dir__)
+    jobs = YAML.safe_load_file(path, aliases: true).fetch('jobs')
+    %w[rails-matrix rails-required].each do |name|
+      job = jobs.fetch(name)
+      expect(job.fetch('env').fetch('WOODS_RUN_BOOTED_APP')).to eq('1')
+      step = job.fetch('steps').find { |entry| entry['name'] == 'Run booted-app extraction' }
+      expect(step.fetch('run').split).to include('spec/integration/writer_fencing_booted_spec.rb')
+    end
+    expect(CiLocalRunnerSpecHarness::BOOTED_STEPS.flatten)
+      .to include('spec/integration/writer_fencing_booted_spec.rb')
+  end
+
   def fixture(root)
     %w[lib/woods exe assets puma gemfiles bin].each { |path| FileUtils.mkdir_p(File.join(root, path)) }
     File.write(File.join(root, '.gitignore'), "Gemfile.lock\ngemfiles/*.gemfile.lock\n.bundle/\ntmp/\n")

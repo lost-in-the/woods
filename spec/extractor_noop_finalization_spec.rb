@@ -148,7 +148,7 @@ RSpec.describe Woods::Extractor, 'payload-only no-op finalization' do
 
   def allow_payload_creation_failure
     store = extractor.instance_variable_get(:@payload_store)
-    allow(store).to receive(:create).and_raise(Errno::ENOSPC, 'fixture payload unavailable')
+    allow(store).to receive(:create_stage).and_raise(Errno::ENOSPC, 'fixture payload unavailable')
     allow(extractor).to receive(:flat_fallback_allowed?).and_return(true)
   end
 
@@ -384,7 +384,7 @@ RSpec.describe Woods::Extractor, 'payload-only no-op finalization' do
   it 'refuses flat fallback over a payload-born baseline even when the fallback flag is enabled' do
     before = published_bytes
     store = extractor.instance_variable_get(:@payload_store)
-    allow(store).to receive(:create).and_raise(Errno::ENOSPC, 'fixture payload unavailable')
+    allow(store).to receive(:create_stage).and_raise(Errno::ENOSPC, 'fixture payload unavailable')
     allow(extractor).to receive(:flat_fallback_allowed?).and_return(true)
 
     expect { open_stage }.to raise_error(Woods::ExtractionError, /rather than the flat output root/)
