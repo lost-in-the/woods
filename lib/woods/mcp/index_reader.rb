@@ -1133,6 +1133,18 @@ module Woods
         traverse(identifier, depth: depth, types: types, via: via, direction: :reverse, max_nodes: max_nodes, max_edges: max_edges)
       end
 
+      # Relationship labels recorded on the published edges from +source+ to
+      # +target+, across every unit type the source identifier names.
+      #
+      # @param source [String] the edge's source identifier
+      # @param target [String] the edge's target identifier
+      # @return [Array<String>] distinct labels, empty when no such edge is recorded
+      def recorded_vias(source, target)
+        (normalized_graph_edges[source] || []).filter_map do |edge|
+          edge['via'] if edge['target'] == target
+        end.uniq
+      end
+
       # Search rails_source units by concept keyword.
       #
       # Matches the keyword (case-insensitive) against identifier, source_code,

@@ -39,6 +39,7 @@ require_relative 'tasks/store'
 require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'traversal_response'
+require_relative 'dependent_families'
 require_relative 'version_aware_tool_dispatch'
 require_relative 'worktree_routing'
 
@@ -763,14 +764,24 @@ module Woods
             depth = coerce_int.call(depth)
             limit = coerce_int.call(limit)
             offset = coerce_int.call(offset)
-            result = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
-                                                            max_nodes: coerce_int.call(max_nodes) || 1000,
-                                                            max_edges: coerce_int.call(max_edges) || 10_000, explain: explain || false)
-            if result[:found] == false
-              result[:message] =
-                "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+            # The walk and the family annotation read one generation: the
+            # mapped-test check reads edges again, and must not see a newer graph.
+            result = reader.with_pinned_generation do
+              walked = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
+                                                              max_nodes: coerce_int.call(max_nodes) || 1000,
+                                                              max_edges: coerce_int.call(max_edges) || 10_000,
+                                                              explain: explain || false)
+              if walked[:found] == false
+                walked[:message] =
+                  "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+              end
+              TraversalResponse.annotate(walked)
+              # Families and counts cover the whole walk, so they are taken before paging.
+              if render_key == :dependents
+                DependentFamilies.annotate(walked, vias: ->(source, target) { reader.recorded_vias(source, target) })
+              end
+              walked
             end
-            TraversalResponse.annotate(result)
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
             respond.call(renderer.render(render_key, result), data: result)
@@ -2952,7 +2963,9 @@ module Woods
               (config.respond_to?(:vector_store) ? config.vector_store : nil)),
             session_tracer_enabled: config.respond_to?(:session_tracer_enabled) ? config.session_tracer_enabled : false,
             snapshots_enabled: config.respond_to?(:enable_snapshots) ? config.enable_snapshots : false,
-            notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?
+            notion_configured: config.respond_to?(:notion_api_token) && !presence(config.notion_api_token).nil?,
+            # Read per query by `dependents`; reported so a client can tell what its headline counts.
+            reverse_includes_tests: DependentFamilies.include_tests?
           }
         end
 
