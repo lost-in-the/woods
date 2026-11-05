@@ -45,7 +45,8 @@ BUNDLE_ROOT = File.expand_path(ENV.fetch('WOODS_CI_LOCAL_BUNDLE',
 # lists several files in CI runs them together there, so it does here too).
 BOOTED_STEPS = [
   %w[spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb
-     spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb],
+     spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb
+     spec/integration/writer_fencing_booted_spec.rb],
   %w[spec/integration/declaration_identity_spec.rb],
   %w[spec/integration/console_credential_rotation_spec.rb],
   %w[spec/integration/session_controller_identity_spec.rb],

@@ -15,6 +15,20 @@ module Woods
 
       attr_reader :extra_roots
 
+      # What the walk skips before any scope is matched, as status reports
+      # it. Declared roots override the generic directory and hidden-entry
+      # exclusions; the index output is always skipped.
+      #
+      # @param output_dir [String]
+      # @return [Hash]
+      def self.exclusions(output_dir:)
+        kept = Watch::TreeScan::NOT_IGNORED_DOTFILES +
+               Watch::TreeScan::NOT_IGNORED_DOTFILE_PREFIXES.map { |prefix| "#{prefix}*" } +
+               Watch::TreeScan::VISIBLE_DOT_DIRECTORIES
+        { 'directories' => Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES, 'hidden_entries' => true,
+          'hidden_kept' => kept, 'index_output' => SourcePathEncoding.expand(output_dir) }
+      end
+
       def initialize(extra_roots: [])
         require 'woods/extractor' unless defined?(Woods::Extractor::EXTRACTORS)
         @extra_roots = Array(extra_roots).map { |path| validate_root(path) }.uniq.sort

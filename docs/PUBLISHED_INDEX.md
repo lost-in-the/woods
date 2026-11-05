@@ -222,6 +222,14 @@ Unknown types return no records, and an explicit GraphQL subtype never matches
 another subtype. Enumeration continues to return index-entry fields, not full
 unit source bodies.
 
+Included in Woods 2.2 (#969): these two are the only family aliases. `route`
+is the route unit type, so `unit(id, type: 'route')` and `units(type: 'route')`
+no longer return the `route_file` units that share the `routes/` directory.
+Select those with `route_file`, or call `units` with no type and filter on
+`"type"`. There is no plural `routes` selector. An older index whose `routes/`
+entries carry no `type` is labelled by reading each unit, so it lists the same
+way.
+
 ### `available_generations`: published means published
 
 A generation is listed only when both hold:

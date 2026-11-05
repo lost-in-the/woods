@@ -801,4 +801,71 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       fold_into_pristine('app/controllers/taps_controller.rb')
     end
   end
+
+  # ── Top-level constant verdicts (#967) ───────────────────────────────────
+  #
+  # The verdicts are derived from the whole graph, so a change that adds or
+  # removes an app unit sharing a top-level constant's short name changes them
+  # without touching any controller. A carried flow that calls that name must
+  # be reassembled, or it keeps the step a full run marks ambiguous (or the
+  # marker a full run drops).
+  describe 'when the top-level constant verdicts change' do
+    let(:service) { 'app/services/lint/flow_verdict_probe.rb' }
+    let(:service_source) do
+      "module Lint\n  class FlowVerdictProbe\n    def self.t(*)\n      self\n    end\n  end\nend\n"
+    end
+
+    before do
+      stub_const('FlowVerdictProbe', Module.new)
+      write_controller('verdict_probes_controller', 'VerdictProbesController', show: 'FlowVerdictProbe.t(:hi)')
+    end
+
+    after { fold_into_pristine('app/controllers/verdict_probes_controller.rb') }
+
+    # The flow `trace_flow` would assemble on demand from the published
+    # generation, without the booted process's constants: the published
+    # graph, units and verdicts only.
+    def on_demand_flow(index_dir)
+      payload = payload_of(index_dir)
+      graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+      flow = Woods::FlowAssembler.new(graph: graph, extracted_dir: payload)
+                                 .assemble('VerdictProbesController#show', max_depth: Woods::FlowPrecomputer::DEFAULT_MAX_DEPTH)
+      JSON.parse(JSON.generate(flow.to_h)).except('generated_at')
+    end
+
+    def stored_flow(index_dir)
+      file = File.basename(flow_index(index_dir).fetch('VerdictProbesController#show'))
+      flow_doc(index_dir, file).except('generated_at')
+    end
+
+    def probe_operation(index_dir)
+      file = File.basename(flow_index(index_dir).fetch('VerdictProbesController#show'))
+      flow_doc(index_dir, file)['steps'].first['operations'].find { |op| op['target'] == 'FlowVerdictProbe' }
+    end
+
+    it 'marks a carried flow ambiguous when a new app unit takes the name, as a full run does' do
+      index_dir = extract_all_to_tmp
+      expect(probe_operation(index_dir)).not_to have_key('ambiguous_candidates')
+
+      load_app_file(service, service_source)
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([service])
+
+      expect(stored_flow(index_dir)).to eq(on_demand_flow(index_dir))
+      expect(probe_operation(index_dir)['ambiguous_candidates']).to eq(['::FlowVerdictProbe', 'Lint::FlowVerdictProbe'])
+      expect_flows_match_full(index_dir)
+    end
+
+    it 'drops the marker from a carried flow when that app unit goes away, as a full run does' do
+      load_app_file(service, service_source)
+      index_dir = extract_all_to_tmp
+      expect(probe_operation(index_dir)['ambiguous_candidates']).to eq(['::FlowVerdictProbe', 'Lint::FlowVerdictProbe'])
+
+      File.delete(app_path(service))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([service])
+
+      expect(stored_flow(index_dir)).to eq(on_demand_flow(index_dir))
+      expect(probe_operation(index_dir)).not_to have_key('ambiguous_candidates')
+      expect_flows_match_full(index_dir)
+    end
+  end
 end

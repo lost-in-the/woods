@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative 'dependent_families'
 require_relative 'traversal_evidence_index'
 require_relative 'traversal_evidence_text'
 
@@ -83,6 +84,33 @@ module Woods
         coverage = fetch_key(data, :graph_coverage)
         notice = fetch_key(coverage, :notice) if coverage.is_a?(Hash)
         notice ? [notice] : []
+      end
+
+      # The `dependents` headline and family counts, formatted from the
+      # server's `dependent_counts` without recounting the page.
+      #
+      # @return [Array<String>] empty when the result carries no counts
+      def dependent_counts_lines(data)
+        counts = fetch_key(data, :dependent_counts)
+        return [] unless counts.is_a?(Hash)
+
+        exact = fetch_key(counts, :exact) != false
+        bound = exact ? '' : 'at least '
+        families = fetch_key(counts, :families, {})
+        mapped = fetch_key(counts, :mapped_tests, 0)
+        included = fetch_key(counts, :reverse_includes_tests) == true
+        headline = "Recorded dependents: #{bound}#{fetch_key(counts, :headline)} " \
+                   "(#{included ? 'code and Mapped tests' : 'code'}); Mapped tests: #{bound}#{mapped}" \
+                   "#{included ? ' (counted in the headline)' : ' (listed, not counted)'}."
+        by_family = DependentFamilies::FAMILIES.map { |family| "#{family} #{fetch_key(families, family, 0)}" }
+        scope = exact ? 'over the whole traversal' : 'over the whole traversal (lower bounds: the walk stopped early)'
+        detail = "By family: #{by_family.join(', ')}; total #{bound}#{fetch_key(counts, :total)} #{scope}."
+        [headline, detail]
+      end
+
+      # @return [String] a row's label suffix, e.g. ` (Mapped test)`
+      def mapped_test_suffix(info)
+        fetch_key(info, :mapped_test) ? ' (Mapped test)' : ''
       end
 
       def traversal_lower_bound_note(data, shown)

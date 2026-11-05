@@ -19,6 +19,7 @@ A typical structural index looks like this; optional entries need not exist:
 <index root>/
 ├── generation.json
 ├── payloads/
+│   ├── .stage-43-<token>/          # a writer's private stage; never a generation
 │   └── gen-42/
 │       ├── manifest.json
 │       ├── source_inputs.json          # optional on older indexes
@@ -33,6 +34,7 @@ A typical structural index looks like this; optional entries need not exist:
 │       └── flows/
 │           ├── flow_index.json
 │           ├── by_unit.json             # optional inverted flow membership
+│           ├── top_level_constants.json # optional top-level constant verdicts
 │           └── <flow filename>.json
 ├── woods.json                 # optional configuration artifact
 ├── dumps/                     # optional semantic-store snapshots
@@ -82,6 +84,7 @@ Reject invalid UTF-8 rather than replacing bytes in published source evidence.
 | `git_commits.json` | Optional [commit table](#commit-table): HEAD-reachable commits in a bounded window that touched an indexed path, with their files, and a path => commits index. Absent when the writer had no readable git history or predates the table; absence is unknown history, not "no commits". |
 | `flows/flow_index.json` and flow documents | Optional precomputed flows. Use the index's relative paths; do not invent flow filenames. |
 | `flows/by_unit.json` | Optional inverted precomputed-flow membership, keyed by unit identifier, then unit type, with sorted unique entry-point arrays. See [inverted flow membership](#inverted-flow-membership). |
+| `flows/top_level_constants.json` | Optional, written by flow precomputation: `{ "top_level_constants": [...] }`, the sorted short names of graph identifiers that the booted application already defined as top-level constants (`Object.const_defined?(name, false)`, never by autoloading). Flow assembly reads it to mark such a short-name call ambiguous (#967). Derived from the whole graph, so full and incremental runs publish the same list. Absent in older indexes; a reader then resolves as before. |
 | `SUMMARY.md` | Generated human-readable summary, not a machine schema. |
 
 Unit summaries identify units, but do not carry an artifact filename. Their
@@ -107,6 +110,9 @@ Extractor directories can contain multiple unit types: `graphql/` contains
 `rails_source/` contains `rails_source` and `gem_source`, and `routes/` contains
 `route` and `route_file`. Validate and retain the
 artifact's actual type instead of deriving it by singularizing the directory.
+A directory name is not a type filter: only `graphql` and `rails_source` are
+family aliases that select a whole directory, and `route` selects `route`
+units only.
 
 Do not flatten typed variants into a single node per textual identifier. The
 static Woods self-map has the same publication envelope but different type
@@ -635,6 +641,31 @@ immutable snapshot if that protection is unavailable. Flat indexes (including
 the opt-in `WOODS_ALLOW_FLAT_FALLBACK=1` full-extraction fallback) have
 individually replaced files, not multi-file atomicity; read/copy them only with
 writers stopped.
+
+### Writer stages and lock takeover
+
+Each writer builds its payload in a private stage, `payloads/.stage-<n>-<token>`,
+named with the token of the writer lock it holds. A stage is not a generation:
+readers, pins and retention only consider `gen-<n>`. Ignore stages, and never
+read or copy one.
+
+Moving the stage to `gen-<n>`, replacing `generation.json` and retention all run
+while the writer proves it still owns `extraction.lock`, under the same guard
+(`.extraction.lock.guard`) a takeover takes. A writer that paused past its lease
+(a laptop sleeping mid-run) and was taken over finds the lock is no longer its
+own when it reaches that step. It then stops without renaming, publishing or
+pruning anything, removes its own stage, and reports `Could not publish
+generation … no longer held by this writer`. The successor's generation and every
+pinned reader are unaffected.
+
+The same fence covers the snapshot store write after a full run's publish, and
+each deletion `woods:clean` makes, so neither can touch a successor's state. The
+lock is not supported on NFS; see
+[writers serialize](WATCH_DAEMON.md#within-one-worktree-writers-serialize).
+
+A run that publishes nothing (a no-op incremental run, a failed run) removes its
+own stage. A stage left by a crashed writer is removed by a later lock holder
+once it has been untouched for 24 hours.
 
 ### Payload directory failure
 

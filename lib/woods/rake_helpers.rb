@@ -138,11 +138,7 @@ module Woods
 
       wait ||= Float(ENV.fetch('WOODS_LOCK_WAIT', Woods::Watch::Daemon::LOCK_STALE_TIMEOUT))
 
-      lock = Woods::Coordination::PipelineLock.new(
-        lock_dir: output_dir.to_s,
-        name: Woods::Watch::Daemon::LOCK_NAME,
-        stale_timeout: Woods::Watch::Daemon::LOCK_STALE_TIMEOUT
-      )
+      lock = Woods::Coordination::PipelineLock.for_index(output_dir)
 
       woods_abort_on_lock_timeout(wait, raise_error: raise_on_timeout) unless woods_acquire_within(lock, wait)
 
@@ -161,11 +157,11 @@ module Woods
     # @return [Boolean] whether the lock was acquired
     def woods_acquire_within(lock, wait)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
-      acquired = lock.acquire
+      acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
       warn woods_lock_wait_message(lock, wait) if !acquired && wait.positive?
       until acquired || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
         sleep 0.25
-        acquired = lock.acquire
+        acquired = lock.acquire(guard_wait: Woods::Coordination::PipelineLock.guard_wait_until(deadline))
       end
       acquired
     end
@@ -291,7 +287,7 @@ module Woods
 
       lock_name = Woods::Watch::Daemon::LOCK_NAME
       woods_with_extraction_lock(output_dir, wait: wait) do
-        woods_sweep_index_dir(output_dir, lock_name)
+        woods_sweep_index_dir(output_dir, lock_name, Woods::Coordination::PipelineLock.held_for_index(output_dir))
       end
 
       # Retain the stable guard and directory: another writer may already hold
@@ -303,14 +299,25 @@ module Woods
     # guard. The guard lives inside the lock directory and a contender may hold
     # its flock right now — deleting it mid-sweep would split the flock across
     # two inodes and defeat the mutual exclusion it provides.
-    def woods_sweep_index_dir(output_dir, lock_name)
+    #
+    # Each removal runs inside the writer fence ({PipelineLock#fenced}). A
+    # clean that stalls past its lease can be taken over between two entries;
+    # when it resumes, the fence refuses and it stops before deleting anything
+    # its successor has published.
+    #
+    # @param lock [Woods::Coordination::PipelineLock, nil] the lock this clean
+    #   holds; nil only for a caller that holds none
+    # @raise [Woods::Coordination::LockLostError] when the lock was taken over
+    def woods_sweep_index_dir(output_dir, lock_name, lock = nil)
+      require 'woods/publication_seam'
       preserved = [
         output_dir.join("#{lock_name}.lock"),
         output_dir.join(Woods::Coordination::PipelineLock.guard_filename(lock_name)),
         *['', '.lock', '.lease'].map { |suffix| output_dir.join("#{Woods::Watch::ClaimLease::CLAIM}#{suffix}") }
       ]
-      output_dir.children.each do |entry|
-        FileUtils.rm_rf(entry) unless preserved.include?(entry)
+      (output_dir.children - preserved).sort.each do |entry|
+        lock ? lock.fenced { FileUtils.rm_rf(entry) } : FileUtils.rm_rf(entry)
+        Woods::PublicationSeam.reach(:swept_entry, output_dir)
       end
     end
 

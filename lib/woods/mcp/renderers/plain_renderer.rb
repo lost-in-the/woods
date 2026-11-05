@@ -316,6 +316,7 @@ module Woods
           end
 
           lines.concat(traversal_coverage_lines(data))
+          lines.concat(dependent_counts_lines(data))
 
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
@@ -323,7 +324,7 @@ module Woods
             # Set by the reader only in a graph spanning more than one database.
             database = fetch_key(info, :database)
             indent = '  ' * (depth + 1)
-            lines << "#{indent}#{id}#{" [#{database}]" if database}"
+            lines << "#{indent}#{id}#{" [#{database}]" if database}#{mapped_test_suffix(info)}"
             deps.each { |d| lines << "#{indent}  -> #{d}" }
           end
 

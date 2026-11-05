@@ -9,6 +9,10 @@ on:
   push:
     branches: [main, release/1.6.4, release/2.0.1]
     tags: ['v*']
+  # Run the full matrix on any branch on request: a PR run skips the older
+  # Ruby/Rails rows (`pr: false`), and a change those rows guard (booted
+  # extraction on Rails 6.0 to 7.1) needs them before merge, not after.
+  workflow_dispatch:
 
 # Keep only the newest automatic main/PR run. Release refs and reruns need
 # independent groups: even cancel-in-progress: false replaces pending runs.
@@ -209,7 +213,7 @@ jobs:
           retention-days: 7
       - name: Run booted-app extraction
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb spec/integration/concurrent_extraction_pool_spec.rb
+        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb spec/integration/concurrent_extraction_pool_spec.rb spec/integration/writer_fencing_booted_spec.rb
 
       - name: Run declaration ownership against booted Rails
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}

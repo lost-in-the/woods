@@ -24,6 +24,8 @@ RSpec.describe Woods::Extractor, 'phase accounting' do
     allow(extractor).to receive(:publishable_payload_name).and_return('payloads/gen-2')
     allow(extractor).to receive(:sync_payload)
     allow(extractor).to receive(:prune_payloads)
+    # The writer fence is not under test; its lock polling reads the same clock.
+    allow(extractor).to receive(:with_writer_fence).and_yield
     allow(Process).to receive(:clock_gettime).with(Process::CLOCK_MONOTONIC).and_return(0, 1, 1, 3, 3, 6, 6, 11)
 
     expect(extractor.send(:publish_generation, 'full')).to eq(marker)
@@ -44,8 +46,19 @@ RSpec.describe Woods::Extractor, 'phase accounting' do
 
   it 'does not read the timing clock when profiling is disabled' do
     allow(extractor).to receive(:profiling?).and_return(false)
-    expect(Process).not_to receive(:clock_gettime)
+    # Other threads can still use monotonic deadlines. Observe the profiling
+    # thread without refusing those independent clock reads.
+    timed_threads = Queue.new
+    allow(Process).to receive(:clock_gettime).and_wrap_original do |original, *arguments|
+      timed_threads << Thread.current
+      original.call(*arguments)
+    end
+    background = Thread.new { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+    background.value
 
     expect(extractor.send(:profile_phase, 'example') { :result }).to eq(:result)
+    calls = Array.new(timed_threads.size) { timed_threads.pop }
+    expect(calls).to include(background)
+    expect(calls).not_to include(Thread.current)
   end
 end

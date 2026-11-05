@@ -43,6 +43,16 @@ RSpec.describe 'CI pull request tier' do
     end
   end
 
+  # A change the end-of-life rows guard needs them before merge. A manual
+  # dispatch is not a pull_request event, so every row is active on it.
+  it 'can run every row on any branch on request' do
+    workflow = YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true)
+    triggers = workflow['on'] || workflow[true]
+
+    expect(triggers).to have_key('workflow_dispatch')
+    expect(active).to start_with("${{ github.event_name != 'pull_request'")
+  end
+
   %w[test test-required rails-matrix rails-required].each do |id|
     it "gates every step of #{id} on whether its row runs for this event" do
       job = jobs.fetch(id)

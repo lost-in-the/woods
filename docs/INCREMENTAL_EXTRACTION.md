@@ -50,6 +50,16 @@ refresh rewrites the unit, and counts it as touched, only when its annotation
 really changes. With the gate off, or no published flow family, the annotation
 is compared as before.
 
+The top-level constant verdicts in `flows/top_level_constants.json` (#967) are
+derived from the whole graph on every flow refresh. When they differ from the
+previous generation's, every controller whose carried flow calls a receiver
+whose verdict changed (`Name`, `Name.new` or `Name.action`, unrooted) is
+reassembled, so its stored flow matches both a full run and an on-demand
+`trace_flow` assembly. The verdicts are read from the booted process, so a
+change that defines or removes a top-level constant without touching an
+indexed file (a new gem) is picked up only by the next run that refreshes
+flows.
+
 The comparison runs before the method table, callback and filter declaration
 sites and test examples are recorded, and leaves them out on both sides: they
 are derived from the source and metadata it already compares. A unit re-derived
@@ -850,6 +860,15 @@ bundle exec rake "woods:refresh[routes]"
 bundle exec rake "woods:refresh[state_machines,factories]"
 bundle exec rake woods:refresh          # lists the valid keys
 ```
+
+A direct call holds no writer lock of its own, so `Extractor#refresh` (like
+`#extract_changed` and `#extract_all`) takes the index writer lock for its
+publish step: the number check, the promotion of its stage, the generation
+marker and retention all run under that lock. It waits for another writer as
+the rake tasks do (`WOODS_LOCK_WAIT`, default 600 seconds). If the lock stays
+held, the run does not publish and `raise_on_publication_failure!` raises.
+Prefer `woods:refresh` or `Woods.extract!`, which hold the lock for the whole
+run.
 
 Any extractor key works, not only the whole-app ones, `refresh(:models)` is a
 legitimate way to re-derive every model after a schema change. A routes refresh
