@@ -16,6 +16,15 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
                           "def post!\n    true\n  end\nend\n",
                   identifier: 'Postable'
 
+  it 'recognizes callback and validation words without matching inside other identifiers' do
+    extractor = described_class.new
+    source = "before_save :track\nafter_commit :track\naround_save :track\nvalidates :name\nvalidate_presence :name\n"
+    expect(extractor.send(:detect_callbacks, source)).to eq(%w[before_save after_commit around_save])
+    expect(extractor.send(:detect_validations, source)).to eq(%w[validates validate_presence])
+    expect(extractor.send(:detect_callbacks, "not_before_save :track\n")).to be_empty
+    expect(extractor.send(:detect_validations, "not_validate_presence :name\n")).to be_empty
+  end
+
   describe 'runtime model mixins' do
     let(:model) { Class.new }
 

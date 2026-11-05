@@ -101,14 +101,19 @@ module Woods
         aggregate(group) || raise(Woods::ExtractionError, "Ambiguous library owner: #{group.first[:unit].identifier}")
       end
 
-      # Identifiers of the concern units live model inclusions produce. A
-      # module a model includes is a concern wherever it lives, as it is for
-      # the PORO sweep, so lib publishes no second unit under its identifier.
+      # A run hands in its one {ConcernClassification} (#996).
+      attr_writer :concern_classification
+
+      # Identifiers of the runtime-owned concern units: modules a live model
+      # includes, and loaded modules that extend ActiveSupport::Concern. Such a
+      # module is a concern wherever it lives, as it is for the PORO sweep, so
+      # lib publishes no second unit under its identifier.
       #
       # @return [Set<String>]
       def claimed_identifiers
         @claimed_identifiers ||= begin
           concerns = ConcernExtractor.new
+          concerns.concern_classification = @concern_classification if @concern_classification
           concerns.runtime_model_mixins.keys.flat_map do |path|
             Array(concerns.extract_model_mixin_file(path)).map(&:identifier)
           end.to_set

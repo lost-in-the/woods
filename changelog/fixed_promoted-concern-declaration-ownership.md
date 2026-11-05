@@ -1,0 +1,1 @@
+- Keep promoted concern metadata and dependencies within their owning declarations, and preserve class-method names from `class_methods do` and `module ClassMethods`.

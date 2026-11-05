@@ -54,6 +54,35 @@ RSpec.describe Woods::PathDispatcher do
       expect(keys).to include(:concerns)
     end
 
+    # #996 moves a module between families by its runtime answer, not its
+    # path. Every path the runtime rule examines must reach the concern
+    # family's runtime entry point and the family that owned it before, so a
+    # promotion or a demotion is seen from either side.
+    {
+      'app/models/tracked.rb' => :poros, 'app/controllers/authenticated.rb' => :poros,
+      'app/helpers/formatting.rb' => :poros, 'lib/storage/tracked.rb' => nil
+    }.each do |path, previous_owner|
+      it "routes #{path} to the concern runtime entry point#{" and to #{previous_owner}" if previous_owner}" do
+        rules = dispatcher.file_rules_for(path).map { |rule| [rule.extractor_key, rule.method_name] }
+
+        expect(rules).to include(%i[concerns extract_model_mixin_file])
+        expect(rules).not_to include(%i[concerns extract_concern_file])
+        expect(rules.map(&:first)).to include(previous_owner) if previous_owner
+      end
+    end
+
+    it 'routes lib changes to a wholesale library re-run, which drops a promoted module' do
+      expect(dispatcher.whole_app_keys_for('lib/storage/tracked.rb')).to include(:libs)
+    end
+
+    it 'routes a concerns-directory file to the directory rule only' do
+      rules = dispatcher.file_rules_for('app/models/concerns/tracked.rb')
+                        .map { |rule| [rule.extractor_key, rule.method_name] }
+
+      expect(rules).to include(%i[concerns extract_concern_file])
+      expect(rules).not_to include(%i[concerns extract_model_mixin_file])
+    end
+
     it 'keeps concerns out of the PORO extractor' do
       expect(keys_for('app/models/concerns/auditable.rb')).not_to include(:poros)
     end
