@@ -1,0 +1,1 @@
+- Lexical-mode metadata-store records, including nested Hashes, Arrays and Strings, are now deeply frozen. Callers that mutate retrieved records must deep-copy the structures they need to edit before changing them.
