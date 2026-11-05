@@ -620,6 +620,14 @@ module Woods
       suffix_groups.fetch(suffix, []).dup
     end
 
+    # Every unqualified short name some namespaced identifier ends in: the
+    # keys {#find_all_by_suffix} answers for.
+    #
+    # @return [Array<String>] sorted
+    def suffix_names
+      suffix_groups.keys.sort
+    end
+
     # Get direct dependencies of a unit
     #
     # Without `type:` this is the **union** across every type registered under

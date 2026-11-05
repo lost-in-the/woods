@@ -51,7 +51,43 @@ module Woods
         end
       end
 
+      # Controllers with a flow document holding a call whose receiver is one
+      # of +short_names+, unrooted (#967). Used when the top-level constant
+      # verdicts change between generations: a carried flow assembled under
+      # the old verdicts would otherwise keep a step a full run marks
+      # ambiguous, or keep a marker a full run drops. The receiver is the
+      # target up to its first `.`, so `Name`, `Name.new` and a mailer's
+      # `Name.action` all count; reading more than the verdicts can change
+      # only reassembles more.
+      #
+      # @param short_names [Enumerable<String>] single-segment constant names
+      # @return [Set<String>] controller identifiers
+      # @raise [Woods::ExtractionError] when a document cannot be read
+      def controllers_calling(short_names)
+        wanted = short_names.to_set
+        return Set.new if wanted.empty?
+
+        @index_entries.each_with_object(Set.new) do |(entry_point, relative), controllers|
+          controller, action = entry_point.split('#', 2)
+          next unless action && calls_any?(flow_document(relative), wanted)
+
+          controllers << controller
+        end
+      end
+
       private
+
+      def calls_any?(value, wanted)
+        case value
+        when Hash
+          target = value['target']
+          return true if target.is_a?(String) && wanted.include?(target.split('.', 2).first)
+
+          value.each_value.any? { |nested| calls_any?(nested, wanted) }
+        when Array then value.any? { |nested| calls_any?(nested, wanted) }
+        else false
+        end
+      end
 
       def inverse
         path = @payload_dir.join('flows', 'by_unit.json')

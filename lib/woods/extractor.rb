@@ -2256,11 +2256,12 @@ module Woods
       controllers_dir = payload_dir.join('controllers')
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
-      stepped = flow_stepped_controllers
+      verdicts_changed = changed_top_level_constants
+      stepped = flow_stepped_controllers | flow_verdict_controllers(verdicts_changed)
       unchanged = ((stepped | flow_scope_controllers) - reextracted - removed).select do |id|
         controllers_dir.join(collision_safe_filename(id)).exist?
       end
-      return if reextracted.empty? && unchanged.empty? && removed.empty?
+      return if reextracted.empty? && unchanged.empty? && removed.empty? && verdicts_changed.empty?
 
       reassemble, carried = partition_flow_controllers(
         (reextracted + unchanged.sort).filter_map { |id| unit_from_payload(:controllers, id) }, stepped
@@ -2353,6 +2354,44 @@ module Woods
 
       Extraction::FlowReach.new(payload_dir: payload_dir, index_entries: previous_flow_index_entries)
                            .controllers_through(@flow_changed_units)
+    end
+
+    # The short names whose top-level constant verdict (#967) differs between
+    # the previous generation and this run's graph, in either direction. A
+    # previous generation without verdicts assembled its flows with none.
+    #
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when the previous verdicts cannot be read
+    def changed_top_level_constants
+      current = FlowAssembler.top_level_constants(@dependency_graph.suffix_names).to_set
+      current ^ previous_top_level_constants
+    end
+
+    # @return [Set<String>] the verdicts the seeded payload carries
+    # @raise [Woods::ExtractionError] when they are present but unreadable
+    def previous_top_level_constants
+      path = payload_dir.join(FlowAssembler::TOP_LEVEL_CONSTANTS_PATH)
+      return Set.new unless path.exist?
+
+      names = FlowAssembler.published_names(JSON.parse(AtomicFile.read(path)))
+      raise Woods::ExtractionError, 'previous flows/top_level_constants.json does not list constant names' unless names
+
+      names.to_set
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "previous flows/top_level_constants.json does not parse: #{e.message}"
+    end
+
+    # Controllers whose previous flows call a receiver whose verdict changed,
+    # so a carried document would disagree with a full run's.
+    #
+    # @param names [Set<String>] from {#changed_top_level_constants}
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when a flow document cannot be read
+    def flow_verdict_controllers(names)
+      return Set.new if names.empty?
+
+      Extraction::FlowReach.new(payload_dir: payload_dir, index_entries: previous_flow_index_entries)
+                           .controllers_calling(names)
     end
 
     # The actions a unit's metadata declares, as the index records them.
@@ -2510,7 +2549,8 @@ module Woods
       end
 
       keep = parse_flow_index_for_sweep(index_path)
-             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json'
+             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json' <<
+             File.basename(FlowAssembler::TOP_LEVEL_CONSTANTS_PATH)
       orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
       return if orphans.empty?
 

@@ -57,6 +57,7 @@ module Woods
       @flows_dir = File.join(output_dir, 'flows')
       @by_unit = {}
       @failures = {}
+      @top_level_constants = nil
     end
 
     # Pre-compute flow documents for all controller actions.
@@ -77,7 +78,7 @@ module Woods
       @by_unit = {}
       @failures = {}
 
-      assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
+      assembler = new_assembler
       flow_map = {}
 
       controller_units.each do |unit|
@@ -132,7 +133,7 @@ module Woods
                                           .to_h { |failure| [failure['entry_point'], failure] }
       @by_unit = carried_inverse(carried)
 
-      assembler = FlowAssembler.new(graph: @graph, extracted_dir: @output_dir)
+      assembler = new_assembler
       delta = {}
       annotations = {}
 
@@ -156,6 +157,25 @@ module Woods
     end
 
     private
+
+    # An assembler over this run's graph, deciding #967's top-level shadowing
+    # from this booted process rather than from the verdicts a previous
+    # generation published.
+    #
+    # @return [FlowAssembler]
+    def new_assembler
+      FlowAssembler.new(graph: @graph, extracted_dir: @output_dir, top_level_constants: top_level_constants)
+    end
+
+    # The graph's short names that this process defines as top-level
+    # constants. Derived from the whole graph, not from the flows this run
+    # assembled, so a full run and an incremental delta over the same graph
+    # publish the same verdicts.
+    #
+    # @return [Array<String>]
+    def top_level_constants
+      @top_level_constants ||= FlowAssembler.top_level_constants(@graph.suffix_names)
+    end
 
     # Filter units to only controllers.
     #
@@ -295,6 +315,9 @@ module Woods
       Woods::AtomicFile.write(index_path, canonical_json(flow_map), durable: durable_writes?)
       @by_unit.each_value { |types| types.transform_values! { |entries| entries.uniq.sort } }
       Woods::AtomicFile.write(File.join(@flows_dir, 'by_unit.json'), canonical_json(@by_unit), durable: durable_writes?)
+      Woods::AtomicFile.write(File.join(@output_dir, FlowAssembler::TOP_LEVEL_CONSTANTS_PATH),
+                              canonical_json(FlowAssembler.publishable_top_level_constants(top_level_constants)),
+                              durable: durable_writes?)
     end
 
     # Retain memberships only for entries the delta carries. An older generation

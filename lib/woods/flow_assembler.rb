@@ -48,6 +48,17 @@ module Woods
     # calls one, so they are never flow callees.
     SPEC_ONLY_TYPES = %w[factory test_mapping].freeze
 
+    # Where a booted precompute publishes its top-level constant verdicts
+    # ({.top_level_constants}), relative to the index payload. A reader without
+    # Rails (the MCP server's `trace_flow`) reads them back from here, so a flow
+    # it assembles on demand reaches the same ambiguity verdicts as a
+    # precomputed one.
+    TOP_LEVEL_CONSTANTS_PATH = File.join('flows', 'top_level_constants.json')
+
+    # A single-segment constant name: the only kind of target that resolves
+    # by short-name suffix, so the only kind a top-level constant can shadow.
+    SINGLE_SEGMENT = /\A[A-Z]\w*+\z/
+
     # The method an enqueued job runs, whichever enqueue method
     # (`perform_later`, `perform_async`, `perform_in`, `perform_at`) the
     # `:async` operation recorded.
@@ -88,11 +99,50 @@ module Woods
       [match[:unit], match[:type], match[:event] || match[:scoped]]
     end
 
+    # The short names in +names+ that this process already defines as
+    # top-level constants (#967).
+    #
+    # Only a booted precompute asks: it is the one process whose constants are
+    # the application's. A name counts when `Object` defines it itself
+    # (`const_defined?(name, false)`) and not only as a pending autoload, so
+    # the check never loads a constant to decide.
+    #
+    # @param names [Enumerable<String>] candidate short names
+    # @param namespace [Module] the root namespace, `Object` outside specs
+    # @return [Array<String>] the defined names, sorted and unique
+    def self.top_level_constants(names, namespace: Object)
+      names.map(&:to_s).grep(SINGLE_SEGMENT).uniq.select do |name|
+        namespace.const_defined?(name, false) && !namespace.autoload?(name, false)
+      end.sort
+    end
+
+    # The published form of {.top_level_constants}: one sorted list under
+    # its own key, so the artifact can grow without changing shape.
+    #
+    # @param names [Array<String>]
+    # @return [Hash{String => Array<String>}]
+    def self.publishable_top_level_constants(names)
+      { 'top_level_constants' => names }
+    end
+
+    # @param document [Object] a parsed {TOP_LEVEL_CONSTANTS_PATH} artifact
+    # @return [Array<String>, nil] its names, or nil when it is malformed
+    def self.published_names(document)
+      names = document.is_a?(Hash) ? document['top_level_constants'] : nil
+      names if names.is_a?(Array) && names.all?(String)
+    end
+
     # @param graph [DependencyGraph] The dependency graph for resolving targets
     # @param extracted_dir [String] Directory containing extracted unit JSON files
-    def initialize(graph:, extracted_dir:)
+    # @param top_level_constants [Enumerable<String>, nil] short names a booted
+    #   precompute found defined at the top level ({.top_level_constants}).
+    #   Nil reads the verdicts the index published at
+    #   {TOP_LEVEL_CONSTANTS_PATH}; an index without them has no verdicts, and
+    #   every unique suffix match resolves as before.
+    def initialize(graph:, extracted_dir:, top_level_constants: nil)
       @graph = graph
       @extracted_dir = extracted_dir
+      @top_level_constants = top_level_constants&.to_set(&:to_s)
       @parser = Ast::Parser.new
       @operation_extractor = FlowAnalysis::OperationExtractor.new
       @resolved_targets = {}
@@ -540,36 +590,101 @@ module Woods
     # Tier 2: Disk fallback — attempts to load the unit JSON from disk, covering
     #          units that exist in the index but were not loaded into the graph.
     #
+    # A rooted target (`::Billing::Invoice`) names its constant from the top
+    # level, so it matches that exact identifier in either tier and never a
+    # suffix. This is a static approximation of Ruby's constant lookup, not
+    # lexical resolution: an unrooted name still resolves by unique suffix
+    # whatever the caller's nesting.
+    #
     # @param target [String] The call target name to resolve
-    # @return [String, nil] The resolved unit identifier, or nil if not found
+    # @return [String, Hash, nil] see {#compute_resolved_target}
     # Memoized per assembler instance, and negative results are cached too
     # (`nil` is a real answer — most call targets are not units). Resolution
     # used to run a linear suffix scan over every graph node *and*, on a miss,
     # a set of disk globs, once per operation encountered. A flow touching a
     # few hundred operations on a host with tens of thousands of nodes paid
-    # that every time, including for the same target repeatedly.
+    # that every time, including for the same target repeatedly. The memo key
+    # carries the rooted flag beside the bare name, so `::Invoice` and
+    # `Invoice` never share an answer.
     def resolve_target(target)
-      return @resolved_targets[target] if @resolved_targets.key?(target)
+      name = target.delete_suffix(INSTANCE_CALL_SUFFIX)
+      rooted = name.start_with?('::')
+      key = [name.delete_prefix('::'), rooted]
+      return @resolved_targets[key] if @resolved_targets.key?(key)
 
-      @resolved_targets[target] = compute_resolved_target(target)
+      @resolved_targets[key] = compute_resolved_target(*key, constant: name.match?(CONSTANT_RECEIVER))
     end
 
+    # @param name [String] the target without a leading `::` or `.new`
+    # @param rooted [Boolean] whether the call spelled a leading `::`
+    # @param constant [Boolean] whether the target is a constant reference
     # @return [String, Hash, nil] a resolved unit identifier; a
     #   `{ ambiguous: true, candidates: }` marker when several namespaces
-    #   share +target+'s short name; or nil when nothing resolves
-    def compute_resolved_target(target)
-      target = target.delete_suffix(INSTANCE_CALL_SUFFIX)
-      return nil unless target.match?(CONSTANT_RECEIVER)
+    #   share +name+, or a top-level constant shares it with one app unit;
+    #   or nil when nothing resolves
+    def compute_resolved_target(name, rooted, constant:)
+      return nil unless constant
+      return exact_target(name) if rooted
 
       # Tier 1: Graph-wide lookup
-      return callee(target) if @graph.node_exists?(target)
+      return callee(name) if @graph.node_exists?(name)
 
-      suffix_matches = @graph.find_all_by_suffix(target)
-      return callee(suffix_matches.first) if suffix_matches.size == 1
+      suffix_matches = @graph.find_all_by_suffix(name)
       return { ambiguous: true, candidates: suffix_matches } if suffix_matches.size > 1
+      return shadowed_suffix_match(name, suffix_matches.first) if suffix_matches.size == 1
 
       # Tier 2: Disk fallback (unit JSON exists but isn't in the graph)
-      callee(target) if load_unit(target)
+      callee(name) if load_unit(name)
+    end
+
+    # A rooted name's exact identifier, from the graph or from disk: the
+    # same reading `SourceReferences::Registry` gives a `::`-rooted
+    # reference.
+    #
+    # @param name [String] the target without its leading `::`
+    # @return [String, nil]
+    def exact_target(name)
+      callee(name) if @graph.node_exists?(name) || load_unit(name)
+    end
+
+    # A unique suffix match, unless the precompute found a top-level constant
+    # of the same single-segment name (#967): `I18n.t` beside an app unit
+    # `Lint::I18n` could be either, so the step names both and expands
+    # neither. The top-level candidate is spelled rooted (`::I18n`) because
+    # it is a constant, not a unit.
+    #
+    # @param name [String] the unrooted target
+    # @param match [String] the one identifier the suffix index returned
+    # @return [String, Hash, nil]
+    def shadowed_suffix_match(name, match)
+      return callee(match) unless top_level_constant?(name)
+
+      { ambiguous: true, candidates: ["::#{name}", match] }
+    end
+
+    # @param name [String]
+    # @return [Boolean] whether the verdicts name +name+ as a top-level constant
+    def top_level_constant?(name)
+      return false unless name.match?(SINGLE_SEGMENT)
+
+      @top_level_constants ||= published_top_level_constants
+      @top_level_constants.include?(name)
+    end
+
+    # The verdicts a booted precompute published with the index's flows.
+    #
+    # @return [Set<String>] empty when the index published none
+    # @raise [JSON::ParserError] when the artifact is present but unreadable,
+    #   so a reader reports a corrupt artifact instead of quietly resolving
+    #   targets the precompute marked ambiguous
+    def published_top_level_constants
+      path = File.join(@extracted_dir, TOP_LEVEL_CONSTANTS_PATH)
+      return Set.new unless File.file?(path)
+
+      names = self.class.published_names(JSON.parse(AtomicFile.read(path)))
+      raise JSON::ParserError, "#{TOP_LEVEL_CONSTANTS_PATH} does not list constant names" unless names
+
+      names.to_set
     end
 
     # @param identifier [String] a resolved unit identifier
