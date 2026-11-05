@@ -45,13 +45,13 @@ jobs:
       - name: Set up the independent docs Ruby
         uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
         with:
-          ruby-version: '3.4'
+          ruby-version: '4.0'
           bundler: '2.5.22'
       - name: Cache only locked documentation dependencies
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: ${{ env.BUNDLE_PATH }}
-          key: docs-${{ runner.os }}-${{ runner.arch }}-ruby-3.4-bundler-2.5.22-${{ hashFiles('site/Gemfile.lock') }}
+          key: docs-${{ runner.os }}-${{ runner.arch }}-ruby-4.0-bundler-2.5.22-${{ hashFiles('site/Gemfile.lock') }}
       - name: Install the isolated frozen bundle
         run: |
           ruby --version

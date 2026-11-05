@@ -1,10 +1,14 @@
 # frozen_string_literal: true
 
+require_relative 'refusal_details'
+
 module Woods
   module Console
     # Normalizes integer inputs and enforces the bounds declared by a ToolSpec.
     module InputContract
-      class ValidationError < StandardError; end
+      class ValidationError < StandardError
+        include RefusalDetails
+      end
 
       DECIMAL_INTEGER = /\A-?(?:0|[1-9]\d*)\z/
       private_constant :DECIMAL_INTEGER

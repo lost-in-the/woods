@@ -88,8 +88,10 @@ RSpec.describe Woods::GemMapper do
       result = described_class.new(root: gem_root, output_dir: out).map!
 
       expect(result).to include(status: :published)
-      payload = Woods::Generation.new(output_dir: out).payload_dir.to_s
-      payload_writes, other_writes = events.select { |e| e.first == :write }.partition { |e| e[1].start_with?(payload) }
+      # Payload files are written into the writer's private stage, which is
+      # then promoted to the published payload.
+      stage = File.join(Woods::PayloadStore.new(out).root.to_s, Woods::PayloadStore::STAGE_PREFIX)
+      payload_writes, other_writes = events.select { |e| e.first == :write }.partition { |e| e[1].start_with?(stage) }
       expect(payload_writes).not_to be_empty
       expect(payload_writes.map(&:last).uniq).to eq([false])
       # The generation pointer and anything outside the payload keep their own flush.
@@ -99,7 +101,58 @@ RSpec.describe Woods::GemMapper do
       expect(sync_at).not_to be_nil
       expect(publish_at).not_to be_nil
       expect(sync_at).to be < publish_at
-      expect(events[sync_at].last).to eq(payload)
+      expect(events[sync_at].last).to start_with(stage)
+    end
+  end
+
+  # Two self-map writers are ordinary (`bin/woods-self-mcp` refreshes in the
+  # background). One whose lock is taken over before it publishes must change
+  # nothing its successor owns.
+  describe 'a self-map writer whose lock is taken over before publishing' do
+    after { Woods::PublicationSeam.hook = nil }
+
+    def tiny_gem(dir)
+      gem_root = File.join(dir, 'gem')
+      FileUtils.mkdir_p(File.join(gem_root, 'lib'))
+      File.write(File.join(gem_root, 'lib/tiny.rb'), "module Tiny; end\n")
+      gem_root
+    end
+
+    it 'publishes nothing, prunes nothing and removes only its own stage' do
+      Dir.mktmpdir('woods_self_map_fence') do |dir|
+        out = File.join(dir, 'out')
+        successor = nil
+        theirs = nil
+        Woods::PublicationSeam.hook = lambda do |point, _dir|
+          next unless point == :before_promotion
+
+          lock_path = File.join(out, "#{described_class::LOCK_NAME}.lock")
+          old = Time.now - 7200
+          File.utime(old, old, lock_path)
+          successor = Woods::Coordination::PipelineLock.new(lock_dir: out, name: described_class::LOCK_NAME)
+          raise 'takeover failed' unless successor.acquire
+
+          theirs = Woods::PayloadStore.new(out).create_stage(1, successor.token)
+        end
+
+        expect { described_class.new(root: tiny_gem(dir), output_dir: out).map! }
+          .to raise_error(Woods::Coordination::LockLostError)
+
+        expect(Woods::Generation.new(output_dir: out).current.number).to eq(0)
+        expect(Dir.children(File.join(out, 'payloads')).grep(/\A(gen-|\.stage-)/)).to eq([theirs.basename.to_s])
+        expect(theirs).to be_directory
+        successor.release
+      end
+    end
+
+    it 'publishes from a private stage when uncontested' do
+      Dir.mktmpdir('woods_self_map_fence') do |dir|
+        out = File.join(dir, 'out')
+
+        expect(described_class.new(root: tiny_gem(dir), output_dir: out).map!).to include(status: :published,
+                                                                                          generation: 1)
+        expect(Dir.children(File.join(out, 'payloads')).grep(/\A\.stage-/)).to be_empty
+      end
     end
   end
 

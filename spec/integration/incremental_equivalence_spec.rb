@@ -1254,6 +1254,121 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     @scratch_dirs = []
   end
 
+  # `dependents` families and headline: the setting is read at query time
+  # only, so the graph cannot depend on it, and what a client is shown must
+  # match after full and incremental extraction alike.
+  describe 'dependents families and the mapped-test headline' do
+    let(:setting_env) { Woods::MCP::DependentFamilies::ENV_KEY }
+    # Written out from the files below, not from any extraction.
+    let(:direct_mapped_tests) { %w[spec/services/gizmo_service_spec.rb] }
+    let(:mapped_tests_depth_two) { %w[spec/services/gizmo_runner_spec.rb spec/services/gizmo_service_spec.rb] }
+
+    before do
+      require 'woods/mcp/server'
+      require 'woods/impact/report'
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call; end\nend\n")
+      write_file('app/services/gizmo_runner.rb', "class GizmoRunner\n  def run\n    GizmoService.call\n  end\nend\n")
+      write_file('spec/services/gizmo_service_spec.rb',
+                 "RSpec.describe GizmoService do\n  it('calls') { GizmoService.call }\nend\n")
+      write_file('spec/services/gizmo_runner_spec.rb', "RSpec.describe GizmoRunner do\n  it('runs') {}\nend\n")
+    end
+
+    after { Woods.configuration.reverse_includes_tests = false }
+
+    def scratch_index
+      dir = Dir.mktmpdir('woods_diff_families')
+      (@scratch_dirs ||= []) << dir
+      dir
+    end
+
+    def tool(dir, name, format, arguments)
+      server = Woods::MCP::Server.build(index_dir: dir, response_format: format, warmup: false)
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: name, arguments: arguments } }
+      JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
+    end
+
+    # Everything a client is shown, for one setting.
+    def displayed(dir)
+      views = [{ identifier: 'GizmoService', depth: 2 }, { identifier: 'GizmoService', depth: 2, max_nodes: 2 },
+               { identifier: 'GizmoService', depth: 1 }].to_h do |arguments|
+        [arguments, { data: tool(dir, 'dependents', :json, arguments).dig('structuredContent', 'data'),
+                      text: tool(dir, 'dependents', :markdown, arguments).dig('content', 0, 'text') }]
+      end
+      status = JSON.parse(tool(dir, 'woods_status', :json, worktrees: 'none').dig('content', 0, 'text'))
+      views.merge(setting: status.dig('features', 'reverse_includes_tests'))
+    end
+
+    def impact_tests(dir, **budget)
+      report = Woods::Impact::Report.compare(dir, from: 'gen:1', to: 'now', depth: 1, **budget).to_h
+      [report.fetch('tests').map { |item| item.except('generation') },
+       report.fetch('unknowns').select { |item| item['feature'] == 'related' || item['kind'].to_s.end_with?('budget') }
+             .map { |item| item.except('generation') }]
+    end
+
+    def mapped(view)
+      view.fetch(:data).fetch('nodes').select { |_id, entry| entry.key?('mapped_test') }.keys.sort
+    end
+
+    it 'publishes identical graph bytes with the setting on and off, and extraction never reads it' do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:fetch).and_call_original
+      expect(Woods.configuration).not_to receive(:reverse_includes_tests)
+      control = [full_extraction, full_extraction].map { |dir| read_json(dir, 'dependency_graph.json') }
+      expect(control.uniq.size).to eq(1)
+      bytes = [false, true].map do |setting|
+        ENV[setting_env] = setting ? '1' : '0'
+        dir = full_extraction
+        File.binread(File.join(payload_dir(dir), 'dependency_graph.json'))
+      ensure
+        ENV.delete(setting_env)
+      end
+      expect(bytes.uniq.size).to eq(1)
+
+      index = full_extraction
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call(*); end\nend\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/services/gizmo_service.rb'])
+      expect(ENV).not_to have_received(:[]).with(setting_env)
+      expect(ENV).not_to have_received(:fetch).with(setting_env, anything)
+    end
+
+    it 'shows the same rows, counts, setting and impact tests after full and incremental extraction' do
+      incremental = scratch_index
+      full = scratch_index
+      [incremental, full].each { |dir| Woods::Extractor.new(output_dir: dir).extract_all }
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call(*); end\nend\n")
+      Woods::Extractor.new(output_dir: incremental).extract_changed(['app/services/gizmo_service.rb'])
+      Woods::Extractor.new(output_dir: full).extract_all
+      expect(differences(incremental, full)).to be_empty
+
+      shown = [false, true].to_h do |setting|
+        Woods.configuration.reverse_includes_tests = setting
+        [setting, { incremental: displayed(incremental), full: displayed(full) }]
+      end
+      shown.each_value { |views| expect(views.fetch(:incremental)).to eq(views.fetch(:full)) }
+
+      off = shown.fetch(false).fetch(:full)
+      on = shown.fetch(true).fetch(:full)
+      expect([off.fetch(:setting), on.fetch(:setting)]).to eq([false, true])
+      whole = { identifier: 'GizmoService', depth: 2 }
+      limited = { identifier: 'GizmoService', depth: 2, max_nodes: 2 }
+      expect(mapped(off.fetch(whole))).to eq(mapped_tests_depth_two)
+      expect(mapped(off.fetch({ identifier: 'GizmoService', depth: 1 }))).to eq(direct_mapped_tests)
+      expect(off.dig(whole, :data, 'nodes')).to eq(on.dig(whole, :data, 'nodes'))
+      expect(on.dig(whole, :data, 'dependent_counts', 'headline'))
+        .to eq(off.dig(whole, :data, 'dependent_counts', 'headline') + mapped_tests_depth_two.size)
+      expect(off.dig(limited, :data, 'dependent_counts')).to include('exact' => false, 'bound' => 'lower_bound')
+      expect(off.dig(limited, :text)).to include('Recorded dependents: at least ')
+
+      [{}, { max_nodes: 1 }].each do |budget|
+        expect(impact_tests(incremental, **budget)).to eq(impact_tests(full, **budget))
+      end
+      tests, = impact_tests(full)
+      impact_ids = tests.map { |item| item['identifier'] }
+      expect(impact_ids).to include(*direct_mapped_tests)
+      expect(mapped(off.fetch({ identifier: 'GizmoService', depth: 1 })) - impact_ids).to be_empty
+    end
+  end
+
   # Annotated source_code shifts lines away from the file; the map back to the
   # file is recorded while the absolute path is still readable, on the full
   # path's normalization phase and on each incremental write.

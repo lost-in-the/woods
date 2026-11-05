@@ -37,6 +37,34 @@ module Woods
         end
       end
 
+      # Names the application's module, so its bytes tie a tree to an app.
+      APPLICATION = 'config/application.rb'
+
+      # How much of the recorded baseline a check read and found unchanged:
+      # a bounded check that stops early can still say "no drift in N of M"
+      # rather than only "unknown". `application_verified`, present when
+      # {APPLICATION} was captured, says whether it still has its bytes.
+      #
+      # @param previous [Hash{String => Hash{String => String}}] {#expanded}
+      # @param files [Hash{String => String}] identities a scan read
+      # @return [Hash]
+      def self.coverage(previous, files)
+        recorded = previous.each_value.with_object({}) { |paths, all| all.merge!(paths) }
+        { 'recorded_files' => recorded.size, 'verified_files' => recorded.count { |path, id| files[path] == id },
+          'application_verified' => (files[APPLICATION] == recorded[APPLICATION] if recorded.key?(APPLICATION)) }
+          .compact
+      end
+
+      # What a check compares, as status reports it: the consumer scopes this
+      # generation captured (the file kinds each extractor reads) and the
+      # declared source roots. A file no scope claims was never captured, so
+      # its appearance is never drift.
+      #
+      # @return [Hash]
+      def scope_summary
+        { 'consumer_scopes' => @data.fetch('scopes').keys.sort, 'declared_roots' => @data.fetch('extra_roots') }
+      end
+
       # Older version-1 writers encoded missing comparison evidence only as
       # errors. Never interpret their empty ledger as proof of an empty tree.
       def comparison_complete?
