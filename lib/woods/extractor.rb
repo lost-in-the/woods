@@ -1101,6 +1101,10 @@ module Woods
       # inverse. See {#flow_stepped_controllers}.
       @flow_changed_units = nil
       @previous_flow_index_entries = nil
+      # Controllers the unchanged check retained without comparing their flow
+      # annotation, and whether the seeded payload holds a flow family (#994).
+      @flow_retained_controllers = Set.new
+      @flow_family_published = nil
       @incremental_extractors = nil
       @source_collector = nil
       @hybrid_discovery_keys = Set.new
@@ -2244,7 +2248,8 @@ module Woods
     # stays resolved and readable. ( woods:validate applies the same rule
     # for a populated family without an index.)
     #
-    # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @param touched [Set<String>] identifiers added, re-extracted, or removed;
+    #   a retained controller whose annotation this rewrites is added to it
     # @return [void]
     # @raise [Woods::ExtractionError] when authoritative flow state is
     #   missing or corrupt, or a flow-family write fails
@@ -2258,7 +2263,10 @@ module Woods
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
       verdicts_changed = changed_top_level_constants
       stepped = flow_stepped_controllers | flow_verdict_controllers(verdicts_changed)
-      unchanged = ((stepped | flow_scope_controllers) - reextracted - removed).select do |id|
+      # Controllers retained without comparing their annotation still reach
+      # the refresh that owns it; changed constant verdicts force reassembly.
+      retained = Array(@flow_retained_controllers).to_set
+      unchanged = ((stepped | flow_scope_controllers | retained) - reextracted - removed).select do |id|
         controllers_dir.join(collision_safe_filename(id)).exist?
       end
       return if reextracted.empty? && unchanged.empty? && removed.empty? && verdicts_changed.empty?
@@ -2281,7 +2289,9 @@ module Woods
       )
       @flow_failures = precomputer.failures.values
       log_flow_failures
-      patch_flow_annotations(annotations)
+      # A controller retained by the unchanged check is written here only when
+      # its annotation really changed; it counts as touched like any write.
+      touched.merge(Array(patch_flow_annotations(annotations)))
       sweep_orphaned_flow_files
       # The annotation patch changed controller JSON after the run's type
       # index regeneration; the index carries estimated_tokens, which the
@@ -2496,9 +2506,9 @@ module Woods
     #
     # @param annotations [Hash{String => Hash{String => String}}] from
     #   {FlowPrecomputer#recompute_delta}
-    # @return [void]
+    # @return [Set<String>] the controllers whose unit JSON was rewritten
     def patch_flow_annotations(annotations)
-      annotations.each do |identifier, flow_paths|
+      annotations.each_with_object(Set.new) do |(identifier, flow_paths), written|
         path = payload_dir.join('controllers', collision_safe_filename(identifier))
         next unless File.exist?(path)
 
@@ -2514,6 +2524,7 @@ module Woods
         next if JSON.generate(data) == before
 
         AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
+        written.add(identifier)
       end
     end
 
@@ -4627,27 +4638,62 @@ module Woods
     # The comparison is in {ExtractedForm.before_tables}: the method table,
     # test examples and declaration sites are derived from what that form
     # holds, so the fresh unit need not carry them yet.
+    #
+    # A controller's `metadata.flow_paths` is left out too when the run's
+    # flow refresh reconciles it ({#flow_annotation_reconciled?}). The fresh
+    # unit never carries it at this point, so keeping it in made every
+    # flow-bearing controller in the radius look changed (#994). A retained
+    # controller is handed to the flow refresh instead, which reassembles or
+    # carries its flows and rewrites the unit only if the annotation differs.
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
+      reconciled = flow_annotation_reconciled?(unit)
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      fresh = ExtractedForm.before_tables(JSON.parse(JSON.generate(normalized.to_h)))
+      fresh = extracted_form_for_comparison(JSON.parse(JSON.generate(normalized.to_h)), reconciled)
       path = type_dir.join(collision_safe_filename(unit.identifier))
-      return false unless fresh == published_extracted_form(path, unit)
+      return false unless fresh == published_extracted_form(path, unit, reconciled: reconciled)
 
       retain_unit(unit)
+      (@flow_retained_controllers ||= Set.new).add(unit.identifier) if reconciled
       true
+    end
+
+    # Whether the run's flow refresh owns this unit's flow annotation, so the
+    # unchanged check may leave it out. True only for a controller, with flow
+    # precomputation on and a published flow family for the refresh to
+    # reconcile against ({#refresh_incremental_flows} skips without one).
+    # Anything else keeps the annotation in the comparison, as before #994.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [Boolean]
+    def flow_annotation_reconciled?(unit)
+      return false unless unit.type.to_s == 'controller' && Woods.configuration.precompute_flows
+
+      @flow_family_published = flow_family_present? if @flow_family_published.nil?
+      @flow_family_published
+    end
+
+    # @param data [Hash] string-keyed unit JSON
+    # @param reconciled [Boolean] from {#flow_annotation_reconciled?}
+    # @param reference_edges [Array<Hash>]
+    # @return [String, nil] {ExtractedForm.before_tables}, without the flow
+    #   annotation when the flow refresh reconciles it
+    def extracted_form_for_comparison(data, reconciled, reference_edges: [])
+      data = ExtractedForm.without_flow_annotation(data) if reconciled
+      ExtractedForm.before_tables(data, reference_edges: reference_edges)
     end
 
     # @return [String, nil] the published unit's {ExtractedForm.before_tables};
     #   nil when the file is missing, unreadable, or disagrees with its
     #   reference ownership
-    def published_extracted_form(path, unit)
+    def published_extracted_form(path, unit, reconciled: false)
       return nil unless File.exist?(path)
 
       key = [unit.type.to_s, unit.identifier]
-      ExtractedForm.before_tables(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+      extracted_form_for_comparison(JSON.parse(AtomicFile.read(path)), reconciled,
+                                    reference_edges: reference_additions[key])
     rescue StandardError
       nil
     end

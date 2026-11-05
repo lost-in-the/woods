@@ -39,8 +39,16 @@ also carries what the second pass adds after registration: `dependents`, Git
 facts, and the edges the source-reference pass resolved. A fresh unit has none
 of them yet, so they are left out of the comparison (included in Woods 2.2;
 earlier writers compared them, and a unit with one dependent never matched).
-Controller flow annotations are compared, so a re-extracted controller with
-precomputed flows is always registered and its flows reassembled.
+Controller flow annotations (`metadata[:flow_paths]`) are left out too when
+the run's flow refresh reconciles them: `precompute_flows` is on and the
+published payload holds a flow family (included in Woods 2.2, #994; earlier
+writers compared them, so every flow-bearing controller in the blast radius
+was rewritten with only `extracted_at` different, and counted). A controller
+retained this way still goes to the flow refresh, which reassembles or carries
+its flows like a re-extracted one (see [Flow artifacts](#flow-artifacts)). The
+refresh rewrites the unit, and counts it as touched, only when its annotation
+really changes. With the gate off, or no published flow family, the annotation
+is compared as before.
 
 The top-level constant verdicts in `flows/top_level_constants.json` (#967) are
 derived from the whole graph on every flow refresh. When they differ from the
@@ -786,7 +794,8 @@ uses its normal query-time assembly instead of an obsolete precomputed document.
 A full extraction computes all three in one pass. An incremental run computes
 them for its **delta**:
 
-- **Re-extracted controllers** get their `metadata[:flow_paths]` back, their
+- **Re-extracted controllers**, and controllers the unchanged check retained
+  without comparing their annotation, get their `metadata[:flow_paths]` back, their
   flow documents are re-assembled from the units on disk, and their entries
   replace whatever the previous index held for them — so an action removed
   from a re-extracted controller leaves the index even though the file still

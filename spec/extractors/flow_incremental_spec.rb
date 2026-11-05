@@ -609,11 +609,21 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
   # publication before the generation is bumped: the preceding generation
   # stays resolved and readable, and the run's payload directory is left
   # inert (nothing points at it; the next run's PayloadStore#create empties
-  # it). Reload the dummy controller to touch it: re-opening adds no
-  # methods, so later examples are unaffected.
+  # it). Each example edits the dummy controller with a comment, so the run
+  # really re-extracts it and reaches the flow refresh. An unchanged file is a
+  # no-op that never gets there, now that the published flow annotation no
+  # longer makes the controller look changed (#994). Re-opening adds no
+  # methods, and the before hook restores the file, so later examples are
+  # unaffected.
 
   def generation_bytes(index_dir)
     File.read(File.join(index_dir, 'generation.json'))
+  end
+
+  def edit_posts_controller
+    path = app_path('app/controllers/posts_controller.rb')
+    File.write(path, "#{File.read(path)}# edited for this example\n")
+    load path
   end
 
   it 'aborts publication when the previous flow_index.json is corrupt' do
@@ -626,7 +636,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     # guarantees is that publication does not advance over it.
     File.write(File.join(payload_of(index_dir), 'flows', 'flow_index.json'), '{ corrupt')
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
@@ -655,7 +665,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
         original.call(path, content)
       end
 
-      load app_path('app/controllers/posts_controller.rb')
+      edit_posts_controller
       expect do
         Woods::Extractor.new(output_dir: index_dir)
                         .extract_changed(['app/controllers/posts_controller.rb'])
@@ -679,7 +689,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       original.call(path, content)
     end
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
@@ -698,7 +708,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
     allow(assembler).to receive(:assemble).and_raise(StandardError, 'broken route table')
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
