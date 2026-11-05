@@ -18,6 +18,19 @@ module CiLocalRunnerSpecHarness
 end
 
 RSpec.describe CiLocalEnvironment do
+  it 'runs booted writer-fencing entry points in hosted and local Rails lanes', :aggregate_failures do
+    path = File.expand_path('../../.github/workflows/ci.yml', __dir__)
+    jobs = YAML.safe_load_file(path, aliases: true).fetch('jobs')
+    %w[rails-matrix rails-required].each do |name|
+      job = jobs.fetch(name)
+      expect(job.fetch('env').fetch('WOODS_RUN_BOOTED_APP')).to eq('1')
+      step = job.fetch('steps').find { |entry| entry['name'] == 'Run booted-app extraction' }
+      expect(step.fetch('run').split).to include('spec/integration/writer_fencing_booted_spec.rb')
+    end
+    expect(CiLocalRunnerSpecHarness::BOOTED_STEPS.flatten)
+      .to include('spec/integration/writer_fencing_booted_spec.rb')
+  end
+
   def fixture(root)
     %w[lib/woods exe assets puma gemfiles bin].each { |path| FileUtils.mkdir_p(File.join(root, path)) }
     File.write(File.join(root, '.gitignore'), "Gemfile.lock\ngemfiles/*.gemfile.lock\n.bundle/\ntmp/\n")
@@ -189,6 +202,44 @@ RSpec.describe CiLocalEnvironment do
     "GEM\n  specs:\n\nPLATFORMS\n  ruby\n\nDEPENDENCIES\n\nBUNDLED WITH\n   2.5.22\n"
   end
 
+  describe 'hosted reference event profiles' do
+    CiLocalEnvironment::ROWS.each_key do |row|
+      %w[pull_request push workflow_dispatch].each do |event|
+        it "accepts #{row} references from #{event} with the matching profile" do
+          record = fixture_record(CiLocalEnvironment::ROOT, reference_lock, row)
+          record['event'] = event
+          booted_profile = event == 'pull_request' ? %w[8 1] : ['60', '1,2,3']
+          record['profile'] = booted_profile if row.start_with?('rails-')
+
+          expect do
+            described_class.validate_record!(record, row, '123', '1', record.dig('identity', 'lock_sha256'))
+          end.not_to raise_error
+        end
+      end
+
+      it "refuses #{row} references from an unsupported hosted event" do
+        record = fixture_record(CiLocalEnvironment::ROOT, reference_lock, row)
+        record['event'] = 'schedule'
+
+        expect do
+          described_class.validate_record!(record, row, '123', '1', record.dig('identity', 'lock_sha256'))
+        end.to raise_error(described_class::Error, /contradictory reference/)
+      end
+
+      next unless row.start_with?('rails-')
+
+      it "refuses a shortened #{row} profile on a full-matrix dispatch" do
+        record = fixture_record(CiLocalEnvironment::ROOT, reference_lock, row)
+        record['event'] = 'workflow_dispatch'
+        record['profile'] = %w[8 1]
+
+        expect do
+          described_class.validate_record!(record, row, '123', '1', record.dig('identity', 'lock_sha256'))
+        end.to raise_error(described_class::Error, /contradictory reference/)
+      end
+    end
+  end
+
   it 'activates lint and unit frozen against one existing fast-mode lock without changing it', :baseline_puma do
     Dir.mktmpdir do |root|
       fixture(root)
@@ -340,6 +391,16 @@ RSpec.describe CiLocalEnvironment do
         record = JSON.parse(File.read(File.join(target, 'environment.json')))
         expect(record).to include('row' => row, 'reference_source_sha' => sha, 'run_id' => '123')
         expect(record.fetch('identity').fetch('dependency_inputs')).to eq(described_class.expected_inputs(row))
+        env['GITHUB_EVENT_NAME'] = 'workflow_dispatch'
+        if row.start_with?('rails-')
+          env['WOODS_CI_REFERENCE_OPS'] = '60'
+          env['WOODS_CI_REFERENCE_SEEDS'] = '1,2,3'
+        end
+        out, err, status = bundle_fixture(root, *args, env: env)
+        expect(status.success?).to be(true), "#{out} #{err}"
+        record = JSON.parse(File.read(File.join(target, 'environment.json')))
+        expect(record).to include('event' => 'workflow_dispatch', 'reference_source_sha' => sha)
+        expect(record['profile']).to eq(row.start_with?('rails-') ? ['60', '1,2,3'] : nil)
         File.write(File.join(root, 'unexpected.rb'), 'untracked')
         _, err, status = bundle_fixture(root, *args, env: env)
         expect(status.success?).to be(false), err

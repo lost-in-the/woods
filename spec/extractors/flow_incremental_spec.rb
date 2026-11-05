@@ -609,11 +609,21 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
   # publication before the generation is bumped: the preceding generation
   # stays resolved and readable, and the run's payload directory is left
   # inert (nothing points at it; the next run's PayloadStore#create empties
-  # it). Reload the dummy controller to touch it: re-opening adds no
-  # methods, so later examples are unaffected.
+  # it). Each example edits the dummy controller with a comment, so the run
+  # really re-extracts it and reaches the flow refresh. An unchanged file is a
+  # no-op that never gets there, now that the published flow annotation no
+  # longer makes the controller look changed (#994). Re-opening adds no
+  # methods, and the before hook restores the file, so later examples are
+  # unaffected.
 
   def generation_bytes(index_dir)
     File.read(File.join(index_dir, 'generation.json'))
+  end
+
+  def edit_posts_controller
+    path = app_path('app/controllers/posts_controller.rb')
+    File.write(path, "#{File.read(path)}# edited for this example\n")
+    load path
   end
 
   it 'aborts publication when the previous flow_index.json is corrupt' do
@@ -626,7 +636,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     # guarantees is that publication does not advance over it.
     File.write(File.join(payload_of(index_dir), 'flows', 'flow_index.json'), '{ corrupt')
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
@@ -655,7 +665,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
         original.call(path, content)
       end
 
-      load app_path('app/controllers/posts_controller.rb')
+      edit_posts_controller
       expect do
         Woods::Extractor.new(output_dir: index_dir)
                         .extract_changed(['app/controllers/posts_controller.rb'])
@@ -679,7 +689,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       original.call(path, content)
     end
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
@@ -698,7 +708,7 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
     allow(Woods::FlowAssembler).to receive(:new).and_return(assembler)
     allow(assembler).to receive(:assemble).and_raise(StandardError, 'broken route table')
 
-    load app_path('app/controllers/posts_controller.rb')
+    edit_posts_controller
     expect do
       Woods::Extractor.new(output_dir: index_dir)
                       .extract_changed(['app/controllers/posts_controller.rb'])
@@ -789,6 +799,73 @@ RSpec.describe 'Incremental flow artifacts', :booted_app do
       end.to raise_error(Woods::ExtractionError, /best-effort flow failures/)
       expect(generation_bytes(index_dir)).to eq(before_bytes)
       fold_into_pristine('app/controllers/taps_controller.rb')
+    end
+  end
+
+  # ── Top-level constant verdicts (#967) ───────────────────────────────────
+  #
+  # The verdicts are derived from the whole graph, so a change that adds or
+  # removes an app unit sharing a top-level constant's short name changes them
+  # without touching any controller. A carried flow that calls that name must
+  # be reassembled, or it keeps the step a full run marks ambiguous (or the
+  # marker a full run drops).
+  describe 'when the top-level constant verdicts change' do
+    let(:service) { 'app/services/lint/flow_verdict_probe.rb' }
+    let(:service_source) do
+      "module Lint\n  class FlowVerdictProbe\n    def self.t(*)\n      self\n    end\n  end\nend\n"
+    end
+
+    before do
+      stub_const('FlowVerdictProbe', Module.new)
+      write_controller('verdict_probes_controller', 'VerdictProbesController', show: 'FlowVerdictProbe.t(:hi)')
+    end
+
+    after { fold_into_pristine('app/controllers/verdict_probes_controller.rb') }
+
+    # The flow `trace_flow` would assemble on demand from the published
+    # generation, without the booted process's constants: the published
+    # graph, units and verdicts only.
+    def on_demand_flow(index_dir)
+      payload = payload_of(index_dir)
+      graph = Woods::DependencyGraph.from_h(JSON.parse(File.read(File.join(payload, 'dependency_graph.json'))))
+      flow = Woods::FlowAssembler.new(graph: graph, extracted_dir: payload)
+                                 .assemble('VerdictProbesController#show', max_depth: Woods::FlowPrecomputer::DEFAULT_MAX_DEPTH)
+      JSON.parse(JSON.generate(flow.to_h)).except('generated_at')
+    end
+
+    def stored_flow(index_dir)
+      file = File.basename(flow_index(index_dir).fetch('VerdictProbesController#show'))
+      flow_doc(index_dir, file).except('generated_at')
+    end
+
+    def probe_operation(index_dir)
+      file = File.basename(flow_index(index_dir).fetch('VerdictProbesController#show'))
+      flow_doc(index_dir, file)['steps'].first['operations'].find { |op| op['target'] == 'FlowVerdictProbe' }
+    end
+
+    it 'marks a carried flow ambiguous when a new app unit takes the name, as a full run does' do
+      index_dir = extract_all_to_tmp
+      expect(probe_operation(index_dir)).not_to have_key('ambiguous_candidates')
+
+      load_app_file(service, service_source)
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([service])
+
+      expect(stored_flow(index_dir)).to eq(on_demand_flow(index_dir))
+      expect(probe_operation(index_dir)['ambiguous_candidates']).to eq(['::FlowVerdictProbe', 'Lint::FlowVerdictProbe'])
+      expect_flows_match_full(index_dir)
+    end
+
+    it 'drops the marker from a carried flow when that app unit goes away, as a full run does' do
+      load_app_file(service, service_source)
+      index_dir = extract_all_to_tmp
+      expect(probe_operation(index_dir)['ambiguous_candidates']).to eq(['::FlowVerdictProbe', 'Lint::FlowVerdictProbe'])
+
+      File.delete(app_path(service))
+      Woods::Extractor.new(output_dir: index_dir).extract_changed([service])
+
+      expect(stored_flow(index_dir)).to eq(on_demand_flow(index_dir))
+      expect(probe_operation(index_dir)).not_to have_key('ambiguous_candidates')
+      expect_flows_match_full(index_dir)
     end
   end
 end

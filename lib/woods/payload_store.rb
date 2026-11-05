@@ -4,6 +4,7 @@ require 'pathname'
 require 'fileutils'
 require 'forwardable'
 require_relative 'generation_pins'
+require_relative 'atomic_file'
 
 module Woods
   # Writer-side owner of the per-generation payload directories.
@@ -86,6 +87,107 @@ module Woods
     # @return [Pathname] the destination
     def rename(source, number)
       replace_unpinned(number, source: source) { |dir| FileUtils.mv(source.to_s, dir.to_s) }
+    end
+
+    # Prefix of a writer's private staging directory. Never matches the
+    # `gen-<n>` pattern, so retention, pins and readers never treat a stage
+    # as a generation.
+    STAGE_PREFIX = '.stage-'
+
+    # How long another writer's stage must sit untouched before a writer that
+    # holds the lock may sweep it. Far beyond any lease: the only stages this
+    # old belong to a writer that crashed, or one so long obsolete that its
+    # resumed run failing is the right outcome.
+    ABANDONED_STAGE_AGE = 24 * 60 * 60
+
+    # @param number [Integer] the generation the stage expects to publish as
+    # @param owner [String] the writer's lock token (or another per-run
+    #   unique string)
+    # @return [Pathname] where that writer stages (may not exist)
+    def stage_path_for(number, owner)
+      raise ArgumentError, 'invalid stage owner' unless owner.to_s.match?(/\A[A-Za-z0-9_-]+\z/)
+
+      root.join("#{STAGE_PREFIX}#{number}-#{owner}")
+    end
+
+    # Create a writer's private staging directory and return it.
+    #
+    # Unlike {#create}, nothing here can touch another writer's work: the
+    # name carries this writer's own token, so the only directory it may
+    # empty is one this writer created earlier under the same token.
+    #
+    # @param number [Integer]
+    # @param owner [String]
+    # @return [Pathname]
+    def create_stage(number, owner)
+      stage = stage_path_for(number, owner)
+      FileUtils.mkdir_p(root.to_s)
+      FileUtils.rm_rf(stage.to_s)
+      FileUtils.mkdir_p(stage.to_s)
+      stage
+    end
+
+    # Move a finished stage into place as generation +number+.
+    #
+    # The caller runs this inside its writer fence, with the marker still
+    # naming +number - 1+, so +gen-<number>+ is not the published payload. An
+    # existing one is a leftover from a run that never published and is
+    # replaced, exactly as {#create} always did; a persistently pinned one is
+    # refused.
+    #
+    # The rename is made durable before this returns: `payloads/` itself is
+    # fsynced, so a marker written durably afterwards can never name a
+    # `gen-<n>` whose directory entry a crash could still lose. (The tree
+    # flush before promotion persists the stage's contents and its
+    # `.stage-*` entry, not the rename.)
+    #
+    # @param stage [Pathname] a directory from {#create_stage}
+    # @param number [Integer]
+    # @return [Pathname] the promoted payload directory
+    def promote(stage, number)
+      promoted = rename(stage, number)
+      AtomicFile.fsync_directory(root.to_s)
+      promoted
+    end
+
+    # Remove this writer's own stage. Only a path under {STAGE_PREFIX} is
+    # ever removed, so a caller holding a promoted payload's path cannot
+    # delete a generation through this.
+    #
+    # @param stage [Pathname, nil]
+    # @return [void]
+    def discard_stage(stage)
+      return unless stage && stage?(stage)
+
+      FileUtils.rm_rf(stage.to_s)
+    end
+
+    # @param path [Pathname, String]
+    # @return [Boolean] whether +path+ names a staging directory of this store
+    def stage?(path)
+      path = Pathname.new(path.to_s)
+      path.dirname.expand_path == root.expand_path && path.basename.to_s.start_with?(STAGE_PREFIX)
+    end
+
+    # Remove other writers' stages that have been abandoned for longer than
+    # +older_than+ seconds. Called by a writer that holds the lock; a stage
+    # younger than that is left alone even when its writer has been taken
+    # over, so a takeover never deletes a stage another writer may still be
+    # writing.
+    #
+    # @param except [Pathname, nil] the caller's own stage
+    # @param older_than [Numeric]
+    # @return [Array<String>] the names removed
+    def sweep_abandoned_stages(except: nil, older_than: ABANDONED_STAGE_AGE)
+      return [] unless root.directory?
+
+      own = except && Pathname.new(except.to_s).expand_path
+      root.children.filter_map do |child|
+        next unless abandoned_stage?(child, own, older_than)
+
+        FileUtils.rm_rf(child.to_s)
+        child.basename.to_s
+      end
     end
 
     # Populate +target+ with the contents of +source+ using hardlinks.
@@ -197,6 +299,15 @@ module Woods
     end
 
     private
+
+    def abandoned_stage?(child, own, older_than)
+      return false unless child.basename.to_s.start_with?(STAGE_PREFIX) && child.directory?
+      return false if own && child.expand_path == own
+
+      Time.now - child.mtime > older_than
+    rescue Errno::ENOENT
+      false
+    end
 
     def replace_unpinned(number, source: nil)
       dir = path_for(number)

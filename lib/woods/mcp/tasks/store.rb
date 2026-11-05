@@ -7,6 +7,7 @@ require 'time'
 require 'fileutils'
 require 'open3'
 require_relative '../../atomic_file'
+require_relative '../../coordination/liveness'
 
 module Woods
   module MCP
@@ -332,14 +333,31 @@ module Woods
           # A foreign-boot producer identity (e.g. a task minted inside a
           # container) can't be judged by this reader's own pid table at all —
           # `task.pid` names a slot in a namespace this process doesn't share,
-          # so `process_alive?` would be checking an unrelated, possibly
+          # so a pid check would be judging an unrelated, possibly
           # reused, host pid. Leave those tasks alone rather than risk failing
           # one that is still running — but only within
           # FOREIGN_PRODUCER_GRACE_SECONDS, or a rebooted host answers
           # `working` forever for a run that died in the reboot.
           return foreign_producer_within_grace?(task) if foreign_producer?(task.producer_identity)
 
-          process_alive?(task.pid) && producer_identity_for(task.pid) == task.producer_identity
+          case producer_liveness(task.pid)
+          when :alive
+            producer_identity_for(task.pid) == task.producer_identity
+          when :unknown
+            # EPERM with no readable /proc status: something holds the pid,
+            # but it may be an exited, unreaped producer. Unknown alone never
+            # fails a task. A readable identity that differs still proves the
+            # pid was reused; otherwise the same age backstop as a foreign
+            # producer decides.
+            identity = producer_identity_for(task.pid)
+            return false if identity && identity != task.producer_identity
+
+            foreign_producer_within_grace?(task)
+          else
+            # Dead, or (on Linux) exited and waiting to be reaped: a zombie
+            # keeps its /proc stat, so its identity would still match.
+            false
+          end
         end
 
         # Age backstop for an unjudgeable producer, measured from
@@ -356,7 +374,7 @@ module Woods
         # under another kernel boot, or (ordinary Docker on Linux, which
         # shares the host boot id) inside another pid namespace. `task.pid`
         # then names a slot in a namespace this process does not share, so
-        # `process_alive?` would be checking an unrelated, possibly reused,
+        # a pid check would be judging an unrelated, possibly reused,
         # host pid.
         def foreign_producer?(producer_identity)
           boot = producer_identity[/\Aboot=([^;]+)/, 1]
@@ -396,14 +414,14 @@ module Woods
           @current_boot_identity = nil
         end
 
-        def process_alive?(pid)
-          Process.kill(0, Integer(pid))
-          true
-        rescue Errno::EPERM
-          # The process exists, it just belongs to another user. Alive.
-          true
-        rescue Errno::ESRCH, ArgumentError, TypeError
-          false
+        # The shared four-state check ({Woods::Coordination::Liveness}). A pid
+        # this record cannot even parse names no producer: :dead.
+        #
+        # @return [Symbol] :alive, :dead, :zombie or :unknown
+        def producer_liveness(pid)
+          Woods::Coordination::Liveness.check(Integer(pid))
+        rescue ArgumentError, TypeError
+          :dead
         end
 
         def producer_identity_for(pid)

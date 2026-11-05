@@ -438,6 +438,15 @@ apparently complete empty result. This corrects the older unscoped family
 labels. Retrieval tools continue to use their own documented concrete-type
 filters; search aliases do not change those contracts.
 
+**Included in Woods 2.2 (#969):** `graphql` and `rails_source` are the only
+family aliases. `search.types: ["route"]` returns `route` units only, not the
+`route_file` units that share the `routes/` directory; pass `route_file` for
+those. `routes` is not a type and returns `invalid_params`. `recent_changes`
+filters `types` the same way and labels each result with its unit's own type
+(`route_file`, `gem_source`, `graphql_mutation`) instead of its directory name.
+The `codebase://type/{type}` resource follows the same rule: `codebase://type/route`
+lists route units only, and `codebase://type/route_file` lists route files.
+
 **Included in Woods 2.1:** typed `lookup` also accepts the `graphql` family
 alias. The returned unit keeps its concrete type, such as `graphql_mutation`;
 prefer that concrete type for follow-up identity checks.
@@ -546,6 +555,54 @@ Successful responses carry `graph_coverage` with `scope: "published_relationship
 show the same notice, including compact, root-only and empty-page responses.
 This response metadata and the total exactness field below are included in Woods
 `2.0.0`; older servers need the same conservative interpretation.
+
+### Dependents families and headline
+
+`dependents` sorts every row it returns, except the root, into one family by
+published unit type, never by path:
+
+| Family | Unit types |
+|---|---|
+| `code` | application code: models, controllers, concerns, services, jobs, mailers, views, components, GraphQL, POROs, lib and similar, plus `scheduled_job`, `event` and `caching` (declared at code sites) |
+| `tests` | `test_mapping`, `test_support`, `factory` |
+| `schema` | `database_table`, `database_view`, `migration`, `external_consumer` |
+| `docs` | `doc`, including agent instruction files such as `AGENTS.md` and `CLAUDE.md` |
+| `other` | `route`, `route_file`, `i18n`, `configuration`, `config_file`, `engine`, `package`, `rails_source`, `gem_source`; also any type this list does not name, and an identifier whose types fall in different families |
+
+Each row carries `family`. A **mapped test** is a `test_mapping` row whose
+recorded edge to the row it was reached from is `test_coverage`: a static
+association between a spec and the code it names, not proof that the test ran
+or covers the behavior. Mapped test rows also carry
+`mapped_test: { via: "test_coverage", direction: "test_to_subject" }`, the raw
+relationship and its recorded direction. Text renderers label them
+"(Mapped test)".
+
+The result carries `dependent_counts`:
+
+| Field | Meaning |
+|---|---|
+| `headline` | recorded dependents in the `code` family, plus mapped tests when `reverse_includes_tests` is on |
+| `mapped_tests` | mapped test rows, always reported beside the headline |
+| `reverse_includes_tests` | the setting this answer used |
+| `families` | `code`, `tests`, `schema`, `docs`, `other`; they add up to `total` |
+| `total` | rows in the traversal, without the root |
+| `scope` | `whole_traversal`: the counts cover the whole walk, not the page `limit`/`offset` selected |
+| `exact`, `bound` | `true`/`exact` for a finished walk; `false`/`lower_bound` after a budget cutoff, when every count is a lower bound |
+
+The counts are taken after the `depth`, `types` and `via` filters. They are
+recorded dependents, impact candidates in the published graph: they say
+nothing about what a change will break. Text renderers print the server's
+counts as given, for example `Recorded dependents: 12 (code); Mapped tests: 3
+(listed, not counted).` and a `By family:` line, prefixed with `at least` for a
+lower bound. `dependencies` carries neither field.
+
+Mapped tests are always listed, so the rows, their order and the traversal
+budget are what they were before families existed. The setting
+`reverse_includes_tests` (default `false`; see the
+[configuration reference](CONFIGURATION_REFERENCE.md#dependents-headline)) only
+decides whether they count toward `headline`. The server reads it per query;
+extraction never reads it, so changing it needs no re-extraction.
+`woods_status` reports it as `features.reverse_includes_tests`.
 
 ### Dependency traversal budgets
 
@@ -683,6 +740,11 @@ a generation-marker or final source-verification failure marks the task
 Clients without the extension still receive a background-start acknowledgement,
 which does not establish completion. This correction (#584) is included in Woods 2.1; check the loaded server revision. See the
 [publication failure recovery](TROUBLESHOOTING.md#extraction-exits-non-zero-after-could-not-publish-generation).
+
+Both operator pipeline tools write the index the server serves (its
+`index_dir`) and take that directory's writer lock, the same lock the rake
+writers and the watch daemon use. `config.output_dir` does not pick either one,
+so a server started on one index cannot lock it while writing another.
 
 ### HTTP transport
 

@@ -116,6 +116,41 @@ RSpec.describe Woods::ExtractedForm do
     end
   end
 
+  # #994: a caller whose flow refresh reconciles the annotation compares
+  # without it. Everything else about the unit still counts.
+  describe '.without_flow_annotation' do
+    let(:annotated) do
+      unit('metadata' => { 'queue' => 'default', 'flow_paths' => { 'show' => 'flows/ShipmentJob_show.json' } })
+    end
+
+    it 'makes an annotated unit compare equal to the same unit without the annotation' do
+      expect(described_class.before_tables(described_class.without_flow_annotation(annotated)))
+        .to eq(described_class.before_tables(unit))
+    end
+
+    it 'keeps every other difference, including a nested key of the same name' do
+      changed = described_class.without_flow_annotation(
+        unit('metadata' => { 'queue' => 'low', 'flow_paths' => { 'show' => 'f' } })
+      )
+      nested = unit('metadata' => { 'queue' => 'default', 'options' => { 'flow_paths' => 'kept' } })
+
+      expect(described_class.of(changed)).not_to eq(described_class.of(unit))
+      expect(described_class.without_flow_annotation(nested)).to eq(nested)
+    end
+
+    it 'returns a unit without the annotation, or without metadata, as it is, and does not mutate its argument' do
+      copy = Marshal.load(Marshal.dump(annotated))
+      plain = unit
+      bare = unit.except('metadata')
+
+      described_class.without_flow_annotation(annotated)
+
+      expect(annotated).to eq(copy)
+      expect(described_class.without_flow_annotation(plain)).to equal(plain)
+      expect(described_class.without_flow_annotation(bare)).to equal(bare)
+    end
+  end
+
   describe '.own_dependencies' do
     it 'returns the published edges without the recorded additions' do
       expect(described_class.own_dependencies([edge, reference_edge], [reference_edge])).to eq([edge])

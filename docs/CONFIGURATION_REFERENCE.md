@@ -1265,6 +1265,23 @@ extraction**: the value is part of the generation's configuration fingerprint,
 so incremental extraction and `woods:refresh` refuse with
 `Woods::ExtractionConfigChanged` until `woods:extract` runs.
 
+### Dependents headline
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `reverse_includes_tests` | Boolean | `false` | Whether the `dependents` headline counts mapped tests (`test_mapping` units reached through `test_coverage`) beside code. |
+
+Mapped tests are listed either way; the setting changes only
+`dependent_counts.headline`. The Index Server reads it per query, extraction
+never reads it, and it is not part of the configuration fingerprint, so
+changing it needs no re-extraction. An MCP server started without the host
+initializer takes it from `WOODS_REVERSE_INCLUDES_TESTS` (`1`/`true`/`yes`/`on`
+or `0`/`false`/`no`/`off`), which wins over the configuration value. Any
+other value is ignored with a warning on stderr, and the configuration value
+applies.
+`woods_status` reports the value in use as `features.reverse_includes_tests`.
+See [dependents families](MCP_SERVERS.md#dependents-families-and-headline).
+
 ### Documentation paths
 
 | Option | Type | Default | Description |
@@ -1349,10 +1366,12 @@ These variables are read by the gem and its MCP servers at runtime. They complem
 | `WOODS_DIR` | unset | MCP extraction-index path, after a positional argument and before `WOODS_OUTPUT`. See precedence below. |
 | `WOODS_OUTPUT` | unset | MCP index-path fallback when neither a positional path nor `WOODS_DIR` is set; included in Woods `2.0.0`. |
 | `WOODS_REQUIRE_INDEX` | unset | Set to `"1"` to fail closed: the server refuses to boot (raises `MissingArtifact`) unless a real index (`woods.json`) is present, a static source map (`woods:self_map`) included. By default an extract-only host boots in pattern/structural mode without it and `woods_status` reports `bootstrap.status: not_configured` with a reason. Explicit lexical mode requires a valid published extraction index, not `woods.json`. |
+| `WOODS_SOURCE_ROOT` | unset | Included in Woods 2.2. The source root the MCP reader's `woods_status` source freshness check reads, over both the recorded root and the root it re-resolves from the served index location. Use it when the index's checkout is served at another path and no application root owns the index directory. Reported as `root_source: explicit`. See [a checkout served under another path](SOURCE_FRESHNESS.md#a-checkout-served-under-another-path). |
 | `WOODS_MCP_ALLOW_MISMATCH` | unset | Set to `"1"` (or `true`/`yes`) to let `woods-mcp-start` serve an index another checkout of the repository recorded; equivalent to `--allow-mismatch`. Without it the launcher exits naming both checkouts. Branch differences only warn. See [served index identity](MCP_SERVERS.md#served-index-identity). |
 | `WOODS_MCP_HYDRATION_WAIT_SECONDS` | `30` | Longest a tool call waits for the server's background cache warm-up before answering from the cold reader (lexical `codebase_retrieve` answers a retryable `warming` result instead). The warm-up starts after the `initialize` handshake is answered; `woods_status` reports it under `hydration`. See [startup and cache hydration](MCP_SERVERS.md#startup-and-cache-hydration). |
 | `WOODS_ALLOW_AUTODETECT` | unset | **Deprecated no-op.** Auto-detect is now the default; accepted for backward compatibility only. |
 | `WOODS_SEARCH_MAX_SCAN` | unset | Exact number of unit bodies a metadata/source_code `search` may read. Unset, search reads every candidate unit in the requested types, stopping early only past 256 MiB of unit JSON or 10 seconds (about 2.5x a 10k-unit index; see [search completeness](MCP_SERVERS.md#search-completeness)). Setting it replaces both caps with this count. A stopped scan sets `partial: true`, reports `scan.scanned_units` of `scan.candidate_units` and `scan.limit_hit`, and an empty partial answer is not evidence of absence. |
+| `WOODS_REVERSE_INCLUDES_TESTS` | unset | Overrides `reverse_includes_tests` for the Index Server: whether the `dependents` headline counts mapped tests. See [dependents headline](#dependents-headline). |
 | `WOODS_DOMAIN_CLUSTERS_LIMIT` | `20` | Default number of clusters `domain_clusters` returns per call when `limit` is not passed. |
 | `WOODS_DOMAIN_CLUSTERS_MEMBER_LIMIT` | `50` | Default number of members, entry points and boundary edges `domain_clusters` lists per cluster when `member_limit` is not passed. |
 | `WOODS_SNAPSHOTS` | unset | Set to `"true"` to force-enable temporal snapshot storage, even without a pre-existing SQLite database. |

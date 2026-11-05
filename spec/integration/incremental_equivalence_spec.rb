@@ -1319,6 +1319,121 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     @scratch_dirs = []
   end
 
+  # `dependents` families and headline: the setting is read at query time
+  # only, so the graph cannot depend on it, and what a client is shown must
+  # match after full and incremental extraction alike.
+  describe 'dependents families and the mapped-test headline' do
+    let(:setting_env) { Woods::MCP::DependentFamilies::ENV_KEY }
+    # Written out from the files below, not from any extraction.
+    let(:direct_mapped_tests) { %w[spec/services/gizmo_service_spec.rb] }
+    let(:mapped_tests_depth_two) { %w[spec/services/gizmo_runner_spec.rb spec/services/gizmo_service_spec.rb] }
+
+    before do
+      require 'woods/mcp/server'
+      require 'woods/impact/report'
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call; end\nend\n")
+      write_file('app/services/gizmo_runner.rb', "class GizmoRunner\n  def run\n    GizmoService.call\n  end\nend\n")
+      write_file('spec/services/gizmo_service_spec.rb',
+                 "RSpec.describe GizmoService do\n  it('calls') { GizmoService.call }\nend\n")
+      write_file('spec/services/gizmo_runner_spec.rb', "RSpec.describe GizmoRunner do\n  it('runs') {}\nend\n")
+    end
+
+    after { Woods.configuration.reverse_includes_tests = false }
+
+    def scratch_index
+      dir = Dir.mktmpdir('woods_diff_families')
+      (@scratch_dirs ||= []) << dir
+      dir
+    end
+
+    def tool(dir, name, format, arguments)
+      server = Woods::MCP::Server.build(index_dir: dir, response_format: format, warmup: false)
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: name, arguments: arguments } }
+      JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
+    end
+
+    # Everything a client is shown, for one setting.
+    def displayed(dir)
+      views = [{ identifier: 'GizmoService', depth: 2 }, { identifier: 'GizmoService', depth: 2, max_nodes: 2 },
+               { identifier: 'GizmoService', depth: 1 }].to_h do |arguments|
+        [arguments, { data: tool(dir, 'dependents', :json, arguments).dig('structuredContent', 'data'),
+                      text: tool(dir, 'dependents', :markdown, arguments).dig('content', 0, 'text') }]
+      end
+      status = JSON.parse(tool(dir, 'woods_status', :json, worktrees: 'none').dig('content', 0, 'text'))
+      views.merge(setting: status.dig('features', 'reverse_includes_tests'))
+    end
+
+    def impact_tests(dir, **budget)
+      report = Woods::Impact::Report.compare(dir, from: 'gen:1', to: 'now', depth: 1, **budget).to_h
+      [report.fetch('tests').map { |item| item.except('generation') },
+       report.fetch('unknowns').select { |item| item['feature'] == 'related' || item['kind'].to_s.end_with?('budget') }
+             .map { |item| item.except('generation') }]
+    end
+
+    def mapped(view)
+      view.fetch(:data).fetch('nodes').select { |_id, entry| entry.key?('mapped_test') }.keys.sort
+    end
+
+    it 'publishes identical graph bytes with the setting on and off, and extraction never reads it' do
+      allow(ENV).to receive(:[]).and_call_original
+      allow(ENV).to receive(:fetch).and_call_original
+      expect(Woods.configuration).not_to receive(:reverse_includes_tests)
+      control = [full_extraction, full_extraction].map { |dir| read_json(dir, 'dependency_graph.json') }
+      expect(control.uniq.size).to eq(1)
+      bytes = [false, true].map do |setting|
+        ENV[setting_env] = setting ? '1' : '0'
+        dir = full_extraction
+        File.binread(File.join(payload_dir(dir), 'dependency_graph.json'))
+      ensure
+        ENV.delete(setting_env)
+      end
+      expect(bytes.uniq.size).to eq(1)
+
+      index = full_extraction
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call(*); end\nend\n")
+      Woods::Extractor.new(output_dir: index).extract_changed(['app/services/gizmo_service.rb'])
+      expect(ENV).not_to have_received(:[]).with(setting_env)
+      expect(ENV).not_to have_received(:fetch).with(setting_env, anything)
+    end
+
+    it 'shows the same rows, counts, setting and impact tests after full and incremental extraction' do
+      incremental = scratch_index
+      full = scratch_index
+      [incremental, full].each { |dir| Woods::Extractor.new(output_dir: dir).extract_all }
+      write_file('app/services/gizmo_service.rb', "class GizmoService\n  def self.call(*); end\nend\n")
+      Woods::Extractor.new(output_dir: incremental).extract_changed(['app/services/gizmo_service.rb'])
+      Woods::Extractor.new(output_dir: full).extract_all
+      expect(differences(incremental, full)).to be_empty
+
+      shown = [false, true].to_h do |setting|
+        Woods.configuration.reverse_includes_tests = setting
+        [setting, { incremental: displayed(incremental), full: displayed(full) }]
+      end
+      shown.each_value { |views| expect(views.fetch(:incremental)).to eq(views.fetch(:full)) }
+
+      off = shown.fetch(false).fetch(:full)
+      on = shown.fetch(true).fetch(:full)
+      expect([off.fetch(:setting), on.fetch(:setting)]).to eq([false, true])
+      whole = { identifier: 'GizmoService', depth: 2 }
+      limited = { identifier: 'GizmoService', depth: 2, max_nodes: 2 }
+      expect(mapped(off.fetch(whole))).to eq(mapped_tests_depth_two)
+      expect(mapped(off.fetch({ identifier: 'GizmoService', depth: 1 }))).to eq(direct_mapped_tests)
+      expect(off.dig(whole, :data, 'nodes')).to eq(on.dig(whole, :data, 'nodes'))
+      expect(on.dig(whole, :data, 'dependent_counts', 'headline'))
+        .to eq(off.dig(whole, :data, 'dependent_counts', 'headline') + mapped_tests_depth_two.size)
+      expect(off.dig(limited, :data, 'dependent_counts')).to include('exact' => false, 'bound' => 'lower_bound')
+      expect(off.dig(limited, :text)).to include('Recorded dependents: at least ')
+
+      [{}, { max_nodes: 1 }].each do |budget|
+        expect(impact_tests(incremental, **budget)).to eq(impact_tests(full, **budget))
+      end
+      tests, = impact_tests(full)
+      impact_ids = tests.map { |item| item['identifier'] }
+      expect(impact_ids).to include(*direct_mapped_tests)
+      expect(mapped(off.fetch({ identifier: 'GizmoService', depth: 1 })) - impact_ids).to be_empty
+    end
+  end
+
   # Annotated source_code shifts lines away from the file; the map back to the
   # file is recorded while the absolute path is still readable, on the full
   # path's normalization phase and on each incremental write.
@@ -6125,6 +6240,126 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
       run_sequence([-> { sieves.call('recent', false) }, -> { sieves.call('recent', true) },
                     -> { sieves.call('all', true) }])
+    end
+
+    # #994: a controller's published unit carries metadata.flow_paths, and
+    # the freshly extracted one does not have it yet. The unchanged check
+    # used to see that as a change, so every flow-bearing controller in the
+    # radius was rewritten with only extracted_at different, and counted.
+    #
+    # The fixture: FlowLedger is a plain class. FlowLedgersController and
+    # FlowReportsController call it, so both are in its blast radius and its
+    # flow radius. FlowQuietController does not call it. The written sets
+    # below are listed by hand, not derived from the run.
+    describe 'units written after a one-file edit (#994)' do
+      let(:ledger) { 'app/models/flow_ledger.rb' }
+      let(:flow_controllers) { %w[FlowLedgersController FlowReportsController FlowQuietController] }
+
+      def write_ledger(remark = nil)
+        write_file(ledger, <<~RUBY)
+          #{remark}class FlowLedger
+            def self.total = 0
+            def self.entries = []
+          end
+        RUBY
+        load app_path(ledger)
+        ledger
+      end
+
+      def write_flow_controllers
+        {
+          'flow_ledgers_controller' => "class FlowLedgersController < ApplicationController\n  " \
+                                       "def index\n    @total = FlowLedger.total\n  end\n\n  " \
+                                       "def show\n    @entries = FlowLedger.entries\n  end\nend\n",
+          'flow_reports_controller' => "class FlowReportsController < ApplicationController\n  " \
+                                       "def index\n    @total = FlowLedger.total\n  end\nend\n",
+          'flow_quiet_controller' => "class FlowQuietController < ApplicationController\n  " \
+                                     "def index\n    @posts = Post.recent\n  end\nend\n"
+        }.each do |name, source|
+          load app_path(write_file("app/controllers/#{name}.rb", source))
+        end
+      end
+
+      # The fixture's own controllers only: other examples leave controllers
+      # loaded whose names also start with Flow.
+      def controller_files(index_dir)
+        Dir[File.join(payload_dir(index_dir), 'controllers', 'Flow*.json')].each_with_object({}) do |path, files|
+          identifier = JSON.parse(File.read(path)).fetch('identifier')
+          files[identifier] = File.binread(path) if flow_controllers.include?(identifier)
+        end
+      end
+
+      def flow_paths(index_dir, identifier)
+        JSON.parse(controller_files(index_dir).fetch(identifier)).dig('metadata', 'flow_paths')
+      end
+
+      # Run the incremental from a published full index and return what it
+      # wrote, with the controller files before and after.
+      def one_file_incremental
+        write_ledger
+        write_flow_controllers
+        index_dir = full_extraction
+        before = controller_files(index_dir)
+        expect(before.keys).to match_array(flow_controllers)
+        yield(index_dir) if block_given?
+        write_ledger("# A remark that changes no unit but FlowLedger.\n")
+        touched = Woods::Extractor.new(output_dir: index_dir).extract_changed([ledger])
+        [index_dir, touched, before, controller_files(index_dir)]
+      end
+
+      it 'writes only FlowLedger when a comment edit leaves the controllers that call it unchanged' do
+        index_dir, touched, before, after = one_file_incremental
+
+        # Not vacuous: both callers are in the radius and carry flows.
+        graph = read_json(index_dir, 'dependency_graph.json')
+        %w[FlowLedgersController FlowReportsController].each do |caller|
+          expect(graph.fetch('edges').fetch(caller, []).map { |edge| edge['target'] }).to include('FlowLedger')
+          expect(JSON.parse(before.fetch(caller)).dig('metadata', 'flow_paths')).not_to be_empty
+        end
+
+        expect(touched).to contain_exactly('FlowLedger')
+        expect(after).to eq(before)
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+
+      # Near miss: the controller's extracted form is the same, but its flow
+      # annotation really changes, because the show flow no longer assembles.
+      it 'still writes a controller whose flow annotation really changes' do
+        Woods.configuration.precompute_flows = :best_effort
+        index_dir, touched, before, after = one_file_incremental do
+          allow_any_instance_of(Woods::FlowAssembler).to receive(:assemble)
+            .and_wrap_original do |original, entry, **opts|
+              raise StandardError, "cannot trace #{entry}" if entry == 'FlowLedgersController#show'
+
+              original.call(entry, **opts)
+            end
+        end
+
+        expect(touched).to contain_exactly('FlowLedger', 'FlowLedgersController')
+        expect(flow_paths(index_dir, 'FlowLedgersController').keys).to contain_exactly('index')
+        expect(after.except('FlowLedgersController')).to eq(before.except('FlowLedgersController'))
+        expect(differences(index_dir, full_extraction)).to be_empty
+      end
+
+      # Unknown: with no published flow family the refresh cannot reconcile
+      # the annotation, so the check keeps comparing it, as it did before.
+      it 'keeps comparing the annotation when no flow family was published' do
+        index_dir, touched, = one_file_incremental do |published|
+          FileUtils.rm_rf(File.join(payload_dir(published), 'flows'))
+        end
+
+        expect(touched).to contain_exactly('FlowLedger', 'FlowLedgersController', 'FlowReportsController')
+        expect(flow_paths(index_dir, 'FlowLedgersController')).to be_nil
+      end
+
+      after do
+        %w[flow_ledgers_controller flow_reports_controller flow_quiet_controller].each do |name|
+          created = app_path("app/controllers/#{name}.rb")
+          FileUtils.cp(created, File.join(@pristine_root, "app/controllers/#{name}.rb")) if File.exist?(created)
+        end
+        created = app_path(ledger)
+        FileUtils.cp(created, File.join(@pristine_root, ledger)) if File.exist?(created)
+      end
     end
 
     # ThingsController stays in the controller descendants for the rest of

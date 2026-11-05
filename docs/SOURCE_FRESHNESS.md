@@ -243,12 +243,77 @@ source mapping), and `mode` (`quick` or `deep`).
 **Included in Woods 2.1:** results expose `recorded_root` (writer location),
 `checked_root` (the directory actually scanned), and `root_source` (`recorded`,
 `explicit`, or `working_directory`). `current` applies only to that checked root.
-The MCP IndexReader keeps using the recorded root; it does not infer a checkout
-from the index's location. For a copied index, a current result about the original
-root says nothing about edits in the copy. Run `woods:source_status` in the copy,
+The MCP IndexReader uses the recorded root while that path is a directory. For a
+copied index, a current result about the original root says nothing about edits in
+the copy. Run `woods:source_status` in the copy,
 or provide an explicit `root` mapping. The task defaults to its process working
 directory, including inside containers; launch it from the application root, not
 an unrelated directory or a monorepo parent. Missing source remains unknown.
+
+### A checkout served under another path
+
+**Included in Woods 2.2:** when the recorded root is not a directory for the MCP
+reader (the same checkout extracted at one path and served at another), the reader
+picks the root to check in this order:
+
+| Source | `root_source` | When |
+|---|---|---|
+| `WOODS_SOURCE_ROOT` | `explicit` | Set in the MCP server's environment. Checked as given. |
+| Recorded root | `recorded` | The recorded path is a directory here. Same as before. |
+| Application that owns the served index | `re_resolved` | The nearest ancestor of the index directory with `config.ru` or `config/application.rb`. The walk never goes past the checkout (the nearest `.git`) that holds the index. |
+
+A re-resolved root is a guess from the index location, so it needs an **identity
+tie** with the index:
+
+| `config/application.rb` captured | It still has its bytes | Captured files verified | Tie |
+|---|---|---|---|
+| yes | yes | any | yes |
+| yes | no | any, even all the others | no |
+| no | n/a | at least one | yes |
+| no | n/a | none | no |
+
+`config/application.rb` names the application's module. So an unrelated app that
+shares generated boilerplate elsewhere in `config/` does not tie, and the same
+repository at another commit keeps the tie and reports its changes as drift.
+`coverage.application_verified` shows the application-file check when it was
+captured. `false` means changed, missing or not read. A quick check that stops at
+its budget before reading `config/application.rb` cannot establish the tie. It
+reports `unknown` and recommends `deep_check`.
+
+Without the tie, the result is `unknown` with `source_root_unavailable` and
+`root_rejected: "no_identity_match"`, not drift.
+
+**The tie is a heuristic.** It rejects a tree whose application file differs, or,
+when no application file was captured, a tree where no captured file matches. An
+unrelated tree with a byte-identical `config/application.rb` (or, without one, a
+single matching captured file) still ties, and its differences are reported as
+drift. `checked_root` and `root_source` always say which tree was checked. Set
+`WOODS_SOURCE_ROOT` to name the root instead.
+
+If no application owns the index directory, the result is `unknown` with
+`source_root_unavailable`, as before.
+
+Drift against a relocated root follows the same rules as any other check:
+
+- a captured file that is missing or changed is drift;
+- a new file is drift only when it would have been captured: it matches a consumer
+  scope after the exclusions. A generated report, a log, a compiled asset, a file
+  under `tmp/` or the index output, or an excluded hidden file never counts;
+- a partial capture reports `unknown` with its reasons, never `current`;
+- Git dirtiness proves nothing. A dirty tree can be `current`, and a clean one can
+  be `drifted`.
+
+Each result lists what it compared. `scope.consumer_scopes` names the consumer
+scopes the generation captured, and `scope.declared_roots` lists the
+`--source-root` directories. `exclusions` lists the skipped directories, whether
+hidden entries are skipped, the hidden paths that are kept, and the index output.
+
+The relocated check runs no `git` process. History (`history`) and Git enrichment
+still read the recorded root, so they stay `unknown` when it is unreachable.
+Saved-index answers are unaffected. The check runs on every `woods_status` call and
+is never cached. Finding the owning application runs on every call, even when the
+recorded root is reachable, and costs well under a millisecond. The scan costs
+the same as a recorded-root check: a quick check stays within its 250ms budget.
 
 The opt-in SessionStart hook uses `WOODS_HOOK_RAKE` and `WOODS_OUTPUT`, including a
 Docker command prefix without requiring a host application bundle. It prints

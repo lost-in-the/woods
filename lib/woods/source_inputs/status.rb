@@ -3,6 +3,7 @@
 require 'base64'
 require 'woods/generation'
 require 'woods/source_inputs/verifier'
+require 'woods/source_inputs/relocated_root'
 
 module Woods
   module SourceInputs
@@ -33,11 +34,14 @@ module Woods
 
       private_class_method :transport_options
 
-      def initialize(output_dir:, payload_dir: nil, generation: nil, root: nil, mode: 'quick')
+      # @param relocated_root [String, nil] the root to check when the recorded
+      #   one is not a directory here and no +root+ is given ({RelocatedRoot})
+      def initialize(output_dir:, payload_dir: nil, generation: nil, root: nil, mode: 'quick', relocated_root: nil) # rubocop:disable Metrics/ParameterLists -- one keyword per binding
         raise ArgumentError, 'source status mode must be quick or deep' unless BUDGETS.key?(mode)
 
         @output = SourcePathEncoding.expand(output_dir)
         @root = SourcePathEncoding.expand(root) if root
+        @relocated_root = relocated_root
         @mode = mode
         @generation = generation
         @payload = SourcePathEncoding.utf8!(payload_dir) if payload_dir
@@ -55,9 +59,10 @@ module Woods
 
           Manifest.parse(file.read(Manifest::MAX_BYTES + 1))
         end
-        result = Verifier.new(manifest: manifest, output_dir: @output, root: @root,
-                              generation: @generation, max_seconds: BUDGETS.fetch(@mode), deadline: deadline).call
-        result.merge('check' => @mode, 'recommendations' => recommendations(result, manifest))
+        result = verify(manifest, deadline)
+        result.merge('check' => @mode, 'scope' => manifest.scope_summary,
+                     'exclusions' => Scopes.exclusions(output_dir: @output),
+                     'recommendations' => recommendations(result, manifest))
       rescue Errno::ENOENT
         unknown('source_manifest_unavailable')
       rescue Manifest::Invalid, SystemCallError, IOError
@@ -67,6 +72,14 @@ module Woods
       end
 
       private
+
+      def verify(manifest, deadline)
+        relocated = RelocatedRoot.new(@relocated_root, manifest) unless @root
+        result = Verifier.new(manifest: manifest, output_dir: @output, root: @root || relocated&.path,
+                              root_source: relocated&.source, generation: @generation,
+                              max_seconds: BUDGETS.fetch(@mode), deadline: deadline).call
+        relocated ? relocated.checked(result) : result
+      end
 
       # The budget covers the whole check: reading the manifest and preparing
       # the walk come out of it, not on top of it.

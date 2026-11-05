@@ -317,9 +317,12 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
       skip 'requires non-root: chmod 0o555 does not stop root from writing' if Process.uid.zero?
 
       allow(fake_extractor).to receive(:extract_all).and_return(true)
-      allow(Woods.configuration).to receive(:output_dir).and_return(nil)
       server
-      File.chmod(0o555, @index_dir)
+      # Only the task store's directory is read-only: the extraction lock lives
+      # in the served index directory, and this example is about the store.
+      tasks_dir = File.join(@index_dir, 'tasks')
+      FileUtils.mkdir_p(tasks_dir)
+      File.chmod(0o555, tasks_dir)
 
       body = extract_call(tasks_meta)
 
@@ -327,7 +330,7 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
       expect(body.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
       expect(fake_extractor).not_to have_received(:extract_all)
     ensure
-      File.chmod(0o755, @index_dir) if @index_dir && File.exist?(@index_dir)
+      File.chmod(0o755, tasks_dir) if tasks_dir && File.exist?(tasks_dir)
     end
 
     it 'does not consume pipeline cooldown and permits an immediate retry' do

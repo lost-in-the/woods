@@ -39,8 +39,26 @@ also carries what the second pass adds after registration: `dependents`, Git
 facts, and the edges the source-reference pass resolved. A fresh unit has none
 of them yet, so they are left out of the comparison (included in Woods 2.2;
 earlier writers compared them, and a unit with one dependent never matched).
-Controller flow annotations are compared, so a re-extracted controller with
-precomputed flows is always registered and its flows reassembled.
+Controller flow annotations (`metadata[:flow_paths]`) are left out too when
+the run's flow refresh reconciles them: `precompute_flows` is on and the
+published payload holds a flow family (included in Woods 2.2, #994; earlier
+writers compared them, so every flow-bearing controller in the blast radius
+was rewritten with only `extracted_at` different, and counted). A controller
+retained this way still goes to the flow refresh, which reassembles or carries
+its flows like a re-extracted one (see [Flow artifacts](#flow-artifacts)). The
+refresh rewrites the unit, and counts it as touched, only when its annotation
+really changes. With the gate off, or no published flow family, the annotation
+is compared as before.
+
+The top-level constant verdicts in `flows/top_level_constants.json` (#967) are
+derived from the whole graph on every flow refresh. When they differ from the
+previous generation's, every controller whose carried flow calls a receiver
+whose verdict changed (`Name`, `Name.new` or `Name.action`, unrooted) is
+reassembled, so its stored flow matches both a full run and an on-demand
+`trace_flow` assembly. The verdicts are read from the booted process, so a
+change that defines or removes a top-level constant without touching an
+indexed file (a new gem) is picked up only by the next run that refreshes
+flows.
 
 The comparison runs before the method table, callback and filter declaration
 sites and test examples are recorded, and leaves them out on both sides: they
@@ -783,7 +801,8 @@ uses its normal query-time assembly instead of an obsolete precomputed document.
 A full extraction computes all three in one pass. An incremental run computes
 them for its **delta**:
 
-- **Re-extracted controllers** get their `metadata[:flow_paths]` back, their
+- **Re-extracted controllers**, and controllers the unchanged check retained
+  without comparing their annotation, get their `metadata[:flow_paths]` back, their
   flow documents are re-assembled from the units on disk, and their entries
   replace whatever the previous index held for them — so an action removed
   from a re-extracted controller leaves the index even though the file still
@@ -848,6 +867,15 @@ bundle exec rake "woods:refresh[routes]"
 bundle exec rake "woods:refresh[state_machines,factories]"
 bundle exec rake woods:refresh          # lists the valid keys
 ```
+
+A direct call holds no writer lock of its own, so `Extractor#refresh` (like
+`#extract_changed` and `#extract_all`) takes the index writer lock for its
+publish step: the number check, the promotion of its stage, the generation
+marker and retention all run under that lock. It waits for another writer as
+the rake tasks do (`WOODS_LOCK_WAIT`, default 600 seconds). If the lock stays
+held, the run does not publish and `raise_on_publication_failure!` raises.
+Prefer `woods:refresh` or `Woods.extract!`, which hold the lock for the whole
+run.
 
 Any extractor key works, not only the whole-app ones, `refresh(:models)` is a
 legitimate way to re-derive every model after a schema change. A routes refresh

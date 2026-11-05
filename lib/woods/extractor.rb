@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require 'securerandom'
 require 'digest'
 require 'fileutils'
 require 'open3'
@@ -21,6 +22,8 @@ require_relative 'container_attribution'
 require_relative 'source_size'
 require_relative 'extraction_identities'
 require_relative 'payload_store'
+require_relative 'publication_seam'
+require_relative 'coordination/pipeline_lock'
 require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
@@ -537,10 +540,14 @@ module Woods
     # @return [Hash] Results keyed by extractor type
     def extract_all
       with_parse_cache { perform_extract_all }
+    ensure
+      discard_unpromoted_stage
     end
 
     def extract_changed(changed_files)
       with_parse_cache { perform_extract_changed(changed_files) }
+    ensure
+      discard_unpromoted_stage
     end
 
     # One Prism parse per distinct source for the length of the run; see
@@ -676,8 +683,8 @@ module Woods
       # assembly, index write, annotation rewrite, sweep — raises and aborts
       # the run here, BEFORE the graph, manifest, snapshot, and generation
       # publish below. The previously published generation stays resolved
-      # and readable; the aborted run's payload directory is left
-      # unreachable for the next run's PayloadStore#create to reclaim.
+      # and readable; the aborted run's private stage is removed on the way
+      # out ({#discard_unpromoted_stage}).
       # Publishing a partial flow index, stale prior flow artifacts
       # alongside a new graph, or half-rewritten annotations would violate
       # the atomic-generation and full/incremental-equivalence contracts;
@@ -702,9 +709,11 @@ module Woods
         write_manifest
         write_structural_summary
       end
-      profile_phase('snapshot') { capture_snapshot }
       @source_inputs.full_units(@results, consumers: @extractors)
-      publish_generation('full')
+      published = publish_generation('full')
+      # After the publish, and only when it succeeded: an obsolete writer
+      # (lock taken over) never reaches the snapshot store.
+      profile_phase('snapshot') { capture_published_snapshot } if published
 
       log_summary
 
@@ -899,6 +908,7 @@ module Woods
 
       { types: known, touched: touched.to_a, unknown: unknown }
     ensure
+      discard_unpromoted_stage
       log_profile_total('refresh', profile_started)
     end
 
@@ -1092,6 +1102,10 @@ module Woods
       # inverse. See {#flow_stepped_controllers}.
       @flow_changed_units = nil
       @previous_flow_index_entries = nil
+      # Controllers the unchanged check retained without comparing their flow
+      # annotation, and whether the seeded payload holds a flow family (#994).
+      @flow_retained_controllers = Set.new
+      @flow_family_published = nil
       @incremental_extractors = nil
       @source_collector = nil
       @concern_classification = nil
@@ -1178,17 +1192,32 @@ module Woods
     # reader that sees generation N knows N's files are already on disk. A run
     # that raised, or that changed nothing, never reaches this.
     #
+    # The irreversible steps — promoting the private stage to `gen-<n>`,
+    # writing the marker, and retention — run inside the writer fence
+    # ({#with_writer_fence}). A writer whose lock was taken over while it was
+    # paused reaches the fence, finds the token is no longer its own, and
+    # stops: it renames, publishes and prunes nothing, and its own stage is
+    # discarded. Everything before the fence touched only that stage.
+    #
     # @param reason [String] what produced this generation
     # @return [void]
     def publish_generation(reason)
       generation = Generation.new(output_dir: @output_dir)
-      # Resolve (and if necessary rename) the payload first, so the flush
-      # below covers the directory under the name the pointer will carry.
+      # Resolve the generation number first, so the source manifest written
+      # below names the generation the pointer will carry.
       payload = publishable_payload_name(generation)
       profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
-      marker = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
-      profile_phase('payload prune') { prune_payloads(marker.number) }
+      PublicationSeam.reach(:before_promotion, @output_dir)
+      marker = with_writer_fence do
+        promote_payload(generation)
+        PublicationSeam.reach(:promoted, @output_dir)
+        published = profile_phase('publish') { generation.bump!(reason: reason, payload: payload) }
+        PublicationSeam.reach(:marker_published, @output_dir)
+        profile_phase('payload prune') { prune_payloads(published.number) }
+        published
+      end
+      PublicationSeam.reach(:published, @output_dir)
       marker
     rescue StandardError => e
       # A failed bump must not fail the extraction that produced a perfectly
@@ -1199,12 +1228,120 @@ module Woods
       # nothing either. Error, not warn — and `Watch::Daemon` cross-checks that
       # the number actually moved so the daemon reports degraded rather than
       # running.
+      discard_unpromoted_stage
       @publication_error = Woods::ExtractionError.new(
         "Could not publish generation for #{@output_dir} (#{e.class}: #{e.message}); " \
         'the previous generation remains active'
       )
       Rails.logger.error "[Woods] #{@publication_error.message}"
       nil
+    end
+
+    # Run the publish steps under the index writer lock, proving ownership
+    # under the same guard a takeover takes ({Coordination::PipelineLock#fenced}).
+    #
+    # A run whose caller holds the lock (every rake task, the watch daemon,
+    # the MCP operator tools, {Woods.extract!}) uses that lock. A run that
+    # holds none — a direct `Extractor#refresh`, `#extract_changed` or
+    # `#extract_all` from a console or a resident process — takes the same
+    # lock itself for the publish, waiting as the rake writers do
+    # (`WOODS_LOCK_WAIT`, default {Coordination::PipelineLock::INDEX_WRITER_STALE_TIMEOUT}
+    # seconds). Publishing is never unfenced: without the lock, the number
+    # check and the promotion would not be serialized against a locked
+    # writer publishing the same number.
+    #
+    # @raise [Coordination::LockLostError] when the lock was taken over
+    # @raise [Coordination::LockError] when the lock could not be taken
+    def with_writer_fence(&block)
+      lock = @writer_lock || index_writer_lock
+      return lock.fenced(&block) if lock
+
+      with_publication_lock(&block)
+    end
+
+    # @return [Object] the block's value, run inside a lock taken for it
+    def with_publication_lock(&block)
+      lock = Coordination::PipelineLock.for_index(@output_dir)
+      unless acquire_publication_lock(lock)
+        raise Coordination::LockError,
+              "Could not take the index writer lock for #{@output_dir} to publish; another writer holds it. " \
+              'Run `woods:refresh`/`woods:incremental`/`woods:extract`, or `Woods.extract!`, which wait for it'
+      end
+
+      begin
+        lock.fenced(&block)
+      ensure
+        lock.release
+      end
+    end
+
+    def acquire_publication_lock(lock)
+      wait = Float(ENV.fetch('WOODS_LOCK_WAIT', Coordination::PipelineLock::INDEX_WRITER_STALE_TIMEOUT))
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + wait
+      loop do
+        return true if lock.acquire(guard_wait: Coordination::PipelineLock.guard_wait_until(deadline))
+        return false if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.05
+      end
+    end
+
+    # The index writer lock this process holds for this output directory.
+    #
+    # A process that holds the writer lock for some *other* index while
+    # writing this one is a wiring mistake (a lock taken on one path, an
+    # extractor pointed at another), and publishing unfenced there would
+    # silently drop the protection. Refuse instead.
+    #
+    # @return [Coordination::PipelineLock, nil] nil only when this process
+    #   owns no index writer lock at all
+    # @raise [Woods::ExtractionError] when it owns one for another directory
+    def index_writer_lock
+      lock = Coordination::PipelineLock.held_for_index(@output_dir)
+      return lock if lock
+
+      elsewhere = Coordination::PipelineLock.owned_index_writer_dirs
+      return if elsewhere.empty?
+
+      raise Woods::ExtractionError,
+            "This process holds the index writer lock for #{elsewhere.join(', ')} but is writing " \
+            "#{@output_dir}; take the lock for the directory being written"
+    end
+
+    # Move the finished private stage into place as `gen-<n>`. Inside the
+    # fence the marker cannot move except through this writer, so a number
+    # that changed since {#publishable_payload_name} means a writer that does
+    # not take the lock published meanwhile; refuse rather than publish over
+    # it.
+    #
+    # @param generation [Woods::Generation]
+    # @return [void]
+    def promote_payload(generation)
+      return unless @payload_dir && @payload_store.stage?(@payload_dir)
+
+      actual = generation.current.number + 1
+      unless actual == @payload_generation
+        raise Woods::ExtractionError,
+              "generation moved to #{actual - 1} during publication (expected #{@payload_generation - 1})"
+      end
+
+      PublicationSeam.reach(:number_checked, @output_dir)
+      @payload_dir = @payload_store.promote(@payload_dir, @payload_generation)
+    end
+
+    # Remove this run's private stage if it was never promoted: a no-op
+    # incremental run, a failed run, or a run whose lock was taken over. Only
+    # a path under the stage prefix is ever removed, and only this run's own.
+    #
+    # @return [void]
+    def discard_unpromoted_stage
+      return unless @payload_dir && @payload_store.stage?(@payload_dir)
+
+      @payload_store.discard_stage(@payload_dir)
+      @payload_dir = nil
+      @payload_generation = nil
+    rescue SystemCallError => e
+      Rails.logger.warn "[Woods] Could not remove unpublished stage #{@payload_dir}: #{e.message}"
     end
 
     # Capture before eager loading or extraction; only an explicit fresh-launch
@@ -1306,10 +1443,15 @@ module Woods
     #   payload-born index's payload directory could not be opened
     def begin_payload!(strict: false, rewritten_dirs: [])
       @publication_error = nil
+      discard_unpromoted_stage
       marker = Generation.new(output_dir: @output_dir).current
       @payload_generation = marker.number + 1
-      @payload_dir = @payload_store.create(@payload_generation)
+      @writer_lock = index_writer_lock
+      @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
       seed_payload(marker, rewritten_dirs: rewritten_dirs)
+      PublicationSeam.reach(:staged, @output_dir)
+    rescue Coordination::LockLostError, Woods::ExtractionError
+      raise
     rescue StandardError => e
       if strict && marker&.payload
         raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
@@ -1548,30 +1690,27 @@ module Woods
 
     # The pointer to publish, or nil when this run built no payload directory.
     #
-    # The directory was named from the generation number this run expected to
-    # publish as. Writers serialize on `PipelineLock`, so that prediction holds
-    # — but if it ever did not, the pointer would name a directory belonging to
-    # a different generation, so the directory is renamed to match rather than
-    # published under a name that lies.
+    # The stage was opened expecting to publish as the generation after the
+    # one current then. Writers serialize on `PipelineLock`, so that holds; if
+    # it ever did not, the number is corrected here so the source manifest
+    # names the generation actually published, and {#promote_payload}
+    # re-checks it inside the fence.
     #
     # @param generation [Woods::Generation]
     # @return [String, nil]
     def publishable_payload_name(generation)
       return nil unless @payload_dir
 
-      actual = generation.current.number + 1
-      if actual != @payload_generation
-        @payload_dir = rename_payload(actual)
-        @payload_generation = actual
-      end
-
+      @payload_generation = generation.current.number + 1
       PayloadStore.name_for(@payload_generation)
     end
 
-    # @param number [Integer] the generation number actually being published
-    # @return [Pathname] the payload directory under its corrected name
-    def rename_payload(number)
-      @payload_store.rename(@payload_dir, number)
+    # A name only this run may stage under: the lock token when this process
+    # holds the index writer lock, otherwise a random one.
+    #
+    # @return [String]
+    def stage_owner
+      @writer_lock&.token || SecureRandom.hex(8)
     end
 
     # @param published [Integer] the generation just published
@@ -1582,6 +1721,7 @@ module Woods
       @payload_store.prune(keep: payload_retention, protect: published) do |number, _reason|
         Rails.logger.info "[Woods] Retaining generation #{number}: persistent pin"
       end
+      @payload_store.sweep_abandoned_stages if @writer_lock
     rescue StandardError => e
       Rails.logger.warn "[Woods] Payload retention failed: #{e.message}"
     end
@@ -2114,7 +2254,8 @@ module Woods
     # stays resolved and readable. ( woods:validate applies the same rule
     # for a populated family without an index.)
     #
-    # @param touched [Set<String>] identifiers added, re-extracted, or removed
+    # @param touched [Set<String>] identifiers added, re-extracted, or removed;
+    #   a retained controller whose annotation this rewrites is added to it
     # @return [void]
     # @raise [Woods::ExtractionError] when authoritative flow state is
     #   missing or corrupt, or a flow-family write fails
@@ -2126,11 +2267,15 @@ module Woods
       controllers_dir = payload_dir.join('controllers')
       reextracted = touched.select { |id| controllers_dir.join(collision_safe_filename(id)).exist? }
       removed = previous_flow_index_controllers & (touched.to_set - reextracted.to_set)
-      stepped = flow_stepped_controllers
-      unchanged = ((stepped | flow_scope_controllers) - reextracted - removed).select do |id|
+      verdicts_changed = changed_top_level_constants
+      stepped = flow_stepped_controllers | flow_verdict_controllers(verdicts_changed)
+      # Controllers retained without comparing their annotation still reach
+      # the refresh that owns it; changed constant verdicts force reassembly.
+      retained = Array(@flow_retained_controllers).to_set
+      unchanged = ((stepped | flow_scope_controllers | retained) - reextracted - removed).select do |id|
         controllers_dir.join(collision_safe_filename(id)).exist?
       end
-      return if reextracted.empty? && unchanged.empty? && removed.empty?
+      return if reextracted.empty? && unchanged.empty? && removed.empty? && verdicts_changed.empty?
 
       reassemble, carried = partition_flow_controllers(
         (reextracted + unchanged.sort).filter_map { |id| unit_from_payload(:controllers, id) }, stepped
@@ -2150,7 +2295,9 @@ module Woods
       )
       @flow_failures = precomputer.failures.values
       log_flow_failures
-      patch_flow_annotations(annotations)
+      # A controller retained by the unchanged check is written here only when
+      # its annotation really changed; it counts as touched like any write.
+      touched.merge(Array(patch_flow_annotations(annotations)))
       sweep_orphaned_flow_files
       # The annotation patch changed controller JSON after the run's type
       # index regeneration; the index carries estimated_tokens, which the
@@ -2223,6 +2370,44 @@ module Woods
 
       Extraction::FlowReach.new(payload_dir: payload_dir, index_entries: previous_flow_index_entries)
                            .controllers_through(@flow_changed_units)
+    end
+
+    # The short names whose top-level constant verdict (#967) differs between
+    # the previous generation and this run's graph, in either direction. A
+    # previous generation without verdicts assembled its flows with none.
+    #
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when the previous verdicts cannot be read
+    def changed_top_level_constants
+      current = FlowAssembler.top_level_constants(@dependency_graph.suffix_names).to_set
+      current ^ previous_top_level_constants
+    end
+
+    # @return [Set<String>] the verdicts the seeded payload carries
+    # @raise [Woods::ExtractionError] when they are present but unreadable
+    def previous_top_level_constants
+      path = payload_dir.join(FlowAssembler::TOP_LEVEL_CONSTANTS_PATH)
+      return Set.new unless path.exist?
+
+      names = FlowAssembler.published_names(JSON.parse(AtomicFile.read(path)))
+      raise Woods::ExtractionError, 'previous flows/top_level_constants.json does not list constant names' unless names
+
+      names.to_set
+    rescue JSON::ParserError => e
+      raise Woods::ExtractionError, "previous flows/top_level_constants.json does not parse: #{e.message}"
+    end
+
+    # Controllers whose previous flows call a receiver whose verdict changed,
+    # so a carried document would disagree with a full run's.
+    #
+    # @param names [Set<String>] from {#changed_top_level_constants}
+    # @return [Set<String>]
+    # @raise [Woods::ExtractionError] when a flow document cannot be read
+    def flow_verdict_controllers(names)
+      return Set.new if names.empty?
+
+      Extraction::FlowReach.new(payload_dir: payload_dir, index_entries: previous_flow_index_entries)
+                           .controllers_calling(names)
     end
 
     # The actions a unit's metadata declares, as the index records them.
@@ -2327,9 +2512,9 @@ module Woods
     #
     # @param annotations [Hash{String => Hash{String => String}}] from
     #   {FlowPrecomputer#recompute_delta}
-    # @return [void]
+    # @return [Set<String>] the controllers whose unit JSON was rewritten
     def patch_flow_annotations(annotations)
-      annotations.each do |identifier, flow_paths|
+      annotations.each_with_object(Set.new) do |(identifier, flow_paths), written|
         path = payload_dir.join('controllers', collision_safe_filename(identifier))
         next unless File.exist?(path)
 
@@ -2345,6 +2530,7 @@ module Woods
         next if JSON.generate(data) == before
 
         AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
+        written.add(identifier)
       end
     end
 
@@ -2380,7 +2566,8 @@ module Woods
       end
 
       keep = parse_flow_index_for_sweep(index_path)
-             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json'
+             .to_set { |relative| File.basename(relative.to_s) } << 'flow_index.json' << 'by_unit.json' <<
+             File.basename(FlowAssembler::TOP_LEVEL_CONSTANTS_PATH)
       orphans = Dir[flows_dir.join('*.json').to_s].reject { |file| keep.include?(File.basename(file)) }
       return if orphans.empty?
 
@@ -3122,6 +3309,17 @@ module Woods
       Rails.logger.info "[Woods] Snapshot captured for #{manifest['git_sha'][0..7]}"
     rescue StandardError => e
       Rails.logger.error "[Woods] Snapshot capture failed (#{e.class}): #{e.message}"
+    end
+
+    # {#capture_snapshot} for a run that has just published, inside the
+    # writer fence so a writer taken over after its publish does not write
+    # the snapshot store either.
+    #
+    # @return [void]
+    def capture_published_snapshot
+      with_writer_fence { capture_snapshot }
+    rescue Coordination::LockLostError => e
+      Rails.logger.warn "[Woods] Snapshot skipped: #{e.message}"
     end
 
     # Build a snapshot store, preferring SQLite with JSON file fallback.
@@ -4456,27 +4654,62 @@ module Woods
     # The comparison is in {ExtractedForm.before_tables}: the method table,
     # test examples and declaration sites are derived from what that form
     # holds, so the fresh unit need not carry them yet.
+    #
+    # A controller's `metadata.flow_paths` is left out too when the run's
+    # flow refresh reconciles it ({#flow_annotation_reconciled?}). The fresh
+    # unit never carries it at this point, so keeping it in made every
+    # flow-bearing controller in the radius look changed (#994). A retained
+    # controller is handed to the flow refresh instead, which reassembles or
+    # carries its flows and rewrites the unit only if the annotation differs.
     def unchanged_registered_unit?(type_dir, unit)
       return false unless @dependency_graph.node(unit.identifier, type: unit.type)
 
+      reconciled = flow_annotation_reconciled?(unit)
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      fresh = ExtractedForm.before_tables(JSON.parse(JSON.generate(normalized.to_h)))
+      fresh = extracted_form_for_comparison(JSON.parse(JSON.generate(normalized.to_h)), reconciled)
       path = type_dir.join(collision_safe_filename(unit.identifier))
-      return false unless fresh == published_extracted_form(path, unit)
+      return false unless fresh == published_extracted_form(path, unit, reconciled: reconciled)
 
       retain_unit(unit)
+      (@flow_retained_controllers ||= Set.new).add(unit.identifier) if reconciled
       true
+    end
+
+    # Whether the run's flow refresh owns this unit's flow annotation, so the
+    # unchanged check may leave it out. True only for a controller, with flow
+    # precomputation on and a published flow family for the refresh to
+    # reconcile against ({#refresh_incremental_flows} skips without one).
+    # Anything else keeps the annotation in the comparison, as before #994.
+    #
+    # @param unit [ExtractedUnit]
+    # @return [Boolean]
+    def flow_annotation_reconciled?(unit)
+      return false unless unit.type.to_s == 'controller' && Woods.configuration.precompute_flows
+
+      @flow_family_published = flow_family_present? if @flow_family_published.nil?
+      @flow_family_published
+    end
+
+    # @param data [Hash] string-keyed unit JSON
+    # @param reconciled [Boolean] from {#flow_annotation_reconciled?}
+    # @param reference_edges [Array<Hash>]
+    # @return [String, nil] {ExtractedForm.before_tables}, without the flow
+    #   annotation when the flow refresh reconciles it
+    def extracted_form_for_comparison(data, reconciled, reference_edges: [])
+      data = ExtractedForm.without_flow_annotation(data) if reconciled
+      ExtractedForm.before_tables(data, reference_edges: reference_edges)
     end
 
     # @return [String, nil] the published unit's {ExtractedForm.before_tables};
     #   nil when the file is missing, unreadable, or disagrees with its
     #   reference ownership
-    def published_extracted_form(path, unit)
+    def published_extracted_form(path, unit, reconciled: false)
       return nil unless File.exist?(path)
 
       key = [unit.type.to_s, unit.identifier]
-      ExtractedForm.before_tables(JSON.parse(AtomicFile.read(path)), reference_edges: reference_additions[key])
+      extracted_form_for_comparison(JSON.parse(AtomicFile.read(path)), reconciled,
+                                    reference_edges: reference_additions[key])
     rescue StandardError
       nil
     end
