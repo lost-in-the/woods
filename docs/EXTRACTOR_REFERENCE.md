@@ -35,7 +35,8 @@ Some extractors combine both (e.g., `JobExtractor` scans directories first, then
 Discovery is not exhaustive. Woods 2.0.0 does not discover callable standalone
 modules under `app/models` through its model/PORO paths. Woods 2.1
 [standalone-module support](#poroextractor) addresses that case; conventional
-concerns and app modules included by live models retain concern ownership.
+concerns, app modules included by live models and loaded modules that extend
+`ActiveSupport::Concern` retain concern ownership.
 Dependency scanning also remains partial, including with the source-reference
 pass below. A missing unit or edge is not proof of unused code; cross-check the
 application source.
@@ -313,10 +314,16 @@ publish the same values.
 
 ### ModelExtractor
 
-**What it captures:** Every non-abstract `ActiveRecord::Base` descendant with concrete table-backed state. The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. Schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
+**What it captures:** Every named, non-abstract `ActiveRecord::Base` descendant loaded in the process, except Rails-generated `HABTM_` join classes. A table is not required: a model whose table is missing is still extracted, with `table_exists: false` and empty column metadata. Models a gem or the framework defines are included too (an engine model, and on Rails before 7.1 `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata`); `origin` says which (below). The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. When the table exists, schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
 
 **Key details:**
 - Uses `ActiveRecord::Base.descendants` for discovery (runtime introspection, not static parsing)
+- `metadata.origin` (#995) says who defines the model class: `app`, `framework`, `gem` or `unknown`, by the same rules as callback `origin` (`Woods::Extractors::SourceOrigin`). It is read from the file that **first defined the class's constant** (`Module#const_source_location`), not from `file_path`:
+  - A gem model the application reopens keeps `origin: gem`, while its `file_path` names the application file (for example `app/models/catalog_kit/item.rb`). `file_path` says where Woods read the source; `origin` says who wrote the class. The reverse, an application model a gem file reopens, stays `app`. A file under `app/` that fully replaces a gem model, so the gem's file never loads, defines the constant first and reads `app`.
+  - Files under `vendor/` follow `SourceOrigin` as is: an installed-gem layout (`…/gems/<name>-<version>/…`) is `gem`; any other file there is `unknown`.
+  - `unknown` also covers a class Ruby has no source site for, a class whose name now resolves to a different class (one a reload replaced), and a name any of whose segments is a pending autoload. Ruby reports an unloaded autoload at the `autoload` call (Zeitwerk's own file), so it is never read as an origin, and Woods never loads code to decide.
+  - Load order matters only for reopenings: whichever file defines the constant first wins.
+  - `origin` is metadata only. No model is hidden or dropped because of it; `unknown` models stay published. Readers that predate the field see no change to existing keys; treat a missing `origin` as unknown.
 - Named, source-defined app model mixins (for example `Card::Pinnable` in `app/models/card/pinnable.rb`) resolve through runtime source locations, with conventional concern paths as fallbacks. Included mixins also receive `:concern` units, so their actual files map to the includer through dependency edges. Gem-owned modules stay outside this discovery. Conventional concern files retain their existing identity even when nested helpers share the same file. Outside those directories, each included runtime mixin receives its own concern identity even when several share a source file; editing that file refreshes every includer.
 - Inlines concerns: all `include FooConcern` references are resolved and the concern source is appended to `source_code`. Inlined concerns are recorded in `metadata[:inlined_concerns]` by full constant name (`Canopy::MoneyColumns`), the same string as the concern unit's identifier and its `include` edge target
 - Association targets are recorded without a leading `::`. A polymorphic `belongs_to`, or a `through` association whose source is polymorphic, names an interface, not a constant: its name, and every `as:` name, is listed in `metadata[:polymorphic_interfaces]`, and a `polymorphic_interface` edge is emitted only when the application defines a constant of that name. An `extend` edge to a `ClassMethods` module targets the module that owns it. A module whose `ClassMethods` a live model extends receives a `concern` unit wherever the application declares it, including a file under `config/initializers/`. A module with behavior that a `config/initializers/` file canonically declares receives a `concern` unit whichever class mixes it in. A class defined in an initializer is not indexed; only modules are. Association targets name the class the reflection resolves to (`class_name: "PlanLink"` on `Pricing::Model` targets `Pricing::PlanLink`).
@@ -851,11 +858,37 @@ A ViewComponent's sidecar template (`metadata.sidecar_template`) is scanned with
 
 ### ConcernExtractor
 
-**What it captures:** `ActiveSupport::Concern` modules from `app/models/concerns` and `app/controllers/concerns`.
+**What it captures:** `ActiveSupport::Concern` modules and the other mixins of the concerns directories.
+
+**Which modules are concerns (#996).** A module is a `concern` unit when either holds:
+
+| Rule | Check | Example |
+|---|---|---|
+| Directory | Its file is under an `app/**/concerns` directory (`app/models/concerns`, `app/controllers/concerns`, nested ones such as `app/models/gateway/stripe/concerns`) and declares a module with mixin content in code: `extend ActiveSupport::Concern`, an `included do` or `class_methods do` block, or a method | `app/models/concerns/sluggable.rb`, a plain mixin |
+| Runtime | The loaded module extends `ActiveSupport::Concern`: `mod.singleton_class.include?(ActiveSupport::Concern)`, wherever the module lives under `app/` or `lib/` (and `config.unclaimed_ruby_paths`), whether or not anything includes it | `app/models/billing/chargeable.rb` with `extend ::ActiveSupport::Concern` |
+
+A module a live model mixes in also stays a concern, as before. The runtime
+check resolves each module a file declares through its constant name, without
+autoloading; it never walks the object heap and never reads source to decide,
+so a comment or string that mentions `ActiveSupport::Concern` is not evidence.
+One classification is computed per run and shared by the concern, PORO and
+library extractors and by incremental reconciliation, so a module is published
+under one type only: a promoted module is not also a `poro` or `lib` unit.
+
+**Limit:** a module that is never loaded (a `lib/` file outside the autoload
+paths, or any module during an incomplete eager load) has no runtime answer. It
+keeps the type its other rules give it (`lib`, for example). That is not a
+claim about what the module is.
+
+`metadata.concern_type` and `uses_active_support` follow the runtime answer
+for a loaded module; for an unloaded one they come from its code (comments
+excluded). They never decide the unit type.
 
 **Key details:**
-- Scans: `app/models/concerns`, `app/controllers/concerns`
+- Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
+- For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
+- Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked
 - Note: concerns are *also* inlined into model/controller source by ModelExtractor and ControllerExtractor. ConcernExtractor produces standalone units for direct lookup
 
@@ -941,11 +974,10 @@ loaded module whose canonical declaration and own methods are defined under
 `class << self` methods and plain instance-method mixins. Discovery uses runtime
 ownership and source locations without calling those methods.
 
-Three more module shapes produce a unit:
+Two more module shapes produce a unit:
 
 | Shape | Evidence | Metadata |
 |---|---|---|
-| An `ActiveSupport::Concern` no live model includes | A `ClassMethods` method defined in the file, or an `included` / `prepended` block | `active_support_concern: true`; `ClassMethods` names join `class_methods` |
 | A method wrapped by a helper from another file | A prepended wrapper (a memoizer) is skipped through the super chain; a method redefined in place still counts when this module body declares it with `def` | Same as any module |
 | A constant-only module | Non-module constants declared inside the module body | `constants: [...]` |
 
@@ -954,11 +986,15 @@ units too, if each defines at least one method and is canonically declared in
 that file. A bodiless helper such as `class Error < StandardError; end` stays
 inside its owner's source.
 
-Namespace-only wrappers (no methods, no constants, no hook), aliases, unloaded
+Namespace-only wrappers (no methods, no constants), aliases, unloaded
 constants, gem-owned modules and methods supplied only by another file do not
 establish standalone ownership.
-An app module included by a live model belongs to `ConcernExtractor`; a library
-module remains owned by `LibExtractor`. Separate callable modules sharing a
+An app module included by a live model, or one that extends
+`ActiveSupport::Concern`, belongs to `ConcernExtractor` and is never a `poro`
+unit as well (see [ConcernExtractor](#concernextractor)); an earlier writer
+published an `ActiveSupport::Concern` no live model includes as a `poro` unit
+with `active_support_concern: true`. Any other library module remains owned
+by `LibExtractor`. Separate callable modules sharing a
 source file retain their own identities. Ordinary class PORO identifiers stay unchanged.
 
 Incremental extraction and model/PORO/concern refreshes reconcile ownership when

@@ -436,6 +436,7 @@ module Woods
           end
 
           lines.concat(traversal_coverage_lines(data))
+          lines.concat(dependent_counts_lines(data))
 
           nodes.each do |id, info|
             depth = fetch_key(info, :depth) || 0
@@ -449,6 +450,7 @@ module Woods
             indent = '  ' * depth
             suffix = types ? " (#{Array(types).join(', ')})" : ''
             suffix += " [#{database}]" if database
+            suffix += mapped_test_suffix(info)
             lines << "#{indent}- **#{id}**#{suffix}"
             deps.each { |d| lines << "#{indent}  - #{d}" }
           end

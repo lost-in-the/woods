@@ -116,8 +116,10 @@ module Woods
         { 'ok' => true, 'result' => result, 'timing_ms' => elapsed }
       rescue ValidationError => e
         # Validation messages are author-controlled — safe to return as-is so
-        # callers can correct their request.
+        # callers can correct their request. A refusal that names its code,
+        # argument and hint carries them beside the message.
         { 'ok' => false, 'error' => e.message, 'error_type' => 'validation' }
+          .merge(e.details.transform_keys(&:to_s))
       rescue StandardError => e
         # Execution errors come from adapters and can embed fragments of the
         # rejected SQL, schema names, column names, or partial table contents
@@ -488,7 +490,7 @@ module Woods
         end
         InputContract.normalize!(params, spec.properties)
       rescue InputContract::ValidationError => e
-        raise ValidationError, e.message
+        raise ValidationError.new(e.message, **e.details)
       end
 
       # @param params [Hash] Must contain 'model' key
@@ -580,7 +582,7 @@ module Woods
       # `find_by({})` returns an arbitrary row when neither is supplied, and
       # `find_by` with an empty `by` hash is indistinguishable from that:
       # both must be refused before any query runs. Defense-in-depth against
-      # the public schema's `oneOf`/`minProperties` constraint (ToolSpec
+      # the authoritative schema's `oneOf`/`minProperties` constraint (ToolSpec
       # for console_find), for callers that reach this handler directly.
       #
       # @param params [Hash]
@@ -590,9 +592,12 @@ module Woods
         has_by = params['by'].is_a?(Hash) && params['by'].any?
         return if has_id ^ has_by
 
-        raise ValidationError, 'console_find requires exactly one non-empty locator: id or by' unless has_id && has_by
+        rule = Server::FIND_LOCATOR_RULE.slice(:code, :argument, :hint)
+        unless has_id && has_by
+          raise ValidationError.new('console_find requires exactly one non-empty locator: id or by', **rule)
+        end
 
-        raise ValidationError, 'console_find accepts only one locator at a time: id or by, not both'
+        raise ValidationError.new('console_find accepts only one locator at a time: id or by, not both', **rule)
       end
 
       def handle_pluck(params)
@@ -612,16 +617,7 @@ module Woods
       def handle_aggregate(params)
         column = params['column']
         function = params['function']
-        if column
-          @model_validator.validate_column!(params['model'], column)
-          refuse_redacted_aggregate_expression!(column)
-        end
-
-        unless Server::AGGREGATE_FUNCTIONS.include?(function)
-          raise ValidationError, "Invalid aggregate function: #{function}. " \
-                                 "Allowed: #{Server::AGGREGATE_FUNCTIONS.join(', ')}"
-        end
-        raise ValidationError, "column is required for #{function} aggregate" if function != 'count' && column.nil?
+        validate_aggregate_arguments!(params['model'], function, column)
 
         model = resolve_model(params['model'])
         scope = apply_scope(model, params['scope'], model_name: params['model'])
@@ -633,6 +629,26 @@ module Woods
                   scope.send(function.to_sym, column.to_sym)
                 end
         { 'value' => value }
+      end
+
+      # Defense-in-depth for the aggregate rules the authoritative schema
+      # already enforces, for callers that reach this handler directly.
+      #
+      # @raise [ValidationError]
+      def validate_aggregate_arguments!(model_name, function, column)
+        if column
+          @model_validator.validate_column!(model_name, column)
+          refuse_redacted_aggregate_expression!(column)
+        end
+
+        unless Server::AGGREGATE_FUNCTIONS.include?(function)
+          raise ValidationError, "Invalid aggregate function: #{function}. " \
+                                 "Allowed: #{Server::AGGREGATE_FUNCTIONS.join(', ')}"
+        end
+        return unless function != 'count' && column.nil?
+
+        raise ValidationError.new("column is required for #{function} aggregate",
+                                  **Server::AGGREGATE_COLUMN_RULE.slice(:code, :argument, :hint))
       end
 
       def handle_association_count(params)

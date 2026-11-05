@@ -6,6 +6,7 @@ module SourceInputApp
     FileUtils.cp_r(File.join(root, 'spec/dummy/.'), app)
     File.write(File.join(app, 'Rakefile'), <<~RUBY)
       require 'rake'
+      require 'fileutils'
       require 'woods'
       task :environment do
         require 'rails'
@@ -15,7 +16,8 @@ module SourceInputApp
         require 'active_job/railtie'
         require 'logger'
         require './config/application_config'
-        ENV['WOODS_DUMMY_DB'] = File.join(Dir.pwd, 'dummy.sqlite3')
+        ENV['WOODS_DUMMY_DB'] = File.join(Dir.pwd, 'tmp', 'dummy.sqlite3')
+        FileUtils.mkdir_p(File.dirname(ENV.fetch('WOODS_DUMMY_DB')))
         class SourceFixtureApplication < Rails::Application
           config.root = Dir.pwd
           config.secret_key_base = 'woods-source-fixture'

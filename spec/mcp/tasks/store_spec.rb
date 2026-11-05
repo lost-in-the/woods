@@ -450,6 +450,57 @@ RSpec.describe Woods::MCP::Tasks::Store do
     end
   end
 
+  # A producer killed in a container whose PID 1 never reaps stays a zombie.
+  # Signal 0 still answers for it, and its /proc stat (so its identity) is
+  # unchanged, so a bare pid-plus-identity check kept the task `working` (#1002).
+  describe 'orphan detection with the shared liveness check' do
+    def rewrite(task, **fields)
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      File.write(path, JSON.generate(JSON.parse(File.read(path)).merge(fields.transform_keys(&:to_s))))
+    end
+
+    it 'fails a working task whose exact producer exited but was never reaped', if: UnreapedChild::SUPPORTED do
+      UnreapedChild.with_zombie do |zombie|
+        task = store.create!(tool: 'pipeline_extract')
+        rewrite(task, pid: zombie, producer_identity: store.send(:producer_identity_for, zombie))
+
+        result = described_class.new(@index_dir).get(task.id)
+        expect(result.status).to eq('failed')
+        expect(result.error['message']).to include("pid #{zombie}")
+      end
+    end
+
+    context 'when the producer\'s liveness is unknown' do
+      let(:task) { store.create!(tool: 'pipeline_extract') }
+      let(:pid) { 2**30 }
+
+      before do
+        allow(Woods::Coordination::Liveness).to receive(:check).and_call_original
+        allow(Woods::Coordination::Liveness).to receive(:check).with(pid).and_return(:unknown)
+      end
+
+      it 'leaves a recent task working' do
+        rewrite(task, pid: pid)
+
+        expect(store.get(task.id).status).to eq('working')
+      end
+
+      it 'fails the task once it is older than the grace window' do
+        aged = Time.now.utc - described_class::FOREIGN_PRODUCER_GRACE_SECONDS - 60
+        rewrite(task, pid: pid, updated_at: aged.iso8601)
+
+        expect(store.get(task.id).status).to eq('failed')
+      end
+
+      it 'fails a recent task whose readable identity proves the pid was reused' do
+        rewrite(task, pid: pid)
+        allow(store).to receive(:producer_identity_for).with(pid).and_return('another-process-start')
+
+        expect(store.get(task.id).status).to eq('failed')
+      end
+    end
+  end
+
   describe 'expiry' do
     it 'drops a record older than its ttl' do
       task = store.create!(tool: 'pipeline_extract', ttl_ms: 0)

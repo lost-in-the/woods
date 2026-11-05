@@ -86,6 +86,11 @@ module Woods
       # source-reference pass, so each file is parsed once per run.
       attr_writer :collector
 
+      # A run hands in its one {ConcernClassification}, so standalone-module
+      # discovery steps aside for exactly the modules the concern family owns.
+      # Without one, each discovery pass builds its own (fresh runtime state).
+      attr_writer :concern_classification
+
       # @return [#call] the parser for every file this extractor reads
       def collector
         @collector ||= SourceReferences::Collector.new
@@ -100,7 +105,7 @@ module Woods
       def extract_all
         ar_names = ActiveRecord::Base.descendants.filter_map(&:name).to_set
 
-        @module_discovery = StandaloneModuleDiscovery.new
+        @module_discovery = new_module_discovery
         swept_files.flat_map { |file| extract_poro_units(file, ar_names: ar_names) }
       end
 
@@ -171,7 +176,7 @@ module Woods
       def extract_nested_units(file_path, ar_names: Set.new, owners: [])
         source = SourceFile.read(file_path)
         analysis = collector.call(source)
-        @module_discovery ||= StandaloneModuleDiscovery.new
+        @module_discovery ||= new_module_discovery
         mark(nested_class_units(file_path, source, ar_names, analysis, owners: owners.to_set), FALLBACK_MARKER)
       rescue StandardError => e
         SourceInputs::ConsumerErrors.log(self, "Failed to extract nested PORO units #{file_path}: #{e.message}")
@@ -183,7 +188,7 @@ module Woods
       #
       # @return [Hash<String, Array<ExtractedUnit>>] absolute paths and module units
       def standalone_modules
-        @module_discovery = StandaloneModuleDiscovery.new
+        @module_discovery = new_module_discovery
         swept_files.each_with_object({}) do |file, result|
           # Without the keyword the file declares no module; skip the parse.
           next unless SourceFile.read(file).match?(/\bmodule\s/)
@@ -223,6 +228,12 @@ module Woods
 
       private
 
+      def new_module_discovery
+        concerns = ConcernExtractor.new
+        concerns.concern_classification = @concern_classification if @concern_classification
+        StandaloneModuleDiscovery.new(concerns: concerns)
+      end
+
       # A file whose only declarations are a class-family class and its
       # namespace wrappers cannot yield a PORO unit, and deciding that needs no
       # parse. Most swept controller, mailer and component files are this shape.
@@ -236,7 +247,7 @@ module Woods
         return false unless declares_only?(source, segments)
         return false unless runtime_family(governed)
 
-        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        discovery = (@module_discovery ||= new_module_discovery)
         (1...segments.size).none? { |depth| discovery.owns?(segments.first(depth).join('::'), file_path) }
       end
 
@@ -261,7 +272,7 @@ module Woods
         return [] if family_owned_file?(file_path, source)
 
         analysis = collector.call(source)
-        discovery = (@module_discovery ||= StandaloneModuleDiscovery.new)
+        discovery = (@module_discovery ||= new_module_discovery)
         proof = fallback || swept_path?(file_path)
         primary = extract_class_unit(file_path, source, ar_names, analysis, proof: proof)
         nested = primary ? [] : nested_class_units(file_path, source, ar_names, analysis)

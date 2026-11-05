@@ -383,6 +383,10 @@ module Woods
           # ConcernExtractor globs app/**/concerns, not just the two canonical
           # directories — match any .rb under app/ inside a concerns/ segment.
           file_rule(:concerns, :extract_concern_file, %w[app], require_segment: '/concerns/'),
+          # Elsewhere a module is a concern by its runtime answer (a model
+          # mixes it in, or it extends ActiveSupport::Concern, #996), not its
+          # path. Every such file also routes to its path owner (PORO, or the
+          # wholesale lib re-run), and module reconciliation moves the unit.
           file_rule(:concerns, :extract_model_mixin_file, %w[app lib], exclude: %w[/concerns/]),
           # GraphQL types sit outside FILE_BASED (they share one extractor
           # method across four unit types via GRAPHQL_TYPES), which is exactly

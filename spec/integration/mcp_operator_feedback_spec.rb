@@ -37,9 +37,18 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
 
   let(:operator) { { pipeline_guard: guard, status_reporter: status_reporter } }
 
+  # The pipeline tools lock the index they serve, so serve a writable copy
+  # rather than the tracked fixture.
+  let(:served_dir) do
+    File.join(tmpdir, 'index').tap do |dir|
+      FileUtils.mkdir_p(dir)
+      FileUtils.cp_r(File.join(fixture_dir, '.'), dir)
+    end
+  end
+
   let(:server) do
     Woods::MCP::Server.build(
-      index_dir: fixture_dir,
+      index_dir: served_dir,
       operator: operator,
       feedback_store: feedback_store
     )

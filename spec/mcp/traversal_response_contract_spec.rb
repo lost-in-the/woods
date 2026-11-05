@@ -38,6 +38,12 @@ RSpec.describe 'Traversal response scope and totals' do
     format == :json ? JSON.parse(text) : text
   end
 
+  # The rows as the reader walked them; `dependents` adds only each row's
+  # family (and mapped-test relationship) on top.
+  def listed_rows(data)
+    data['nodes'].transform_values { |entry| entry.except('family', 'mapped_test') }
+  end
+
   def traverse(name, **arguments)
     Woods::MCP::IndexReader.new(directory).public_send("traverse_#{name}", 'Hub', depth: 1, **arguments)
   end
@@ -68,7 +74,7 @@ RSpec.describe 'Traversal response scope and totals' do
               data = call_tool(name, identifier: 'Hub', depth: 1, explain: explain, **budget, **page)
               expect(data).to include('partial' => true, 'partial_reason' => reason.to_s, 'total_is_exact' => false)
               expected_nodes = baseline[:nodes].to_a.drop(page.fetch(:offset, 0)).take(page.fetch(:limit, 50)).to_h
-              expect(data['nodes']).to eq(JSON.parse(JSON.generate(expected_nodes)))
+              expect(listed_rows(data)).to eq(JSON.parse(JSON.generate(expected_nodes)))
               expect(data['traversal_budget']).to eq(JSON.parse(JSON.generate(baseline.fetch(:traversal_budget))))
               paged = page.fetch(:offset, 0).positive? || total > page.fetch(:limit, 50)
               expect(data['nodes_total']).to eq(total) if paged
@@ -89,7 +95,7 @@ RSpec.describe 'Traversal response scope and totals' do
             baseline = traverse(name, max_edges: 2, explain: explain, **scope)
             data = call_tool(name, identifier: 'Hub', depth: 1, max_edges: 2, explain: explain, **scope)
             expect(data).to include('partial' => true, 'partial_reason' => 'edge_budget', 'total_is_exact' => false)
-            expect(data['nodes']).to eq(JSON.parse(JSON.generate(baseline.fetch(:nodes))))
+            expect(listed_rows(data)).to eq(JSON.parse(JSON.generate(baseline.fetch(:nodes))))
             expect(data['traversal_budget']).to eq(JSON.parse(JSON.generate(baseline.fetch(:traversal_budget))))
           end
         end

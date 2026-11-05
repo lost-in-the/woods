@@ -107,7 +107,7 @@ module Woods
       # and its own output dir — so this only ever contends with another
       # writer against the *same* index: a manual `woods:extract`, or a hook
       # sync that fired anyway.
-      LOCK_NAME = 'extraction'
+      LOCK_NAME = Coordination::PipelineLock::INDEX_WRITER_NAME
 
       # Name of the O_EXCL claim file that closes the startup TOCTOU: two
       # daemons that both pass {#another_daemon_alive?} before either has
@@ -117,7 +117,8 @@ module Woods
 
       # A daemon cycle is milliseconds; a manual full extraction is seconds to
       # minutes. This bounds how long a crashed writer can block the daemon.
-      LOCK_STALE_TIMEOUT = 600
+      # Defined beside the lock factory ({Coordination::PipelineLock.for_index}).
+      LOCK_STALE_TIMEOUT = Coordination::PipelineLock::INDEX_WRITER_STALE_TIMEOUT
 
       # How often an otherwise idle daemon re-stamps its status file.
       #
@@ -520,9 +521,7 @@ module Woods
       end
 
       def default_lock
-        Coordination::PipelineLock.new(
-          lock_dir: @output_dir, name: LOCK_NAME, stale_timeout: LOCK_STALE_TIMEOUT
-        )
+        Coordination::PipelineLock.for_index(@output_dir)
       end
 
       def reset_cycle_state

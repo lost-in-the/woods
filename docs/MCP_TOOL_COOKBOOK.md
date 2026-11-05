@@ -260,6 +260,16 @@ The `metadata.inlined_concerns` array lists which concerns were resolved. On a m
 
 **What you'll get:** A BFS traversal of units that reference `User`, such as controllers, services, jobs, and mailers, up to 2 hops out. Set `depth: 1` for direct dependents only.
 
+The answer leads with a headline over the whole traversal, not just the page:
+`Recorded dependents: 12 (code); Mapped tests: 3 (listed, not counted).`,
+then a `By family:` line (code, tests, schema, docs, other). The headline
+counts code; mapped tests (specs whose `test_coverage` edge names the unit)
+are listed and marked "(Mapped test)", and count toward the headline only
+when `reverse_includes_tests` is on. These are recorded dependents to check,
+not a list of what will break. After a budget cutoff every count reads
+`at least`. Structured clients read `data.dependent_counts` and each row's
+`family`; see [dependents families](MCP_SERVERS.md#dependents-families-and-headline).
+
 The answer is paged to 50 nodes by default. When it is cut, the response ends with a
 `Showing N of M (truncated)` line, the same one `graph_analysis` prints. Reach
 for `depth`, `types` and `via` first: they make the answer smaller. `limit` and
@@ -521,6 +531,13 @@ Static tools miss all of these because they only exist after Rails processes the
 ```
 
 **What you'll get:** Execution flow from the controller action through services, callbacks, jobs enqueued, and mailers sent, assembled from the dependency graph. Increase `depth` to trace deeper call chains.
+
+How a call target becomes a step. This is a static approximation of Ruby's constant lookup, not lexical resolution:
+
+- An exact identifier wins. A rooted name (`::Billing::Invoice`) matches only its exact unit, from the graph or from disk, never a unit of the same short name elsewhere.
+- An unrooted short name with no exact unit resolves by short-name suffix. Several matches make the operation ambiguous, with `ambiguous_candidates` naming them, and nothing is expanded.
+- One match is expanded, unless the precompute found a top-level constant of that name already defined in the booted app (#967). Then the operation is ambiguous with both candidates, the rooted top-level constant first (`["::I18n", "Lint::I18n"]`). The verdicts are published in `flows/top_level_constants.json`, so a flow assembled on demand reads the same verdicts as the stored flows of that generation, and an incremental run that changes them reassembles the stored flows that call the affected names. An index without them resolves the single match. A top-level constant that appears or disappears without any indexed file changing (a new gem) is seen only by the next run that refreshes flows.
+- The caller's nesting is not consulted, so a compact `class A::B` body can be shown reaching `A::Widget` where Ruby would raise `NameError`. Use `lookup` at ambiguous steps.
 
 ---
 

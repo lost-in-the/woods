@@ -20,17 +20,12 @@ module Woods
       CORE_OWNER = UnboundMethod.instance_method(:owner)
       CORE_LOCATION = UnboundMethod.instance_method(:source_location)
       CORE_SUPER = UnboundMethod.instance_method(:super_method)
-      CORE_IS_A = Kernel.instance_method(:is_a?)
-      CORE_IVAR_DEFINED = Kernel.instance_method(:instance_variable_defined?)
       CORE_CONSTANTS = Module.instance_method(:constants)
-      CORE_CONST_DEFINED = Module.instance_method(:const_defined?)
       CORE_CONST_GET = Module.instance_method(:const_get)
       CORE_AUTOLOAD = Module.instance_method(:autoload?)
       VISIBILITIES = %i[public protected private].freeze
       CORE_LISTS = VISIBILITIES.to_h { |visibility| [visibility, Module.instance_method("#{visibility}_instance_methods")] }
                                .freeze
-      # Hooks ActiveSupport::Concern stores on its module; either one is behavior.
-      CONCERN_BLOCKS = %i[@_included_block @_prepended_block].freeze
 
       def initialize(root: Rails.root, concerns: ConcernExtractor.new)
         @root = File.expand_path(root)
@@ -52,7 +47,9 @@ module Woods
           next if claimed_identity?(identifier)
 
           value = verified_constant(identifier, candidates, path, kind: :module)
-          next unless value
+          # A module that extends ActiveSupport::Concern is a concern unit
+          # wherever it lives, never a PORO as well (#996).
+          next if value.nil? || @concerns.classification.active_support_concern?(value)
 
           module_record(identifier, value, path, candidates)
         end
@@ -78,39 +75,17 @@ module Woods
 
       private
 
-      # A module counts when it has behavior or data of its own: methods, an
-      # ActiveSupport::Concern hook or ClassMethods, or non-module constants.
+      # A module counts when it has behavior or data of its own: methods or
+      # non-module constants. A concern-shaped module never reaches here.
       def module_record(identifier, value, path, candidates)
         methods = own_methods(value, path, candidates)
-        concern = concern_class_methods(value, path, candidates)
         constants = own_constants(value, path, candidates)
-        return if methods[:all].empty? && concern.nil? && constants.empty?
+        return if methods[:all].empty? && constants.empty?
 
         record = { identifier: identifier, public_methods: methods[:public],
-                   class_methods: (methods[:singleton] + concern.to_a).uniq.sort,
-                   method_count: methods[:all].size + concern.to_a.size }
-        record[:active_support_concern] = true if concern
+                   class_methods: methods[:singleton], method_count: methods[:all].size }
         record[:constants] = constants unless constants.empty?
         record
-      end
-
-      # @return [Array<String>, nil] ClassMethods names, or nil when the module
-      #   is not a concern with any hook or class method of its own
-      def concern_class_methods(value, path, declarations)
-        return unless defined?(ActiveSupport::Concern) && CORE_IS_A.bind(value).call(ActiveSupport::Concern)
-
-        class_methods = class_methods_module(value)
-        names = class_methods ? methods_at(class_methods, path, declarations).values.flat_map(&:keys) : []
-        hooked = CONCERN_BLOCKS.any? { |ivar| CORE_IVAR_DEFINED.bind(value).call(ivar) }
-        names.uniq.sort if hooked || names.any?
-      end
-
-      def class_methods_module(value)
-        return unless CORE_CONST_DEFINED.bind(value).call(:ClassMethods, false)
-        return if CORE_AUTOLOAD.bind(value).call(:ClassMethods, false)
-
-        candidate = CORE_CONST_GET.bind(value).call(:ClassMethods, false)
-        candidate if @lookup.module_object?(candidate) && !@lookup.class_object?(candidate)
       end
 
       def own_constants(value, path, declarations)

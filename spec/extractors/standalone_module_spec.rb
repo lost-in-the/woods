@@ -312,8 +312,10 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
       values.first
     end
 
-    it 'extracts a concern no model includes as a module unit listing its ClassMethods' do
-      load_source('studio/configurable', <<~RUBY)
+    # #996: these were PORO module units; extending ActiveSupport::Concern now
+    # makes them concern units, published by the concern family only.
+    it 'leaves a concern no model includes to the concern extractor, with its ClassMethods' do
+      path = load_source('studio/configurable', <<~RUBY)
         module StandaloneFixture::Configurable
           extend ActiveSupport::Concern
           class_methods do
@@ -321,14 +323,16 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
           end
         end
       RUBY
-      unit = only_unit
-      expect(unit.identifier).to eq('StandaloneFixture::Configurable')
-      expect(unit.metadata).to include(ruby_kind: 'module', active_support_concern: true,
-                                       class_methods: ['configurable'], public_methods: [], method_count: 1)
+      expect(units).to eq([])
+      concerns = Woods::Extractors::ConcernExtractor.new.extract_model_mixin_file(path)
+      expect(concerns.size).to eq(1)
+      concern = concerns.first
+      expect(concern).to have_attributes(type: :concern, identifier: 'StandaloneFixture::Configurable')
+      expect(concern.metadata).to include(concern_type: 'active_support', has_class_methods_block: true)
     end
 
-    it 'treats an included block as concern behavior even without any method' do
-      load_source('stamped', <<~RUBY)
+    it 'leaves a concern with only an included block to the concern extractor' do
+      path = load_source('stamped', <<~RUBY)
         module StandaloneFixture::Stamped
           extend ActiveSupport::Concern
           included do
@@ -336,7 +340,8 @@ RSpec.describe Woods::Extractors::PoroExtractor, 'standalone module ownership' d
           end
         end
       RUBY
-      expect(only_unit.metadata).to include(ruby_kind: 'module', active_support_concern: true, method_count: 0)
+      expect(units).to eq([])
+      expect(Woods::Extractors::ConcernExtractor.new.extract_model_mixin_file(path).map(&:type)).to eq([:concern])
     end
 
     it 'keeps singleton methods wrapped by a memoizer defined in another file' do

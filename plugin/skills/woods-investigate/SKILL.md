@@ -29,7 +29,7 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 ## By task shape
 
-- **Code review / change impact**: `lookup` the changed unit, then `dependents` at depth 1 before going deeper. Group results by relationship type and layer; report direct dependents separately from inferred downstream impact. A graph edge is not test coverage — select tests from mappings and repository search.
+- **Code review / change impact**: `lookup` the changed unit, then `dependents` at depth 1 before going deeper. Group results by relationship type and layer; report direct dependents separately from inferred downstream impact. Where the server reports `dependent_counts`, quote its headline (code, plus mapped tests only when `reverse_includes_tests` is on) and family counts as recorded dependents, and read `at least` counts as lower bounds; never call them what will break. A graph edge is not test coverage — select tests from mappings and repository search.
 - **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, and undeclared package edges; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
 - **Investigating behavior / debugging**: find the exact indexed unit with `search` and `lookup`, then use `trace_flow` with `UnitIdentifier` or `UnitIdentifier#method` (for example, `CheckoutService#order`). Bare `order` names a unit, potentially a factory, rather than locating an application method. Receiverless local calls may remain unexpanded; inspect their source or trace the owning unit's method explicitly. Flow output is not proof of runtime execution or exhaustive call coverage. See the [flow workflow](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md#trace-a-feature-flow).
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
@@ -71,7 +71,9 @@ evidence, not observed execution; the coverage warning remains applicable.
 
 The same Woods 2.1 expansion discovers callable standalone `app/models` modules
 as `poro` units with `metadata.ruby_kind: "module"`. Runtime model mixins retain
-`concern` ownership. Later writers also sweep Ruby under `app/` that no extractor
+`concern` ownership. Writers after #996 also publish any loaded module that
+extends `ActiveSupport::Concern` as a `concern` unit, wherever it lives, instead
+of a `poro` or `lib` unit; a module that was never loaded keeps its earlier type. Concern metadata and dependencies describe its own declarations; the displayed file source can still include sibling context. Class-method summaries include both concern declaration forms. Later writers also sweep Ruby under `app/` that no extractor
 claims (helpers, view models, constraints, an app-local `app/lib`) into `poro`
 units marked `metadata.discovered_via: "unclaimed_sweep"` or `"owner_fallback"`.
 Verify the installed writer and run a full extraction before expecting those

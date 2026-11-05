@@ -197,6 +197,7 @@ module Woods
                 :settings_readers, :external_table_consumers, :external_table_consumers_path,
                 :test_support_paths, :test_subdomain_helpers, :source_reference_callers, :rake_task_paths,
                 :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation,
+                :reverse_includes_tests,
                 :git_recent_commits, :git_commit_table_days, :git_commit_table_limit,
                 :git_commit_table_files_limit, :git_commit_table_line_stats, :git_commit_table_hunk_budget
 
@@ -321,6 +322,9 @@ module Woods
       @documentation_exclude = DEFAULT_DOCUMENTATION_EXCLUDE
       # Whether retrieval returns `doc` units unless a caller filters by type.
       @retrieve_documentation = true
+      # Whether mapped tests count toward the `dependents` headline. Read at
+      # query time only; see the setter.
+      @reverse_includes_tests = false
     end
 
     def embedding_model=(value)
@@ -956,6 +960,19 @@ module Woods
     def retrieve_documentation=(value)
       validate_boolean!('retrieve_documentation', value)
       @retrieve_documentation = value
+    end
+
+    # Whether the `dependents` headline counts mapped tests (`test_mapping`
+    # units reached through `test_coverage`) beside code. Mapped tests are
+    # listed either way; this changes only the headline number. The Index
+    # Server reads it per query, extraction never does, and it is not part of
+    # {EXTRACTION_KEYS}, so changing it needs no re-extraction.
+    #
+    # @param value [Boolean]
+    # @raise [ConfigurationError] unless +value+ is true or false
+    def reverse_includes_tests=(value)
+      validate_boolean!('reverse_includes_tests', value)
+      @reverse_includes_tests = value
     end
 
     # Accepted for forward compatibility. Nothing reads {gem_configs}; gem

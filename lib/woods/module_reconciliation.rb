@@ -2,7 +2,10 @@
 
 module Woods
   # Keeps callable app/models modules under one extractor owner as model
-  # inclusions change. Partial runtime discovery cannot establish removals.
+  # inclusions change, or as a module gains or loses `extend
+  # ActiveSupport::Concern` (#996). Ownership comes from the run's one
+  # {Extractors::ConcernClassification}, read through the concern extractor.
+  # Partial runtime discovery cannot establish removals.
   module ModuleReconciliation # rubocop:disable Metrics/ModuleLength -- one ownership/provenance policy across writers
     private
 

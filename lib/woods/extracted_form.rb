@@ -8,8 +8,9 @@ module Woods
   # A published unit also carries what later passes add after registration:
   # `dependents`, Git facts, and source-reference edges and occurrence metadata.
   # A freshly extracted unit has none of them yet, so the two are comparable
-  # only in this form. Flow annotations stay in: a controller that carries
-  # them must be re-registered for its flow documents to be reassembled.
+  # only in this form. Flow annotations stay in by default. A caller whose
+  # flow refresh reconciles them afterwards removes them with
+  # {.without_flow_annotation} first (#994).
   #
   # @example
   #   ExtractedForm.of(published, reference_edges: added) == ExtractedForm.of(fresh)
@@ -20,6 +21,8 @@ module Woods
     TABLE_KEYS = %w[methods examples].freeze
     # Entry lists whose `declaration` {CallbackSites} derives the same way.
     DECLARATION_LISTS = %w[callbacks filters].freeze
+    # The controller metadata the flow pass writes after registration.
+    FLOW_ANNOTATION = 'flow_paths'
 
     module_function
 
@@ -51,6 +54,20 @@ module Woods
       form = data
       form = data.merge('metadata' => without_tables(data['metadata'])) if data['metadata'].is_a?(Hash)
       of(form, reference_edges: reference_edges)
+    end
+
+    # The unit without its flow annotation, for a comparison made before the
+    # flow pass runs. Only safe when that pass reconciles the annotation
+    # afterwards; otherwise a stale annotation would look unchanged.
+    #
+    # @param data [Hash] string-keyed unit JSON
+    # @return [Hash] a copy without `metadata.flow_paths`; +data+ itself when
+    #   it carries none
+    def without_flow_annotation(data)
+      metadata = data['metadata']
+      return data unless metadata.is_a?(Hash) && metadata.key?(FLOW_ANNOTATION)
+
+      data.merge('metadata' => metadata.except(FLOW_ANNOTATION))
     end
 
     # @param metadata [Hash]

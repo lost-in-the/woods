@@ -89,12 +89,14 @@ RSpec.describe 'Index MCP tool contracts' do
                                                                                  'nodes' => {
                                                                                    'Post' => { 'type' => 'model', 'depth' => 0,
                                                                                                'deps' => %w[Comment PostsController] },
-                                                                                   'Comment' => { 'type' => 'model',
-                                                                                                  'depth' => 1, 'deps' => [] },
+                                                                                   'Comment' => { 'type' => 'model', 'depth' => 1,
+                                                                                                  'deps' => [], 'family' => 'code' },
                                                                                    'PostsController' => {
-                                                                                     'type' => 'controller', 'depth' => 1, 'deps' => []
+                                                                                     'type' => 'controller', 'depth' => 1, 'deps' => [],
+                                                                                     'family' => 'code'
                                                                                    }
-                                                                                 }
+                                                                                 },
+                                                                                 'dependent_counts' => expected_dependent_counts(2)
                                                                                }),
                                required: %w[identifier], properties: {
                                  'identifier' => string_contract(1, 10_000),
@@ -1100,13 +1102,17 @@ RSpec.describe 'Index MCP tool contracts' do
 
   def assert_union_semantics(name, result)
     root, type = name == 'dependencies' ? %w[Comment model] : %w[Post model]
-    expect(result.dig('structuredContent', 'data')).to eq(
-      'root' => root,
-      'found' => true,
-      'graph_coverage' => expected_graph_coverage,
-      'total_is_exact' => true,
-      'nodes' => { root => { 'type' => type, 'depth' => 0, 'deps' => [] } }
-    )
+    expected = { 'root' => root, 'found' => true, 'graph_coverage' => expected_graph_coverage,
+                 'total_is_exact' => true, 'nodes' => { root => { 'type' => type, 'depth' => 0, 'deps' => [] } } }
+    expected['dependent_counts'] = expected_dependent_counts(0) if name == 'dependents'
+    expect(result.dig('structuredContent', 'data')).to eq(expected)
+  end
+
+  # The `dependents` headline over +code+ code rows and nothing else.
+  def expected_dependent_counts(code)
+    { 'scope' => 'whole_traversal', 'exact' => true, 'bound' => 'exact', 'total' => code, 'headline' => code,
+      'mapped_tests' => 0, 'reverse_includes_tests' => false,
+      'families' => { 'code' => code, 'tests' => 0, 'schema' => 0, 'docs' => 0, 'other' => 0 } }
   end
 
   def rpc(server, method, params = {})

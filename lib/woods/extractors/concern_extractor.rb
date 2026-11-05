@@ -8,6 +8,9 @@ require_relative 'shared_dependency_scanner'
 require_relative 'source_nesting'
 require_relative 'constant_paths'
 require_relative 'config_source_guard'
+require_relative 'comment_blanking'
+require_relative 'concern_classification'
+require_relative 'concern_source'
 
 module Woods
   module Extractors
@@ -34,24 +37,30 @@ module Woods
       include SourceNesting
 
       # Canonical concern directories (used as fallback if glob finds nothing).
-      CONCERN_DIRECTORIES = %w[
-        app/models/concerns
-        app/controllers/concerns
-      ].freeze
+      CONCERN_DIRECTORIES = ConcernClassification::CONCERN_DIRECTORIES
 
       # Initializers are loaded once at boot and sit outside every autoload path.
       INITIALIZERS_GLOB = 'config/initializers/**/*.rb'
 
-      def initialize
-        # Discover all concerns/ directories under app/, including deeply nested ones
-        # like app/models/gateway/stripe/webhook/concerns/.
-        @directories = Dir[Rails.root.join('app/**/concerns')].map { |d| Pathname.new(d) }
-                                                              .select(&:directory?)
-        # Fall back to canonical directories if glob finds nothing.
-        return unless @directories.empty?
+      # `extend ActiveSupport::Concern`, rooted or not, read from code only.
+      ACTIVE_SUPPORT_EXTEND = /\bextend\s+(?:::)?ActiveSupport::Concern\b/
 
-        @directories = CONCERN_DIRECTORIES.map { |d| Rails.root.join(d) }
-                                          .select(&:directory?)
+      def initialize
+        @directories = classification.directories
+      end
+
+      # A run hands in the one {ConcernClassification} every extractor shares,
+      # so the mixin and promoted-module sets are computed once (#996).
+      #
+      # @param value [ConcernClassification]
+      def concern_classification=(value)
+        @classification = value
+        @directories = value.directories
+      end
+
+      # @return [ConcernClassification] this run's classification
+      def classification
+        @classification ||= ConcernClassification.new
       end
 
       # Extract all concern modules
@@ -69,12 +78,19 @@ module Woods
       # @return [ExtractedUnit, nil] The extracted unit or nil if not a concern
       def extract_concern_file(file_path, module_name: nil)
         source = SourceFile.read(file_path)
+        published = source
+        if module_name
+          source = ConcernSource.new(source).for_owner(module_name)
+          return nil unless source
+        end
         # Runtime discovery supplies each included module's identity. Ordinary
         # concern files retain their canonical identity, including nested helpers.
         module_name ||= extract_module_name(file_path, source)
 
         return nil unless module_name
-        return nil unless concern_module?(source)
+
+        code = CommentBlanking.blank(source, file_path.to_s)
+        return nil unless concern_module?(code, module_name)
 
         unit = ExtractedUnit.new(
           type: :concern,
@@ -83,8 +99,9 @@ module Woods
         )
 
         unit.namespace = extract_namespace(module_name)
-        unit.source_code = annotate_source(published_source(file_path, source), module_name)
-        unit.metadata = extract_metadata(source, file_path)
+        unit.source_code = annotate_source(published_source(file_path, published), module_name,
+                                           active_support_concern?(code, module_name), method_source: source)
+        unit.metadata = extract_metadata(source, file_path, active_support_concern?(code, module_name))
         unit.dependencies = extract_dependencies(source, module_name)
 
         unit
@@ -106,39 +123,44 @@ module Woods
         ConfigSourceGuard.redact(source)
       end
 
-      # Extract a module outside concerns directories only when a live model
-      # includes it. Filenames alone cannot establish that a module is a mixin.
+      # Extract a module outside concerns directories when a live model
+      # includes it, or when the loaded module extends ActiveSupport::Concern
+      # (#996). Filenames alone cannot establish either.
       #
       # @param file_path [String] Changed application source path
       # @return [Array<ExtractedUnit>, nil]
       def extract_model_mixin_file(file_path)
-        modules = model_mixin_paths[file_path.to_s]
+        modules = runtime_module_paths[file_path.to_s]
         return unless modules
 
         modules.filter_map { |mod| extract_concern_file(file_path, module_name: mod.name) }
       end
 
-      # Runtime mixins that have no conventional concern-directory discovery.
-      # @return [Hash<String, Array<Module>>] Source paths and their included modules
+      # Runtime-owned concerns outside the concern directories: modules a live
+      # model mixes in, and loaded modules that extend ActiveSupport::Concern.
+      # Every family that would otherwise publish one of these (PORO, lib)
+      # reads this set to step aside, so each module has one type.
+      #
+      # @return [Hash<String, Array<Module>>] Source paths and their modules
       def runtime_model_mixins
-        model_mixin_paths.reject { |path, _mod| conventional_concern_path?(path) }
+        runtime_module_paths.reject { |path, _mod| conventional_concern_path?(path) }
       end
 
       # @param path [String] Absolute source path
       # @return [Boolean] Whether directory-based discovery owns this source
       def conventional_concern_path?(path)
-        @directories.any? { |directory| path.to_s.start_with?("#{directory}/") }
+        classification.conventional_path?(path)
       end
 
       private
 
       # Runtime ownership is authoritative; never import gem mixins even when
-      # the application adds methods to them.
-      # @return [Hash<String, Array<Module>>] App-owned included modules by source path
-      def model_mixin_paths
-        return {} unless defined?(ActiveRecord::Base)
-
-        @model_mixin_paths ||= discover_model_mixin_paths
+      # the application adds methods to them. Model mixins and promoted
+      # modules, computed once per run by the shared classification.
+      #
+      # @return [Hash<String, Array<Module>>] App-owned runtime concerns by source path
+      def runtime_module_paths
+        classification.runtime_modules { defined?(ActiveRecord::Base) ? discover_model_mixin_paths : {} }
       end
 
       # @return [Hash<String, Array<Module>>] Reflected module source locations
@@ -262,17 +284,34 @@ module Woods
           .join('::')
       end
 
-      # Detect whether source defines an ActiveSupport::Concern or a plain mixin.
+      # Whether a file names a concern. A loaded module that extends
+      # ActiveSupport::Concern always is one (the runtime rule). Otherwise the
+      # file must declare a module with mixin content of its own, read from
+      # code only: a comment or heredoc that mentions a hook is not one.
       #
-      # @param source [String] Ruby source code
+      # @param code [String] Ruby source with comments blanked
+      # @param module_name [String] identity of the module
       # @return [Boolean]
-      def concern_module?(source)
-        # ActiveSupport::Concern usage or plain module with methods
-        source.match?(/^\s*module\s+/) &&
-          (source.match?(/extend\s+ActiveSupport::Concern/) ||
-           source.match?(/included\s+do/) ||
-           source.match?(/class_methods\s+do/) ||
-           source.match?(/def\s+\w+/))
+      def concern_module?(code, module_name)
+        return true if classification.concern_answer(module_name)
+
+        code.match?(/^\s*module\s+/) &&
+          (code.match?(ACTIVE_SUPPORT_EXTEND) ||
+           code.match?(/included\s+do/) ||
+           code.match?(/class_methods\s+do/) ||
+           code.match?(/def\s+\w+/))
+      end
+
+      # Whether the module extends ActiveSupport::Concern: the runtime answer
+      # for a loaded module; for an unloaded one, what its code declares.
+      # Metadata only; it never decides the unit type.
+      #
+      # @param code [String] Ruby source with comments blanked
+      # @param module_name [String]
+      # @return [Boolean]
+      def active_support_concern?(code, module_name)
+        runtime = classification.concern_answer(module_name)
+        runtime.nil? ? code.match?(ACTIVE_SUPPORT_EXTEND) : runtime
       end
 
       # ──────────────────────────────────────────────────────────────────────
@@ -281,10 +320,11 @@ module Woods
 
       # @param source [String] Ruby source code
       # @param module_name [String] The concern module name
+      # @param active_support [Boolean] whether the module extends ActiveSupport::Concern
       # @return [String] Annotated source
-      def annotate_source(source, module_name)
-        concern_type = detect_concern_type(source)
-        instance_methods = extract_instance_method_names(source)
+      def annotate_source(source, module_name, active_support, method_source: source)
+        concern_type = detect_concern_type(active_support)
+        instance_methods = extract_instance_method_names(method_source)
 
         <<~ANNOTATION
           # ╔═══════════════════════════════════════════════════════════════════════╗
@@ -303,17 +343,18 @@ module Woods
 
       # @param source [String] Ruby source code
       # @param file_path [String] Path to the concern file
+      # @param active_support [Boolean] whether the module extends ActiveSupport::Concern
       # @return [Hash] Concern metadata
-      def extract_metadata(source, file_path)
+      def extract_metadata(source, file_path, active_support)
         {
-          concern_type: detect_concern_type(source),
+          concern_type: detect_concern_type(active_support),
           concern_scope: detect_concern_scope(file_path),
-          uses_active_support: source.match?(/extend\s+ActiveSupport::Concern/),
+          uses_active_support: active_support,
           has_included_block: source.match?(/included\s+do/) || false,
           has_class_methods_block: source.match?(/class_methods\s+do/) || false,
           included_modules: detect_included_modules(source),
           instance_methods: extract_instance_method_names(source),
-          class_methods: extract_class_methods(source),
+          class_methods: (extract_class_methods(source) + ConcernSource.new(source).class_methods).uniq,
           public_methods: extract_public_methods(source),
           callbacks_defined: detect_callbacks(source),
           scopes_defined: detect_scopes(source),
@@ -323,16 +364,10 @@ module Woods
         }
       end
 
-      # Detect whether this is a model concern, controller concern, or generic.
-      #
-      # @param source [String] Ruby source code
+      # @param active_support [Boolean] whether the module extends ActiveSupport::Concern
       # @return [String] One of "active_support", "plain_mixin"
-      def detect_concern_type(source)
-        if source.match?(/extend\s+ActiveSupport::Concern/)
-          'active_support'
-        else
-          'plain_mixin'
-        end
+      def detect_concern_type(active_support)
+        active_support ? 'active_support' : 'plain_mixin'
       end
 
       # Detect concern scope from file path (model vs controller).
@@ -399,7 +434,7 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<String>] Callback names
       def detect_callbacks(source)
-        source.scan(/(before_\w+|after_\w+|around_\w+)\s/).flatten.uniq
+        source.scan(/\b((?:before_|after_|around_)\w++)\s/).flatten.uniq
       end
 
       # Detect scope declarations.
@@ -415,7 +450,7 @@ module Woods
       # @param source [String] Ruby source code
       # @return [Array<String>] Validation types
       def detect_validations(source)
-        source.scan(/(validates?(?:_\w+)?)\s/).flatten.uniq
+        source.scan(/\b(validates?(?:_\w++)?)\s/).flatten.uniq
       end
 
       # ──────────────────────────────────────────────────────────────────────
