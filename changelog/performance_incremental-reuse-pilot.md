@@ -1,0 +1,1 @@
+- Add an explicitly loaded, disabled-by-default incremental reuse client pilot with bounded template facts, exact graph/analysis guards and process-local generation ownership; the published index format is unchanged.

@@ -1221,6 +1221,7 @@
     ],
     "docs/EMBEDDING_MODELS.md": [],
     "docs/EVALUATION.md": [],
+    "docs/EXPERIMENTAL_INCREMENTAL_REUSE.md": [],
     "docs/EXTRACTOR_REFERENCE.md": [
       {
         "surface": "extractor_registrations",

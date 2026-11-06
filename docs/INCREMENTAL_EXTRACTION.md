@@ -7,6 +7,10 @@ what is still out of scope.
 
 Background: [#164](https://github.com/lost-in-the/woods/issues/164).
 
+The branch-only [incremental reuse pilot](EXPERIMENTAL_INCREMENTAL_REUSE.md) describes
+explicit experimental flags, resident-process requirements and rollback. It preserves
+the equivalence contract below.
+
 ## The contract
 
 > After any sequence of file create / modify / delete / rename operations, an

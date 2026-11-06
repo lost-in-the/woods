@@ -83,6 +83,7 @@ See [work tracking](../CONTRIBUTING.md#work-tracking) for ownership and release 
 
 Contract records that read as maintainer reference rather than guides:
 
+- [Experimental incremental reuse](EXPERIMENTAL_INCREMENTAL_REUSE.md): branch-only opt-in client pilot and rollback.
 - [Incremental extraction](INCREMENTAL_EXTRACTION.md): the incremental/full equivalence contract and dispatch inventory.
 - [Watch daemon](WATCH_DAEMON.md): the resident daemon's design contract (the user-facing entry point is the task table above).
 - [Extractor run state](EXTRACTOR_RUN_STATE.md): who sets and resets each `Woods::Extractor` instance variable across full, incremental and refresh runs.
