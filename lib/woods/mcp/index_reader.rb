@@ -681,9 +681,16 @@ module Woods
       #   into its data; nil parses them. Every result is still validated as
       #   the typed unit its entry names. A bulk consumer reading two
       #   generations can share one parse between equivalent files.
+      # @param reuse [#fetch, #store, nil] a consumer's table of decoded units
+      #   by file identity (see {#read_published_unit}): `fetch(key, identity)`
+      #   answers the decoded data of an unchanged file, or nil, and
+      #   `store(key, identity, data)` is told each file decoded. A payload
+      #   seeded from the generation before keeps every unchanged unit file as
+      #   a hard link of the earlier one, so a consumer reading generation
+      #   after generation decodes only what changed.
       # @yieldparam unit [Hash]
-      def each_unit(decode: nil)
-        return enum_for(__method__, decode: decode) unless block_given?
+      def each_unit(decode: nil, reuse: nil)
+        return enum_for(__method__, decode: decode, reuse: reuse) unless block_given?
 
         with_pinned_generation do
           TYPE_DIRS.each do |dir|
@@ -698,7 +705,7 @@ module Woods
                 raise IOError, "invalid or duplicate unit identifier in #{dir}/_index.json"
               end
 
-              yield read_published_unit(dir, id, decode: decode)
+              yield read_published_unit(dir, id, decode: decode, reuse: reuse)
             end
           end
         end
@@ -1844,7 +1851,20 @@ module Woods
         entries
       end
 
-      def read_published_unit(dir, identifier, decode: nil)
+      # A unit file's identity for {#each_unit}'s +reuse+: the device, inode,
+      # size and modification time of the regular file at its path. Woods
+      # writes a unit file whole and renames it into place, so a changed unit
+      # is a new inode, and an unchanged one seeded into the next payload is
+      # a hard link with the same identity. A file whose bytes changed under
+      # an identical identity is not a file this code writes.
+      #
+      # @param stat [File::Stat]
+      # @return [Array<Integer>] frozen
+      def unit_file_identity(stat)
+        [stat.dev, stat.ino, stat.size, stat.mtime.to_i, stat.mtime.nsec].freeze
+      end
+
+      def read_published_unit(dir, identifier, decode: nil, reuse: nil)
         base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
         filename = "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
         # A String path and one lstat: this runs once per unit of a corpus
@@ -1855,6 +1875,12 @@ module Woods
         raise IOError, "symlink unit file: #{dir}/#{filename}" if stat.symlink?
 
         raise IOError, "non-regular unit file: #{dir}/#{filename}" unless stat.file?
+
+        if reuse
+          identity = unit_file_identity(stat)
+          reused = reuse.fetch([dir, filename], identity)
+          return reused if reused
+        end
 
         data = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
           raise IOError, "non-regular unit file: #{dir}/#{filename}" unless file.stat.file?
@@ -1871,6 +1897,7 @@ module Woods
           raise IOError, build_gap_message || "typed unit identity mismatch: #{dir}/#{filename}"
         end
 
+        reuse&.store([dir, filename], identity, data)
         data
       end
 

@@ -13,12 +13,44 @@ module Woods
     # snapshot construction AND the query, so a publication cannot mix units.
     # No provider, vector adapter, host source read, or context cache is involved.
     class PublishedLexicalRetriever
-      # Each unit file is parsed straight into deep-frozen JSON data, which
-      # the lexical index and the metadata store then share without a copy.
-      FROZEN_UNIT = ->(content) { JSON.parse(content, freeze: true) }
       # The store's own bookkeeping key: a unit's copy is never indexed.
       STORE_STAMP = 'updated_at'
+      # Each unit file is parsed straight into deep-frozen JSON data, without
+      # the store's stamp, which the lexical index, the metadata store and the
+      # next generation's build then share without a copy.
+      FROZEN_UNIT = lambda do |content|
+        unit = JSON.parse(content, freeze: true)
+        unit.key?(STORE_STAMP) ? unit.except(STORE_STAMP).freeze : unit
+      end
       private_constant :FROZEN_UNIT, :STORE_STAMP
+
+      # The decoded units of the generation last built, by unit file and
+      # file identity ({IndexReader#each_unit}'s +reuse+). A build reads
+      # through it and fills a table of its own, so a unit the new generation
+      # no longer publishes is not kept.
+      class UnitReuse
+        attr_reader :table
+
+        # @param previous [Hash, nil] the table of the build before
+        def initialize(previous)
+          @previous = previous || {}
+          @table = {}
+        end
+
+        # @return [Hash, nil] the unit decoded from the same file identity before
+        def fetch(key, identity)
+          entry = @previous[key]
+          return unless entry && entry.first == identity
+
+          @table[key] = entry
+          entry.last
+        end
+
+        def store(key, identity, unit)
+          @table[key] = [identity, unit].freeze
+        end
+      end
+      private_constant :UnitReuse
 
       attr_reader :reader, :snapshot, :default_budget
 
@@ -32,6 +64,8 @@ module Woods
         @reader = reader || IndexReader.new(index_dir)
         @snapshot_mutex = Mutex.new
         @snapshot = nil
+        @reuse = nil
+        @last_index = nil
       end
 
       def mode = :lexical
@@ -72,6 +106,8 @@ module Woods
 
       # Explicit invalidation is used by reload after its candidate has been
       # validated. Ordinary generation changes rebuild lazily under the pin.
+      # The last build's units stay reusable: what the next generation still
+      # publishes unchanged is read from them, not decoded again.
       def invalidate_snapshot!
         @snapshot_mutex.synchronize { @snapshot = nil }
       end
@@ -133,21 +169,52 @@ module Woods
         return @snapshot.last if key.first && @snapshot&.first == key
 
         units = {}
-        reader.each_unit(decode: FROZEN_UNIT) do |unit|
+        # A unit file the generation before published under the same file
+        # identity is the unit decoded then (a flat index has no generations
+        # to carry it between, so it is read in full each time).
+        reuse = UnitReuse.new(key.first && @reuse)
+        reader.each_unit(decode: FROZEN_UNIT, reuse: reuse) do |unit|
           # The warm-up gives up its pins here when a reload or a refresh is
           # waiting for them (IndexReader#yielding_to_drains); nothing is
           # installed, and it rebuilds on the generation that follows.
           reader.yield_point!
-          unit = unit.except(STORE_STAMP).freeze if unit.key?(STORE_STAMP)
           units[StorageIdentity.key(unit.fetch('identifier'), unit.fetch('type')).freeze] = unit
         end
-        # Tokens may come from an earlier generation's build; each unit, its
-        # key and every statistic come from this one.
-        index = Retrieval::LexicalIndex.new(units: units, token_cache: @token_cache)
-        candidate = Retriever.new(vector_store: nil, metadata_store: metadata_store_for(units), graph_store: nil,
-                                  embedding_provider: nil, mode: :lexical, lexical_index: index)
+        @reuse = reuse.table.freeze
+        candidate = unchanged_snapshot(units) || build_snapshot(units)
         @snapshot = [key.freeze, candidate].freeze
         candidate
+      end
+
+      # Tokens and the documents of reused units may come from an earlier
+      # generation's build; each unit's key and every statistic come from
+      # this one.
+      def build_snapshot(units)
+        index = Retrieval::LexicalIndex.new(units: units, token_cache: @token_cache,
+                                            reusable: @last_index&.documents_by_key)
+        @last_index = index
+        Retriever.new(vector_store: nil, metadata_store: metadata_store_for(units), graph_store: nil,
+                      embedding_provider: nil, mode: :lexical, lexical_index: index)
+      end
+
+      # The snapshot built last, when the new generation publishes exactly the
+      # unit objects it indexed (a publication that changed no unit file, or
+      # none the index reads): nothing it holds would differ. Its tokens are
+      # fetched from the cache all the same, so the cache keeps them and
+      # counts the build as a reuse of every unit.
+      #
+      # @return [Retriever, nil]
+      def unchanged_snapshot(units)
+        previous = @last_index
+        return unless previous && @snapshot && previous.units.size == units.size &&
+                      units.all? { |key, unit| previous.units[key].equal?(unit) }
+
+        build = @token_cache.begin_build(Retrieval::LexicalIndex.configuration_key)
+        previous.documents_by_key.each_value do |document|
+          build.fetch(document.digest) { [document.fields, document.terms, document.lengths] }
+        end
+        @token_cache.commit(build)
+        @snapshot.last
       end
 
       # The public store holds the same frozen units. A write replaces a

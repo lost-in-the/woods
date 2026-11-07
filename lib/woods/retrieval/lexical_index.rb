@@ -36,8 +36,9 @@ module Woods
       private_constant :UNICODE_PATTERNS, :ASCII_PATTERNS, :STOP_WORDS
       # +terms+ is the document's distinct vocabulary and +lengths+ its
       # per-field token totals, tallied once at build so a view's statistics
-      # come from the tallies, not from the token counts again.
-      Document = Struct.new(:key, :unit, :fields, :terms, :lengths, keyword_init: true)
+      # come from the tallies, not from the token counts again. +digest+ is
+      # the {.field_digest} of its indexed text, the token cache's key.
+      Document = Struct.new(:key, :unit, :fields, :terms, :lengths, :digest, keyword_init: true)
       private_constant :Document
 
       # The indexed units by key: immutable, shared with every candidate's
@@ -45,6 +46,12 @@ module Woods
       #
       # @return [Hash{String => Hash}] in key order
       attr_reader :units
+
+      # This index's immutable documents by key, for a later build of the
+      # next generation to reuse (+reusable:+).
+      #
+      # @return [Hash{String => Document}] frozen
+      attr_reader :documents_by_key
 
       # @param metadata_store [MetadataStore::Interface] the records to index
       # @param units [Hash{String => Hash}, nil] the records to index instead,
@@ -59,9 +66,14 @@ module Woods
       #   and document frequencies already known for +documents+
       # @param candidate_postings [Array(Hash, Hash), nil] the root's frozen
       #   token and exact-identifier postings, shared by restricted views
+      # @param reusable [Hash{String => Document}, nil] an earlier index's
+      #   {#documents_by_key}: a document whose key names the very same unit
+      #   object in +units+ is kept as it is, so a corpus read generation
+      #   after generation rebuilds only the documents of changed units
       def initialize(metadata_store: nil, units: nil, token_cache: nil, documents: nil, statistics: nil,
-                     candidate_postings: nil)
+                     candidate_postings: nil, reusable: nil)
         @stems = {}
+        @reusable = reusable
         @documents = (documents || build_documents(metadata_store, units, token_cache)).freeze
         @documents_by_key = @documents.to_h { |doc| [doc.key, doc] }.freeze
         @units = @documents_by_key.transform_values(&:unit).freeze
@@ -218,19 +230,31 @@ module Woods
           unit = units.fetch(key)
           raise ArgumentError, "unit #{key.inspect} must be a frozen Hash" unless unit.is_a?(Hash) && unit.frozen?
 
-          document(key, unit, cache_build)
+          reused_document(key, unit, cache_build) || document(key, unit, cache_build)
         end
+      end
+
+      # An earlier index's document for the same unit object. Its tokens are
+      # fetched from the build all the same, so the cache keeps them and
+      # counts the reuse as it counts any other.
+      def reused_document(key, unit, cache_build)
+        previous = @reusable&.[](key)
+        return unless previous && previous.unit.equal?(unit)
+
+        cache_build&.fetch(previous.digest) { [previous.fields, previous.terms, previous.lengths] }
+        previous
       end
 
       def document(key, unit, cache_build)
         values = field_values(unit)
+        digest = self.class.field_digest(values)
         fields, terms, lengths = if cache_build
-                                   cache_build.fetch(self.class.field_digest(values)) { tokenized(values) }.drop(1)
+                                   cache_build.fetch(digest) { tokenized(values) }.drop(1)
                                  else
                                    tokenized(values)
                                  end
         Document.new(key: key.frozen? ? key : key.dup.freeze, unit: unit,
-                     fields: fields, terms: terms, lengths: lengths).freeze
+                     fields: fields, terms: terms, lengths: lengths, digest: digest.freeze).freeze
       end
 
       # @return [Array(Hash, Array, Hash)] per-field token counts, distinct
