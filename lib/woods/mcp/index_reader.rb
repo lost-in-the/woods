@@ -1868,10 +1868,14 @@ module Woods
       def read_published_unit(dir, identifier, decode: nil)
         base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
         filename = "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
-        path = current_payload_dir.join(dir, filename)
-        raise IOError, "symlink unit file: #{dir}/#{filename}" if path.symlink?
+        # A String path and one lstat: this runs once per unit of a corpus
+        # scan, where Pathname#join was a third of the scan's allocations and
+        # the separate symlink? and lstat calls two of its four syscalls.
+        path = File.join(current_payload_dir.to_s, dir, filename)
+        stat = File.lstat(path)
+        raise IOError, "symlink unit file: #{dir}/#{filename}" if stat.symlink?
 
-        raise IOError, "non-regular unit file: #{dir}/#{filename}" unless path.lstat.file?
+        raise IOError, "non-regular unit file: #{dir}/#{filename}" unless stat.file?
 
         data = File.open(path, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
           raise IOError, "non-regular unit file: #{dir}/#{filename}" unless file.stat.file?

@@ -356,10 +356,14 @@ module Woods
         source.each_line do |line|
           stripped = line.strip
 
-          in_private = true if stripped.match?(/^\s*private\s*$/)
-          in_private = false if stripped.match?(/^\s*public\s*$/)
+          # A stripped line has no surrounding whitespace, so these equal the
+          # former anchored `^\s*private\s*$` and `^\s*public\s*$` matches.
+          in_private = true if stripped == 'private'
+          in_private = false if stripped == 'public'
 
-          next unless !in_private && stripped =~ /def\s+((?:self\.)?\w+[?!=]?)(\(.*?\))?/
+          # The definition pattern cannot match a line without "def" in it.
+          next unless !in_private && stripped.include?('def') &&
+                      stripped =~ /def\s+((?:self\.)?\w+[?!=]?)(\(.*?\))?/
 
           method_name = ::Regexp.last_match(1)
           signature = ::Regexp.last_match(2)
@@ -376,15 +380,28 @@ module Woods
       end
 
       # Extract DSL-style methods (like has_many, validates, etc.)
-      def extract_dsl_methods(source)
-        dsl_patterns = [
-          /def\s+self\.(\w+).*?#.*?DSL/i,
-          /def\s+(\w+)\(.*?\)\s*#\s*:call-seq:/,
-          /class_methods\s+do.*?def\s+(\w+)/m
-        ]
+      #
+      # Each pattern needs a literal substring that most framework files
+      # lack, so the file is scanned only when that substring is present:
+      # the scans that run are the ones that could match.
+      DSL_PATTERNS = [
+        ['dsl', /def\s+self\.(\w+).*?#.*?DSL/i],
+        [':call-seq:', /def\s+(\w+)\(.*?\)\s*#\s*:call-seq:/],
+        ['class_methods', /class_methods\s+do.*?def\s+(\w+)/m]
+      ].freeze
+      private_constant :DSL_PATTERNS
 
+      def extract_dsl_methods(source)
         methods = []
-        dsl_patterns.each do |pattern|
+        lowercase = nil
+        DSL_PATTERNS.each do |needle, pattern|
+          present = if pattern.casefold?
+                      (lowercase ||= source.downcase).include?(needle)
+                    else
+                      source.include?(needle)
+                    end
+          next unless present
+
           source.scan(pattern) { |m| methods.concat(Array(m)) }
         end
 
@@ -395,17 +412,23 @@ module Woods
       def extract_option_definitions(source)
         options = []
 
-        # Look for VALID_OPTIONS or similar constants
-        source.scan(/(\w+_OPTIONS|VALID_\w+)\s*=\s*\[(.*?)\]/m) do |const, values|
-          options << {
-            constant: const,
-            values: values.scan(/:(\w+)/).flatten
-          }
+        # Look for VALID_OPTIONS or similar constants. The pattern backtracks
+        # through every word of the file, so it runs only when a constant of
+        # either name can be present at all.
+        if source.include?('_OPTIONS') || source.include?('VALID_')
+          source.scan(/(\w+_OPTIONS|VALID_\w+)\s*=\s*\[(.*?)\]/m) do |const, values|
+            options << {
+              constant: const,
+              values: values.scan(/:(\w+)/).flatten
+            }
+          end
         end
 
-        # Look for documented options in comments
-        source.scan(/# (\w+) - (.+)$/) do |opt, desc|
-          options << { name: opt, description: desc }
+        # Look for documented options in comments; none without " - ".
+        if source.include?(' - ')
+          source.scan(/# (\w+) - (.+)$/) do |opt, desc|
+            options << { name: opt, description: desc }
+          end
         end
 
         options

@@ -23,6 +23,17 @@ module Woods
       # Bump when {#tokenize} or {#field_values} would split the same text
       # differently: it is part of every {LexicalTokenCache} key.
       TOKENIZER_VERSION = 1
+      # The tokenizer's patterns: a run of letters and digits, an upper-case
+      # letter, and the two CamelCase boundaries. The Unicode set is the
+      # definition; the ASCII set is the same definition restricted to ASCII
+      # text, where \p{L} is A-Z and a-z, \p{N} is 0-9, and the case
+      # properties are the two ASCII letter ranges, so an ASCII-only value
+      # tokenizes identically through either set and several times faster
+      # through the ASCII one.
+      UNICODE_PATTERNS = [/[\p{L}\p{N}]+/u, /\p{Lu}/u, /(\p{Ll}|\d)(\p{Lu})/u, /(\p{Lu})(\p{Lu}\p{Ll})/u].freeze
+      ASCII_PATTERNS = [/[A-Za-z0-9]+/, /[A-Z]/, /([a-z0-9])([A-Z])/, /([A-Z])([A-Z][a-z])/].freeze
+      STOP_WORDS = QueryClassifier::STOP_WORDS
+      private_constant :UNICODE_PATTERNS, :ASCII_PATTERNS, :STOP_WORDS
       # +terms+ is the document's distinct vocabulary and +lengths+ its
       # per-field token totals, tallied once at build so a view's statistics
       # come from the tallies, not from the token counts again.
@@ -259,11 +270,25 @@ module Woods
       # Terms: CamelCase and snake_case parts, singular (a question about
       # "labels" must reach a method named +set_label+), without stop
       # words. Each distinct term is singularized once per index.
+      #
+      # Only runs of letters and digits can hold a term, so the text is
+      # scanned for those first and only a run with an upper-case letter is
+      # split at its CamelCase boundaries. This yields exactly the terms of
+      # splitting the whole text first (a boundary space can only fall
+      # inside such a run), and most of a source file is neither.
       def tokenize(value)
-        value.to_s.gsub(/(\p{Ll}|\d)(\p{Lu})/u, '\1 \2')
-             .gsub(/(\p{Lu})(\p{Lu}\p{Ll})/u, '\1 \2').downcase
-             .scan(/[\p{L}\p{N}]+/u).reject { |term| QueryClassifier::STOP_WORDS.include?(term) }
-             .map! { |term| stem(term) }
+        text = value.to_s
+        word_run, upper, lower_upper, upper_upper_lower = text.ascii_only? ? ASCII_PATTERNS : UNICODE_PATTERNS
+        terms = []
+        text.scan(word_run) do |run|
+          if run.match?(upper)
+            terms.concat(run.gsub(lower_upper, '\1 \2').gsub(upper_upper_lower, '\1 \2').downcase.split)
+          else
+            terms << run.downcase
+          end
+        end
+        terms.reject! { |term| STOP_WORDS.include?(term) }
+        terms.map! { |term| stem(term) }
       end
 
       # Interned, so a term reused from an earlier build and the same term

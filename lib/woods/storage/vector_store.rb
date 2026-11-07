@@ -173,6 +173,7 @@ module Woods
           @dim = nil
           @ids = [] # Array<String> (frozen)
           @vectors_flat = [] # flat Array<Float>, length @ids.size * @dim
+          @norms = []        # Array<Float>, each vector's Euclidean norm, index-aligned with @ids
           @metadata = []     # Array<Hash>, index-aligned with @ids
           @id_to_index = {}  # id => Integer for O(1) delete/overwrite
           @tombstones = Set.new
@@ -211,6 +212,7 @@ module Woods
           @dim = nil
           @ids = []
           @vectors_flat = []
+          @norms = []
           @metadata = []
           @id_to_index = {}
           @tombstones = Set.new
@@ -260,7 +262,7 @@ module Woods
           # sorting every candidate of a large scope (N-ip-1).
           return scored.min_by(limit) { |r| [-r.score, r.id] } if ids
 
-          scored.sort_by! { |r| [-r.score] }
+          scored.sort_by! { |r| -r.score }
           scored.first(limit)
         end
 
@@ -318,8 +320,24 @@ module Woods
           idx = @ids.size
           @ids << id
           @vectors_flat.concat(vector)
+          @norms << norm_of(vector)
           @metadata << metadata
           @id_to_index[id] = idx
+        end
+
+        # The Euclidean norm of +vector+, accumulated in index order exactly
+        # as the former per-query kernel did, so a score computed from the
+        # stored norm is bit-identical to one that re-summed the squares.
+        def norm_of(vector)
+          len = vector.length
+          i = 0
+          mag = 0.0
+          while i < len
+            b = vector[i]
+            mag += b * b
+            i += 1
+          end
+          Math.sqrt(mag)
         end
 
         # Overwrite an existing entry in place.
@@ -336,6 +354,7 @@ module Woods
             @vectors_flat[base + i] = vector[i]
             i += 1
           end
+          @norms[idx] = norm_of(vector)
           @metadata[idx] = metadata
         end
 
@@ -349,6 +368,9 @@ module Woods
         def gather_candidates(query_vector, filters, ids)
           scored = []
           allowed_ids = ids&.to_set
+          # The query's norm is one number per search, not one per candidate:
+          # the kernel below only needs the dot product.
+          query_norm = norm_of(query_vector)
           len = @ids.size
           idx = 0
           while idx < len
@@ -362,38 +384,41 @@ module Woods
               next
             end
 
-            score = cosine_similarity_strided(query_vector, idx * @dim)
+            score = cosine_similarity_strided(query_vector, query_norm, idx)
             scored << SearchResult.new(id: @ids[idx], score: score, metadata: meta)
             idx += 1
           end
           scored
         end
 
-        # Cosine similarity between a query Array<Float> and a vector
-        # that lives at @vectors_flat[base, @dim]. Strided access avoids
-        # allocating a copy of the stored vector on every comparison.
+        # Cosine similarity between a query Array<Float> and the vector
+        # stored at position +idx+ (its floats at @vectors_flat[idx * @dim, @dim]).
+        # Strided access avoids allocating a copy of the stored vector on
+        # every comparison, and both norms are known before the loop: the
+        # query's once per search, the stored vector's since it was stored.
+        # The loop is therefore one multiply-add per dimension instead of
+        # three, and its result is bit-identical to the former kernel, which
+        # re-summed both sets of squares in the same order on every call.
         #
         # See bench/vector_query_and_serialization.rb for the allocation
         # story — the old Enumerable path allocated ~770 objects per pair;
         # this loop allocates none inside the hot path.
-        def cosine_similarity_strided(query, base)
-          len = @dim
+        def cosine_similarity_strided(query, query_norm, idx)
+          stored_norm = @norms[idx]
+          return 0.0 if query_norm.zero? || stored_norm.zero?
+
+          flat = @vectors_flat
+          base = idx * @dim
+          len = base + @dim
           i = 0
           dot = 0.0
-          mag_a = 0.0
-          mag_b = 0.0
-          while i < len
-            a = query[i]
-            b = @vectors_flat[base + i]
-            dot += a * b
-            mag_a += a * a
-            mag_b += b * b
+          while base < len
+            dot += query[i] * flat[base]
             i += 1
+            base += 1
           end
 
-          return 0.0 if mag_a.zero? || mag_b.zero?
-
-          dot / (Math.sqrt(mag_a) * Math.sqrt(mag_b))
+          dot / (query_norm * stored_norm)
         end
       end
     end
