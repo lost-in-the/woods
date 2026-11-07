@@ -41,6 +41,53 @@ RSpec.describe 'incremental runtime inputs' do
       expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs, :serializers])
     end
 
+    context 'with a published source-reference baseline' do
+      let(:collector) { Woods::SourceReferences::Collector.new }
+      let(:job_source) { "class ReportJob < ApplicationJob\n  queue_as QueueSettings::QUEUE\nend\n" }
+      let(:baseline) do
+        { 'version' => 1, 'callers' => {},
+          'files' => { 'app/jobs/report_job.rb' => { 'identity' => 'x', 'analysis' => collector.call(job_source) } },
+          'owners' => [{ 'type' => 'job', 'identifier' => 'ReportJob', 'file_path' => 'app/jobs/report_job.rb',
+                         'added' => [] }] }
+      end
+
+      before do
+        FileUtils.mkdir_p(@root.join('app/models'))
+        extractor.instance_variable_set(:@source_reference_baseline, baseline)
+        job = Woods::ExtractedUnit.new(type: :job, identifier: 'ReportJob',
+                                       file_path: @root.join('app/jobs/report_job.rb').to_s)
+        extractor.dependency_graph.register(job)
+        allow(extractor).to receive(:hybrid_inventory_delta).and_return([])
+      end
+
+      it 'refreshes a hybrid family whole when runtime discovery disagrees with the graph' do
+        allow(extractor).to receive(:hybrid_inventory_delta).with(:jobs, anything).and_return(['NightlyJob'])
+        allow(extractor).to receive(:hybrid_inventory_delta).with(:serializers, anything).and_return([])
+        File.write(@root.join('app/models/widget.rb'), "class Widget\nend\n")
+        changes = Woods::ChangeSet.new(paths: ['app/models/widget.rb'], root: @root)
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs])
+      end
+
+      it 'leaves a hybrid family to its blast radius when the edit declares nothing its units name' do
+        File.write(@root.join('app/models/widget.rb'), "class Widget\n  def label = name\nend\n")
+        changes = Woods::ChangeSet.new(paths: ['app/models/widget.rb'], root: @root)
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to be_empty
+      end
+
+      it 'refreshes a hybrid family whole when the edit declares a constant its units name' do
+        File.write(@root.join('app/models/queue_settings.rb'), "class QueueSettings\n  QUEUE = 'critical'\nend\n")
+        changes = Woods::ChangeSet.new(paths: ['app/models/queue_settings.rb'], root: @root)
+        expect(extractor.send(:hybrid_discovery_keys, changes, [])).to eq(Set[:jobs])
+      end
+
+      it 'refreshes both families whole when the edit defines constants the collector cannot see' do
+        File.write(@root.join('app/models/widget.rb'), "Object.const_set(:QUEUE, 'critical')\n")
+        changes = Woods::ChangeSet.new(paths: ['app/models/widget.rb'], root: @root)
+        expect(extractor.send(:hybrid_discovery_keys, changes, []))
+          .to eq(Set[:jobs, :serializers, :components, :view_components])
+      end
+    end
+
     %w[
       app/components/shelf_component.html.erb
       app/components/shelf_component/shelf_component.html.haml
@@ -63,6 +110,31 @@ RSpec.describe 'incremental runtime inputs' do
         expect(extractor.send(:hybrid_discovery_keys, changes, [])).to be_empty
         expect(extractor.send(:hybrid_discovery_keys, changes, ['NestedJob'])).to eq(Set[:jobs])
       end
+    end
+  end
+
+  describe 'hybrid inventory delta' do
+    let(:known) do
+      [Woods::ExtractedUnit.new(type: :job, identifier: 'ReportJob',
+                                file_path: @root.join('app/jobs/report_job.rb').to_s),
+       Woods::ExtractedUnit.new(type: :job, identifier: 'NestedJob', file_path: 'app/models/container.rb')]
+    end
+    let(:consumer) { double('Consumer', discoverable_classes: [double('Klass', name: 'NightlyJob')]) }
+
+    before do
+      known.each { |unit| extractor.dependency_graph.register(unit) }
+      extractor.instance_variable_set(:@incremental_extractors, { jobs: consumer })
+    end
+
+    it 'answers nothing after a partial eager load without consulting discovery' do
+      extractor.instance_variable_set(:@eager_load_complete, false)
+      expect(consumer).not_to receive(:discoverable_classes)
+      expect(extractor.send(:hybrid_inventory_delta, :jobs, [:job])).to be_nil
+    end
+
+    it 'names the classes discovered but unknown and the class-discovered units no longer found' do
+      extractor.instance_variable_set(:@eager_load_complete, true)
+      expect(extractor.send(:hybrid_inventory_delta, :jobs, [:job])).to eq(%w[NestedJob NightlyJob])
     end
   end
 

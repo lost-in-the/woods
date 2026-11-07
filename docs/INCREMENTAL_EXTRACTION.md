@@ -373,13 +373,28 @@ step before it.
    there is no path-to-constant guessing.
 
    **Included in Woods 2.1:** jobs and serializers reconcile their combined
-   file/runtime inventory whenever a Ruby source path changes. Resolved metadata
+   file/runtime inventory when a Ruby source path changes. Resolved metadata
    can depend on another file without a recorded graph edge, such as a nested,
-   class-discovered job's `queue_as Settings::QUEUE`. Runtime queue enrichment
-   applies only to class-discovered jobs; file-discovered jobs keep source-based
-   queue metadata. Non-Ruby batches refresh only hybrid families
-   already reached by the pre-change dependency graph. The application must have
-   loaded the changed runtime before extraction, through a fresh boot or reload.
+   class-discovered job's `queue_as Settings::QUEUE`, so the family is
+   refreshed whole when a changed file could have changed what a constant its
+   units name means (`Extraction::HybridRerunPolicy`): the file is one of
+   the family's own sources in the pre-change graph, it declares before or
+   after the edit a constant a unit of the family names (through the
+   reference's lexical nesting and every prefix of the constant path), it
+   carries a construct that defines constants or methods without a
+   declaration (`const_set`, `define_method`, `class_eval`, `Class.new` and
+   the like), or runtime discovery after the reload disagrees with the graph
+   on a class (a discovered class the graph does not hold, or a
+   class-discovered unit discovery no longer finds). Otherwise a family unit
+   in the blast radius is re-extracted on its own, like any other unit.
+   Without a published source-reference baseline, after a partial eager
+   load, or for a family source the baseline never analysed, every Ruby edit
+   refreshes both families. Runtime queue
+   enrichment applies only to class-discovered jobs; file-discovered jobs
+   keep source-based queue metadata. Non-Ruby batches refresh only hybrid
+   families already reached by the pre-change dependency graph. The
+   application must have loaded the changed runtime before extraction,
+   through a fresh boot or reload. Each decision is logged with its reason.
 
    Components and view components re-run with them on a Ruby edit only when
    the edit touched a constant they resolve. `RenderScope` reads the
