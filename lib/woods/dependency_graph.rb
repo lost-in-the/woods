@@ -1043,7 +1043,14 @@ module Woods
     # complete relationship records without changing the legacy `reverse` map.
     #
     # @return [Hash] Complete graph data
-    def to_h
+    # @param detached [Boolean] true returns a deep copy the caller may
+    #   change in place (the public contract, see {#detached_snapshot});
+    #   false returns the memoized serialization itself, shared with this
+    #   graph and with every other such caller. Only a caller that reads it
+    #   and never writes into it may pass false: the serialization of a large
+    #   application is copied in full otherwise, and a run serializes the
+    #   graph several times (the published file, the analysis, the summary).
+    def to_h(detached: true)
       root = self.class.graph_root
       @to_h ||= begin
         variants = self.class.relativize_variants(variant_records, root)
@@ -1063,7 +1070,7 @@ module Woods
         }
         variants.empty? ? base : base.merge(variants: variants)
       end
-      detached_snapshot(@to_h)
+      detached ? detached_snapshot(@to_h) : @to_h
     end
 
     # A hash rebuilt in key order, so serialization is a function of the

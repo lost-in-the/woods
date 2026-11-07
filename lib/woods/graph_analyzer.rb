@@ -840,7 +840,7 @@ module Woods
     #
     # @return [Hash] Full graph data
     def graph_data
-      @graph_data ||= @graph.to_h
+      @graph_data ||= @graph.to_h(detached: false)
     end
 
     # Access graph nodes from cached graph data.
