@@ -35,6 +35,32 @@ module Woods
         @file_rules = PathDispatcher.file_rules
         @whole_rules = PathDispatcher.whole_app_rules
         @policy = ReloadPolicy.new
+        @rule_scopes = self.class.shared_rule_scopes(matching_key)
+      end
+
+      # The rule scopes matched so far in this process for one matching key:
+      # the rule set, the extra roots and the configuration the matchers read
+      # ({#matching_key}). A resident process (the watch daemon, a long
+      # session) classifies the same tree on every run, and matching every
+      # rule against every path was a third of a run's source capture; a key
+      # that differs from the last one starts a new table.
+      #
+      # @param key [Array]
+      # @return [Hash{String => Array<String>}]
+      def self.shared_rule_scopes(key)
+        (@shared_rule_scopes_lock ||= Mutex.new).synchronize do
+          @shared_rule_scopes = [key, {}] unless @shared_rule_scopes&.first == key
+          @shared_rule_scopes.last
+        end
+      end
+
+      # Everything the dispatch rules' matching of a path depends on, so a
+      # table keyed by it is valid for every path it holds.
+      #
+      # @return [Array]
+      def matching_key
+        configuration = Woods.configuration
+        [fingerprint, configuration&.event_paths, configuration&.unclaimed_ruby_paths].freeze
       end
 
       def for_path(path)
@@ -55,7 +81,7 @@ module Woods
       # @param path [String]
       # @return [Array<String>] frozen
       def rule_scopes(path)
-        (@rule_scopes ||= {})[path] ||= begin
+        @rule_scopes[path] ||= begin
           scopes = @file_rules.filter_map { |rule| "file:#{rule.extractor_key}" if rule.matches?(path) }
           @whole_rules.each { |rule| scopes << "whole:#{rule.extractor_key}" if rule.matches?(path) }
           scopes.freeze

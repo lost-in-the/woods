@@ -3130,11 +3130,13 @@ module Woods
     end
 
     def write_dependency_graph
-      graph_data = @dependency_graph.to_h
       # Key-sorted for the same reason `to_h` sorts its own sections: the
       # digest published as `graph_sha` covers these bytes, so node
-      # registration order must not reach it (B-180).
-      graph_data[:pagerank] = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
+      # registration order must not reach it (B-180). The serialization is
+      # only read here (`merge` makes the one Hash this method adds a key to),
+      # so it is not copied.
+      pagerank = @dependency_graph.pagerank.sort_by { |identifier, _| identifier }.to_h
+      graph_data = @dependency_graph.to_h(detached: false).merge(pagerank: pagerank)
 
       payload = json_serialize(graph_data)
       # The bytes about to land on disk are the bytes `graph_sha` covers, so
@@ -3389,7 +3391,7 @@ module Woods
       summary << '## Dependency Overview'
       summary << ''
 
-      graph_stats = @dependency_graph.to_h[:stats]
+      graph_stats = @dependency_graph.to_h(detached: false)[:stats]
       if graph_stats
         summary << "- Total nodes: #{graph_stats[:node_count]}"
         summary << "- Total edges: #{graph_stats[:edge_count]}"
