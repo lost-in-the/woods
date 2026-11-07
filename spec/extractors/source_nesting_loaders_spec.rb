@@ -38,6 +38,28 @@ RSpec.describe Woods::Extractors::SourceNesting, 'loader ownership' do
     path
   end
 
+  describe '.loader_roots' do
+    it 'memoizes the expanded roots per loader list and root list' do
+      main = double('main', dirs: [File.join(@root, 'app/models/'), File.join(@root, 'lib')])
+      roots = described_class.loader_roots([main])
+
+      expect(roots).to eq([[File.join(@root, 'app/models'), main], [File.join(@root, 'lib'), main]])
+      expect(roots).to be_frozen
+      expect(described_class.loader_roots([main])).to equal(roots)
+      expect(described_class.loader_roots([double('other', dirs: [File.join(@root, 'lib')])])).not_to equal(roots)
+    end
+
+    it 'answers a loader whose roots changed with the new roots' do
+      dirs = [File.join(@root, 'lib')]
+      loader = double('main', dirs: dirs)
+      described_class.loader_roots([loader])
+      dirs << File.join(@root, 'app/models')
+
+      expect(described_class.loader_roots([loader]).map(&:first)).to eq([File.join(@root, 'lib'),
+                                                                         File.join(@root, 'app/models')])
+    end
+  end
+
   %i[main once].each do |owner|
     context "with the #{owner} loader owning the file" do
       before do

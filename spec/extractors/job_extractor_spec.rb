@@ -1016,6 +1016,21 @@ RSpec.describe Woods::Extractors::JobExtractor do
       expect(unit.metadata).to include(job_type: :sidekiq, queue: 'bulk')
     end
 
+    it 'admits an ApplicationJob descendant by its descent, without reading its file' do
+      stub_const('ActiveJob::Base', Class.new)
+      stub_const('ApplicationJob', Class.new(ActiveJob::Base))
+      declare('app/jobs/job_fixture/report_job.rb', <<~RUBY)
+        class ReportJob < ApplicationJob
+          def perform = nil
+        end
+      RUBY
+      allow(Woods::Extractors::JobAncestry).to receive(:admitted?).and_call_original
+      expect(Woods::Extractors::JobAncestry).not_to receive(:admitted?).with(JobFixture::ReportJob, anything)
+
+      expect(described_class.new.discoverable_classes).to include(JobFixture::ReportJob)
+      expect(units_by_id.fetch('JobFixture::ReportJob').metadata).to include(job_type: :active_job)
+    end
+
     it 'admits a markerless leaf of an application ActiveJob base' do
       stub_const('ActiveJob::Base', Class.new)
       declare('app/jobs/job_fixture/ledger_base_job.rb', <<~RUBY)

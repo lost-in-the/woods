@@ -102,7 +102,10 @@ module Woods
         application_jobs = defined?(ApplicationJob) ? ApplicationJob.descendants : []
         app_root = Rails.root.to_s
         @generated_sites = GeneratedJobSite.new(app_root: app_root)
-        ancestry_jobs = JobAncestry.candidates.select do |klass|
+        # An ApplicationJob descendant is vouched for by its descent; admitting
+        # it as well would read and parse its file for nothing.
+        vouched = application_jobs.to_set
+        ancestry_jobs = JobAncestry.candidates.reject { |klass| vouched.include?(klass) }.select do |klass|
           JobAncestry.admitted?(klass, app_root: app_root) || generated_site(klass)
         end
         (application_jobs + ancestry_jobs).uniq.select do |klass|

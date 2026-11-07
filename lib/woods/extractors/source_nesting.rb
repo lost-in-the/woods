@@ -85,6 +85,23 @@ module Woods
       # @return [Array<Array(Integer, Integer, String)>, nil] start and end
       #   byte offsets and qualified name, outer scopes before the ones
       #   they enclose; nil when the source does not parse
+      # Each loader's autoload roots, expanded, paired with the loader: the
+      # table {#managed_root_for} claims a file against. Every managed file
+      # of a run asks for it, so it is memoized per loader list and root
+      # list (a loader whose roots change gets a new entry; an old entry
+      # costs nothing but its strings).
+      #
+      # @param loaders [Array<#dirs>]
+      # @return [Array<Array(String, #dirs)>] frozen
+      def self.loader_roots(loaders)
+        key = loaders.map { |loader| [loader, Array(loader.dirs).map(&:to_s)] }
+        memo = (@loader_roots ||= {})
+        memo.clear if memo.size >= 16 && !memo.key?(key)
+        memo[key] ||= key.flat_map do |loader, dirs|
+          dirs.map { |dir| [File.expand_path(dir.chomp('/')), loader] }
+        end.uniq.freeze
+      end
+
       def self.lexical_scopes(source)
         parsed = Woods::ParseCache.parse(source)
         return nil unless parsed.success?
@@ -507,9 +524,7 @@ module Woods
           return root ? [root, :convention] : nil
         end
 
-        roots = loaders.flat_map do |loader|
-          Array(loader.dirs).map { |dir| [File.expand_path(dir.to_s.chomp('/')), loader] }
-        end.uniq
+        roots = SourceNesting.loader_roots(loaders)
 
         claimed = roots.select { |dir, _loader| file_path.start_with?("#{dir}/") }
         unless claimed.empty?

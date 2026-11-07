@@ -56,6 +56,33 @@ RSpec.describe Woods::ModelNameCache do
     end
   end
 
+  describe '.model_name_set' do
+    before do
+      stub_const('ActiveRecord::Base', double('AR::Base', descendants: [double('User', name: 'User'),
+                                                                        double('Post', name: 'Post')]))
+    end
+
+    it 'answers the model names as a frozen set, the same object on every call' do
+      set = described_class.model_name_set
+      expect(set).to eq(Set['User', 'Post'])
+      expect(set).to be_frozen
+      expect(described_class.model_name_set).to equal(set)
+    end
+
+    it 'rebuilds the set after a reset' do
+      set = described_class.model_name_set
+      described_class.reset!
+      expect(described_class.model_name_set).to eq(set)
+      expect(described_class.model_name_set).not_to equal(set)
+    end
+
+    it 'follows a model name list that changes under it' do
+      expect(described_class.model_name_set).to include('User')
+      allow(described_class).to receive(:model_names).and_return(%w[Invoice])
+      expect(described_class.model_name_set).to eq(Set['Invoice'])
+    end
+  end
+
   describe '.model_names_regex' do
     it 'matches model names as whole words' do
       stub_const('ActiveRecord::Base', double('AR::Base', descendants: [double(name: 'User')]))

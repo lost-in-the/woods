@@ -96,9 +96,10 @@ module Woods
       # @param source [String]
       # @return [Array<String>]
       def extract_constantize_targets(source)
-        return [] unless ModelNameCache.respond_to?(:model_names)
+        return [] unless source.include?('constantize') || source.include?('const_get')
+        return [] unless ModelNameCache.respond_to?(:model_name_set)
 
-        known = ModelNameCache.model_names.to_set
+        known = ModelNameCache.model_name_set
         return [] if known.empty?
 
         targets = []
