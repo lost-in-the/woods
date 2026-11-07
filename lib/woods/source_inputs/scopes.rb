@@ -39,11 +39,12 @@ module Woods
       end
 
       # The rule scopes matched so far in this process for one matching key:
-      # the rule set, the extra roots and the configuration the matchers read
-      # ({#matching_key}). A resident process (the watch daemon, a long
-      # session) classifies the same tree on every run, and matching every
-      # rule against every path was a third of a run's source capture; a key
-      # that differs from the last one starts a new table.
+      # the rule set, the extra roots and every configuration value an
+      # extractor's matcher can read at call time ({#matching_key}). A
+      # resident process (the watch daemon, a long session) classifies the
+      # same tree on every run, and matching every rule against every path
+      # was a third of a run's source capture; a key that differs from the
+      # last one starts a new table.
       #
       # @param key [Array]
       # @return [Hash{String => Array<String>}]
@@ -55,12 +56,18 @@ module Woods
       end
 
       # Everything the dispatch rules' matching of a path depends on, so a
-      # table keyed by it is valid for every path it holds.
+      # table keyed by it is valid for every path it holds: the rule set
+      # ({#fingerprint}) and the whole extraction-shaping configuration
+      # ({Configuration#extraction_fingerprint}). Named matchers read their
+      # globs and paths from the configuration when they match (documentation,
+      # config files, GraphQL documents, JavaScript modules, test support, the
+      # external consumers file, the sweep of unclaimed Ruby), and a rule's
+      # own fields never carry them, so a configuration change in the same
+      # process must start a new table.
       #
       # @return [Array]
       def matching_key
-        configuration = Woods.configuration
-        [fingerprint, configuration&.event_paths, configuration&.unclaimed_ruby_paths].freeze
+        [fingerprint, Woods.configuration&.extraction_fingerprint].freeze
       end
 
       def for_path(path)
