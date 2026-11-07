@@ -92,6 +92,7 @@ require_relative 'doc_references'
 require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
 require_relative 'extraction/extractor_timings'
+require_relative 'extraction/hybrid_rerun_policy'
 require_relative 'extraction/flow_reach'
 
 module Woods
@@ -3631,8 +3632,14 @@ module Woods
 
     # Runtime metadata can depend on Ruby outside a class's definition or its
     # recorded graph edges (for example, queue_as Settings::QUEUE). A Ruby edit
-    # therefore refreshes both complete hybrid inventories after Rails reload.
-    # Non-Ruby batches retain the narrower pre-change graph selection.
+    # therefore refreshes a complete hybrid inventory after Rails reload when
+    # a changed file could have changed what a constant its units name means,
+    # or is one of their own sources, as {Extraction::HybridRerunPolicy}
+    # decides from the published source-reference baseline; without that
+    # baseline every Ruby edit refreshes both inventories, as before. A
+    # family unit the edit reaches through a graph edge is in the blast
+    # radius and is re-extracted on its own. Non-Ruby batches retain the
+    # narrower pre-change graph selection.
     #
     # Component edges are resolved against the loaded constant tables, so they
     # re-run with a Ruby edit only when {RenderScope} finds the edit touched a
@@ -3640,7 +3647,7 @@ module Woods
     def hybrid_discovery_keys(change_set, affected_ids, scope: render_scope(change_set))
       paths = change_set.absolute_paths
       keys = if paths.any? { |path| path.end_with?('.rb') }
-               HYBRID_DISCOVERY_EXTRACTORS.to_set.merge(scope.components? ? RUNTIME_RESOLVED_EXTRACTORS : [])
+               hybrid_wholesale_keys(change_set).merge(scope.components? ? RUNTIME_RESOLVED_EXTRACTORS : [])
              else
                affected_ids.flat_map { |id| @dependency_graph.node_types(id) }
                            .filter_map { |type| TYPE_TO_EXTRACTOR_KEY[type] }
@@ -3648,6 +3655,75 @@ module Woods
              end
       keys.add(:view_components) if paths.any? { |path| sidecar_template?(path) }
       keys
+    end
+
+    # The hybrid families a Ruby edit refreshes whole, each decision logged.
+    #
+    # @param change_set [ChangeSet]
+    # @return [Set<Symbol>]
+    def hybrid_wholesale_keys(change_set)
+      policy = Extraction::HybridRerunPolicy.new(baseline: @source_reference_baseline, root: Rails.root,
+                                                 collector: source_collector)
+      HYBRID_DISCOVERY_EXTRACTORS.each_with_object(Set.new) do |key, keys|
+        types = EXTRACTOR_KEY_TO_TYPES.fetch(key)
+        decision = policy.decide(key, change_set: change_set, sources: hybrid_family_sources(types),
+                                      new_classes: hybrid_inventory_delta(key, types))
+        Rails.logger.info "[Woods] #{decision.wholesale? ? 'Wholesale re-run' : 'Narrow re-run'}: #{decision.reason}"
+        keys << key if decision.wholesale?
+      end
+    end
+
+    # Every path the pre-change graph registers for a unit of +types+, each
+    # relative to the root: a unit's own file and every contributor.
+    #
+    # @return [Array<String>]
+    def hybrid_family_sources(types)
+      family = types.flat_map { |type| @dependency_graph.units_of_type(type) }.to_set
+      return [] if family.empty?
+
+      root = Rails.root.to_s
+      @dependency_graph.registered_paths.select { |path| @dependency_graph.identifiers_for_path(path).any?(family) }
+                       .map { |path| path.start_with?("#{root}/") ? path.delete_prefix("#{root}/") : path }.sort
+    end
+
+    # The names a hybrid family's runtime discovery and the pre-change graph
+    # disagree on: classes discovered after the reload that the graph does
+    # not hold as units of its types, and class-discovered units the graph
+    # holds that discovery no longer finds (a mixin or parent changed through
+    # another file). A unit a family rule discovers from its file is not
+    # expected in the runtime inventory. Nil when discovery cannot answer
+    # completely, after a partial eager load above all (see
+    # {#stale_class_based_units}), which {Extraction::HybridRerunPolicy}
+    # reads as "refresh".
+    #
+    # @return [Array<String>, nil]
+    def hybrid_inventory_delta(key, types)
+      return nil unless @eager_load_complete
+
+      extractor = extractor_for(key)
+      return nil unless extractor.respond_to?(:discoverable_classes)
+      return nil if extractor.respond_to?(:runtime_discovery_complete?) && !extractor.runtime_discovery_complete?
+
+      known = types.flat_map { |type| @dependency_graph.units_of_type(type) }.to_set
+      discovered = extractor.discoverable_classes.filter_map(&:name).to_set
+      vanished = (known - discovered).reject { |identifier| file_discovered?(key, types, identifier) }
+      ((discovered - known).to_a + vanished).sort
+    rescue StandardError => e
+      Rails.logger.warn "[Woods] #{key}: runtime discovery failed (#{e.class}: #{e.message})"
+      nil
+    end
+
+    # Whether a family unit's own file is one the family's dispatch rules
+    # claim, so a full extraction reads it from the file whatever the runtime
+    # says.
+    def file_discovered?(key, types, identifier)
+      node = types.lazy.filter_map { |type| @dependency_graph.node(identifier, type: type) }.first
+      path = node && node[:file_path]
+      return false unless path
+
+      root = "#{Rails.root}/"
+      relative = path.start_with?(root) ? path.delete_prefix(root) : path
+      PathDispatcher.new.file_rules_for(relative).any? { |rule| rule.extractor_key == key }
     end
 
     # @param change_set [ChangeSet]
