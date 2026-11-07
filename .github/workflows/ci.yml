@@ -211,105 +211,60 @@ jobs:
           path: tmp/ci-local-reference/
           if-no-files-found: error
           retention-days: 7
+      # Every `:booted_app` file boots its own Rails application, so each keeps
+      # its own process (the file sets that shared one before still do, see
+      # script/parallel_booted.rb). script/parallel-booted runs those processes
+      # several at a time on the runner's cores; as fifteen serial single-process
+      # steps, this job left three of four cores idle for most of its run.
       - name: Run booted-app extraction
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/booted_extraction_spec.rb spec/integration/lazy_routes_equivalence_spec.rb spec/integration/mailer_determinism_spec.rb spec/integration/validation_options_spec.rb spec/integration/concurrent_extraction_pool_spec.rb spec/integration/writer_fencing_booted_spec.rb
-
-      - name: Run declaration ownership against booted Rails
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/declaration_identity_spec.rb
-
-      - name: Run encrypted Console credential rotation
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/console_credential_rotation_spec.rb
-
-      - name: Run session controller identity through real Rails requests
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/session_controller_identity_spec.rb
-
-      - name: Run multi-database extraction and equivalence
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/multi_database_extraction_spec.rb
-
-      - name: Run opt-in hook refresh through fresh Rails processes
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/hook_refresh_spec.rb
-      - name: Fresh-process source provenance
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        env:
-          WOODS_RUN_BOOTED_APP: '1'
-        run: bundle exec rspec spec/integration/source_input_drift_spec.rb spec/integration/source_output_spec.rb spec/integration/source_manifest_capacity_spec.rb
-
-      # Real Rails boot, stdio protocol and guarded HTTP requests (#304).
-      # Isolate booted spec files so fixture applications cannot share state.
-      - name: Run Console transport boot contracts
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: |
-          bin/rspec spec/console/transport_boot_spec.rb
-          bin/rspec spec/console/stdio_e2e_spec.rb
-          bin/rspec spec/console/collection_redaction_spec.rb
-          bin/rspec spec/console/association_count_runtime_spec.rb
-          bin/rspec spec/console/http_eager_load_failure_spec.rb
+        run: >-
+          bundle exec ruby script/parallel-booted
+          spec/integration/booted_extraction_spec.rb
+          spec/integration/lazy_routes_equivalence_spec.rb
+          spec/integration/mailer_determinism_spec.rb
+          spec/integration/validation_options_spec.rb
+          spec/integration/concurrent_extraction_pool_spec.rb
+          spec/integration/writer_fencing_booted_spec.rb
+          spec/integration/declaration_identity_spec.rb
+          spec/integration/console_credential_rotation_spec.rb
+          spec/integration/session_controller_identity_spec.rb
+          spec/integration/multi_database_extraction_spec.rb
+          spec/integration/hook_refresh_spec.rb
+          spec/integration/source_input_drift_spec.rb
+          spec/integration/source_output_spec.rb
+          spec/integration/source_manifest_capacity_spec.rb
+          spec/console/transport_boot_spec.rb
+          spec/console/stdio_e2e_spec.rb
+          spec/console/collection_redaction_spec.rb
+          spec/console/association_count_runtime_spec.rb
+          spec/console/http_eager_load_failure_spec.rb
+          spec/extractors/flow_incremental_spec.rb
+          spec/integration/watch_daemon_spec.rb
+          spec/generators/install_generator_spec.rb
+          spec/integration/watch_startup_spec.rb
+          spec/integration/managed_watch_spec.rb
+          spec/integration/console_sqlite_policy_spec.rb
+          spec/integration/console_typed_eav_policy_spec.rb
+          spec/integration/console_sqlite_keyword_functions_spec.rb
+          spec/integration/console_resolved_relation_policy_spec.rb
+          spec/integration/console_credential_serialization_spec.rb
+          spec/integration/multi_worktree_spec.rb
+          spec/integration/inflected_naming_spec.rb
+          spec/integration/assigned_value_classes_spec.rb
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full
-      # extraction at every step. Runs in its own process — like the spec
-      # above, it boots the dummy app and can't share one.
+      # extraction at every step. One 7,000-line file of booted examples: the
+      # runner splits its top-level groups across one process per core and
+      # runs the randomized sequences one seed per process, so the step takes
+      # about a quarter of its former single-process time.
       - name: Run incremental equivalence harness
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         env:
           WOODS_DIFF_OPS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}
           WOODS_DIFF_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
-        run: bundle exec rspec spec/integration/incremental_equivalence_spec.rb
-
-      # Incremental flow-artifact refresh (M3): annotations, delta flow
-      # precompute, and the dedicated flow-artifact sweep, with the
-      # precompute_flows gate on. Own process — boots its own dummy app.
-      - name: Run incremental flow artifacts
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/extractors/flow_incremental_spec.rb
-
-      # Watch daemon against a real booted app (#164 phase 2). Own process for
-      # the same reason as the two above — each boots its own Rails app.
-      - name: Run watch daemon integration
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/watch_daemon_spec.rb
-
-      # The install generator, executed for real: the default examples run on
-      # every bundle; the legacy-migration example needs this row's Active
-      # Record (#618).
-      - name: Run the install generator with Active Record available
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/generators/install_generator_spec.rb
-
-      - name: Run managed watcher across fresh Rails boots
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/watch_startup_spec.rb spec/integration/managed_watch_spec.rb
-      - name: Console read and response policies
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: |
-          bundle exec rspec spec/integration/console_sqlite_policy_spec.rb
-          bundle exec rspec spec/integration/console_typed_eav_policy_spec.rb
-          bundle exec rspec spec/integration/console_sqlite_keyword_functions_spec.rb
-          bundle exec rspec spec/integration/console_resolved_relation_policy_spec.rb
-          bundle exec rspec spec/integration/console_credential_serialization_spec.rb
-
-      # Six worktrees, disjoint indexes, concurrent readers (#164 phase 4).
-      - name: Run multi-worktree integration
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/multi_worktree_spec.rb
-
-      # Governed naming must follow the active Zeitwerk inflector (PR-251
-      # finding 2). Own process — boots its own Rails app with a custom
-      # `api => API` inflection and wrapper-nested siblings under app/services/api/.
-      - name: Run inflected-naming integration
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/inflected_naming_spec.rb
-
-      # Assigned value classes boot their own Rails app and loader (#559).
-      - name: Run assigned value-class ownership integration
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
-        run: bundle exec rspec spec/integration/assigned_value_classes_spec.rb
+        run: bundle exec ruby script/parallel-booted spec/integration/incremental_equivalence_spec.rb
 
       - name: Run reopened library contributor equivalence
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
