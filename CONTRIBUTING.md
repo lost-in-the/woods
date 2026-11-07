@@ -144,6 +144,17 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
   bin/rspec spec/integration/booted_extraction_spec.rb
 ```
 
+Every booted file boots its own Rails application, so files run one per
+process. `script/parallel-booted` runs several of those processes at a time
+(one per core by default, `--jobs N` otherwise) and is what the CI
+`rails-matrix` job runs; give it the files, or the incremental-equivalence
+harness, which it splits by top-level group and by `WOODS_DIFF_SEEDS` seed:
+
+```bash
+WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile \
+  bundle exec ruby script/parallel-booted --list spec/integration/incremental_equivalence_spec.rb
+```
+
 The unit suite evaluates every hand-maintained Rails gemfile and checks its
 Appraisal requirements, old-Rails compatibility pins, and CI matrix membership.
 This detects configuration drift; it does not replace the booted rows.

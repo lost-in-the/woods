@@ -42,7 +42,7 @@ module ParallelRspec
   # @return [Hash{String=>Float}] summed example seconds per spec file
   def timings_from(report_path)
     seconds = Hash.new(0.0)
-    JSON.parse(File.read(report_path)).fetch('examples').each do |example|
+    JSON.parse(File.read(report_path, encoding: 'UTF-8')).fetch('examples').each do |example|
       seconds[example.fetch('file_path').delete_prefix('./')] += example.fetch('run_time')
     end
     seconds.transform_values { |value| value.round(2) }.sort.to_h

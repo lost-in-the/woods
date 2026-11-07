@@ -1,0 +1,91 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Runs booted spec files as separate rspec processes, several at a time.
+#
+#   script/parallel-booted [--jobs N] [--buckets N] [--list] spec/integration/foo_spec.rb ...
+#
+# Every file runs in its own process except the sets that already shared one
+# (ParallelBooted::SHARED_GROUPS); the incremental-equivalence harness is
+# split into --buckets line-filtered processes plus one per WOODS_DIFF_SEEDS
+# seed. --jobs (default: the machine's cores, or WOODS_PARALLEL_PROCESSES)
+# bounds how many run at once. Each process gets its own TMPDIR and
+# TEST_ENV_NUMBER, its output is kept whole and printed when it ends, and the
+# runner fails if any process does. --list prints the plan without running.
+require 'fileutils'
+require 'tmpdir'
+
+require_relative 'parallel_booted'
+
+ROOT = ParallelBooted::ROOT
+REPORT_DIR = File.expand_path(ENV.fetch('WOODS_PARALLEL_REPORT_DIR', File.join(ROOT, 'tmp', 'parallel-booted')))
+
+options = { jobs: ParallelBooted.default_jobs, buckets: nil, list: false }
+files = []
+args = ARGV.dup
+until args.empty?
+  case (arg = args.shift)
+  when '--jobs' then options[:jobs] = Integer(args.shift)
+  when '--buckets' then options[:buckets] = Integer(args.shift)
+  when '--list' then options[:list] = true
+  when /\A--/ then abort "unknown option #{arg}"
+  else files << arg
+  end
+end
+abort 'no spec files given' if files.empty?
+options[:buckets] ||= options[:jobs]
+
+jobs = ParallelBooted.plan(files, buckets: options[:buckets])
+if options[:list]
+  jobs.each { |job| puts "#{job.label}: #{job.arguments.join(' ')} #{job.env.map { |k, v| "#{k}=#{v}" }.join(' ')}" }
+  exit
+end
+
+FileUtils.rm_rf(REPORT_DIR)
+FileUtils.mkdir_p(REPORT_DIR)
+tmp_base = Dir.mktmpdir('woods-booted')
+monotonic = -> { Process.clock_gettime(Process::CLOCK_MONOTONIC) }
+group = ENV.key?('GITHUB_ACTIONS')
+
+def print_job(job, record, group)
+  verdict = record[:status].success? ? 'passed' : 'FAILED'
+  heading = "#{job.label} #{verdict} (#{record[:seconds].round}s): #{job.arguments.join(' ')}"
+  puts(group ? "::group::#{heading}" : "== #{heading}")
+  puts File.read(record[:log], encoding: 'UTF-8')
+  puts '::endgroup::' if group
+end
+
+pending = jobs.each_with_index.to_a
+running = {}
+finished = []
+puts "Running #{jobs.size} booted processes, #{options[:jobs]} at a time"
+begin
+  until pending.empty? && running.empty?
+    while running.size < options[:jobs] && !pending.empty?
+      job, index = pending.shift
+      tmpdir = File.join(tmp_base, (index + 1).to_s)
+      FileUtils.mkdir_p(tmpdir)
+      log = File.join(REPORT_DIR, "#{job.label}.log")
+      env = ParallelBooted.environment(job, index + 1, tmpdir)
+      pid = Process.spawn(env, *ParallelBooted.command(job), chdir: ROOT, in: File::NULL, out: log, err: %i[child out])
+      running[pid] = { job: job, log: log, started: monotonic.call }
+      puts "started #{job.label}"
+    end
+    pid, status = Process.wait2
+    record = running.delete(pid)
+    next unless record
+
+    record[:status] = status
+    record[:seconds] = monotonic.call - record[:started]
+    finished << record
+    print_job(record[:job], record, group)
+  end
+ensure
+  running.each_key { |pid| Process.kill('TERM', pid) rescue nil } # rubocop:disable Style/RescueModifier
+  FileUtils.rm_rf(tmp_base)
+end
+
+failed = finished.reject { |record| record[:status].success? }
+puts "#{finished.size} processes, #{failed.size} failed" \
+     "#{": #{failed.map { |record| record[:job].label }.join(', ')}" unless failed.empty?}"
+exit(failed.empty? ? 0 : 1)

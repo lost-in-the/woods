@@ -20,6 +20,9 @@ bin/rake "woods:affected_specs[lib/woods/x.rb]"  # ...for named paths; hubs it d
 # Opt-in spec tags (excluded from the default suite)
 WOODS_RUN_HTTP_SERVER=1 bin/rspec spec/mcp/http_server_e2e_spec.rb   # boots exe/woods-mcp-http
 WOODS_RUN_BOOTED_APP=1  bin/rspec spec/integration/booted_extraction_spec.rb
+# Booted files, one Rails process each, several at a time (what the CI rails-matrix job runs);
+# the harness is split by top-level group and by seed. --list prints the plan.
+WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile bundle exec ruby script/parallel-booted spec/integration/incremental_equivalence_spec.rb
 WOODS_RUN_PERF_SPECS=1  bin/rspec --tag perf
 WOODS_RUN_GITHUB_MERMAID=1 bin/rspec spec/diagrams/github_mermaid_spec.rb   # needs Node
 
@@ -250,6 +253,7 @@ Full files and the full suite are slow here (the suite takes over 15 minutes, on
 - After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
 - Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
 - Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
+- A whole booted file, or the harness, goes through `script/parallel-booted` (one process per file or per harness bucket, on every core); it is what CI runs.
 - Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
 - Locally, run focused specs almost always. The full suite and whole booted files belong to hosted CI; run them locally only when a cross-cutting change cannot be judged otherwise. Say which you ran and which you skipped.
 
