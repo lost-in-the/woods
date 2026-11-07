@@ -1792,9 +1792,15 @@ module Woods
         data
       end
 
+      # The unit file name for an identifier: a pure function of the
+      # identifier, memoized for the reader's life, since a corpus scan
+      # derives one per unit and a resident reader scans every generation.
       def unit_filename(identifier)
-        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-        "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
+        @unit_filenames ||= {}
+        @unit_filenames[identifier] ||= begin
+          base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
+          "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json".freeze
+        end
       end
 
       # The duplicate scan is linear in the directory, and typed reads need it
@@ -1865,8 +1871,7 @@ module Woods
       end
 
       def read_published_unit(dir, identifier, decode: nil, reuse: nil)
-        base = identifier.gsub('::', '__').gsub(/[^a-zA-Z0-9_-]/, '_')
-        filename = "#{base}_#{Digest::SHA256.hexdigest(identifier)[0, 8]}.json"
+        filename = unit_filename(identifier)
         # A String path and one lstat: this runs once per unit of a corpus
         # scan, where Pathname#join was a third of the scan's allocations and
         # the separate symlink? and lstat calls two of its four syscalls.
