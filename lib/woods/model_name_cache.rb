@@ -39,6 +39,20 @@ module Woods
         @model_names_regex ||= build_regex
       end
 
+      # {.model_names} as a frozen set, for the membership tests the
+      # dependency scanners run once per unit. Rebuilt whenever
+      # {.model_names} answers a different array, so a reset or a stubbed
+      # list never serves a stale set.
+      #
+      # @return [Set<String>]
+      def model_name_set
+        names = model_names
+        return @model_name_set if @model_name_set && @model_name_set_names.equal?(names)
+
+        @model_name_set_names = names
+        @model_name_set = names.to_set.freeze
+      end
+
       # Short-name → fully-qualified owner mapping. Ambiguous short names
       # (two different models sharing the same inner name) map to nil so
       # callers can detect the collision and skip the edge rather than
@@ -70,6 +84,8 @@ module Woods
       # Clear cache (call at the start of each extraction run)
       def reset!
         @model_names = nil
+        @model_name_set = nil
+        @model_name_set_names = nil
         @model_names_regex = nil
         @short_name_map = nil
         @short_names_regex = nil

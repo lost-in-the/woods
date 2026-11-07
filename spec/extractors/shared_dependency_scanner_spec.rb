@@ -776,6 +776,11 @@ RSpec.describe Woods::Extractors::SharedDependencyScanner do
   #    bare short-name / string-literal refs produced zero dependents) ──
 
   describe 'constantize / short-name resolution' do
+    it 'does not consult the model names for a source that constantizes nothing' do
+      expect(Woods::ModelNameCache).not_to receive(:model_name_set)
+      expect(scanner.extract_constantize_targets('Library::Book.new')).to eq([])
+    end
+
     it 'resolves .constantize string-literal arguments to model targets' do
       allow(Woods::ModelNameCache).to receive(:model_names).and_return(%w[User Library::Book])
 
