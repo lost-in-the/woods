@@ -66,6 +66,7 @@ module Woods
         @snapshot = nil
         @reuse = nil
         @last_index = nil
+        @last_retriever = nil
       end
 
       def mode = :lexical
@@ -190,31 +191,35 @@ module Woods
       # generation's build; each unit's key and every statistic come from
       # this one.
       def build_snapshot(units)
-        index = Retrieval::LexicalIndex.new(units: units, token_cache: @token_cache,
-                                            reusable: @last_index&.documents_by_key)
+        index = Retrieval::LexicalIndex.new(units: units, token_cache: @token_cache, reusable: @last_index)
         @last_index = index
-        Retriever.new(vector_store: nil, metadata_store: metadata_store_for(units), graph_store: nil,
-                      embedding_provider: nil, mode: :lexical, lexical_index: index)
+        @last_retriever = Retriever.new(vector_store: nil, metadata_store: metadata_store_for(units), graph_store: nil,
+                                        embedding_provider: nil, mode: :lexical, lexical_index: index)
       end
 
-      # The snapshot built last, when the new generation publishes exactly the
-      # unit objects it indexed (a publication that changed no unit file, or
-      # none the index reads): nothing it holds would differ. Its tokens are
-      # fetched from the cache all the same, so the cache keeps them and
-      # counts the build as a reuse of every unit.
+      # The retriever built last, when the new generation publishes exactly
+      # the unit objects its index holds (a publication that changed no unit
+      # file, or none the index reads) under the same lexical configuration:
+      # nothing it holds would differ. It is that build's own retriever, not
+      # whatever snapshot is installed now, which a reload may have replaced.
+      # Its tokens are fetched from the cache all the same, so the cache
+      # keeps them and counts the build as a reuse of every unit.
       #
       # @return [Retriever, nil]
       def unchanged_snapshot(units)
         previous = @last_index
-        return unless previous && @snapshot && previous.units.size == units.size &&
+        return unless previous && @last_retriever && previous.units.size == units.size &&
                       units.all? { |key, unit| previous.units[key].equal?(unit) }
 
-        build = @token_cache.begin_build(Retrieval::LexicalIndex.configuration_key)
+        configuration = Retrieval::LexicalIndex.configuration_key
+        return unless previous.configuration_key == configuration
+
+        build = @token_cache.begin_build(configuration)
         previous.documents_by_key.each_value do |document|
           build.fetch(document.digest) { [document.fields, document.terms, document.lengths] }
         end
         @token_cache.commit(build)
-        @snapshot.last
+        @last_retriever
       end
 
       # The public store holds the same frozen units. A write replaces a

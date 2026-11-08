@@ -53,6 +53,13 @@ module Woods
       # @return [Hash{String => Document}] frozen
       attr_reader :documents_by_key
 
+      # The {.configuration_key} its documents were tokenized under, or nil
+      # for a view over another index's documents. A later build reuses
+      # documents only under the same key.
+      #
+      # @return [String, nil]
+      attr_reader :configuration_key
+
       # @param metadata_store [MetadataStore::Interface] the records to index
       # @param units [Hash{String => Hash}, nil] the records to index instead,
       #   by key, each already deep-frozen JSON data owned by this index (for
@@ -66,14 +73,16 @@ module Woods
       #   and document frequencies already known for +documents+
       # @param candidate_postings [Array(Hash, Hash), nil] the root's frozen
       #   token and exact-identifier postings, shared by restricted views
-      # @param reusable [Hash{String => Document}, nil] an earlier index's
-      #   {#documents_by_key}: a document whose key names the very same unit
-      #   object in +units+ is kept as it is, so a corpus read generation
-      #   after generation rebuilds only the documents of changed units
+      # @param reusable [LexicalIndex, nil] an earlier index: a document of
+      #   its {#documents_by_key} whose key names the very same unit object
+      #   in +units+ is kept as it is, so a corpus read generation after
+      #   generation rebuilds only the documents of changed units. Nothing is
+      #   reused when it was tokenized under another {.configuration_key}.
       def initialize(metadata_store: nil, units: nil, token_cache: nil, documents: nil, statistics: nil,
                      candidate_postings: nil, reusable: nil)
         @stems = {}
-        @reusable = reusable
+        @configuration_key = self.class.configuration_key unless documents
+        @reusable = reusable.documents_by_key if reusable && reusable.configuration_key == @configuration_key
         @documents = (documents || build_documents(metadata_store, units, token_cache)).freeze
         @documents_by_key = @documents.to_h { |doc| [doc.key, doc] }.freeze
         @units = @documents_by_key.transform_values(&:unit).freeze
@@ -204,7 +213,7 @@ module Woods
       end
 
       def build_documents(metadata_store, units, token_cache)
-        cache_build = token_cache&.begin_build(self.class.configuration_key)
+        cache_build = token_cache&.begin_build(@configuration_key)
         documents = if units
                       owned_documents(units, cache_build)
                     else
