@@ -129,6 +129,63 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever, 'document reuse across see
     expect(retriever.retrieve('Post').sources.map { |source| source[:identifier] }).not_to include('Post')
   end
 
+  context 'when the lexical configuration changes between seeded generations' do
+    let(:inflections) { ActiveSupport::Inflector.inflections(:en) }
+
+    after { inflections.uncountables.delete('oldwords') }
+
+    def comment_file
+      "models/#{Object.new.extend(Woods::FilenameUtils).collision_safe_filename('Comment')}"
+    end
+
+    def publish_oldwords
+      publish('gen-1') { |target| edit_post(target) { |data| data['source_code'] = 'class Post; oldwords; end' } }
+      retriever.warmup!
+      expect(retriever.retrieve('oldword').sources.map { |source| source[:identifier] }).to include('Post')
+      inflections.uncountable('oldwords')
+    end
+
+    def shared_cache_answers
+      answers(described_class.new(index_dir: index_dir, token_cache: cache))
+    end
+
+    it 're-tokenizes a hard-linked unit when another unit changed' do
+      publish_oldwords
+      publish('gen-2', from: 'gen-1', except: [comment_file]) do |target|
+        path = File.join(target, comment_file)
+        data = JSON.parse(File.read(path))
+        data['source_code'] = "#{data['source_code']}\n# edited"
+        File.write(path, JSON.generate(data))
+      end
+
+      expect(answers(retriever)).to eq(cold_answers)
+      expect(shared_cache_answers).to eq(cold_answers)
+    end
+
+    it 're-tokenizes every unit of a hard-linked no-op publication' do
+      publish_oldwords
+      publish('gen-2', from: 'gen-1')
+
+      expect(answers(retriever)).to eq(cold_answers)
+      expect(shared_cache_answers).to eq(cold_answers)
+    end
+  end
+
+  it 'serves the snapshot of the generation it built after a reload installed another one' do
+    publish('gen-1') { |target| edit_post(target) { |data| data['source_code'] = 'class Post; oldword; end' } }
+    retriever.warmup!
+    publish('gen-2', from: 'gen-1', except: [post_file]) do |target|
+      edit_post(target) { |data| data['source_code'] = 'class Post; newword; end' }
+    end
+    candidate = described_class.new(index_dir: index_dir, token_cache: cache).warmup!
+    retriever.install_snapshot!(candidate.snapshot)
+    Woods::Generation.new(output_dir: index_dir).bump!(payload: 'payloads/gen-1')
+
+    expect(retriever.retrieve('oldword').sources.map { |source| source[:identifier] }).to include('Post')
+    expect(retriever.retrieve('newword').sources.map { |source| source[:identifier] }).not_to include('Post')
+    expect(answers(retriever)).to eq(cold_answers)
+  end
+
   it 'keeps the reused documents of a copied payload out of the way: a new inode is decoded again' do
     publish('gen-1')
     retriever.warmup!
