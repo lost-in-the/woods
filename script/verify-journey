@@ -1,0 +1,14 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative 'verification/journey'
+
+Signal.trap('TERM') { raise Interrupt }
+
+unless ARGV.empty? || ARGV == ['--negative-control']
+  warn 'Usage: bundle exec ruby script/verify-journey [--negative-control]'
+  exit 2
+end
+
+exit WoodsVerification::Journey.new(root: File.expand_path('..', __dir__),
+                                    negative_control: ARGV.include?('--negative-control')).run

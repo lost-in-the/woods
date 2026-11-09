@@ -237,27 +237,30 @@ exe/
 
 ## Testing Workflow
 
+Contributor test policy is owned by [CONTRIBUTING.md](CONTRIBUTING.md#make-the-change).
 The approach depends on the task:
 
 - **New extractors/features:** Strict TDD, write a failing spec in `spec/` first, implement to pass, refactor. No implementation without a failing test.
-- **Bug fixes:** Fix first, then add a regression test that would have caught it.
+- **Bug fixes:** Add the smallest regression and demonstrate its failure before the fix; then implement and rerun it.
 - **Refactors:** Lean on the existing specs that cover the moved code. If coverage gaps exist, add specs before refactoring, not after.
 
 ### Running specs: narrowest first
 
-Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
+Use narrow checks while iterating. Full files and the full suite are slower,
+but focused results do not replace the pre-review and pre-push gates in
+[CONTRIBUTING.md](CONTRIBUTING.md#before-you-push).
 
-- After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
+- After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then the examples the change can reach. Treat static impact as incomplete, especially across runtime and serialization boundaries.
 - Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
 - Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
 - Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
-- Locally, run focused specs almost always. The full suite and whole booted files belong to hosted CI; run them locally only when a cross-cutting change cannot be judged otherwise. Say which you ran and which you skipped.
+- Before requesting review, run the full unit suite and style check, or explain the specific blocker as CONTRIBUTING requires. Run `script/ci-local` before a push. Report omitted lanes separately; hosted CI and a scoped journey are not substitutes for these gates.
 
 ```bash
 # Gem unit specs (run from gem root)
 bin/rspec spec/extractors/model_extractor_spec.rb:42   # One example: the default local run
 bin/rspec spec/extractors/model_extractor_spec.rb      # One file
-bin/rake spec                                          # Full suite: hosted CI, rarely local
+bin/rake spec                                          # Required pre-review unit suite
 
 # Lint
 bin/rubocop -a

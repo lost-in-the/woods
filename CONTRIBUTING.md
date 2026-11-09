@@ -110,6 +110,14 @@ bin/rubocop
 
 Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
 
+This is the canonical contributor testing policy; AGENTS.md and CLAUDE.md
+should link here rather than define different gates. During implementation,
+start with narrow checks. Before every push, run `script/ci-local` as described
+below. A blocked or deliberately omitted check remains unverified; explaining
+a blocker is not a passing result or a waiver of required CI/review policy.
+The opt-in [verification journeys](docs/VERIFICATION_SPIKE.md) add scoped
+behavioral evidence and do not replace these checks.
+
 Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces a 90% aggregate line floor and measures branches, but does not enforce a branch floor. The line gate was calibrated against local and CI default-suite results on 2026-09-18; it does not establish per-file coverage or coverage across the opt-in lanes. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
 
 ### Pending examples in CI

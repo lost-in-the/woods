@@ -1,0 +1,11 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require_relative 'verification/resident_journey'
+Signal.trap('TERM') { raise Interrupt }
+
+unless ARGV.length.between?(1, 2) && (ARGV.length == 1 || ARGV.last == '--negative-control')
+  warn 'Usage: bundle exec ruby script/verify-resident-journey CANDIDATE_CHECKOUT [--negative-control]'
+  exit 2
+end
+exit WoodsVerification::ResidentJourney.new(root: ARGV.first, negative_control: ARGV.length == 2).run
