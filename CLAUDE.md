@@ -246,6 +246,13 @@ The approach depends on the task:
 - **Bug fixes:** Fix first, then add a regression test that would have caught it.
 - **Refactors:** Lean on the existing specs that cover the moved code. If coverage gaps exist, add specs before refactoring, not after.
 
+A fix covers the rule behind a bug, not only the reported case:
+
+- **Name the rule, test its forms.** State the rule the fix enforces (for example, "only calls the AASM definition runs as it is read declare events") and add a spec for each form it covers: every nesting level and every block form, not only the reported example.
+- **Compare against the real runtime.** When code models a gem's DSL or Rails runtime behavior, check the result against the real registry in a booted fixture (for example `spec/integration/state_machine_forms_spec.rb`) or a testbed variant before pushing.
+- **Guard what a narrowing fix must keep.** When a fix narrows what a filter or walker admits, add a spec for a legitimate form that must still pass.
+- **Test interrupted on-disk state.** For markers, migrations, retention or any state written to disk, test a write that fails partway and a second run over what it left.
+
 ### Running specs: narrowest first
 
 Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
