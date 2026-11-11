@@ -179,14 +179,29 @@ module Woods
       # Start the warm-up on a background thread. Idempotent: only a `pending`
       # hydration starts, every later call returns at once.
       #
+      # A thread that cannot be created (ThreadError when the process is out
+      # of threads) is recorded as `failed` and re-raised. Left `warming`, no
+      # worker could finish it and every wait ran to its cap. The state is set
+      # here, under the lock already held, not through {#finish}, whose lock
+      # is not reentrant.
+      #
       # @return [void]
+      # @raise [StandardError] whatever creating the thread raised
       def start!
         @mutex.synchronize do
           return unless @state == :pending
 
           @state = :warming
           @started_at = Time.now
-          @thread = Thread.new { run_work }
+          begin
+            @thread = Thread.new { run_work }
+          rescue StandardError => e
+            @state = :failed
+            @error = e
+            @finished_at = Time.now
+            @done.broadcast
+            raise
+          end
           @thread.name = 'woods-hydration'
           @thread.report_on_exception = false
         end

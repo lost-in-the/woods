@@ -427,6 +427,36 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
                            ])
     end
 
+    # Keyword matching without token context counted a method named
+    # `class` and a `:begin` symbol as block openers, so the event's own
+    # `end` never closed it and the next event's transitions joined it.
+    ['object.class', ':begin', 'state_options(begin: 1)'].each do |body_line|
+      it "keeps events apart when an event body holds #{body_line}" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          class Order < ApplicationRecord
+            include AASM
+
+            aasm do
+              event :pay do
+                #{body_line}
+                transitions from: :pending, to: :paid
+              end
+              event :ship do
+                transitions from: :paid, to: :shipped
+              end
+            end
+          end
+        RUBY
+
+        events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+        expect(events).to eq([
+                               { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                               { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] }
+                             ])
+      end
+    end
+
     it 'keeps an event block still open at the end of the source' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
@@ -554,6 +584,29 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
   # ── state_machines gem ────────────────────────────────────────────────
 
   describe '#extract_model_file — state_machines gem' do
+    it 'keeps events apart when an event body calls a method named class' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          state_machine initial: :pending do
+            event :activate do
+              record.class
+              transition pending: :active
+            end
+            event :archive do
+              transition active: :archived
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'activate', transitions: [{ from: 'pending', to: 'active', guard: nil }] },
+                             { name: 'archive', transitions: [{ from: 'active', to: 'archived', guard: nil }] }
+                           ])
+    end
+
     {
       'state_machine initial: :pending do' => 'state',
       'state_machine(initial: :pending) do' => 'state',

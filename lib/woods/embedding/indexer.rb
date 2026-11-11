@@ -1299,12 +1299,22 @@ module Woods
       # @param current [Pathname, String, nil] the dump this run wrote
       # @return [void]
       def prune_old_dumps(artifact, current: nil)
-        return if @dump_retention_count.nil? || @dump_retention_count <= 0
-        return unless artifact.dumps_root.exist?
+        return unless pruning_dumps?(artifact)
 
         latest = artifact.latest_dump_path&.to_s
-        doomed = prunable_dumps(sorted_dump_dirs(artifact.dumps_root), latest)
+        dirs = sorted_dump_dirs(artifact.dumps_root)
+        return unless migrate_legacy_dumps(artifact.dumps_root, dirs, latest)
+
+        doomed = prunable_dumps(dirs, latest)
         (doomed - [latest, current&.to_s]).each { |dir| FileUtils.rm_rf(dir) }
+      end
+
+      # @param artifact [IndexArtifact]
+      # @return [Boolean] whether a retention window is set and dumps exist
+      def pruning_dumps?(artifact)
+        return false if @dump_retention_count.nil? || @dump_retention_count <= 0
+
+        artifact.dumps_root.exist?
       end
 
       # @param dirs [Array<String>] sorted oldest first
@@ -1318,19 +1328,53 @@ module Woods
       end
 
       # Split dump directories into promoted and unpromoted, keeping order.
-      #
       # A dump is promoted when it carries {PROMOTED_MARKER} or is +latest+.
-      # An unmarked dump that sorts before the oldest marked one predates the
-      # marker (an earlier Woods wrote it) and counts as promoted, as every
-      # dump did before; with no marked dump at all, all of them do.
       #
       # @param dirs [Array<String>] sorted oldest first
       # @param latest [String, nil]
       # @return [Array(Array<String>, Array<String>)]
       def partition_dumps(dirs, latest)
-        marked = dirs.map { |dir| promoted_dump?(dir, latest) }
-        first_marked = marked.index(true) || dirs.length
-        dirs.each_with_index.partition { |_dir, i| i < first_marked || marked[i] }.map { |part| part.map(&:first) }
+        dirs.partition { |dir| promoted_dump?(dir, latest) }
+      end
+
+      # File in the dumps root recording that every dump written before
+      # {PROMOTED_MARKER} existed has been marked.
+      MARKERS_MIGRATED = '.promoted_markers_migrated'
+      private_constant :MARKERS_MIGRATED
+
+      # Mark the dumps an earlier Woods wrote, once per dumps root.
+      #
+      # Dumps written before {PROMOTED_MARKER} existed carry none, though
+      # every one of them was counted as promoted. Those are the unmarked
+      # dumps that sort before the oldest marked one (with none marked, all
+      # of them). They are marked here, and {MARKERS_MIGRATED} records that
+      # this ran, so the boundary is fixed at migration. Inferring it on
+      # every prune moved it as marked dumps were removed, until a fresh
+      # unpromoted dump sorted before the oldest surviving marker and was
+      # deleted as legacy.
+      #
+      # A migration that could not mark every legacy dump writes no record
+      # and returns false, and this run prunes nothing: an unmarked legacy
+      # dump is old enough to be removed as a stale unpromoted one.
+      #
+      # @param dumps_root [Pathname]
+      # @param dirs [Array<String>] sorted oldest first
+      # @param latest [String, nil]
+      # @return [Boolean] whether pruning may go on
+      def migrate_legacy_dumps(dumps_root, dirs, latest)
+        record = dumps_root.join(MARKERS_MIGRATED).to_s
+        return true if File.exist?(record)
+
+        first_marked = dirs.index { |dir| promoted_dump?(dir, latest) } || dirs.length
+        legacy = dirs.first(first_marked)
+        legacy.each { |dir| mark_promoted(dir) }
+        return false unless legacy.all? { |dir| File.exist?(File.join(dir, PROMOTED_MARKER)) }
+
+        AtomicFile.write(record, '')
+        true
+      rescue StandardError => e
+        warn "[woods] could not mark dumps written before promotion markers (#{e.class}: #{e.message})"
+        false
       end
 
       # @return [Boolean] whether +dir+ is +latest+ or carries {PROMOTED_MARKER}

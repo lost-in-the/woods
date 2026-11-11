@@ -221,6 +221,23 @@ RSpec.describe Woods::MCP::Hydration do
       expect(hydration.state).to eq(:failed)
       expect(hydration.error).to be_a(fatal)
     end
+
+    # The state moved to `warming` before Thread.new, so a thread that could
+    # not be created left it there: no worker could finish it, later starts
+    # returned at once, and every wait ran to its cap.
+    it 'records failed when the warm-up thread cannot be created, then re-raises' do
+      hydration = described_class.new(mode: :after_handshake) { nil }
+      allow(Thread).to receive(:new).and_raise(ThreadError, "can't create Thread: Resource temporarily unavailable")
+
+      expect { hydration.start! }.to raise_error(ThreadError, /can't create Thread/)
+      expect(hydration.state).to eq(:failed)
+      expect(hydration.error).to be_a(ThreadError)
+      expect(hydration.to_h).to include(state: 'failed', error: include(class: 'ThreadError'))
+
+      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      expect(hydration.wait(timeout: 5)).to eq(:failed)
+      expect(Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).to be < 1
+    end
   end
 
   describe 'warmup: :before_handshake' do

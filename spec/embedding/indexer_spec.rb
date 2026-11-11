@@ -1133,6 +1133,46 @@ RSpec.describe Woods::Embedding::Indexer do
           expect(File.directory?(fresh)).to be true
           expect(File.directory?(File.join(dumps_dir, '2026-04-20T00-00-00Z'))).to be true
         end
+
+        # The legacy boundary (the oldest marked dump) used to be inferred on
+        # every prune, so it moved once that dump was removed and a fresh
+        # unpromoted dump before the next marker was deleted as legacy.
+        context 'with retention 1' do
+          let(:indexer_with_retention) do
+            described_class.new(
+              provider: provider,
+              text_preparer: text_preparer,
+              vector_store: persistable_store,
+              output_dir: output_dir,
+              batch_size: 2,
+              resolved_config: resolved_config,
+              dump_retention_count: 1
+            )
+          end
+
+          it 'keeps a fresh unpromoted dump protected after the marked dump before it is pruned' do
+            embed_at([2026, 4, 20])
+            fresh = leave_unpromoted('2026-04-20T12-00-00Z')
+
+            embed_at([2026, 4, 21])
+            expect(File.exist?(File.join(dumps_dir, '2026-04-20T00-00-00Z'))).to be false
+            expect(File.directory?(fresh)).to be true
+
+            embed_at([2026, 4, 22])
+            expect(File.directory?(fresh)).to be true
+            expect(File.exist?(File.join(dumps_dir, '2026-04-21T00-00-00Z'))).to be false
+          end
+
+          it 'still counts dumps written before markers existed as promoted' do
+            legacy = %w[2026-04-18T00-00-00Z 2026-04-19T00-00-00Z].map { |name| leave_unpromoted(name) }
+
+            embed_at([2026, 4, 20])
+
+            legacy.each { |dir| expect(File.exist?(dir)).to be false }
+            expect(File.basename(Woods::IndexArtifact.new(output_dir).latest_dump_path.to_s))
+              .to eq('2026-04-20T00-00-00Z')
+          end
+        end
       end
     end
   end
