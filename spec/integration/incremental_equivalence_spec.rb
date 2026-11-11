@@ -1355,7 +1355,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     # Everything a client is shown, for one setting.
     def displayed(dir)
       views = [{ identifier: 'GizmoService', depth: 2 }, { identifier: 'GizmoService', depth: 2, max_nodes: 2 },
-               { identifier: 'GizmoService', depth: 1 }].to_h do |arguments|
+               { identifier: 'GizmoService', depth: 1 }, { identifier: 'GizmoService', depth: 2, families: ['tests'] },
+               { identifier: 'GizmoService', depth: 2, families: ['code'], explain: true }].to_h do |arguments|
         [arguments, { data: tool(dir, 'dependents', :json, arguments).dig('structuredContent', 'data'),
                       text: tool(dir, 'dependents', :markdown, arguments).dig('content', 0, 'text') }]
       end
@@ -1423,6 +1424,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
         .to eq(off.dig(whole, :data, 'dependent_counts', 'headline') + mapped_tests_depth_two.size)
       expect(off.dig(limited, :data, 'dependent_counts')).to include('exact' => false, 'bound' => 'lower_bound')
       expect(off.dig(limited, :text)).to include('Recorded dependents: at least ')
+      selected = off.fetch({ identifier: 'GizmoService', depth: 2, families: ['tests'] })
+      expect(mapped(selected)).to eq(mapped_tests_depth_two)
+      expect(selected.dig(:data, 'selection', 'counts', 'mapped_tests')).to eq(mapped_tests_depth_two.size)
 
       [{}, { max_nodes: 1 }].each do |budget|
         expect(impact_tests(incremental, **budget)).to eq(impact_tests(full, **budget))

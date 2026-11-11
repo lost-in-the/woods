@@ -100,6 +100,77 @@ module DependentsFixture
   end
 end
 
+# A second graph for the `families:` selector, so the counts above stay as
+# they were. Every expected row below is written out by hand from these units.
+module SelectionFixture
+  ANCHOR = 'Gadget'
+
+  module_function
+
+  def units
+    fx = DependentsFixture
+    guide = fx.unit('docs/agent-guide.md', :doc, [[ANCHOR, :model, :documents]])
+    # Published alias: a symlink CLAUDE.md -> docs/agent-guide.md. The
+    # identifier alone would read as plain documentation.
+    guide.metadata = { aliases: ['CLAUDE.md'] }
+    [
+      fx.unit(ANCHOR, :model),
+      fx.unit('GadgetsController', :controller, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('gadgets:sync', :rake_task, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('spec/models/gadget_spec.rb', :test_mapping, [[ANCHOR, :model, :test_coverage]]),
+      fx.unit('spec/requests/gadget_flow_spec.rb', :test_mapping, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('gadget', :factory, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('CreateGadgets', :migration, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('gadget_totals', :database_view, [[ANCHOR, :model, :code_reference]]),
+      fx.unit('docs/gadgets.md', :doc, [[ANCHOR, :model, :documents]]),
+      guide,
+      fx.unit('.claude/rules/gadgets.md', :doc, [[ANCHOR, :model, :documents]]),
+      fx.unit('Oddity', :custom_thing, [[ANCHOR, :model, :code_reference]])
+    ] + second_hop
+  end
+
+  # Depth 2. Code reached only through a factory, which a code selection does
+  # not list; and a doc and a mapped test of the controller.
+  def second_hop
+    fx = DependentsFixture
+    [
+      fx.unit('GadgetSeeder', :service, [['gadget', :factory, :code_reference]]),
+      fx.unit('docs/controllers.md', :doc, [['GadgetsController', :controller, :documents]]),
+      fx.unit('spec/controllers/gadgets_controller_spec.rb', :test_mapping,
+              [['GadgetsController', :controller, :test_coverage]])
+    ]
+  end
+
+  # Every traversed row at depth 2 with its category, in walk order.
+  CATEGORIES_DEPTH_TWO = {
+    '.claude/rules/gadgets.md' => 'agent_instructions', # agent instructions by directory
+    'CreateGadgets' => 'migrations',
+    'GadgetsController' => 'application_code',
+    'Oddity' => 'other', # unknown type
+    'docs/agent-guide.md' => 'agent_instructions', # agent instructions by published alias
+    'docs/gadgets.md' => 'documentation', # near miss: a doc, not an instruction file
+    'gadget' => 'factories',
+    'gadget_totals' => 'schema_objects',
+    'gadgets:sync' => 'rake_tasks',
+    'spec/models/gadget_spec.rb' => 'test_files', # mapped test
+    'spec/requests/gadget_flow_spec.rb' => 'test_files', # near miss: a test, not a mapped test
+    'docs/controllers.md' => 'documentation',
+    'spec/controllers/gadgets_controller_spec.rb' => 'test_files',
+    'GadgetSeeder' => 'application_code' # code through an unselected factory
+  }.freeze
+
+  # `families: ['code']` at depth 2: the listed rows exactly.
+  CODE_ROWS = {
+    ANCHOR => { 'type' => 'model', 'depth' => 0, 'deps' => %w[GadgetsController gadgets:sync], 'hidden_deps' => 9 },
+    'GadgetsController' => { 'type' => 'controller', 'depth' => 1, 'deps' => [], 'hidden_deps' => 2,
+                             'family' => 'code', 'category' => 'application_code' },
+    'gadgets:sync' => { 'type' => 'rake_task', 'depth' => 1, 'deps' => [], 'family' => 'code',
+                        'category' => 'rake_tasks' },
+    'GadgetSeeder' => { 'type' => 'service', 'depth' => 2, 'deps' => [], 'family' => 'code',
+                        'category' => 'application_code', 'reached_through_hidden' => true }
+  }.freeze
+end
+
 RSpec.describe 'dependents families and headline' do
   let(:fx) { DependentsFixture }
 
@@ -125,7 +196,7 @@ RSpec.describe 'dependents families and headline' do
   end
 
   def listed(payload)
-    payload.fetch('nodes').transform_values { |entry| entry.except('family', 'mapped_test') }
+    payload.fetch('nodes').transform_values { |entry| entry.except('family', 'category', 'mapped_test') }
   end
 
   def with_setting(value)
@@ -283,6 +354,260 @@ RSpec.describe 'dependents families and headline' do
       expect(forward).not_to have_key('dependent_counts')
       expect(forward.fetch('nodes').values).to all(satisfy { |entry| !entry.key?('family') })
       expect(data(identifier: 'Absent')).not_to have_key('dependent_counts')
+    end
+  end
+
+  describe 'detailed categories' do
+    {
+      [%w[model], []] => 'application_code', [%w[rake_task], []] => 'rake_tasks',
+      [%w[test_mapping], []] => 'test_files', [%w[test_support], []] => 'test_files',
+      [%w[factory], []] => 'factories', [%w[migration], []] => 'migrations',
+      [%w[database_table], []] => 'schema_objects', [%w[external_consumer], []] => 'schema_objects',
+      [%w[doc], %w[docs/setup.md]] => 'documentation', [%w[doc], %w[AGENTS.md]] => 'agent_instructions',
+      [%w[route], []] => 'other', [%w[custom_thing], []] => 'other', [[nil], []] => 'other', [[], []] => 'other',
+      # Same family, different categories: the family's general category.
+      [%w[model rake_task], []] => 'application_code', [%w[factory test_mapping], []] => 'test_files',
+      # Different families: other, as the family is.
+      [%w[model migration], []] => 'other'
+    }.each do |(types, paths), category|
+      it "classifies #{types.inspect} at #{paths.inspect} as #{category}" do
+        expect(Woods::MCP::DependentFamilies.category_for(types, paths: paths)).to eq(category)
+      end
+    end
+
+    {
+      %w[AGENTS.md] => true, %w[packs/billing/AGENTS.md] => true, %w[CLAUDE.md] => true,
+      %w[CLAUDE.local.md] => true, %w[GEMINI.md] => true, %w[.claude/skills/deploy/SKILL.md] => true,
+      %w[.claude/rules/style.md] => true, %w[engines/shop/.claude/rules/style.md] => true,
+      %w[.github/copilot-instructions.md] => true, %w[.github/instructions/ruby.instructions.md] => true,
+      # Near misses: the name differs in case or is only part of a file name,
+      # or the directory is a different one.
+      %w[docs/agents.md] => false, %w[docs/CLAUDE.md.notes.md] => false, %w[docs/claude-notes.md] => false,
+      %w[.github/PULL_REQUEST_TEMPLATE.md] => false, %w[docs/instructions/setup.md] => false,
+      %w[README.md] => false, [] => false, [''] => false,
+      # An absolute path is outside the application root: never matched.
+      %w[/home/dev/.claude/CLAUDE.md] => false,
+      # An alias decides as much as the identifier does.
+      %w[docs/agent-guide.md CLAUDE.md] => true
+    }.each do |paths, expected|
+      it "reads #{paths.inspect} as #{expected ? 'agent instructions' : 'documentation'}" do
+        expect(Woods::MCP::DependentFamilies.agent_instructions?(paths)).to be(expected)
+      end
+    end
+
+    it 'puts every category inside exactly one family' do
+      families = Woods::MCP::DependentFamilies::CATEGORY_FAMILY
+      expect(families.values.uniq).to match_array(Woods::MCP::DependentFamilies::FAMILIES)
+      expect(Woods::MCP::DependentFamilies::GENERAL_CATEGORY.all? { |family, category| families[category] == family })
+        .to be(true)
+    end
+
+    it 'never names a category after a family it does not equal' do
+      families = Woods::MCP::DependentFamilies::FAMILIES
+      shared = Woods::MCP::DependentFamilies::CATEGORIES & families
+      expect(shared).to eq(%w[other])
+      in_other = Woods::MCP::DependentFamilies::CATEGORY_FAMILY.select { |_category, family| family == 'other' }
+      expect(in_other.keys).to eq(%w[other])
+    end
+
+    it 'reads aliases from the published graph, whatever root its paths were written against' do
+      SelectionFixture.units.then { |units| DependentsFixture.publish(@root, 1, units) }
+      reader = Woods::MCP::IndexReader.new(@root)
+      expect(reader.published_paths('docs/agent-guide.md')).to eq(%w[docs/agent-guide.md CLAUDE.md])
+      expect(reader.published_paths('docs/gadgets.md')).to eq(%w[docs/gadgets.md])
+      expect(reader.published_paths('Absent')).to eq(%w[Absent])
+    end
+  end
+
+  describe 'families selector' do
+    let(:sx) { SelectionFixture }
+
+    before { fx.publish(@root, 1, sx.units) }
+
+    def rpc(arguments, format: :json)
+      call(format, identifier: sx::ANCHOR, depth: 2, **arguments)
+    end
+
+    it 'classifies every traversed row, and the categories add up to their families' do
+      payload = data(identifier: sx::ANCHOR, depth: 2)
+      nodes = payload.fetch('nodes').except(sx::ANCHOR)
+      expect(nodes.transform_values { |entry| entry.fetch('category') }).to eq(sx::CATEGORIES_DEPTH_TWO)
+      counts = payload.fetch('dependent_counts')
+      expect(counts.fetch('categories')).to eq(
+        'application_code' => 2, 'rake_tasks' => 1, 'test_files' => 3, 'factories' => 1, 'schema_objects' => 1,
+        'migrations' => 1, 'documentation' => 2, 'agent_instructions' => 2, 'other' => 1
+      )
+      families = Woods::MCP::DependentFamilies::CATEGORY_FAMILY
+      by_family = counts.fetch('categories').group_by { |category, _| families.fetch(category) }
+                        .transform_values { |pairs| pairs.sum(&:last) }
+      expect(by_family).to eq(counts.fetch('families'))
+      expect(counts.fetch('total')).to eq(sx::CATEGORIES_DEPTH_TWO.size)
+    end
+
+    it 'lists code reached through an unselected row, without claiming a direct edge' do
+      payload = data(identifier: sx::ANCHOR, depth: 2, families: ['code'])
+      expect(payload.fetch('nodes')).to eq(sx::CODE_ROWS)
+      expect(payload.fetch('selection')).to eq(
+        'requested' => %w[code], 'categories' => %w[application_code rake_tasks],
+        'counts' => {
+          'scope' => 'whole_traversal', 'exact' => true, 'bound' => 'exact', 'total' => 3, 'headline' => 3,
+          'mapped_tests' => 0, 'reverse_includes_tests' => false,
+          'families' => { 'code' => 3, 'tests' => 0, 'schema' => 0, 'docs' => 0, 'other' => 0 },
+          'categories' => { 'application_code' => 2, 'rake_tasks' => 1, 'test_files' => 0, 'factories' => 0,
+                            'schema_objects' => 0, 'migrations' => 0, 'documentation' => 0,
+                            'agent_instructions' => 0, 'other' => 0 },
+          'not_selected' => 11
+        }
+      )
+      # The traversal counts are the unfiltered walk's, unchanged.
+      expect(payload.fetch('dependent_counts')).to eq(data(identifier: sx::ANCHOR, depth: 2).fetch('dependent_counts'))
+    end
+
+    it 'prunes nothing: the selected rows are the unselected walk filtered, in walk order' do
+      whole = data(identifier: sx::ANCHOR, depth: 2).fetch('nodes')
+      Woods::MCP::DependentFamilies::SELECTOR_VALUES.each do |value|
+        payload = data(identifier: sx::ANCHOR, depth: 2, families: [value])
+        families = Woods::MCP::DependentFamilies::CATEGORY_FAMILY
+        expected = whole.keys.select do |id|
+          id == sx::ANCHOR || whole[id]['category'] == value || families[whole[id]['category']] == value
+        end
+        expect(payload.fetch('nodes').keys).to eq(expected), value
+        expect(payload.dig('selection', 'counts', 'total')).to eq(expected.size - 1), value
+      end
+    end
+
+    it 'selects a family as the union of its categories, whatever order and repeats it is given in' do
+      docs = data(identifier: sx::ANCHOR, depth: 2, families: %w[docs])
+      split = data(identifier: sx::ANCHOR, depth: 2, families: %w[agent_instructions documentation documentation])
+      expect(split.fetch('nodes')).to eq(docs.fetch('nodes'))
+      expect(split.dig('selection', 'categories')).to eq(%w[documentation agent_instructions])
+      expect(split.dig('selection', 'requested')).to eq(%w[documentation agent_instructions])
+      expect(data(identifier: sx::ANCHOR, depth: 2, families: %w[migrations code code]).dig('selection', 'requested'))
+        .to eq(%w[code migrations])
+      expect(data(identifier: sx::ANCHOR, depth: 2, families: %w[code docs]).fetch('nodes').keys)
+        .to eq([sx::ANCHOR, '.claude/rules/gadgets.md', 'GadgetsController', 'docs/agent-guide.md',
+                'docs/gadgets.md', 'gadgets:sync', 'docs/controllers.md', 'GadgetSeeder'])
+    end
+
+    it 'refuses an empty selector, an unknown value and a selector on dependencies' do
+      empty = rpc({ families: [] })
+      expect(empty['isError']).to be(true)
+      expect(empty.dig('content', 0, 'text')).to include('families must name at least one family or category')
+
+      unknown = rpc({ families: %w[code specs] })
+      expect(unknown['isError']).to be(true)
+      expect(unknown.dig('content', 0, 'text')).to include('families')
+
+      expect { Woods::MCP::DependentFamilies.resolve_selector(%w[code specs Code]) }
+        .to raise_error(ArgumentError, /unknown families values: "specs", "Code"; expected any of code, tests/)
+
+      server = Woods::MCP::Server.build(index_dir: @root, response_format: :json, warmup: false)
+      request = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                  params: { name: 'dependencies', arguments: { identifier: 'GadgetSeeder', families: ['code'] } } }
+      expect(JSON.parse(server.handle_json(JSON.generate(request))).dig('result', 'isError')).to be(true)
+    end
+
+    it 'answers an identifier the index lacks without a selection' do
+      payload = data(identifier: 'Absent', families: ['code'])
+      expect(payload).to include('found' => false)
+      expect(payload).not_to have_key('selection')
+    end
+
+    it 'pages the selected rows, and counts them over every page' do
+      first = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], limit: 2)
+      second = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], limit: 2, offset: 2)
+      expect(first.fetch('nodes').keys).to eq([sx::ANCHOR, 'GadgetsController'])
+      expect(first).to include('nodes_total' => 4, 'nodes_truncated' => true)
+      expect(second.fetch('nodes').keys).to eq(%w[gadgets:sync GadgetSeeder])
+      expect(second).to include('nodes_total' => 4, 'nodes_offset' => 2)
+      expect(second).not_to have_key('nodes_truncated')
+      expect(first.fetch('selection')).to eq(second.fetch('selection'))
+      beyond = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], limit: 2, offset: 4)
+      expect(beyond.fetch('nodes')).to be_empty
+      expect(beyond.fetch('selection')).to eq(first.fetch('selection'))
+    end
+
+    it 'reports selected counts after either budget as lower bounds' do
+      # Node budget 5: the root and the first four direct dependents, in stored order.
+      by_nodes = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], max_nodes: 5)
+      expect(by_nodes.fetch('nodes').keys).to eq([sx::ANCHOR, 'GadgetsController'])
+      expect(by_nodes.dig('selection', 'counts')).to include('exact' => false, 'bound' => 'lower_bound',
+                                                             'total' => 1, 'not_selected' => 3)
+      # Edge budget 3: three reverse entries checked, then the walk stops.
+      by_edges = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], max_edges: 3)
+      expect(by_edges.fetch('nodes').keys).to eq([sx::ANCHOR, 'GadgetsController'])
+      expect(by_edges).to include('partial_reason' => 'edge_budget')
+      expect(by_edges.dig('selection', 'counts')).to include('bound' => 'lower_bound', 'total' => 1)
+    end
+
+    it 'composes with via, which prunes edges before the selection reads the rows' do
+      payload = data(identifier: sx::ANCHOR, depth: 2, via: ['code_reference'], families: ['tests'])
+      expect(payload.fetch('nodes').keys).to eq([sx::ANCHOR, 'gadget', 'spec/requests/gadget_flow_spec.rb'])
+      expect(payload.dig('selection', 'counts', 'mapped_tests')).to eq(0)
+    end
+
+    it 'composes with types, which prunes the walk; families never does' do
+      pruned = data(identifier: sx::ANCHOR, depth: 2, types: ['service'], families: ['code'])
+      expect(pruned.fetch('nodes').keys).to eq([sx::ANCHOR])
+      through = data(identifier: sx::ANCHOR, depth: 2, types: %w[service factory], families: ['code'])
+      expect(through.fetch('nodes')).to eq(
+        sx::ANCHOR => { 'type' => 'model', 'depth' => 0, 'deps' => [], 'hidden_deps' => 1 },
+        'GadgetSeeder' => sx::CODE_ROWS.fetch('GadgetSeeder')
+      )
+    end
+
+    it 'keeps the witness path through unselected rows, marked, with every reference resolvable' do
+      payload = data(identifier: sx::ANCHOR, depth: 2, families: ['code'], explain: true)
+      expect(payload.fetch('nodes').keys).to eq(sx::CODE_ROWS.keys)
+      explanation = payload.fetch('explanation')
+      witnesses = explanation.fetch('witnesses')
+      expect(witnesses.transform_values { |witness| witness.values_at('selection', 'context', 'parent') }).to eq(
+        sx::ANCHOR => ['root', false, nil],
+        'GadgetsController' => ['selected', false, sx::ANCHOR],
+        'gadget' => ['not_selected', true, sx::ANCHOR],
+        'gadgets:sync' => ['selected', false, sx::ANCHOR],
+        'GadgetSeeder' => ['selected', false, 'gadget']
+      )
+      expect(witnesses.fetch('GadgetSeeder')).to include('impact' => 'transitive')
+      witnesses.each_value do |witness|
+        expect(witnesses).to have_key(witness['parent']) if witness['parent']
+        expect(explanation.fetch('edges')).to have_key(witness['edge_id']) if witness['edge_id']
+      end
+      seeder_edge = explanation.fetch('edges').fetch(witnesses.dig('GadgetSeeder', 'edge_id'))
+      expect(seeder_edge.dig('source', 'identifier')).to eq('GadgetSeeder')
+      expect(seeder_edge.dig('target', 'identifier')).to eq('gadget')
+      # Explain adds evidence only: the same rows and counts as without it.
+      plain = data(identifier: sx::ANCHOR, depth: 2, families: ['code'])
+      expect(payload.fetch('nodes')).to eq(plain.fetch('nodes'))
+      expect(payload.fetch('selection')).to eq(plain.fetch('selection'))
+    end
+
+    it 'counts selected mapped tests toward the selected headline only when the setting says so' do
+      off = data(identifier: sx::ANCHOR, depth: 2, families: ['tests'])
+      expect(off.dig('selection', 'counts')).to include('headline' => 0, 'mapped_tests' => 2, 'total' => 4)
+      expect(off.fetch('nodes').select { |_id, entry| entry.key?('mapped_test') }.keys)
+        .to eq(%w[spec/models/gadget_spec.rb spec/controllers/gadgets_controller_spec.rb])
+      on = with_setting(true) { data(identifier: sx::ANCHOR, depth: 2, families: ['tests']) }
+      expect(on.dig('selection', 'counts')).to include('headline' => 2, 'reverse_includes_tests' => true)
+      expect(on.fetch('nodes')).to eq(off.fetch('nodes'))
+    end
+
+    it 'prints the selection, its categories and the rows reached through unselected ones' do
+      %i[markdown plain claude].each do |format|
+        text = rpc({ families: ['code'] }, format: format).dig('content', 0, 'text')
+        expect(text).to include('By category: application_code 2, rake_tasks 1, test_files 3, factories 1, ' \
+                                'schema_objects 1, migrations 1, documentation 2, agent_instructions 2, other 1.')
+        expect(text).to include('Selected (families: code): 3 listed, 11 traversed but not listed; ' \
+                                'headline 3 (code), Mapped tests 0.')
+        expect(text).to include('Selected by category: application_code 2, rake_tasks 1.')
+        expect(text).to match(/GadgetSeeder(\*\*)? \(reached through rows outside the selection\)/)
+        expect(text).to match(/Gadget(\*\*)? \(9 dependents outside the selection\)/)
+      end
+      text = rpc({ families: ['code'], explain: true }, format: :plain).dig('content', 0, 'text')
+      expect(text).to include('gadget: direct; parent=Gadget')
+      expect(text).to match(/^gadget: .*context only=yes; selection=not_selected$/)
+      limited = rpc({ families: ['code'], max_nodes: 5 }, format: :markdown).dig('content', 0, 'text')
+      expect(limited).to include('Selected (families: code): at least 1 listed')
     end
   end
 
@@ -462,10 +787,21 @@ RSpec.describe 'dependents families and headline' do
           result = reader.traverse_dependents('Hub', **walk)
           timed { Woods::MCP::DependentFamilies.annotate(result, vias: reader.method(:recorded_vias)) }
         end
+        selector = Woods::MCP::DependentFamilies.resolve_selector(%w[code])
+        select = Array.new(5) do
+          result = reader.traverse_dependents('Hub', **walk)
+          Woods::MCP::DependentFamilies.annotate(result, vias: reader.method(:recorded_vias))
+          timed { Woods::MCP::DependentSelection.apply(result, selector) }
+        end
+        selected_request = JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call',
+                                         params: { name: 'dependents',
+                                                   arguments: { identifier: 'Hub', families: %w[code], **walk } })
+        selected_calls = Array.new(5) { timed { server.handle_json(selected_request) } }
         warn format('dependents hub %<walk>s: %<rows>d rows, call median %<call>.1f ms, ' \
-                    'classify median %<classify>.1f ms (first after load %<cold>.1f ms)',
+                    'classify median %<classify>.1f ms (first after load %<cold>.1f ms), ' \
+                    'families: [code] call median %<selected>.1f ms, select median %<select>.1f ms',
                     walk: walk.inspect, rows: rows, call: median_ms(calls), classify: median_ms(classify),
-                    cold: cold * 1000)
+                    cold: cold * 1000, selected: median_ms(selected_calls), select: median_ms(select))
       end
     end
   end

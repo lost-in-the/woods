@@ -39,8 +39,9 @@ module Woods
         edge = value(witness, :edge_id) || 'none'
         complete = value(witness, :typed_path_complete) ? 'yes' : 'no'
         context = value(witness, :context) ? 'yes' : 'no'
+        selection = value(witness, :selection)
         "#{identifier}: #{value(witness, :impact)}; parent=#{parent}; edge=#{edge}; " \
-          "witness types unambiguous=#{complete}; context only=#{context}"
+          "witness types unambiguous=#{complete}; context only=#{context}#{"; selection=#{selection}" if selection}"
       end
 
       def self.value(hash, key)

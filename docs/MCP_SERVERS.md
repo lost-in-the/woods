@@ -585,6 +585,7 @@ The result carries `dependent_counts`:
 | `mapped_tests` | mapped test rows, always reported beside the headline |
 | `reverse_includes_tests` | the setting this answer used |
 | `families` | `code`, `tests`, `schema`, `docs`, `other`; they add up to `total` |
+| `categories` | the [detailed categories](#detailed-categories); they add up to `total`, and each family's add up to it |
 | `total` | rows in the traversal, without the root |
 | `scope` | `whole_traversal`: the counts cover the whole walk, not the page `limit`/`offset` selected |
 | `exact`, `bound` | `true`/`exact` for a finished walk; `false`/`lower_bound` after a budget cutoff, when every count is a lower bound |
@@ -593,8 +594,8 @@ The counts are taken after the `depth`, `types` and `via` filters. They are
 recorded dependents, impact candidates in the published graph: they say
 nothing about what a change will break. Text renderers print the server's
 counts as given, for example `Recorded dependents: 12 (code); Mapped tests: 3
-(listed, not counted).` and a `By family:` line, prefixed with `at least` for a
-lower bound. `dependencies` carries neither field.
+(listed, not counted).`, a `By family:` line and a `By category:` line naming
+the nonzero categories, prefixed with `at least` for a lower bound. `dependencies` carries neither field.
 
 Mapped tests are always listed, so the rows, their order and the traversal
 budget are what they were before families existed. The setting
@@ -603,6 +604,89 @@ budget are what they were before families existed. The setting
 decides whether they count toward `headline`. The server reads it per query;
 extraction never reads it, so changing it needs no re-extraction.
 `woods_status` reports it as `features.reverse_includes_tests`.
+
+#### Detailed categories
+
+Each family splits into categories, and every category lies inside exactly
+one family, so a family's categories add up to it. Each row but the root also
+carries `category`, and `dependent_counts.categories` counts them over the
+whole traversal.
+
+| Family | Category | Unit types |
+|---|---|---|
+| `code` | `application_code` | every `code` type but `rake_task` |
+| `code` | `rake_tasks` | `rake_task` |
+| `tests` | `test_files` | `test_mapping`, `test_support` |
+| `tests` | `factories` | `factory` |
+| `schema` | `schema_objects` | `database_table`, `database_view`, `external_consumer` |
+| `schema` | `migrations` | `migration` |
+| `docs` | `documentation` | `doc` that is not an agent instruction file |
+| `docs` | `agent_instructions` | `doc` whose path matches the rule below |
+| `other` | `other` | the `other` family |
+
+An identifier whose types share a family but not a category takes the
+family's general category (`application_code`, `test_files`, `schema_objects`,
+`documentation`); one whose types span families is `other`, as its family is.
+
+A `doc` row is `agent_instructions` when its identifier, or one of the alias
+paths the graph publishes for it (the `source_paths` of a document that
+symlinks reach), is a root-relative path that:
+
+- has the file name `AGENTS.md`, `CLAUDE.md`, `CLAUDE.local.md`, `GEMINI.md`
+  or `SKILL.md`, in any directory; or
+- lies under a `.claude/` directory at any depth, or under
+  `.github/instructions/`; or
+- is exactly `.github/copilot-instructions.md`.
+
+Names match exactly, case included. A document's text is never read to decide
+its category, and an absolute path (outside the application root) never
+matches. So `docs/agent-guide.md` aliased by a `CLAUDE.md` symlink counts as
+agent instructions, and `docs/agents.md` does not.
+
+#### Selecting families
+
+`families:` lists only the rows in the named families or categories. It takes
+an array of any of `code`, `tests`, `schema`, `docs`, `other` and the category
+names above; a family selects all of its categories, and `other` is both the
+same rows. Repeats collapse and order does not matter. An empty array or an
+unknown value is refused with `invalid_params`; `dependencies` does not take
+it.
+
+The selector filters the finished walk. It never prunes the traversal, which
+is how it differs from `types`:
+
+- `depth`, `via`, `types` and the budgets decide which rows the walk reaches,
+  exactly as without `families:`. `types` prunes during the walk, so a row it
+  rejects is never expanded and its dependents are never reached.
+- `families:` then keeps the reached rows in the selected categories, in walk
+  order. A selected row reached only through an unselected one is still
+  listed, at its own depth.
+- Paging (`limit`, `offset`, `nodes_total`) applies to the selected rows.
+
+Listed rows keep only the recorded edges between listed rows in `deps`, so a
+row reached through a hidden one is never shown as a direct dependent of the
+root. A row whose `deps` lost edges carries `hidden_deps`, the number left
+out; a row none of whose recorded parents is listed carries
+`reached_through_hidden: true`. Text renderers mark both.
+
+With `explain`, the witness forest keeps unselected ancestors of listed rows
+as context witnesses (`context: true`), so every `parent` and `edge_id` still
+resolves. Each witness then carries `selection`: `root`, `selected` or
+`not_selected`.
+
+`dependent_counts` stays the count of every traversed row. The answer adds
+`selection`:
+
+| Field | Meaning |
+|---|---|
+| `requested` | the distinct selector values, in vocabulary order |
+| `categories` | the categories they cover |
+| `counts` | the `dependent_counts` fields over the selected rows only: `total`, `headline` (selected code, plus selected mapped tests when `reverse_includes_tests` is on), `mapped_tests`, `families`, `categories`, `exact`/`bound`; and `not_selected`, the traversed rows left out |
+
+Like `dependent_counts`, the selected counts cover every page and become
+lower bounds after a budget cutoff. Text renderers print a `Selected
+(families: ...)` line and the selected categories.
+
 
 ### Dependency traversal budgets
 

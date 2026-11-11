@@ -39,9 +39,9 @@ RSpec.describe 'Traversal response scope and totals' do
   end
 
   # The rows as the reader walked them; `dependents` adds only each row's
-  # family (and mapped-test relationship) on top.
+  # family, category (and mapped-test relationship) on top.
   def listed_rows(data)
-    data['nodes'].transform_values { |entry| entry.except('family', 'mapped_test') }
+    data['nodes'].transform_values { |entry| entry.except('family', 'category', 'mapped_test') }
   end
 
   def traverse(name, **arguments)
