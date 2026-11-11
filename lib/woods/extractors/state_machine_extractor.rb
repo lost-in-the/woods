@@ -38,6 +38,16 @@ module Woods
 
       MODEL_DIRECTORIES = %w[app/models].freeze
 
+      # Kernel methods that call their block exactly once, before returning,
+      # with +self+ unchanged. An iterator's block (+each+, +times+, +map+)
+      # runs once per element, which depends on runtime values, so it is not
+      # among them.
+      RUNS_BLOCK_ONCE = %i[tap then yield_self].freeze
+
+      # Methods that run their block once with their receiver as +self+, so
+      # only a receiverless or +self+ call keeps the DSL as +self+.
+      EVALUATES_BLOCK_ON_RECEIVER = %i[instance_eval instance_exec].freeze
+
       # An event declaration that opens a block: the (neutralized) line ends
       # in +do+, optionally with block parameters (`event :pay do |order|`).
       EVENT_BLOCK_OPENER = /\bdo(?:\s*\|[^|]*\|)?\z/
@@ -270,7 +280,7 @@ module Woods
       # so does a literal proc forwarded as the block (+aasm(&proc { ... })+).
       #
       # @param node [Prism::Node, nil] parsed source
-      # @return [Array<Prism::BlockNode>] the definitions' blocks
+      # @return [Array<Prism::BlockNode, Prism::LambdaNode>] the definitions' blocks
       def aasm_definitions(node)
         definitions = []
         each_call_outside_methods(node) do |call|
@@ -286,21 +296,67 @@ module Woods
       end
 
       # The block a DSL call reads, when the source states it: a +do+/braces
-      # block, or a forwarded +proc { }+ or +Proc.new { }+ literal. Any other
-      # forwarded expression (a variable, a method call, +method(:x)+) is not
-      # evaluated. A lambda is not a definition: AASM 6.0.0 runs the block
-      # with +instance_eval+, which passes a lambda one argument too many and
-      # raises, so a forwarded lambda declares nothing.
+      # block, or a forwarded +proc { }+, +Proc.new { }+, +lambda { }+ or
+      # +-> { }+ literal. Any other forwarded expression (a variable, a method
+      # call, +method(:x)+) is not evaluated.
+      #
+      # AASM 6.0.0 runs the definition's and each event's block with
+      # +instance_eval+, which passes the receiver as one argument. A proc
+      # ignores it; a lambda raises +ArgumentError+ unless it accepts exactly
+      # one positional argument, so only such a lambda declares anything
+      # (see {#takes_one_argument?}).
       #
       # @param call [Prism::CallNode]
-      # @return [Prism::BlockNode, nil]
+      # @return [Prism::BlockNode, Prism::LambdaNode, nil]
       def literal_block(call)
         block = call.block
         return block if block.is_a?(Prism::BlockNode)
         return unless block.is_a?(Prism::BlockArgumentNode)
 
         forwarded = block.expression
-        forwarded.block if proc_literal?(forwarded) && forwarded.block.is_a?(Prism::BlockNode)
+        return forwarded if forwarded.is_a?(Prism::LambdaNode) && takes_one_argument?(forwarded.parameters)
+        return unless forwarded.is_a?(Prism::CallNode) && forwarded.block.is_a?(Prism::BlockNode)
+
+        body = forwarded.block
+        return body if proc_literal?(forwarded)
+
+        body if lambda_literal?(forwarded) && takes_one_argument?(body.parameters)
+      end
+
+      # Whether a lambda with these parameters can be called with exactly one
+      # positional argument, as +instance_eval+ calls it. Checked against
+      # AASM 6.0.0: +->(*)+, +->(dsl)+, +->(dsl, extra = 1)+, +->(dsl, **opts)+,
+      # +lambda { |dsl| }+ and +-> { _1 }+ register their events; +-> { }+,
+      # +->(a, b)+, +->(dsl, key:)+, +->(**opts)+, +->(&blk)+ and +-> { _2 }+
+      # raise. +it+ (Ruby 3.4) is not counted: no supported runtime here
+      # confirmed it.
+      #
+      # @param parameters [Prism::Node, nil] a lambda's or block's parameters
+      # @return [Boolean]
+      def takes_one_argument?(parameters)
+        case parameters
+        when Prism::NumberedParametersNode then parameters.maximum == 1
+        when Prism::BlockParametersNode then accepts_one_positional?(parameters.parameters)
+        else false
+        end
+      end
+
+      # @param params [Prism::ParametersNode, nil]
+      # @return [Boolean]
+      def accepts_one_positional?(params)
+        return false unless params
+        return false if params.keywords.any?(Prism::RequiredKeywordParameterNode)
+
+        required = params.requireds.size + params.posts.size
+        return false if required > 1
+
+        required == 1 || params.optionals.any? || params.rest.is_a?(Prism::RestParameterNode)
+      end
+
+      # @param node [Prism::CallNode]
+      # @return [Boolean] whether +node+ is a bare +lambda+ call
+      def lambda_literal?(node)
+        node.name == :lambda && node.receiver.nil? && node.arguments.nil?
       end
 
       # @param node [Prism::Node, nil]
@@ -441,7 +497,7 @@ module Woods
       # line: a method named +class+ or a +:begin+ symbol opens nothing. A
       # blockless declaration (`event :noop`) is an event with no transitions.
       #
-      # @param node [Prism::BlockNode, nil] an aasm or state_machine block
+      # @param node [Prism::BlockNode, Prism::LambdaNode, nil] an aasm or state_machine block
       # @return [Array<Hash>] events with :name and :transitions keys, in source order
       def parse_events_from_node(node)
         events = []
@@ -452,25 +508,46 @@ module Woods
         events
       end
 
-      # Yield the calls a DSL block runs while it is read: the calls in its
-      # statements, including those under +if+, +unless+, +case+ and +begin+.
-      # A call's own block and arguments are not entered. They hold code the
-      # DSL keeps for later, such as a callback (+after_all_events { ... }+,
-      # an event's +after { ... }+) or an option (+after: -> { ... }+), so an
-      # +event+ or +transitions+ call there declares nothing. A method body,
-      # a lambda and a class body run later too.
+      # Yield the calls a DSL block runs while it is read, in the order Ruby
+      # runs them: the calls in its statements, including those under +if+,
+      # +unless+, +case+ and +begin+, and for each call its receiver and its
+      # arguments before the call itself (+event(:x) { ... }.tap {}+ and
+      # +Array(transitions(...))+ declare at once). A call's own block is
+      # entered only when Ruby runs it once, at once (see {#runs_block_at_once?}),
+      # and a block forwarded with +&+ never is: the rest hold code the DSL
+      # keeps for later, such as a callback (+after_all_events { ... }+, an
+      # event's +after { ... }+), so an +event+ or +transitions+ call there
+      # declares nothing. A method body, a lambda and a class body run later
+      # too.
       #
-      # @param node [Prism::BlockNode, nil] the DSL block
+      # @param node [Prism::BlockNode, Prism::LambdaNode, nil] the DSL block
       # @yieldparam call [Prism::CallNode]
       def each_dsl_call(node, &block)
-        node = node.body if node.is_a?(Prism::BlockNode)
+        node = node.body if node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
 
         case node
-        when Prism::CallNode then yield node
+        when Prism::CallNode
+          each_dsl_call(node.receiver, &block)
+          each_dsl_call(node.arguments, &block)
+          each_dsl_call(node.block.expression, &block) if node.block.is_a?(Prism::BlockArgumentNode)
+          yield node
+          each_dsl_call(node.block, &block) if runs_block_at_once?(node)
         when Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
           nil
         when Prism::Node then node.compact_child_nodes.each { |child| each_dsl_call(child, &block) }
         end
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [Boolean] whether Ruby runs +call+'s literal block while the
+      #   definition is read, with the DSL still +self+. Checked against
+      #   AASM 6.0.0, where an event declared in each such block registers.
+      def runs_block_at_once?(call)
+        return false unless call.block.is_a?(Prism::BlockNode)
+        return true if RUNS_BLOCK_ONCE.include?(call.name)
+
+        EVALUATES_BLOCK_ON_RECEIVER.include?(call.name) && call.arguments.nil? &&
+          (call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode))
       end
 
       # Yield every call under +node+ in source order. A call for which the
@@ -500,7 +577,7 @@ module Woods
         name if name.match?(/\A\w+\z/)
       end
 
-      # @param block [Prism::BlockNode, nil] an event's block
+      # @param block [Prism::BlockNode, Prism::LambdaNode, nil] an event's block
       # @return [Array<Hash>] the transitions declared inside it
       def event_transitions(block)
         transitions = []
