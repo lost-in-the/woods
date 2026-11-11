@@ -1,0 +1,1 @@
+- `spec/ci/parallel_booted_spec.rb` checks the incremental-equivalence harness split with RSpec's own dry run: the line-filtered and per-seed processes together must declare every example of the file exactly once. A top-level loop with a second example, or a top-level form the line parser does not recognise, now fails that spec instead of silently dropping examples from CI.
