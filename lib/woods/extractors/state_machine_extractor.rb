@@ -395,13 +395,16 @@ module Woods
       end
 
       # Yield every call under +node+ in source order. A call for which the
-      # block returns true is not descended into.
+      # block returns true is not descended into, and neither is a method
+      # body: a +def+ runs later, so an +event+ or +transitions+ call in one
+      # declares nothing.
       #
       # @param node [Prism::Node, nil]
       # @yieldparam call [Prism::CallNode]
       # @yieldreturn [Boolean] true to skip the call's children
       def each_call_outside_events(node, &block)
         return unless node.is_a?(Prism::Node)
+        return if node.is_a?(Prism::DefNode)
         return if node.is_a?(Prism::CallNode) && yield(node)
 
         node.compact_child_nodes.each { |child| each_call_outside_events(child, &block) }
