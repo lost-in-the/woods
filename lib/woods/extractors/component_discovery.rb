@@ -142,6 +142,27 @@ module Woods
         ComponentDiscovery.component_paths
       end
 
+      # Ask the autoloader for every component file's constant, once, for the
+      # orchestrator (#1040).
+      #
+      # Files under an autoload-only root (`app/views` by default) can define
+      # more than components: an `ActiveSupport::Concern` kept beside its
+      # templates, for one. The shared {ConcernClassification} answers by what
+      # is loaded and memoizes that answer for the run, so the walk has to
+      # finish before any extraction family, path dispatch or reconciliation
+      # reads it. After a Rails reload nothing else loads these files until a
+      # component extractor reaches them, which is too late.
+      #
+      # The walk is the one {#load_component_files} performs: the configured
+      # directories only (an empty `component_paths` walks nothing), loading
+      # only what an autoload root owns, and never aborting on a file that
+      # fails to load.
+      #
+      # @return [void]
+      def self.load_component_files
+        Walker.new.load_component_files
+      end
+
       # @see #component_directories
       def self.component_directories
         present = component_paths
@@ -259,6 +280,12 @@ module Woods
           end
           roots.uniq.sort_by { |path| -path.length }
         end
+      end
+
+      # A bare carrier for the walk, so the orchestrator runs it without a
+      # component extractor.
+      class Walker
+        include ComponentDiscovery
       end
     end
   end

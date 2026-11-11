@@ -597,6 +597,7 @@ module Woods
 
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
+      profile_phase('component load') { load_runtime_discovery_files }
 
       # Phase 1: Extract all units
       profile_phase('extraction') do
@@ -1084,6 +1085,7 @@ module Woods
       prepare_source_reference_baseline
       ModelNameCache.reset!
       profile_phase('eager load') { safe_eager_load! }
+      profile_phase('component load') { load_runtime_discovery_files }
 
       @results = {}
       @timing_collector = Extraction::ExtractorTimings.new
@@ -1777,6 +1779,28 @@ module Woods
       Rails.logger.warn '[Woods] Falling back to per-directory eager loading'
       @eager_load_complete = false
       eager_load_extraction_directories
+    end
+
+    # Finish the configured component-directory autoload walk before anything
+    # reads the shared concern classification (#1040).
+    #
+    # {Extractors::ConcernClassification} answers "is this module a concern?"
+    # by what is loaded, and memoizes the answer for the run. A concern kept
+    # under an autoload-only root (`app/views`) is loaded by nothing but the
+    # component walk, which used to run inside the component extractors. Path
+    # dispatch or an earlier family could read the classification first, and
+    # reconciliation then pruned the live concern as no longer owned; after a
+    # Rails reload every incremental run repeated the loss. Running the walk
+    # here, right after the eager load, gives full, concurrent, incremental and
+    # refresh runs the load state a full extraction classifies in.
+    #
+    # It walks only the configured component directories, loads only files an
+    # autoload root owns, and does not touch {#safe_eager_load!}'s record of
+    # whether the eager load was complete.
+    #
+    # @return [void]
+    def load_runtime_discovery_files
+      Extractors::ComponentDiscovery.load_component_files
     end
 
     # Load classes from each extraction-relevant app/ subdirectory individually.

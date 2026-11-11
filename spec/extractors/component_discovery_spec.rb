@@ -190,6 +190,27 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
     end
   end
 
+  describe '.load_component_files' do
+    # The orchestrator runs this before anything reads the shared concern
+    # classification (#1040), so it has to work without a component extractor.
+    it 'walks the configured directories without an extractor' do
+      path = write('app/views/ui/decorated.rb')
+
+      expect_any_instance_of(described_class::Walker).to receive(:constantize_component_file).with(path)
+
+      described_class.load_component_files
+    end
+
+    it 'walks nothing when the configured list is empty' do
+      Woods.configuration.component_paths = []
+      write('app/views/ui/decorated.rb')
+
+      expect_any_instance_of(described_class::Walker).not_to receive(:constantize_component_file)
+
+      described_class.load_component_files
+    end
+  end
+
   describe '#component_paths' do
     it 'defaults to the component directories Rails apps actually use' do
       Woods.configuration.component_paths = nil
