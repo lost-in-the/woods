@@ -457,6 +457,68 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       end
     end
 
+    it 'reads a transition declared on an explicit self the same as a receiverless one' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              self.transitions from: :pending, to: :paid
+            end
+            event :ship do
+              transitions from: :paid, to: :shipped
+            end
+            event :void do
+              ledger.transitions from: :paid, to: :void
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] },
+                             { name: 'void', transitions: [] }
+                           ])
+    end
+
+    # The transition's whole source, block included, was scanned for
+    # `guard:`, so a comment or a string inside its block became a guard.
+    [
+      '# guard: :blocked_by_comment',
+      'after { audit("guard: blocked_by_string") }'
+    ].each do |block_line|
+      it "takes no guard from a transition block holding #{block_line}" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          class Order < ApplicationRecord
+            include AASM
+
+            aasm do
+              event :pay do
+                transitions from: :pending, to: :paid do
+                  #{block_line}
+                  after { audit(:paid) }
+                end
+                transitions from: :held, to: :paid, guard: :allowed?
+              end
+            end
+          end
+        RUBY
+
+        events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+        expect(events).to eq([
+                               { name: 'pay', transitions: [
+                                 { from: 'pending', to: 'paid', guard: nil },
+                                 { from: 'held', to: 'paid', guard: 'allowed?' }
+                               ] }
+                             ])
+      end
+    end
+
     it 'keeps an event block still open at the end of the source' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
