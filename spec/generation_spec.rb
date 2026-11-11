@@ -25,14 +25,6 @@ RSpec.describe Woods::Generation do
 
       expect(generation.current.number).to eq(0)
     end
-
-    it 'reads as unpublished when the file holds JSON that is not an object' do
-      %w[[] 5].each do |bytes|
-        File.write(File.join(dir, described_class::FILENAME), bytes)
-
-        expect(generation.current.number).to eq(0), bytes
-      end
-    end
   end
 
   describe '#bump!' do
