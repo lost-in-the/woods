@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Upgrade Notes
+
+- **Read these before upgrading from 2.1.** Run one full `woods:extract` after upgrading: `woods:incremental` and `woods:refresh` refuse an index written by 2.1 until it has run. These changes can affect existing callers, and each is described in full below:
+  - `woods_status` returns `worktrees` as a summary object. Pass `worktrees: "list"` for the previous array.
+  - The `route` type selects route units only, no longer `route_file` units.
+  - `Woods::MCP::Server.build` returns before the reader warm-up. Pass `warmup: :before_handshake` for the previous behaviour.
+  - Lexical-mode metadata-store records are deeply frozen.
+  - `metadata.inlined_concerns` holds full concern names, and a module that extends `ActiveSupport::Concern` is a `concern` unit wherever it lives.
+  - `woods-mcp-start` refuses an index recorded by another checkout unless given `--allow-mismatch`.
+  - Console `tools/list` no longer advertises a root `oneOf` or `allOf` on `console_find` and `console_aggregate`.
+
 ### Documentation
 
 - Update the independent Woods plugin to 2.3.72 with tagged 2.1 guidance, a full extraction baseline for upgrades, and explicit version checks for the newly released capabilities. Preserve the base workflow floor and the 2.0.1/1.6.4 Console compatibility guidance; installing the plugin does not upgrade the gem.

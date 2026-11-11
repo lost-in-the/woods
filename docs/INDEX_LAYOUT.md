@@ -658,6 +658,14 @@ pruning anything, removes its own stage, and reports `Could not publish
 generation … no longer held by this writer`. The successor's generation and every
 pinned reader are unaffected.
 
+A direct `Extractor#refresh`, `#extract_changed` or `#extract_all` call holds no
+lock while it builds its stage, and takes the lock only to publish. If another
+writer published while it ran, its stage was seeded from an older generation
+and lacks that writer's changes, so it refuses with `generation moved to <n>
+during publication (expected <m>)`, removes its stage, and leaves the newer
+generation active. Run it again, or use the rake tasks, which hold the lock for
+the whole run.
+
 The same fence covers the snapshot store write after a full run's publish, and
 each deletion `woods:clean` makes, so neither can touch a successor's state. The
 lock is not supported on NFS; see

@@ -369,6 +369,36 @@ RSpec.describe 'Writer fencing across a lock takeover (#1004)',
       Woods::PublishedIndex.open(@output) { |i| expect(i.unit('Post')['written_by']).to eq('B') }
       expect(stages).to be_empty
     end
+
+    # The direct writer staged from generation 1. A locked writer publishing
+    # generation 2 meanwhile means that stage no longer holds generation 2's
+    # changes, so publishing it as generation 3 would drop them from the live
+    # index. It must refuse instead.
+    WriterFencingCases::ENTRY_SHAPES.each_key do |shape|
+      WriterFencingCases::TAKEOVER_POINTS.each do |point|
+        context "when a #{shape} run paused at #{point} and a locked writer published meanwhile" do
+          it 'refuses to publish over the newer generation' do
+            direct, ready = spawn_writer('direct', shape: shape, pause_at: point, locked: false)
+            wait_stopped(direct, ready)
+            expect(guard_held?).to be(false)
+
+            b, = spawn_writer('B', shape: :refresh)
+            expect(finish(b)).to eq(0)
+            expect(marker.number).to eq(2)
+            b_hashes = tree_hashes(2)
+
+            Process.kill('CONT', direct)
+            expect(finish(direct)).to eq(2)
+
+            expect(marker.number).to eq(2)
+            expect(generation_dirs).to eq(%w[gen-1 gen-2])
+            expect(tree_hashes(2)).to eq(b_hashes)
+            Woods::PublishedIndex.open(@output) { |i| expect(i.unit('Post')['written_by']).to eq('B') }
+            expect(stages).to be_empty
+          end
+        end
+      end
+    end
   end
 
   # `woods:clean` deletes index entries one at a time, each inside the fence.

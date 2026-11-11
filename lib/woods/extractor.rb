@@ -1310,9 +1310,10 @@ module Woods
 
     # Move the finished private stage into place as `gen-<n>`. Inside the
     # fence the marker cannot move except through this writer, so a number
-    # that changed since {#publishable_payload_name} means a writer that does
-    # not take the lock published meanwhile; refuse rather than publish over
-    # it.
+    # that changed since the stage was opened means another writer published
+    # meanwhile (a locked writer while a direct call ran unlocked, or a writer
+    # that does not take the lock); refuse rather than publish a stage that
+    # lacks its changes.
     #
     # @param generation [Woods::Generation]
     # @return [void]
@@ -1690,18 +1691,19 @@ module Woods
 
     # The pointer to publish, or nil when this run built no payload directory.
     #
-    # The stage was opened expecting to publish as the generation after the
-    # one current then. Writers serialize on `PipelineLock`, so that holds; if
-    # it ever did not, the number is corrected here so the source manifest
-    # names the generation actually published, and {#promote_payload}
-    # re-checks it inside the fence.
+    # The stage was opened ({#begin_payload!}) as the generation after the one
+    # current then, and seeded from it. That number is kept, never moved to
+    # the generation after whatever is current now: a stage seeded from
+    # generation N holds none of N+1's changes, so publishing it as N+2 would
+    # drop them from the live index. A locked writer cannot see the number
+    # move; a direct call that takes the lock only for its publish can, and
+    # {#promote_payload} then refuses inside the fence.
     #
-    # @param generation [Woods::Generation]
+    # @param _generation [Woods::Generation]
     # @return [String, nil]
-    def publishable_payload_name(generation)
+    def publishable_payload_name(_generation)
       return nil unless @payload_dir
 
-      @payload_generation = generation.current.number + 1
       PayloadStore.name_for(@payload_generation)
     end
 

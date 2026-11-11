@@ -201,7 +201,7 @@ RSpec.describe 'Persistent payload generation pins' do
     expect(File.binread(store.path_for(1).join('manifest.json'))).to eq(original)
   end
 
-  it 'does not replace a pinned destination during publication number correction' do
+  it 'refuses to publish when the marker moved, leaving a pinned destination alone' do
     (1..3).each { |number| publish(number) }
     store.pin(1)
     source = store.create_stage(4, 'writer')
@@ -212,8 +212,9 @@ RSpec.describe 'Persistent payload generation pins' do
     extractor.instance_variable_set(:@payload_generation, 4)
     FileUtils.rm_f(File.join(index, 'generation.json'))
     generation = Woods::Generation.new(output_dir: index)
-    extractor.send(:publishable_payload_name, generation)
-    expect { extractor.send(:promote_payload, generation) }.to raise_error(IOError, /pinned/)
+    expect(extractor.send(:publishable_payload_name, generation)).to eq('payloads/gen-4')
+    expect { extractor.send(:promote_payload, generation) }
+      .to raise_error(Woods::ExtractionError, /generation moved to 0 during publication \(expected 3\)/)
     expect(File.read(store.path_for(1).join('manifest.json'))).to eq('{}')
     expect(source).to be_directory
   end
