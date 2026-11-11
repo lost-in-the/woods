@@ -508,6 +508,78 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       end
     end
 
+    # AASM 6.0.0's own registry for this model holds `pay` (pending to paid)
+    # and `ship` (paid to shipped). The callbacks register deferred blocks;
+    # the forwarded proc extends the same machine.
+    it 'reads the events AASM registers, not calls inside callbacks' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            after_all_events { event(:payment_sent) }
+            event :pay do
+              after { transitions(from: :fake, to: :fake2) }
+              transitions(from: :pending, to: :paid)
+            end
+          end
+
+          aasm(&proc {
+            event(:ship) {
+              transitions(from: :paid, to: :shipped)
+            }
+          })
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] }
+                           ])
+    end
+
+    # AASM 6.0.0 accepts proc and Proc.new blocks at both levels; a forwarded
+    # lambda raises ArgumentError under its instance_eval, so it defines nothing.
+    it 'reads literal procs forwarded as blocks, and evaluates nothing else' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm(&Proc.new {
+            event(:pay, &proc { transitions from: :pending, to: :paid })
+          })
+          aasm(&-> { event(:refund) { transitions from: :paid, to: :refunded } })
+          aasm(&DEFINITION)
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([{ name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] }])
+    end
+
+    it 'keeps declarations nested in conditionals inside the definition' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            if ENV['REFUNDS']
+              event :refund do
+                transitions from: :paid, to: :refunded unless ENV['NO_PAID_REFUNDS']
+              end
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([{ name: 'refund', transitions: [{ from: 'paid', to: 'refunded', guard: nil }] }])
+    end
+
     it 'reads events from every aasm definition, including one in a concern block' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
