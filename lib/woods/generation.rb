@@ -105,7 +105,7 @@ module Woods
         reason: data['reason'],
         payload: data['payload']
       )
-    rescue JSON::ParserError, SystemCallError, TypeError
+    rescue JSON::ParserError, SystemCallError
       UNPUBLISHED
     end
 
