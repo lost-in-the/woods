@@ -541,7 +541,8 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
     end
 
     # AASM 6.0.0 accepts proc and Proc.new blocks at both levels; a forwarded
-    # lambda raises ArgumentError under its instance_eval, so it defines nothing.
+    # zero-argument lambda raises ArgumentError under its instance_eval, so it
+    # defines nothing.
     it 'reads literal procs forwarded as blocks, and evaluates nothing else' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
@@ -558,6 +559,100 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       events = described_class.new.extract_model_file(path).first.metadata[:events]
 
       expect(events).to eq([{ name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] }])
+    end
+
+    # AASM 6.0.0 registers all three: a receiver and an argument are
+    # evaluated before the outer call. A block forwarded to a callback is not.
+    it 'reads declarations evaluated as a receiver or an argument' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event(:pay) do
+              transitions from: :pending, to: :paid
+            end.tap {}
+            event(:ship) { transitions(from: :paid, to: :shipped).tap {} }
+            Array(event(:refund) { Array(transitions(from: :paid, to: :refunded)) })
+            after_all_events(&proc { event(:noted) })
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] },
+                             { name: 'refund', transitions: [{ from: 'paid', to: 'refunded', guard: nil }] }
+                           ])
+    end
+
+    # In AASM 6.0.0 every block below runs while the definition is read and
+    # registers its event. An iterator's block runs as often as its receiver
+    # has elements ([].each runs none), so it is not read; another object's
+    # instance_eval raises NoMethodError.
+    it 'reads declarations inside blocks Ruby runs once, at once' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            tap { event(:tapped) { transitions from: :a, to: :b } }
+            self.then { event(:thened) { transitions from: :a, to: :b } }
+            yield_self { event(:yielded) { transitions from: :a, to: :b } }
+            instance_eval { event(:evaluated) { transitions from: :a, to: :b } }
+            instance_exec { event(:executed) { tap { transitions from: :a, to: :b } } }
+            event(:first) { transitions from: :a, to: :b }.tap { event(:second) }
+
+            [1].each { event(:iterated) }
+            Object.new.instance_eval { event(:foreign) }
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+      transition = [{ from: 'a', to: 'b', guard: nil }]
+
+      expect(events.map { |event| [event[:name], event[:transitions]] }).to eq(
+        [['tapped', transition], ['thened', transition], ['yielded', transition], ['evaluated', transition],
+         ['executed', transition], ['first', transition], ['second', []]]
+      )
+    end
+
+    # AASM 6.0.0 runs both blocks with instance_eval, which passes one
+    # argument. Each lambda below that accepts it registered its event in the
+    # live registry; each that does not raised ArgumentError. The last event
+    # keeps its name, as a blockless event would, but no transitions.
+    it 'reads a forwarded lambda only when it accepts one argument' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm(&->(*) { event(:rest) { transitions from: :a, to: :b } })
+          aasm(&->(_dsl) { event(:one, &->(_event) { transitions from: :a, to: :b }) })
+          aasm(&->(dsl, extra = 1) { event(:optional) { transitions from: :a, to: :b } })
+          aasm(&lambda { |dsl| event(:block_param) { transitions from: :a, to: :b } })
+          aasm(&-> { _1; event(:numbered) { transitions from: :a, to: :b } })
+          aasm(&->(dsl, **opts) { event(:keyword_rest) { transitions from: :a, to: :b } })
+
+          aasm(&->() { event(:none) })
+          aasm(&->(dsl, other) { event(:two) })
+          aasm(&->(dsl, key:) { event(:required_keyword) })
+          aasm(&->(**opts) { event(:keywords_only) })
+          aasm(&-> { _2; event(:numbered_two) })
+          aasm(&lambda { event(:bare_lambda) })
+          aasm { event(:pay, &-> { transitions from: :a, to: :b }) }
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+      transition = [{ from: 'a', to: 'b', guard: nil }]
+
+      expect(events.to_h { |event| [event[:name], event[:transitions]] }).to eq(
+        'rest' => transition, 'one' => transition, 'optional' => transition, 'block_param' => transition,
+        'numbered' => transition, 'keyword_rest' => transition, 'pay' => []
+      )
     end
 
     it 'keeps declarations nested in conditionals inside the definition' do
