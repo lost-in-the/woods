@@ -113,9 +113,14 @@ module Woods
 
         states = source.scan(/^\s*state\s+:(\w+)/).flatten
         initial_state = parse_initial_state_aasm(source)
-        events = parse_events_from_source(source, /\Aevent\s+:(\w+)/)
+        parsed = Woods::ParseCache.parse(source)
+        events = if parsed.success?
+                   parse_events_from_node(parsed.value)
+                 else
+                   parse_events_from_source(source, /\Aevent\s+:(\w+)/)
+                 end
         callbacks = parse_state_machine_callbacks(source)
-        transition_callbacks = TransitionCallbacks.read(Woods::ParseCache.parse(source).value)
+        transition_callbacks = TransitionCallbacks.read(parsed.value)
 
         [build_unit(
           identifier: "#{class_name}::aasm",
@@ -216,7 +221,7 @@ module Woods
 
           block = declaration.block&.location&.slice.to_s
           states = block.scan(/^\s*state\s+:(\w+)/).flatten
-          events = parse_events_from_source(block, /\Aevent\s+:(\w+)/)
+          events = parse_events_from_node(declaration.block)
           initial_state = state_machine_initial_state(declaration)
           callbacks = parse_state_machine_callbacks(block)
           transition_callbacks = TransitionCallbacks.read(declaration.block)
@@ -296,6 +301,11 @@ module Woods
 
       # Parse events from source using a line-by-line depth tracker.
       #
+      # This is the fallback for an AASM model whose source does not parse;
+      # {#parse_events_from_node} reads every parseable source. Keywords are
+      # matched without token context here, so a method named +class+ can
+      # still miscount a block.
+      #
       # Correctly handles nested blocks (e.g., guard lambdas) within event blocks.
       # Only processes lines after detecting +event :name do+, and closes the event
       # when the matching +end+ is found.
@@ -359,6 +369,71 @@ module Woods
 
         events << current_event if current_event
         events
+      end
+
+      # Read the events declared under +node+ from the syntax tree.
+      #
+      # An event is a receiverless +event :name+ call. Its transitions are the
+      # +transition+/+transitions+ calls inside its own block, at any depth,
+      # so block boundaries come from the parser rather than from keywords on
+      # a line: a method named +class+ or a +:begin+ symbol opens nothing. A
+      # blockless declaration (`event :noop`) is an event with no transitions.
+      # Events are not looked for inside another event's block.
+      #
+      # @param node [Prism::Node, nil] parsed source, or a state_machine block
+      # @return [Array<Hash>] events with :name and :transitions keys, in source order
+      def parse_events_from_node(node)
+        events = []
+        each_call_outside_events(node) do |call|
+          name = event_name(call)
+          next false unless name
+
+          events << { name: name, transitions: event_transitions(call.block) }
+          true
+        end
+        events
+      end
+
+      # Yield every call under +node+ in source order. A call for which the
+      # block returns true is not descended into.
+      #
+      # @param node [Prism::Node, nil]
+      # @yieldparam call [Prism::CallNode]
+      # @yieldreturn [Boolean] true to skip the call's children
+      def each_call_outside_events(node, &block)
+        return unless node.is_a?(Prism::Node)
+        return if node.is_a?(Prism::CallNode) && yield(node)
+
+        node.compact_child_nodes.each { |child| each_call_outside_events(child, &block) }
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [String, nil] the event's name when +call+ declares one
+      def event_name(call)
+        return unless call.name == :event && call.receiver.nil?
+
+        argument = call.arguments&.arguments&.first
+        return unless argument.is_a?(Prism::SymbolNode)
+
+        name = argument.unescaped
+        name if name.match?(/\A\w+\z/)
+      end
+
+      # @param block [Prism::Node, nil] an event's block
+      # @return [Array<Hash>] the transitions declared inside it
+      def event_transitions(block)
+        return [] unless block.is_a?(Prism::BlockNode)
+
+        transitions = []
+        each_call_outside_events(block.body) do |call|
+          next true if event_name(call)
+          next false unless %i[transition transitions].include?(call.name) && call.receiver.nil?
+
+          transition = parse_transition_line(call.location.slice)
+          transitions << transition if transition
+          false
+        end
+        transitions
       end
 
       # Parse a single transition line into a structured hash.
