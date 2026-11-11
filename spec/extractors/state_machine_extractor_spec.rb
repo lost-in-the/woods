@@ -457,6 +457,30 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       end
     end
 
+    # The event walker descended into method bodies, so a runtime call named
+    # `event` in an instance method was read as a declared event.
+    it 'ignores an event call inside a method body' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              transitions from: :pending, to: :paid
+            end
+          end
+
+          def notify_tracker
+            event(:payment_sent)
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events.map { |event| event[:name] }).to eq(['pay'])
+    end
+
     it 'reads a transition declared on an explicit self the same as a receiverless one' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
