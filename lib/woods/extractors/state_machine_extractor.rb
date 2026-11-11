@@ -427,13 +427,73 @@ module Woods
         transitions = []
         each_call_outside_events(block.body) do |call|
           next true if event_name(call)
-          next false unless %i[transition transitions].include?(call.name) && call.receiver.nil?
+          next false unless transition_call?(call)
 
-          transition = parse_transition_line(call.location.slice)
+          transition = transition_from_call(call)
           transitions << transition if transition
           false
         end
         transitions
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [Boolean] whether +call+ is +transition+ or +transitions+ on
+      #   the event itself: no receiver, or an explicit +self+
+      def transition_call?(call)
+        %i[transition transitions].include?(call.name) &&
+          (call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode))
+      end
+
+      # Read a transition from the call's keyword arguments, never from its
+      # source text: a comment or a string inside the transition's block is
+      # not a guard.
+      #
+      # Handles +from: :a, to: :b, guard: :method+ (AASM, and state_machines'
+      # keyword form) and state_machines' +pending: :active+.
+      #
+      # @param call [Prism::CallNode]
+      # @return [Hash, nil] Transition hash with :from, :to, :guard
+      def transition_from_call(call)
+        pairs = symbol_pairs(call)
+        return if pairs.empty?
+
+        if pairs.key?('from') || pairs.key?('to')
+          from = state_symbol(pairs['from'])
+          to = state_symbol(pairs['to'])
+          return unless from && to
+
+          return { from: from, to: to, guard: guard_symbol(pairs['guard']) }
+        end
+
+        from, target = pairs.first
+        to = state_symbol(target)
+        { from: from, to: to, guard: nil } if from.match?(/\A\w+\z/) && to
+      end
+
+      # @param call [Prism::CallNode]
+      # @return [Hash{String => Prism::Node}] the call's hash arguments whose
+      #   keys are symbols, in source order
+      def symbol_pairs(call)
+        hash = call.arguments&.arguments&.find { |arg| arg.is_a?(Prism::KeywordHashNode) || arg.is_a?(Prism::HashNode) }
+        return {} unless hash
+
+        hash.elements.each_with_object({}) do |element, pairs|
+          next unless element.is_a?(Prism::AssocNode) && element.key.is_a?(Prism::SymbolNode)
+
+          pairs[element.key.unescaped] ||= element.value
+        end
+      end
+
+      # @param node [Prism::Node, nil]
+      # @return [String, nil] the state a symbol names
+      def state_symbol(node)
+        node.unescaped if node.is_a?(Prism::SymbolNode) && node.unescaped.match?(/\A\w+\z/)
+      end
+
+      # @param node [Prism::Node, nil]
+      # @return [String, nil] the guard method a symbol names
+      def guard_symbol(node)
+        node.unescaped if node.is_a?(Prism::SymbolNode) && node.unescaped.match?(/\A\w+[?!]?\z/)
       end
 
       # Parse a single transition line into a structured hash.

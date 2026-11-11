@@ -1342,6 +1342,11 @@ module Woods
       MARKERS_MIGRATED = '.promoted_markers_migrated'
       private_constant :MARKERS_MIGRATED
 
+      # File in the dumps root listing, by name, the legacy dumps a migration
+      # still in progress is marking. Written before the first marker.
+      MARKERS_MIGRATING = '.promoted_markers_migrating'
+      private_constant :MARKERS_MIGRATING
+
       # Mark the dumps an earlier Woods wrote, once per dumps root.
       #
       # Dumps written before {PROMOTED_MARKER} existed carry none, though
@@ -1352,6 +1357,12 @@ module Woods
       # every prune moved it as marked dumps were removed, until a fresh
       # unpromoted dump sorted before the oldest surviving marker and was
       # deleted as legacy.
+      #
+      # The worklist is written to {MARKERS_MIGRATING} before any marker, and
+      # a later run resumes from it. Recomputed from the markers a failed or
+      # interrupted migration had already written, the boundary moved to the
+      # first one, and the legacy dumps after it were deleted as stale
+      # unpromoted ones.
       #
       # A migration that could not mark every legacy dump writes no record
       # and returns false, and this run prunes nothing: an unmarked legacy
@@ -1365,16 +1376,62 @@ module Woods
         record = dumps_root.join(MARKERS_MIGRATED).to_s
         return true if File.exist?(record)
 
-        first_marked = dirs.index { |dir| promoted_dump?(dir, latest) } || dirs.length
-        legacy = dirs.first(first_marked)
-        legacy.each { |dir| mark_promoted(dir) }
-        return false unless legacy.all? { |dir| File.exist?(File.join(dir, PROMOTED_MARKER)) }
+        legacy = legacy_worklist(dumps_root, dirs, latest)
+        return false unless legacy && mark_legacy(legacy)
 
         AtomicFile.write(record, '')
+        FileUtils.rm_f(dumps_root.join(MARKERS_MIGRATING).to_s)
         true
       rescue StandardError => e
         warn "[woods] could not mark dumps written before promotion markers (#{e.class}: #{e.message})"
         false
+      end
+
+      # The legacy dumps to mark: the recorded worklist of a migration that
+      # stopped partway, or else the unmarked dumps before the first marked
+      # one, recorded before any is marked.
+      #
+      # Until every one of those has sat untouched past
+      # {UNPROMOTED_DUMP_STALE_AFTER}, the migration waits (nil): a fresh
+      # unmarked dump may be another writer's, still being written, rather
+      # than one an earlier Woods promoted. Marked as legacy, it was pruned
+      # at once. When that writer promotes it, it carries its own marker; if
+      # it never does, it is marked once stale and, being the oldest, is the
+      # first promoted dump retention removes.
+      #
+      # @param dumps_root [Pathname]
+      # @param dirs [Array<String>] sorted oldest first
+      # @param latest [String, nil]
+      # @return [Array<String>, nil] dump paths, or nil while the migration waits
+      def legacy_worklist(dumps_root, dirs, latest)
+        worklist = dumps_root.join(MARKERS_MIGRATING).to_s
+        return recorded_worklist(dumps_root, worklist) if File.exist?(worklist)
+
+        first_marked = dirs.index { |dir| promoted_dump?(dir, latest) } || dirs.length
+        legacy = dirs.first(first_marked)
+        return unless legacy.all? { |dir| stale_dump?(dir) }
+
+        AtomicFile.write(worklist, JSON.generate(legacy.map { |dir| File.basename(dir) })) unless legacy.empty?
+        legacy
+      end
+
+      # @param dumps_root [Pathname]
+      # @param worklist [String] path of {MARKERS_MIGRATING}
+      # @return [Array<String>] the dump paths it names
+      # @raise [TypeError] when it is not a list of names
+      def recorded_worklist(dumps_root, worklist)
+        names = JSON.parse(AtomicFile.read(worklist))
+        raise TypeError, "#{worklist} is not a list of dump names" unless names.is_a?(Array) && names.all?(String)
+
+        names.map { |name| dumps_root.join(File.basename(name)).to_s }
+      end
+
+      # @param legacy [Array<String>] dump paths
+      # @return [Boolean] whether every one still present now carries a marker
+      def mark_legacy(legacy)
+        present = legacy.select { |dir| File.directory?(dir) }
+        present.each { |dir| mark_promoted(dir) }
+        present.all? { |dir| File.exist?(File.join(dir, PROMOTED_MARKER)) }
       end
 
       # @return [Boolean] whether +dir+ is +latest+ or carries {PROMOTED_MARKER}

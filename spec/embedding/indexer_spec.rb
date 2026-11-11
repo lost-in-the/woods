@@ -1032,10 +1032,15 @@ RSpec.describe Woods::Embedding::Indexer do
         dumps_dir = File.join(output_dir, 'dumps')
         FileUtils.mkdir_p(dumps_dir)
 
-        # Pre-create two old dump directories with earlier timestamps
+        # Pre-create two old dump directories with earlier timestamps. They
+        # carry no promotion marker, as an earlier Woods wrote them, and sit
+        # untouched past a day: a fresh unmarked one may still be another
+        # writer's, and the first migration waits on it.
         old_dirs = %w[2026-04-20T00-00-00Z 2026-04-21T00-00-00Z].map do |name|
           dir = File.join(dumps_dir, name)
           FileUtils.mkdir_p(dir)
+          old = Time.now - (2 * 24 * 60 * 60)
+          File.utime(old, old, dir)
           dir
         end
 
@@ -1164,13 +1169,87 @@ RSpec.describe Woods::Embedding::Indexer do
           end
 
           it 'still counts dumps written before markers existed as promoted' do
-            legacy = %w[2026-04-18T00-00-00Z 2026-04-19T00-00-00Z].map { |name| leave_unpromoted(name) }
+            legacy = %w[2026-04-18T00-00-00Z 2026-04-19T00-00-00Z].map do |name|
+              leave_unpromoted(name, age: 2 * 24 * 60 * 60)
+            end
 
             embed_at([2026, 4, 20])
 
             legacy.each { |dir| expect(File.exist?(dir)).to be false }
             expect(File.basename(Woods::IndexArtifact.new(output_dir).latest_dump_path.to_s))
               .to eq('2026-04-20T00-00-00Z')
+          end
+
+          # Before the first migration, an unmarked dump that sorts before the
+          # first marked one may be another writer's dump still being written,
+          # not a legacy one. It was marked and pruned at once.
+          it 'leaves a fresh unmarked dump alone during the first migration' do
+            writing = leave_unpromoted('2026-04-19T00-00-00Z')
+
+            embed_at([2026, 4, 20])
+            expect(File.directory?(writing)).to be true
+
+            # The other writer finishes and marks its dump; migration then runs.
+            File.write(File.join(writing, '.promoted'), '')
+            embed_at([2026, 4, 21])
+            expect(File.exist?(writing)).to be false
+            expect(File.exist?(File.join(dumps_dir, '.promoted_markers_migrated'))).to be true
+          end
+        end
+
+        # A migration that marked some legacy dumps and not others used to
+        # recompute its boundary on the next run from the markers it had just
+        # written, so the unmarked rest were deleted as stale unpromoted dumps.
+        context 'with retention 3 and a migration that stopped partway' do
+          let(:indexer_with_retention) do
+            described_class.new(
+              provider: provider,
+              text_preparer: text_preparer,
+              vector_store: persistable_store,
+              output_dir: output_dir,
+              batch_size: 2,
+              resolved_config: resolved_config,
+              dump_retention_count: 3
+            )
+          end
+
+          let!(:legacy) do
+            %w[2026-04-17T00-00-00Z 2026-04-18T00-00-00Z 2026-04-19T00-00-00Z].map do |name|
+              leave_unpromoted(name, age: 2 * 24 * 60 * 60)
+            end
+          end
+
+          def fail_markers_in(dirs, with:)
+            allow(Woods::AtomicFile).to receive(:write).and_call_original
+            dirs.each do |dir|
+              allow(Woods::AtomicFile).to receive(:write)
+                .with(File.join(dir, '.promoted'), anything).and_raise(with)
+            end
+          end
+
+          def remaining_dumps
+            Dir.children(dumps_dir).reject { |name| name.start_with?('.') || name == 'latest' }.sort
+          end
+
+          it 'keeps the retained set after a marker write fails' do
+            fail_markers_in(legacy.last(2), with: Errno::ENOSPC)
+            embed_at([2026, 4, 20])
+            expect(remaining_dumps.length).to eq(4)
+
+            allow(Woods::AtomicFile).to receive(:write).and_call_original
+            embed_at([2026, 4, 21])
+
+            expect(remaining_dumps).to eq(%w[2026-04-19T00-00-00Z 2026-04-20T00-00-00Z 2026-04-21T00-00-00Z])
+          end
+
+          it 'keeps the retained set after a run is interrupted mid-migration' do
+            fail_markers_in([legacy[1]], with: Interrupt)
+            expect { embed_at([2026, 4, 20]) }.to raise_error(Interrupt)
+
+            allow(Woods::AtomicFile).to receive(:write).and_call_original
+            embed_at([2026, 4, 21])
+
+            expect(remaining_dumps).to eq(%w[2026-04-19T00-00-00Z 2026-04-20T00-00-00Z 2026-04-21T00-00-00Z])
           end
         end
       end

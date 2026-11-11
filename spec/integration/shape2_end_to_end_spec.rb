@@ -598,7 +598,11 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
       provider
     end
 
-    # Write a complete dump with a specific timestamp into artifact.
+    # Write a complete dump with a specific timestamp into artifact. Promoted
+    # outside the Indexer, it carries no promotion marker, like a dump an
+    # earlier Woods wrote, and is aged past a day: the first marker
+    # migration waits on a fresh unmarked dump, which may be another
+    # writer's still being written.
     def write_timed_dump(artifact, now, dim)
       vs = Woods::Storage::VectorStore::InMemory.new
       vs.store('Unit', Array.new(dim) { 0.5 }, {})
@@ -606,6 +610,8 @@ RSpec.describe 'Shape-2 end-to-end: dump → boot → search' do
       dump_dir = artifact.new_dump_dir(now: now)
       Woods::Storage::Snapshotter::Vector.dump(vs, artifact, dump_dir, resolved_config: rc)
       artifact.promote(dump_dir)
+      old = Time.now - (2 * 24 * 60 * 60)
+      File.utime(old, old, dump_dir.to_s)
       dump_dir
     end
 
