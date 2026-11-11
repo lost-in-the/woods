@@ -96,8 +96,8 @@ RSpec.describe Woods::Impact::Store do
     expect(store.read(id)).to eq(json)
   end
 
-  it 'preserves a nonempty destination if failure occurs after the report link is created' do
-    allow(File).to receive(:link).and_wrap_original do |original, *arguments|
+  it 'preserves a published destination if failure occurs after the report is renamed into place' do
+    allow(File).to receive(:rename).and_wrap_original do |original, *arguments|
       original.call(*arguments)
       raise Errno::EIO
     end
@@ -107,17 +107,56 @@ RSpec.describe Woods::Impact::Store do
     expect(store.save(json)).to eq(id)
   end
 
-  it 'refuses corrupt or incomplete existing ID destinations without overwriting them' do
+  it 'refuses a corrupt existing ID destination without overwriting it' do
     id = store.save(json)
     path = store.path_for(id)
     path.write('{}')
     expect { store.save(json) }.to raise_error(described_class::Error)
     expect(path.read).to eq('{}')
+  end
+
+  it 'refuses a report directory without its report that holds anything a writer does not make' do
+    id = store.save(json)
+    path = store.path_for(id)
     FileUtils.rm(path)
-    directory_inode = path.dirname.stat.ino
+    path.dirname.join('notes.txt').write('kept')
     expect { store.save(json) }.to raise_error(described_class::Error)
+    expect(path.dirname.join('notes.txt').read).to eq('kept')
     expect(path).not_to exist
-    expect(path.dirname.stat.ino).to eq(directory_inode)
+  end
+
+  # A writer that died between creating the report directory and linking its
+  # report used to leave a directory every later save refused, wedging the ID.
+  it 'recovers a report directory a dead writer left without its report' do
+    id = Digest::SHA256.hexdigest(json)
+    leftover = @root.join('explorer', 'impacts', id)
+    FileUtils.mkdir_p(leftover, mode: 0o700)
+    leftover.join('.impact-20261111-1-abc').binwrite(json[0, 10])
+    File.chmod(0o600, leftover.join('.impact-20261111-1-abc'))
+    expect(store.save(json)).to eq(id)
+    expect(store.read(id)).to eq(json)
+    expect(leftover.children.map { |entry| entry.basename.to_s }).to eq(['impact.json'])
+  end
+
+  %i[link rename].each do |operation|
+    it "leaves nothing at the report path when a writer dies at its #{operation}" do
+      crash = Class.new(Exception) # rubocop:disable Lint/InheritException
+      died = false
+      allow(File).to receive(operation).and_wrap_original do |original, *arguments|
+        unless died
+          died = true
+          raise crash
+        end
+        original.call(*arguments)
+      end
+      id = Digest::SHA256.hexdigest(json)
+      expect { store.save(json) }.to raise_error(crash)
+      expect(store.path_for(id).dirname).not_to exist
+      expect(store.save(json)).to eq(id)
+      expect(store.read(id)).to eq(json)
+      expect(store.path_for(id).dirname.parent.children.map { |entry| entry.basename.to_s })
+        .to contain_exactly('.lock', id)
+    end
   end
 
   it 'refuses symlink components, ID directories, report files and lock files' do

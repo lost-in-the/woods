@@ -145,6 +145,24 @@ RSpec.describe Woods::GemMapper do
       end
     end
 
+    it 'refuses to republish as generation 1 over a corrupt marker' do
+      Dir.mktmpdir('woods_self_map_corrupt') do |dir|
+        out = File.join(dir, 'out')
+        described_class.new(root: tiny_gem(dir), output_dir: out).map!
+        sentinel = File.join(out, Woods::PayloadStore.name_for(1), 'sentinel.json')
+        File.write(sentinel, 'kept')
+        marker = File.join(out, Woods::Generation::FILENAME)
+        File.write(marker, '{broken')
+
+        expect { described_class.new(root: tiny_gem(dir), output_dir: out).map! }
+          .to raise_error(Woods::Generation::InvalidMarker)
+
+        expect(File.read(marker)).to eq('{broken')
+        expect(File.read(sentinel)).to eq('kept')
+        expect(Dir.children(File.join(out, 'payloads')).grep(/\A\.stage-/)).to be_empty
+      end
+    end
+
     it 'publishes from a private stage when uncontested' do
       Dir.mktmpdir('woods_self_map_fence') do |dir|
         out = File.join(dir, 'out')

@@ -1,0 +1,1 @@
+- The Redis session tracer store now writes each request in one MULTI/EXEC transaction: the append, the per-session trim, the TTL and the recency-index entry. They used to be separate commands, so a crash or dropped connection between them could leave a session list with no TTL, kept forever, or one the index never named, never evicted.

@@ -450,6 +450,39 @@ RSpec.describe Woods::MCP::Tasks::Store do
     end
   end
 
+  # The producer can complete its record and exit between a reader's read of
+  # the stale `working` copy and that reader's orphan decision. The reader must
+  # re-read under the record's lock and leave the terminal record alone.
+  describe 'orphan adoption racing the producer\'s completion' do
+    it 'does not overwrite a record the producer completed after the reader read it' do
+      task = store.create!(tool: 'pipeline_extract')
+      producer = described_class.new(@index_dir)
+      allow(store).to receive(:producer_alive?) do
+        producer.complete!(task.id, result: { 'ok' => true })
+        false
+      end
+
+      result = store.get(task.id)
+
+      expect(result.status).to eq('completed')
+      reloaded = described_class.new(@index_dir).get(task.id)
+      expect(reloaded.status).to eq('completed')
+      expect(reloaded.result).to eq('ok' => true)
+    end
+
+    it 'does not fail a record that a new producer took over after the reader read it' do
+      task = store.create!(tool: 'pipeline_extract')
+      path = File.join(@index_dir, described_class::DIRNAME, "#{task.id}.json")
+      allow(store).to receive(:producer_alive?) do
+        raw = JSON.parse(File.read(path)).merge('producer_identity' => 'a-newer-producer')
+        File.write(path, JSON.generate(raw))
+        false
+      end
+
+      expect(store.get(task.id).status).to eq('working')
+    end
+  end
+
   # A producer killed in a container whose PID 1 never reaps stays a zombie.
   # Signal 0 still answers for it, and its /proc stat (so its identity) is
   # unchanged, so a bare pid-plus-identity check kept the task `working` (#1002).

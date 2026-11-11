@@ -1,0 +1,1 @@
+- A `pipeline_extract` or `pipeline_embed` call whose start failed after its task record was written (for example, the cooldown record could not be saved) now marks that task `failed`. Before, the record stayed `working` for as long as the server process lived, so a client polling it never got an answer.

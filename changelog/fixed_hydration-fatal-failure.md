@@ -1,0 +1,1 @@
+- The Index Server's background warm-up no longer stays `warming` forever when it dies of an exception outside `StandardError` and `ScriptError` (such as `NoMemoryError` or `SystemStackError`). The warm-up now records `failed`, so waiting tool calls go on and `woods_status` reports `hydration` as `failed` with the error.

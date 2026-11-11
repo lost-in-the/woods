@@ -237,6 +237,109 @@ RSpec.describe Woods::Extractors::PunditExtractor do
       expect(unit.metadata[:authorization_actions]).not_to include('resolve?')
     end
 
+    it 'ends the Scope class at its own end, past multi-line method bodies' do
+      path = create_file('app/policies/post_policy.rb', <<~RUBY)
+        class PostPolicy < ApplicationPolicy
+          def show?
+            true
+          end
+
+          class Scope < Scope
+            def resolve
+              if user.admin?
+                scope.all
+              else
+                scope.where(published: true)
+              end
+            end
+
+            def visible?
+              true
+            end
+
+            private
+
+            def admin_only?
+              user.admin?
+            end
+          end
+
+          def destroy?
+            user.admin?
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_pundit_file(path)
+      expect(unit.metadata[:authorization_actions]).to eq(%w[show? destroy?])
+    end
+
+    context 'when Prism cannot give the Scope extent' do
+      before { allow(Woods::Extractors::SourceNesting).to receive(:lexical_scopes).and_return(nil) }
+
+      it 'counts method bodies and ignores comment and string keywords in the line scan' do
+        path = create_file('app/policies/post_policy.rb', <<~RUBY)
+          class PostPolicy < ApplicationPolicy
+            def show?
+              true
+            end
+
+            class Scope < Scope
+              # what do we show? see the end of this file
+              def resolve
+                if user.admin?
+                  scope.all
+                else
+                  scope.where(state: "do end")
+                end
+              end
+
+              def visible?
+                true
+              end
+
+              private
+
+              def admin_only?
+                user.admin?
+              end
+            end
+
+            def destroy?
+              user.admin?
+            end
+          end
+        RUBY
+
+        unit = described_class.new.extract_pundit_file(path)
+        expect(unit.metadata[:authorization_actions]).to eq(%w[show? destroy?])
+      end
+    end
+
+    it 'ignores block keywords in comments and strings inside the Scope class' do
+      path = create_file('app/policies/post_policy.rb', <<~RUBY)
+        class PostPolicy < ApplicationPolicy
+          class Scope < Scope
+            # what do we show? see the end of this file
+            def resolve
+              scope.where(state: "do end")
+            end
+
+            def visible?
+              true
+            end
+          end
+
+          def update?
+            true
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_pundit_file(path)
+      expect(unit.metadata[:authorization_actions]).to eq(%w[update?])
+    end
+
     it 'detects ApplicationPolicy inheritance' do
       path = create_file('app/policies/post_policy.rb', <<~RUBY)
         class PostPolicy < ApplicationPolicy

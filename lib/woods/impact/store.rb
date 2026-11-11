@@ -4,6 +4,7 @@ require 'digest'
 require 'json'
 require 'pathname'
 require 'tempfile'
+require 'tmpdir'
 require_relative '../atomic_file'
 
 module Woods
@@ -101,9 +102,17 @@ module Woods
     end
 
     # Content-addressed local reports, immutable after publication. A private
-    # lock serializes cooperating writers; hardlink publication never overwrites.
+    # lock serializes cooperating writers. A report is written into a private
+    # staging directory and renamed into place whole, so a writer that dies
+    # leaves nothing at its report path; a staging directory or report
+    # directory without its report found under the lock is a dead writer's
+    # (an older writer created the directory first) and is removed.
     class Store
       class Error < IOError; end
+
+      REPORT = 'impact.json'
+      STAGING_PREFIX = '.staging-'
+      TEMPORARY_PREFIX = '.impact-'
 
       # @param index_dir [String, Pathname] existing published index root
       def initialize(index_dir)
@@ -118,6 +127,7 @@ module Woods
         @paths.prepare
         with_lock do
           destination = path_for(id)
+          discard_abandoned(destination.dirname)
           if destination.dirname.exist?
             raise Error, 'Conflicting saved impact report' unless read(id) == json
           else
@@ -161,34 +171,65 @@ module Woods
         end
       end
 
-      def publish_new(destination, json)
-        Dir.mkdir(destination.dirname, 0o700)
-        begin
-          publish(destination, json)
-        rescue StandardError
-          discard_empty(destination.dirname)
-          raise
+      # Holding the lock proves no cooperating writer is mid-publication, so
+      # every staging directory, and a report directory without its report,
+      # belongs to a writer that died.
+      def discard_abandoned(report_directory)
+        @paths.directory.each_child do |entry|
+          remove_leftover(entry, REPORT, TEMPORARY_PREFIX) if entry.basename.to_s.start_with?(STAGING_PREFIX)
         end
+        report = report_directory.join(REPORT)
+        return if !report_directory.exist? || report.symlink? || report.exist?
+
+        remove_leftover(report_directory, TEMPORARY_PREFIX)
       end
 
-      def discard_empty(directory)
+      # Removes only a private directory of regular files a writer makes;
+      # anything else is evidence to keep, and the save refuses.
+      def remove_leftover(directory, *names)
+        stat = directory.lstat
+        entries = stat.directory? && !stat.symlink? ? directory.children : nil
+        raise Error, 'Conflicting saved impact report' unless entries&.all? { |entry| leftover_file?(entry, names) }
+
+        entries.each { |entry| File.unlink(entry) }
         Dir.rmdir(directory)
-      rescue Errno::ENOTEMPTY, Errno::EEXIST, Errno::ENOENT
-        # Preserve nonempty evidence; cleanup is only for this call's empty directory.
+        AtomicFile.fsync_directory(directory.dirname)
+      end
+
+      def leftover_file?(entry, names)
+        name = entry.basename.to_s
+        entry.lstat.file? && names.any? { |prefix| name == prefix || name.start_with?(prefix) }
+      end
+
+      def publish_new(destination, json)
+        staging = Pathname.new(Dir.mktmpdir(STAGING_PREFIX, @paths.directory.to_s))
+        begin
+          write_report(staging.join(REPORT), json)
+          AtomicFile.fsync_directory(staging)
+          File.rename(staging, destination.dirname)
+        rescue StandardError
+          discard_staging(staging)
+          raise
+        end
+        AtomicFile.fsync_directory(destination.dirname.parent)
+      end
+
+      def discard_staging(staging)
+        remove_leftover(staging, REPORT, TEMPORARY_PREFIX)
+      rescue Errno::ENOENT
+        # Already renamed into place: the published report stays.
         nil
       end
 
-      def publish(destination, json)
-        temporary = Tempfile.new('.impact-', destination.dirname)
+      def write_report(path, json)
+        temporary = Tempfile.new(TEMPORARY_PREFIX, path.dirname)
         temporary.binmode
         temporary.chmod(0o600)
         temporary.write(json)
         temporary.flush
         temporary.fsync
         temporary.close
-        File.link(temporary.path, destination)
-        AtomicFile.fsync_directory(destination.dirname)
-        AtomicFile.fsync_directory(destination.dirname.parent)
+        File.link(temporary.path, path)
       ensure
         temporary&.close!
       end

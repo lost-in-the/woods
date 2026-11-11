@@ -30,6 +30,7 @@ module Woods
           journal = { 'schema_version' => 1, 'plan' => plan.data, 'originals' => originals(changes) }
           write_journal(journal)
           apply_changes(changes, journal)
+          discard_committed_journal
           'applied'
         end
       end
@@ -39,7 +40,10 @@ module Woods
           document = Document.new(journal_path)
           return 'nothing_to_recover' if document.content.nil?
 
-          recover_journal(document.json)
+          journal = document.json
+          return 'already_applied' if discard_committed?(journal)
+
+          recover_journal(journal)
           'recovered'
         end
       end
@@ -81,7 +85,8 @@ module Woods
       end
 
       def refuse_pending!
-        return if Document.new(journal_path).content.nil?
+        document = Document.new(journal_path)
+        return if document.content.nil? || discard_committed?(document.json)
 
         raise Conflict, "An interrupted operation needs explicit recovery first: #{journal_path}"
       end
@@ -120,12 +125,14 @@ module Woods
         end
       end
 
+      # Marking the journal committed is the commit point: a failure before it
+      # restores the originals; removing the committed journal never rolls back.
       def apply_changes(changes, journal)
         changes.each do |change|
           assert_snapshot!(current(change), change.fetch('before'), change.fetch('path'))
           replace(change.fetch('path'), Plan.after_content(change), change.fetch('mode'))
         end
-        File.unlink(journal_path)
+        write_journal(committed_journal(journal))
       rescue StandardError => e
         recover_journal(journal)
         raise Conflict, "Apply failed and original files were restored: #{e.message}"

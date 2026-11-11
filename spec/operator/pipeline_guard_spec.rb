@@ -63,6 +63,23 @@ RSpec.describe Woods::Operator::PipelineGuard do
       File.chmod(0o600, state_path) if state_path
     end
 
+    # An entry whose timestamp cannot be parsed used to read as "never ran"
+    # (last_run answered nil), so one bad value disabled the cooldown.
+    it 'fails closed (denies) when the operation timestamp cannot be parsed' do
+      state_path = File.join(state_dir, 'pipeline_guard.json')
+      File.write(state_path, JSON.generate('extraction' => 'not a time', 'embedding' => 42))
+
+      expect(guard.allow?(:extraction)).to be false
+      expect(guard.allow?(:embedding)).to be false
+    end
+
+    it 'judges each operation by its own timestamp when another one is unparseable' do
+      state_path = File.join(state_dir, 'pipeline_guard.json')
+      File.write(state_path, JSON.generate('extraction' => 'not a time'))
+
+      expect(guard.allow?(:embedding)).to be true
+    end
+
     it 'still allows when the state file is simply missing' do
       expect(File.exist?(File.join(state_dir, 'pipeline_guard.json'))).to be false
 
@@ -93,6 +110,14 @@ RSpec.describe Woods::Operator::PipelineGuard do
       File.write(state_path, '[1,2,3]')
 
       expect(guard.state_status).to eq(:corrupt)
+    end
+
+    it "reports :corrupt for an operation whose timestamp cannot be parsed, and :ok for the file's shape" do
+      File.write(state_path, JSON.generate('extraction' => 'not a time', 'embedding' => Time.now.iso8601))
+
+      expect(guard.state_status(:extraction)).to eq(:corrupt)
+      expect(guard.state_status(:embedding)).to eq(:ok)
+      expect(guard.state_status).to eq(:ok)
     end
 
     it 'reports :permission_denied for a state file this process cannot read, distinct from :corrupt' do

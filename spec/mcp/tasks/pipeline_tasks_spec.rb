@@ -355,6 +355,62 @@ RSpec.describe 'pipeline tools and the Tasks extension' do
     end
   end
 
+  # The record is minted before the `started` hook runs. If the hook raises,
+  # no thread ever owns the record, and its producer is this live process, so
+  # orphan detection never resolves it: the record must be failed here.
+  describe 'when the started hook raises after the task record exists' do
+    let(:guard) { instance_double(Woods::Operator::PipelineGuard, allow?: true) }
+
+    before do
+      operator[:pipeline_guard] = guard
+      allow(fake_extractor).to receive(:extract_all).and_return(true)
+    end
+
+    def task_records
+      Dir.glob(File.join(@index_dir, 'tasks', '*.json')).map { |path| JSON.parse(File.read(path)) }
+    end
+
+    it 'fails the record when the hook raises a StandardError' do
+      allow(guard).to receive(:record!).and_raise(RuntimeError, 'cooldown store broken')
+
+      extract_call(tasks_meta)
+
+      expect(task_records.size).to eq(1)
+      expect(task_records.first['status']).to eq('failed')
+      expect(task_records.first.dig('error', 'message')).to include('cooldown store broken')
+      expect(fake_extractor).not_to have_received(:extract_all)
+    end
+
+    it 'fails the record when the hook raises a SystemCallError' do
+      allow(guard).to receive(:record!).and_raise(Errno::ENOSPC)
+
+      body = extract_call(tasks_meta)
+
+      expect(body.dig('result', '_meta', 'error_code')).to eq('task_store_unavailable')
+      expect(task_records.map { |record| record['status'] }).to eq(['failed'])
+    end
+
+    it 'keeps the original exception when failing the record also fails' do
+      allow(guard).to receive(:record!).and_raise(RuntimeError, 'cooldown store broken')
+      allow_any_instance_of(Woods::MCP::Tasks::Store).to receive(:fail!).and_raise(Errno::EROFS)
+      allow(Logger).to receive(:new).and_call_original
+      allow(Logger).to receive(:new).with($stderr).and_return(double('Logger', error: nil))
+
+      expect { Woods::MCP::Server.send(:run_pipeline_in_background, **direct_pipeline_args) }
+        .to raise_error(RuntimeError, 'cooldown store broken')
+    end
+
+    def direct_pipeline_args
+      store = Woods::MCP::Tasks::Store.new(@index_dir)
+      allow(Woods::MCP::Tasks::RequestCapture).to receive(:tasks_requested?).and_return(true)
+      {
+        kind: :extraction, tool: 'pipeline_extract', lock: nil, task_store: store,
+        respond: ->(text) { text }, respond_err: ->(*args, **kw) { [args, kw] },
+        runner: -> {}, started: -> { guard.record!(:extraction) }, started_message: 'started'
+      }
+    end
+  end
+
   describe 'durability across processes' do
     before { allow(fake_extractor).to receive(:extract_all).and_return(true) }
 

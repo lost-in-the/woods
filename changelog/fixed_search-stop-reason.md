@@ -1,0 +1,1 @@
+- `search` no longer reports `result_limit` as its stop reason when it also skipped an unreadable or corrupt unit. The completeness block now keeps `unreadable_or_corrupt_source` and its repair hint, and still sets `has_more` when a match beyond the page was found.

@@ -34,6 +34,12 @@ RSpec.describe Woods::Console::SqlTableScanner do
     end
   end
 
+  it 'sees a table named after a carriage return ends a PostgreSQL comment' do
+    sql = "SELECT a FROM ok --x\r UNION SELECT s FROM secrets"
+    expect(described_class.identifiers_in(sql, dialect: :postgres)).to include('secrets')
+    expect(described_class.identifiers_in(sql)).to include('secrets')
+  end
+
   describe '.identifiers_in' do
     subject(:identifiers) { described_class.identifiers_in(sql) }
 

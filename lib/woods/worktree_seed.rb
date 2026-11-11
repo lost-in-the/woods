@@ -84,8 +84,13 @@ module Woods
       end
     end
 
+    # Strict: seeding replaces the target's payloads and restarts it at
+    # generation 1, so a present but malformed marker must not read as
+    # "nothing published here".
+    #
+    # @raise [Generation::InvalidMarker] when the marker exists but is invalid
     def published?(dir)
-      Generation.new(output_dir: dir).current.number.positive?
+      Generation.new(output_dir: dir).current!.number.positive?
     end
 
     # @return [Result, String] the seeded result, or the reason to fall back

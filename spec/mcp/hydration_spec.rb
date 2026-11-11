@@ -183,6 +183,44 @@ RSpec.describe Woods::MCP::Hydration do
       expect(response).not_to have_key('error')
       expect(tool_json(response)['identifier']).to eq('Post')
     end
+
+    it 'records failed for a ScriptError such as a LoadError from a lazy require' do
+      allow_any_instance_of(Woods::MCP::IndexReader).to receive(:warmup!).and_raise(LoadError, 'cannot load such file')
+      server = build
+      initialize_request(server)
+      wait_until { server.woods_hydration.done? }
+
+      expect(tool_json(tool_call(server, 'woods_status'))['hydration']).to include(
+        'state' => 'failed', 'error' => { 'class' => 'LoadError', 'message' => 'cannot load such file' }
+      )
+    end
+
+    # Neither a StandardError nor a ScriptError: the warm-up thread dies with
+    # it, but waiting calls and woods_status must still see `failed` rather
+    # than `warming` forever.
+    it 'records failed for an Exception outside StandardError and ScriptError' do
+      fatal = Class.new(Exception) # rubocop:disable Lint/InheritException -- a non-StandardError is the point
+      stub_const('FatalWarmupError', fatal)
+      allow_any_instance_of(Woods::MCP::IndexReader).to receive(:warmup!).and_raise(fatal, 'stack exhausted')
+      server = build
+      initialize_request(server)
+      wait_until { server.woods_hydration.done? }
+
+      expect(server.woods_hydration.wait(timeout: 0.1)).to eq(:failed)
+      expect(tool_json(tool_call(server, 'woods_status'))['hydration']).to include(
+        'state' => 'failed', 'error' => { 'class' => 'FatalWarmupError', 'message' => 'stack exhausted' }
+      )
+    end
+
+    it 'records failed and then re-raises such an Exception on the warm-up thread' do
+      fatal = Class.new(Exception) # rubocop:disable Lint/InheritException -- a non-StandardError is the point
+      hydration = described_class.new(mode: :after_handshake) { raise fatal, 'stack exhausted' }
+      hydration.start!
+
+      expect { hydration.instance_variable_get(:@thread).join(5) }.to raise_error(fatal, 'stack exhausted')
+      expect(hydration.state).to eq(:failed)
+      expect(hydration.error).to be_a(fatal)
+    end
   end
 
   describe 'warmup: :before_handshake' do

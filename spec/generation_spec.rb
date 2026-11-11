@@ -25,6 +25,14 @@ RSpec.describe Woods::Generation do
 
       expect(generation.current.number).to eq(0)
     end
+
+    it 'reads as unpublished when the file holds JSON that is not an object' do
+      %w[[] 5].each do |bytes|
+        File.write(File.join(dir, described_class::FILENAME), bytes)
+
+        expect(generation.current.number).to eq(0), bytes
+      end
+    end
   end
 
   describe '#bump!' do
@@ -46,6 +54,40 @@ RSpec.describe Woods::Generation do
 
       expect(generation.current.reason).to eq('incremental')
       expect(generation.current.updated_at).to eq('2026-07-27T00:00:00Z')
+    end
+
+    # A writer that read a corrupt marker as "nothing published" republished
+    # as generation 1: the number moved backward and the unpinned
+    # payloads/gen-1 was replaced, while readers (#current!) failed closed.
+    context 'when an existing marker is corrupt' do
+      let(:marker_path) { File.join(dir, described_class::FILENAME) }
+
+      before do
+        (1..3).each do |number|
+          payload = File.join(dir, 'payloads', "gen-#{number}")
+          FileUtils.mkdir_p(payload)
+          File.write(File.join(payload, 'sentinel.json'), JSON.generate('generation' => number))
+          generation.bump!(reason: 'full', payload: "payloads/gen-#{number}")
+        end
+      end
+
+      ['not json', '{}', '{"number":"3"}', '[]'].each do |content|
+        it "refuses to bump over #{content.inspect} instead of republishing as generation 1" do
+          File.write(marker_path, content)
+
+          expect { generation.bump!(reason: 'full', payload: 'payloads/gen-1') }
+            .to raise_error(described_class::InvalidMarker)
+          expect(File.read(marker_path)).to eq(content)
+          expect(JSON.parse(File.read(File.join(dir, 'payloads', 'gen-1', 'sentinel.json'))))
+            .to eq('generation' => 1)
+        end
+      end
+
+      it 'still starts at one when the marker is missing' do
+        File.delete(marker_path)
+
+        expect(generation.bump!.number).to eq(1)
+      end
     end
 
     it 'survives a reload from disk' do

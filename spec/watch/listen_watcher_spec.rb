@@ -109,4 +109,77 @@ RSpec.describe Woods::Watch::ListenWatcher do
       expect(listen.ignore.first).not_to match('app/tmp/cache')
     end
   end
+
+  # `start` ignored @stopped, so a watcher stopped before or while starting
+  # still registered and started its listener, which then ran with nothing
+  # left to stop it. This stand-in follows listen's own state machine: a
+  # listener starts only from `:initializing`, and a second stop is refused.
+  describe 'a stop racing #start' do
+    # One listener per `to`, recorded on the class so an example can read it.
+    class FsmListen # rubocop:disable Lint/ConstantDefinitionInBlock
+      class << self
+        attr_accessor :built, :on_to, :before_start, :after_start
+
+        def to(_dir, **)
+          on_to&.call
+          (self.built ||= []) << new(self)
+          built.last
+        end
+      end
+
+      attr_reader :state
+
+      def initialize(owner)
+        @owner = owner
+        @state = :initializing
+      end
+
+      def start
+        @owner.before_start&.call
+        raise ArgumentError, "cannot start from state #{@state.inspect}" unless @state == :initializing
+
+        @state = :processing_events
+        @owner.after_start&.call
+      end
+
+      def stop
+        raise ArgumentError, "can't change state from '#{@state}' to 'stopped'" if @state == :stopped
+
+        @state = :stopped
+      end
+    end
+
+    let(:listen) { Class.new(FsmListen) }
+    let(:watcher) { described_class.new(root: root, listen_class: listen) }
+
+    it 'does nothing when started after a stop' do
+      watcher.stop
+
+      Timeout.timeout(5) { watcher.start { nil } }
+
+      expect(listen.built).to be_nil
+    end
+
+    it 'never starts a listener when the stop lands while it is being built' do
+      listen.on_to = -> { watcher.stop }
+
+      Timeout.timeout(5) { watcher.start { nil } }
+
+      expect(listen.built.map(&:state)).to eq([:initializing])
+    end
+
+    it 'treats a listener refusing to start after the stop as stopped, not as a failed start' do
+      listen.before_start = -> { watcher.stop }
+
+      expect { Timeout.timeout(5) { watcher.start { nil } } }.not_to raise_error
+      expect(listen.built.map(&:state)).to eq([:stopped])
+    end
+
+    it 'leaves the listener stopped when the stop lands just after it started' do
+      listen.after_start = -> { watcher.stop }
+
+      expect { Timeout.timeout(5) { watcher.start { nil } } }.not_to raise_error
+      expect(listen.built.map(&:state)).to eq([:stopped])
+    end
+  end
 end

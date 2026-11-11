@@ -89,7 +89,9 @@ module Woods
     #
     # A missing or unreadable file reads as {UNPUBLISHED} rather than raising:
     # a reader asking "what generation is this?" of a directory that has none
-    # wants an answer, not an exception.
+    # wants an answer, not an exception. That leniency is for display only.
+    # A writer must use {#current!}: reading a corrupt marker as "nothing
+    # published" would republish as generation 1 over a retained gen-1.
     #
     # @return [Marker]
     def current
@@ -103,7 +105,7 @@ module Woods
         reason: data['reason'],
         payload: data['payload']
       )
-    rescue JSON::ParserError, SystemCallError
+    rescue JSON::ParserError, SystemCallError, TypeError
       UNPUBLISHED
     end
 
@@ -129,6 +131,10 @@ module Woods
     # Call this *after* the index files are written, never before, and never
     # after a run that failed or wrote nothing.
     #
+    # The next number comes from {#current!}, so a marker that exists but is
+    # unreadable or malformed fails closed instead of reading as unpublished
+    # and moving the number back to 1. A missing marker still starts at 1.
+    #
     # @param reason [String, nil] what produced this generation, for humans
     #   reading `woods_status`
     # @param payload [String, nil] name of the immutable directory this
@@ -136,9 +142,10 @@ module Woods
     #   directory. Omit for a flat index; when given, this bump becomes the
     #   single commit point for that whole payload (see the class docs).
     # @return [Marker] the newly published generation
+    # @raise [InvalidMarker] if an existing marker cannot identify a generation
     def bump!(reason: nil, payload: nil)
       marker = Marker.new(
-        number: current.number + 1,
+        number: current!.number + 1,
         token: SecureRandom.hex(8),
         updated_at: @clock.call,
         reason: reason,

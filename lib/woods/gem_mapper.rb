@@ -76,8 +76,10 @@ module Woods
 
     private
 
+    # Strict: a present but malformed marker raises rather than reading as
+    # unpublished, which would promote over the retained gen-1.
     def current_number
-      Generation.new(output_dir: @output_dir).current.number
+      Generation.new(output_dir: @output_dir).current!.number
     end
 
     def promote_and_publish(stage, number)

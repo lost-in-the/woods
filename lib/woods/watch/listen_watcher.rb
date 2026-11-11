@@ -39,38 +39,75 @@ module Woods
       # by the extraction layer, which keys deletion on the file being gone),
       # so they are merged into one batch.
       #
+      # A stop is final: once {#stop} has run, `start` registers nothing, and
+      # a stop racing the setup below leaves no listener running.
+      #
       # @yieldparam changed [Array<String>] absolute paths
       # @return [void]
       def start(&on_change)
-        # Only the setup is wrapped. `sleep_until_stopped` parks for the whole
-        # life of the daemon, so folding it into this rescue labelled every
-        # later failure — including one raised by `on_change`, i.e. by the
-        # extraction itself — as "failed to start", and sent it up as a
-        # WatcherError the daemon then treated as a dead backend.
-        begin
-          @listener = @listen_class.to(@root, ignore: ignore_patterns) do |modified, added, removed|
-            batch = (modified + added + removed).uniq
-            on_change.call(batch) if batch.any?
-          end
-          @listener.start
-          @ready_callback&.call
-        rescue StandardError => e
-          # inotify watch exhaustion (ENOSPC) lands here, and it is the most
-          # likely failure on a large tree. {Watcher.build}'s caller falls back
-          # to polling on this, which works where listen just gave up.
-          raise WatcherError, "listen backend failed to start: #{e.class}: #{e.message}"
-        end
+        return if @stopped
 
+        # Only the setup is wrapped (in #start_listener). `sleep_until_stopped`
+        # parks for the whole life of the daemon, so folding it into that
+        # rescue labelled every later failure — including one raised by
+        # `on_change`, i.e. by the extraction itself — as "failed to start",
+        # and sent it up as a WatcherError the daemon then treated as a dead
+        # backend.
+        listener = start_listener(&on_change)
+        return unless listener
+
+        # {#stop} sets the flag before it reads @listener, so a stop that
+        # raced `listener.start` has either stopped it or is seen here.
+        stop_listener(listener) if @stopped
         sleep_until_stopped
       end
 
       # @return [void]
       def stop
         @stopped = true
-        @listener&.stop
+        stop_listener(@listener)
       end
 
       private
+
+      # Build, register and start the listener.
+      #
+      # @return [Object, nil] the started listener, or nil when a stop landed
+      #   during setup and nothing was started
+      # @raise [WatcherError] when the backend cannot start
+      def start_listener(&on_change)
+        listener = @listen_class.to(@root, ignore: ignore_patterns) do |modified, added, removed|
+          batch = (modified + added + removed).uniq
+          on_change.call(batch) if batch.any?
+        end
+        @listener = listener
+        # A stop that ran before the assignment above found no listener to
+        # stop; one that ran after it already stopped this one. Either way it
+        # must not be started.
+        return if @stopped
+
+        listener.start
+        @ready_callback&.call
+        listener
+      rescue StandardError => e
+        # A stop that landed between the check above and `start` stopped the
+        # listener first, and listen refuses to start a stopped listener. That
+        # is the requested stop, not a backend that failed.
+        return if @stopped
+
+        # inotify watch exhaustion (ENOSPC) lands here, and it is the most
+        # likely failure on a large tree. {Watcher.build}'s caller falls back
+        # to polling on this, which works where listen just gave up.
+        raise WatcherError, "listen backend failed to start: #{e.class}: #{e.message}"
+      end
+
+      # Best-effort: when {#start} and {#stop} race, both may stop the same
+      # listener, and listen refuses to stop one twice.
+      def stop_listener(listener)
+        listener&.stop
+      rescue StandardError
+        nil
+      end
 
       def ignore_patterns
         @ignored.map { |dir| %r{\A#{Regexp.escape(dir)}(/|\z)} }

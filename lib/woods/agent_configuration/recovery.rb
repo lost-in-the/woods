@@ -2,7 +2,8 @@
 
 module Woods
   module AgentConfiguration
-    # Validate every journal snapshot before restoring any managed file.
+    # Validate every journal snapshot before restoring any managed file. A
+    # journal marked committed holds a fully applied change and is only removed.
     module Recovery
       private
 
@@ -18,6 +19,33 @@ module Woods
         File.unlink(journal_path)
       rescue KeyError, TypeError, ArgumentError => e
         raise Conflict, "Invalid recovery journal; retained for manual recovery: #{e.message}"
+      end
+
+      # A committed journal records a change that was fully applied; only its
+      # removal was left undone, so it is removed and nothing is restored.
+      #
+      # @return [Boolean] true when the journal was committed and is now gone
+      def discard_committed?(journal)
+        return false unless journal['committed'] == true
+
+        File.unlink(journal_path)
+        true
+      end
+
+      # Keeps the journal's shape (plan and original paths) so readers that
+      # validate it still can, but drops the original bytes: a committed
+      # journal is never restored, and an older reader refuses it instead of
+      # rolling back.
+      def committed_journal(journal)
+        journal.merge('committed' => true,
+                      'originals' => journal.fetch('originals').map { |original| original.slice('path') })
+      end
+
+      def discard_committed_journal
+        File.unlink(journal_path)
+      rescue SystemCallError
+        # The change stands; the next apply or recover removes the committed journal.
+        nil
       end
 
       def validate_originals!(originals, changes)

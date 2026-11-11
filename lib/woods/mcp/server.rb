@@ -1644,17 +1644,9 @@ module Woods
           return nil unless guard
           return nil if guard.allow?(operation)
 
-          case guard.state_status
+          case guard.state_status(operation)
           when :corrupt
-            # `pipeline_repair`'s `reset_cooldowns` action deletes state by
-            # key and cannot act on content it cannot parse, so it will not
-            # clear this — the fix is replacing or removing the state file
-            # directly.
-            error_response(
-              'Pipeline cooldown state is corrupt, so the cooldown cannot be verified. ' \
-              'Inspect and replace (or remove) pipeline_guard.json in the operator state directory.',
-              code: :cooldown_state_corrupt, tool: tool
-            )
+            error_response(cooldown_corrupt_message(guard), code: :cooldown_state_corrupt, tool: tool)
           when :permission_denied
             error_response(
               'Pipeline cooldown state is unreadable (permission denied), so the cooldown cannot be verified. ' \
@@ -1666,6 +1658,19 @@ module Woods
               "#{operation == :extraction ? 'Extraction' : 'Embedding'} is rate-limited. Try again later.",
               code: :rate_limited, tool: tool, retry_after_seconds: 300
             )
+          end
+        end
+
+        # `pipeline_repair`'s `reset_cooldowns` action deletes state by key: it
+        # clears one operation's unparseable timestamp, but cannot act on a
+        # file it cannot parse, which has to be replaced or removed directly.
+        def cooldown_corrupt_message(guard)
+          if guard.state_status == :corrupt
+            'Pipeline cooldown state is corrupt, so the cooldown cannot be verified. ' \
+              'Inspect and replace (or remove) pipeline_guard.json in the operator state directory.'
+          else
+            'Pipeline cooldown state for this operation is unreadable, so the cooldown cannot be verified. ' \
+              "Run pipeline_repair's reset_cooldowns action to clear it."
           end
         end
 
@@ -1839,9 +1844,10 @@ module Woods
           # the moment Thread.new succeeds — its ensure releases it when the
           # run finishes. Before that point (guard failures, started hook),
           # THIS method owns the lock and must release it on the way out
-          # (L6): the rescue below covers only SystemCallError/IOError, so a
+          # (L6): only SystemCallError/IOError are answered as a response, so a
           # guard bug raising anything else used to leak the on-disk lock
           # and block every later writer until the stale window expired.
+          # Either way a task record minted before the handoff is failed.
           handoff = false
           begin
             task = create_pipeline_task(task_store, tool)
@@ -1887,18 +1893,43 @@ module Woods
 
             respond.call(JSON.pretty_generate({ status: 'started', message: started_message }))
           rescue SystemCallError, IOError => e
+            abandon_pipeline_task(task_store, task, e) unless handoff
             respond_err.call(
               'The task could not be durably recorded, so the pipeline was not started.',
               code: :task_store_unavailable,
               tool: tool,
               exception: e.class.name
             )
+          rescue Exception => e # rubocop:disable Lint/RescueException -- record the terminal state, then re-raise unchanged
+            # A record minted before the `started` hook (or Thread.new) raised
+            # has no thread to finish it, and its producer is this live
+            # process, so orphan detection would leave it `working` forever.
+            abandon_pipeline_task(task_store, task, e) unless handoff
+            raise
           ensure
             unless handoff
               lock&.release
               Woods::MCP::Server.send(:pipeline_finish, kind)
             end
           end
+        end
+
+        # Fail a task record that no background thread took ownership of.
+        #
+        # Best effort: a store that cannot record the failure must not replace
+        # the exception that stopped the start, so its own error is only logged.
+        #
+        # @param task_store [Tasks::Store, nil]
+        # @param task [Tasks::Store::Task, nil] nil when no record was minted
+        # @param error [Exception] what stopped the pipeline from starting
+        # @return [void]
+        def abandon_pipeline_task(task_store, task, error)
+          return unless task_store && task
+
+          task_store.fail!(task.id, message: "The pipeline did not start: #{error.class}: #{error.message}")
+        rescue StandardError => e
+          logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
+          logger.error("[Woods] Could not record task #{task.id} as failed: #{e.class}: #{e.message}")
         end
 
         # Mint a task record, or return nil to take the legacy path.

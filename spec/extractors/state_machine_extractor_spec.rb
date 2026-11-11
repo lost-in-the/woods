@@ -322,6 +322,126 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(units.first.metadata[:events].map { |e| e[:name] }).to include('noop', 'pay')
     end
 
+    it 'does not open a block on a do inside a comment' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              transitions from: :pending, to: :paid # do not retry here
+            end
+
+            event :ship do
+              transitions from: :paid, to: :shipped
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] }
+                           ])
+    end
+
+    it 'does not open a block on a do inside a string' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              after { log("nothing to do") }
+              transitions from: :pending, to: :paid
+            end
+
+            event :ship do
+              transitions from: :paid, to: :shipped
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events.map { |e| e[:name] }).to eq(%w[pay ship])
+      expect(events.last[:transitions]).to eq([{ from: 'paid', to: 'shipped', guard: nil }])
+    end
+
+    it 'closes an event on an end line with trailing content' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              transitions from: :pending, to: :paid, guard: :funded?
+            end # pay
+
+            event :ship do
+              after { notify(:shipped) }
+              transitions from: :paid, to: :shipped
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: 'funded?' }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] }
+                           ])
+    end
+
+    it 'does not close an event on the end of a nested if block' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              before do
+                if Rails.env.test?
+                  log(:paid)
+                end
+              end
+              transitions from: :pending, to: :paid
+            end
+
+            event :ship do
+              transitions from: :paid, to: :shipped
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([
+                             { name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] },
+                             { name: 'ship', transitions: [{ from: 'paid', to: 'shipped', guard: nil }] }
+                           ])
+    end
+
+    it 'keeps an event block still open at the end of the source' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            event :pay do
+              transitions from: :pending, to: :paid
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events).to eq([{ name: 'pay', transitions: [{ from: 'pending', to: 'paid', guard: nil }] }])
+    end
+
     it 'returns empty array for files without AASM' do
       path = create_file('app/models/user.rb', <<~RUBY)
         class User < ApplicationRecord
