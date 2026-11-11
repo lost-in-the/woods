@@ -115,7 +115,7 @@ module Woods
         initial_state = parse_initial_state_aasm(source)
         parsed = Woods::ParseCache.parse(source)
         events = if parsed.success?
-                   aasm_definitions(parsed.value).flat_map { |definition| parse_events_from_node(definition.block) }
+                   aasm_definitions(parsed.value).flat_map { |definition| parse_events_from_node(definition) }
                  else
                    parse_events_from_source(source, /\Aevent\s+:(\w+)/)
                  end
@@ -261,25 +261,65 @@ module Woods
         []
       end
 
-      # The +aasm do ... end+ calls in the parsed model, in source order.
+      # The +aasm+ definitions in the parsed model, in source order.
       #
       # Events are read only inside these blocks: an +event+ call in a
       # callback (+after_commit { event(:x) }+), a +define_method+ block or a
       # method body runs later and declares nothing. A definition inside
-      # another block, such as a concern's +included do+, still counts.
+      # another block, such as a concern's +included do+, still counts, and
+      # so does a literal proc forwarded as the block (+aasm(&proc { ... })+).
       #
       # @param node [Prism::Node, nil] parsed source
-      # @return [Array<Prism::CallNode>] receiverless or +self+ +aasm+ calls with a block
+      # @return [Array<Prism::BlockNode>] the definitions' blocks
       def aasm_definitions(node)
         definitions = []
-        each_call_outside_events(node) do |call|
-          next false unless call.name == :aasm && call.block.is_a?(Prism::BlockNode) &&
-                            (call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode))
+        each_call_outside_methods(node) do |call|
+          next false unless call.name == :aasm && (call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode))
 
-          definitions << call
+          block = literal_block(call)
+          next false unless block
+
+          definitions << block
           true
         end
         definitions
+      end
+
+      # The block a DSL call reads, when the source states it: a +do+/braces
+      # block, or a forwarded +proc { }+ or +Proc.new { }+ literal. Any other
+      # forwarded expression (a variable, a method call, +method(:x)+) is not
+      # evaluated. A lambda is not a definition: AASM 6.0.0 runs the block
+      # with +instance_eval+, which passes a lambda one argument too many and
+      # raises, so a forwarded lambda declares nothing.
+      #
+      # @param call [Prism::CallNode]
+      # @return [Prism::BlockNode, nil]
+      def literal_block(call)
+        block = call.block
+        return block if block.is_a?(Prism::BlockNode)
+        return unless block.is_a?(Prism::BlockArgumentNode)
+
+        forwarded = block.expression
+        forwarded.block if proc_literal?(forwarded) && forwarded.block.is_a?(Prism::BlockNode)
+      end
+
+      # @param node [Prism::Node, nil]
+      # @return [Boolean] whether +node+ is +proc { }+ or +Proc.new { }+
+      def proc_literal?(node)
+        return false unless node.is_a?(Prism::CallNode)
+        return node.receiver.nil? && node.arguments.nil? if node.name == :proc
+
+        node.name == :new && node.arguments.nil? && proc_constant?(node.receiver)
+      end
+
+      # @param node [Prism::Node, nil]
+      # @return [Boolean] whether +node+ is +Proc+ or +::Proc+
+      def proc_constant?(node)
+        case node
+        when Prism::ConstantReadNode then node.name == :Proc
+        when Prism::ConstantPathNode then node.parent.nil? && node.name == :Proc
+        else false
+        end
       end
 
       # @param declaration [Prism::CallNode] state_machine DSL call
@@ -394,41 +434,58 @@ module Woods
 
       # Read the events declared under +node+ from the syntax tree.
       #
-      # An event is a receiverless +event :name+ call. Its transitions are the
-      # +transition+/+transitions+ calls inside its own block, at any depth,
-      # so block boundaries come from the parser rather than from keywords on
-      # a line: a method named +class+ or a +:begin+ symbol opens nothing. A
+      # An event is a receiverless +event :name+ call that the definition
+      # runs as it is read (see {#each_dsl_call}). Its transitions are the
+      # +transition+/+transitions+ calls its own block runs the same way, so
+      # block boundaries come from the parser rather than from keywords on a
+      # line: a method named +class+ or a +:begin+ symbol opens nothing. A
       # blockless declaration (`event :noop`) is an event with no transitions.
-      # Events are not looked for inside another event's block.
       #
-      # @param node [Prism::Node, nil] an aasm or state_machine block
+      # @param node [Prism::BlockNode, nil] an aasm or state_machine block
       # @return [Array<Hash>] events with :name and :transitions keys, in source order
       def parse_events_from_node(node)
         events = []
-        each_call_outside_events(node) do |call|
+        each_dsl_call(node) do |call|
           name = event_name(call)
-          next false unless name
-
-          events << { name: name, transitions: event_transitions(call.block) }
-          true
+          events << { name: name, transitions: event_transitions(literal_block(call)) } if name
         end
         events
       end
 
+      # Yield the calls a DSL block runs while it is read: the calls in its
+      # statements, including those under +if+, +unless+, +case+ and +begin+.
+      # A call's own block and arguments are not entered. They hold code the
+      # DSL keeps for later, such as a callback (+after_all_events { ... }+,
+      # an event's +after { ... }+) or an option (+after: -> { ... }+), so an
+      # +event+ or +transitions+ call there declares nothing. A method body,
+      # a lambda and a class body run later too.
+      #
+      # @param node [Prism::BlockNode, nil] the DSL block
+      # @yieldparam call [Prism::CallNode]
+      def each_dsl_call(node, &block)
+        node = node.body if node.is_a?(Prism::BlockNode)
+
+        case node
+        when Prism::CallNode then yield node
+        when Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+          nil
+        when Prism::Node then node.compact_child_nodes.each { |child| each_dsl_call(child, &block) }
+        end
+      end
+
       # Yield every call under +node+ in source order. A call for which the
       # block returns true is not descended into, and neither is a method
-      # body: a +def+ runs later, so an +event+ or +transitions+ call in one
-      # declares nothing.
+      # body: a +def+ runs later, so an +aasm+ call in one defines nothing.
       #
       # @param node [Prism::Node, nil]
       # @yieldparam call [Prism::CallNode]
       # @yieldreturn [Boolean] true to skip the call's children
-      def each_call_outside_events(node, &block)
+      def each_call_outside_methods(node, &block)
         return unless node.is_a?(Prism::Node)
         return if node.is_a?(Prism::DefNode)
         return if node.is_a?(Prism::CallNode) && yield(node)
 
-        node.compact_child_nodes.each { |child| each_call_outside_events(child, &block) }
+        node.compact_child_nodes.each { |child| each_call_outside_methods(child, &block) }
       end
 
       # @param call [Prism::CallNode]
@@ -443,19 +500,15 @@ module Woods
         name if name.match?(/\A\w+\z/)
       end
 
-      # @param block [Prism::Node, nil] an event's block
+      # @param block [Prism::BlockNode, nil] an event's block
       # @return [Array<Hash>] the transitions declared inside it
       def event_transitions(block)
-        return [] unless block.is_a?(Prism::BlockNode)
-
         transitions = []
-        each_call_outside_events(block.body) do |call|
-          next true if event_name(call)
-          next false unless transition_call?(call)
+        each_dsl_call(block) do |call|
+          next unless transition_call?(call)
 
           transition = transition_from_call(call)
           transitions << transition if transition
-          false
         end
         transitions
       end
