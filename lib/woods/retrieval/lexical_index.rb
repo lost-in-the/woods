@@ -308,14 +308,17 @@ module Woods
       # scanned for those first and only a run with an upper-case letter is
       # split at its CamelCase boundaries. This yields exactly the terms of
       # splitting the whole text first (a boundary space can only fall
-      # inside such a run), and most of a source file is neither.
+      # inside such a run), and most of a source file is neither. The split
+      # run is scanned again after +downcase+, as the whole text was: a
+      # lower-case form need not be letters and digits only ("İ" becomes
+      # "i" and a combining dot, which ends a term).
       def tokenize(value)
         text = value.to_s
         word_run, upper, lower_upper, upper_upper_lower = text.ascii_only? ? ASCII_PATTERNS : UNICODE_PATTERNS
         terms = []
         text.scan(word_run) do |run|
           if run.match?(upper)
-            terms.concat(run.gsub(lower_upper, '\1 \2').gsub(upper_upper_lower, '\1 \2').downcase.split)
+            terms.concat(run.gsub(lower_upper, '\1 \2').gsub(upper_upper_lower, '\1 \2').downcase.scan(word_run))
           else
             terms << run.downcase
           end

@@ -205,6 +205,25 @@ RSpec.describe Woods::Retrieval::LexicalIndex do
     expect(search('charge').first.matched_fields).to include('file_path:charge')
   end
 
+  # The tokenizer scans runs first; its terms must equal splitting the whole
+  # text at CamelCase boundaries, downcasing it and scanning that, the
+  # definition it replaced. "İ" lower-cases to "i" and a combining dot.
+  it 'tokenizes exactly as splitting the whole text first, including lower-case forms that end a term' do
+    reference = lambda do |text|
+      text.gsub(/(\p{Ll}|\d)(\p{Lu})/u, '\1 \2').gsub(/(\p{Lu})(\p{Lu}\p{Ll})/u, '\1 \2').downcase
+          .scan(/[\p{L}\p{N}]+/u).reject { |term| Woods::Retrieval::QueryClassifier::STOP_WORDS.include?(term) }
+    end
+    index = described_class.new(metadata_store: store)
+    samples = ['İstanbulRoute', 'İSTANBUL', 'fooİbar', 'Straße ÉCOLE ǅemal', 'HTTPServer2Go', 'snake_case/path.rb',
+               'ΣΑΣ σας', 'plain words only']
+    samples.each do |text|
+      expect(index.send(:tokenize, text)).to eq(reference.call(text).map { |term| index.send(:stem, term) }), text
+    end
+
+    target = add('Route', source: 'İstanbulRoute')
+    expect(search('stanbul').map(&:identifier)).to eq([target])
+  end
+
   # A question in the plural reaches a method named in the singular, and
   # a unit that holds more of its words outranks units that only repeat one
   # rare word in their names.

@@ -1,6 +1,9 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'json'
+require 'open3'
+require 'tmpdir'
 require 'yaml'
 require_relative '../../script/parallel_booted'
 
@@ -91,6 +94,37 @@ RSpec.describe ParallelBooted do
       expect(selected.sort).to eq(declarations.reject(&:randomized).map(&:line).sort)
       randomized = declarations.find(&:randomized).line
       expect(seeds.map(&:arguments)).to all(eq(["#{described_class::HARNESS}:#{randomized}"]))
+    end
+
+    # The line filters are derived from the harness's text, so a declaration
+    # the parser misreads (a second example inside a top-level loop, a
+    # top-level form it does not recognise) would drop examples from CI
+    # without a failure. RSpec's own dry run is the oracle: the processes
+    # together must declare the whole file's examples, each exactly once.
+    it 'selects every example of the harness exactly once across its processes, by RSpec dry run' do
+      seeds = '1,2,3'
+      dry_run = lambda do |arguments, env, out|
+        command = [RbConfig.ruby, File.join(described_class::ROOT, 'bin', 'rspec'), '--options', File::NULL,
+                   '--require', 'spec_helper', '--dry-run', '--format', 'json', '--out', out, *arguments]
+        output, status = Open3.capture2e({ 'WOODS_RUN_BOOTED_APP' => '1', 'WOODS_DIFF_SEEDS' => seeds }.merge(env),
+                                         *command, chdir: described_class::ROOT)
+        raise "dry run failed for #{arguments.join(' ')}:\n#{output}" unless status.success?
+
+        JSON.parse(File.read(out, encoding: 'UTF-8')).fetch('examples').map { |example| example['full_description'] }
+      end
+
+      Dir.mktmpdir do |dir|
+        whole = dry_run.call([described_class::HARNESS], {}, File.join(dir, 'whole.json'))
+        jobs = described_class.plan([described_class::HARNESS], buckets: 4, seeds: seeds,
+                                                                harness_source: harness_source)
+        split = jobs.each_with_index.flat_map do |job, index|
+          dry_run.call(job.arguments, job.env, File.join(dir, "#{index}.json"))
+        end
+
+        expect(whole).not_to be_empty
+        expect(split.tally.select { |_, count| count > 1 }.keys).to be_empty
+        expect(split.sort).to eq(whole.sort)
+      end
     end
 
     it 'keeps the file sets that shared a process together and runs every other file alone' do
