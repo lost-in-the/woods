@@ -270,6 +270,16 @@ not a list of what will break. After a budget cutoff every count reads
 `at least`. Structured clients read `data.dependent_counts` and each row's
 `family`; see [dependents families](MCP_SERVERS.md#dependents-families-and-headline).
 
+A `By category:` line splits the families further: `application_code`,
+`rake_tasks`, `test_files`, `factories`, `schema_objects`, `migrations`,
+`documentation`, `agent_instructions`. To read only some of them, pass
+`families`, for example `families: ["code"]` for code alone or
+`families: ["migrations", "rake_tasks"]`. Unlike `types`, it filters after the
+walk, so code reached through a factory or a doc is still listed and marked
+"(reached through rows outside the selection)". The traversal counts stay
+whole; the `Selected (families: ...)` line counts the listed rows. See
+[selecting families](MCP_SERVERS.md#selecting-families).
+
 The answer is paged to 50 nodes by default. When it is cut, the response ends with a
 `Showing N of M (truncated)` line, the same one `graph_analysis` prints. Reach
 for `depth`, `types` and `via` first: they make the answer smaller. `limit` and

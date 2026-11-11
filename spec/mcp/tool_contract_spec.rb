@@ -90,10 +90,11 @@ RSpec.describe 'Index MCP tool contracts' do
                                                                                    'Post' => { 'type' => 'model', 'depth' => 0,
                                                                                                'deps' => %w[Comment PostsController] },
                                                                                    'Comment' => { 'type' => 'model', 'depth' => 1,
-                                                                                                  'deps' => [], 'family' => 'code' },
+                                                                                                  'deps' => [], 'family' => 'code',
+                                                                                                  'category' => 'application_code' },
                                                                                    'PostsController' => {
                                                                                      'type' => 'controller', 'depth' => 1, 'deps' => [],
-                                                                                     'family' => 'code'
+                                                                                     'family' => 'code', 'category' => 'application_code'
                                                                                    }
                                                                                  },
                                                                                  'dependent_counts' => expected_dependent_counts(2)
@@ -102,6 +103,7 @@ RSpec.describe 'Index MCP tool contracts' do
                                  'identifier' => string_contract(1, 10_000),
                                  'depth' => integer_contract(0, 20),
                                  'explain' => boolean_contract,
+                                 'families' => enum_array_contract(dependents_selector_values, 1_000, 10_000),
                                  'max_nodes' => integer_contract(1, 10_000),
                                  'max_edges' => integer_contract(1, 100_000),
                                  'types' => array_contract(1_000, 10_000),
@@ -1112,7 +1114,16 @@ RSpec.describe 'Index MCP tool contracts' do
   def expected_dependent_counts(code)
     { 'scope' => 'whole_traversal', 'exact' => true, 'bound' => 'exact', 'total' => code, 'headline' => code,
       'mapped_tests' => 0, 'reverse_includes_tests' => false,
-      'families' => { 'code' => code, 'tests' => 0, 'schema' => 0, 'docs' => 0, 'other' => 0 } }
+      'families' => { 'code' => code, 'tests' => 0, 'schema' => 0, 'docs' => 0, 'other' => 0 },
+      'categories' => { 'application_code' => code, 'rake_tasks' => 0, 'test_files' => 0, 'factories' => 0,
+                        'schema_objects' => 0, 'migrations' => 0, 'documentation' => 0,
+                        'agent_instructions' => 0, 'other' => 0 } }
+  end
+
+  # The `dependents` `families:` vocabulary, written out rather than read from the classifier.
+  def dependents_selector_values
+    %w[code tests schema docs other application_code rake_tasks test_files factories schema_objects
+       migrations documentation agent_instructions]
   end
 
   def rpc(server, method, params = {})

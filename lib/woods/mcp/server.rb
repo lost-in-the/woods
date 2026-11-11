@@ -40,6 +40,7 @@ require_relative 'tool_contract'
 require_relative 'tool_response_renderer'
 require_relative 'traversal_response'
 require_relative 'dependent_families'
+require_relative 'dependent_selection'
 require_relative 'version_aware_tool_dispatch'
 require_relative 'worktree_routing'
 
@@ -208,7 +209,7 @@ module Woods
 
           define_lookup_tool(server, reader, respond, respond_err, renderer)
           define_search_tool(server, reader, respond, respond_err, renderer)
-          define_traversal_tool(server, reader, respond, renderer,
+          define_traversal_tool(server, reader, respond, respond_err, renderer,
                                 name: 'dependencies',
                                 description: 'Traverse forward dependencies of a unit (what it depends on). ' \
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
@@ -219,7 +220,7 @@ module Woods
                                              'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
-          define_traversal_tool(server, reader, respond, renderer,
+          define_traversal_tool(server, reader, respond, respond_err, renderer,
                                 name: 'dependents',
                                 description: 'Traverse reverse dependencies of a unit (what depends on it). ' \
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
@@ -720,52 +721,42 @@ module Woods
           end
         end
 
-        def define_traversal_tool(server, reader, respond, renderer, name:, description:, reader_method:, render_key:)
+        def define_traversal_tool(server, reader, respond, respond_err, renderer, name:, description:, reader_method:,
+                                  render_key:)
           coerce = method(:coerce_array)
           coerce_int = method(:coerce_integer)
           paginate_nodes = method(:paginate_traversal_nodes)
+          properties = traversal_properties
+          properties[:families] = dependents_families_property if render_key == :dependents
           server.define_tool(
             name: name,
             description: description,
-            input_schema: {
-              properties: {
-                identifier: { type: 'string', description: 'Unit identifier to start from' },
-                depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
-                explain: { type: 'boolean', description: 'Include recorded relationship evidence and shared shortest witnesses (default: false)' },
-                types: {
-                  type: 'array', items: { type: 'string' },
-                  description: 'Filter to these types'
-                },
-                via: {
-                  anyOf: [
-                    { type: 'string' },
-                    { type: 'array', items: { type: 'string' } }
-                  ],
-                  description: 'Filter by relationship type. Accepts either a single string ' \
-                               "(e.g. 'code_reference') or an array " \
-                               "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
-                               'Known values: link_to, redirect_to, form_action, render, code_reference, ' \
-                               'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface, ' \
-                               'published_by, subscribed_by.'
-                },
-                limit: { type: 'integer',
-                         description: "Maximum nodes to return (default: #{DEFAULT_TRAVERSAL_LIMIT})" },
-                offset: { type: 'integer', description: 'Skip this many nodes (default: 0)' },
-                max_nodes: { type: 'integer', minimum: 1, maximum: 10_000,
-                             description: 'Visited-node budget including root (default: 1000; maximum: 10000)' },
-                max_edges: { type: 'integer', minimum: 1, maximum: 100_000,
-                             description: 'Edge-check budget before filters, including reverse via checks (default: 10000; maximum: 100000)' }
-              },
-              required: ['identifier']
-            }
-          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil, max_nodes: nil, max_edges: nil, explain: nil|
+            input_schema: { properties: properties, required: ['identifier'] }
+          ) do |identifier:, server_context:, depth: nil, types: nil, via: nil, limit: nil, offset: nil, max_nodes: nil,
+                max_edges: nil, explain: nil, families: nil|
             types = coerce.call(types)
             via = coerce.call(via)
             depth = coerce_int.call(depth)
             limit = coerce_int.call(limit)
             offset = coerce_int.call(offset)
-            # The walk and the family annotation read one generation: the
-            # mapped-test check reads edges again, and must not see a newer graph.
+            selector = nil
+            unless families.nil?
+              unless render_key == :dependents
+                next respond_err.call("#{name} does not take families; it applies to dependents only.",
+                                      code: :unsupported_argument, tool: name, argument: 'families')
+              end
+
+              begin
+                selector = DependentFamilies.resolve_selector(families)
+              rescue ArgumentError => e
+                next respond_err.call(e.message, code: :invalid_params, tool: name, argument: 'families',
+                                                 accepted: DependentFamilies::SELECTOR_VALUES)
+              end
+            end
+            selection = nil
+            # The walk, the family annotation and the selection read one
+            # generation: the mapped-test check reads edges again, and must
+            # not see a newer graph.
             result = reader.with_pinned_generation do
               walked = reader.send(reader_method, identifier, depth: depth || 2, types: types, via: via,
                                                               max_nodes: coerce_int.call(max_nodes) || 1000,
@@ -776,16 +767,70 @@ module Woods
                   "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
               end
               TraversalResponse.annotate(walked)
-              # Families and counts cover the whole walk, so they are taken before paging.
+              # Families and counts cover the whole walk, so they are taken
+              # before paging. So is the selection: it filters the rows the
+              # finished walk reached, and pages cut the selected rows.
               if render_key == :dependents
-                DependentFamilies.annotate(walked, vias: ->(source, target) { reader.recorded_vias(source, target) })
+                DependentFamilies.annotate(walked, vias: ->(source, target) { reader.recorded_vias(source, target) },
+                                                   paths: ->(row) { reader.published_paths(row) })
+                selection = DependentSelection.apply(walked, selector) if selector
               end
               walked
             end
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
+            selection&.mark_witnesses
             respond.call(renderer.render(render_key, result), data: result)
           end
+        end
+
+        # Input properties both traversal tools take.
+        #
+        # @return [Hash]
+        def traversal_properties
+          {
+            identifier: { type: 'string', description: 'Unit identifier to start from' },
+            depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
+            explain: { type: 'boolean', description: 'Include recorded relationship evidence and shared shortest witnesses (default: false)' },
+            types: {
+              type: 'array', items: { type: 'string' },
+              description: 'Filter to these types'
+            },
+            via: {
+              anyOf: [
+                { type: 'string' },
+                { type: 'array', items: { type: 'string' } }
+              ],
+              description: 'Filter by relationship type. Accepts either a single string ' \
+                           "(e.g. 'code_reference') or an array " \
+                           "(e.g. ['code_reference','render']); both forms are coerced to an array internally. " \
+                           'Known values: link_to, redirect_to, form_action, render, code_reference, ' \
+                           'belongs_to, has_many, has_one, has_and_belongs_to_many, polymorphic_interface, ' \
+                           'published_by, subscribed_by.'
+            },
+            limit: { type: 'integer',
+                     description: "Maximum nodes to return (default: #{DEFAULT_TRAVERSAL_LIMIT})" },
+            offset: { type: 'integer', description: 'Skip this many nodes (default: 0)' },
+            max_nodes: { type: 'integer', minimum: 1, maximum: 10_000,
+                         description: 'Visited-node budget including root (default: 1000; maximum: 10000)' },
+            max_edges: { type: 'integer', minimum: 1, maximum: 100_000,
+                         description: 'Edge-check budget before filters, including reverse via checks (default: 10000; maximum: 100000)' }
+          }
+        end
+
+        # The `dependents` `families:` selector.
+        #
+        # @return [Hash]
+        def dependents_families_property
+          {
+            type: 'array', items: { type: 'string', enum: DependentFamilies::SELECTOR_VALUES },
+            description: 'List only rows in these families or categories, chosen after the walk. Unlike types, ' \
+                         'it never prunes the traversal: a selected row reached through an unselected one is still ' \
+                         'listed. Families: code, tests, schema, docs, other. Categories: application_code, ' \
+                         'rake_tasks, test_files, factories, schema_objects, migrations, documentation, ' \
+                         'agent_instructions, other. Applied before limit/offset; dependent_counts still cover ' \
+                         'every traversed row, selection.counts the selected ones.'
+          }
         end
 
         def define_structure_tool(server, reader, respond, renderer)

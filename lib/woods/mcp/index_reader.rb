@@ -1145,6 +1145,27 @@ module Woods
         end.uniq
       end
 
+      # The paths the published graph records for +identifier+: the
+      # identifier itself and the node's `source_paths`, which for a document
+      # include the paths that alias it through a symlink. A path is made
+      # relative to the node's own root (its `file_path` less the identifier),
+      # so an absolute record reads as the extractor's root-relative alias.
+      #
+      # @param identifier [String]
+      # @return [Array<String>] distinct paths, the identifier first
+      def published_paths(identifier)
+        node = (raw_graph_data['nodes'] || {})[identifier]
+        return [identifier] unless node.is_a?(Hash)
+
+        file = node['file_path'].to_s
+        base = file.end_with?(identifier) ? file.delete_suffix(identifier) : ''
+        base = '' unless base.end_with?('/')
+        paths = Array(node['source_paths']).grep(String).map do |path|
+          base.empty? || !path.start_with?(base) ? path : path.delete_prefix(base)
+        end
+        [identifier, *paths].uniq
+      end
+
       # Search rails_source units by concept keyword.
       #
       # Matches the keyword (case-insensitive) against identifier, source_code,

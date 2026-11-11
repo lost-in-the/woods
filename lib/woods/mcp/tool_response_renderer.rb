@@ -105,12 +105,43 @@ module Woods
         by_family = DependentFamilies::FAMILIES.map { |family| "#{family} #{fetch_key(families, family, 0)}" }
         scope = exact ? 'over the whole traversal' : 'over the whole traversal (lower bounds: the walk stopped early)'
         detail = "By family: #{by_family.join(', ')}; total #{bound}#{fetch_key(counts, :total)} #{scope}."
-        [headline, detail]
+        [headline, detail, *category_line(counts, bound), *selection_lines(data, bound)]
       end
 
       # @return [String] a row's label suffix, e.g. ` (Mapped test)`
       def mapped_test_suffix(info)
-        fetch_key(info, :mapped_test) ? ' (Mapped test)' : ''
+        suffix = fetch_key(info, :mapped_test) ? ' (Mapped test)' : ''
+        suffix += ' (reached through rows outside the selection)' if fetch_key(info, :reached_through_hidden)
+        hidden = fetch_key(info, :hidden_deps).to_i
+        suffix += " (#{hidden} dependent#{'s' unless hidden == 1} outside the selection)" if hidden.positive?
+        suffix
+      end
+
+      # Nonzero categories only: every row has one, and a list of zeros hides the ones that matter.
+      def category_line(counts, bound)
+        categories = fetch_key(counts, :categories)
+        return [] unless categories.is_a?(Hash)
+
+        named = DependentFamilies::CATEGORIES.filter_map do |category|
+          count = fetch_key(categories, category, 0)
+          "#{category} #{bound}#{count}" if count.positive?
+        end
+        named.empty? ? [] : ["By category: #{named.join(', ')}."]
+      end
+
+      def selection_lines(data, bound)
+        selection = fetch_key(data, :selection)
+        return [] unless selection.is_a?(Hash)
+
+        counts = fetch_key(selection, :counts, {})
+        included = fetch_key(counts, :reverse_includes_tests) == true
+        requested = Array(fetch_key(selection, :requested)).join(', ')
+        listed = "Selected (families: #{requested}): #{bound}#{fetch_key(counts, :total)} listed, " \
+                 "#{bound}#{fetch_key(counts, :not_selected)} traversed but not listed; " \
+                 "headline #{bound}#{fetch_key(counts, :headline)} (#{included ? 'code and Mapped tests' : 'code'}), " \
+                 "Mapped tests #{bound}#{fetch_key(counts, :mapped_tests)}."
+        [listed, *category_line(counts, bound).map { |line| line.sub('By category:', 'Selected by category:') },
+         'The walk was not pruned; deps list only edges between listed rows.']
       end
 
       def traversal_lower_bound_note(data, shown)
