@@ -115,7 +115,7 @@ module Woods
         initial_state = parse_initial_state_aasm(source)
         parsed = Woods::ParseCache.parse(source)
         events = if parsed.success?
-                   parse_events_from_node(parsed.value)
+                   aasm_definitions(parsed.value).flat_map { |definition| parse_events_from_node(definition.block) }
                  else
                    parse_events_from_source(source, /\Aevent\s+:(\w+)/)
                  end
@@ -261,6 +261,27 @@ module Woods
         []
       end
 
+      # The +aasm do ... end+ calls in the parsed model, in source order.
+      #
+      # Events are read only inside these blocks: an +event+ call in a
+      # callback (+after_commit { event(:x) }+), a +define_method+ block or a
+      # method body runs later and declares nothing. A definition inside
+      # another block, such as a concern's +included do+, still counts.
+      #
+      # @param node [Prism::Node, nil] parsed source
+      # @return [Array<Prism::CallNode>] receiverless or +self+ +aasm+ calls with a block
+      def aasm_definitions(node)
+        definitions = []
+        each_call_outside_events(node) do |call|
+          next false unless call.name == :aasm && call.block.is_a?(Prism::BlockNode) &&
+                            (call.receiver.nil? || call.receiver.is_a?(Prism::SelfNode))
+
+          definitions << call
+          true
+        end
+        definitions
+      end
+
       # @param declaration [Prism::CallNode] state_machine DSL call
       # @return [String, nil] literal attribute, defaulting to state for options-only calls
       def state_machine_attribute(declaration)
@@ -380,7 +401,7 @@ module Woods
       # blockless declaration (`event :noop`) is an event with no transitions.
       # Events are not looked for inside another event's block.
       #
-      # @param node [Prism::Node, nil] parsed source, or a state_machine block
+      # @param node [Prism::Node, nil] an aasm or state_machine block
       # @return [Array<Hash>] events with :name and :transitions keys, in source order
       def parse_events_from_node(node)
         events = []

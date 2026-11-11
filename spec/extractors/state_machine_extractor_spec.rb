@@ -481,6 +481,59 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(events.map { |event| event[:name] }).to eq(['pay'])
     end
 
+    # Events were looked for in the whole model, so an `event` call in a
+    # callback or a define_method block was read as a declared event.
+    {
+      'a callback block' => 'after_commit { event(:payment_sent) }',
+      'a define_method block' => "define_method(:notify_tracker) do\n    event(:payment_seen)\n  end"
+    }.each do |label, body|
+      it "ignores an event call in #{label} outside the aasm definition" do
+        path = create_file('app/models/order.rb', <<~RUBY)
+          class Order < ApplicationRecord
+            include AASM
+
+            aasm do
+              event :pay do
+                transitions from: :pending, to: :paid
+              end
+            end
+
+            #{body}
+          end
+        RUBY
+
+        events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+        expect(events.map { |event| event[:name] }).to eq(['pay'])
+      end
+    end
+
+    it 'reads events from every aasm definition, including one in a concern block' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          included do
+            aasm(:payment) do
+              event :pay do
+                transitions from: :pending, to: :paid
+              end
+            end
+          end
+
+          aasm(:shipping, column: :shipping_state) do
+            event :ship do
+              transitions from: :packed, to: :shipped
+            end
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events.map { |event| event[:name] }).to eq(%w[pay ship])
+    end
+
     it 'reads a transition declared on an explicit self the same as a receiverless one' do
       path = create_file('app/models/order.rb', <<~RUBY)
         class Order < ApplicationRecord
