@@ -620,6 +620,68 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       )
     end
 
+    # AASM 6.0.0's registry for this model holds pay (pending to paid), ship
+    # and archive. A lambda that is assigned, forwarded to a callback or
+    # passed as a keyword option is never called while the definition is read.
+    it 'reads no lambda the definition does not run' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            unused = -> { event(:ghost) }
+            after_all_events(&-> { event(:payment_sent) })
+            event :pay, after: -> { event(:keyword_event) } do
+              unused_transition = -> { transitions(from: :fake, to: :fake2) }
+              after(&-> { transitions(from: :fake3, to: :fake4) })
+              transitions from: :pending, to: :paid, after: -> { transitions(from: :fake5, to: :fake6) }
+            end
+            event :ship, &->(*) { transitions from: :paid, to: :shipped }
+          end
+          aasm(&->(*) { event(:archive) { transitions from: :shipped, to: :pending } })
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events.map { |event| [event[:name], event[:transitions].map { |t| "#{t[:from]}->#{t[:to]}" }] }).to eq(
+        [['pay', ['pending->paid']], ['ship', ['paid->shipped']], ['archive', ['shipped->pending']]]
+      )
+    end
+
+    # AASM 6.0.0 registers ran, elsed and ensured here: a rescue clause runs
+    # only on an error, a loop body as often as runtime values say, and
+    # defined? never runs its operand.
+    it 'reads no rescue clause, loop body or defined? operand' do
+      path = create_file('app/models/order.rb', <<~RUBY)
+        class Order < ApplicationRecord
+          include AASM
+
+          aasm do
+            begin
+              event(:ran)
+            rescue StandardError
+              event(:rescued)
+            else
+              event(:elsed)
+            ensure
+              event(:ensured)
+            end
+            event(:modified) rescue event(:rescue_modifier)
+            while false
+              event(:while_looped)
+            end
+            for state in [] do event(:for_looped) end
+            defined?(event(:checked))
+          end
+        end
+      RUBY
+
+      events = described_class.new.extract_model_file(path).first.metadata[:events]
+
+      expect(events.map { |event| event[:name] }).to eq(%w[ran elsed ensured modified])
+    end
+
     # AASM 6.0.0 runs both blocks with instance_eval, which passes one
     # argument. Each lambda below that accepts it registered its event in the
     # live registry; each that does not raised ArgumentError. The last event

@@ -48,6 +48,13 @@ module Woods
       # only a receiverless or +self+ call keeps the DSL as +self+.
       EVALUATES_BLOCK_ON_RECEIVER = %i[instance_eval instance_exec].freeze
 
+      # Nodes whose code does not run once, at once, while a DSL block is
+      # read. Checked against AASM 6.0.0: an event inside any of them is not
+      # registered (+begin; ...; rescue; event(:x); end+ registers only what
+      # +begin+, +else+ and +ensure+ hold).
+      UNRUN_BODIES = [Prism::RescueNode, Prism::DefinedNode, Prism::WhileNode, Prism::UntilNode,
+                      Prism::ForNode].freeze
+
       # An event declaration that opens a block: the (neutralized) line ends
       # in +do+, optionally with block parameters (`event :pay do |order|`).
       EVENT_BLOCK_OPENER = /\bdo(?:\s*\|[^|]*\|)?\z/
@@ -524,17 +531,34 @@ module Woods
       # @yieldparam call [Prism::CallNode]
       def each_dsl_call(node, &block)
         node = node.body if node.is_a?(Prism::BlockNode) || node.is_a?(Prism::LambdaNode)
+        walk_dsl_calls(node, &block)
+      end
 
+      # The walk under {#each_dsl_call}, after the DSL block itself has been
+      # opened. Any block or lambda met here is a value, not the DSL body: an
+      # assigned lambda, one forwarded to a callback (+after(&-> { })+) or a
+      # keyword option (+after: -> { }+) is never called while the definition
+      # is read, so its body is not entered. The one exception is a block
+      # Ruby runs once, at once (see {#runs_block_at_once?}). A +rescue+
+      # clause runs only on an error, +defined?+ never runs its operand, and
+      # a loop body runs as often as runtime values say, like an iterator's
+      # block, so none of them declares (see {UNRUN_BODIES}).
+      #
+      # @param node [Prism::Node, nil]
+      # @yieldparam call [Prism::CallNode]
+      def walk_dsl_calls(node, &block)
         case node
         when Prism::CallNode
-          each_dsl_call(node.receiver, &block)
-          each_dsl_call(node.arguments, &block)
-          each_dsl_call(node.block.expression, &block) if node.block.is_a?(Prism::BlockArgumentNode)
+          walk_dsl_calls(node.receiver, &block)
+          walk_dsl_calls(node.arguments, &block)
+          walk_dsl_calls(node.block.expression, &block) if node.block.is_a?(Prism::BlockArgumentNode)
           yield node
-          each_dsl_call(node.block, &block) if runs_block_at_once?(node)
-        when Prism::DefNode, Prism::LambdaNode, Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
+          walk_dsl_calls(node.block.body, &block) if runs_block_at_once?(node)
+        when Prism::RescueModifierNode then walk_dsl_calls(node.expression, &block)
+        when Prism::BlockNode, Prism::LambdaNode, Prism::DefNode, Prism::ClassNode, Prism::ModuleNode,
+             Prism::SingletonClassNode, *UNRUN_BODIES
           nil
-        when Prism::Node then node.compact_child_nodes.each { |child| each_dsl_call(child, &block) }
+        when Prism::Node then node.compact_child_nodes.each { |child| walk_dsl_calls(child, &block) }
         end
       end
 
