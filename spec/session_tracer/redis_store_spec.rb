@@ -11,13 +11,48 @@ require 'woods/session_tracer/redis_store'
 # prefix so the store's client-error class check matches.
 class RedisTestCommandError < StandardError; end
 
+# Raised for a command named by MockRedis#interrupt_before: the connection
+# dropping (or the process dying) before that command reaches the server.
+class MockRedisInterrupted < StandardError; end
+
+# Queues commands issued inside MockRedis#multi and applies none of them until
+# the block returns, the way MULTI/EXEC does on a real server.
+class MockRedisTransaction
+  attr_reader :commands
+
+  def initialize(redis)
+    @redis = redis
+    @commands = []
+  end
+
+  def method_missing(name, *args, **kwargs)
+    return super unless @redis.respond_to?(name)
+    raise MockRedisInterrupted, "connection lost before #{name}" if @redis.interrupt_before == name
+
+    @commands << [name, args, kwargs]
+    nil
+  end
+
+  def respond_to_missing?(name, include_private = false)
+    @redis.respond_to?(name) || super
+  end
+end
+
 # Minimal in-memory Redis mock for unit testing.
 # Implements only the subset of Redis commands used by RedisStore.
 class MockRedis
-  attr_reader :data
+  attr_reader :data, :transactions
+  attr_accessor :interrupt_before
 
   def initialize
     @data = {}
+    @transactions = []
+  end
+
+  def multi
+    yield(transaction = MockRedisTransaction.new(self))
+    @transactions << transaction.commands.map(&:first)
+    transaction.commands.map { |name, args, kwargs| public_send(name, *args, **kwargs) }
   end
 
   def rpush(key, value)
@@ -43,6 +78,8 @@ class MockRedis
 
   # rubocop:disable-next Naming/PredicateMethod
   def expire(_key, _seconds)
+    raise MockRedisInterrupted, 'connection lost before expire' if @interrupt_before == :expire
+
     # No-op for tests (TTL not simulated)
     true
   end
@@ -324,6 +361,29 @@ RSpec.describe Woods::SessionTracer::RedisStore do
       expect(bounded.read('oldest')).to eq([])
       expect(bounded.read('newest').size).to eq(1)
       expect(bounded.read('middle').size).to eq(1)
+    end
+  end
+
+  # The list append, its trim, its TTL and its index entry went out as
+  # separate commands, so a crash or a dropped connection between them left a
+  # session list with no TTL (kept forever) or one the index never names (so
+  # never evicted). They now go through one MULTI/EXEC.
+  describe 'atomic record' do
+    let(:ttl_store) { described_class.new(redis: redis, ttl: 3600) }
+
+    it 'appends, trims, expires and indexes the session in one transaction' do
+      ttl_store.record('sess1', request_data)
+
+      expect(redis.transactions).to eq([%i[rpush ltrim expire eval]])
+      expect(ttl_store.sessions.map { |entry| entry['session_id'] }).to eq(['sess1'])
+    end
+
+    it 'leaves no session list without its TTL when the connection drops before EXPIRE' do
+      redis.interrupt_before = :expire
+
+      expect { ttl_store.record('sess1', request_data) }.to raise_error(MockRedisInterrupted)
+      expect(redis.data.keys.grep(/\A#{Regexp.escape(described_class::KEY_PREFIX)}/)).to be_empty
+      expect(redis.zrange(described_class::SESSIONS_KEY, 0, -1)).to be_empty
     end
   end
 

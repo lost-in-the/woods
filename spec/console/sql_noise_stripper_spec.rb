@@ -11,6 +11,27 @@ RSpec.describe Woods::Console::SqlNoiseStripper do
     expect(described_class.strip_noise(sql, dialect: :postgres)).to eq(sql)
   end
 
+  describe 'line comment terminators' do
+    let(:sql) { "SELECT a FROM ok --x\r UNION SELECT s FROM secrets" }
+
+    it 'ends a PostgreSQL line comment at a carriage return, as the server does' do
+      expect(described_class.strip_noise(sql, dialect: :postgres))
+        .to eq("SELECT a FROM ok \r UNION SELECT s FROM secrets")
+    end
+
+    it 'keeps a MySQL or SQLite line comment open past a carriage return' do
+      sql = "SELECT a FROM ok -- x\r UNION SELECT s FROM secrets"
+      %i[mysql sqlite].each do |dialect|
+        expect(described_class.strip_noise(sql, dialect: dialect)).to eq('SELECT a FROM ok '), dialect.to_s
+      end
+    end
+
+    it 'does not let a quote after a MySQL carriage return hide the live line that follows' do
+      sql = "SELECT 1 -- x\r'\n UNION SELECT s FROM secrets -- '"
+      expect(described_class.strip_noise(sql, dialect: :mysql)).to include('FROM secrets')
+    end
+  end
+
   it 'recognizes extended dollar quote tags without treating their contents as SQL' do
     tag = ['$', 'é', '$'].join
     sql = "SELECT #{tag}ordinary ' content#{tag} FROM allowed"

@@ -86,15 +86,30 @@ module Woods
 
       # Append a request record to a session's Redis List.
       #
+      # The append, its trim, its TTL and its recency-index entry go out as
+      # one MULTI/EXEC transaction. Issued one by one, a crash or a dropped
+      # connection between them left a list with no TTL (kept forever) or a
+      # list the index never names (never evicted). Eviction stays outside:
+      # it reads the index size, which a transaction cannot branch on.
+      #
       # @param session_id [String] The session identifier
       # @param request_data [Hash] Request metadata to store
       # @return [void]
       def record(session_id, request_data)
         key = session_key(session_id)
-        @redis.rpush(key, JSON.generate(request_data))
-        @redis.ltrim(key, -@max_requests_per_session, -1)
-        @redis.expire(key, @ttl) if @ttl
-        index_session(session_id, request_data)
+        # Serialized before MULTI, so a payload that cannot be encoded sends
+        # nothing at all.
+        payload = JSON.generate(request_data)
+        @redis.multi do |transaction|
+          transaction.rpush(key, payload)
+          transaction.ltrim(key, -@max_requests_per_session, -1)
+          transaction.expire(key, @ttl) if @ttl
+          # The recency index, scored by the request's own timestamp so
+          # eviction order matches the last-request ordering {#sessions}
+          # reports. The update, a legacy SET migration included, is one
+          # atomic script (see {INDEX_UPDATE_SCRIPT}).
+          transaction.eval(INDEX_UPDATE_SCRIPT, keys: [SESSIONS_KEY], argv: [recency_score(request_data), session_id])
+        end
         prune_sessions(session_id)
       end
 
@@ -169,18 +184,6 @@ module Woods
         "#{KEY_PREFIX}#{sanitize_session_id(session_id)}"
       end
 
-      # Record the session in the recency index, scored by the request's own
-      # timestamp so eviction order matches the last-request ordering
-      # {#sessions} reports. The whole update — a legacy SET migration
-      # included — runs as one atomic script (see {INDEX_UPDATE_SCRIPT}).
-      #
-      # @param session_id [String]
-      # @param request_data [Hash]
-      # @return [void]
-      def index_session(session_id, request_data)
-        @redis.eval(INDEX_UPDATE_SCRIPT, keys: [SESSIONS_KEY], argv: [recency_score(request_data), session_id])
-      end
-
       # @param request_data [Hash]
       # @return [Float] Request timestamp as an epoch, or write time
       def recency_score(request_data)
@@ -193,7 +196,7 @@ module Woods
       # Evict the oldest sessions once the recency index overflows
       # `@max_sessions`.
       #
-      # The ZSET is scored by last request timestamp (see {#index_session}),
+      # The ZSET is scored by last request timestamp (see {#record}),
       # so the `overflow + 1` lowest-scoring members contain the oldest
       # `overflow` sessions other than the one just recorded. That matches
       # the FileStore twin's oldest-by-mtime eviction without reading any

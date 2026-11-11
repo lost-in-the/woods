@@ -36,12 +36,14 @@ module Woods
       # :permission_denied used to be indistinguishable from :missing —
       # both parsed to `{}` (or crashed uncaught) and let the operation
       # through, silently defeating the cooldown on exactly the state that
-      # means it can no longer be verified.
+      # means it can no longer be verified. A recorded timestamp that cannot
+      # be parsed is corrupt state too: {#last_run} answers nil for it, which
+      # must not read as "never ran".
       #
       # @param operation [Symbol, String] Operation name
       # @return [Boolean]
       def allow?(operation)
-        case state_status
+        case state_status(operation)
         when :corrupt, :permission_denied
           false
         else
@@ -57,12 +59,20 @@ module Woods
       # public callers (the MCP pipeline tools) need to tell a fresh install
       # apart from a state file that needs operator attention.
       #
+      # Without an operation only the file's shape is judged. With one, a
+      # timestamp recorded for that operation that cannot be parsed is
+      # `:corrupt` as well, since its cooldown cannot be verified either.
+      #
+      # @param operation [Symbol, String, nil] Operation whose entry to check too
       # @return [Symbol] `:ok`, `:missing`, `:corrupt`, or `:permission_denied`
-      def state_status
+      def state_status(operation = nil)
         return :missing unless File.exist?(@state_path)
 
         parsed = JSON.parse(File.read(@state_path))
-        parsed.is_a?(Hash) ? :ok : :corrupt
+        return :corrupt unless parsed.is_a?(Hash)
+        return :corrupt if operation && !readable_timestamp?(parsed[operation.to_s])
+
+        :ok
       rescue Errno::EACCES
         :permission_denied
       rescue JSON::ParserError
@@ -118,11 +128,23 @@ module Woods
         return nil if timestamp.nil?
 
         Time.parse(timestamp)
-      rescue ArgumentError
+      rescue ArgumentError, TypeError
         nil
       end
 
       private
+
+      # @param value [Object] a recorded timestamp, or nil when none is recorded
+      # @return [Boolean] false for a recorded value {#last_run} cannot parse
+      def readable_timestamp?(value)
+        return true if value.nil?
+        return false unless value.is_a?(String)
+
+        Time.parse(value)
+        true
+      rescue ArgumentError
+        false
+      end
 
       def with_locked_state
         FileUtils.mkdir_p(@state_dir)

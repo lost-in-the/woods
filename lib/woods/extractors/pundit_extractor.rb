@@ -3,6 +3,8 @@
 require_relative '../source_file'
 require_relative '../source_inputs/consumer_errors'
 
+require_relative 'line_neutralizer'
+require_relative 'source_nesting'
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
 require_relative 'declaration_ancestry'
@@ -32,6 +34,9 @@ module Woods
 
       # Standard Pundit action methods
       PUNDIT_ACTIONS = %w[index? show? create? new? update? edit? destroy?].freeze
+
+      # A line declaring the nested Scope class (line-scan fallback only).
+      SCOPE_DECLARATION = /\Aclass\s+Scope(?![[:word:]:])/
 
       def initialize
         @directories = PUNDIT_DIRECTORIES.map { |d| Rails.root.join(d) }
@@ -160,32 +165,22 @@ module Woods
 
       # Detect authorization action methods (public methods ending in ?).
       #
+      # Methods of a nested +Scope+ class are not authorization actions, and
+      # its +private+/+protected+ markers do not apply to the policy, so the
+      # lines it spans are skipped.
+      #
       # @param source [String]
       # @return [Array<String>]
       def detect_authorization_actions(source)
         methods = []
         in_private = false
         in_protected = false
-        in_scope_class = false
-        scope_depth = 0
+        scope_lines = scope_class_lines(source)
 
-        source.each_line do |line|
+        source.each_line.with_index(1) do |line, number|
+          next if scope_lines.any? { |range| range.cover?(number) }
+
           stripped = line.strip
-
-          # Track Scope inner class
-          if stripped =~ /class\s+Scope\b/
-            in_scope_class = true
-            scope_depth = 0
-          end
-          if in_scope_class
-            scope_depth += stripped.scan(/\b(class|module|do)\b/).size
-            scope_depth -= stripped.scan(/\bend\b/).size
-            if scope_depth <= 0
-              in_scope_class = false
-              next
-            end
-            next
-          end
 
           in_private = true if stripped == 'private'
           in_protected = true if stripped == 'protected'
@@ -198,6 +193,69 @@ module Woods
         end
 
         methods.uniq
+      end
+
+      # Line ranges of every nested +Scope+ class, from its declaration to
+      # its own +end+.
+      #
+      # Prism gives each class body's exact extent. Source Prism cannot parse
+      # falls back to {#scope_class_lines_by_depth}.
+      #
+      # @param source [String]
+      # @return [Array<Range>] 1-based line ranges
+      def scope_class_lines(source)
+        scopes = SourceNesting.lexical_scopes(source)
+        return scope_class_lines_by_depth(source) unless scopes
+
+        scopes.filter_map do |start, finish, name|
+          segments = name.split('::')
+          next unless segments.size > 1 && segments.last == 'Scope'
+
+          line_at(source, start)..line_at(source, finish - 1)
+        end
+      end
+
+      # Depth-tracked +Scope+ extents for source Prism cannot parse.
+      #
+      # Lines are read with comments stripped and string bodies blanked, and
+      # every opener of an +end+-terminated block counts ({#block_opener?}:
+      # class, module, def, do, begin, case, loops, statement-position
+      # if/unless), so a method body inside the Scope no longer closes it. A
+      # Scope still open at end of file extends to the end of the file.
+      #
+      # @param source [String]
+      # @return [Array<Range>] 1-based line ranges
+      def scope_class_lines_by_depth(source)
+        ranges = []
+        start = nil
+        depth = 0
+
+        LineNeutralizer.neutralize_lines(source).each.with_index(1) do |line, number|
+          stripped = line.strip
+          next if start.nil? && !stripped.match?(SCOPE_DECLARATION)
+
+          start ||= number
+          if stripped.match?(SourceNesting::END_LINE)
+            depth -= 1
+          elsif block_opener?(stripped)
+            depth += 1
+          end
+          next if depth.positive?
+
+          ranges << (start..number)
+          start = nil
+          depth = 0
+        end
+
+        ranges << (start..) if start
+        ranges
+      end
+
+      # @param source [String]
+      # @param offset [Integer] byte offset
+      # @return [Integer] 1-based line number holding that byte
+      def line_at(source, offset)
+        source.byteslice(0, offset).count("\n") + 1
       end
 
       # Infer the model name from the policy class name.

@@ -1320,7 +1320,7 @@ module Woods
     def promote_payload(generation)
       return unless @payload_dir && @payload_store.stage?(@payload_dir)
 
-      actual = generation.current.number + 1
+      actual = generation.current!.number + 1
       unless actual == @payload_generation
         raise Woods::ExtractionError,
               "generation moved to #{actual - 1} during publication (expected #{@payload_generation - 1})"
@@ -1445,7 +1445,7 @@ module Woods
     def begin_payload!(strict: false, rewritten_dirs: [])
       @publication_error = nil
       discard_unpromoted_stage
-      marker = Generation.new(output_dir: @output_dir).current
+      marker = published_marker_for_write
       @payload_generation = marker.number + 1
       @writer_lock = index_writer_lock
       @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
@@ -1476,6 +1476,22 @@ module Woods
       )
       @payload_dir = nil
       @payload_generation = nil
+    end
+
+    # The published marker a writer numbers its next generation from. A
+    # marker that exists but cannot be read is not "nothing published":
+    # numbering from 0 would stage generation 1, replace the retained
+    # unpinned gen-1 and move the marker backward while readers refuse the
+    # same file. Fail closed, ahead of the flat-fallback rescue.
+    #
+    # @return [Generation::Marker]
+    # @raise [Woods::ExtractionError] when the marker is present but invalid
+    def published_marker_for_write
+      Generation.new(output_dir: @output_dir).current!
+    rescue Generation::InvalidMarker => e
+      raise Woods::ExtractionError,
+            "#{e.message} (#{File.join(@output_dir.to_s, Generation::FILENAME)}); refusing to publish a new " \
+            'generation over it. Restore it to name the newest retained payloads/gen-<n>, then retry'
     end
 
     # @return [Boolean] whether a full extraction may publish flat when no payload directory opens

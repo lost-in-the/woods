@@ -1183,6 +1183,11 @@ module Woods
         require_relative '../storage/snapshotter'
 
         artifact = IndexArtifact.new(@output_dir)
+        # The dump +latest+ names now was promoted, whatever wrote it: mark it
+        # before minting a new one. That covers a crash between an earlier
+        # run's promote and its own mark, and the latest dump of an index
+        # written before markers existed.
+        mark_promoted(artifact.latest_dump_path)
         dump_dir = unique_dump_dir(artifact)
 
         # Pass resolved_config: the WVF1 header carries a model_name field, and
@@ -1203,6 +1208,7 @@ module Woods
         artifact.write_dump_config(dump_dir, @resolved_config) if @resolved_config
 
         artifact.promote(dump_dir)
+        mark_promoted(dump_dir)
 
         # Written AFTER promote so the commit point stays the promotion
         # above — this root copy is for anything that reads
@@ -1210,7 +1216,37 @@ module Woods
         # IndexArtifact#read_config.
         artifact.write_config(@resolved_config) if @resolved_config
 
-        prune_old_dumps(artifact)
+        prune_old_dumps(artifact, current: dump_dir)
+      end
+
+      # File written inside a dump directory once {IndexArtifact#promote} has
+      # pointed +latest+ at it. Retention counts only marked dumps; a dump
+      # without one was never promoted (a run that raised before promotion,
+      # or one still writing elsewhere).
+      PROMOTED_MARKER = '.promoted'
+      private_constant :PROMOTED_MARKER
+
+      # Seconds an unpromoted dump must sit untouched before retention removes
+      # it. Far beyond any dump write, so a writer in another process that is
+      # still dumping never loses its directory.
+      UNPROMOTED_DUMP_STALE_AFTER = 24 * 60 * 60
+      private_constant :UNPROMOTED_DUMP_STALE_AFTER
+
+      # Record that +dump_dir+ was promoted. Runs after the commit point, so a
+      # failure here only warns: the dump stays protected as +latest+, and the
+      # next run marks it before minting its own.
+      #
+      # @param dump_dir [Pathname, String, nil]
+      # @return [void]
+      def mark_promoted(dump_dir)
+        return if dump_dir.nil?
+
+        marker = File.join(dump_dir.to_s, PROMOTED_MARKER)
+        return if File.exist?(marker)
+
+        AtomicFile.write(marker, '')
+      rescue StandardError => e
+        warn "[woods] could not mark dump #{dump_dir} as promoted (#{e.class}: #{e.message})"
       end
 
       # Seconds of timestamp to walk forward looking for a free dump directory
@@ -1244,9 +1280,13 @@ module Woods
 
       # Remove old dump directories beyond the retention window.
       #
-      # Keeps the +@dump_retention_count+ most-recently-created directories
-      # (sorted by name, which is a UTC timestamp so lexicographic order equals
-      # chronological order). The current +latest+ directory is always kept —
+      # Keeps the +@dump_retention_count+ most-recently-created *promoted*
+      # directories (sorted by name, which is a UTC timestamp so lexicographic
+      # order equals chronological order). A dump that never reached +latest+
+      # does not count toward the window, so failed leftovers cannot evict
+      # promoted dumps; it is removed only once it is stale
+      # ({UNPROMOTED_DUMP_STALE_AFTER}). The current +latest+ directory, and
+      # the dump this run just wrote, are always kept —
       # true by construction: it is filtered out of the prune candidates
       # below, not merely assumed to sort last. A backward wall-clock step
       # (NTP correction, a stubbed clock in a spec) can mint a new dump
@@ -1254,18 +1294,58 @@ module Woods
       # dump #persist_snapshot had just promoted at the front of the "oldest
       # first" prune list — deleting it out from under the +latest+ pointer
       # that was made to point at it moments earlier.
-      def prune_old_dumps(artifact)
+      #
+      # @param artifact [IndexArtifact]
+      # @param current [Pathname, String, nil] the dump this run wrote
+      # @return [void]
+      def prune_old_dumps(artifact, current: nil)
         return if @dump_retention_count.nil? || @dump_retention_count <= 0
-
-        dumps_root = artifact.dumps_root
-        return unless dumps_root.exist?
+        return unless artifact.dumps_root.exist?
 
         latest = artifact.latest_dump_path&.to_s
-        dirs = sorted_dump_dirs(dumps_root)
-        excess = dirs.length - @dump_retention_count
-        return unless excess.positive?
+        doomed = prunable_dumps(sorted_dump_dirs(artifact.dumps_root), latest)
+        (doomed - [latest, current&.to_s]).each { |dir| FileUtils.rm_rf(dir) }
+      end
 
-        (dirs.first(excess) - [latest]).each { |dir| FileUtils.rm_rf(dir) }
+      # @param dirs [Array<String>] sorted oldest first
+      # @param latest [String, nil]
+      # @return [Array<String>] promoted dumps beyond the window, then stale
+      #   unpromoted ones
+      def prunable_dumps(dirs, latest)
+        promoted, unpromoted = partition_dumps(dirs, latest)
+        excess = [promoted.length - @dump_retention_count, 0].max
+        promoted.first(excess) + unpromoted.select { |dir| stale_dump?(dir) }
+      end
+
+      # Split dump directories into promoted and unpromoted, keeping order.
+      #
+      # A dump is promoted when it carries {PROMOTED_MARKER} or is +latest+.
+      # An unmarked dump that sorts before the oldest marked one predates the
+      # marker (an earlier Woods wrote it) and counts as promoted, as every
+      # dump did before; with no marked dump at all, all of them do.
+      #
+      # @param dirs [Array<String>] sorted oldest first
+      # @param latest [String, nil]
+      # @return [Array(Array<String>, Array<String>)]
+      def partition_dumps(dirs, latest)
+        marked = dirs.map { |dir| promoted_dump?(dir, latest) }
+        first_marked = marked.index(true) || dirs.length
+        dirs.each_with_index.partition { |_dir, i| i < first_marked || marked[i] }.map { |part| part.map(&:first) }
+      end
+
+      # @return [Boolean] whether +dir+ is +latest+ or carries {PROMOTED_MARKER}
+      def promoted_dump?(dir, latest)
+        dir == latest || File.exist?(File.join(dir, PROMOTED_MARKER))
+      end
+
+      # @param dir [String]
+      # @return [Boolean] whether the directory has sat untouched past
+      #   {UNPROMOTED_DUMP_STALE_AFTER}. Read from the system clock rather
+      #   than +Time.now+, so a stubbed +Time.now+ never ages a fresh dump.
+      def stale_dump?(dir)
+        Process.clock_gettime(Process::CLOCK_REALTIME) - File.mtime(dir).to_f > UNPROMOTED_DUMP_STALE_AFTER
+      rescue SystemCallError
+        false
       end
 
       def sorted_dump_dirs(dumps_root)

@@ -1,0 +1,1 @@
+- A pipeline cooldown entry whose timestamp cannot be parsed no longer disables the 5-minute cooldown. `PipelineGuard#allow?` now refuses that operation as corrupt state, the same way it refuses an unparseable state file, and `PipelineGuard#state_status` takes an optional operation and reports `:corrupt` for it; other operations are still judged by their own entries.

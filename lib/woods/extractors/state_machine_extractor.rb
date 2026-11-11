@@ -6,6 +6,7 @@ require_relative '../parse_cache'
 
 require_relative 'shared_utility_methods'
 require_relative 'shared_dependency_scanner'
+require_relative 'line_neutralizer'
 require_relative 'source_nesting'
 require_relative 'class_declarations'
 require_relative 'transition_callbacks'
@@ -36,6 +37,10 @@ module Woods
       include SourceNesting
 
       MODEL_DIRECTORIES = %w[app/models].freeze
+
+      # An event declaration that opens a block: the (neutralized) line ends
+      # in +do+, optionally with block parameters (`event :pay do |order|`).
+      EVENT_BLOCK_OPENER = /\bdo(?:\s*\|[^|]*\|)?\z/
 
       def initialize
         @directories = MODEL_DIRECTORIES.map { |d| Rails.root.join(d) }.select(&:directory?)
@@ -295,6 +300,15 @@ module Woods
       # Only processes lines after detecting +event :name do+, and closes the event
       # when the matching +end+ is found.
       #
+      # Lines are read through {LineNeutralizer.neutralize_lines}, so a +do+ in
+      # a comment or a string opens nothing. Inside an event, every opener of
+      # an +end+-terminated block counts ({SourceNesting#block_opener?}: do,
+      # def, case, begin, loops, statement-position if/unless), and a line
+      # that starts with +end+ closes one even with trailing content
+      # (+end # pay+, +end)+, +end.tap+; {SourceNesting::END_LINE}). An event
+      # still open at the end of the source is kept with the transitions read
+      # so far.
+      #
       # A blockless declaration (`event :noop`) is complete on its own line and
       # is emitted immediately — the same discipline
       # {FactoryExtractor#match_factory} follows. Leaving it "current" with
@@ -311,13 +325,13 @@ module Woods
         current_event = nil
         depth = 0
 
-        source.each_line do |line|
+        LineNeutralizer.neutralize_lines(source).each do |line|
           stripped = line.strip
-          next if stripped.start_with?('#')
+          next if stripped.empty?
 
           if depth.zero? && (m = stripped.match(event_pattern))
             event = { name: m[1], transitions: [] }
-            if stripped.include?(' do') || stripped.end_with?('do')
+            if stripped.match?(EVENT_BLOCK_OPENER)
               current_event = event
               depth = 1
             else
@@ -332,17 +346,18 @@ module Woods
             current_event[:transitions] << t
           end
 
-          if stripped.match?(/\bdo\b/) && depth.positive?
-            depth += 1
-          elsif stripped == 'end'
-            depth -= 1 if depth.positive?
+          if stripped.match?(END_LINE)
+            depth -= 1
             if depth.zero?
               events << current_event
               current_event = nil
             end
+          elsif block_opener?(stripped)
+            depth += 1
           end
         end
 
+        events << current_event if current_event
         events
       end
 

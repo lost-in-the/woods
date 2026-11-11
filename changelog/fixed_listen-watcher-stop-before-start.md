@@ -1,0 +1,1 @@
+- The native (`listen`) file watcher no longer starts after it has been stopped. A stop that arrived before or during startup used to leave a running listener with nothing left to stop it, and a stop that made `listen` refuse to start was reported as a failed backend, which sent the daemon to its polling fallback.

@@ -3174,6 +3174,60 @@ RSpec.describe Woods::Extractor do
     end
   end
 
+  # ── begin_payload! over a corrupt marker ─────────────────────────────
+  #
+  # Readers fail closed on a present but malformed generation.json. A writer
+  # that read the same file as "nothing published" staged generation 1 and,
+  # on promotion, replaced the unpinned payloads/gen-1 and moved the marker
+  # back to 1.
+  describe '#begin_payload! over a corrupt generation marker' do
+    let(:output_dir) { File.join(tmpdir, 'output') }
+    let(:marker_path) { File.join(output_dir, Woods::Generation::FILENAME) }
+
+    before do
+      FileUtils.mkdir_p(output_dir)
+      store = Woods::PayloadStore.new(output_dir)
+      (1..3).each do |number|
+        dir = store.create(number)
+        File.write(dir.join('sentinel.json'), JSON.generate('generation' => number))
+        Woods::Generation.new(output_dir: output_dir)
+                         .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(number))
+      end
+      File.write(marker_path, '{broken')
+    end
+
+    def expect_index_untouched
+      expect(File.read(marker_path)).to eq('{broken')
+      sentinel = File.join(output_dir, Woods::PayloadStore.name_for(1), 'sentinel.json')
+      expect(JSON.parse(File.read(sentinel))).to eq('generation' => 1)
+      expect_no_stage
+    end
+
+    def expect_no_stage
+      expect(extractor.instance_variable_get(:@payload_dir)).to be_nil
+      expect(Dir.children(File.join(output_dir, 'payloads')).grep(/stage/)).to be_empty
+    end
+
+    it 'refuses to stage a generation instead of restarting at 1' do
+      expect { extractor.send(:begin_payload!) }
+        .to raise_error(Woods::ExtractionError, /generation marker/i)
+
+      expect_index_untouched
+    end
+
+    it 'refuses even when WOODS_ALLOW_FLAT_FALLBACK=1 would allow a flat publish' do
+      original = ENV.fetch('WOODS_ALLOW_FLAT_FALLBACK', nil)
+      ENV['WOODS_ALLOW_FLAT_FALLBACK'] = '1'
+
+      expect { extractor.send(:begin_payload!) }
+        .to raise_error(Woods::ExtractionError, /generation marker/i)
+
+      expect_index_untouched
+    ensure
+      original.nil? ? ENV.delete('WOODS_ALLOW_FLAT_FALLBACK') : ENV['WOODS_ALLOW_FLAT_FALLBACK'] = original
+    end
+  end
+
   # ── begin_payload! strict degrade (P2) ───────────────────────────────
   #
   # An incremental run's write set is only the units it touched. Degrading a

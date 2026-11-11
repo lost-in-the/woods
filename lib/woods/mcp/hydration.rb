@@ -294,6 +294,13 @@ module Woods
         finish(:ready, nil)
       rescue StandardError, ScriptError => e
         finish(:failed, e)
+      rescue Exception => e # rubocop:disable Lint/RescueException -- record the terminal state, then let the thread die with it
+        # Neither a StandardError nor a ScriptError (NoMemoryError,
+        # SystemStackError, a signal, a custom Exception subclass): the
+        # thread dies with it either way, but left unrecorded the state stayed
+        # `warming` and every waiting call and woods_status never saw `failed`.
+        finish(:failed, e)
+        raise
       end
 
       def finish(state, error)

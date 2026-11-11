@@ -95,24 +95,41 @@ module Woods
         @matches = []
         @seen = Set.new
         @reason = nil
+        @overflowed = false
       end
 
-      # Admit at most one lookahead match beyond the returned page.
+      # Admit at most one lookahead match beyond the returned page. Matches are
+      # still admitted after {#stop}: a caller that skips an unreadable unit
+      # keeps searching the rest of the domain.
+      #
+      # @param identifier [String]
+      # @param type [String]
+      # @param match_field [String]
       # @return [self]
       def add(identifier:, type:, match_field:)
         return self if result_limit_reached?
         return self unless @seen.add?([type, identifier])
 
         @matches << { identifier: identifier, type: type, match_field: match_field }
-        @reason = 'result_limit' if @matches.size > @limit
+        if @matches.size > @limit
+          @overflowed = true
+          # A reason {#stop} recorded (part of the domain was never examined)
+          # is stronger than a full page and must not be replaced by it; the
+          # lookahead still shows in +has_more+.
+          @reason ||= 'result_limit'
+        end
         self
       end
 
+      # @return [Boolean] true once a match beyond the page was admitted
       def result_limit_reached?
-        @reason == 'result_limit'
+        @overflowed
       end
 
       # Stop because the remaining search domain could not be examined.
+      #
+      # @param reason [String]
+      # @return [String]
       def stop(reason)
         @reason = reason
       end

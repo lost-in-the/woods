@@ -1080,6 +1080,60 @@ RSpec.describe Woods::Embedding::Indexer do
         expect(File.directory?(latest_dir.to_s)).to be true
         expect(File.basename(latest_dir.to_s)).to eq('2020-01-01T00-00-00Z')
       end
+
+      # Dumps that never reached the `latest` pointer (a run that raised
+      # mid-dump, or crashed before promotion) used to count toward the
+      # retention window, so leftovers evicted promoted dumps early.
+      context 'with dumps that were never promoted' do
+        let(:dumps_dir) { File.join(output_dir, 'dumps') }
+
+        before do
+          stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
+          stub_const('Woods::Storage::Snapshotter::Metadata', metadata_snapshotter)
+          allow(vector_snapshotter).to receive(:dump)
+        end
+
+        def embed_at(stamp)
+          allow(Time).to receive(:now).and_return(Time.utc(*stamp))
+          indexer_with_retention.index_all
+        end
+
+        def leave_unpromoted(name, age: 0)
+          dir = File.join(dumps_dir, name)
+          FileUtils.mkdir_p(dir)
+          File.write(File.join(dir, 'vectors.bin'), 'partial')
+          old = Time.at(File.mtime(dir).to_f - age)
+          File.utime(old, old, dir)
+          dir
+        end
+
+        it 'counts only promoted dumps toward the retention window' do
+          embed_at([2026, 4, 20])
+          embed_at([2026, 4, 21])
+          leftovers = %w[2026-04-21T06-00-00Z 2026-04-21T12-00-00Z].map { |name| leave_unpromoted(name) }
+
+          embed_at([2026, 4, 22])
+
+          expect(File.exist?(File.join(dumps_dir, '2026-04-20T00-00-00Z'))).to be false
+          expect(File.directory?(File.join(dumps_dir, '2026-04-21T00-00-00Z'))).to be true
+          expect(File.basename(Woods::IndexArtifact.new(output_dir).latest_dump_path.to_s))
+            .to eq('2026-04-22T00-00-00Z')
+          # Recent leftovers may belong to a writer still running elsewhere.
+          leftovers.each { |dir| expect(File.directory?(dir)).to be true }
+        end
+
+        it 'removes unpromoted leftovers only once they are stale' do
+          embed_at([2026, 4, 20])
+          stale = leave_unpromoted('2026-04-20T06-00-00Z', age: 2 * 24 * 60 * 60)
+          fresh = leave_unpromoted('2026-04-20T12-00-00Z')
+
+          embed_at([2026, 4, 21])
+
+          expect(File.exist?(stale)).to be false
+          expect(File.directory?(fresh)).to be true
+          expect(File.directory?(File.join(dumps_dir, '2026-04-20T00-00-00Z'))).to be true
+        end
+      end
     end
   end
 

@@ -240,8 +240,17 @@ module Woods
 
       # Stop the loop at the next opportunity.
       #
+      # A stop is final: it wins over a restart or idle reason recorded before
+      # or after it (see {#record_stop_reason}), and a stop that lands before
+      # the watcher exists keeps the watcher from starting at all (see
+      # {#start_backend}). Takes no lock, so it is safe from a signal trap.
+      #
       # @return [void]
       def stop
+        # Flag first, reason second: {#record_stop_reason} re-checks the flag
+        # after it writes, so whichever order the two threads interleave in,
+        # the last write to @stop_reason is :stopped.
+        @stop_requested = true
         @stop_reason = :stopped
         @watcher&.stop
       end
@@ -532,6 +541,7 @@ module Woods
         @reconciliation_pending = false
         @pending_mutex = Mutex.new
         @stop_reason = nil
+        @stop_requested = false
         @drain_mutex = Mutex.new
         @retry_thread = nil
         @watcher_ready = Queue.new
@@ -859,7 +869,7 @@ module Woods
 
             if idle_expired?
               @logger.info("[Woods] watch: idle for #{@idle_timeout}s — exiting")
-              @stop_reason = :idle
+              record_stop_reason(:idle)
               # @watcher, not a captured local — see the same note in
               # #drain_cycles. Idle-stop is exactly the path that missed this:
               # a daemon that fell back to polling and then went idle never
@@ -989,6 +999,18 @@ module Woods
           # backends signal only after the actual baseline/registration.
           @watcher_ready << :ready
         end
+        # A stop recorded before this watcher existed (before {#run}, or
+        # before the polling fallback rebuilt it) reached no watcher at all,
+        # and the one started here would then run with nothing left to stop
+        # it, hanging {#run_started}'s join. Never start it. {#stop} sets its
+        # flag before it reads @watcher, so a stop that lands after this
+        # check finds the watcher assigned and stops it; the built-in
+        # backends treat a stop before start as final.
+        if @stop_requested
+          @watcher.stop
+          return
+        end
+
         @watcher.start(&on_change)
       end
 
@@ -1021,8 +1043,26 @@ module Woods
         carry_forward(change_set)
         reason = "restart required: #{restart_reason(change_set)}"
         @logger.warn("[Woods] watch: #{reason}")
-        @stop_reason = :restart_required
+        record_stop_reason(:restart_required)
         outcome(:restart, :degraded, reason: reason, count: change_set.size)
+      end
+
+      # Record why the loop is ending, unless {#stop} already decided it.
+      #
+      # `stop` and a restart (or the idle timer) used to share @stop_reason
+      # with a plain write each, so whichever landed last won: a stop that
+      # arrived mid-cycle was overwritten by the restart that cycle then
+      # demanded, and the run reported `restart_required` to a caller that
+      # had asked it to stop. The re-check after the write closes the race
+      # with a concurrent {#stop} without a lock (stop can run in trap
+      # context): stop sets its flag before its own write, so either this
+      # check sees the flag or stop's write lands after this one.
+      #
+      # @param reason [Symbol]
+      # @return [void]
+      def record_stop_reason(reason)
+        @stop_reason = reason
+        @stop_reason = :stopped if @stop_requested
       end
 
       # Why this batch needs a restart, naming the paths behind it. A restart

@@ -183,8 +183,7 @@ module Woods
               i += 1
             end
           elsif dash_comment?(sql, i, mysql: mysql) || (mysql && ch == '#')
-            nl = sql.index("\n", i)
-            i = nl || len
+            i = line_comment_end(sql, i, postgres: dialect == :postgres) || len
           elsif sql[i, 3] == '/*!' || sql[i, 4] == '/*M!'
             close = block_comment_end(sql, i, nested: dialect == :postgres)
             if close
@@ -257,6 +256,23 @@ module Woods
         !mysql || sql[index + 2].nil? || sql[index + 2].match?(/[[:space:][:cntrl:]]/)
       end
       private_class_method :dash_comment?
+
+      # Index of the character that ends the line comment opening at +index+,
+      # or nil when the comment runs to the end of +sql+. The terminator itself
+      # is kept, so it survives as the comment's boundary marker.
+      #
+      # PostgreSQL's scanner ends a `--` comment at a carriage return as well
+      # as a newline (`non_newline [^\n\r]` in scan.l), so text after a bare
+      # `\r` is live SQL there and must stay visible. MySQL and SQLite end a
+      # line comment only at `\n`; ending theirs at `\r` would expose comment
+      # text to the scanner, where a quote in it could hide the live SQL that
+      # follows.
+      #
+      # @api private
+      def self.line_comment_end(sql, index, postgres:)
+        sql.index(postgres ? /[\n\r]/ : "\n", index)
+      end
+      private_class_method :line_comment_end
 
       # Regexp matching a PostgreSQL dollar-quote opening tag (`$$` or
       # `$tag$`) at the start of the given slice.

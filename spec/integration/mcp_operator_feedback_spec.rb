@@ -97,6 +97,15 @@ RSpec.describe 'MCP Operator + Feedback Tools Integration', :integration do
       expect(text).to include('rate-limited')
     end
 
+    it 'names an unparseable extraction timestamp as corrupt state, not a rate limit' do
+      File.write(File.join(tmpdir, 'pipeline_guard.json'), JSON.generate('extraction' => 'not a time'))
+
+      text = response_text(call_tool(server, 'pipeline_extract'))
+
+      expect(text).to include('cooldown cannot be verified', 'reset_cooldowns')
+      expect(text).not_to include('rate-limited')
+    end
+
     it 'allows extraction after cooldown expires' do
       guard.record!(:extraction)
 

@@ -1732,6 +1732,59 @@ RSpec.describe Woods::Watch::Daemon do
         .with(hash_including(ignored: array_including('.woods'), force_polling: true, poll_interval: 2.5))
     end
   end
+
+  # A stop and a restart shared one @stop_reason with a plain write each, so
+  # whichever landed last won; and a stop that arrived before @watcher existed
+  # reached no watcher, so the one built afterwards ran with nothing to stop it.
+  describe 'a stop is final' do
+    let(:fake_watcher) { FakeWatcher.new }
+
+    # Blocks in #start until #stop, like a real backend's event loop, and
+    # counts how often it was started.
+    class StopCountingWatcher # rubocop:disable Lint/ConstantDefinitionInBlock
+      attr_reader :starts
+
+      def initialize
+        @stopped = false
+        @starts = 0
+      end
+
+      def start(&_on_change)
+        @starts += 1
+        sleep(0.02) until @stopped
+      end
+
+      def stop
+        @stopped = true
+      end
+    end
+
+    it 'keeps a watcher built after the stop from starting' do
+      built = StopCountingWatcher.new
+      allow(Woods::Watch::Watcher).to receive(:build).and_return(built)
+      daemon = build
+
+      daemon.stop
+
+      expect(Timeout.timeout(5) { daemon.run }).to eq(:stopped)
+      expect(built.starts).to eq(0)
+      expect(status['state']).to eq('stopped')
+    end
+
+    it 'reports a stop that lands mid-cycle even when the cycle then demands a restart' do
+      policy = Woods::ReloadPolicy.new
+      daemon = build(watcher: fake_watcher, policy: policy)
+      allow(policy).to receive(:classify_all).and_wrap_original do |original, *args|
+        daemon.stop
+        original.call(*args)
+      end
+      fake_watcher.queue(['config/initializers/redis.rb'])
+
+      expect(Timeout.timeout(5) { daemon.run }).to eq(:stopped)
+      expect(status['reason']).to eq('stopped')
+    end
+  end
+
   describe Woods::Watch::Daemon::RailsReloader do
     subject(:rails_reloader) { described_class.new }
 

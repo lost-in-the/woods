@@ -114,6 +114,43 @@ RSpec.describe 'Agent configuration lifecycle' do
     expect(File).not_to exist("#{layout.receipt_path}.pending")
   end
 
+  # Removing the journal used to sit inside the rollback's rescue, so a failed
+  # unlink after every file was replaced restored the originals and raised.
+  context 'when the journal cannot be removed after every change is applied' do
+    let(:journal) { "#{layout.receipt_path}.pending" }
+
+    def apply_with_failing_journal_unlink(preview)
+      failed = false
+      allow(File).to receive(:unlink).and_wrap_original do |original, *paths|
+        if !failed && paths == [journal]
+          failed = true
+          raise Errno::EIO, journal
+        end
+        original.call(*paths)
+      end
+      applier.apply(preview).tap { RSpec::Mocks.space.proxy_for(File).reset }
+    end
+
+    it 'keeps the applied change and does not ask for recovery on the next apply' do
+      preview = plan
+      expect(apply_with_failing_journal_unlink(preview)).to eq('applied')
+      expect(JSON.parse(File.read(layout.config_path)).fetch('mcpServers')).to eq('woods' => entry)
+      expect(File.read(layout.instruction_path('CLAUDE.md'))).to include('woods:managed:start')
+      expect(JSON.parse(File.read(journal))).to include('committed' => true)
+
+      expect(applier.apply(preview)).to eq('already_applied')
+      expect(File).not_to exist(journal)
+    end
+
+    it 'never rolls the applied change back through explicit recovery' do
+      apply_with_failing_journal_unlink(plan)
+      expect(applier.recover).to eq('already_applied')
+      expect(JSON.parse(File.read(layout.config_path)).fetch('mcpServers')).to eq('woods' => entry)
+      expect(File.read(layout.instruction_path('CLAUDE.md'))).to include('woods:managed:start')
+      expect(File).not_to exist(journal)
+    end
+  end
+
   it 'retains a recovery journal if a concurrent edit makes automatic rollback unsafe' do
     preview = plan
     writer = lambda do |path, content, **options|

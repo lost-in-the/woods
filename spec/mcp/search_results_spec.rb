@@ -43,4 +43,46 @@ RSpec.describe Woods::MCP::SearchResults do
                                                           total_matches: nil, matched_lower_bound: 1)
     end
   end
+
+  # An unreadable unit does not end the search: the caller skips it and keeps
+  # matching. A page that then overflows proves more matches exist, but the
+  # stronger reason (some of the domain was never examined) must survive.
+  context 'when an unreadable source was recorded before the page overflowed' do
+    let(:results) do
+      described_class.new(limit: 1).tap do |results|
+        results.stop('unreadable_or_corrupt_source')
+        match(results, 'Post')
+        match(results, 'Comment')
+      end
+    end
+
+    it 'keeps the stop reason and still reports the proven lookahead' do
+      expect(results.finish.response.fetch(:completeness)).to eq(
+        status: 'partial', reason: 'unreadable_or_corrupt_source', has_more: true,
+        total_matches: nil, matched_lower_bound: 2
+      )
+      expect(results.response[:hint]).to include('woods:validate')
+    end
+
+    it 'still stops admitting matches at the lookahead' do
+      expect(results.result_limit_reached?).to be(true)
+      match(results, 'Ignored')
+
+      expect(results.finish.response.fetch(:completeness)).to include(matched_lower_bound: 2)
+      expect(results.response[:results].map { |row| row[:identifier] }).to eq(['Post'])
+    end
+  end
+
+  it 'keeps admitting matches after an unreadable source until the lookahead' do
+    results = described_class.new(limit: 2)
+    results.stop('unreadable_or_corrupt_source')
+    match(results, 'Post')
+    match(results, 'Comment')
+
+    expect(results.result_limit_reached?).to be(false)
+    expect(results.finish.response.fetch(:completeness)).to eq(
+      status: 'partial', reason: 'unreadable_or_corrupt_source', has_more: nil,
+      total_matches: nil, matched_lower_bound: 2
+    )
+  end
 end

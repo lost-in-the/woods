@@ -355,6 +355,13 @@ RSpec.describe Woods::Console::SqlValidator do
           .to raise_error(Woods::Console::SqlValidationError, /dangerous function/i)
       end
 
+      it 'rejects pg_read_file after a carriage return ends a PostgreSQL comment' do
+        sql = "SELECT a FROM ok --x\r UNION SELECT pg_read_file('/etc/passwd')"
+        [described_class.new(dialect: :postgres), described_class.new].each do |checker|
+          expect { checker.validate!(sql) }.to raise_error(Woods::Console::SqlValidationError)
+        end
+      end
+
       it 'rejects sleep (MySQL)' do
         expect { validator.validate!('SELECT sleep(10)') }
           .to raise_error(Woods::Console::SqlValidationError, /dangerous function/i)

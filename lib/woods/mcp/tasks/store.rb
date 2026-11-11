@@ -314,19 +314,35 @@ module Woods
         # A `working` record whose owning process is gone describes work that
         # cannot still be happening. Resolve it to `failed` and persist, so
         # every later reader gets the same answer instead of re-deciding.
+        #
+        # `task` may be stale: the producer can complete its record and exit
+        # between this reader's read and its liveness check. So the write
+        # happens under the record's lock (the one {#transition!} holds), over
+        # a fresh read, and only while that read is still `working` for the
+        # same producer; otherwise the fresh record is the answer.
         def adopt_orphan(task)
           return task unless task.status == 'working'
           return task if producer_alive?(task)
 
-          task.status = 'failed'
-          task.error = {
-            'code' => JSON_RPC_INTERNAL_ERROR,
-            'message' => "The process running this task did not survive (pid #{task.pid}). " \
-                         'Re-run the tool; the index is unchanged unless the run had already committed.'
-          }
-          task.updated_at = Time.now.utc.iso8601
-          write(task)
-          task
+          with_task_lock(task.id) do
+            current = read(task.id)
+            return current unless same_working_producer?(current, task)
+
+            current.status = 'failed'
+            current.error = {
+              'code' => JSON_RPC_INTERNAL_ERROR,
+              'message' => "The process running this task did not survive (pid #{current.pid}). " \
+                           'Re-run the tool; the index is unchanged unless the run had already committed.'
+            }
+            current.updated_at = Time.now.utc.iso8601
+            write(current)
+            current
+          end
+        end
+
+        def same_working_producer?(current, judged)
+          !current.nil? && current.status == 'working' &&
+            current.pid == judged.pid && current.producer_identity == judged.producer_identity
         end
 
         def producer_alive?(task)

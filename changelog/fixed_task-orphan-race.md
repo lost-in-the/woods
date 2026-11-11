@@ -1,0 +1,1 @@
+- A pipeline task that finished just before its server process exited is no longer reported as `failed` by a reader that had read it while it was still `working`. The reader now re-reads the record under the task's own lock and leaves it alone unless it is still `working` for the same dead producer.
