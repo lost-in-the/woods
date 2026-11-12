@@ -537,7 +537,8 @@ module Woods
                          'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
                          '`name` is accepted as an alias for `identifier` for discoverability. ' \
                          'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
-                         'page says which `page` to ask for next.',
+                         'page says which `page` and `answer_id` to ask for next. In the JSON format a page ' \
+                         'is a JSON object whose `chunk` strings join into the unit\'s JSON document.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
@@ -675,9 +676,14 @@ module Woods
                                       "page #{page_number} does not exist.",
                                       code: :invalid_params, tool: 'lookup', argument: 'page', pages: pages)
               end
-              body = LookupPages.render(selected)
+              # A slice of a JSON document does not parse; in that format the
+              # page is a JSON object that carries the slice as a string.
+              json = renderer.is_a?(Renderers::JsonRenderer)
+              body = json ? LookupPages.render_json(selected) : LookupPages.render(selected)
+              data = { lookup_page: selected.to_h }
+              data[:chunk] = selected.text if json
               ::MCP::Tool::Response.new([{ type: 'text', text: body }],
-                                        structured_content: { text: body, data: { lookup_page: selected.to_h } },
+                                        structured_content: { text: body, data: data },
                                         meta: (lookup_meta || {}).merge(lookup_page: selected.to_h))
             else
               suggestions = reader.suggest_identifiers(identifier)

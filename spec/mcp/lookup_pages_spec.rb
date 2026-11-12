@@ -241,7 +241,53 @@ RSpec.describe Woods::MCP::LookupPages do
       expect(text(response)).to include('page, max_chars and answer_id apply only to full evidence')
     end
 
-    %i[json plain claude].each do |format|
+    describe 'in the JSON format' do
+      it 'answers every page as JSON that parses on its own' do
+        pages = lookup(:json, max_chars: 3000).meta.dig(:lookup_page, :pages)
+
+        (1..pages).each do |number|
+          parsed = JSON.parse(text(page_of(number, :json, max_chars: 3000)))
+          expect(parsed.keys).to eq(%w[lookup_page chunk])
+          expect(parsed.fetch('lookup_page')).to include('page' => number, 'pages' => pages)
+        end
+      end
+
+      it 'carries the unit in chunks that join into its JSON document' do
+        whole = JSON.parse(text(lookup(:json, max_chars: 2_000_000)))
+        pages = lookup(:json, max_chars: 3000).meta.dig(:lookup_page, :pages)
+        chunks = (1..pages).map { |number| JSON.parse(text(page_of(number, :json, max_chars: 3000))).fetch('chunk') }
+
+        expect(pages).to be > 3
+        expect(JSON.parse(chunks.join)).to eq(whole)
+      end
+
+      it 'says in each page how to get the next and what to do with the chunks' do
+        first = JSON.parse(text(lookup(:json, max_chars: 3000))).fetch('lookup_page')
+        last = JSON.parse(text(page_of(first.fetch('pages'), :json, max_chars: 3000))).fetch('lookup_page')
+
+        expect(first.fetch('how_to_continue'))
+          .to eq("Call lookup again with the same arguments, page: 2 and answer_id: \"#{first.fetch('answer_id')}\". " \
+                 'Join the chunk strings of every page in order, then parse the result as JSON.')
+        expect(last.fetch('how_to_continue')).to start_with('This is the last page.')
+        expect(last.fetch('next_page')).to be_nil
+      end
+
+      it 'gives the same chunk as structured data' do
+        response = lookup(:json, max_chars: 3000)
+        parsed = JSON.parse(text(response))
+
+        expect(response.structured_content.dig(:data, :chunk)).to eq(parsed.fetch('chunk'))
+      end
+
+      it 'answers a unit that fits as its own JSON document, with no envelope' do
+        parsed = JSON.parse(text(lookup(:json, max_chars: 2_000_000)))
+
+        expect(parsed).to include('identifier' => 'Post')
+        expect(parsed).not_to have_key('chunk')
+      end
+    end
+
+    %i[plain claude].each do |format|
       it "pages the #{format} rendering without losing any of it" do
         whole = text(lookup(format, max_chars: 2_000_000))
         pages = lookup(format, max_chars: 3000).meta.dig(:lookup_page, :pages)

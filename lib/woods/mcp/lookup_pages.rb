@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'digest'
+require 'json'
 
 module Woods
   module MCP
@@ -18,6 +19,10 @@ module Woods
     # the whole rendering and the page size. A later page must name it, and
     # is refused when the rendering it would be cut from is no longer that
     # one; pages of two versions joined together are the answer of neither.
+    #
+    # In the JSON format a page is itself a JSON object: a slice of a JSON
+    # document does not parse, so the slice travels as the string `chunk`
+    # beside its position, and the chunks joined in order parse as the unit.
     #
     # The limit is {DEFAULT_MAX_CHARS} unless the `WOODS_MCP_LOOKUP_MAX_CHARS`
     # environment variable sets another (0 turns paging off) or the call
@@ -98,6 +103,24 @@ module Woods
         Page.new(text: piece, number: number, pages: pieces.size, first_char: before + 1,
                  last_char: before + piece.length, total_chars: text.length,
                  answer_id: answer_id(text, max_chars))
+      end
+
+      # The page as a JSON object, for the JSON format: every page parses on
+      # its own. `chunk` is this page's slice of the unit's JSON document;
+      # the chunks of all pages, joined in order, are that document.
+      #
+      # @param page [Page]
+      # @return [String] pretty-printed JSON
+      def render_json(page)
+        continue = if page.next_number
+                     "Call lookup again with the same arguments, page: #{page.next_number} and " \
+                       "answer_id: \"#{page.answer_id}\". Join the chunk strings of every page in order, then " \
+                       'parse the result as JSON.'
+                   else
+                     'This is the last page. Join the chunk strings of every page in order, then parse the ' \
+                       'result as JSON.'
+                   end
+        JSON.pretty_generate(lookup_page: page.to_h.merge(how_to_continue: continue), chunk: page.text)
       end
 
       # The page with a line above and below it saying where it sits and how
