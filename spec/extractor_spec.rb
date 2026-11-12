@@ -599,6 +599,24 @@ RSpec.describe Woods::Extractor do
         expect(index.find { |entry| entry['identifier'] == 'User' }['namespace']).to eq('Ops')
       end
 
+      # Each publication stages in its own directory (.stage-<n>-<owner>),
+      # so entries from one are never the next one's, and are not kept.
+      it 'starts over, and keeps one entry set, when the payload directory changes' do
+        allow(extractor).to receive(:estimated_tokens_from).and_call_original
+        rebuilt_index
+        staged = File.join(tmpdir, 'output', '.stage-2-owner')
+        FileUtils.mkdir_p(staged)
+        FileUtils.cp_r(type_dir, staged)
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(staged))
+
+        extractor.send(:regenerate_type_index, :models)
+
+        expect(extractor).to have_received(:estimated_tokens_from).exactly(4).times
+        remembered = extractor.instance_variable_get(:@type_index_entries)
+        expect(remembered.keys).to eq([:models])
+        expect(remembered.fetch(:models).first).to eq(File.join(staged, 'models'))
+      end
+
       it 'drops a unit whose file is gone and adds a new one' do
         rebuilt_index
         FileUtils.rm(File.join(type_dir, 'Post.json'))

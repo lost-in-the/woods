@@ -99,7 +99,10 @@ module Woods
           value = metadata[key] || unit[key]
           selected[key] = value unless value.nil?
         end
-        "Published runtime metadata:\n#{runtime_metadata_text(values)}\n\n#{source}"
+        matched = candidate.matched_fields.filter_map do |field|
+          field.delete_prefix('runtime:') if field.start_with?('runtime:')
+        end
+        "Published runtime metadata:\n#{runtime_metadata_text(values, matched)}\n\n#{source}"
       end
 
       # Runtime metadata as one line of JSON per entry, without empty values
@@ -108,9 +111,12 @@ module Woods
       # hooks, each with six empty side-effect lists) took its whole share of
       # the budget and left no room for its source. `lookup` returns the
       # complete metadata.
-      def runtime_metadata_text(values)
+      #
+      # A framework callback that one of the query's +matched+ runtime terms
+      # names is kept: it is why the unit matched.
+      def runtime_metadata_text(values, matched = [])
         values.filter_map do |key, value|
-          value, omitted = app_callbacks(value) if key == 'callbacks'
+          value, omitted = app_callbacks(value, matched) if key == 'callbacks'
           value = compact_value(value)
           lines = if value.is_a?(Array) && value.any?(Hash)
                     ["#{key}:", *value.map { |item| "  #{JSON.generate(item)}" }]
@@ -129,14 +135,24 @@ module Woods
       end
 
       # @return [Array(Object, Integer)] the callbacks worth showing and how many were left out
-      def app_callbacks(callbacks)
+      def app_callbacks(callbacks, matched)
         return [callbacks, 0] unless callbacks.is_a?(Array)
 
         kept = callbacks.reject do |callback|
           callback.is_a?(Hash) && callback['origin'] == 'framework' &&
-            blank_value?(compact_value(callback['side_effects']))
+            blank_value?(compact_value(callback['side_effects'])) && !names_any?(callback, matched)
         end
         [kept, callbacks.size - kept.size]
+      end
+
+      # Whether the callback's own text holds one of the matched terms. The
+      # index lowercases and splits names, so a term is a substring of the
+      # name it came from.
+      def names_any?(callback, terms)
+        return false if terms.empty?
+
+        text = JSON.generate(compact_value(callback)).downcase
+        terms.any? { |term| text.include?(term) }
       end
 
       # Drops nil, empty strings, empty lists and empty hashes at every level.

@@ -92,6 +92,41 @@ RSpec.describe Woods::Retrieval::LexicalAssembler do
       expect(context).to include('"filter":"touch_parent"').and include('"columns_written":["updated_at"]')
     end
 
+    # The callback is why the unit matched; dropping it would leave
+    # `Matched: runtime:...` pointing at evidence the answer does not show.
+    it 'keeps a framework callback that a matched runtime term names' do
+      matched = runtime_candidate(metadata)
+      matched.matched_fields.replace(%w[runtime:autosave runtime:customer])
+
+      context = assemble([matched]).context
+
+      expect(context).to include('"type":"before_save","filter":"autosave_associated_records_for_customer"')
+      expect(context).not_to include('framework callback with no recorded side effects omitted')
+    end
+
+    it 'finds a unit by a framework callback named only in its metadata and shows that callback' do
+      require 'woods/retrieval/lexical_index'
+      require 'woods/storage/metadata_store'
+      require 'woods/storage_identity'
+      unit = { 'identifier' => 'Order', 'type' => 'model', 'file_path' => 'app/models/order.rb',
+               'source_code' => "class Order\nend\n",
+               'metadata' => { 'callbacks' => metadata['callbacks'] + [
+                 { 'type' => 'around_save', 'filter' => 'around_save_collection_association',
+                   'origin' => 'framework', 'side_effects' => empty_effects }
+               ] } }
+      query = 'autosave_associated_records_for_customer'
+      store = Woods::Storage::MetadataStore::InMemory.new
+      store.store(Woods::StorageIdentity.key('Order', 'model'), unit)
+      candidates = Woods::Retrieval::LexicalIndex.new(metadata_store: store).execute(query: query).candidates
+
+      context = described_class.new.assemble(candidates: candidates, budget: 2000, query: query).context
+
+      expect(candidates.first.matched_fields).to include(a_string_starting_with('runtime:'))
+      expect(context).to include('"type":"before_save","filter":"autosave_associated_records_for_customer"')
+      expect(context).not_to include('around_save_collection_association')
+      expect(context).to include('(1 framework callback with no recorded side effects omitted')
+    end
+
     it 'still names the callbacks when only framework ones were recorded' do
       only_framework = { 'callbacks' => [metadata['callbacks'].first] }
 

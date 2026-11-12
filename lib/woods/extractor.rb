@@ -3489,10 +3489,14 @@ module Woods
 
       # Scan existing unit JSON files (exclude _index.json). The directory
       # stays the authority on which units exist; only the entry derived from
-      # a file's bytes is remembered. One edit leaves almost every file of
-      # its type untouched, and a resident extractor (woods:watch) rebuilds
-      # the same index on every run.
-      remembered = (@type_index_entries ||= {})[type_dir.to_s] || {}
+      # a file's bytes is remembered, and only for this publication's
+      # directory. A run rebuilds a type's index more than once (controllers
+      # again after the flow pass, any type a later phase touches), and each
+      # rebuild leaves almost every file untouched. Each publication stages
+      # in its own directory, so nothing is carried from one run to the next,
+      # and one entry set is kept per type.
+      directory, remembered = (@type_index_entries ||= {})[type_key]
+      remembered = {} unless directory == type_dir.to_s
       current = {}
       entries = type_dir.children.sort.filter_map do |file|
         next unless file.extname == '.json' && file.basename.to_s != '_index.json'
@@ -3505,7 +3509,7 @@ module Woods
         current[name] = [digest, entry]
         entry
       end
-      @type_index_entries[type_dir.to_s] = current
+      @type_index_entries[type_key] = [type_dir.to_s, current]
       index = entries.sort_by { |entry| entry[:identifier].to_s }
 
       AtomicFile.write(
