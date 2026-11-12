@@ -460,11 +460,12 @@ module Woods
       return [] unless scan.comparable?
 
       known = woods_normalize_incremental_paths(already)
-      drifted = scan.paths.reject { |path| known.include?(path.delete_prefix("#{root}/")) }
+      drifted = (scan.paths | scan.missing_paths).reject { |path| known.include?(path.delete_prefix("#{root}/")) }
       return drifted if drifted.empty?
 
       puts "#{drifted.size} more file(s) differ from the index and are not in " \
-           "`git diff #{WOODS_DEFAULT_INCREMENTAL_RANGE}` (reverted after an extraction, or not yet tracked); " \
+           "`git diff #{WOODS_DEFAULT_INCREMENTAL_RANGE}` (reverted after an extraction, never tracked, " \
+           'or deleted while untracked); ' \
            'adding them to the change set.'
       drifted
     rescue ScriptError, StandardError => e

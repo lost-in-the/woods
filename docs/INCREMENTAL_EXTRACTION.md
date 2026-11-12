@@ -124,8 +124,9 @@ The default also adds every file that **no longer matches the published
 index**, whatever git says about it. The published source manifest records a
 digest for each captured file, so a file modified since that capture whose
 bytes differ is known exactly. This covers an edit that was extracted and
-then reverted (it leaves the diff while the index still holds the edit) and a
-new file git does not track yet. The task prints how many it added. A CI
+then reverted (it leaves the diff while the index still holds the edit), a
+new file git does not track yet, and the deletion of a file that was indexed
+while untracked. The task prints how many it added. A CI
 range and `CHANGED_FILES` are used as given.
 
 A run meant to cover one

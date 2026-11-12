@@ -81,6 +81,23 @@ module Woods
         kept
       end
 
+      # Absolute paths the published generation captured that are no longer
+      # on disk. {#paths} walks the files that exist, so a deleted file is
+      # never one of its candidates; git reports the deletion of a tracked
+      # file, but not of one that was indexed while untracked.
+      #
+      # @return [Array<String>] empty unless {#comparable?}
+      def missing_paths
+        return [] unless comparable?
+
+        recorded_identities.keys.filter_map do |path|
+          next unless relative_path?(path)
+
+          absolute = File.join(@root, path)
+          absolute unless File.exist?(absolute) || File.symlink?(absolute)
+        end
+      end
+
       # One bounded keyed read per candidate, against every digest the
       # manifest's scopes record for its path.
       class UnchangedContent

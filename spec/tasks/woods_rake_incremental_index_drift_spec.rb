@@ -96,6 +96,28 @@ RSpec.describe 'woods:incremental change set and index drift' do
     expect(changed_paths).to include('app/models/widget.rb')
   end
 
+  # git reports the deletion of a tracked file. One indexed while untracked
+  # was never git's to report, and a deleted file is not in a walk of the
+  # files that exist.
+  it 'adds a file that was indexed while untracked and then deleted' do
+    widget = File.join(root, 'app/models/widget.rb')
+    File.write(widget, "class Widget\nend\n")
+    publish
+    File.delete(widget)
+
+    expect(changed_paths).to include('app/models/widget.rb')
+  end
+
+  it 'does not add a captured file that still exists and is unchanged' do
+    widget = File.join(root, 'app/models/widget.rb')
+    File.write(widget, "class Widget\nend\n")
+    earlier = Time.now - 100
+    File.utime(earlier, earlier, widget)
+    publish
+
+    expect(changed_paths).to eq(['README.md'])
+  end
+
   it 'says how many files it added' do
     publish
     write_later(File.join(root, 'app/models/widget.rb'), "class Widget\nend\n")
