@@ -20,9 +20,8 @@ module Woods
     # is refused when the rendering it would be cut from is no longer that
     # one; pages of two versions joined together are the answer of neither.
     #
-    # In the JSON format a page is itself a JSON object: a slice of a JSON
-    # document does not parse, so the slice travels as the string `chunk`
-    # beside its position, and the chunks joined in order parse as the unit.
+    # In the JSON format the unit itself is paged, not its text: see
+    # {.json_pages}.
     #
     # The limit is {DEFAULT_MAX_CHARS} unless the `WOODS_MCP_LOOKUP_MAX_CHARS`
     # environment variable sets another (0 turns paging off) or the call
@@ -105,22 +104,122 @@ module Woods
                  answer_id: answer_id(text, max_chars))
       end
 
-      # The page as a JSON object, for the JSON format: every page parses on
-      # its own. `chunk` is this page's slice of the unit's JSON document;
-      # the chunks of all pages, joined in order, are that document.
+      # Room the page's own `lookup_page` object takes beside the unit.
+      JSON_ENVELOPE_CHARS = 900
+
+      # The unit cut into pages for the JSON format. A slice of a JSON
+      # document does not parse, and one carried as an escaped string is
+      # unreadable, so the unit itself is paged: every page holds a real part
+      # of it. A value that fits travels whole; a long string is cut at line
+      # ends and a long list between items, and `parts` says which lines or
+      # items a page holds. Merging the pages' units in order (objects by
+      # key; strings and lists under the same key joined) gives the unit.
       #
-      # @param page [Page]
+      # @param unit [Hash] the unit as the JSON renderer would print it
+      # @param max_chars [Integer]
+      # @return [Array<Hash>] `{ 'unit' => Hash, 'parts' => Array<Hash> }`, at least one
+      def json_pages(unit, max_chars)
+        budget = [max_chars - JSON_ENVELOPE_CHARS, 200].max
+        pages = [{ 'unit' => {}, 'parts' => [], size: 0 }]
+        unit.flat_map { |key, value| json_parts([key.to_s], value, budget) }.each do |path, value, span|
+          size = JSON.pretty_generate(value).length
+          if pages.last[:size].positive? && pages.last[:size] + size > budget
+            pages << { 'unit' => {}, 'parts' => [], size: 0 }
+          end
+          page = pages.last
+          merge_at(page['unit'], path, value)
+          page['parts'] << { 'key' => path.join('.') }.merge(span) if span
+          page[:size] += size
+        end
+        pages.map { |page| page.slice('unit', 'parts') }
+      end
+
+      # Merge +pages+ back into the unit, by the rule a client is given.
+      #
+      # @param pages [Array<Hash>] `unit` objects, in page order
+      # @return [Hash]
+      def merge_json_units(pages)
+        pages.each_with_object({}) { |unit, whole| merge_into(whole, unit) }
+      end
+
+      # One page of {.json_pages} as the JSON text of an answer.
+      #
+      # @param page [Page] position of the page
+      # @param part [Hash] the page's entry from {.json_pages}
       # @return [String] pretty-printed JSON
-      def render_json(page)
+      def render_json(page, part)
         continue = if page.next_number
                      "Call lookup again with the same arguments, page: #{page.next_number} and " \
-                       "answer_id: \"#{page.answer_id}\". Join the chunk strings of every page in order, then " \
-                       'parse the result as JSON.'
+                       "answer_id: \"#{page.answer_id}\"."
                    else
-                     'This is the last page. Join the chunk strings of every page in order, then parse the ' \
-                       'result as JSON.'
+                     'This is the last page.'
                    end
-        JSON.pretty_generate(lookup_page: page.to_h.merge(how_to_continue: continue), chunk: page.text)
+        position = page.to_h.except(:first_char, :last_char).merge(
+          parts: part.fetch('parts'),
+          how_to_continue: "#{continue} Merge the unit objects of all pages in order: objects merge by key, " \
+                           'and strings and lists under the same key are joined.'
+        )
+        JSON.pretty_generate(lookup_page: position, unit: part.fetch('unit'))
+      end
+
+      # @return [Array<Array>] `[path, value, span]` pieces of +value+, each within +budget+ where it can be cut
+      def json_parts(path, value, budget)
+        return [[path, value, nil]] if JSON.pretty_generate(value).length <= budget
+
+        case value
+        when Hash then value.flat_map { |key, nested| json_parts(path + [key.to_s], nested, budget) }
+        when String then string_parts(path, value, budget)
+        when Array then list_parts(path, value, budget)
+        else [[path, value, nil]]
+        end
+      end
+
+      def string_parts(path, value, budget)
+        line = 1
+        split(value, budget).map do |piece|
+          first = line
+          line += piece.count("\n")
+          [path, piece, { 'lines' => [first, piece.end_with?("\n") ? line - 1 : line] }]
+        end
+      end
+
+      def list_parts(path, value, budget)
+        slices = [[]]
+        size = 0
+        value.each do |item|
+          item_size = JSON.pretty_generate(item).length
+          if size.positive? && size + item_size > budget
+            slices << []
+            size = 0
+          end
+          slices.last << item
+          size += item_size
+        end
+        first = 0
+        slices.map do |slice|
+          span = { 'items' => [first, first + slice.size - 1] }
+          first += slice.size
+          [path, slice, span]
+        end
+      end
+
+      def merge_at(unit, path, value)
+        *parents, key = path
+        target = parents.reduce(unit) { |hash, name| hash[name] ||= {} }
+        target[key] = target.key?(key) ? join(target[key], value) : value
+      end
+
+      def merge_into(whole, unit)
+        unit.each do |key, value|
+          whole[key] = whole.key?(key) ? join(whole[key], value) : value
+        end
+        whole
+      end
+
+      def join(existing, value)
+        return merge_into(existing, value) if existing.is_a?(Hash) && value.is_a?(Hash)
+
+        existing + value
       end
 
       # The page with a line above and below it saying where it sits and how

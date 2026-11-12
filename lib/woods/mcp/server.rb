@@ -537,8 +537,8 @@ module Woods
                          'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
                          '`name` is accepted as an alias for `identifier` for discoverability. ' \
                          'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
-                         'page says which `page` and `answer_id` to ask for next. In the JSON format a page ' \
-                         'is a JSON object whose `chunk` strings join into the unit\'s JSON document.',
+                         'page says which `page` and `answer_id` to ask for next. In the JSON format each ' \
+                         'page is a JSON object holding part of the unit; merging the pages gives the unit.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
@@ -669,22 +669,32 @@ module Woods
                 end
               end
 
-              selected = LookupPages.page(text, max_chars: page_limit || text.length, number: page_number)
-              unless selected
-                pages = LookupPages.split(text, page_limit || text.length).size
+              # In the JSON format the unit itself is paged, so every page
+              # is a readable part of it that parses; the other formats cut
+              # the rendered text at line ends.
+              limit = page_limit || text.length
+              unit_pages = LookupPages.json_pages(filtered, limit) if renderer.is_a?(Renderers::JsonRenderer)
+              pages = unit_pages ? unit_pages.size : LookupPages.split(text, limit).size
+              unless page_number.between?(1, pages)
                 next respond_err.call("lookup of #{identifier} has #{pages} page#{'s' unless pages == 1}; " \
                                       "page #{page_number} does not exist.",
                                       code: :invalid_params, tool: 'lookup', argument: 'page', pages: pages)
               end
-              # A slice of a JSON document does not parse; in that format the
-              # page is a JSON object that carries the slice as a string.
-              json = renderer.is_a?(Renderers::JsonRenderer)
-              body = json ? LookupPages.render_json(selected) : LookupPages.render(selected)
-              data = { lookup_page: selected.to_h }
-              data[:chunk] = selected.text if json
+              if unit_pages
+                position = LookupPages::Page.new(number: page_number, pages: pages, total_chars: text.length,
+                                                 answer_id: LookupPages.answer_id(text, limit))
+                body = LookupPages.render_json(position, unit_pages[page_number - 1])
+                data = JSON.parse(body)
+                where = position.to_h.except(:first_char, :last_char)
+              else
+                selected = LookupPages.page(text, max_chars: limit, number: page_number)
+                body = LookupPages.render(selected)
+                where = selected.to_h
+                data = { lookup_page: where }
+              end
               ::MCP::Tool::Response.new([{ type: 'text', text: body }],
                                         structured_content: { text: body, data: data },
-                                        meta: (lookup_meta || {}).merge(lookup_page: selected.to_h))
+                                        meta: (lookup_meta || {}).merge(lookup_page: where))
             else
               suggestions = reader.suggest_identifiers(identifier)
               respond_err.call(

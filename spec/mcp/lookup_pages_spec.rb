@@ -242,48 +242,114 @@ RSpec.describe Woods::MCP::LookupPages do
     end
 
     describe 'in the JSON format' do
-      it 'answers every page as JSON that parses on its own' do
-        pages = lookup(:json, max_chars: 3000).meta.dig(:lookup_page, :pages)
+      def json_page(number)
+        JSON.parse(text(page_of(number, :json, max_chars: 3000)))
+      end
 
+      let(:whole) { JSON.parse(text(lookup(:json, max_chars: 2_000_000))) }
+      let(:pages) { lookup(:json, max_chars: 3000).meta.dig(:lookup_page, :pages) }
+
+      it 'answers every page as JSON that parses on its own and holds part of the unit' do
         (1..pages).each do |number|
-          parsed = JSON.parse(text(page_of(number, :json, max_chars: 3000)))
-          expect(parsed.keys).to eq(%w[lookup_page chunk])
+          parsed = json_page(number)
+          expect(parsed.keys).to eq(%w[lookup_page unit])
           expect(parsed.fetch('lookup_page')).to include('page' => number, 'pages' => pages)
+          expect(parsed.fetch('unit')).to be_a(Hash).and(satisfy { |unit| !unit.empty? })
         end
       end
 
-      it 'carries the unit in chunks that join into its JSON document' do
-        whole = JSON.parse(text(lookup(:json, max_chars: 2_000_000)))
-        pages = lookup(:json, max_chars: 3000).meta.dig(:lookup_page, :pages)
-        chunks = (1..pages).map { |number| JSON.parse(text(page_of(number, :json, max_chars: 3000))).fetch('chunk') }
+      it 'gives the unit back when the pages are merged in order' do
+        units = (1..pages).map { |number| json_page(number).fetch('unit') }
 
         expect(pages).to be > 3
-        expect(JSON.parse(chunks.join)).to eq(whole)
+        expect(described_class.merge_json_units(units)).to eq(whole)
       end
 
-      it 'says in each page how to get the next and what to do with the chunks' do
-        first = JSON.parse(text(lookup(:json, max_chars: 3000))).fetch('lookup_page')
-        last = JSON.parse(text(page_of(first.fetch('pages'), :json, max_chars: 3000))).fetch('lookup_page')
+      it 'cuts long source at line ends and says which lines a page holds' do
+        sources = (1..pages).filter_map do |number|
+          parsed = json_page(number)
+          part = parsed.dig('lookup_page', 'parts').find { |entry| entry['key'] == 'source_code' }
+          [parsed.dig('unit', 'source_code'), part.fetch('lines')] if part
+        end
+
+        expect(sources.size).to be > 2
+        expect(sources.map(&:first).join).to eq(whole.fetch('source_code'))
+        expect(sources.map(&:first)[0...-1]).to all(end_with("\n"))
+        expect(sources.first.last.first).to eq(1)
+        sources.each_cons(2) { |(_, before), (_, after)| expect(after.first).to eq(before.last + 1) }
+        sources.each { |source, (first, last)| expect(source.lines.size).to eq(last - first + 1) }
+      end
+
+      it 'keeps each page near the limit' do
+        (1..pages).each { |number| expect(text(page_of(number, :json, max_chars: 3000)).length).to be <= 3600 }
+      end
+
+      it 'says in each page how to get the next and how to merge' do
+        first = json_page(1).fetch('lookup_page')
+        last = json_page(pages).fetch('lookup_page')
 
         expect(first.fetch('how_to_continue'))
           .to eq("Call lookup again with the same arguments, page: 2 and answer_id: \"#{first.fetch('answer_id')}\". " \
-                 'Join the chunk strings of every page in order, then parse the result as JSON.')
+                 'Merge the unit objects of all pages in order: objects merge by key, and strings and lists ' \
+                 'under the same key are joined.')
         expect(last.fetch('how_to_continue')).to start_with('This is the last page.')
         expect(last.fetch('next_page')).to be_nil
       end
 
-      it 'gives the same chunk as structured data' do
+      it 'gives the same page as structured data' do
         response = lookup(:json, max_chars: 3000)
-        parsed = JSON.parse(text(response))
 
-        expect(response.structured_content.dig(:data, :chunk)).to eq(parsed.fetch('chunk'))
+        expect(JSON.parse(JSON.generate(response.structured_content.fetch(:data)))).to eq(JSON.parse(text(response)))
+      end
+
+      it 'refuses a later page when the unit changed, as the other formats do' do
+        first = lookup(:json, max_chars: 3000)
+        response = lookup(:json, max_chars: 5000, page: 2, answer_id: first.meta.dig(:lookup_page, :answer_id))
+
+        expect(response.error?).to be(true)
+        expect(response.meta).to include(error_code: :stale_index)
       end
 
       it 'answers a unit that fits as its own JSON document, with no envelope' do
-        parsed = JSON.parse(text(lookup(:json, max_chars: 2_000_000)))
+        expect(whole).to include('identifier' => 'Post')
+        expect(whole).not_to have_key('lookup_page')
+      end
+    end
 
-        expect(parsed).to include('identifier' => 'Post')
-        expect(parsed).not_to have_key('chunk')
+    describe '.json_pages' do
+      def roundtrip(unit, max_chars)
+        pages = described_class.json_pages(unit, max_chars)
+        [pages, described_class.merge_json_units(pages.map { |page| page.fetch('unit') })]
+      end
+
+      it 'splits a long list between items and says which items a page holds' do
+        unit = { 'identifier' => 'Order',
+                 'metadata' => { 'callbacks' => Array.new(60) { |index| { 'filter' => "callback_#{index}" } } } }
+
+        pages, merged = roundtrip(unit, 1500)
+        spans = pages.flat_map { |page| page.fetch('parts') }.select { |part| part['key'] == 'metadata.callbacks' }
+
+        expect(merged).to eq(unit)
+        expect(spans.size).to be > 1
+        expect(spans.first.fetch('items').first).to eq(0)
+        expect(spans.last.fetch('items').last).to eq(59)
+        spans.each_cons(2) { |before, after| expect(after['items'].first).to eq(before['items'].last + 1) }
+      end
+
+      it 'keeps a value it cannot cut whole on a page of its own' do
+        unit = { 'identifier' => 'Order', 'blob' => 'x' * 5000, 'count' => 3, 'flag' => false, 'nothing' => nil }
+
+        pages, merged = roundtrip(unit, 1500)
+
+        expect(merged).to eq(unit)
+        expect(pages.size).to be > 1
+      end
+
+      it 'answers one page for a small unit' do
+        pages, merged = roundtrip({ 'identifier' => 'Order', 'metadata' => {} }, 1500)
+
+        expect(pages.size).to eq(1)
+        expect(merged).to eq('identifier' => 'Order', 'metadata' => {})
       end
     end
 
