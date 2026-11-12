@@ -464,12 +464,14 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      # Through the parallel runner: as one rspec process this step took
+      # three minutes on one of the runner's four cores.
       - name: Run artifact-reader specs under LC_ALL=C
         env:
           LC_ALL: C
           LANG: C
         run: >-
-          bundle exec rspec
+          bundle exec ruby script/parallel-rspec
           spec/mcp
           spec/feedback
           spec/session_tracer
@@ -495,7 +497,7 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Set up Node 22.19.0
+      - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26.13.0'

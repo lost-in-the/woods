@@ -48,6 +48,19 @@ RSpec.describe ParallelRspec do
         expect(described_class.timings_from(report)).to eq('spec/a_spec.rb' => 3.23, 'spec/b_spec.rb' => 0.5)
       end
     end
+
+    it 'sums across the reports of several processes' do
+      Dir.mktmpdir do |dir|
+        reports = { 'rspec-1.json' => ['./spec/a_spec.rb', 1.0], 'rspec-2.json' => ['./spec/b_spec.rb', 2.0] }
+        paths = reports.map do |name, (file, seconds)|
+          File.join(dir, name).tap do |path|
+            File.write(path, JSON.generate('examples' => [{ 'file_path' => file, 'run_time' => seconds }]))
+          end
+        end
+
+        expect(described_class.timings_from(*paths)).to eq('spec/a_spec.rb' => 1.0, 'spec/b_spec.rb' => 2.0)
+      end
+    end
   end
 
   describe 'script/parallel-rspec' do
@@ -57,9 +70,9 @@ RSpec.describe ParallelRspec do
       File.write(File.join(dir, name), "require 'spec_helper'\nRSpec.describe('#{name}') { #{body} }\n")
     end
 
-    def run_script(dir, *files)
+    def run_script(dir, *files, extra_env: {})
       env = { 'WOODS_PARALLEL_PROCESSES' => '2', 'WOODS_PARALLEL_REPORT_DIR' => File.join(dir, 'report'),
-              'COVERAGE' => nil, 'CI' => nil }
+              'COVERAGE' => nil, 'CI' => nil }.merge(extra_env)
       Open3.capture2e(env, RbConfig.ruby, script, *files.map { |file| File.join(dir, file) })
     end
 
@@ -93,6 +106,21 @@ RSpec.describe ParallelRspec do
         expect(output).to include('2 examples, 1 failures')
         summary = JSON.parse(File.read(File.join(dir, 'report', 'test_results.json')))
         expect(summary.fetch('failures').map { |example| example['full_description'] }).to eq(['bad_spec.rb fails'])
+      end
+    end
+
+    # The c-locale CI job runs this script under LC_ALL=C; a report read with
+    # the locale's encoding raised on the first non-ASCII description.
+    it 'merges reports that hold non-ASCII text under a POSIX locale' do
+      Dir.mktmpdir do |dir|
+        write_spec(dir, 'accent_spec.rb', "it('caf\u00e9 \u2014 passes') { expect(1).to eq(1) }")
+        write_spec(dir, 'plain_spec.rb', "it('passes') { expect(1).to eq(1) }")
+
+        output, status = run_script(dir, 'accent_spec.rb', 'plain_spec.rb',
+                                    extra_env: { 'LC_ALL' => 'C', 'LANG' => 'C' })
+
+        expect(status).to be_success, output
+        expect(output).to include('2 examples, 0 failures')
       end
     end
   end
