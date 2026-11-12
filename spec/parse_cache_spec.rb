@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'woods/parse_cache'
+require 'woods/extractors/comment_blanking'
 
 RSpec.describe Woods::ParseCache do
   let(:source) { "class Ledger\n  def call = Shipment.new\nend\n" }
@@ -87,5 +88,34 @@ RSpec.describe Woods::ParseCache do
       expect(results.uniq.size).to eq(1)
       expect(results.first).to eq(Array.new(16) { |i| :"Model#{i}" })
     end
+  end
+end
+
+RSpec.describe Woods::Extractors::CommentBlanking, 'within a parse cache' do
+  let(:source) { "class Order\n  # ships a Widget\n  def ship; end\nend\n" }
+
+  it 'blanks a source once for every scanner that reads it in a run' do
+    Woods::ParseCache.with do
+      first = described_class.ruby(source)
+
+      expect(first).to eq("class Order\n                  \n  def ship; end\nend\n")
+      expect(first).to be_frozen
+      expect(described_class.ruby(source.dup)).to equal(first)
+      expect(described_class.blank(source.dup, 'app/models/order.rb')).to equal(first)
+    end
+  end
+
+  it 'keeps one result per encoding of the same bytes' do
+    Woods::ParseCache.with do
+      utf8 = described_class.ruby(source)
+      binary = described_class.ruby(source.b)
+
+      expect(binary.encoding).to eq(Encoding::BINARY)
+      expect(utf8.encoding).to eq(Encoding::UTF_8)
+    end
+  end
+
+  it 'still blanks without a cache' do
+    expect(described_class.ruby(source)).not_to include('Widget')
   end
 end

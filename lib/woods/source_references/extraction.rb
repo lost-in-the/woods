@@ -35,7 +35,9 @@ module Woods
         @results.values.flatten.each do |unit|
           key = [unit.type.to_s, unit.identifier]
           raw = @source_reference_occurrences&.fetch(key, []) || []
-          unit.metadata[:references] = projector.call(reference_record(unit), raw)
+          # The projector answers [] for no occurrences without reading the
+          # record, and building one deep-copies the unit's whole metadata.
+          unit.metadata[:references] = raw.empty? ? [] : projector.call(reference_record(unit), raw)
         end
       end
 
