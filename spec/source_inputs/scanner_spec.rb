@@ -11,7 +11,7 @@ RSpec.describe Woods::SourceInputs::Scanner do
   around do |example|
     Dir.mktmpdir('woods-source') do |root|
       @root = root
-      @output = File.join(root, 'index')
+      @output = File.join(@root, 'index')
       @key = Woods::SourceInputs::PrivateKey.new(output_dir: @output, create: true)
       example.run
     end
@@ -292,16 +292,71 @@ RSpec.describe Woods::SourceInputs::Scanner do
   it 'does not acknowledge bytes that change while they are read' do
     path = write('app/services/pay.rb', 'a' * 40_000)
     original = File.method(:stat)
-    calls = 0
+    rewritten = false
+    # The only path stat of a regular file is the one that follows the hash.
     allow(File).to receive(:stat) do |target|
-      calls += 1 if target == path
-      File.binwrite(path, 'b' * 40_000) if target == path && calls == 2
+      if target == path && !rewritten
+        rewritten = true
+        File.binwrite(path, 'b' * 40_000)
+      end
       original.call(target)
     end
     result = scan
+    expect(rewritten).to be(true)
     expect(result['complete']).to be(false)
     expect(result['files']).to be_empty
     expect(result['errors']).to include('reason' => 'source_changed_during_read', 'path' => 'app/services/pay.rb')
+  end
+
+  describe 'path resolution' do
+    it 'rechecks an unchanged regular file without resolving its path again' do
+      write('app/models/user.rb', 'class User; end')
+      write('app/services/deep/nested/pay.rb', 'class Pay; end')
+      first = described_class.new(root: @root, output_dir: @output, key: @key)
+      captured = first.call
+      known = first.stamps.to_h { |path, stamp| [path, [stamp, captured['files'].fetch(path)]] }
+      allow(File).to receive(:realpath).and_call_original
+
+      recheck = described_class.new(root: @root, output_dir: @output, key: @key, known: known).call
+
+      expect(recheck['files']).to eq(captured['files'])
+      expect(recheck['metrics']).to include('reused_files' => 2, 'hashed_files' => 0)
+      expect(File).not_to have_received(:realpath).with(a_string_ending_with('.rb'))
+    end
+
+    it 'gives a symlinked file the identity of the file it resolves to' do
+      write('app/models/user.rb', 'class User; end')
+      File.symlink(File.join(@root, 'app/models/user.rb'), File.join(@root, 'app/models/alias.rb'))
+      first = scan
+
+      expect(first['complete']).to be(true)
+      expect(first['files']['app/models/alias.rb']).to eq(first['files']['app/models/user.rb'])
+    end
+
+    it 'still refuses a symlinked file that resolves outside the root' do
+      outside = File.join(Dir.mktmpdir('woods-outside'), 'secret.rb')
+      File.write(outside, 'SECRET = 1')
+      FileUtils.mkdir_p(File.join(@root, 'app/models'))
+      File.symlink(outside, File.join(@root, 'app/models/leak.rb'))
+
+      result = scan
+
+      expect(result['files']).to be_empty
+      expect(result['errors']).to include('reason' => 'external_source_path', 'path' => 'app/models/leak.rb')
+    ensure
+      FileUtils.rm_rf(File.dirname(outside)) if outside
+    end
+
+    it 'resolves a file under a symlinked directory through the directory' do
+      write('engines/core/app/models/thing.rb', 'class Thing; end')
+      FileUtils.mkdir_p(File.join(@root, 'app'))
+      File.symlink(File.join(@root, 'engines/core/app/models'), File.join(@root, 'app/models'))
+
+      result = scan
+
+      expect(result['complete']).to be(true)
+      expect(result['files']).to include('app/models/thing.rb')
+    end
   end
 end
 
