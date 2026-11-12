@@ -1144,7 +1144,10 @@ or start it inside an already initialized process when relying on this recovery.
 Read `woods_status.index.source_freshness.reasons`. Old indexes, an inaccessible
 source root/private key, a quick scan limit and an unverified boot boundary are
 different causes. Try `source_check: "deep"` for a budget limit; use the fresh
-launcher for a new verified baseline. Do not delete pending hook events or alter
+launcher for a new verified baseline.
+For `source_root_unavailable` with `map_source_root`, a new baseline does not help.
+Launch the server where the recorded root exists, or set `WOODS_SOURCE_ROOT` to this machine's path of the checkout.
+Do not delete pending hook events or alter
 key permissions just to suppress a warning. See [source freshness](SOURCE_FRESHNESS.md).
 
 If `woods-extract` refuses an identity key, use

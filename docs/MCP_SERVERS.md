@@ -947,6 +947,8 @@ never count as current. No Rails initialization or provider call is needed.
 `unavailable` with `source_manifest_too_large` while the code index remains
 usable. Follow `inspect_source_limits` and inspect the reported byte counts;
 repeating an identical full extraction cannot remove this limitation.
+`map_source_root` with `source_root_unavailable` means the recorded source root is not a directory for this server.
+Launch the server where that root exists, or set `WOODS_SOURCE_ROOT`; another extraction does not change it.
 See [source freshness](SOURCE_FRESHNESS.md) for scope, private-key handling and
 fresh-process extraction. Existing HEAD/dirty fields remain separate diagnostics.
 

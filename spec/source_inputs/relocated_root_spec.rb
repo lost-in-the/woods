@@ -108,7 +108,9 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
 
       result = freshness
       expect(result).to include('state' => 'current', 'root_source' => 're_resolved',
-                                'recorded_root' => @original, 'checked_root' => @moved, 'complete' => true)
+                                'recorded_root' => @original, 'checked_root' => @moved, 'complete' => true,
+                                'recommendations' => [])
+      expect(result).not_to have_key('root_advice')
       expect(result['scope']['consumer_scopes']).to include('runtime', 'file:services', 'boot')
       expect(result['scope']['declared_roots']).to eq([])
       expect(result['exclusions']['directories']).to include('tmp', 'log', 'coverage', 'node_modules')
@@ -143,7 +145,7 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
       write(@moved, 'app/models/order.rb', 'class Order; def total; end; end')
 
       result = freshness
-      expect(result).to include('state' => 'drifted', 'root_source' => 're_resolved')
+      expect(result).to include('state' => 'drifted', 'root_source' => 're_resolved', 'recommendations' => [])
       expect(result['changes']).to eq('added' => [], 'changed' => ['app/models/order.rb'], 'removed' => [])
     end
 
@@ -290,7 +292,9 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
 
       result = Woods::MCP::IndexReader.new(detached).source_freshness(mode: 'deep')
       expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
-                                'root_source' => 'recorded', 'checked_root' => @original)
+                                'root_source' => 'recorded', 'checked_root' => @original,
+                                'recommendations' => ['map_source_root'])
+      expect(result['root_advice']).to include('WOODS_SOURCE_ROOT')
     end
 
     it 'is unavailable, not drifted, when the owning application shares no captured bytes' do
@@ -307,7 +311,8 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
                                 'root_source' => 're_resolved', 'checked_root' => other,
                                 'root_rejected' => 'no_identity_match')
       expect(result).not_to have_key('changes')
-      expect(result['recommendations']).to include('inspect_source_scan')
+      expect(result['recommendations']).to eq(['map_source_root'])
+      expect(result['root_advice']).to include('WOODS_SOURCE_ROOT')
     end
 
     it 'is unavailable when only generated boilerplate matches and the application file differs' do
@@ -345,6 +350,7 @@ RSpec.describe 'Source freshness for an index served from a relocated root' do
       result = freshness
       expect(result).to include('state' => 'unknown', 'root_rejected' => 'no_identity_match')
       expect(result['verification_reasons']).to include('scan_file_budget', 'source_root_unavailable')
+      expect(result['recommendations']).to eq(%w[inspect_source_scan map_source_root])
     end
   end
 

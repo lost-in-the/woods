@@ -781,7 +781,10 @@ for Git/path builds, the loaded revision before using them:
   `checked_root` before trusting drift there. Set `WOODS_SOURCE_ROOT` in the MCP
   server's environment to name the root instead. Follow `deep_check`
   for a quick-reader timeout, `inspect_source_scan` for mapping/permission/limit
-  problems, and `fresh_capture` for incomplete capture or boot evidence. Preserve
+  problems, and `fresh_capture` for incomplete capture or boot evidence.
+  `map_source_root` (with `root_advice`) means the recorded root is not a
+  directory for this server: launch the server where it exists or set
+  `WOODS_SOURCE_ROOT`; do not re-extract for it. Preserve
   mixed recommendations. Missing evidence cannot prove all files were added or
   unreadable files deleted. See
   [source freshness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/SOURCE_FRESHNESS.md).

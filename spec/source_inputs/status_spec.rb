@@ -116,6 +116,84 @@ RSpec.describe Woods::SourceInputs::Status do
     expect(status['recommendations']).to eq(['fresh_capture'])
   end
 
+  # | recorded root here | other root given | scan           | capture    | recommendations                   |
+  # |--------------------|------------------|----------------|------------|-----------------------------------|
+  # | no                 | no               | not run        | any        | map_source_root                   |
+  # | no                 | yes, missing     | not run        | any        | map_source_root                   |
+  # | no                 | yes, a directory | ran            | complete   | none                              |
+  # | yes                | no               | ran, current   | complete   | none                              |
+  # | yes                | no               | ran, drifted   | complete   | none                              |
+  # | yes                | no               | ran            | incomplete | fresh_capture                     |
+  # | yes                | no               | failed to read | incomplete | inspect_source_scan, fresh_capture |
+  describe 'advice for a recorded root that is not a directory here' do
+    def record_root(root, **changes)
+      manifest = JSON.parse(File.read(@manifest_path)).merge('root' => root, **changes)
+      File.write(@manifest_path, JSON.generate(manifest))
+    end
+
+    it 'names the root mapping, not a fresh capture, even when the capture is also incomplete' do
+      publish_source
+      record_root('/app-recorded-in-a-container')
+
+      result = status
+      expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
+                                'root_source' => 'recorded', 'recommendations' => ['map_source_root'])
+      expect(result['root_advice']).to include('WOODS_SOURCE_ROOT', 'through that container',
+                                               'Extracting again records the same root')
+
+      record_root('/app-recorded-in-a-container', 'boot_verified' => false)
+      expect(status(mode: 'deep')['recommendations']).to eq(['map_source_root'])
+    end
+
+    it 'gives the same advice when the root named for this machine is not a directory either' do
+      publish_source
+      record_root('/app-recorded-in-a-container')
+
+      result = status(root: File.join(@root, 'missing'))
+      expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'],
+                                'root_source' => 'explicit', 'recommendations' => ['map_source_root'])
+    end
+
+    it 'checks a root named for this machine and gives no mapping advice' do
+      publish_source
+      record_root('/app-recorded-in-a-container')
+
+      result = status(root: @root)
+      expect(result).to include('state' => 'current', 'root_source' => 'explicit', 'recommendations' => [])
+      expect(result).not_to have_key('root_advice')
+    end
+
+    it 'gives no mapping advice for a reachable recorded root, current or drifted' do
+      publish_source
+      expect(status).to include('state' => 'current', 'recommendations' => [])
+      expect(status).not_to have_key('root_advice')
+
+      File.write(File.join(@root, 'app/services/probe.rb'), 'edited')
+      drifted = status
+      expect(drifted).to include('state' => 'drifted', 'recommendations' => [])
+      expect(drifted).not_to have_key('root_advice')
+    end
+
+    it 'keeps fresh_capture for an incomplete capture of a reachable root' do
+      publish_source
+      record_root(@root, 'boot_verified' => false)
+
+      expect(status).to include('state' => 'unknown', 'recommendations' => ['fresh_capture'])
+      expect(status).not_to have_key('root_advice')
+    end
+
+    it 'keeps the scan advice when a reachable root cannot be read' do
+      publish_source
+      record_root(@root, 'boot_verified' => false)
+      allow(Woods::SourceInputs::Scanner).to receive(:new).and_raise(Errno::EACCES)
+
+      result = status
+      expect(result).to include('state' => 'unknown', 'reasons' => ['source_root_unavailable'])
+      expect(result['recommendations']).to eq(%w[inspect_source_scan fresh_capture])
+      expect(result).not_to have_key('root_advice')
+    end
+  end
+
   it 'uses the supplied served payload and generation, even when the latest marker differs' do
     File.write(File.join(@output, 'generation.json'),
                JSON.generate(number: 2, token: 'new', payload: 'payloads/00000002'))

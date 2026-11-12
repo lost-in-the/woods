@@ -618,6 +618,11 @@ RSpec.describe 'plugin hooks (#280)' do
           out, = run_hook(session_start, { 'cwd' => dir }, env)
           expect(out).to include('source_check: deep', 'woods-extract full', 'permissions', 'source mapping')
 
+          env = status_command(dir, state: 'unknown', recommendations: ['map_source_root']).merge(environment)
+          out, = run_hook(session_start, { 'cwd' => dir }, env)
+          expect(out).to include('not a directory here', 'WOODS_SOURCE_ROOT', 'records the same root')
+          expect(out).not_to include('woods-extract full')
+
           [nil, 'deep_check', ['unrecognized']].each do |malformed|
             env = status_command(dir, state: 'unknown', recommendations: malformed).merge(environment)
             out, = run_hook(session_start, { 'cwd' => dir }, env)

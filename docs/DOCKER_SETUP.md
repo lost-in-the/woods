@@ -465,6 +465,26 @@ Container launch: /app/tmp/woods
 Host launch:      /absolute/host/project/tmp/woods
 ```
 
+### Source freshness is unknown on a host-launched server
+
+**Symptom:** `woods_status` reports `index.source_freshness.state: "unknown"` with reason `source_root_unavailable`
+and recommendation `map_source_root`.
+
+**Cause:** Extraction ran in the container, so the index records the container root (`/app`).
+A server on the host cannot find that directory.
+It checks the application that owns the index directory in its place.
+That fails when the index is mounted outside the application checkout, or when the application file does not match.
+
+**Fix:** Launch the Index Server through the container, where `/app` exists.
+Or keep the host launch and set `WOODS_SOURCE_ROOT` to the host path of the checkout:
+
+```json
+"env": { "WOODS_SOURCE_ROOT": "/absolute/host/path/to/app" }
+```
+
+Extracting again does not help: the next index records `/app` again.
+See [source freshness](SOURCE_FRESHNESS.md#a-checkout-served-under-another-path).
+
 ### Rails boot noise breaks MCP protocol
 
 **Symptom:** MCP client shows JSON parse errors.
