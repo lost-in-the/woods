@@ -125,6 +125,34 @@ RSpec.describe Woods::Extraction::GitCapture do
       expect(facts.size).to eq(1100)
     end
 
+    describe 'change frequency' do
+      def frequency(history)
+        reader = instance_double(Woods::GitHistory, read: { 'post.rb' => history })
+        allow(Woods::GitHistory).to receive(:new).and_return(reader)
+        capture = described_class.new(root: root, logger: logger)
+        allow(capture).to receive(:head).and_return('a' * 40)
+        capture.file_facts([root.join('post.rb').to_s]).fetch('post.rb')
+      end
+
+      it 'calls a file new only when the window holds the commit that created it' do
+        expect(frequency(commit_count: 2, recent_count: 2, added: true)).to include(change_frequency: :new)
+      end
+
+      it 'calls a file the window never touches dormant, not new' do
+        expect(frequency({})).to include(change_frequency: :dormant, commit_count: 0, contributors: [])
+      end
+
+      it 'ranks an older file with few commits by its recent activity' do
+        expect(frequency(commit_count: 2, recent_count: 1)).to include(change_frequency: :stable)
+        expect(frequency(commit_count: 2, recent_count: 0)).to include(change_frequency: :dormant)
+      end
+
+      it 'ranks a busy file by activity even when it was created inside the window' do
+        expect(frequency(commit_count: 14, recent_count: 11, added: true)).to include(change_frequency: :hot)
+        expect(frequency(commit_count: 5, recent_count: 3, added: true)).to include(change_frequency: :active)
+      end
+    end
+
     it 'shapes published metadata with the configured recent commit limit' do
       commits = (1..4).map do |i|
         { sha: i.to_s * 40, message: "edit #{i}", date: Time.current.iso8601, author: 'A' }
