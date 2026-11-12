@@ -50,6 +50,39 @@ Identifiers are namespaced and typed. Never invent one from a filename when
 `search` can return the exact value. Carry both the returned `identifier` and
 `type` into `lookup`; the same identifier can belong to more than one unit type. When an untyped `lookup` hits such an identifier, `_meta.ambiguous_types` names every type (Woods 2.1.1); an unknown `type` is refused with `invalid_params` and `accepted_types`.
 
+### When a name is not found
+
+A unit the index does not hold is an error, on `lookup`, `dependents`,
+`dependencies`, `trace_flow` and `diagram` alike. It is never an empty answer:
+no rows from `dependents` on a unit that exists means nothing recorded depends
+on it, while a missing unit says so and traverses nothing.
+
+The error names up to five units you probably meant, in its text and as
+`_meta.suggestions`. It matches a missing namespace (`Subscription` for
+`Billing::Subscription`), a different case, another unit type, the owner of a
+`Controller#action`, the units published from a file path, and misspellings.
+Take the suggestion and call again with its `identifier` and `type`.
+
+### When a lookup comes in pages
+
+A full `lookup` longer than the page limit (40,000 characters unless the server
+sets `WOODS_MCP_LOOKUP_MAX_CHARS`) is answered in pages. Nothing is dropped.
+
+- Each page states its position and which `page` and `answer_id` to ask for
+  next. Call `lookup` again with the same arguments plus those two.
+- A later page is refused with `stale_index` when the unit changed after the
+  first page (the index was republished). Start again from page 1; pages of two
+  versions must not be joined.
+- In Markdown, plain and Claude formats a page is the next run of lines.
+- In the JSON format each page is a JSON object holding part of the unit under
+  `unit`. `lookup_page.parts` says which source lines or list items it holds.
+  Merge the `unit` objects in order: objects by key, strings and lists under the
+  same key joined.
+
+Before paging through a large unit, ask whether you need all of it:
+`sections`, `include_source: false`, or `evidence: "compact"` with a `query`
+return a smaller answer in one call.
+
 ## Pick the smallest useful tool
 
 | Need | Start with | Continue with |
@@ -291,6 +324,8 @@ Verification: <source/test/history checked or still needed>
 | Mistake | Better approach |
 |---|---|
 | Guessing an identifier | Discover it with `search` |
+| Reading a not-found error as "no dependents" | Use the suggested identifier and call again |
+| Joining lookup pages after a `stale_index` refusal | Start again from page 1 |
 | Starting with semantic retrieval for an exact class | Use `search` then `lookup` |
 | Treating no result as proof of absence | Check status, generation, extractor coverage, and source |
 | Traversing deeply from the start | Begin at depth 1 or 2 and filter |
