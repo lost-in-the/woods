@@ -3256,8 +3256,13 @@ module Woods
     # @return [Array(Hash{Symbol => Integer}, Integer)] counts by type, total chunk count
     def persisted_counts
       stats = persisted_index_stats
-      [stats.transform_values { |type_stats| type_stats[:count] },
-       stats.sum { |_type, type_stats| type_stats[:chunks] }]
+      # In the order a full extraction lists the types (the extractors'
+      # order), not the directory listing's alphabetical one: `woods:stats`
+      # and the manifest of a full and an incremental run then read alike.
+      order = EXTRACTORS.keys
+      counts = stats.sort_by { |type, _| [order.index(type) || order.size, type.to_s] }
+                    .to_h { |type, type_stats| [type, type_stats[:count]] }
+      [counts, stats.sum { |_type, type_stats| type_stats[:chunks] }]
     end
 
     # One pass over the persisted per-type _index.json files.

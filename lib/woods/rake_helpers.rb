@@ -455,12 +455,8 @@ module Woods
     # @param already [Array<String>] paths the git range reported
     # @return [Array<String>] absolute paths to add to the change set
     def woods_index_drift_paths(output_dir, already)
-      require 'woods/watch/catch_up'
-      require 'woods/watch/watcher'
       root = Rails.root.to_s
-      inside = Pathname.new(File.expand_path(output_dir.to_s)).relative_path_from(Pathname.new(root)).to_s
-      ignored = [*Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES, (inside unless inside.start_with?('..'))].compact.uniq
-      scan = Watch::CatchUp.new(root: root, output_dir: output_dir.to_s, ignored: ignored)
+      scan = woods_index_drift_scan(root, output_dir)
       return [] unless scan.comparable?
 
       known = woods_normalize_incremental_paths(already)
@@ -475,6 +471,19 @@ module Woods
       warn "[Woods] could not compare the working tree with the index (#{e.class}: #{e.message}); " \
            'using the git range alone.'
       []
+    end
+
+    # The watch daemon's start-up comparison, over the directories it watches.
+    #
+    # @param root [String] application root
+    # @param output_dir [Pathname, String] index directory
+    # @return [Watch::CatchUp]
+    def woods_index_drift_scan(root, output_dir)
+      require 'woods/watch/catch_up'
+      require 'woods/watch/watcher'
+      inside = Pathname.new(File.expand_path(output_dir.to_s)).relative_path_from(Pathname.new(root)).to_s
+      ignored = [*Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES, (inside unless inside.start_with?('..'))].compact.uniq
+      Watch::CatchUp.new(root: root, output_dir: output_dir.to_s, ignored: ignored)
     end
 
     # Why a `woods:incremental` run became a full extraction (#948): each

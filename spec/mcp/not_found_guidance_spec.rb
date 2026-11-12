@@ -31,8 +31,12 @@ RSpec.describe 'MCP answers for an identifier the index lacks' do
 
       %w[dependents dependencies].each do |tool|
         it "says #{tool} traversed nothing, and suggests the unit meant" do
-          answer = text(call(server, tool, identifier: 'post'))
+          response = call(server, tool, identifier: 'post')
+          answer = text(response)
 
+          expect(response.error?).to be(true)
+          expect(response.meta).to include(error_code: :not_found, tool: tool,
+                                           suggestions: [{ identifier: 'Post', type: 'model' }])
           expect(answer).to include("Identifier 'post' not found in the index, so no #{tool} were traversed.")
           expect(answer).to include('Did you mean: Post (model)?')
         end
@@ -56,6 +60,12 @@ RSpec.describe 'MCP answers for an identifier the index lacks' do
       expect(data).to include('found' => false, 'suggestions' => [])
       expect(data.fetch('message')).not_to include('Did you mean')
     end
+  end
+
+  it 'does not flag a traversal of an indexed unit with no rows as an error' do
+    response = call(build(:markdown), 'dependents', identifier: 'Post', types: ['no_such_type'])
+
+    expect(response.error?).to be(false)
   end
 
   describe 'lookup' do

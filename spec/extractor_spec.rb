@@ -3946,6 +3946,19 @@ RSpec.describe Woods::Extractor do
       seed_type_index(:services, [{ 'identifier' => 'Checkout', 'namespace' => nil, 'chunk_count' => 1 }])
     end
 
+    # A full extraction lists types in the extractors' order; the directory
+    # listing is alphabetical, which put controllers ahead of models here.
+    it 'lists the counts in the order a full extraction does, unknown directories last' do
+      seed_type_index(:controllers, [{ 'identifier' => 'UsersController', 'namespace' => nil, 'chunk_count' => 1 }])
+      seed_type_index(:a_custom_type, [{ 'identifier' => 'Thing', 'namespace' => nil, 'chunk_count' => 0 }])
+
+      counts, chunks = extractor.send(:persisted_counts)
+
+      expect(counts.keys).to eq(%i[models controllers services a_custom_type])
+      expect(counts).to eq(models: 2, controllers: 1, services: 1, a_custom_type: 1)
+      expect(chunks).to eq(7)
+    end
+
     it 'reads each _index.json once for both callers' do
       reads = Hash.new(0)
       allow(Woods::AtomicFile).to receive(:read).and_wrap_original do |original, path|

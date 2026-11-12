@@ -519,14 +519,33 @@ module Woods
         #
         # @param item [Hash]
         # @return [String]
+        #
+        # A value that says nothing is left out: nil, an empty string, an
+        # empty list, an empty hash, and a nested hash with nothing but those
+        # (a callback's six empty side-effect lists). On a large model those
+        # were most of the metadata; an association line read
+        # `through: , through_db: , polymorphic: ,`. `false` and `0` are
+        # kept: they are answers.
         def metadata_item_summary(item)
           entry = item.transform_keys(&:to_s)
-          return entry.map { |k, v| "#{k}: #{metadata_value(v)}" }.join(', ') unless entry.key?('file_line')
+          shown = entry.reject { |_, value| uninformative?(value) }
+          return shown.map { |k, v| "#{k}: #{metadata_value(v)}" }.join(', ') unless entry.key?('file_line')
 
-          pairs = entry.except(*COORDINATE_KEYS).map { |k, v| "#{k}: #{metadata_value(v)}" }
+          # A null file line is an answer ("not mapped"), so the coordinates
+          # are read from the whole entry, not from what is left to show.
+          pairs = shown.except(*COORDINATE_KEYS).map { |k, v| "#{k}: #{metadata_value(v)}" }
           pairs.unshift(published_lines(entry)) if entry['line']
           pairs.unshift(file_lines(entry))
           pairs.join(', ')
+        end
+
+        def uninformative?(value)
+          case value
+          when nil then true
+          when String, Array then value.empty?
+          when Hash then value.all? { |_, nested| uninformative?(nested) }
+          else false
+          end
         end
 
         def metadata_value(value)

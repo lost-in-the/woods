@@ -199,7 +199,28 @@ module Woods
 
           result[:dependent_counts] = summary(nodes.reject { |identifier, _| identifier == root }.values,
                                               include_tests, result)
+          code_first!(result, root)
           result
+        end
+
+        # List code ahead of tests, schema, documentation and the rest, at
+        # each depth and under each row. The walk reaches neighbours in
+        # identifier order, which put agent-instruction and documentation
+        # files (`.claude/...`, `AGENTS.md`) at the top of a model's
+        # dependents, and the first page of 50 rows could hold no code at
+        # all. Order within a family is the walk's.
+        #
+        # @param result [Hash] a classified traversal result
+        # @param root [String]
+        # @return [void]
+        def code_first!(result, root)
+          nodes = result.fetch(:nodes)
+          rank = lambda do |identifier|
+            identifier == root ? -1 : FAMILIES.index(nodes.dig(identifier, :family)) || FAMILIES.size
+          end
+          nodes.each_value { |entry| entry[:deps] = entry[:deps].sort_by.with_index { |dep, at| [rank.call(dep), at] } }
+          ordered = nodes.sort_by.with_index { |(identifier, entry), at| [entry[:depth], rank.call(identifier), at] }
+          result[:nodes] = ordered.to_h
         end
 
         # Counts over classified rows, in the `dependent_counts` shape.

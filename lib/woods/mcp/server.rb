@@ -336,17 +336,22 @@ module Woods
           !token.nil? && ids && !ids.empty?
         end
 
-        def text_response(text, data: nil, meta: nil)
+        # @param error [Boolean] flag the result as an error while keeping
+        #   its structured payload (a traversal of an identifier the index
+        #   lacks still answers `found: false` with suggestions)
+        def text_response(text, data: nil, meta: nil, error: false)
           structured = { text: text }
           structured[:data] = data.nil? ? JSON.parse(text) : data
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
+            error: error,
             structured_content: structured,
             meta: meta
           )
         rescue JSON::ParserError
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
+            error: error,
             structured_content: structured,
             meta: meta
           )
@@ -787,7 +792,14 @@ module Woods
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
             selection&.mark_witnesses
-            respond.call(renderer.render(render_key, result), data: result)
+            # An identifier the index lacks is an error for the caller, as it
+            # is for `lookup`: a non-error answer with no rows reads as "nothing
+            # depends on this". The payload still says `found: false`.
+            missing = result[:found] == false
+            meta = if missing
+                     { error_code: :not_found, tool: name, identifier: identifier, suggestions: result[:suggestions] }
+                   end
+            respond.call(renderer.render(render_key, result), data: result, meta: meta, error: missing)
           end
         end
 
