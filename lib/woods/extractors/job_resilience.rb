@@ -285,7 +285,12 @@ module Woods
 
       def static_callback(call, class_name)
         symbol = Array(call.arguments&.arguments).find { |node| node.is_a?(Prism::SymbolNode) }
-        symbol ? { method: symbol.unescaped, block: false, declared_in: class_name } : { method: nil, block: true, declared_in: class_name }
+        if symbol
+          { method: symbol.unescaped, block: false,
+            declared_in: class_name }
+        else
+          { method: nil, block: true, declared_in: class_name }
+        end
       end
 
       def constant(node)

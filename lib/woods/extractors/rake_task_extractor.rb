@@ -202,7 +202,8 @@ module Woods
       #
       # @return [String]
       def build_source_annotation(name, records, file)
-        description = records.select { |record| record[:file] == file }.filter_map { |record| record[:description] }.first
+        description = records.select { |record| record[:file] == file }
+                             .filter_map { |record| record[:description] }.first
         header = "# Rake task: #{name}"
         header += "\n# #{description}" if description
         "#{header}\n#{published_source(rake_file_data(file))}"

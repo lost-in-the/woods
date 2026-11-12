@@ -538,7 +538,8 @@ module Woods
 
         resolved = job_class_loaded?(job_class)
         unless resolved
-          Rails.logger.warn("[Woods] Periodic registration at #{location} names #{job_class}, which is not a loaded class")
+          Rails.logger.warn("[Woods] Periodic registration at #{location} names #{job_class}, " \
+                            'which is not a loaded class')
         end
         if registration[:cron_source]
           Rails.logger.warn("[Woods] Periodic registration at #{location}: cron is not a literal " \

@@ -30,14 +30,16 @@ module Woods
       HOST_CALL = /\bhost![ \t(]/
       # A whole string literal shaped like a host name, read in a file that
       # calls host!, since host! may read it from data.
-      HOST_STRING = /(?:"([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)"|'([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)')/i
+      HOST_STRING = /(?:"([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)"|
+                        '([a-z0-9][a-z0-9-]*(?:\.[a-z0-9][a-z0-9-]*)+)')/ix
       # Last labels a test host ends in. A dotted literal that ends otherwise
       # (`order.created`, `app.errors.title`) is a key or event name.
       HOST_TLD = /\A(?:test|example|invalid|localhost|local|internal|com|net|org|edu|gov|io|dev|app|info|biz|me|co|xyz|
                        uk|us|ca|de|fr|au|nz|jp)\z/ix
       # Literal argument hashes of these factory/model calls hold record
       # attributes. This is a name-based heuristic, without value-flow analysis.
-      RECORD_CALLS = %i[create create! create_list build build_list build_stubbed attributes_for new find_by find_by! where].freeze
+      RECORD_CALLS = %i[create create! create_list build build_list build_stubbed attributes_for new find_by find_by!
+                        where].freeze
       HASH_TRANSFORMS = %i[merge merge! deep_merge deep_merge! reverse_merge reverse_merge! except except! slice slice!
                            stringify_keys stringify_keys! symbolize_keys symbolize_keys! with_indifferent_access].freeze
       HASH_MERGES = %i[merge merge! deep_merge deep_merge! reverse_merge reverse_merge!].freeze

@@ -7,16 +7,20 @@ module Woods
       def self.lines(explanation)
         return [] unless explanation
 
-        lines = ['', "Recorded relationships (original source -> target; traversal: #{value(explanation, :direction)}):",
+        lines = ['',
+                 'Recorded relationships (original source -> target; ' \
+                 "traversal: #{value(explanation, :direction)}):",
                  "Root identity: #{identity(value(explanation, :root))}"]
         value(explanation, :edges).each do |id, edge|
           attributes = TraversalEvidenceIndex::ATTRIBUTES.map do |attribute|
             stored = value(edge, attribute)
             "#{attribute}=#{stored.nil? ? 'unknown' : stored}"
           end
-          lines << "#{id}: #{identity(value(edge, :source))} -> #{identity(value(edge, :target))}; #{attributes.join('; ')}"
+          lines << "#{id}: #{identity(value(edge, :source))} -> #{identity(value(edge, :target))}; " \
+                   "#{attributes.join('; ')}"
         end
-        lines << 'Witnesses: direct = recorded root relationship; transitive = inferred reachability, not observed execution.'
+        lines << 'Witnesses: direct = recorded root relationship; ' \
+                 'transitive = inferred reachability, not observed execution.'
         value(explanation, :witnesses).each do |identifier, witness|
           lines << witness_line(identifier, witness)
         end
@@ -29,7 +33,8 @@ module Woods
                   type
                 else
                   candidates = value(endpoint, :candidate_types) || []
-                  "#{value(endpoint, :resolution)}; candidate types: #{candidates.empty? ? 'none' : candidates.join(', ')}"
+                  "#{value(endpoint, :resolution)}; " \
+                    "candidate types: #{candidates.empty? ? 'none' : candidates.join(', ')}"
                 end
         "#{value(endpoint, :identifier)} (#{label})"
       end

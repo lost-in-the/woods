@@ -209,12 +209,14 @@ module Woods
         position = 0
         ranges.each do |range|
           blanked << source.byteslice(position, range.begin - position)
-          blanked << source.byteslice(range.begin, range.end - range.begin).b.tr("^\n", ' ').force_encoding(source.encoding)
+          blanked << source.byteslice(range.begin, range.end - range.begin).b.tr("^\n",
+                                                                                 ' ').force_encoding(source.encoding)
           position = range.end
         end
         blanked << source.byteslice(position, source.bytesize - position)
       end
-      private_class_method :ruby_prose, :heredoc_text, :prose_heredoc?, :byte_range, :erb_comments, :comment_lines, :haml_comments, :splice
+      private_class_method :ruby_prose, :heredoc_text, :prose_heredoc?, :byte_range, :erb_comments, :comment_lines,
+                           :haml_comments, :splice
     end
   end
 end

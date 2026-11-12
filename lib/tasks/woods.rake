@@ -136,7 +136,8 @@ namespace :woods do
 
     puts
     radius = extractor.last_blast_radius_size if !full && extractor.respond_to?(:last_blast_radius_size)
-    puts radius ? "Re-extracted #{affected.size} affected units (blast radius: #{radius} units)." : "Re-extracted #{affected.size} affected units."
+    blast = " (blast radius: #{radius} units)" if radius
+    puts "Re-extracted #{affected.size} affected units#{blast}."
     puts Woods::RakeHelpers.woods_git_enrichment_summary(output_dir)
     timings = Woods::Extraction::ExtractorTimings.line(extractor.extractor_timings)
     puts timings if timings
@@ -523,11 +524,13 @@ namespace :woods do
         total_chunks += type_chunks
       end
 
-      puts "  #{type.ljust(15)}: #{count.to_s.rjust(4)} units, #{type_chunks.to_s.rjust(4)} chunks, #{(type_size / 1024.0).round(1).to_s.rjust(8)} KB"
+      puts "  #{type.ljust(15)}: #{count.to_s.rjust(4)} units, #{type_chunks.to_s.rjust(4)} chunks, " \
+           "#{(type_size / 1024.0).round(1).to_s.rjust(8)} KB"
     end
 
     puts '-' * 50
-    puts "  #{'Total'.ljust(15)}: #{total_units.to_s.rjust(4)} units, #{total_chunks.to_s.rjust(4)} chunks, #{(total_size / 1024.0).round(1).to_s.rjust(8)} KB"
+    puts "  #{'Total'.ljust(15)}: #{total_units.to_s.rjust(4)} units, #{total_chunks.to_s.rjust(4)} chunks, " \
+         "#{(total_size / 1024.0).round(1).to_s.rjust(8)} KB"
     puts
 
     # Dependency graph stats
@@ -928,7 +931,8 @@ namespace :woods do
       puts JSON.pretty_generate(stats)
       next
     end
-    puts(stats[:complete] == false ? 'Sync incomplete; re-run after resolving the reported condition.' : 'Sync complete!')
+    incomplete = stats[:complete] == false
+    puts(incomplete ? 'Sync incomplete; re-run after resolving the reported condition.' : 'Sync complete!')
     puts "  Documents synced:   #{stats[:synced]}"
     puts "  Documents skipped:  #{stats[:skipped]}"
     puts "  Documents deleted:  #{stats[:deleted]}"

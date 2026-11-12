@@ -140,7 +140,9 @@ module Woods
 
         unit
       rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(
+          self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}"
+        )
         SourceInputs::ConsumerErrors.log(self, "[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
         nil
       end
@@ -857,7 +859,9 @@ module Woods
 
           # What each action body and its applicable filters say (W-7)
           action_facts: resolve_action_facts(controller, actions, view_prefix: controller_view_prefix(controller),
-                                                                  permitted: permitted_params.transform_values { |p| p[:model] }),
+                                                                  permitted: permitted_params.transform_values do |p|
+                                                                    p[:model]
+                                                                  end),
           inherited_gem_actions: resolve_inherited_gem_actions(controller),
           routes: routes_map[controller.name] || {},
 

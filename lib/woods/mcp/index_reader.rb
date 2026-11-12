@@ -41,7 +41,8 @@ module Woods
         engines view_templates migrations action_cable_channels
         scheduled_jobs rake_tasks state_machines events decorators
         database_views database_tables external_consumers caching factories test_mappings test_support rails_source
-        poros libs packages graphql_operations config_files js_modules docs ruby_classes ruby_modules ruby_methods ruby_files
+        poros libs packages graphql_operations config_files js_modules docs
+        ruby_classes ruby_modules ruby_methods ruby_files
       ].freeze
 
       # Singular type name for each directory (used in search filtering).
@@ -57,7 +58,8 @@ module Woods
       UNIT_TYPES_BY_DIR = DIR_TO_TYPE.transform_values { |type| [type].freeze }
                                      .merge('rails_source' => %w[rails_source gem_source].freeze,
                                             'routes' => %w[route route_file].freeze,
-                                            'graphql' => %w[graphql_type graphql_mutation graphql_resolver graphql_query].freeze)
+                                            'graphql' => %w[graphql_type graphql_mutation graphql_resolver
+                                                            graphql_query].freeze)
                                      .freeze
       UNIT_TYPE_TO_DIR = UNIT_TYPES_BY_DIR.each_with_object({}) do |(directory, types), result|
         types.each { |type| result[type] = directory }
@@ -84,7 +86,8 @@ module Woods
         raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
         unless manifest_present?
           raise ArgumentError, "Could not resolve a published Woods index in: #{@index_dir.expand_path}\n" \
-                               'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json. ' \
+                               'Expected generation.json pointing to a payload manifest.json, ' \
+                               'or a legacy flat manifest.json. ' \
                                'Point IndexReader at an existing index root. ' \
                                'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
         end
@@ -686,7 +689,12 @@ module Woods
           next entries if (members - expanded).empty?
 
           entries.select do |entry|
-            actual = members.include?(entry['type']) ? entry['type'] : typed_unit(dir, entry['identifier'])&.fetch('type')
+            actual = if members.include?(entry['type'])
+                       entry['type']
+                     else
+                       typed_unit(dir,
+                                  entry['identifier'])&.fetch('type')
+                     end
             expanded.include?(actual)
           end
         end
@@ -913,7 +921,8 @@ module Woods
                 type_name = unit['type']
                 field = if fields.include?('source_code') && unit['source_code'] && pattern.match?(unit['source_code'])
                           'source_code'
-                        elsif fields.include?('metadata') && unit['metadata'] && pattern.match?(unit['metadata'].to_json)
+                        elsif fields.include?('metadata') && unit['metadata'] &&
+                              pattern.match?(unit['metadata'].to_json)
                           'metadata'
                         end
                 next unless field
@@ -1083,7 +1092,12 @@ module Woods
       def search_entry_type(entry, dir, results)
         actual = entry['scope_type'] || entry['type']
         possible = UNIT_TYPES_BY_DIR.fetch(dir)
-        actual ||= possible.one? ? possible.first : readable_search_unit(DIR_TO_TYPE.fetch(dir), entry['identifier'], results)&.fetch('type')
+        actual ||= if possible.one?
+                     possible.first
+                   else
+                     readable_search_unit(DIR_TO_TYPE.fetch(dir), entry['identifier'],
+                                          results)&.fetch('type')
+                   end
         return actual if possible.include?(actual)
 
         results.stop('unreadable_or_corrupt_source')
@@ -1130,13 +1144,15 @@ module Woods
       #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
       #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
       #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
-      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000, explain: false)
+      def traverse_dependencies(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000,
+                                explain: false)
         if explain
           return traverse_with_evidence(identifier, depth: depth, types: types, via: via, direction: :forward,
                                                     max_nodes: max_nodes, max_edges: max_edges)
         end
 
-        traverse(identifier, depth: depth, types: types, via: via, direction: :forward, max_nodes: max_nodes, max_edges: max_edges)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :forward, max_nodes: max_nodes,
+                             max_edges: max_edges)
       end
 
       # BFS traversal of reverse dependencies (dependents).
@@ -1152,13 +1168,15 @@ module Woods
       #   incomplete walks add partial: true, partial_reason (node_budget or edge_budget),
       #   and traversal_budget (max_nodes, max_edges, visited_nodes, visited_edges).
       #   Already discovered rows remain; empty deps in a partial result need not mean a leaf.
-      def traverse_dependents(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000, explain: false)
+      def traverse_dependents(identifier, depth: 2, types: nil, via: nil, max_nodes: 1000, max_edges: 10_000,
+                              explain: false)
         if explain
           return traverse_with_evidence(identifier, depth: depth, types: types, via: via, direction: :reverse,
                                                     max_nodes: max_nodes, max_edges: max_edges)
         end
 
-        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse, max_nodes: max_nodes, max_edges: max_edges)
+        traverse(identifier, depth: depth, types: types, via: via, direction: :reverse, max_nodes: max_nodes,
+                             max_edges: max_edges)
       end
 
       # Relationship labels recorded on the published edges from +source+ to

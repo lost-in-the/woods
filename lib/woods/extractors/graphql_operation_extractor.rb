@@ -229,7 +229,9 @@ module Woods
 
       def dependencies_for(resolution, spread_targets)
         edges = resolution.root_targets.map { |type, target| { type: type.to_sym, target: target, via: :root_field } }
-        edges += resolution.type_targets.map { |type, target| { type: type.to_sym, target: target, via: :type_reference } }
+        edges += resolution.type_targets.map do |type, target|
+          { type: type.to_sym, target: target, via: :type_reference }
+        end
         edges += spread_targets.map { |target| { type: :graphql_operation, target: target, via: :fragment_spread } }
         edges.sort_by { |edge| [EDGE_ORDER.index(edge[:via]), edge[:target]] }
              .uniq { |edge| [edge[:type], edge[:target]] }

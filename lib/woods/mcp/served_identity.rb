@@ -273,7 +273,8 @@ module Woods
       # @return [Hash] the identity block that leads `woods_status`
       def to_h
         {
-          root: recorded_root, repository_root: recorded_checkout, root_source: root_source, root_name: root_name, branch: branch, git_sha: string(@manifest['git_sha']),
+          root: recorded_root, repository_root: recorded_checkout, root_source: root_source, root_name: root_name,
+          branch: branch, git_sha: string(@manifest['git_sha']),
           generation: generation, generation_updated_at: generation_updated_at,
           woods_version: string(@manifest['woods_version']), woods_revision: compatibility.writer_revision,
           woods_revision_dirty: compatibility.writer_dirty,
@@ -289,7 +290,8 @@ module Woods
       # @return [String]
       def summary
         "Serving the index of #{root_name || 'an unrecorded checkout'}" \
-          "#{" (#{recorded_checkout || recorded_root})" if recorded_checkout || recorded_root}, branch #{branch || 'unknown or detached'}, " \
+          "#{" (#{recorded_checkout || recorded_root})" if recorded_checkout || recorded_root}, " \
+          "branch #{branch || 'unknown or detached'}, " \
           "generation #{generation || 'none'}#{", updated #{generation_updated_at}" if generation_updated_at}, " \
           "written by #{writer_label}."
       end

@@ -52,7 +52,8 @@ module Woods
               raise ArgumentError, 'Range mode requires from and does not accept at'
             end
 
-            Impact::Report.compare(index_dir, from: arguments.delete(:from), to: arguments.delete(:to) || 'now', **arguments)
+            Impact::Report.compare(index_dir, from: arguments.delete(:from), to: arguments.delete(:to) || 'now',
+                                              **arguments)
           end
         end
       end

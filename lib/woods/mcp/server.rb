@@ -109,7 +109,8 @@ module Woods
         #
         # @param index_dir [String] Path to extraction output directory
         # @param retriever [Woods::Retriever, nil] Optional retriever for semantic search
-        # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator, :pipeline_guard, :pipeline_lock
+        # @param operator [Hash, nil] Optional operator config with :status_reporter, :error_escalator,
+        #   :pipeline_guard, :pipeline_lock
         # @param feedback_store [Woods::Feedback::Store, nil] Optional feedback store
         # @param bootstrap_state [Woods::MCP::BootstrapState, nil] Optional state
         #   from the bootstrap flow. When provided, woods_status reports the
@@ -216,9 +217,11 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff and total_is_exact is false. ' \
+                                             'max_nodes/max_edges bound the walk independently; ' \
+                                             'partial_reason reports a budget cutoff and total_is_exact is false. ' \
                                              'Published relationships are not exhaustive source-reference coverage. ' \
-                                             'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
+                                             'Use explain:true for recorded directed relationships ' \
+                                             'and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependencies,
                                 render_key: :dependencies)
           define_traversal_tool(server, reader, respond, respond_err, renderer,
@@ -227,9 +230,11 @@ module Woods
                                              'Narrow with depth, types and via first: they shrink the answer, ' \
                                              'while limit and offset only page it. Returns a BFS tree with ' \
                                              "depth, paged to #{DEFAULT_TRAVERSAL_LIMIT} nodes by default. " \
-                                             'max_nodes/max_edges bound the walk independently; partial_reason reports a budget cutoff and total_is_exact is false. ' \
+                                             'max_nodes/max_edges bound the walk independently; ' \
+                                             'partial_reason reports a budget cutoff and total_is_exact is false. ' \
                                              'Published relationships are not exhaustive source-reference coverage. ' \
-                                             'Use explain:true for recorded directed relationships and bounded witnesses; ambiguous types remain explicit.',
+                                             'Use explain:true for recorded directed relationships ' \
+                                             'and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
           define_structure_tool(server, reader, respond, renderer)
@@ -534,7 +539,8 @@ module Woods
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
                          'dependencies, and dependents. Use include_source: false to omit source_code. ' \
-                         'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
+                         'Use sections to select specific keys ' \
+                         '(type, identifier, file_path, namespace are always included). ' \
                          '`name` is accepted as an alias for `identifier` for discoverability. ' \
                          'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
                          'page says which `page` and `answer_id` to ask for next. In the JSON format each ' \
@@ -542,17 +548,26 @@ module Woods
             input_schema: {
               properties: {
                 identifier: { type: 'string',
-                              description: 'Exact unit identifier (e.g. "Post", "PostsController", "Api::V1::HealthController")' },
+                              description: 'Exact unit identifier ' \
+                                           '(e.g. "Post", "PostsController", "Api::V1::HealthController")' },
                 name: { type: 'string', description: 'Alias for `identifier`. Either one works.' },
-                type: { type: 'string', description: 'Optional actual published unit type, to disambiguate shared identifiers.' },
-                evidence: { type: 'string', enum: %w[full compact outline], description: 'Published evidence mode (default full).' },
-                query: { type: 'string', description: 'Optional relevance query for compact evidence; absent means API orientation.' },
-                budget: { type: 'integer', minimum: 1, description: 'Compact/outline token estimate budget (default 2000); full lookup remains complete.' },
-                source_sha256: { type: 'string', description: 'Require the published source SHA256 from an earlier excerpt; refuses changed source.' },
+                type: { type: 'string',
+                        description: 'Optional actual published unit type, to disambiguate shared identifiers.' },
+                evidence: { type: 'string', enum: %w[full compact outline],
+                            description: 'Published evidence mode (default full).' },
+                query: { type: 'string',
+                         description: 'Optional relevance query for compact evidence; absent means API orientation.' },
+                budget: { type: 'integer', minimum: 1,
+                          description: 'Compact/outline token estimate budget (default 2000); ' \
+                                       'full lookup remains complete.' },
+                source_sha256: { type: 'string',
+                                 description: 'Require the published source SHA256 from an earlier excerpt; ' \
+                                              'refuses changed source.' },
                 include_source: { type: 'boolean', description: 'Include source_code in response (default: true)' },
                 sections: {
                   type: 'array', items: { type: 'string' },
-                  description: 'Select specific keys to return (e.g. ["metadata", "dependencies"]). Always includes type, identifier, file_path, namespace.'
+                  description: 'Select specific keys to return (e.g. ["metadata", "dependencies"]). ' \
+                               'Always includes type, identifier, file_path, namespace.'
                 },
                 page: { type: 'integer',
                         description: 'Page of a full lookup too long for one answer (default 1). The answer says ' \
@@ -569,7 +584,9 @@ module Woods
               # accepted alias. The handler validates that one of the two
               # was provided.
             }
-          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil, page: nil, max_chars: nil, answer_id: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil,
+                evidence: 'full', query: nil, budget: nil, source_sha256: nil,
+                page: nil, max_chars: nil, answer_id: nil|
             identifier ||= name
             if identifier.nil? || identifier.empty?
               next respond_err.call(
@@ -584,7 +601,8 @@ module Woods
             begin
               Retrieval::SourceEvidence.validate_mode!(evidence)
               if evidence != 'full' && (include_source == false || sections&.any?)
-                raise ArgumentError, 'compact/outline evidence cannot be combined with include_source: false or sections'
+                raise ArgumentError,
+                      'compact/outline evidence cannot be combined with include_source: false or sections'
               end
               if evidence == 'full' && (!query.nil? || !budget.nil?)
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
@@ -620,7 +638,8 @@ module Woods
                 lookup_meta = { ambiguous_types: shared } if shared.size > 1
               end
               if source_sha256 && Digest::SHA256.hexdigest(unit['source_code'].to_s) != source_sha256
-                next respond_err.call('Published source changed since the excerpt; retrieve fresh evidence before verification.',
+                next respond_err.call('Published source changed since the excerpt; ' \
+                                      'retrieve fresh evidence before verification.',
                                       code: :stale_index, tool: 'lookup', argument: 'source_sha256')
               end
               if evidence != 'full'
@@ -628,7 +647,8 @@ module Woods
                                                     .render(mode: evidence, budget: budget || 2000,
                                                             counter: ->(text) { (text.length / 4.0).ceil })
                 next ::MCP::Tool::Response.new([{ type: 'text', text: selected.text }],
-                                               structured_content: { text: selected.text, data: { evidence: selected.provenance } },
+                                               structured_content: { text: selected.text,
+                                                                     data: { evidence: selected.provenance } },
                                                meta: lookup_meta)
               end
               always_include = %w[type identifier file_path namespace]
@@ -716,7 +736,8 @@ module Woods
             name: 'search',
             description: 'Find code units whose identifiers (or source/metadata) match a regex. ' \
                          'Example: search("Worker|Job") finds workers and jobs; search("^Post") ' \
-                         'returns units starting with "Post". Returns [{identifier, type, match_field}] plus completeness. ' \
+                         'returns units starting with "Post". ' \
+                         'Returns [{identifier, type, match_field}] plus completeness. ' \
                          'Check completeness before treating discovery as exhaustive; a limit is only a page size. ' \
                          'Use `lookup` for exact identifiers, `dependencies`/`dependents` for graph traversal. ' \
                          'Gotchas: query is a Ruby regex — literal pipe needs escaping as \\|; ' \
@@ -726,15 +747,19 @@ module Woods
                          '(literal, case-insensitive) over escaping regex anchors.',
             input_schema: {
               properties: {
-                query: { type: 'string', description: 'Case-insensitive Ruby regex pattern (e.g. "Worker|Job", "^Post", ".*Service$")' },
+                query: { type: 'string',
+                         description: 'Case-insensitive Ruby regex pattern ' \
+                                      '(e.g. "Worker|Job", "^Post", ".*Service$")' },
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict scan to these unit types: model, controller, service, job, mailer, etc.'
                 },
                 packages: { type: 'array', items: { type: 'string' },
-                            description: 'Exact published package owners, OR within the list; AND with source_paths and types.' },
+                            description: 'Exact published package owners, OR within the list; ' \
+                                         'AND with source_paths and types.' },
                 source_paths: { type: 'array', items: { type: 'string' },
-                                description: 'Application-relative directory prefixes; segment-aware, OR within the list. Applied before limits.' },
+                                description: 'Application-relative directory prefixes; segment-aware, ' \
+                                             'OR within the list. Applied before limits.' },
                 fields: {
                   type: 'array', items: { type: 'string', enum: %w[identifier metadata source_code] },
                   description: 'Fields to search: identifier (default), source_code, metadata'
@@ -743,7 +768,8 @@ module Woods
                 exact_prefix: {
                   type: 'string',
                   description: 'Literal (non-regex) case-insensitive identifier prefix filter. ' \
-                               'Use for namespace scoping like "Reports::Settings::" without escaping regex metacharacters.'
+                               'Use for namespace scoping like "Reports::Settings::" ' \
+                               'without escaping regex metacharacters.'
                 },
                 exact_suffix: {
                   type: 'string',
@@ -762,7 +788,8 @@ module Woods
                 code: :unsupported_argument,
                 tool: 'search',
                 argument: 'query',
-                hint: 'Pass query: "Worker|Job" for regex matching, or exact_prefix: "Reports::Settings::" for literal prefix scoping.'
+                hint: 'Pass query: "Worker|Job" for regex matching, ' \
+                      'or exact_prefix: "Reports::Settings::" for literal prefix scoping.'
               )
             end
             types = coerce.call(types)
@@ -885,7 +912,9 @@ module Woods
           {
             identifier: { type: 'string', description: 'Unit identifier to start from' },
             depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
-            explain: { type: 'boolean', description: 'Include recorded relationship evidence and shared shortest witnesses (default: false)' },
+            explain: { type: 'boolean',
+                       description: 'Include recorded relationship evidence ' \
+                                    'and shared shortest witnesses (default: false)' },
             types: {
               type: 'array', items: { type: 'string' },
               description: 'Filter to these types'
@@ -908,7 +937,8 @@ module Woods
             max_nodes: { type: 'integer', minimum: 1, maximum: 10_000,
                          description: 'Visited-node budget including root (default: 1000; maximum: 10000)' },
             max_edges: { type: 'integer', minimum: 1, maximum: 100_000,
-                         description: 'Edge-check budget before filters, including reverse via checks (default: 10000; maximum: 100000)' }
+                         description: 'Edge-check budget before filters, including reverse via checks ' \
+                                      '(default: 10000; maximum: 100000)' }
           }
         end
 
@@ -930,7 +960,8 @@ module Woods
         def define_structure_tool(server, reader, respond, renderer)
           server.define_tool(
             name: 'structure',
-            description: 'Get codebase structure overview. Returns manifest (counts, versions, git info) and optionally the full summary.',
+            description: 'Get codebase structure overview. ' \
+                         'Returns manifest (counts, versions, git info) and optionally the full summary.',
             input_schema: {
               properties: {
                 detail: {
@@ -951,7 +982,8 @@ module Woods
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'graph_analysis',
-            description: 'Get structural analysis of the dependency graph: orphans, dead ends, hubs, cycles, bridges, ' \
+            description: 'Get structural analysis of the dependency graph: ' \
+                         'orphans, dead ends, hubs, cycles, bridges, ' \
                          'cross_database_edges (associations and foreign keys across databases), ' \
                          'volatile_dependencies (edges into units that change far more often than the dependent), ' \
                          'undeclared_package_edges (edges that cross a package boundary the source package ' \
@@ -964,7 +996,8 @@ module Woods
                   enum: ToolResponseRenderer::GRAPH_ANALYSIS_SECTIONS + %w[all],
                   description: 'Which analysis to return. Default: all'
                 },
-                limit: { type: 'integer', description: "Limit results per section (default: #{DEFAULT_GRAPH_ANALYSIS_LIMIT})" },
+                limit: { type: 'integer',
+                         description: "Limit results per section (default: #{DEFAULT_GRAPH_ANALYSIS_LIMIT})" },
                 offset: { type: 'integer', description: 'Skip this many results per section (default: 0)' }
               }
             }
@@ -994,9 +1027,13 @@ module Woods
             description: 'Group code units into semantic domains by namespace and graph connectivity. ' \
                          'Returns clusters with hub nodes, entry points, boundary edges, and type breakdowns. ' \
                          'Clusters come largest first and are paged: `limit` clusters per call ' \
-                         "(default: #{domain_clusters_default_limit}), `offset` to continue, and each cluster lists at most " \
-                         "`member_limit` members, entry points and boundary edges (default: #{domain_clusters_default_member_limit}) " \
-                         'with `members_omitted`, `entry_points_omitted` and `boundary_edges_omitted` counting the rest. Check `completeness.has_more` before treating the answer as every domain. ' \
+                         "(default: #{domain_clusters_default_limit}), `offset` to continue, " \
+                         'and each cluster lists at most ' \
+                         '`member_limit` members, entry points and boundary edges ' \
+                         "(default: #{domain_clusters_default_member_limit}) " \
+                         'with `members_omitted`, `entry_points_omitted` and ' \
+                         '`boundary_edges_omitted` counting the rest. ' \
+                         'Check `completeness.has_more` before treating the answer as every domain. ' \
                          'Useful for understanding architectural domains and blast radius.',
             input_schema: {
               properties: {
@@ -1015,7 +1052,8 @@ module Woods
                 offset: { type: 'integer', description: 'Skip this many clusters (default: 0)' },
                 member_limit: {
                   type: 'integer',
-                  description: "Maximum members, entry points and boundary edges listed per cluster (default: #{domain_clusters_default_member_limit}). " \
+                  description: 'Maximum members, entry points and boundary edges listed per cluster ' \
+                               "(default: #{domain_clusters_default_member_limit}). " \
                                'Raise it to read the rest of a large cluster.'
                 }
               }
@@ -1075,7 +1113,8 @@ module Woods
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'pagerank',
-            description: 'Get PageRank importance scores for code units. Higher scores indicate more structurally important nodes.',
+            description: 'Get PageRank importance scores for code units. ' \
+                         'Higher scores indicate more structurally important nodes.',
             input_schema: {
               properties: {
                 limit: { type: 'integer', description: 'Maximum results to return (default: 20)' },
@@ -1261,7 +1300,8 @@ module Woods
                          'Example: codebase_retrieve("how does billing work?") returns ranked source context. ' \
                          'Returns a token-budgeted context string ready to paste into a prompt. ' \
                          'Use `search` for exact name/pattern matching; use this for conceptual questions. ' \
-                         'Uses configured embeddings, or explicit WOODS_RETRIEVAL_MODE=lexical over extraction units. ' \
+                         'Uses configured embeddings, ' \
+                         'or explicit WOODS_RETRIEVAL_MODE=lexical over extraction units. ' \
                          'By default excludes test_mapping (~33% of a typical index) and test_support units so ' \
                          'spec and helper filenames do not dominate semantic rank; pass ' \
                          'types: ["test_mapping", "test_support"] to opt back in. ' \
@@ -1276,28 +1316,35 @@ module Woods
                 query: { type: 'string',
                          description: 'Natural language question (e.g. "How does user authentication work?")' },
                 budget: { type: 'integer',
-                          description: 'Token budget for context assembly (configured max_context_tokens; otherwise 8000).' },
+                          description: 'Token budget for context assembly ' \
+                                       '(configured max_context_tokens; otherwise 8000).' },
                 evidence: { type: 'string', enum: %w[full compact outline],
-                            description: 'Explicit complete spans or API outline within each ranked unit; default full retains existing output.' },
+                            description: 'Explicit complete spans or API outline within each ranked unit; ' \
+                                         'default full retains existing output.' },
                 types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Restrict results to these unit types (model, controller, service, job, mailer, ' \
                                'rails_source, test_mapping, test_support, etc.). Overrides the default ' \
                                'test_mapping and test_support exclusion. ' \
-                               'Lexical mode and explicit package/path scopes filter before limits and omit the global rank table. ' \
+                               'Lexical mode and explicit package/path scopes filter before limits ' \
+                               'and omit the global rank table. ' \
                                'In semantic mode, when the unfiltered top-K has no requested type, the retriever ' \
-                               'falls back to rank-within-type over the available vectors. The response appends a "Type rank ' \
+                               'falls back to rank-within-type over the available vectors. ' \
+                               'The response appends a "Type rank ' \
                                'context" table with per-type: source, rank in unfiltered top-K, global_k, ' \
                                'total_of_type (retrieval metadata records, not structural or embedded units). ' \
                                'Read source to tell the cases apart: in_top_k (strong match), ' \
                                'within_type_fallback (weak match surfaced by the fallback), outside_top_k ' \
-                               '(retrieval metadata has this type but other requested types filled the result), absent ' \
+                               '(retrieval metadata has this type but other requested types filled the result), ' \
+                               'absent ' \
                                '(zero retrieval metadata records of this type; structural units may still exist).'
                 },
                 packages: { type: 'array', items: { type: 'string' },
-                            description: 'Exact published nearest package owners. OR within the list; AND with paths and type eligibility.' },
+                            description: 'Exact published nearest package owners. OR within the list; ' \
+                                         'AND with paths and type eligibility.' },
                 source_paths: { type: 'array', items: { type: 'string' },
-                                description: 'Application-relative directory prefixes. Scope applies before candidate limits; graph expansion stays inside it.' },
+                                description: 'Application-relative directory prefixes. Scope applies before ' \
+                                             'candidate limits; graph expansion stays inside it.' },
                 exclude_types: {
                   type: 'array', items: { type: 'string' },
                   description: 'Additional types to exclude on top of the default test_mapping and ' \
@@ -1306,7 +1353,8 @@ module Woods
               },
               required: ['query']
             }
-          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil, packages: nil, source_paths: nil, evidence: 'full'|
+          ) do |query:, server_context:, budget: nil, limit: nil, types: nil, exclude_types: nil,
+                packages: nil, source_paths: nil, evidence: 'full'|
             # `limit` isn't declared in the schema but clients still send it
             # because sibling tools (search, recent_changes, pagerank) use
             # `limit` as a result count. Mapping it to `budget` here would
@@ -1329,7 +1377,8 @@ module Woods
             begin
               Retrieval::SourceEvidence.validate_mode!(evidence)
             rescue ArgumentError => e
-              next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'evidence')
+              next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve',
+                                               argument: 'evidence')
             end
             budget = coerce_int.call(budget)
             types = coerce.call(types)
@@ -1374,9 +1423,11 @@ module Woods
               rescue Woods::MCP::Hydration::Warming
                 next warming_response.call(hydration, 'codebase_retrieve')
               rescue Retrieval::Scope::InvalidScopeError => e
-                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'scope')
+                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve',
+                                                 argument: 'scope')
               rescue Woods::InvalidQueryError => e
-                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve', argument: 'query')
+                next respond_err.call(e.message, code: :unsupported_argument, tool: 'codebase_retrieve',
+                                                 argument: 'query')
               rescue Woods::Retriever::StoreError => e
                 # M8: a metadata-store failure mid-query must not surface as
                 # a raw raise through the tool boundary (or as the misleading
@@ -1400,7 +1451,8 @@ module Woods
               if evidence != 'full' || (result.respond_to?(:applied_scope) && result.applied_scope)
                 ::MCP::Tool::Response.new(
                   [{ type: 'text', text: result.context }],
-                  structured_content: { text: result.context, data: { applied_scope: result.applied_scope, sources: result.sources } },
+                  structured_content: { text: result.context,
+                                        data: { applied_scope: result.applied_scope, sources: result.sources } },
                   meta: { applied_scope: result.applied_scope }
                 )
               else
@@ -1518,7 +1570,8 @@ module Woods
                   description: 'Exact UnitIdentifier, optionally followed by #method (e.g., UsersController#create ' \
                                'or CheckoutService#order), or a model callback event: Post@create, ' \
                                'Post@after_commit(create) or Post@after_commit. Bare names identify units, including ' \
-                               'factories; a bare method name does not locate its owning class. Use search and lookup first.'
+                               'factories; a bare method name does not locate its owning class. ' \
+                               'Use search and lookup first.'
                 },
                 depth: {
                   type: 'integer',
@@ -1533,7 +1586,8 @@ module Woods
             unless reader.find_unit(entry_unit)
               suggestions = reader.suggest_identifiers(entry_unit)
               next respond_err.call(
-                IdentifierSuggestions.append('Flow entry unit not found; use search and lookup to select an indexed unit.',
+                IdentifierSuggestions.append('Flow entry unit not found; ' \
+                                             'use search and lookup to select an indexed unit.',
                                              suggestions),
                 code: :not_found, tool: 'trace_flow', entry_point: entry_point, suggestions: suggestions
               )
@@ -1591,7 +1645,8 @@ module Woods
             store = Woods.configuration.session_store
             unless store
               next respond_err.call(
-                'Session tracer is not configured. Assign `session_store` (FileStore, RedisStore, or SolidCacheStore) ' \
+                'Session tracer is not configured. ' \
+                'Assign `session_store` (FileStore, RedisStore, or SolidCacheStore) ' \
                 'and set `session_tracer_enabled = true` in Woods.configure.',
                 code: :not_configured,
                 config_key: 'session_store',
@@ -2312,7 +2367,8 @@ module Woods
           rescue Woods::Diagrams::UnitNotFound => e
             suggestions = reader.suggest_identifiers(arguments[:identifier])
             respond_err.call(
-              IdentifierSuggestions.append("#{e.message}; use search and lookup to select an indexed unit.", suggestions),
+              IdentifierSuggestions.append("#{e.message}; use search and lookup to select an indexed unit.",
+                                           suggestions),
               code: :not_found, tool: DiagramTool::NAME, suggestions: suggestions
             )
           rescue StandardError => e
@@ -2326,8 +2382,10 @@ module Woods
         def define_change_impact_tool(server, index_dir, respond, respond_err)
           server.define_tool(
             name: 'change_impact',
-            description: 'Compare retained generations or plan exact typed focus roots. Uses bounded published evidence, ' \
-                         'with explicit unknowns; never proves complete impact or safety. Returns shared Markdown, JSON ' \
+            description: 'Compare retained generations or plan exact typed focus roots. ' \
+                         'Uses bounded published evidence, ' \
+                         'with explicit unknowns; never proves complete impact or safety. ' \
+                         'Returns shared Markdown, JSON ' \
                          'or Mermaid plus the complete versioned report. Does not save or share reports.',
             input_schema: ChangeImpact.schema
           ) do |server_context:, **arguments|
@@ -2368,7 +2426,8 @@ module Woods
         def define_snapshot_diff_tool(server, snapshot_store, respond, respond_err, snap_missing)
           server.define_tool(
             name: 'snapshot_diff',
-            description: 'Compare two extraction snapshots by git SHA. Returns lists of added, modified, and deleted units.',
+            description: 'Compare two extraction snapshots by git SHA. ' \
+                         'Returns lists of added, modified, and deleted units.',
             input_schema: {
               properties: {
                 sha_a: { type: 'string', description: 'Git SHA of the "before" snapshot' },
@@ -2568,18 +2627,22 @@ module Woods
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Leads with identity: the ' \
                          "index's checkout root, branch, generation and writer build, client_matches (whether that " \
-                         'is the launch checkout) and any build mismatch with this server. Returns extraction metadata ' \
+                         'is the launch checkout) and any build mismatch with this server. ' \
+                         'Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / not_configured / failed + reason), cache hydration ' \
                          '(hydration.state: warming / ready / failed + error), and feature flags. ' \
                          'Top-level `ready` describes structural index availability. ' \
                          'index.git_enrichment says whether Git facts are trustworthy: state (available, degraded, ' \
-                         'unavailable, unknown), a stable reason, coverage by unit and refreshed versus retained facts. ' \
+                         'unavailable, unknown), a stable reason, ' \
+                         'coverage by unit and refreshed versus retained facts. ' \
                          'Semantic corpus diagnostics report local vector/metadata record counts separately; ' \
                          'unknown counts are null, and nonempty counts do not prove complete embedding coverage. ' \
-                         'Includes source-content freshness; quick scans have a 250ms budget, explicit deep scans have 5s. ' \
+                         'Includes source-content freshness; ' \
+                         'quick scans have a 250ms budget, explicit deep scans have 5s. ' \
                          'Incomplete evidence is unknown. Call this first on cold connect. ' \
-                         '`worktrees` counts the other linked checkouts by state; pass worktrees: "list" for each entry.',
+                         '`worktrees` counts the other linked checkouts by state; ' \
+                         'pass worktrees: "list" for each entry.',
             input_schema: { type: 'object', properties: {
               source_check: { type: 'string', enum: %w[quick deep], default: 'quick',
                               description: 'Bounded source content verification: quick (250ms) or deep (5s).' },
@@ -2846,7 +2909,8 @@ module Woods
           base[:source_freshness] = if reader.respond_to?(:source_freshness)
                                       reader.source_freshness(mode: source_check)
                                     else
-                                      { 'state' => 'unknown', 'reasons' => ['source_reader_unavailable'], 'complete' => false }
+                                      { 'state' => 'unknown', 'reasons' => ['source_reader_unavailable'],
+                                        'complete' => false }
                                     end
           base.merge!(generation_fields(index_dir, reader))
           base.merge!(retention_pin_fields(index_dir))

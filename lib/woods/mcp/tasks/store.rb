@@ -455,7 +455,9 @@ module Woods
           return if boot_id.empty? || start_ticks.nil?
 
           namespace = pid_namespace_for(pid)
-          namespace ? "boot=#{boot_id};ns=#{namespace};start_ticks=#{start_ticks}" : "boot=#{boot_id};start_ticks=#{start_ticks}"
+          return "boot=#{boot_id};start_ticks=#{start_ticks}" unless namespace
+
+          "boot=#{boot_id};ns=#{namespace};start_ticks=#{start_ticks}"
         rescue Errno::ENOENT
           nil
         end

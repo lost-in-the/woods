@@ -35,7 +35,8 @@ module Woods
           text: { type: 'string' },
           data: {
             type: %w[object array string number boolean null],
-            description: 'Structured tool payload, including traversal data in every renderer; otherwise parsed JSON when available.'
+            description: 'Structured tool payload, including traversal data in every renderer; ' \
+                         'otherwise parsed JSON when available.'
           }
         },
         required: ['text'],

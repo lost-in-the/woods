@@ -79,7 +79,8 @@ module Woods
 
         return "every #{DURATION_UNITS.fetch(parts.first.last)}" if parts.one? && parts.first.first == '1'
 
-        "every #{parts.map { |count, unit| "#{count} #{DURATION_UNITS.fetch(unit)}#{'s' unless count == '1'}" }.join(' ')}"
+        phrases = parts.map { |count, unit| "#{count} #{DURATION_UNITS.fetch(unit)}#{'s' unless count == '1'}" }
+        "every #{phrases.join(' ')}"
       end
 
       # `1h 30m` => [["1", "h"], ["30", "m"]]; nil unless the whole text is count/unit
@@ -328,7 +329,8 @@ module Woods
       end
 
       private_class_method :duration_parts, :describe_with_seconds, :describe, :parse, :parse_item, :value, :singles,
-                           :clock_times, :recurring_phrase, :stepped_hours, :uneven_hour_step, :hour_range, :minutes_within_hour,
+                           :clock_times, :recurring_phrase, :stepped_hours, :uneven_hour_step, :hour_range,
+                           :minutes_within_hour,
                            :past_the_hour, :clock, :month_phrase, :day_phrase,
                            :weekday_phrase, :month_day_phrase, :yearly_phrase, :clock_sentence,
                            :recurring_suffix, :quantity, :sentence

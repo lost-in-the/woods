@@ -399,7 +399,9 @@ module Woods
       # @param source [String]
       # @return [Boolean]
       def graphql_class?(source)
-        source.match?(/<\s*(?:::)?GraphQL::Schema(?:\b(?!::)|::(?:Object|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface|RelayClassicMutation)\b)/) ||
+        source.match?(/<\s*(?:::)?GraphQL::Schema(?:\b(?!::)|::(?:
+          Object|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface|RelayClassicMutation
+        )\b)/x) ||
           source.match?(/< (Types::Base\w+|Base(Type|InputObject|Enum|Union|Scalar|Mutation|Resolver|Interface))/) ||
           source.match?(/< (Mutations::Base|Resolvers::Base)/) ||
           source.match?(/include GraphQL::Schema::Interface/) ||
@@ -549,9 +551,9 @@ module Woods
           return :scalar if defined?(GraphQL::Schema::Scalar) && runtime_class < GraphQL::Schema::Scalar
           return :mutation if defined?(GraphQL::Schema::Mutation) && runtime_class < GraphQL::Schema::Mutation
           return :resolver if defined?(GraphQL::Schema::Resolver) && runtime_class < GraphQL::Schema::Resolver
-          return :interface if runtime_class.is_a?(Module) && defined?(GraphQL::Schema::Interface) && runtime_class.respond_to?(:included_modules) && runtime_class.included_modules.any? do |m|
-            m.name&.include?('GraphQL::Schema::Interface')
-          end
+          return :interface if runtime_class.is_a?(Module) && defined?(GraphQL::Schema::Interface) &&
+                               runtime_class.respond_to?(:included_modules) &&
+                               runtime_class.included_modules.any? { |m| m.name&.include?('GraphQL::Schema::Interface') }
           return :object if defined?(GraphQL::Schema::Object) && runtime_class < GraphQL::Schema::Object
         end
 

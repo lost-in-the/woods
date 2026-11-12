@@ -333,7 +333,8 @@ module Woods
           lines.concat(TraversalEvidenceText.lines(fetch_key(data, :explanation)))
 
           if fetch_key(data, :partial)
-            lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); narrow depth/types/via or increase max_nodes/max_edges."
+            lines << "Partial traversal (#{fetch_key(data, :partial_reason)}); " \
+                     'narrow depth/types/via or increase max_nodes/max_edges.'
           end
           if (note = traversal_lower_bound_note(data, nodes.size))
             lines << note

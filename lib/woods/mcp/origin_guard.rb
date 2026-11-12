@@ -41,8 +41,10 @@ module Woods
       # Host value is NEVER echoed back to the caller — preventing a
       # stored-XSS / log-injection surface where an attacker-supplied
       # header ended up embedded in the JSON error.
-      FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' }, id: nil }.to_json.freeze
-      FORBIDDEN_HOST_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Host not allowed' }, id: nil }.to_json.freeze
+      FORBIDDEN_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Origin not allowed' },
+                         id: nil }.to_json.freeze
+      FORBIDDEN_HOST_BODY = { jsonrpc: '2.0', error: { code: -32_002, message: 'Host not allowed' },
+                              id: nil }.to_json.freeze
 
       # @param app [#call] The next Rack app in the middleware stack
       # @param allowed_origins [Array<String>, #call, nil] Origin allow-list,
