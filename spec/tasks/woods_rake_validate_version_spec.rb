@@ -32,6 +32,8 @@ RSpec.describe 'woods:validate writer-version warnings (#323)' do
         { 'WOODS_OUTPUT' => app_root }, RbConfig.ruby, File.join(root, 'bin/rake'),
         'woods:validate', chdir: app_root
       )
+      # The task prints UTF-8; under a POSIX locale the captured text is tagged US-ASCII.
+      out = out.dup.force_encoding(Encoding::UTF_8)
       expect(status).to be_success, "#{out}\n#{err}"
       expect(out).to include("Index last published by Woods #{writer}", 'Run a full woods:extract',
                              'Index is valid with 1 warning(s)')

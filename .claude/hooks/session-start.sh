@@ -18,3 +18,11 @@ if ! sha256sum --check --status "$hashes" 2>/dev/null; then
   bundle install --quiet
   sha256sum .claude/hooks/session-start.sh Gemfile woods.gemspec lib/woods/version.rb > "$hashes" || rm -f "$hashes"
 fi
+
+# The container puts ruby and bundle on PATH but not the directory gem
+# executables install into, so `bundle exec rake` (and every spec that shells
+# out to it) fails with "command not found: rake".
+gem_bin="$(ruby -e 'print Gem.bindir')"
+if [ -n "${CLAUDE_ENV_FILE:-}" ] && [[ ":$PATH:" != *":$gem_bin:"* ]]; then
+  echo "export PATH=\"$gem_bin:\$PATH\"" >> "$CLAUDE_ENV_FILE"
+fi

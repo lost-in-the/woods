@@ -37,7 +37,7 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 
 ## Boundaries
 
-The normal packaged Index Server registers 14 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
+The normal packaged Index Server registers 15 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
 
 ## Partial search answers
 

@@ -13,7 +13,7 @@ absent or the client does not display them.
 For builds containing #762, a registered `change_impact` tool can compare retained
 generations or plan exact typed unit focus using the shared versioned report.
 Check `tools/list`; this capability requires snapshot-store wiring and is absent
-from the default 14-tool catalog. Use `gen:N` selectors when a SHA maps to several
+from the default 15-tool catalog. Use `gen:N` selectors when a SHA maps to several
 retained generations. Preserve endpoint/type/generation evidence, incomplete
 coverage and unknowns. The tool does not save reports or prove complete impact.
 See the

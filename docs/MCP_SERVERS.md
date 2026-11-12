@@ -9,7 +9,7 @@ Woods provides two MCP servers with different purposes and trust boundaries. Use
 | What does it answer? | Code structure, resolved Rails behavior, dependencies, flows, and graph questions | Live model, schema, count, aggregate, sample, and optional read-only query questions |
 | What does it read? | A generated Woods index | A booted Rails app and its database |
 | Does it boot Rails? | No | Yes |
-| Packaged default | 14 tools | 9 tools |
+| Packaged default | 15 tools | 9 tools |
 | Normal setup | Recommended | Disabled |
 | Main risk | Generated index may contain source and schema details | Responses may contain live application data |
 
