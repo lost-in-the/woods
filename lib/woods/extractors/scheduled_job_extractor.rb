@@ -80,9 +80,6 @@ module Woods
       # sidekiq-scheduler schedule types, in the order it checks them.
       SCHEDULE_TYPES = %w[cron every interval at in].freeze
 
-      # Common cron patterns mapped to human-readable descriptions
-      CRON_HUMANIZE = CronHumanizer::NAMED
-
       # A quoted Whenever command argument in either style. The body runs to
       # the *matching* delimiter, so the inner quotes of `command "echo 'hi'"`
       # stay part of the command.

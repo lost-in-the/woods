@@ -68,7 +68,8 @@ namespace :woods do
     Change set, first match wins: CHANGED_FILES (comma-separated paths; git is not consulted),
     then CI_COMMIT_BEFORE_SHA..CI_COMMIT_SHA (GitLab), then origin/$GITHUB_BASE_REF...HEAD (GitHub),
     else `git diff HEAD~1`: the last commit plus the working tree's staged and unstaged changes to
-    tracked files (untracked files are not included). A changed restart input (Gemfile, Gemfile.lock,
+    tracked files, plus any file that no longer matches the published index (an edit that was
+    extracted and then reverted, a new file git does not track yet). A changed restart input (Gemfile, Gemfile.lock,
     config/initializers/, db/schema.rb, ...) runs a full extraction, and the task prints each path
     that forced it and whether it came from a commit or the working tree. Set CHANGED_FILES to
     choose the paths yourself.

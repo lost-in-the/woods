@@ -412,8 +412,10 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
         require 'rails'
         require 'active_record'
         require 'tmpdir'
+        require 'fileutils'
 
-        Dir.mktmpdir('woods-solid-cache-shards') do |dir|
+        dir = Dir.mktmpdir('woods-solid-cache-shards')
+        begin
           ActiveRecord::Base.configurations = {
             'test' => {
               'cache_one' => { 'adapter' => 'sqlite3', 'database' => File.join(dir, 'one.sqlite3') },
@@ -501,10 +503,14 @@ if ENV['WOODS_RUN_LIVE_BACKENDS']
         ensure
           SolidCache::Record.connection_handler.clear_all_connections!
           # SQLite in WAL mode leaves -wal/-shm sidecars that clear_all_connections!
-          # does not synchronously remove, so Dir.mktmpdir's own rmdir raced them
-          # to Errno::ENOTEMPTY and failed the subprocess after its logic passed.
-          # Empty the directory ourselves before mktmpdir cleans it up.
-          Dir.glob(File.join(dir, '*')).each { |file| File.delete(file) }
+          # does not synchronously remove. Dir.mktmpdir's block form removes the
+          # directory strictly, so a sidecar written between its listing and its
+          # rmdir raised Errno::ENOTEMPTY and failed the subprocess after its
+          # logic had passed; deleting the files first only narrowed that window
+          # (it was lost again in CI run 43288808608). Removal here is
+          # best-effort: the checks above are the result, and a leftover sidecar
+          # in the runner's temp directory is not.
+          FileUtils.rm_rf(dir)
         end
       RUBY
       stdout, stderr, status = Open3.capture3(

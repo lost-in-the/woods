@@ -105,14 +105,6 @@ module Woods
         raise Retriever::StoreError, "lexical index read failed: #{e.class}: #{e.message}"
       end
 
-      # Explicit invalidation is used by reload after its candidate has been
-      # validated. Ordinary generation changes rebuild lazily under the pin.
-      # The last build's units stay reusable: what the next generation still
-      # publishes unchanged is read from them, not decoded again.
-      def invalidate_snapshot!
-        @snapshot_mutex.synchronize { @snapshot = nil }
-      end
-
       def install_snapshot!(snapshot)
         @snapshot_mutex.synchronize { @snapshot = snapshot }
       end

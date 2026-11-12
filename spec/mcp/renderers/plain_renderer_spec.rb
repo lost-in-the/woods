@@ -73,15 +73,16 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
 
   describe '#render_dependencies' do
     it 'renders the label header with the root identifier' do
-      # NOTE: the renderer has a latent bug with found:false detection when
-      # data carries symbol keys (`data[:found] || data['found']` short-
-      # circuits on false). This is tracked separately; for this spec we
-      # exercise the found-true / no-found branch, which is the common path.
       out = renderer.render(:dependencies, {
                               root: 'Ghost',
                               nodes: {}
                             })
       expect(out).to include('Dependencies of Ghost')
+    end
+
+    it 'says an identifier is missing when found: false arrives under a symbol key' do
+      out = renderer.render(:dependencies, { root: 'Ghost', found: false, nodes: {} })
+      expect(out).to include("Identifier 'Ghost' not found in the index.")
     end
 
     it 'renders nodes tree structure' do

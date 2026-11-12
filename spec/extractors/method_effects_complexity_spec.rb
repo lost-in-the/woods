@@ -89,9 +89,15 @@ RSpec.describe 'Method effects complexity' do
         end
       RUBY
 
-      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+      # CPU time of this thread, not wall time. The suite runs as four
+      # processes on four cores, with coverage on in one CI row: a scan that
+      # takes two seconds alone waited its turn and measured 5.0007 s against
+      # a 5 s budget. What this guards is the work the scan does, which the
+      # other processes do not add to.
+      clock = Process::CLOCK_THREAD_CPUTIME_ID
+      started = Process.clock_gettime(clock)
       Woods::Extractors::MethodEffects.apply(unit, source_with_sentinel, column_names: %w[status], limit: 50)
-      elapsed = Process.clock_gettime(Process::CLOCK_MONOTONIC) - started
+      elapsed = Process.clock_gettime(clock) - started
 
       expect(elapsed).to be < budget_seconds * 5
       expect(logger).not_to have_received(:warn)

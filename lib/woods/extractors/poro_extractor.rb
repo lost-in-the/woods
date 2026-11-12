@@ -49,9 +49,6 @@ module Woods
       # Glob pattern for all Ruby files in app/models/ (recursive).
       MODELS_GLOB = 'app/models/**/*.rb'
 
-      # Subdirectory to exclude — handled by ConcernExtractor.
-      CONCERNS_SEGMENT = '/concerns/'
-
       # A `def` at the start of a line. `[ \t]*+` never crosses a newline and
       # never backtracks, so blank-line runs stay linear.
       OWN_METHOD_DEFINITION = /^[ \t]*+def\s/

@@ -4,10 +4,11 @@
 # Runs the unit suite as several rspec processes and fails if any of them does.
 #
 #   script/parallel-rspec [spec paths...]        # default: spec/
-#   script/parallel-rspec --update-timings tmp/rspec.json
+#   script/parallel-rspec --update-timings tmp/parallel/rspec-*.json   # after a full run
 #
 # Files are split into balanced groups from script/parallel_rspec_timings.json
-# (seconds per file; --update-timings rewrites it from an rspec JSON report).
+# (seconds per file; --update-timings rewrites it from rspec JSON reports, such
+# as the one each process of a full run leaves in tmp/parallel/).
 # Each process gets its own TEST_ENV_NUMBER, TMPDIR, log and JSON report, so no
 # two of them share a scratch path. With COVERAGE set, every process stores a
 # SimpleCov resultset and this script collates them once, where the coverage
@@ -23,8 +24,9 @@ ROOT = ParallelRspec::ROOT
 REPORT_DIR = File.expand_path(ENV.fetch('WOODS_PARALLEL_REPORT_DIR', File.join(ROOT, 'tmp', 'parallel')))
 COVERAGE_DIR = File.expand_path(ENV.fetch('WOODS_COVERAGE_DIR', File.join(ROOT, 'coverage')))
 
-def update_timings(report_path)
-  timings = ParallelRspec.timings_from(report_path)
+def update_timings(report_paths)
+  abort 'usage: script/parallel-rspec --update-timings REPORT.json [REPORT.json ...]' if report_paths.empty?
+  timings = ParallelRspec.timings_from(*report_paths)
   File.write(ParallelRspec::TIMINGS_PATH, "#{JSON.pretty_generate(timings)}\n")
   puts "Wrote #{timings.size} file timings to #{ParallelRspec::TIMINGS_PATH}"
 end
@@ -72,7 +74,7 @@ end
 
 def read_report(shard)
   path = File.join(REPORT_DIR, "rspec-#{shard[:index]}.json")
-  File.exist?(path) ? JSON.parse(File.read(path)) : nil
+  File.exist?(path) ? ParallelRspec.read_json(path) : nil
 end
 
 def print_shard(shard)
@@ -80,7 +82,7 @@ def print_shard(shard)
   verdict = shard[:status].success? ? 'passed' : 'FAILED'
   puts "::group::shard #{shard[:index]} #{verdict} (#{shard[:files].size} files, #{shard[:seconds].round}s)" if group
   puts "== shard #{shard[:index]} #{verdict} (#{shard[:files].size} files, #{shard[:seconds].round}s)" unless group
-  puts File.read(shard[:log])
+  puts File.read(shard[:log], encoding: 'UTF-8')
   puts '::endgroup::' if group
 end
 
@@ -102,7 +104,7 @@ end
 # leaves a process out reports a lower number than the code earned.
 def missing_coverage(shards)
   path = File.join(COVERAGE_DIR, '.resultset.json')
-  stored = File.exist?(path) ? JSON.parse(File.read(path)).keys : []
+  stored = File.exist?(path) ? ParallelRspec.read_json(path).keys : []
   shards.map { |shard| "rspec-#{shard[:index]}" } - stored
 rescue JSON::ParserError
   shards.map { |shard| "rspec-#{shard[:index]}" }
@@ -119,12 +121,12 @@ def collate_coverage
 end
 
 if ARGV.first == '--update-timings'
-  update_timings(ARGV.fetch(1))
+  update_timings(ARGV.drop(1))
   exit
 end
 
 count = Integer(ENV.fetch('WOODS_PARALLEL_PROCESSES', '4'))
-timings = File.exist?(ParallelRspec::TIMINGS_PATH) ? JSON.parse(File.read(ParallelRspec::TIMINGS_PATH)) : {}
+timings = File.exist?(ParallelRspec::TIMINGS_PATH) ? ParallelRspec.read_json(ParallelRspec::TIMINGS_PATH) : {}
 groups = ParallelRspec.split(ParallelRspec.spec_files(ARGV), timings, count)
 abort 'no spec files found' if groups.empty?
 

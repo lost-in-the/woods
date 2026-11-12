@@ -419,12 +419,6 @@ module Woods
         nil
       end
 
-      # @param name [String] directory basename under the payload
-      # @return [Boolean] true when extraction publishes unit types here
-      def unit_type_directory?(name)
-        type_directory_allowlist.include?(name)
-      end
-
       # The shared allowlist: exactly the directories extraction publishes
       # unit types into, derived from `Extractor::EXTRACTORS` so the two
       # cannot drift. Required lazily — {IndexValidator} deliberately loads

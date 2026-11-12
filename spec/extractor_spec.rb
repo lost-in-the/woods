@@ -557,6 +557,84 @@ RSpec.describe Woods::Extractor do
       expect(index).to eq(JSON.parse(JSON.generate(extractor.send(:type_index_entries, [unit]))))
       expect(index.first['type']).to eq('route_file')
     end
+
+    describe 'across rebuilds by one extractor' do
+      let(:type_dir) { File.join(tmpdir, 'output', 'models').tap { |dir| FileUtils.mkdir_p(dir) } }
+
+      def write_unit(name, source)
+        File.write(File.join(type_dir, "#{name}.json"),
+                   JSON.generate(identifier: name, type: 'model', file_path: "app/models/#{name.downcase}.rb",
+                                 namespace: nil, source_code: source, metadata: {}, chunks: []))
+      end
+
+      def rebuilt_index
+        extractor.send(:regenerate_type_index, :models)
+        JSON.parse(File.read(File.join(type_dir, '_index.json'))).to_h do |entry|
+          [entry['identifier'], entry['estimated_tokens']]
+        end
+      end
+
+      before do
+        write_unit('User', 'x' * 40)
+        write_unit('Post', 'y' * 80)
+      end
+
+      it 'derives an entry once for a file whose bytes did not change' do
+        allow(extractor).to receive(:estimated_tokens_from).and_call_original
+
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+        expect(extractor).to have_received(:estimated_tokens_from).twice
+      end
+
+      it 'picks up changed content of the same length' do
+        path = File.join(type_dir, 'User.json')
+        File.write(path, File.read(path).sub('"namespace":null', '"namespace":"Crm"'))
+        rebuilt_index
+        File.write(path, File.read(path).sub('"Crm"', '"Ops"'))
+
+        extractor.send(:regenerate_type_index, :models)
+        index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+
+        expect(index.find { |entry| entry['identifier'] == 'User' }['namespace']).to eq('Ops')
+      end
+
+      # Each publication stages in its own directory (.stage-<n>-<owner>),
+      # so entries from one are never the next one's, and are not kept.
+      it 'starts over, and keeps one entry set, when the payload directory changes' do
+        allow(extractor).to receive(:estimated_tokens_from).and_call_original
+        rebuilt_index
+        staged = File.join(tmpdir, 'output', '.stage-2-owner')
+        FileUtils.mkdir_p(staged)
+        FileUtils.cp_r(type_dir, staged)
+        extractor.instance_variable_set(:@payload_dir, Pathname.new(staged))
+
+        extractor.send(:regenerate_type_index, :models)
+
+        expect(extractor).to have_received(:estimated_tokens_from).exactly(4).times
+        remembered = extractor.instance_variable_get(:@type_index_entries)
+        expect(remembered.keys).to eq([:models])
+        expect(remembered.fetch(:models).first).to eq(File.join(staged, 'models'))
+      end
+
+      it 'drops a unit whose file is gone and adds a new one' do
+        rebuilt_index
+        FileUtils.rm(File.join(type_dir, 'Post.json'))
+        write_unit('Tag', 'z' * 8)
+
+        expect(rebuilt_index).to eq('Tag' => 2, 'User' => 10)
+      end
+
+      it 'forgets a remembered file that became unreadable, and recovers' do
+        rebuilt_index
+        File.write(File.join(type_dir, 'User.json'), '{"identifier":')
+
+        expect { extractor.send(:regenerate_type_index, :models) }.to raise_error(JSON::ParserError)
+
+        write_unit('User', 'x' * 40)
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+      end
+    end
   end
 
   # ── extract_all_concurrent — warning survival ──────────────────────
@@ -3866,6 +3944,19 @@ RSpec.describe Woods::Extractor do
       seed_type_index(:models, [{ 'identifier' => 'User', 'namespace' => nil, 'chunk_count' => 2 },
                                 { 'identifier' => 'Admin::Note', 'namespace' => 'Admin', 'chunk_count' => 3 }])
       seed_type_index(:services, [{ 'identifier' => 'Checkout', 'namespace' => nil, 'chunk_count' => 1 }])
+    end
+
+    # A full extraction lists types in the extractors' order; the directory
+    # listing is alphabetical, which put controllers ahead of models here.
+    it 'lists the counts in the order a full extraction does, unknown directories last' do
+      seed_type_index(:controllers, [{ 'identifier' => 'UsersController', 'namespace' => nil, 'chunk_count' => 1 }])
+      seed_type_index(:a_custom_type, [{ 'identifier' => 'Thing', 'namespace' => nil, 'chunk_count' => 0 }])
+
+      counts, chunks = extractor.send(:persisted_counts)
+
+      expect(counts.keys).to eq(%i[models controllers services a_custom_type])
+      expect(counts).to eq(models: 2, controllers: 1, services: 1, a_custom_type: 1)
+      expect(chunks).to eq(7)
     end
 
     it 'reads each _index.json once for both callers' do

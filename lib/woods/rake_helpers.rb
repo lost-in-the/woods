@@ -8,6 +8,10 @@ require 'woods/git_command'
 module Woods
   # Shared rake implementation, kept off the host application's Object.
   module RakeHelpers # rubocop:disable Metrics/ModuleLength -- existing task helpers grouped without changing behavior
+    # The range `woods:incremental` diffs outside CI: the last commit plus
+    # the working tree.
+    WOODS_DEFAULT_INCREMENTAL_RANGE = 'HEAD~1'
+
     module_function
 
     # @return [Float, nil] blank values leave the raw task resident
@@ -413,7 +417,10 @@ module Woods
 
       range = woods_incremental_range
       changed_files, failure = woods_changed_paths_for_range(range)
-      return woods_normalize_incremental_paths(changed_files) unless failure
+      unless failure
+        changed_files |= woods_index_drift_paths(output_dir, changed_files) if range == WOODS_DEFAULT_INCREMENTAL_RANGE
+        return woods_normalize_incremental_paths(changed_files)
+      end
 
       if woods_daemon_coverage(output_dir) == :running
         puts "Could not resolve the git diff range #{range.inspect} (#{failure})."
@@ -427,6 +434,57 @@ module Woods
       warn 'The changed-file set is unknown, so incremental extraction would silently index nothing.'
       warn 'Fix the range (a zero SHA or an unfetched base ref resolve to nothing), or run a full woods:extract.'
       exit 1
+    end
+
+    # Files the index no longer matches and the git range does not name.
+    #
+    # `git diff HEAD~1` describes the last commit and the working tree, not
+    # what the index holds. An edit that was extracted and then reverted
+    # leaves the diff while the index still carries the edited file; a new
+    # file that is not yet tracked never enters it. The first made every
+    # later run refuse with a source-reference rebuild error, the second
+    # exited 0 having ignored the file. The published source manifest
+    # records a digest per captured path, so the files modified since that
+    # capture whose bytes no longer match are known exactly: the same
+    # evidence the watch daemon catches up from at start-up.
+    #
+    # Local default range only. A CI range names what changed between two
+    # commits, and a fresh checkout there makes every file a candidate.
+    #
+    # @param output_dir [Pathname, String] index directory
+    # @param already [Array<String>] paths the git range reported
+    # @return [Array<String>] absolute paths to add to the change set
+    def woods_index_drift_paths(output_dir, already)
+      root = Rails.root.to_s
+      scan = woods_index_drift_scan(root, output_dir)
+      return [] unless scan.comparable?
+
+      known = woods_normalize_incremental_paths(already)
+      drifted = (scan.paths | scan.missing_paths).reject { |path| known.include?(path.delete_prefix("#{root}/")) }
+      return drifted if drifted.empty?
+
+      puts "#{drifted.size} more file(s) differ from the index and are not in " \
+           "`git diff #{WOODS_DEFAULT_INCREMENTAL_RANGE}` (reverted after an extraction, never tracked, " \
+           'or deleted while untracked); ' \
+           'adding them to the change set.'
+      drifted
+    rescue ScriptError, StandardError => e
+      warn "[Woods] could not compare the working tree with the index (#{e.class}: #{e.message}); " \
+           'using the git range alone.'
+      []
+    end
+
+    # The watch daemon's start-up comparison, over the directories it watches.
+    #
+    # @param root [String] application root
+    # @param output_dir [Pathname, String] index directory
+    # @return [Watch::CatchUp]
+    def woods_index_drift_scan(root, output_dir)
+      require 'woods/watch/catch_up'
+      require 'woods/watch/watcher'
+      inside = Pathname.new(File.expand_path(output_dir.to_s)).relative_path_from(Pathname.new(root)).to_s
+      ignored = [*Watch::Watcher::DEFAULT_IGNORED_DIRECTORIES, (inside unless inside.start_with?('..'))].compact.uniq
+      Watch::CatchUp.new(root: root, output_dir: output_dir.to_s, ignored: ignored)
     end
 
     # Why a `woods:incremental` run became a full extraction (#948): each
@@ -474,7 +532,7 @@ module Woods
         "origin/#{base}...HEAD"
       else
         # Default: changes since last commit
-        'HEAD~1'
+        WOODS_DEFAULT_INCREMENTAL_RANGE
       end
     end
 

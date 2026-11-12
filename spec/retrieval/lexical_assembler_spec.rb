@@ -47,4 +47,103 @@ RSpec.describe Woods::Retrieval::LexicalAssembler do
     expect(result.sources.map { |source| source[:identifier] }).to eq(%w[Gadget0 Gadget1 Gadget2])
     expect(result.sources.map { |source| source[:truncated] }).to all(be(false))
   end
+  describe 'runtime metadata evidence' do
+    def empty_effects
+      { 'columns_written' => [], 'jobs_enqueued' => [], 'services_called' => [] }
+    end
+
+    def runtime_candidate(metadata, source: "class Order\nend\n")
+      unit = { 'identifier' => 'Order', 'type' => 'model', 'file_path' => 'app/models/order.rb',
+               'source_code' => source, 'metadata' => metadata }
+      Woods::Retrieval::SearchExecutor::Candidate.new(identifier: 'Order', score: 1.0, source: :lexical,
+                                                      metadata: unit, matched_fields: ['runtime:receipt'])
+    end
+
+    let(:metadata) do
+      { 'callbacks' => [
+          { 'type' => 'before_save', 'filter' => 'autosave_associated_records_for_customer',
+            'origin' => 'framework', 'conditions' => {}, 'side_effects' => empty_effects },
+          { 'type' => 'after_commit', 'filter' => 'enqueue_receipt', 'origin' => 'app', 'conditions' => {},
+            'side_effects' => empty_effects.merge('jobs_enqueued' => ['ReceiptJob']) },
+          { 'type' => 'after_save', 'filter' => 'touch_parent', 'origin' => 'framework',
+            'side_effects' => empty_effects.merge('columns_written' => ['updated_at']) }
+        ],
+        'associations' => [{ 'name' => 'customer', 'type' => 'belongs_to', 'through' => nil, 'options' => {} }],
+        'scopes' => [],
+        'table_name' => 'orders' }
+    end
+
+    let(:context) { assemble([runtime_candidate(metadata)]).context }
+
+    it 'writes one line of JSON per entry, without empty values' do
+      expect(context).to include(%(  {"name":"customer","type":"belongs_to"}))
+      expect(context).to include('table_name: "orders"')
+      expect(context).not_to include('scopes')
+      expect(context).not_to include('"conditions"')
+    end
+
+    it 'leaves out framework callbacks that record no side effect, and says how many' do
+      expect(context).not_to include('autosave_associated_records_for_customer')
+      expect(context).to include('(1 framework callback with no recorded side effects omitted; lookup lists them)')
+    end
+
+    it 'keeps application callbacks and framework callbacks that record a side effect' do
+      expect(context).to include('"filter":"enqueue_receipt"').and include('"jobs_enqueued":["ReceiptJob"]')
+      expect(context).to include('"filter":"touch_parent"').and include('"columns_written":["updated_at"]')
+    end
+
+    # The callback is why the unit matched; dropping it would leave
+    # `Matched: runtime:...` pointing at evidence the answer does not show.
+    it 'keeps a framework callback that a matched runtime term names' do
+      matched = runtime_candidate(metadata)
+      matched.matched_fields.replace(%w[runtime:autosave runtime:customer])
+
+      context = assemble([matched]).context
+
+      expect(context).to include('"type":"before_save","filter":"autosave_associated_records_for_customer"')
+      expect(context).not_to include('framework callback with no recorded side effects omitted')
+    end
+
+    it 'finds a unit by a framework callback named only in its metadata and shows that callback' do
+      require 'woods/retrieval/lexical_index'
+      require 'woods/storage/metadata_store'
+      require 'woods/storage_identity'
+      unit = { 'identifier' => 'Order', 'type' => 'model', 'file_path' => 'app/models/order.rb',
+               'source_code' => "class Order\nend\n",
+               'metadata' => { 'callbacks' => metadata['callbacks'] + [
+                 { 'type' => 'around_save', 'filter' => 'around_save_collection_association',
+                   'origin' => 'framework', 'side_effects' => empty_effects }
+               ] } }
+      query = 'autosave_associated_records_for_customer'
+      store = Woods::Storage::MetadataStore::InMemory.new
+      store.store(Woods::StorageIdentity.key('Order', 'model'), unit)
+      candidates = Woods::Retrieval::LexicalIndex.new(metadata_store: store).execute(query: query).candidates
+
+      context = described_class.new.assemble(candidates: candidates, budget: 2000, query: query).context
+
+      expect(candidates.first.matched_fields).to include(a_string_starting_with('runtime:'))
+      expect(context).to include('"type":"before_save","filter":"autosave_associated_records_for_customer"')
+      expect(context).not_to include('around_save_collection_association')
+      expect(context).to include('(1 framework callback with no recorded side effects omitted')
+    end
+
+    it 'still names the callbacks when only framework ones were recorded' do
+      only_framework = { 'callbacks' => [metadata['callbacks'].first] }
+
+      expect(assemble([runtime_candidate(only_framework)]).context)
+        .to include("callbacks:\n  (1 framework callback with no recorded side effects omitted")
+    end
+
+    it 'leaves room for the source of a unit with many framework callbacks' do
+      noisy = { 'callbacks' => Array.new(40) { metadata['callbacks'].first } }
+      result = assemble([runtime_candidate(noisy, source: "def renew\n  charge!\nend\n")], budget: 300)
+
+      expect(result.context).to include('def renew')
+      expect(result.sources.first).to include(truncated: false)
+    end
+
+    it 'shows the source alone when no runtime field matched' do
+      expect(assemble([candidate('Widget', "widget\n")]).context).not_to include('Published runtime metadata')
+    end
+  end
 end

@@ -112,13 +112,6 @@ module Woods
           worktree_layout.worktrees
         end
 
-        # Why {#entries} is empty, when it is.
-        #
-        # @return [String, nil]
-        def unavailable_reason
-          worktree_layout.reason
-        end
-
         # @param root [Object] the caller's `root` argument
         # @return [Route] the reader and index directory serving +root+
         # @raise [Refused] when +root+ is malformed, not a worktree of this

@@ -104,7 +104,7 @@ module Woods
       # Memoize a derivation of +source+ for the run, or compute it when no
       # run is active.
       #
-      # @param family [Symbol] what the block derives, e.g. +:ast+
+      # @param family [Object] what the block derives, e.g. +:ast+
       # @param source [String]
       # @return [Object] the block's value
       def derive(family, source, &block)

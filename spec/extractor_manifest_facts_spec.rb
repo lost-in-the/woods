@@ -122,8 +122,8 @@ RSpec.describe 'Extractor manifest data composition' do
 
     extractor.send(:write_manifest, incremental: true)
 
-    # Persisted directory reads are sorted; this differs from the full result order.
-    expected[:counts] = { controllers: 0, models: 2 }
+    # Read from the persisted directories, listed in a full extraction's order.
+    expected[:counts] = { models: 2, controllers: 0 }
     expected[:extraction_config] = baseline_config
     expect(Woods::AtomicFile.read(output.join('manifest.json'))).to eq(JSON.generate(expected))
     expect(Woods.configuration).not_to have_received(:extraction_fingerprint)

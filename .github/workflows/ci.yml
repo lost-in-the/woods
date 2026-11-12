@@ -216,6 +216,8 @@ jobs:
       # script/parallel_booted.rb). script/parallel-booted runs those processes
       # several at a time on the runner's cores; as fifteen serial single-process
       # steps, this job left three of four cores idle for most of its run.
+      # The reopened-library contributor file runs on the Rails 7.2 row only;
+      # it joins this step there rather than run alone after it.
       - name: Run booted-app extraction
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
         run: >-
@@ -253,6 +255,7 @@ jobs:
           spec/integration/inflected_naming_spec.rb
           spec/integration/assigned_value_classes_spec.rb
           spec/integration/autoload_concern_reload_spec.rb
+          ${{ matrix.rails == '7.2' && 'spec/integration/library_contributors_spec.rb' || '' }}
 
       # Differential harness for incremental extraction (#164): random
       # create/modify/delete/rename sequences, compared against a cold full
@@ -266,10 +269,6 @@ jobs:
           WOODS_DIFF_OPS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_ops || '60' }}
           WOODS_DIFF_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
         run: bundle exec ruby script/parallel-booted spec/integration/incremental_equivalence_spec.rb
-
-      - name: Run reopened library contributor equivalence
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        run: bundle exec rspec spec/integration/library_contributors_spec.rb
 
       # Optional AMS stays outside the base bundle. This fixture boots fresh
       # processes and performs no network I/O after dependency installation.
@@ -465,12 +464,14 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
+      # Through the parallel runner: as one rspec process this step took
+      # three minutes on one of the runner's four cores.
       - name: Run artifact-reader specs under LC_ALL=C
         env:
           LC_ALL: C
           LANG: C
         run: >-
-          bundle exec rspec
+          bundle exec ruby script/parallel-rspec
           spec/mcp
           spec/feedback
           spec/session_tracer
@@ -496,7 +497,7 @@ jobs:
         with:
           ruby-version: '3.3'
           bundler-cache: true
-      - name: Set up Node 22.19.0
+      - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: '26.13.0'

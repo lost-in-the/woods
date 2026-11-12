@@ -308,21 +308,50 @@ RSpec.describe 'dependents families and headline' do
       expect(on.dig('dependent_counts', 'reverse_includes_tests')).to be(true)
     end
 
-    it 'lists the same rows as the traversal did before families existed, in every page and budget' do
+    # Families classify and order the walk's rows; they never add, drop or
+    # change one. Pages cut the ordered rows.
+    it 'lists the rows the traversal reached, in every page and budget' do
       reader = Woods::MCP::IndexReader.new(@root)
       [{}, { limit: 3 }, { limit: 3, offset: 3 }, { max_nodes: 4 }, { max_edges: 3 }, { types: ['test_mapping'] },
        { via: ['test_coverage'] }, { explain: true }].each do |options|
         arguments = { identifier: fx::ANCHOR, depth: 2 }.merge(options)
-        raw = reader.traverse_dependents(fx::ANCHOR, depth: 2, types: options[:types], via: options[:via],
-                                                     max_nodes: options.fetch(:max_nodes, 1000),
-                                                     max_edges: options.fetch(:max_edges, 10_000),
-                                                     explain: options.fetch(:explain, false))
-        Woods::MCP::Server.send(:paginate_traversal_nodes, raw, options.fetch(:limit, 50), options.fetch(:offset, 0))
-        expected = JSON.parse(JSON.generate(raw.fetch(:nodes)))
+        walk = lambda do
+          reader.traverse_dependents(fx::ANCHOR, depth: 2, types: options[:types], via: options[:via],
+                                                 max_nodes: options.fetch(:max_nodes, 1000),
+                                                 max_edges: options.fetch(:max_edges, 10_000),
+                                                 explain: options.fetch(:explain, false))
+        end
+        walked = JSON.parse(JSON.generate(walk.call.fetch(:nodes)))
+        ordered = Woods::MCP::DependentFamilies.annotate(walk.call, vias: reader.method(:recorded_vias))
+        Woods::MCP::Server.send(:paginate_traversal_nodes, ordered, options.fetch(:limit, 50),
+                                options.fetch(:offset, 0))
+        page = ordered.fetch(:nodes).keys
         [false, true].each do |setting|
           payload = with_setting(setting) { data(**arguments) }
-          expect(listed(payload)).to eq(expected), "#{options.inspect}, setting #{setting}"
+          rows = listed(payload)
+          expect(rows.keys).to eq(page), "#{options.inspect}, setting #{setting}"
+          rows.each do |identifier, row|
+            expect(row.except('deps')).to eq(walked.fetch(identifier).except('deps'))
+            expect(row.fetch('deps')).to match_array(walked.fetch(identifier).fetch('deps'))
+          end
         end
+      end
+    end
+
+    # In identifier order the first rows under a model were its
+    # agent-instruction and documentation files, and a first page could hold
+    # no code at all.
+    it 'lists code first, then tests, schema, documentation and the rest, at each depth and under each row' do
+      payload = data(identifier: fx::ANCHOR, depth: 2)
+      nodes = payload.fetch('nodes')
+      rank = ->(identifier) { %w[code tests schema docs other].index(nodes.dig(identifier, 'family')) }
+
+      expect(nodes.keys.first).to eq(fx::ANCHOR)
+      expect(nodes.fetch(fx::ANCHOR).fetch('deps'))
+        .to eq(%w[WidgetService WidgetsController spec/models/widget_spec.rb spec/requests/widget_flow_spec.rb
+                  spec/support/widget_helpers.rb CreateWidgets AGENTS.md Mystery])
+      nodes.keys.drop(1).group_by { |identifier| nodes.dig(identifier, 'depth') }.each_value do |row_ids|
+        expect(row_ids.map(&rank)).to eq(row_ids.map(&rank).sort)
       end
     end
 
@@ -485,8 +514,8 @@ RSpec.describe 'dependents families and headline' do
       expect(data(identifier: sx::ANCHOR, depth: 2, families: %w[migrations code code]).dig('selection', 'requested'))
         .to eq(%w[code migrations])
       expect(data(identifier: sx::ANCHOR, depth: 2, families: %w[code docs]).fetch('nodes').keys)
-        .to eq([sx::ANCHOR, '.claude/rules/gadgets.md', 'GadgetsController', 'docs/agent-guide.md',
-                'docs/gadgets.md', 'gadgets:sync', 'docs/controllers.md', 'GadgetSeeder'])
+        .to eq([sx::ANCHOR, 'GadgetsController', 'gadgets:sync', '.claude/rules/gadgets.md', 'docs/agent-guide.md',
+                'docs/gadgets.md', 'GadgetSeeder', 'docs/controllers.md'])
     end
 
     it 'refuses an empty selector, an unknown value and a selector on dependencies' do

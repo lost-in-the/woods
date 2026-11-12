@@ -38,12 +38,24 @@ module ParallelRspec
     groups.map { |group| group[:files].sort }
   end
 
-  # @param report_path [String] output of rspec --format json
+  # Reports, resultsets and timings are UTF-8 whatever the locale: a bare
+  # File.read tags them US-ASCII under LC_ALL=C and JSON.parse then raises on
+  # the first non-ASCII byte (an example description, a failure message).
+  #
+  # @param path [String]
+  # @return [Object] the parsed document
+  def read_json(path)
+    JSON.parse(File.read(path, encoding: 'UTF-8'))
+  end
+
+  # @param report_paths [Array<String>] outputs of rspec --format json, one per process
   # @return [Hash{String=>Float}] summed example seconds per spec file
-  def timings_from(report_path)
+  def timings_from(*report_paths)
     seconds = Hash.new(0.0)
-    JSON.parse(File.read(report_path, encoding: 'UTF-8')).fetch('examples').each do |example|
-      seconds[example.fetch('file_path').delete_prefix('./')] += example.fetch('run_time')
+    report_paths.each do |report_path|
+      read_json(report_path).fetch('examples').each do |example|
+        seconds[example.fetch('file_path').delete_prefix('./')] += example.fetch('run_time')
+      end
     end
     seconds.transform_values { |value| value.round(2) }.sort.to_h
   end

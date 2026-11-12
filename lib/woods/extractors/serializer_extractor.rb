@@ -210,13 +210,7 @@ module Woods
       # ──────────────────────────────────────────────────────────────────────
 
       def extract_class_name(file_path, source)
-        # Zeitwerk-governed naming (G-1), then position-aware (#174), then
-        # convention.
-        governed_class_name(file_path, source) || qualified_first_class_name(source) || file_path
-          .sub("#{Rails.root}/", '')
-          .sub(%r{^app/(serializers|blueprinters|decorators)/}, '')
-          .sub('.rb', '')
-          .camelize
+        super(file_path, source, '(?:serializers|blueprinters|decorators)')
       end
 
       # The file's identity when this extractor admits it, else nil.

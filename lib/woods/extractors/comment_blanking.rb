@@ -59,8 +59,10 @@ module Woods
       # @param file_path [String] Path, for its extension
       # @return [String] The source with its comments blanked
       def blank(source, file_path)
-        ranges = case File.extname(file_path.to_s)
-                 when '.rb', '.jbuilder' then ruby_prose(source)
+        extension = File.extname(file_path.to_s)
+        return ruby(source) if ['.rb', '.jbuilder'].include?(extension)
+
+        ranges = case extension
                  when '.erb' then erb_comments(source)
                  when '.haml' then haml_comments(source)
                  else []
@@ -75,12 +77,19 @@ module Woods
       #
       # @param source [String] Ruby source, a whole file or an excerpt
       # @return [String] The source with its comments and heredoc text
-      #   blanked: the same object when it holds neither
+      #   blanked: the same object when it holds neither, otherwise a
+      #   frozen string
       def ruby(source)
         return source unless source.include?('#') || source.include?('=begin') || source.include?('<<')
 
-        ranges = ruby_prose(source)
-        ranges.empty? ? source : splice(source, ranges)
+        # One unit's source is blanked by every scanner that reads it (model
+        # names, service/mailer/job references, config reads, route helpers):
+        # up to eight walks of the same tree and eight copies of the same
+        # string. Keep the result for the run.
+        Woods::ParseCache.derive([:comment_blank, source.encoding], source) do
+          ranges = ruby_prose(source)
+          ranges.empty? ? source : splice(source, ranges).freeze
+        end
       end
 
       # @return [Array<Range>] Byte ranges, sorted

@@ -99,7 +99,79 @@ module Woods
           value = metadata[key] || unit[key]
           selected[key] = value unless value.nil?
         end
-        "Published runtime metadata:\n#{JSON.pretty_generate(values)}\n\n#{source}"
+        matched = candidate.matched_fields.filter_map do |field|
+          field.delete_prefix('runtime:') if field.start_with?('runtime:')
+        end
+        "Published runtime metadata:\n#{runtime_metadata_text(values, matched)}\n\n#{source}"
+      end
+
+      # Runtime metadata as one line of JSON per entry, without empty values
+      # and without framework callbacks that record no side effect. Pretty
+      # printed in full, a model's callbacks alone (mostly Rails' own autosave
+      # hooks, each with six empty side-effect lists) took its whole share of
+      # the budget and left no room for its source. `lookup` returns the
+      # complete metadata.
+      #
+      # A framework callback that one of the query's +matched+ runtime terms
+      # names is kept: it is why the unit matched.
+      def runtime_metadata_text(values, matched = [])
+        values.filter_map do |key, value|
+          value, omitted = app_callbacks(value, matched) if key == 'callbacks'
+          value = compact_value(value)
+          lines = if value.is_a?(Array) && value.any?(Hash)
+                    ["#{key}:", *value.map { |item| "  #{JSON.generate(item)}" }]
+                  elsif !blank_value?(value)
+                    ["#{key}: #{JSON.generate(value)}"]
+                  else
+                    []
+                  end
+          if omitted.to_i.positive?
+            lines << "#{key}:" if lines.empty?
+            lines << "  (#{omitted} framework callback#{'s' unless omitted == 1} with no recorded side effects " \
+                     'omitted; lookup lists them)'
+          end
+          lines.join("\n") unless lines.empty?
+        end.join("\n")
+      end
+
+      # @return [Array(Object, Integer)] the callbacks worth showing and how many were left out
+      def app_callbacks(callbacks, matched)
+        return [callbacks, 0] unless callbacks.is_a?(Array)
+
+        kept = callbacks.reject do |callback|
+          callback.is_a?(Hash) && callback['origin'] == 'framework' &&
+            blank_value?(compact_value(callback['side_effects'])) && !names_any?(callback, matched)
+        end
+        [kept, callbacks.size - kept.size]
+      end
+
+      # Whether the callback's own text holds one of the matched terms. The
+      # index lowercases and splits names, so a term is a substring of the
+      # name it came from.
+      def names_any?(callback, terms)
+        return false if terms.empty?
+
+        text = JSON.generate(compact_value(callback)).downcase
+        terms.any? { |term| text.include?(term) }
+      end
+
+      # Drops nil, empty strings, empty lists and empty hashes at every level.
+      def compact_value(value)
+        case value
+        when Hash
+          value.each_with_object({}) do |(key, item), kept|
+            item = compact_value(item)
+            kept[key] = item unless blank_value?(item)
+          end
+        when Array
+          value.map { |item| compact_value(item) }.reject { |item| blank_value?(item) }
+        else
+          value
+        end
+      end
+
+      def blank_value?(value)
+        value.nil? || (value.respond_to?(:empty?) && value.empty?)
       end
     end
   end

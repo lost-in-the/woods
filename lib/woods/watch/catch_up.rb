@@ -19,7 +19,7 @@ module Woods
     # tree, so an application larger than a tree scan's budget is still judged.
     # A path with no recorded digest, disagreeing digests, or bytes that cannot
     # be read stably within the bounds stays a candidate.
-    class CatchUp
+    class CatchUp # rubocop:disable Metrics/ClassLength -- one comparison against one manifest; splitting it would separate the candidates from the evidence that drops them
       DIRTY_REASONS = %w[source_changed_during_extraction source_changed_during_read].freeze
       # Wall clock all candidate digest checks may spend together. Candidates
       # left when it runs out are caught up, as they were before the check.
@@ -51,6 +51,16 @@ module Woods
         @marker.number.positive? && @manifest.nil?
       end
 
+      # Whether {#paths} compares against the published generation's
+      # per-path digests. Without them it can only answer "every file" or
+      # "every recently modified file", which is too coarse for a caller
+      # that adds the answer to a change set of its own.
+      #
+      # @return [Boolean]
+      def comparable?
+        !@manifest.nil? && !@manifest.unavailable?
+      end
+
       # Absolute paths start-up must catch up: every watched file without a
       # usable manifest, else the candidates whose content is not proven
       # unchanged. Sets {#unchanged}.
@@ -69,6 +79,23 @@ module Woods
         kept = candidates.reject { |path| check.unchanged?(path) }
         @unchanged = candidates.size - kept.size
         kept
+      end
+
+      # Absolute paths the published generation captured that are no longer
+      # on disk. {#paths} walks the files that exist, so a deleted file is
+      # never one of its candidates; git reports the deletion of a tracked
+      # file, but not of one that was indexed while untracked.
+      #
+      # @return [Array<String>] empty unless {#comparable?}
+      def missing_paths
+        return [] unless comparable?
+
+        recorded_identities.keys.filter_map do |path|
+          next unless relative_path?(path)
+
+          absolute = File.join(@root, path)
+          absolute unless File.exist?(absolute) || File.symlink?(absolute)
+        end
       end
 
       # One bounded keyed read per candidate, against every digest the

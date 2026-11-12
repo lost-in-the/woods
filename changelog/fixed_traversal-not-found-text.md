@@ -1,0 +1,1 @@
+- `dependents` and `dependencies` now say when the identifier is not in the index. The text renderers (markdown, plain, claude) dropped the not-found message, so a misnamed unit returned a bare heading that read as "nothing depends on this". The structured payload was already correct (`found: false`) and is unchanged apart from the new `suggestions` list.

@@ -22,7 +22,8 @@ RSpec.describe Woods::FullRunReason do
   it 'leaves the source unknown when the attributing diffs fail, never guessing one' do
     lines = reason(%w[Gemfile], range: 'HEAD~1', diff: ->(_range) { [nil, 'bad revision (git exited 128)'] })
 
-    expect(lines).to include('  - Gemfile (source unknown: git could not attribute it)')
+    expect(lines).to include('  - Gemfile (not in the git diff: it differs from the published index ' \
+                             '(reverted after an extraction, or untracked), or git could not attribute it)')
   end
 
   it 'notes the working tree when only an unlisted path came from it' do

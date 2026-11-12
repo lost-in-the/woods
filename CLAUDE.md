@@ -10,10 +10,10 @@ Ruby gem that extracts structured data from Rails applications for AI-assisted d
 # Bundler 4 `bundle exec rake` / `bundle exec rspec` fail with "command not
 # found". Bundler 4 no longer exposes gem binstubs. The binstubs work on both.
 bundle install
-bin/rake spec                                    # Full test suite
+bin/rake spec                                    # Full test suite, one process (about 15 minutes)
+script/parallel-rspec                            # Same suite in four processes, as CI runs it (about 4 minutes)
 bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
 bin/rubocop -a                                   # Lint + autofix
-bin/rubocop --auto-gen-config                    # Update .rubocop_todo.yml
 bin/rake woods:affected_specs                    # Specs this branch's changes reach, from the self-map (#926)
 bin/rake "woods:affected_specs[lib/woods/x.rb]"  # ...for named paths; hubs it did not expand go to stderr
 
@@ -125,6 +125,19 @@ docker exec -it woods-testbed-rails-8.0 bash -lc 'cd /app && bin/rails console'
 - **`woods-testbed` `rails-8.0`**: default. Day-to-day Rails 8 validation. Fast, small, self-contained.
 - **`woods-testbed` `rails-7.2`**: when a change could plausibly behave differently on Rails 7 (Zeitwerk load paths, callback-chain internals, `eager_load!` error paths).
 - **`woods-testbed` `rails-6.0`**: the supported floor (`railties >= 6.0`, #135). Use when a change touches 6.0/6.1-era APIs (e.g. `connection_db_config`, `has_many_inversing` guards) or to validate the lowest end of the matrix. Boots on Ruby 3.0.
+**Without Docker (Claude Code cloud sessions).** A cloud session has the `docker` CLI but its network policy can refuse the image build (`deb.debian.org` answers 403/405), and only `rails-8.0-large` carries the proxy CA layer. The `rails-8.0-large` app (Canopy) boots on the session's own Ruby instead, which is enough to run extraction and drive the Index Server:
+
+```bash
+ln -sfn "$PWD" /woods-gem                                  # the testbed Gemfile's gem path
+cd ../woods-testbed/apps/rails-8.0-large
+grep -v '^ruby ' Gemfile > /tmp/canopy.Gemfile             # the app pins Ruby 3.3.1 exactly
+export BUNDLE_GEMFILE=/tmp/canopy.Gemfile
+bundle install && bin/rails db:prepare && bin/rails woods:extract
+WOODS_RETRIEVAL_MODE=lexical bundle exec woods-mcp-start ./tmp/woods   # stdio Index Server
+```
+
+A cloud session also has no `LANG`, so Ruby runs under the POSIX locale: a spec or script that reads Woods output with a bare `File.read`, or matches captured subprocess output, raises on the first non-ASCII byte. `.claude/hooks/session-start.sh` installs the bundle and puts the gem executable directory on `PATH` there.
+
 **Gotchas:**
 - `WOODS_GEM_PATH` is resolved at `docker compose up` time, not `exec` time. Restart the variant after changing it.
 - Bundler installs are cached in per-variant named volumes (`woods-testbed-bundle-rails-8`, `woods-testbed-bundle-rails-7-2`, `woods-testbed-bundle-rails-6-0`). Nuke the matching volume if a lockfile change triggers an install loop.
@@ -231,7 +244,7 @@ exe/
 **Two test suites**: the gem has unit specs with mocks, and a separate Rails app has integration specs that run real extractions.
 
 - **Gem unit specs** (`spec/`): RSpec (`rubocop-rspec` is installed but not loaded as a RuboCop plugin, enabling it repo-wide is an open backlog item). Tests core value objects, graph analysis, ModelNameCache, json_serialize, and extractor orchestration using mocks/stubs. No Rails boot required.
-- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained. Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`. Run booted spec files **one per rspec process**: `Rails::Application` is a singleton, so whichever file boots first fixes the root for both and `BootedAppRoot.assert!` fails the other with spurious "root mismatch" errors (CI runs each file as its own step). The `rails_6.0` row needs Ruby <= 3.3 locally: ActiveSupport 6.0 requires `mutex_m`, dropped from default gems in Ruby 3.4 (CI pins Ruby 3.0 for that row).
+- **Booted-app spec** (`spec/integration/booted_extraction_spec.rb`, tagged `:booted_app`): boots the minimal `spec/dummy` Rails app **in-process** and runs a real end-to-end extraction, asserting a non-zero unit count + the expected models/associations. Excluded from the default `rake spec` (needs full Rails); the CI `rails-matrix` job opts in with `WOODS_RUN_BOOTED_APP=1` under the per-version gemfiles in `gemfiles/`. The gem supports `railties >= 6.0`; the Rails pins live in `Appraisals` (gemfiles are hand-maintained. Appraisal can't generate from the conditional base Gemfile). Run one row: `WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_7.2.gemfile bundle exec rspec spec/integration/booted_extraction_spec.rb`. Run booted spec files **one per rspec process**: `Rails::Application` is a singleton, so whichever file boots first fixes the root for both and `BootedAppRoot.assert!` fails the other with spurious "root mismatch" errors (CI runs each file as its own process, through `script/parallel-booted`). The `rails_6.0` row needs Ruby <= 3.3 locally: ActiveSupport 6.0 requires `mutex_m`, dropped from default gems in Ruby 3.4 (CI pins Ruby 3.0 for that row).
 - **Integration specs** (in a separate Rails app): A minimal Rails 8.1 app with Post, Comment models, controllers, jobs, and a mailer. Tests run real extractions and verify output structure, dependencies, incremental extraction, git metadata, and configuration behavior. Set up a host Rails app per the Getting Started guide, then run `bundle exec rspec spec/integration/`.
 - Every extractor needs tests for: happy path extraction, edge cases (empty files, namespaced classes, STI), concern inlining, dependency detection
 - Test `ExtractedUnit#to_h` serialization round-trips
@@ -255,10 +268,10 @@ A fix covers the rule behind a bug, not only the reported case:
 
 ### Running specs: narrowest first
 
-Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
+Full files and the full suite are slow here (the suite takes 15 minutes in one process and about 4 through `script/parallel-rspec`, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
 
 - After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
-- Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Source-checkout orientation" above), plus a search for the changed method names.
+- Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Woods on itself" above), plus a search for the changed method names.
 - Long booted files run by example line or at a small setting (`WOODS_DIFF_OPS=8 WOODS_DIFF_SEEDS=1` for `incremental_equivalence_spec.rb`), not whole.
 - A whole booted file, or the harness, goes through `script/parallel-booted` (one process per file or per harness bucket, on every core); it is what CI runs.
 - Run anything slow in the background or hand it to a low-cost subagent, and keep working meanwhile.
@@ -268,7 +281,7 @@ Full files and the full suite are slow here (the suite takes over 15 minutes, on
 # Gem unit specs (run from gem root)
 bin/rspec spec/extractors/model_extractor_spec.rb:42   # One example: the default local run
 bin/rspec spec/extractors/model_extractor_spec.rb      # One file
-bin/rake spec                                          # Full suite: hosted CI, rarely local
+script/parallel-rspec                                  # Full suite: hosted CI, rarely local
 
 # Lint
 bin/rubocop -a
@@ -289,7 +302,7 @@ Key references:
 
 - Agents may push branches and open draft PRs freely; merging needs the maintainer's approval.
 - Open every PR as a draft. Hosted CI and the automated review run on the draft.
-- One PR CI run takes 20 minutes or more, and every push restarts it. Batch fixes and push once; never push only to re-trigger CI.
+- One PR CI run takes about 8 minutes (a `main` or tag run, which adds the older Ruby and Rails rows at full harness depth, takes longer), and every push restarts it. Batch fixes and push once; never push only to re-trigger CI.
 - When CI is green and the review's findings are handled, mark the PR ready for review and request the maintainer (`LeahArmstrong`, per `.github/CODEOWNERS`). The maintainer approves, comments, or follows up in the agent session.
 - Merging to `main` is not a release. A flaky or unrelated failure can be named on the PR and handled separately rather than block a merge. The README badge shows `main`'s CI, and releases still require every job in `script/validate-release-run` on the tagged commit.
 
@@ -317,7 +330,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 - `rails_source_extractor.rb` reads from installed gem paths (`Gem.loaded_specs`). Read-only and path-sensitive; never assume install locations.
 - Service discovery scans `app/services`, `app/interactors`, `app/operations`, `app/commands`, `app/use_cases`. Other directories are not found.
 - Class names come from `SourceNesting#qualified_first_class_name` (position-aware, #174). `SharedUtilityMethods#extract_class_name` and every per-extractor copy go through it. Do not reintroduce a first-`class`-token regex.
-- The dependency graph can have cycles. Traversal must handle them; see `DependencyGraph#visited`.
+- The dependency graph can have cycles. Traversal must handle them; see the visited `Set` in `DependencyGraph#affected_by`.
 - MySQL and PostgreSQL differ in JSON querying, indexing, and CTE syntax. Any host-database SQL must work on both.
 - `eager_load!` runs once per extraction mode in the orchestrator (`Extractor#extract_all`, `#extract_changed`). Do not add it to extractors.
 - `eager_load!` aborts on a single `NameError` (for example `app/graphql/` referencing an uninstalled gem). Zeitwerk loads directories alphabetically, so `graphql/` failing blocks `models/`. The gem falls back to per-directory loading via `EXTRACTION_DIRECTORIES`.
@@ -348,7 +361,7 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   7. Reconcile class-based types **again** (pruning can un-know a class the first pass skipped).
   8. Refresh `dependents`, `metadata.git`, PageRank, `graph_analysis.json`.
 - The oracle is `spec/integration/incremental_equivalence_spec.rb` (`:booted_app`). Run it before and after touching the incremental path.
-- `Extractor::WHOLE_APP_EXTRACTORS` (libs, rake_tasks, routes, middleware, engines, scheduled_jobs, state_machines, factories, test_support, test_mappings, events, database_views, database_tables, external_consumers, view_templates, rails_source, packages, graphql_operations; the constant in `lib/woods/extractor.rb` is the source of truth) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates).
+- `Extractor::WHOLE_APP_EXTRACTORS` (libs, rake_tasks, routes, middleware, engines, scheduled_jobs, state_machines, factories, test_support, test_mappings, events, database_views, database_tables, external_consumers, view_templates, rails_source, packages, graphql_operations, js_modules; the constant in `lib/woods/extractor.rb` is the source of truth) re-run **wholesale** when a `PathDispatcher.whole_app_rules` trigger changes. A routes re-run also replaces `ROUTE_CONSUMER_EXTRACTORS` (controllers, mailers, components, view components, view templates, test mappings).
 - Wholesale replacement prunes by `(identifier, type)`, never by bare identifier (#225). Two units sharing an identifier across types are distinct graph nodes.
 - `Extractor#refresh(*keys)` (`woods:refresh`) is the by-name counterpart to the by-trigger path. Both must call `prepare_incremental_run` first or they inherit `@dependents_dirty`/`@incremental_written`.
 - Every Woods-written JSON artifact is read through `AtomicFile.read`. A bare `File.read` tags content with the process default external encoding (US-ASCII under `LANG=C`) and raises on multibyte bytes.

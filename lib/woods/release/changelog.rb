@@ -49,11 +49,6 @@ module Woods
         end
       end
 
-      # @return [String, nil] the newest dated heading of any kind
-      def latest_released_version(source)
-        source[RELEASE_HEADING, :version]
-      end
-
       # Folds `## [Unreleased]` into `## [<version>] - <date>`.
       #
       # Entries are grouped into one block per `###` heading, in the order the

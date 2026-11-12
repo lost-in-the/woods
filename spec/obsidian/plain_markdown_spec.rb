@@ -111,7 +111,7 @@ RSpec.describe 'plain Markdown export (obsidian: false)' do
     it 'writes links that resolve to files in the export' do
       export(obsidian: false)
       markdown_files.each do |file|
-        File.read(file).scan(/\]\(([^)]+\.md)\)/).flatten.each do |href|
+        File.read(file, encoding: 'UTF-8').scan(/\]\(([^)]+\.md)\)/).flatten.each do |href|
           expect(File).to exist(File.expand_path(href, File.dirname(file))), "#{file} links to missing #{href}"
         end
       end

@@ -23,8 +23,8 @@ Read `lib/woods/mcp/server.rb` before building any new MCP server or tool. It de
 1. **Structured tools over raw eval.** Every tool has a named operation, typed parameters, and bounded output. Never expose `eval` or arbitrary code execution without explicit safety layers (see `docs/CONSOLE_MCP_SETUP.md` — Safety Model).
 2. **Read-only by default.** Tools that query data need no special guards. Tools that mutate state require safety layers documented in `docs/CONSOLE_MCP_SETUP.md` (transaction rollback, statement timeout, human confirmation).
 3. **Truncation and budgeting.** All tools that return variable-length data must accept a `limit` parameter and truncate results. Use `truncate_section` pattern from the index server.
-4. **Error responses are tool responses.** Return errors as `text_response` with a clear message, not exceptions. The MCP protocol has no error channel — the agent sees the tool result.
-5. **No Rails boot in the MCP process.** The index server reads JSON from disk. The console server delegates to a bridge process inside Rails. MCP server processes themselves never call `Rails.application` or `ActiveRecord`.
+4. **Error responses are tool responses.** Return errors with `error_response` (sets `isError`, an `error_code`, and any structured hints such as `suggestions`), not exceptions. Say what was wrong and what to call next. An answer that found nothing because the input was wrong must read as an error or a not-found, never as an empty result.
+5. **No Rails boot in the Index Server.** It reads the published index from disk and never calls `Rails.application` or `ActiveRecord`. The Console Server is the opposite: it runs inside a booted Rails environment (`rake woods:console`, or the Rack middleware) and every request goes through `SafeContext`.
 6. **Backend agnostic.** MySQL and PostgreSQL must both work. If a tool generates SQL, handle dialect differences or delegate to ActiveRecord.
 7. **YARD-document every tool definition** — description, parameter types, example responses.
 

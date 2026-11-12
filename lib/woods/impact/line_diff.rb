@@ -26,11 +26,6 @@ module Woods
         @b = after.to_s.lines.map(&:chomp)
       end
 
-      # @return [Boolean] whether the diff fits its bounds
-      def computed?
-        !script.nil?
-      end
-
       # Changed ranges only.
       #
       # @param max_hunks [Integer] hunks kept; past it `coverage` is `truncated`

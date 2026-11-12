@@ -14,8 +14,6 @@ module Woods
     class ManagedProcess
       include ManagedCleanup
 
-      MAX_EVENT_BYTES = 4096
-
       # @param command [Array<String>] explicit application argument vector
       # @param root [String] application working directory
       # @param env [Hash] application environment

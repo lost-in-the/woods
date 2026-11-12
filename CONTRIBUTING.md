@@ -108,7 +108,7 @@ bundle exec ruby script/parallel-rspec
 bin/rubocop
 ```
 
-Before requesting review, run the full unit suite and style check unless the PR explains why one cannot run.
+Before requesting review, run the specs your change reaches and the style check, and say in the PR what you ran. Hosted CI runs the whole suite on every draft PR; run it yourself (`script/parallel-rspec`, about 4 minutes) when a cross-cutting change cannot be judged otherwise. `script/ci-local` ([Before you push](#before-you-push)) is an optional preflight of the hosted gates, not a requirement for every push.
 
 Coverage from the default process excludes opt-in Rails, installed-artifact, and live-backend lanes. Report their results separately; a low percentage for subprocess-driven tasks does not establish that they are untested. CI enforces a 90% aggregate line floor and measures branches, but does not enforce a branch floor. The line gate was calibrated against local and CI default-suite results on 2026-09-18; it does not establish per-file coverage or coverage across the opt-in lanes. Add behavior-based regressions and real optional-gem fixtures for changed extraction paths before proposing higher thresholds.
 

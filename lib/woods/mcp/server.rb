@@ -32,6 +32,7 @@ require_relative 'hydration'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
+require_relative 'lookup_pages'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
@@ -336,17 +337,22 @@ module Woods
           !token.nil? && ids && !ids.empty?
         end
 
-        def text_response(text, data: nil, meta: nil)
+        # @param error [Boolean] flag the result as an error while keeping
+        #   its structured payload (a traversal of an identifier the index
+        #   lacks still answers `found: false` with suggestions)
+        def text_response(text, data: nil, meta: nil, error: false)
           structured = { text: text }
           structured[:data] = data.nil? ? JSON.parse(text) : data
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
+            error: error,
             structured_content: structured,
             meta: meta
           )
         rescue JSON::ParserError
           ::MCP::Tool::Response.new(
             [{ type: 'text', text: text }],
+            error: error,
             structured_content: structured,
             meta: meta
           )
@@ -523,12 +529,16 @@ module Woods
 
         def define_lookup_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
                          'dependencies, and dependents. Use include_source: false to omit source_code. ' \
                          'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
-                         '`name` is accepted as an alias for `identifier` for discoverability.',
+                         '`name` is accepted as an alias for `identifier` for discoverability. ' \
+                         'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
+                         'page says which `page` and `answer_id` to ask for next. In the JSON format each ' \
+                         'page is a JSON object holding part of the unit; merging the pages gives the unit.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
@@ -543,13 +553,23 @@ module Woods
                 sections: {
                   type: 'array', items: { type: 'string' },
                   description: 'Select specific keys to return (e.g. ["metadata", "dependencies"]). Always includes type, identifier, file_path, namespace.'
-                }
+                },
+                page: { type: 'integer',
+                        description: 'Page of a full lookup too long for one answer (default 1). The answer says ' \
+                                     'how many pages there are and which to ask for next.' },
+                answer_id: { type: 'string',
+                             description: 'With page 2 or later: the answer_id the previous page gave. The page ' \
+                                          'is refused if the unit has changed since, so pages of two versions ' \
+                                          'are never mixed.' },
+                max_chars: { type: 'integer',
+                             description: 'Characters per page of a full lookup (default: ' \
+                                          "#{LookupPages::DEFAULT_MAX_CHARS}, or #{LookupPages::ENV_NAME})." }
               }
               # NOTE: 'identifier' is not listed as required — `name` is an
               # accepted alias. The handler validates that one of the two
               # was provided.
             }
-          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil, page: nil, max_chars: nil, answer_id: nil|
             identifier ||= name
             if identifier.nil? || identifier.empty?
               next respond_err.call(
@@ -568,6 +588,10 @@ module Woods
               end
               if evidence == 'full' && (!query.nil? || !budget.nil?)
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
+              end
+              if evidence != 'full' && (!page.nil? || !max_chars.nil? || !answer_id.nil?)
+                raise ArgumentError, 'page, max_chars and answer_id apply only to full evidence; ' \
+                                     'compact/outline take budget'
               end
             rescue ArgumentError => e
               next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
@@ -614,13 +638,71 @@ module Woods
                 allowed = (always_include + sections).to_set
                 filtered = filtered.slice(*allowed)
               end
-              respond.call(renderer.render(:lookup, filtered), meta: lookup_meta)
+              text = renderer.render(:lookup, filtered)
+              page_limit = LookupPages.limit(coerce_int.call(max_chars))
+              page_number = coerce_int.call(page) || 1
+              # Short enough for one answer, and the first page was asked for.
+              if page_number == 1 && (page_limit.nil? || text.length <= page_limit)
+                next respond.call(text, meta: lookup_meta)
+              end
+
+              # A later page belongs to the answer its first page came from.
+              # The unit is rendered afresh on every call and the index can
+              # be republished in between, so the caller names that answer
+              # and a different one is refused, never sliced.
+              if page_number > 1
+                current = LookupPages.answer_id(text, page_limit || text.length)
+                if answer_id.nil?
+                  next respond_err.call(
+                    "lookup page #{page_number} needs the answer_id the previous page gave, so pages of two " \
+                    'versions of the unit are never mixed. Start again from page 1 if you no longer have it.',
+                    code: :invalid_params, tool: 'lookup', argument: 'answer_id'
+                  )
+                end
+                unless answer_id == current
+                  next respond_err.call(
+                    "#{identifier} changed since the page that gave answer_id #{answer_id} (the index was " \
+                    'republished, or max_chars differs). The pages already read belong to the earlier ' \
+                    'answer; start again from page 1.',
+                    code: :stale_index, tool: 'lookup', argument: 'answer_id', answer_id: current
+                  )
+                end
+              end
+
+              # In the JSON format the unit itself is paged, so every page
+              # is a readable part of it that parses; the other formats cut
+              # the rendered text at line ends.
+              limit = page_limit || text.length
+              unit_pages = LookupPages.json_pages(filtered, limit) if renderer.is_a?(Renderers::JsonRenderer)
+              pages = unit_pages ? unit_pages.size : LookupPages.split(text, limit).size
+              unless page_number.between?(1, pages)
+                next respond_err.call("lookup of #{identifier} has #{pages} page#{'s' unless pages == 1}; " \
+                                      "page #{page_number} does not exist.",
+                                      code: :invalid_params, tool: 'lookup', argument: 'page', pages: pages)
+              end
+              if unit_pages
+                position = LookupPages::Page.new(number: page_number, pages: pages, total_chars: text.length,
+                                                 answer_id: LookupPages.answer_id(text, limit))
+                body = LookupPages.render_json(position, unit_pages[page_number - 1])
+                data = JSON.parse(body)
+                where = position.to_h.except(:first_char, :last_char)
+              else
+                selected = LookupPages.page(text, max_chars: limit, number: page_number)
+                body = LookupPages.render(selected)
+                where = selected.to_h
+                data = { lookup_page: where }
+              end
+              ::MCP::Tool::Response.new([{ type: 'text', text: body }],
+                                        structured_content: { text: body, data: data },
+                                        meta: (lookup_meta || {}).merge(lookup_page: where))
             else
+              suggestions = reader.suggest_identifiers(identifier)
               respond_err.call(
-                "Unit not found: #{identifier}",
+                IdentifierSuggestions.append("Unit not found: #{identifier}#{" (type #{type})" if type}", suggestions),
                 code: :not_found,
                 identifier: identifier,
                 tool: 'lookup',
+                suggestions: suggestions,
                 hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.'
               )
             end
@@ -763,8 +845,13 @@ module Woods
                                                               max_edges: coerce_int.call(max_edges) || 10_000,
                                                               explain: explain || false)
               if walked[:found] == false
-                walked[:message] =
-                  "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+                # Not an empty answer: nothing was traversed. Say so, and name
+                # the units the caller most likely meant.
+                walked[:suggestions] = reader.suggest_identifiers(identifier)
+                walked[:message] = IdentifierSuggestions.append(
+                  "Identifier '#{identifier}' not found in the index, so no #{name} were traversed. " \
+                  "Use 'search' to find valid identifiers.", walked[:suggestions]
+                )
               end
               TraversalResponse.annotate(walked)
               # Families and counts cover the whole walk, so they are taken
@@ -780,7 +867,14 @@ module Woods
             paginate_nodes.call(result, limit || DEFAULT_TRAVERSAL_LIMIT, offset || 0)
             TraversalEvidencePage.apply(result)
             selection&.mark_witnesses
-            respond.call(renderer.render(render_key, result), data: result)
+            # An identifier the index lacks is an error for the caller, as it
+            # is for `lookup`: a non-error answer with no rows reads as "nothing
+            # depends on this". The payload still says `found: false`.
+            missing = result[:found] == false
+            meta = if missing
+                     { error_code: :not_found, tool: name, identifier: identifier, suggestions: result[:suggestions] }
+                   end
+            respond.call(renderer.render(render_key, result), data: result, meta: meta, error: missing)
           end
         end
 
@@ -1064,10 +1158,17 @@ module Woods
             types = coerce.call(types)
             limit = coerce_int.call(limit)
             results = reader.recent_changes(limit: limit || 10, types: types)
-            respond.call(renderer.render(:recent_changes, {
-                                           result_count: results.size,
-                                           results: results
-                                         }))
+            payload = { result_count: results.size, results: results }
+            # Without Git facts the list is short or empty for a reason that
+            # has nothing to do with what changed; say so in the answer.
+            git = Woods::GitEnrichmentSummary.from_manifest(reader.manifest)
+            if %w[unavailable degraded].include?(git['state'])
+              payload[:notice] = "Git facts are #{git['state']} for this index" \
+                                 "#{" (#{git['reason']})" if git['reason']}: units without recorded history are " \
+                                 'not listed, so a short or empty list does not mean nothing changed. ' \
+                                 'woods_status reports index.git_enrichment.'
+            end
+            respond.call(renderer.render(:recent_changes, payload))
           end
         end
 
@@ -1430,8 +1531,12 @@ module Woods
             max_depth = coerce_int.call(depth) || 3
             entry_unit = Woods::FlowAssembler.model_event(entry_point)&.first || entry_point.split('#', 2).first
             unless reader.find_unit(entry_unit)
-              next respond_err.call('Flow entry unit not found; use search and lookup to select an indexed unit.',
-                                    code: :not_found, tool: 'trace_flow', entry_point: entry_point)
+              suggestions = reader.suggest_identifiers(entry_unit)
+              next respond_err.call(
+                IdentifierSuggestions.append('Flow entry unit not found; use search and lookup to select an indexed unit.',
+                                             suggestions),
+                code: :not_found, tool: 'trace_flow', entry_point: entry_point, suggestions: suggestions
+              )
             end
 
             # Prefer the precomputed flow JSON written by FlowPrecomputer during
@@ -2205,8 +2310,11 @@ module Woods
           rescue Woods::Diagrams::InvalidRequest => e
             respond_err.call(e.message, code: :invalid_params, tool: DiagramTool::NAME)
           rescue Woods::Diagrams::UnitNotFound => e
-            respond_err.call("#{e.message}; use search and lookup to select an indexed unit.",
-                             code: :not_found, tool: DiagramTool::NAME)
+            suggestions = reader.suggest_identifiers(arguments[:identifier])
+            respond_err.call(
+              IdentifierSuggestions.append("#{e.message}; use search and lookup to select an indexed unit.", suggestions),
+              code: :not_found, tool: DiagramTool::NAME, suggestions: suggestions
+            )
           rescue StandardError => e
             raise unless ToolContract.artifact_error?(e)
 

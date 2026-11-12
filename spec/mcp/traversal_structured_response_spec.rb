@@ -44,8 +44,9 @@ RSpec.describe 'Traversal structured responses' do
                                   max_edges: options.fetch(:max_edges, 10_000) }
             raw = reader.public_send("traverse_#{name}", arguments[:identifier], **traversal_options)
             if raw[:found] == false
-              raw[:message] =
-                "Identifier 'Absent' not found in the index. Use 'search' to find valid identifiers."
+              raw[:suggestions] = []
+              raw[:message] = "Identifier 'Absent' not found in the index, so no #{name} were traversed. " \
+                              "Use 'search' to find valid identifiers."
             end
             Woods::MCP::TraversalResponse.annotate(raw)
             Woods::MCP::DependentFamilies.annotate(raw, vias: reader.method(:recorded_vias)) if name == 'dependents'
@@ -54,7 +55,8 @@ RSpec.describe 'Traversal structured responses' do
             Woods::MCP::TraversalEvidencePage.apply(raw)
             response = request(server, 'tools/call', name: name, arguments: arguments)
             expected = JSON.parse(JSON.generate(raw))
-            expect(response['isError']).to be(false)
+            # Only the identifier the index lacks is an error; its payload is still complete.
+            expect(response['isError']).to be(raw[:found] == false)
             expect(response.dig('structuredContent', 'data')).to eq(expected)
             expect(response.dig('content', 0, 'text')).to eq(renderer.render(name.to_sym, raw))
             expect(response.dig('structuredContent', 'text')).to eq(response.dig('content', 0, 'text'))

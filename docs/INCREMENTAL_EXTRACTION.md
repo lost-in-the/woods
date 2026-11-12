@@ -118,8 +118,18 @@ forward run over run instead of being erased by the next full rebuild.
 The default is one revision, not a range, so git compares `HEAD~1` with the
 files on disk. Its change set is the last commit **plus every uncommitted
 change to a tracked file, staged or not** (including `git add -N` paths). A
-file changed in the last commit and reverted on disk drops out. Untracked
-files are not included; `git add` one to include it. A run meant to cover one
+file changed in the last commit and reverted on disk drops out.
+
+The default also adds every file that **no longer matches the published
+index**, whatever git says about it. The published source manifest records a
+digest for each captured file, so a file modified since that capture whose
+bytes differ is known exactly. This covers an edit that was extracted and
+then reverted (it leaves the diff while the index still holds the edit), a
+new file git does not track yet, and the deletion of a file that was indexed
+while untracked. The task prints how many it added. A CI
+range and `CHANGED_FILES` are used as given.
+
+A run meant to cover one
 commit therefore also covers local edits. When one of those edits is a
 restart input (a local `Gemfile` pin, an initializer), the run is a full
 extraction.
@@ -137,7 +147,7 @@ listed; the rest are counted:
 Full extraction forced by 2 restart inputs (state captured at boot, which an incremental run cannot refresh):
   - Gemfile (working tree, uncommitted)
   - Gemfile.lock (committed in HEAD~1..HEAD)
-Uncommitted changes are included: with no CHANGED_FILES or CI range, the change set is `git diff HEAD~1` against the working tree (staged and unstaged; untracked files are not). Commit, stash or revert them, or set CHANGED_FILES, to leave them out.
+Uncommitted changes are included: with no CHANGED_FILES or CI range, the change set is `git diff HEAD~1` against the working tree (staged and unstaged), plus files that differ from the published index. Commit, stash or revert them, or set CHANGED_FILES, to leave them out.
 ```
 
 A source reads `committed in <range>`, `working tree, uncommitted`, both

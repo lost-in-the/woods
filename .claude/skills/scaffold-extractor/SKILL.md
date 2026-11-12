@@ -87,8 +87,7 @@ module Woods
       # @param file_path [String] absolute path to the Ruby file
       # @return [ExtractedUnit, nil] extracted unit or nil if not a {type}
       def extract_{type}_file(file_path)
-        source = File.read(file_path)
-        relative = relative_path(file_path)
+        source = SourceFile.read(file_path)
 
         # TODO: implement extraction logic
 

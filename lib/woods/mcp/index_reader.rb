@@ -12,6 +12,7 @@ require_relative '../generation'
 require_relative '../graph_analyzer'
 require_relative '../source_inputs/status'
 require_relative '../resilience/incremental_readiness'
+require_relative 'identifier_suggestions'
 require_relative 'search_results'
 require_relative 'served_identity'
 require_relative '../retrieval/scope'
@@ -624,6 +625,26 @@ module Woods
             entry['scope_type'] || entry['type'] || single_type_for(dir)
           end
         end.uniq.sort
+      end
+
+      # Near matches for an identifier this generation does not hold: the
+      # same name under a namespace or another type, the owner of a
+      # `Class#method`, the units of a file path, a misspelling. Read from the
+      # per-type index entries; no unit file is opened.
+      #
+      # @param identifier [String]
+      # @param limit [Integer]
+      # @return [Array<Hash>] `{ identifier:, type: }`, best match first
+      def suggest_identifiers(identifier, limit: IdentifierSuggestions::LIMIT)
+        ensure_fresh!
+        entries = TYPE_DIRS.flat_map do |dir|
+          read_index(dir).filter_map do |entry|
+            next unless entry.is_a?(Hash)
+
+            entry.merge('type' => entry['scope_type'] || entry['type'] || single_type_for(dir))
+          end
+        end
+        IdentifierSuggestions.for(identifier, entries, limit: limit)
       end
 
       # List index entries, optionally filtered by type or by type directory.
