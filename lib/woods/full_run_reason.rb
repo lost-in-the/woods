@@ -55,7 +55,8 @@ module Woods
       return [] unless @paths.any? { |path| source_of(path).include?('working tree') }
 
       ["Uncommitted changes are included: with no CHANGED_FILES or CI range, the change set is `git diff #{@range}` " \
-       'against the working tree (staged and unstaged; untracked files are not). Commit, stash or revert them, ' \
+       'against the working tree (staged and unstaged), plus files that differ from the published index. ' \
+       'Commit, stash or revert them, ' \
        'or set CHANGED_FILES, to leave them out.']
     end
 
@@ -76,7 +77,8 @@ module Woods
       return "committed in #{committed_range}" if committed
       return 'working tree, uncommitted' if worktree
 
-      'source unknown: git could not attribute it'
+      'not in the git diff: it differs from the published index (reverted after an extraction, or untracked), ' \
+        'or git could not attribute it'
     end
 
     def two_revision_range?

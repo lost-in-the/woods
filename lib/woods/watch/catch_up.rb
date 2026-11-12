@@ -51,6 +51,16 @@ module Woods
         @marker.number.positive? && @manifest.nil?
       end
 
+      # Whether {#paths} compares against the published generation's
+      # per-path digests. Without them it can only answer "every file" or
+      # "every recently modified file", which is too coarse for a caller
+      # that adds the answer to a change set of its own.
+      #
+      # @return [Boolean]
+      def comparable?
+        !@manifest.nil? && !@manifest.unavailable?
+      end
+
       # Absolute paths start-up must catch up: every watched file without a
       # usable manifest, else the candidates whose content is not proven
       # unchanged. Sets {#unchanged}.
