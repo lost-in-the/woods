@@ -9,7 +9,6 @@ require 'pathname'
 require 'set'
 
 require_relative 'atomic_file'
-require_relative 'compact_json'
 require_relative 'source_file'
 require_relative 'version'
 require_relative 'build_identity'
@@ -2563,7 +2562,7 @@ module Woods
         next unless File.exist?(path)
 
         data = JSON.parse(AtomicFile.read(path))
-        before = CompactJson.generate(data)
+        before = JSON.generate(data)
 
         metadata = (data['metadata'] ||= {})
         if flow_paths.any?
@@ -2571,7 +2570,7 @@ module Woods
         else
           metadata.delete('flow_paths')
         end
-        next if CompactJson.generate(data) == before
+        next if JSON.generate(data) == before
 
         AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
         written.add(identifier)
@@ -2856,7 +2855,7 @@ module Woods
       return nil if relative_path.nil? || relative_path.start_with?('/')
 
       metadata = (data['metadata'] ||= {})
-      before = CompactJson.generate(metadata)
+      before = JSON.generate(metadata)
       package = SourceContributors.annotate_package(data, package_resolver)
 
       if package
@@ -2864,7 +2863,7 @@ module Woods
       else
         metadata.delete('package')
       end
-      return nil if CompactJson.generate(metadata) == before
+      return nil if JSON.generate(metadata) == before
 
       AtomicFile.write(file, json_serialize(data), durable: payload_writes_durable?)
 
@@ -3584,7 +3583,7 @@ module Woods
       metadata = data['metadata'] || {}
 
       source_tokens = source ? TokenUtils.estimate_tokens(source) : 0
-      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(CompactJson.generate(metadata)) : 0
+      metadata_tokens = metadata.any? ? TokenUtils.estimate_tokens(JSON.generate(metadata)) : 0
       source_tokens + metadata_tokens
     end
 
@@ -3611,7 +3610,7 @@ module Woods
       if Woods.configuration.pretty_json
         JSON.pretty_generate(data)
       else
-        CompactJson.generate(data)
+        JSON.generate(data)
       end
     end
 
@@ -4753,7 +4752,7 @@ module Woods
       reconciled = flow_annotation_reconciled?(unit)
       normalized = unit.dup
       normalized.file_path = normalize_file_path(unit.file_path)
-      fresh = extracted_form_for_comparison(JSON.parse(CompactJson.generate(normalized.to_h)), reconciled)
+      fresh = extracted_form_for_comparison(JSON.parse(JSON.generate(normalized.to_h)), reconciled)
       path = type_dir.join(collision_safe_filename(unit.identifier))
       return false unless fresh == published_extracted_form(path, unit, reconciled: reconciled)
 
@@ -5004,7 +5003,7 @@ module Woods
       data = JSON.parse(AtomicFile.read(path))
       # Serialized comparison, not `data.dup`: the git patch mutates the
       # nested metadata hash in place, which a shallow copy would follow.
-      before = CompactJson.generate(data)
+      before = JSON.generate(data)
 
       if refresh_dependents
         detail = @dependency_graph.dependents_detail(identifier)
@@ -5021,12 +5020,12 @@ module Woods
                                                git_sources: sources)
         git_capture.note_refreshed(identifier, type) if sources.positive?
       elsif git
-        (data['metadata'] ||= {})['git'] = JSON.parse(CompactJson.generate(git))
+        (data['metadata'] ||= {})['git'] = JSON.parse(JSON.generate(git))
         annotate_node_from_git(identifier, type, git)
         git_capture.note_refreshed(identifier, type)
       end
 
-      return false if CompactJson.generate(data) == before
+      return false if JSON.generate(data) == before
 
       AtomicFile.write(path, json_serialize(data), durable: payload_writes_durable?)
       affected_types&.add(extractor_key)
