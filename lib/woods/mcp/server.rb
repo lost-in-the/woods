@@ -556,10 +556,12 @@ module Woods
                 evidence: { type: 'string', enum: %w[full compact outline],
                             description: 'Published evidence mode (default full).' },
                 query: { type: 'string',
-                         description: 'Optional relevance query for compact evidence; absent means API orientation.' },
+                         description: 'Optional relevance query for compact evidence; absent means API orientation. ' \
+                                      'Refused with evidence: full (the default).' },
                 budget: { type: 'integer', minimum: 1,
-                          description: 'Compact/outline token estimate budget (default 2000); ' \
-                                       'full lookup remains complete.' },
+                          description: 'Compact/outline token estimate budget (default 2000). ' \
+                                       'Refused with evidence: full (the default), which is never cut to a budget; ' \
+                                       'page a long full lookup with max_chars and page.' },
                 source_sha256: { type: 'string',
                                  description: 'Require the published source SHA256 from an earlier excerpt; ' \
                                               'refuses changed source.' },
@@ -605,7 +607,10 @@ module Woods
                       'compact/outline evidence cannot be combined with include_source: false or sections'
               end
               if evidence == 'full' && (!query.nil? || !budget.nil?)
-                raise ArgumentError, 'query and budget apply only to compact/outline evidence'
+                raise ArgumentError,
+                      'query and budget apply only to compact/outline evidence. ' \
+                      'Add evidence: "compact" (or "outline") to use them, ' \
+                      'or drop them and page a full lookup with max_chars and page.'
               end
               if evidence != 'full' && (!page.nil? || !max_chars.nil? || !answer_id.nil?)
                 raise ArgumentError, 'page, max_chars and answer_id apply only to full evidence; ' \

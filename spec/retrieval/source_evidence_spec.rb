@@ -105,6 +105,49 @@ RSpec.describe Woods::Retrieval::SourceEvidence do
     expect(result.provenance[:physical_location]).to be_nil
   end
 
+  describe 'a concern that matches more of the query than the unit\'s own method' do
+    let(:concern_lines) do
+      %w[login captcha session token browser].map { |word| "  #   def #{word}_check; #{word}; end" }.join("\n")
+    end
+    let(:source) do
+      <<~SOURCE
+        class SessionsController
+        # │ Included from: Authentication                                        │
+          # module Authentication
+        #{concern_lines}
+          # end
+        # ─────────────────────────── End Authentication ───────────────────────────
+        def create
+          login(params[:captcha])
+        end
+        def destroy; reset_session; end
+        end
+      SOURCE
+    end
+    let(:data) { unit(source, metadata: { 'inlined_concerns' => ['Authentication'] }) }
+
+    it 'never spends the budget on the concern while the matching method is left out' do
+      (40..600).step(10) do |budget|
+        text = render(data, query: 'login captcha session token', budget: budget).text
+        next unless text.include?('module Authentication')
+
+        expect(text).to include("def create\n  login(params[:captcha])\nend"), "budget #{budget}"
+      end
+    end
+
+    it 'still includes the matching concern when the budget holds both' do
+      both = render(data, query: 'login captcha session token', budget: 600)
+
+      expect(both.text).to include('login(params[:captcha])').and include('#   def captcha_check; captcha; end')
+    end
+
+    it 'still selects a concern that is the only match' do
+      text = render(data, query: 'browser', budget: 600).text
+
+      expect(text).to include('#   def browser_check; browser; end')
+    end
+  end
+
   it 'finds a namespaced concern display block by the full name the header carries' do
     source = <<~SOURCE
       class Billing::Invoice

@@ -365,6 +365,7 @@ RSpec.describe Woods::Extractors::RakeTaskExtractor do
       units = described_class.new.extract_rake_file(path)
       expect(units.first.source_code).to include('# Rake task: cleanup')
       expect(units.first.source_code).to include('# Clean up data')
+      expect(units.first.source_code).to include('# Defined in lib/tasks/cleanup.rake, line 2; the whole file follows.')
       expect(units.first.source_code).to include('puts "cleaning"')
     end
 
