@@ -44,8 +44,9 @@ RSpec.describe 'Traversal structured responses' do
                                   max_edges: options.fetch(:max_edges, 10_000) }
             raw = reader.public_send("traverse_#{name}", arguments[:identifier], **traversal_options)
             if raw[:found] == false
-              raw[:message] =
-                "Identifier 'Absent' not found in the index. Use 'search' to find valid identifiers."
+              raw[:suggestions] = []
+              raw[:message] = "Identifier 'Absent' not found in the index, so no #{name} were traversed. " \
+                              "Use 'search' to find valid identifiers."
             end
             Woods::MCP::TraversalResponse.annotate(raw)
             Woods::MCP::DependentFamilies.annotate(raw, vias: reader.method(:recorded_vias)) if name == 'dependents'

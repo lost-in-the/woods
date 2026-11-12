@@ -248,6 +248,8 @@ module Woods
           lines = []
           lines << "Recent Changes (#{count} units)"
           lines << DIVIDER
+          notice = fetch_key(data, :notice)
+          lines << notice if notice
 
           results.each do |r|
             ident = fetch_key(r, :identifier)
@@ -302,7 +304,7 @@ module Woods
 
         def render_plain_traversal(label, data)
           root = fetch_key(data, :root)
-          found = data[:found] || data['found']
+          found = fetch_key(data, :found)
           nodes = fetch_key(data, :nodes, {})
           message = fetch_key(data, :message)
 

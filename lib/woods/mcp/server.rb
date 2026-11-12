@@ -616,11 +616,13 @@ module Woods
               end
               respond.call(renderer.render(:lookup, filtered), meta: lookup_meta)
             else
+              suggestions = reader.suggest_identifiers(identifier)
               respond_err.call(
-                "Unit not found: #{identifier}",
+                IdentifierSuggestions.append("Unit not found: #{identifier}#{" (type #{type})" if type}", suggestions),
                 code: :not_found,
                 identifier: identifier,
                 tool: 'lookup',
+                suggestions: suggestions,
                 hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.'
               )
             end
@@ -763,8 +765,13 @@ module Woods
                                                               max_edges: coerce_int.call(max_edges) || 10_000,
                                                               explain: explain || false)
               if walked[:found] == false
-                walked[:message] =
-                  "Identifier '#{identifier}' not found in the index. Use 'search' to find valid identifiers."
+                # Not an empty answer: nothing was traversed. Say so, and name
+                # the units the caller most likely meant.
+                walked[:suggestions] = reader.suggest_identifiers(identifier)
+                walked[:message] = IdentifierSuggestions.append(
+                  "Identifier '#{identifier}' not found in the index, so no #{name} were traversed. " \
+                  "Use 'search' to find valid identifiers.", walked[:suggestions]
+                )
               end
               TraversalResponse.annotate(walked)
               # Families and counts cover the whole walk, so they are taken
@@ -1064,10 +1071,17 @@ module Woods
             types = coerce.call(types)
             limit = coerce_int.call(limit)
             results = reader.recent_changes(limit: limit || 10, types: types)
-            respond.call(renderer.render(:recent_changes, {
-                                           result_count: results.size,
-                                           results: results
-                                         }))
+            payload = { result_count: results.size, results: results }
+            # Without Git facts the list is short or empty for a reason that
+            # has nothing to do with what changed; say so in the answer.
+            git = Woods::GitEnrichmentSummary.from_manifest(reader.manifest)
+            if %w[unavailable degraded].include?(git['state'])
+              payload[:notice] = "Git facts are #{git['state']} for this index" \
+                                 "#{" (#{git['reason']})" if git['reason']}: units without recorded history are " \
+                                 'not listed, so a short or empty list does not mean nothing changed. ' \
+                                 'woods_status reports index.git_enrichment.'
+            end
+            respond.call(renderer.render(:recent_changes, payload))
           end
         end
 
@@ -1430,8 +1444,12 @@ module Woods
             max_depth = coerce_int.call(depth) || 3
             entry_unit = Woods::FlowAssembler.model_event(entry_point)&.first || entry_point.split('#', 2).first
             unless reader.find_unit(entry_unit)
-              next respond_err.call('Flow entry unit not found; use search and lookup to select an indexed unit.',
-                                    code: :not_found, tool: 'trace_flow', entry_point: entry_point)
+              suggestions = reader.suggest_identifiers(entry_unit)
+              next respond_err.call(
+                IdentifierSuggestions.append('Flow entry unit not found; use search and lookup to select an indexed unit.',
+                                             suggestions),
+                code: :not_found, tool: 'trace_flow', entry_point: entry_point, suggestions: suggestions
+              )
             end
 
             # Prefer the precomputed flow JSON written by FlowPrecomputer during
@@ -2205,8 +2223,11 @@ module Woods
           rescue Woods::Diagrams::InvalidRequest => e
             respond_err.call(e.message, code: :invalid_params, tool: DiagramTool::NAME)
           rescue Woods::Diagrams::UnitNotFound => e
-            respond_err.call("#{e.message}; use search and lookup to select an indexed unit.",
-                             code: :not_found, tool: DiagramTool::NAME)
+            suggestions = reader.suggest_identifiers(arguments[:identifier])
+            respond_err.call(
+              IdentifierSuggestions.append("#{e.message}; use search and lookup to select an indexed unit.", suggestions),
+              code: :not_found, tool: DiagramTool::NAME, suggestions: suggestions
+            )
           rescue StandardError => e
             raise unless ToolContract.artifact_error?(e)
 

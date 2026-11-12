@@ -346,6 +346,8 @@ module Woods
           lines << ''
           lines << "#{count} recently modified unit#{'s' unless count == 1}."
           lines << ''
+          notice = fetch_key(data, :notice)
+          lines.push(notice, '') if notice
           lines << '| Identifier | Type | Last Modified | Author |'
           lines << '|-----------|------|---------------|--------|'
 
@@ -422,7 +424,7 @@ module Woods
 
         def render_traversal(label, data)
           root = fetch_key(data, :root)
-          found = data[:found] || data['found']
+          found = fetch_key(data, :found)
           nodes = fetch_key(data, :nodes, {})
           message = fetch_key(data, :message)
 

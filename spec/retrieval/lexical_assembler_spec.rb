@@ -47,4 +47,68 @@ RSpec.describe Woods::Retrieval::LexicalAssembler do
     expect(result.sources.map { |source| source[:identifier] }).to eq(%w[Gadget0 Gadget1 Gadget2])
     expect(result.sources.map { |source| source[:truncated] }).to all(be(false))
   end
+  describe 'runtime metadata evidence' do
+    def empty_effects
+      { 'columns_written' => [], 'jobs_enqueued' => [], 'services_called' => [] }
+    end
+
+    def runtime_candidate(metadata, source: "class Order\nend\n")
+      unit = { 'identifier' => 'Order', 'type' => 'model', 'file_path' => 'app/models/order.rb',
+               'source_code' => source, 'metadata' => metadata }
+      Woods::Retrieval::SearchExecutor::Candidate.new(identifier: 'Order', score: 1.0, source: :lexical,
+                                                      metadata: unit, matched_fields: ['runtime:receipt'])
+    end
+
+    let(:metadata) do
+      { 'callbacks' => [
+          { 'type' => 'before_save', 'filter' => 'autosave_associated_records_for_customer',
+            'origin' => 'framework', 'conditions' => {}, 'side_effects' => empty_effects },
+          { 'type' => 'after_commit', 'filter' => 'enqueue_receipt', 'origin' => 'app', 'conditions' => {},
+            'side_effects' => empty_effects.merge('jobs_enqueued' => ['ReceiptJob']) },
+          { 'type' => 'after_save', 'filter' => 'touch_parent', 'origin' => 'framework',
+            'side_effects' => empty_effects.merge('columns_written' => ['updated_at']) }
+        ],
+        'associations' => [{ 'name' => 'customer', 'type' => 'belongs_to', 'through' => nil, 'options' => {} }],
+        'scopes' => [],
+        'table_name' => 'orders' }
+    end
+
+    let(:context) { assemble([runtime_candidate(metadata)]).context }
+
+    it 'writes one line of JSON per entry, without empty values' do
+      expect(context).to include(%(  {"name":"customer","type":"belongs_to"}))
+      expect(context).to include('table_name: "orders"')
+      expect(context).not_to include('scopes')
+      expect(context).not_to include('"conditions"')
+    end
+
+    it 'leaves out framework callbacks that record no side effect, and says how many' do
+      expect(context).not_to include('autosave_associated_records_for_customer')
+      expect(context).to include('(1 framework callback with no recorded side effects omitted; lookup lists them)')
+    end
+
+    it 'keeps application callbacks and framework callbacks that record a side effect' do
+      expect(context).to include('"filter":"enqueue_receipt"').and include('"jobs_enqueued":["ReceiptJob"]')
+      expect(context).to include('"filter":"touch_parent"').and include('"columns_written":["updated_at"]')
+    end
+
+    it 'still names the callbacks when only framework ones were recorded' do
+      only_framework = { 'callbacks' => [metadata['callbacks'].first] }
+
+      expect(assemble([runtime_candidate(only_framework)]).context)
+        .to include("callbacks:\n  (1 framework callback with no recorded side effects omitted")
+    end
+
+    it 'leaves room for the source of a unit with many framework callbacks' do
+      noisy = { 'callbacks' => Array.new(40) { metadata['callbacks'].first } }
+      result = assemble([runtime_candidate(noisy, source: "def renew\n  charge!\nend\n")], budget: 300)
+
+      expect(result.context).to include('def renew')
+      expect(result.sources.first).to include(truncated: false)
+    end
+
+    it 'shows the source alone when no runtime field matched' do
+      expect(assemble([candidate('Widget', "widget\n")]).context).not_to include('Published runtime metadata')
+    end
+  end
 end
