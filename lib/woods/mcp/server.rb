@@ -556,6 +556,10 @@ module Woods
                 page: { type: 'integer',
                         description: 'Page of a full lookup too long for one answer (default 1). The answer says ' \
                                      'how many pages there are and which to ask for next.' },
+                answer_id: { type: 'string',
+                             description: 'With page 2 or later: the answer_id the previous page gave. The page ' \
+                                          'is refused if the unit has changed since, so pages of two versions ' \
+                                          'are never mixed.' },
                 max_chars: { type: 'integer',
                              description: 'Characters per page of a full lookup (default: ' \
                                           "#{LookupPages::DEFAULT_MAX_CHARS}, or #{LookupPages::ENV_NAME})." }
@@ -564,7 +568,7 @@ module Woods
               # accepted alias. The handler validates that one of the two
               # was provided.
             }
-          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil, page: nil, max_chars: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil, page: nil, max_chars: nil, answer_id: nil|
             identifier ||= name
             if identifier.nil? || identifier.empty?
               next respond_err.call(
@@ -584,8 +588,9 @@ module Woods
               if evidence == 'full' && (!query.nil? || !budget.nil?)
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
               end
-              if evidence != 'full' && (!page.nil? || !max_chars.nil?)
-                raise ArgumentError, 'page and max_chars apply only to full evidence; compact/outline take budget'
+              if evidence != 'full' && (!page.nil? || !max_chars.nil? || !answer_id.nil?)
+                raise ArgumentError, 'page, max_chars and answer_id apply only to full evidence; ' \
+                                     'compact/outline take budget'
               end
             rescue ArgumentError => e
               next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
@@ -638,6 +643,29 @@ module Woods
               # Short enough for one answer, and the first page was asked for.
               if page_number == 1 && (page_limit.nil? || text.length <= page_limit)
                 next respond.call(text, meta: lookup_meta)
+              end
+
+              # A later page belongs to the answer its first page came from.
+              # The unit is rendered afresh on every call and the index can
+              # be republished in between, so the caller names that answer
+              # and a different one is refused, never sliced.
+              if page_number > 1
+                current = LookupPages.answer_id(text, page_limit || text.length)
+                if answer_id.nil?
+                  next respond_err.call(
+                    "lookup page #{page_number} needs the answer_id the previous page gave, so pages of two " \
+                    'versions of the unit are never mixed. Start again from page 1 if you no longer have it.',
+                    code: :invalid_params, tool: 'lookup', argument: 'answer_id'
+                  )
+                end
+                unless answer_id == current
+                  next respond_err.call(
+                    "#{identifier} changed since the page that gave answer_id #{answer_id} (the index was " \
+                    'republished, or max_chars differs). The pages already read belong to the earlier ' \
+                    'answer; start again from page 1.',
+                    code: :stale_index, tool: 'lookup', argument: 'answer_id', answer_id: current
+                  )
+                end
               end
 
               selected = LookupPages.page(text, max_chars: page_limit || text.length, number: page_number)

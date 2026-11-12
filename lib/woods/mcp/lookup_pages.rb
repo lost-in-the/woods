@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require 'digest'
+
 module Woods
   module MCP
     # Pages of a full `lookup` answer.
@@ -11,6 +13,12 @@ module Woods
     # are the complete rendering, cut at line ends, and each page says how to
     # get the next.
     #
+    # Each call renders the unit afresh, and the index can be republished
+    # between two calls. A page therefore carries an `answer_id`: a digest of
+    # the whole rendering and the page size. A later page must name it, and
+    # is refused when the rendering it would be cut from is no longer that
+    # one; pages of two versions joined together are the answer of neither.
+    #
     # The limit is {DEFAULT_MAX_CHARS} unless the `WOODS_MCP_LOOKUP_MAX_CHARS`
     # environment variable sets another (0 turns paging off) or the call
     # passes `max_chars`.
@@ -19,7 +27,8 @@ module Woods
       ENV_NAME = 'WOODS_MCP_LOOKUP_MAX_CHARS'
 
       # One page of a rendering.
-      Page = Struct.new(:text, :number, :pages, :first_char, :last_char, :total_chars, keyword_init: true) do
+      Page = Struct.new(:text, :number, :pages, :first_char, :last_char, :total_chars, :answer_id,
+                        keyword_init: true) do
         # @return [Integer, nil] the page after this one
         def next_number
           number < pages ? number + 1 : nil
@@ -28,7 +37,7 @@ module Woods
         # @return [Hash] machine-readable position, for response metadata
         def to_h
           { page: number, pages: pages, first_char: first_char, last_char: last_char, total_chars: total_chars,
-            next_page: next_number }
+            next_page: next_number, answer_id: answer_id }
         end
       end
 
@@ -44,6 +53,17 @@ module Woods
         return DEFAULT_MAX_CHARS unless configured.match?(/\A\d+\z/)
 
         configured.to_i.zero? ? nil : configured.to_i
+      end
+
+      # Names one rendering cut at one page size. Sixteen hex characters of
+      # its SHA-256: enough to tell two renderings of a unit apart, short
+      # enough to copy into the next call.
+      #
+      # @param text [String] the complete rendering
+      # @param max_chars [Integer]
+      # @return [String]
+      def answer_id(text, max_chars)
+        Digest::SHA256.hexdigest("#{max_chars}\n#{text}")[0, 16]
       end
 
       # Cut +text+ into pieces of at most +max_chars+, at line ends where a
@@ -76,7 +96,8 @@ module Woods
         before = pieces.first(number - 1).sum(&:length)
         piece = pieces[number - 1]
         Page.new(text: piece, number: number, pages: pieces.size, first_char: before + 1,
-                 last_char: before + piece.length, total_chars: text.length)
+                 last_char: before + piece.length, total_chars: text.length,
+                 answer_id: answer_id(text, max_chars))
       end
 
       # The page with a line above and below it saying where it sits and how
@@ -88,7 +109,8 @@ module Woods
         position = "lookup page #{page.number} of #{page.pages}: characters #{page.first_char}-#{page.last_char} " \
                    "of #{page.total_chars}"
         continue = if page.next_number
-                     "Call lookup again with the same arguments and page: #{page.next_number} for the next part."
+                     "Call lookup again with the same arguments, page: #{page.next_number} and " \
+                       "answer_id: \"#{page.answer_id}\" for the next part."
                    else
                      'This is the last page.'
                    end

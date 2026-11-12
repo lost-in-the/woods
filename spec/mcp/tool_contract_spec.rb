@@ -188,6 +188,7 @@ RSpec.describe 'Index MCP tool contracts' do
                              'include_source' => boolean_contract,
                              'sections' => array_contract(1_000, 10_000),
                              'page' => integer_contract(1, 100_000),
+                             'answer_id' => string_contract(nil, 10_000),
                              'max_chars' => integer_contract(1_000, 2_000_000)
                            }),
       'notion_sync' => contract(:notion, {}, exact_data({
@@ -1459,6 +1460,7 @@ RSpec.describe 'Index MCP tool contracts' do
             # The wire accepts any page in range; the handler then refuses one
             # the unit does not have, which is not a schema rejection.
             if tool_name == 'lookup' && name == 'page' && value > 1
+              # ...here for want of the answer_id a later page must name.
               expect(result.dig('_meta', 'error_code')).to eq('invalid_params'), label
               next
             end

@@ -94,6 +94,16 @@ RSpec.describe Woods::MCP::LookupPages do
       response.content.first[:text]
     end
 
+    # A page, asked for as its predecessor's closing line says to: with the
+    # answer_id the first page gave.
+    def page_of(number, format = :markdown, **arguments)
+      return lookup(format, **arguments) if number == 1
+
+      answer = Woods::MCP::LookupPages.answer_id(text(lookup(format, max_chars: 2_000_000)),
+                                                 arguments.fetch(:max_chars))
+      lookup(format, **arguments, page: number, answer_id: answer)
+    end
+
     # The page's own characters: what lies between the position lines, cut
     # to the length the page reports (a page that ends inside a line gets a
     # line break before the closing line).
@@ -113,18 +123,19 @@ RSpec.describe Woods::MCP::LookupPages do
       whole = text(lookup(max_chars: 2_000_000))
       first = lookup(max_chars: 3000)
       pages = first.meta.dig(:lookup_page, :pages)
-      bodies = (1..pages).map { |number| body(lookup(max_chars: 3000, page: number)) }
+      bodies = (1..pages).map { |number| body(page_of(number, max_chars: 3000)) }
 
       expect(pages).to be > 3
       expect(first.error?).to be(false)
       expect(text(first)).to start_with("[lookup page 1 of #{pages}: characters 1-")
-      expect(text(first)).to include('Call lookup again with the same arguments and page: 2 for the next part.')
+      expect(text(first)).to include('Call lookup again with the same arguments, page: 2 and ' \
+                                     "answer_id: \"#{first.meta.dig(:lookup_page, :answer_id)}\" for the next part.")
       expect(bodies.join).to eq(whole)
     end
 
     it 'says the last page is the last' do
       pages = lookup(max_chars: 3000).meta.dig(:lookup_page, :pages)
-      last = lookup(max_chars: 3000, page: pages)
+      last = page_of(pages, max_chars: 3000)
 
       expect(text(last)).to include('This is the last page.')
       expect(last.meta[:lookup_page]).to include(page: pages, next_page: nil)
@@ -132,7 +143,7 @@ RSpec.describe Woods::MCP::LookupPages do
 
     it 'refuses a page that does not exist, naming how many there are' do
       pages = lookup(max_chars: 3000).meta.dig(:lookup_page, :pages)
-      response = lookup(max_chars: 3000, page: pages + 1)
+      response = page_of(pages + 1, max_chars: 3000)
 
       expect(response.error?).to be(true)
       expect(text(response)).to eq("lookup of Post has #{pages} pages; page #{pages + 1} does not exist.")
@@ -140,10 +151,68 @@ RSpec.describe Woods::MCP::LookupPages do
     end
 
     it 'refuses page 2 of a unit that fits in one answer' do
-      response = lookup(max_chars: 2_000_000, page: 2)
+      response = page_of(2, max_chars: 2_000_000)
 
       expect(response.error?).to be(true)
       expect(text(response)).to eq('lookup of Post has 1 page; page 2 does not exist.')
+    end
+
+    describe 'when the unit changes between two pages' do
+      def publish_changed_unit
+        path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+        unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        # Metadata only, and ahead of the first page boundary: the source,
+        # and so its SHA-256, is the same.
+        unit['metadata'] = unit.fetch('metadata').merge('table_name' => 'articles_renamed_since_page_one')
+        File.write(path, JSON.generate(unit))
+      end
+
+      def request(server, arguments)
+        message = { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'lookup', arguments: arguments } }
+        JSON.parse(server.handle_json(JSON.generate(message))).fetch('result')
+      end
+
+      it 'refuses the next page over the wire, and says to start again' do
+        server = Woods::MCP::Server.build(index_dir: index_dir, response_format: :markdown, warmup: false)
+        first = request(server, 'identifier' => 'Post', 'max_chars' => 3000)
+        answer = first.dig('_meta', 'lookup_page', 'answer_id')
+        publish_changed_unit
+        server.instance_variable_get(:@tools).fetch('reload').call(server_context: {})
+
+        second = request(server, 'identifier' => 'Post', 'max_chars' => 3000, 'page' => 2, 'answer_id' => answer)
+
+        expect(first['isError']).to be(false)
+        expect(second['isError']).to be(true)
+        expect(second.dig('_meta', 'error_code')).to eq('stale_index')
+        expect(second.dig('content', 0, 'text'))
+          .to eq("Post changed since the page that gave answer_id #{answer} (the index was republished, or " \
+                 'max_chars differs). The pages already read belong to the earlier answer; start again from page 1.')
+        expect(second.dig('_meta', 'answer_id')).not_to eq(answer)
+      end
+
+      it 'serves the next page when nothing changed' do
+        first = lookup(max_chars: 3000)
+        second = lookup(max_chars: 3000, page: 2, answer_id: first.meta.dig(:lookup_page, :answer_id))
+
+        expect(second.error?).to be(false)
+        expect(second.meta[:lookup_page]).to include(page: 2, answer_id: first.meta.dig(:lookup_page, :answer_id))
+      end
+
+      it 'refuses a later page cut at another page size' do
+        first = lookup(max_chars: 3000)
+        response = lookup(max_chars: 5000, page: 2, answer_id: first.meta.dig(:lookup_page, :answer_id))
+
+        expect(response.error?).to be(true)
+        expect(response.meta).to include(error_code: :stale_index)
+      end
+
+      it 'refuses a later page that names no answer' do
+        response = lookup(max_chars: 3000, page: 2)
+
+        expect(response.error?).to be(true)
+        expect(response.meta).to include(error_code: :invalid_params, argument: 'answer_id')
+        expect(text(response)).to include('needs the answer_id the previous page gave')
+      end
     end
 
     it 'pages by default at the configured limit' do
@@ -169,14 +238,14 @@ RSpec.describe Woods::MCP::LookupPages do
       response = lookup(evidence: 'compact', page: 2)
 
       expect(response.error?).to be(true)
-      expect(text(response)).to include('page and max_chars apply only to full evidence')
+      expect(text(response)).to include('page, max_chars and answer_id apply only to full evidence')
     end
 
     %i[json plain claude].each do |format|
       it "pages the #{format} rendering without losing any of it" do
         whole = text(lookup(format, max_chars: 2_000_000))
         pages = lookup(format, max_chars: 3000).meta.dig(:lookup_page, :pages)
-        bodies = (1..pages).map { |number| body(lookup(format, max_chars: 3000, page: number)) }
+        bodies = (1..pages).map { |number| body(page_of(number, format, max_chars: 3000)) }
 
         expect(bodies.join).to eq(whole)
       end
