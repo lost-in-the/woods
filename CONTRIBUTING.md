@@ -106,7 +106,27 @@ bundle exec ruby script/parallel-rspec
 
 # Style
 bin/rubocop
+
+# Line length of the Markdown, YAML and shell lines this branch adds
+script/check-line-length
 ```
+
+### Line length
+
+Lines stay within 120 columns, so a pull-request diff reads without scrolling.
+
+- **Ruby:** RuboCop's `Layout/LineLength` enforces it everywhere.
+  Split a long string with a trailing backslash between adjacent literals, break a method chain before the dot,
+  and put keyword arguments one per line once a call no longer fits.
+- **Markdown:** write prose one sentence per line.
+  An edit then changes one sentence in the diff, and the rendered page is the same.
+  Tables, headings, code blocks and lines that are long only because of a link are exempt.
+- **Changelog entry files:** start with `- ` and indent each continuation line by two spaces.
+- **YAML and shell:** 120 columns. JSON has no limit.
+
+`script/check-line-length` reads only the lines a branch adds, so existing long lines do not fail it.
+Do not reflow lines you are not otherwise changing.
+A commit that only reflows a file is listed in `.git-blame-ignore-revs` once it is on `main`.
 
 Before requesting review, run the specs your change reaches and the style check, and say in the PR what you ran. Hosted CI runs the whole suite on every draft PR; run it yourself (`script/parallel-rspec`, about 4 minutes) when a cross-cutting change cannot be judged otherwise. `script/ci-local` ([Before you push](#before-you-push)) is an optional preflight of the hosted gates, not a requirement for every push.
 

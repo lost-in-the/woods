@@ -1,0 +1,28 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Fails when a line this branch adds to a Markdown, YAML or shell file is
+# wider than 120 columns. Existing lines are not checked.
+#
+#   script/check-line-length [BASE]    # default: origin/main
+#
+# Exempt: a line that is long only because of a URL or link, and in Markdown a
+# table row, a heading, a code block and a generated release-state fence.
+# Wrap Markdown prose one sentence per line.
+require 'open3'
+require_relative 'check_line_length'
+
+base = ARGV.fetch(0, 'origin/main')
+fork_point, status = Open3.capture2('git', 'merge-base', base, 'HEAD')
+abort "check-line-length: no merge base with #{base}; fetch it first" unless status.success?
+
+# Against the working tree, so an uncommitted line is caught before it is committed.
+diff, status = Open3.capture2('git', 'diff', '--unified=0', '--no-color', '--diff-filter=AM', fork_point.strip)
+abort "check-line-length: git diff against #{base} failed" unless status.success?
+
+violations = LineLengthCheck.violations(LineLengthCheck.added_lines(diff))
+exit if violations.empty?
+
+puts violations
+abort "#{violations.size} added line(s) over #{LineLengthCheck::LIMIT} columns. " \
+      'Wrap them; in Markdown, one sentence per line.'

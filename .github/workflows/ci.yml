@@ -422,6 +422,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 2 # the line-length check diffs against the merge commit's first parent
       - name: Set up Ruby
         uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
         with:
@@ -440,6 +442,12 @@ jobs:
         run: bundle exec rake release_v2:verify_surface_inventory
       - name: Run linter
         run: bundle exec rubocop
+      # Ruby's width is RuboCop's. Markdown, YAML and shell are checked on the
+      # lines a pull request adds, so no existing file is reflowed to pass.
+      - name: Check line length of added lines
+        if: github.event_name == 'pull_request'
+        # The checkout is the pull request's merge commit; its first parent is the base.
+        run: bundle exec ruby script/check-line-length HEAD^1
       # Agents choose which specs to run from the self-map (#926); hold its
       # edges to known truths so a mapping regression cannot narrow them.
       - name: Check self-map accuracy
