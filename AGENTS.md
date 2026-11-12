@@ -32,11 +32,17 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) for shared policy and [CLAUDE.md](CLAUDE
 
 ```bash
 bin/setup
-bin/rspec spec/path/to/spec.rb
-bin/rake spec
+bin/rspec spec/path/to/spec.rb:42   # the example or file a change reaches: the default local run
 bin/rubocop
-script/ci-local   # before every push; see CONTRIBUTING.md "Before you push"
+script/parallel-rspec               # whole unit suite in four processes (about 4 minutes); cross-cutting changes
+script/ci-local                     # optional preflight of the hosted gates; see CONTRIBUTING.md "Before you push"
 ```
+
+Hosted CI is the gate, and it runs on every draft PR. Locally, run the specs a
+change reaches and lint what changed; run the whole suite only when a
+cross-cutting change cannot be judged otherwise. Say which you ran and which
+you left to CI. `bin/rake spec` runs the same suite in one process (about 15
+minutes).
 
 ## Map Woods itself before broad investigation
 
@@ -152,7 +158,7 @@ Summarize and link from secondary pages; do not copy full setup blocks into FAQ 
 
 - [ ] The change is limited to the requested behavior.
 - [ ] Relevant tests failed before the fix and pass after it.
-- [ ] `bin/rake spec` and `bin/rubocop` pass, or the handoff explains why not.
+- [ ] The specs the change reaches and `bin/rubocop` pass (the whole unit suite for a cross-cutting change), or the handoff explains why not.
 - [ ] Booted Rails/live backends were run when their behavior changed.
 - [ ] Generated public-surface evidence matches executable behavior.
 - [ ] Canonical docs, plugin skills, and changelog are synchronized.

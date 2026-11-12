@@ -10,7 +10,8 @@ Ruby gem that extracts structured data from Rails applications for AI-assisted d
 # Bundler 4 `bundle exec rake` / `bundle exec rspec` fail with "command not
 # found". Bundler 4 no longer exposes gem binstubs. The binstubs work on both.
 bundle install
-bin/rake spec                                    # Full test suite
+bin/rake spec                                    # Full test suite, one process (about 15 minutes)
+script/parallel-rspec                            # Same suite in four processes, as CI runs it (about 4 minutes)
 bin/rake spec SPEC=spec/extractors/model_extractor_spec.rb  # Single file
 bin/rubocop -a                                   # Lint + autofix
 bin/rake woods:affected_specs                    # Specs this branch's changes reach, from the self-map (#926)
@@ -267,7 +268,7 @@ A fix covers the rule behind a bug, not only the reported case:
 
 ### Running specs: narrowest first
 
-Full files and the full suite are slow here (the suite takes over 15 minutes, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
+Full files and the full suite are slow here (the suite takes 15 minutes in one process and about 4 through `script/parallel-rspec`, one booted file can take 5 or more). Spend that time only when a narrower run cannot answer the question.
 
 - After a fix, rerun the exact failing example (`bin/rspec spec/foo_spec.rb:132`), then only the examples the change can reach. Assume the failure is the only impact until a check shows otherwise.
 - Find what a change can reach with Woods itself: the static self-map's `dependents` for the changed constant (see "Woods on itself" above), plus a search for the changed method names.
@@ -280,7 +281,7 @@ Full files and the full suite are slow here (the suite takes over 15 minutes, on
 # Gem unit specs (run from gem root)
 bin/rspec spec/extractors/model_extractor_spec.rb:42   # One example: the default local run
 bin/rspec spec/extractors/model_extractor_spec.rb      # One file
-bin/rake spec                                          # Full suite: hosted CI, rarely local
+script/parallel-rspec                                  # Full suite: hosted CI, rarely local
 
 # Lint
 bin/rubocop -a
