@@ -45,9 +45,6 @@ module Woods
 
       STATES = %i[running degraded stopped].freeze
 
-      # States only a reader derives; see {#report}.
-      DERIVED_STATES = %i[stale dead unverified].freeze
-
       # A status record older than this is not believed, however healthy it
       # claims to be. The daemon heartbeats every five minutes, including
       # while idle, so this allows two missed heartbeats.

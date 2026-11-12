@@ -193,19 +193,6 @@ module Woods
         broadcasts.uniq
       end
 
-      # Count non-blank, non-comment lines.
-      #
-      # @param source [String]
-      # @return [Integer]
-      def count_loc(source)
-        return 0 if source.empty?
-
-        source.each_line.count do |line|
-          stripped = line.strip
-          !stripped.empty? && !stripped.start_with?('#')
-        end
-      end
-
       # Log a channel extraction error.
       #
       # @param name [String] Channel class name

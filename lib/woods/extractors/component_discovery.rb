@@ -163,16 +163,6 @@ module Woods
         configured.nil? ? DEFAULT_COMPONENT_PATHS : Array(configured)
       end
 
-      # Whether a changed path can define or rename a component: a Ruby file
-      # under one of the component directories.
-      #
-      # @param path [String] absolute path
-      # @return [Boolean]
-      def self.component_source_path?(path)
-        path.end_with?('.rb') &&
-          component_directories.any? { |directory| path.start_with?("#{directory}#{File::SEPARATOR}") }
-      end
-
       private
 
       # @param path [String] absolute path to a Ruby file

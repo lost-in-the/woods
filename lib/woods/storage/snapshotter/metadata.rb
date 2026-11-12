@@ -138,13 +138,6 @@ module Woods
         class << self
           private
 
-          def dump_file_path(artifact)
-            latest = artifact.latest_dump_path
-            return nil unless latest
-
-            latest.join(FILENAME)
-          end
-
           # @param path [Pathname] the dump being read
           # @param reason [String] what was wrong with it
           # @raise [Woods::MCP::UnsupportedArtifact] always
