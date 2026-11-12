@@ -557,6 +557,66 @@ RSpec.describe Woods::Extractor do
       expect(index).to eq(JSON.parse(JSON.generate(extractor.send(:type_index_entries, [unit]))))
       expect(index.first['type']).to eq('route_file')
     end
+
+    describe 'across rebuilds by one extractor' do
+      let(:type_dir) { File.join(tmpdir, 'output', 'models').tap { |dir| FileUtils.mkdir_p(dir) } }
+
+      def write_unit(name, source)
+        File.write(File.join(type_dir, "#{name}.json"),
+                   JSON.generate(identifier: name, type: 'model', file_path: "app/models/#{name.downcase}.rb",
+                                 namespace: nil, source_code: source, metadata: {}, chunks: []))
+      end
+
+      def rebuilt_index
+        extractor.send(:regenerate_type_index, :models)
+        JSON.parse(File.read(File.join(type_dir, '_index.json'))).to_h do |entry|
+          [entry['identifier'], entry['estimated_tokens']]
+        end
+      end
+
+      before do
+        write_unit('User', 'x' * 40)
+        write_unit('Post', 'y' * 80)
+      end
+
+      it 'derives an entry once for a file whose bytes did not change' do
+        allow(extractor).to receive(:estimated_tokens_from).and_call_original
+
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+        expect(extractor).to have_received(:estimated_tokens_from).twice
+      end
+
+      it 'picks up changed content of the same length' do
+        path = File.join(type_dir, 'User.json')
+        File.write(path, File.read(path).sub('"namespace":null', '"namespace":"Crm"'))
+        rebuilt_index
+        File.write(path, File.read(path).sub('"Crm"', '"Ops"'))
+
+        extractor.send(:regenerate_type_index, :models)
+        index = JSON.parse(File.read(File.join(type_dir, '_index.json')))
+
+        expect(index.find { |entry| entry['identifier'] == 'User' }['namespace']).to eq('Ops')
+      end
+
+      it 'drops a unit whose file is gone and adds a new one' do
+        rebuilt_index
+        FileUtils.rm(File.join(type_dir, 'Post.json'))
+        write_unit('Tag', 'z' * 8)
+
+        expect(rebuilt_index).to eq('Tag' => 2, 'User' => 10)
+      end
+
+      it 'forgets a remembered file that became unreadable, and recovers' do
+        rebuilt_index
+        File.write(File.join(type_dir, 'User.json'), '{"identifier":')
+
+        expect { extractor.send(:regenerate_type_index, :models) }.to raise_error(JSON::ParserError)
+
+        write_unit('User', 'x' * 40)
+        expect(rebuilt_index).to eq('Post' => 20, 'User' => 10)
+      end
+    end
   end
 
   # ── extract_all_concurrent — warning survival ──────────────────────

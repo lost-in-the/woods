@@ -1088,6 +1088,7 @@ module Woods
       @results = {}
       @timing_collector = Extraction::ExtractorTimings.new
       @dependents_dirty = Set.new
+      @published_table_units = nil
       @incremental_written = {}
       @retained_units = Set.new
       @changed_source_paths = nil
@@ -3486,23 +3487,25 @@ module Woods
       # rewriting one invalidates whatever was read before.
       @persisted_index_stats = nil
 
-      # Scan existing unit JSON files (exclude _index.json)
+      # Scan existing unit JSON files (exclude _index.json). The directory
+      # stays the authority on which units exist; only the entry derived from
+      # a file's bytes is remembered. One edit leaves almost every file of
+      # its type untouched, and a resident extractor (woods:watch) rebuilds
+      # the same index on every run.
+      remembered = (@type_index_entries ||= {})[type_dir.to_s] || {}
+      current = {}
       entries = type_dir.children.sort.filter_map do |file|
         next unless file.extname == '.json' && file.basename.to_s != '_index.json'
 
-        data = JSON.parse(AtomicFile.read(file))
-        {
-          identifier: data['identifier'],
-          type: data['type'],
-          file_path: data['file_path'],
-          namespace: data['namespace'],
-          # Unit JSON has no estimated_tokens field (ExtractedUnit#to_h
-          # doesn't emit one) — recompute it, or every unit of a type
-          # touched by an incremental run would index as null.
-          estimated_tokens: estimated_tokens_from(data),
-          chunk_count: (data['chunks'] || []).size
-        }
+        bytes = AtomicFile.read(file)
+        digest = Digest::SHA256.digest(bytes)
+        name = file.basename.to_s
+        digest_was, entry = remembered[name]
+        entry = type_index_entry(JSON.parse(bytes)) unless digest_was == digest
+        current[name] = [digest, entry]
+        entry
       end
+      @type_index_entries[type_dir.to_s] = current
       index = entries.sort_by { |entry| entry[:identifier].to_s }
 
       AtomicFile.write(
@@ -3510,6 +3513,22 @@ module Woods
         json_serialize(index),
         durable: payload_writes_durable?
       )
+    end
+
+    # @param data [Hash] parsed unit JSON (string keys)
+    # @return [Hash] the unit's `_index.json` entry; frozen, shared between runs
+    def type_index_entry(data)
+      {
+        identifier: data['identifier'],
+        type: data['type'],
+        file_path: data['file_path'],
+        namespace: data['namespace'],
+        # Unit JSON has no estimated_tokens field (ExtractedUnit#to_h
+        # doesn't emit one) — recompute it, or every unit of a type
+        # touched by an incremental run would index as null.
+        estimated_tokens: estimated_tokens_from(data),
+        chunk_count: (data['chunks'] || []).size
+      }.freeze
     end
 
     # Token estimate for a unit parsed back from JSON, mirroring
@@ -4166,6 +4185,9 @@ module Woods
       # run drops its flow scope and reassembles every touched controller.
       @flow_scope = nil if keys.include?(:routes) || helper_keys.include?(:controllers)
       prime_table_schema_cache(change_set) if keys.include?(:database_tables)
+      # The replacements below rewrite the table units; nothing may read the
+      # copy taken before them afterwards.
+      @published_table_units = nil
 
       touched = keys.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
@@ -4238,7 +4260,17 @@ module Woods
 
     # @return [Array<Hash>, nil] the published table units, string-keyed; nil
     #   when there are none or one is unreadable
+    #
+    # Read once per whole-app re-run: the ownership comparison and the schema
+    # cache both want every table unit, before any of them is replaced.
     def published_table_units
+      return @published_table_units.first if @published_table_units
+
+      @published_table_units = [read_published_table_units]
+      @published_table_units.first
+    end
+
+    def read_published_table_units
       directory = payload_dir.join(TYPE_TO_EXTRACTOR_KEY.fetch(:database_table).to_s)
       return nil unless directory.directory?
 
