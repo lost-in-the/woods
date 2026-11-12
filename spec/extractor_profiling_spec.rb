@@ -116,8 +116,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(logged.grep(/\[profile total\] full in/).size).to eq(1)
       expect(profiled_phases).to eq(
-        ['source capture', 'payload seed', 'eager load', 'extraction', 'owner fallback', 'deduplication',
-         'package annotation',
+        ['source capture', 'payload seed', 'eager load', 'component load', 'extraction', 'owner fallback',
+         'deduplication', 'package annotation',
          'container annotation', 'source size',
          'source references', 'graph rebuild', 'doc references', 'dependents', 'git enrichment', 'graph analysis',
          'path normalization', 'reference projection',
@@ -133,7 +133,8 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
 
       expect(logged.grep(/\[profile total\] incremental in/).size).to eq(1)
       expect(profiled_phases).to eq(
-        ['source capture', 'payload seed', 'previous graph load', 'eager load', 'blast radius', 'flow radius',
+        ['source capture', 'payload seed', 'previous graph load', 'eager load', 'component load', 'blast radius',
+         'flow radius',
          're-extraction', 'reconciliation', 'source references', 'doc references', 'git enrichment',
          'unit finalization', 'type index',
          'graph write', 'skipped files', 'commit table', 'graph analysis', 'flows', 'manifest and summary',

@@ -190,6 +190,41 @@ RSpec.describe Woods::Extractors::ComponentDiscovery do
     end
   end
 
+  describe '.load_component_files' do
+    # The orchestrator runs this before anything reads the shared concern
+    # classification (#1040), so it has to work without a component extractor.
+    it 'walks the configured directories without an extractor' do
+      path = write('app/views/ui/decorated.rb')
+
+      expect_any_instance_of(described_class::Walker).to receive(:constantize_component_file).with(path)
+
+      described_class.load_component_files
+    end
+
+    # The orchestrator now runs the walk for every application, with or
+    # without a component base class. What keeps that safe for an app with
+    # no components: a directory no autoload path owns is never loaded.
+    context 'when no autoload path owns app/views' do
+      let(:autoload_paths) { [File.join(root, 'app', 'components')] }
+
+      it 'loads no file from it' do
+        write('app/views/ui/decorated.rb', "raise 'loaded a file no autoload root owns'\n")
+
+        expect { described_class.load_component_files }.not_to raise_error
+        expect(debug_messages.join).to include('their directory is not on an autoload path')
+      end
+    end
+
+    it 'walks nothing when the configured list is empty' do
+      Woods.configuration.component_paths = []
+      write('app/views/ui/decorated.rb')
+
+      expect_any_instance_of(described_class::Walker).not_to receive(:constantize_component_file)
+
+      described_class.load_component_files
+    end
+  end
+
   describe '#component_paths' do
     it 'defaults to the component directories Rails apps actually use' do
       Woods.configuration.component_paths = nil
