@@ -154,6 +154,81 @@ RSpec.describe 'Published compact evidence tools' do
     end
   end
 
+  # The rule: a compact or outline lookup states a selected span once. The text
+  # names its kind, lexical owner, name and published lines; structured data
+  # keeps only what the text cannot state (byte offsets, a receiver, a physical
+  # location) under the name that joins the two.
+  describe 'lookup evidence states each selected span once' do
+    def lookup_evidence(format, **args)
+      server = Woods::MCP::Server.build(index_dir: index_dir, warmup: false, response_format: format)
+      raw = server.handle_json(JSON.generate(jsonrpc: '2.0', id: 1, method: 'tools/call',
+                                             params: { name: 'lookup', arguments: { identifier: 'Invoice', **args } }))
+      JSON.parse(raw, symbolize_names: true).fetch(:result)
+    end
+
+    def sent_chars(result)
+      result[:content].sum { |part| part[:text].length } + JSON.generate(result[:structuredContent]).length
+    end
+
+    %i[markdown json].each do |format|
+      %w[outline compact].each do |mode|
+        it "keeps span facts the text states out of #{mode} structured data (#{format})" do
+          result = lookup_evidence(format, evidence: mode, budget: 2000)
+          text = result[:content].first[:text]
+          evidence = result[:structuredContent][:data][:evidence]
+          spans = evidence[:spans]
+
+          expect(spans.size).to be > 5
+          spans.each do |span|
+            expect(span.keys - %i[name start_byte end_byte receiver physical_location]).to be_empty
+            expect(span).not_to have_key(:receiver)
+            expect(text).to match(/^instance_method Invoice #{span[:name]}; published lines \d+-\d+$/)
+            expect(source.byteslice(span[:start_byte]...span[:end_byte])).to start_with("def #{span[:name]}")
+          end
+          expect(result[:structuredContent][:text]).to eq(text)
+        end
+
+        it "keeps unit-level provenance in #{mode} structured data (#{format})" do
+          evidence = lookup_evidence(format, evidence: mode, budget: 2000)[:structuredContent][:data][:evidence]
+
+          expect(evidence).to include(
+            mode: mode, coordinate_system: 'published_unit', owner: { identifier: 'Invoice', type: 'model' },
+            source_sha256: Digest::SHA256.hexdigest(source), generation_status: 'unavailable',
+            source_path: 'app/models/invoice.rb', source_complete: false
+          )
+          expect(evidence[:omitted_spans]).to eq(41 - evidence[:spans].size)
+          expect(evidence[:full_evidence]).to include(tool: 'lookup', evidence: 'full')
+        end
+      end
+
+      it "sends a smaller outline than the full per-span records did (#{format})" do
+        result = lookup_evidence(format, evidence: 'outline', budget: 2000)
+        spans = result[:structuredContent][:data][:evidence][:spans]
+
+        expect(spans.size).to eq(41)
+        expect(JSON.generate(spans).length).to be < result[:content].first[:text].length
+        expect(sent_chars(result)).to be < 9_500
+      end
+    end
+
+    it 'keeps a receiver, which the text does not state' do
+      publish('Invoice', 'model', "class Invoice
+def Other.build; end
+end\n")
+      spans = lookup_evidence(:json, evidence: 'outline')[:structuredContent][:data][:evidence][:spans]
+
+      expect(spans).to eq([{ name: 'build', start_byte: 14, end_byte: 34, receiver: 'Other' }])
+    end
+
+    it 'leaves retrieval evidence records complete' do
+      result = call_tool('codebase_retrieve', query: 'refund payment', evidence: 'compact', budget: 450)
+      span = result[:structuredContent][:data][:sources].first[:evidence][:spans].first
+
+      expect(span).to include(kind: 'instance_method', name: 'refund', lexical_owner: 'Invoice', start_line: 42)
+      expect(span[:sha256]).to eq(Digest::SHA256.hexdigest("def refund(payment)\n payment.reverse!\nend"))
+    end
+  end
+
   it 'advertises the additive controls while keeping omitted and explicit full retrieval identical' do
     omitted = call_tool('codebase_retrieve', query: 'refund', budget: 400)
     explicit = call_tool('codebase_retrieve', query: 'refund', budget: 400, evidence: 'full')

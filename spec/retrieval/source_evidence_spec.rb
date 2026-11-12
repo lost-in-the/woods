@@ -158,4 +158,20 @@ RSpec.describe Woods::Retrieval::SourceEvidence do
     expect(result.text).to include(source)
     expect(result.provenance[:spans].first[:kind]).to eq('unparsed_source')
   end
+  it 'reduces span records for a response that carries the text, keeping what the text cannot state' do
+    location = { file_path: 'app/models/a.rb', start_line: 3 }
+    full = { mode: 'outline', source_sha256: 'abc', omitted_spans: 2,
+             spans: [{ kind: 'instance_method', name: 'a', lexical_owner: 'A', receiver: nil, start_byte: 1,
+                       end_byte: 9, start_line: 1, end_line: 2, sha256: 'x', physical_location: location },
+                     { kind: 'singleton_method', name: 'b', lexical_owner: 'A', receiver: 'B', start_byte: 10,
+                       end_byte: 20, start_line: 3, end_line: 4, sha256: 'y' }] }
+
+    reduced = described_class.beside_text(full)
+
+    expect(reduced).to eq(mode: 'outline', source_sha256: 'abc', omitted_spans: 2, spans: [
+                            { name: 'a', start_byte: 1, end_byte: 9, physical_location: location },
+                            { name: 'b', start_byte: 10, end_byte: 20, receiver: 'B' }
+                          ])
+    expect(full[:spans].first).to include(kind: 'instance_method', sha256: 'x')
+  end
 end
