@@ -32,6 +32,7 @@ require_relative 'hydration'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
+require_relative 'lookup_pages'
 require_relative 'protocol_policy'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
@@ -528,12 +529,15 @@ module Woods
 
         def define_lookup_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
+          coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'lookup',
             description: 'Look up a code unit by its exact identifier. Returns full source code, metadata, ' \
                          'dependencies, and dependents. Use include_source: false to omit source_code. ' \
                          'Use sections to select specific keys (type, identifier, file_path, namespace are always included). ' \
-                         '`name` is accepted as an alias for `identifier` for discoverability.',
+                         '`name` is accepted as an alias for `identifier` for discoverability. ' \
+                         'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
+                         'page says which `page` to ask for next.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
@@ -548,13 +552,19 @@ module Woods
                 sections: {
                   type: 'array', items: { type: 'string' },
                   description: 'Select specific keys to return (e.g. ["metadata", "dependencies"]). Always includes type, identifier, file_path, namespace.'
-                }
+                },
+                page: { type: 'integer',
+                        description: 'Page of a full lookup too long for one answer (default 1). The answer says ' \
+                                     'how many pages there are and which to ask for next.' },
+                max_chars: { type: 'integer',
+                             description: 'Characters per page of a full lookup (default: ' \
+                                          "#{LookupPages::DEFAULT_MAX_CHARS}, or #{LookupPages::ENV_NAME})." }
               }
               # NOTE: 'identifier' is not listed as required — `name` is an
               # accepted alias. The handler validates that one of the two
               # was provided.
             }
-          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil|
+          ) do |server_context:, identifier: nil, name: nil, include_source: nil, sections: nil, type: nil, evidence: 'full', query: nil, budget: nil, source_sha256: nil, page: nil, max_chars: nil|
             identifier ||= name
             if identifier.nil? || identifier.empty?
               next respond_err.call(
@@ -573,6 +583,9 @@ module Woods
               end
               if evidence == 'full' && (!query.nil? || !budget.nil?)
                 raise ArgumentError, 'query and budget apply only to compact/outline evidence'
+              end
+              if evidence != 'full' && (!page.nil? || !max_chars.nil?)
+                raise ArgumentError, 'page and max_chars apply only to full evidence; compact/outline take budget'
               end
             rescue ArgumentError => e
               next respond_err.call(e.message, code: :unsupported_argument, tool: 'lookup', argument: 'evidence',
@@ -619,7 +632,25 @@ module Woods
                 allowed = (always_include + sections).to_set
                 filtered = filtered.slice(*allowed)
               end
-              respond.call(renderer.render(:lookup, filtered), meta: lookup_meta)
+              text = renderer.render(:lookup, filtered)
+              page_limit = LookupPages.limit(coerce_int.call(max_chars))
+              page_number = coerce_int.call(page) || 1
+              # Short enough for one answer, and the first page was asked for.
+              if page_number == 1 && (page_limit.nil? || text.length <= page_limit)
+                next respond.call(text, meta: lookup_meta)
+              end
+
+              selected = LookupPages.page(text, max_chars: page_limit || text.length, number: page_number)
+              unless selected
+                pages = LookupPages.split(text, page_limit || text.length).size
+                next respond_err.call("lookup of #{identifier} has #{pages} page#{'s' unless pages == 1}; " \
+                                      "page #{page_number} does not exist.",
+                                      code: :invalid_params, tool: 'lookup', argument: 'page', pages: pages)
+              end
+              body = LookupPages.render(selected)
+              ::MCP::Tool::Response.new([{ type: 'text', text: body }],
+                                        structured_content: { text: body, data: { lookup_page: selected.to_h } },
+                                        meta: (lookup_meta || {}).merge(lookup_page: selected.to_h))
             else
               suggestions = reader.suggest_identifiers(identifier)
               respond_err.call(

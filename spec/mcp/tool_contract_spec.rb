@@ -186,7 +186,9 @@ RSpec.describe 'Index MCP tool contracts' do
                              'budget' => integer_contract(1, 200_000),
                              'source_sha256' => string_contract(nil, 10_000),
                              'include_source' => boolean_contract,
-                             'sections' => array_contract(1_000, 10_000)
+                             'sections' => array_contract(1_000, 10_000),
+                             'page' => integer_contract(1, 100_000),
+                             'max_chars' => integer_contract(1_000, 2_000_000)
                            }),
       'notion_sync' => contract(:notion, {}, exact_data({
                                                           'synced' => true, 'data_models' => 2, 'columns' => 4,
@@ -1454,6 +1456,12 @@ RSpec.describe 'Index MCP tool contracts' do
             arguments['kind'] = 'impact' if tool_name == 'diagram' && name == 'depth'
             result = call_tool(full_server, tool_name, arguments).fetch('result')
             label = "#{tool_name}.#{name}=#{value}"
+            # The wire accepts any page in range; the handler then refuses one
+            # the unit does not have, which is not a schema rejection.
+            if tool_name == 'lookup' && name == 'page' && value > 1
+              expect(result.dig('_meta', 'error_code')).to eq('invalid_params'), label
+              next
+            end
             expect(result['isError']).to be(false), label
             assert_boundary_semantics(tool_name, name, value, result)
           end

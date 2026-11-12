@@ -19,7 +19,7 @@ module Woods
     # tree, so an application larger than a tree scan's budget is still judged.
     # A path with no recorded digest, disagreeing digests, or bytes that cannot
     # be read stably within the bounds stays a candidate.
-    class CatchUp
+    class CatchUp # rubocop:disable Metrics/ClassLength -- one comparison against one manifest; splitting it would separate the candidates from the evidence that drops them
       DIRTY_REASONS = %w[source_changed_during_extraction source_changed_during_read].freeze
       # Wall clock all candidate digest checks may spend together. Candidates
       # left when it runs out are caught up, as they were before the check.
