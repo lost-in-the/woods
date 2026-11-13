@@ -359,6 +359,14 @@ counting and upgrade compatibility.
 
 ---
 
+### One unit reports `commit_count: 0` for a file with years of history
+
+**Symptom:** Some units, not all, carry `commit_count: 0`, no contributors and no `last_modified`.
+
+**Cause:** `metadata.git` covers commits from the past 365 days. A file nobody touched in that time has none.
+Such a unit is `change_frequency: "dormant"`. Before this was corrected it read `"new"`, like a file just added;
+run a full `woods:extract` to replace labels published by an earlier version.
+
 ### Every unit reports `commit_count: 0` and `change_frequency: "new"`
 
 **Symptom:** Not a few units, all of them, in an application whose files clearly

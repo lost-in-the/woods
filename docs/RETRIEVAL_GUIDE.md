@@ -615,6 +615,15 @@ published display path, source SHA256, generation status, selected span hashes,
 zero-based byte offsets (exclusive end), one-based line ranges and omitted spans.
 Span owners are **lexical declarations**, not inferred runtime dispatch owners.
 
+Compact and outline `lookup` state each selected span once.
+The text names the span's kind, lexical owner, name and published line range, and the same text is in
+`structuredContent.text`.
+Each record in `structuredContent.data.evidence.spans` therefore carries only `name`, `start_byte` and `end_byte`,
+plus `receiver` and `physical_location` when the span has one.
+The span's bytes are those offsets within the source that `source_sha256` identifies, so a span hash is not repeated.
+Unit-level provenance (owner, coordinate system, source hash, generation, omitted-span count, `full_evidence`) is
+unchanged, and retrieval's `sources[].evidence` records keep every span field.
+
 Coordinates are explicitly `published_unit`: they refer to the exact published
 `source_code` bytes. Physical source coordinates are unavailable. Model/controller
 units may contain synthesized headers or commented inlined concerns; the excerpt
