@@ -17,6 +17,11 @@ module Woods
           lines = ["#{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", DIVIDER,
                    data['statement'], '', *member_location_lines(data)]
           lines.push('', data['source_code'].chomp) if data['source_code']
+          Array(data['candidates']).each_with_index do |candidate, index|
+            lines.push('', "Candidate #{index + 1}: #{candidate.dig('defined_in', 'identifier')}",
+                       *definition_location_lines(candidate, data))
+            lines.push('', candidate['source_code'].chomp) if candidate['source_code']
+          end
           lines.join("\n")
         end
 

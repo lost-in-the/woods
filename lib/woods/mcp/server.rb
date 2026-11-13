@@ -560,8 +560,10 @@ module Woods
                          'page says which `page` and `answer_id` to ask for next. In the JSON format each ' \
                          'page is a JSON object holding part of the unit; merging the pages gives the unit. ' \
                          'An identifier `Owner#method` (instance) or `Owner.method` (class method) that is not ' \
-                         'itself a unit answers with that one method of unit Owner: its file and lines and its ' \
-                         'source, stated as a member of Owner, not a unit.',
+                         'itself a unit answers with the method Owner responds to (its own, inherited from a ' \
+                         'published superclass, or from a concern): its file and lines and its source, stated as ' \
+                         'a member of Owner, not a unit. Where the index cannot tell which definition Ruby calls, ' \
+                         'the answer lists the candidates or a caveat and says so.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
@@ -766,9 +768,11 @@ module Woods
               reference = LookupMember.parse(identifier)
               owners = reference ? member_owners.call(reader, reference.owner, type) : []
               concern_file = ->(concern) { reader.find_unit(concern, type: 'concern')&.fetch('file_path', nil) }
+              # A superclass, by its `:inheritance` edge's type when there is one.
+              ancestor = ->(name, kind) { (kind && reader.find_unit(name, type: kind)) || reader.find_unit(name) }
               answer = nil
               owner = owners.find do |candidate|
-                answer = LookupMember.answer(candidate, reference, concern_file: concern_file)
+                answer = LookupMember.answer(candidate, reference, concern_file: concern_file, find_unit: ancestor)
               end
               if answer
                 member_of = { identifier: owner['identifier'], type: owner['type'] }
@@ -785,7 +789,7 @@ module Woods
                                         'retrieve fresh evidence before verification.',
                                         code: :stale_index, tool: 'lookup', argument: 'source_sha256')
                 end
-                answer = answer.except('source_code') if include_source == false
+                answer = LookupMember.without_source(answer) if include_source == false
                 next respond.call(renderer.render(:lookup_member, answer), meta: { member_of: member_of })
               end
 

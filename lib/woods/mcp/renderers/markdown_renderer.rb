@@ -21,6 +21,11 @@ module Woods
                    data['statement'], '']
           member_location_lines(data).each { |line| lines << "- #{line}" }
           lines.push('', '```ruby', data['source_code'].chomp, '```') if data['source_code']
+          Array(data['candidates']).each_with_index do |candidate, index|
+            lines.push('', "### Candidate #{index + 1}: #{candidate.dig('defined_in', 'identifier')}", '')
+            definition_location_lines(candidate, data).each { |line| lines << "- #{line}" }
+            lines.push('', '```ruby', candidate['source_code'].chomp, '```') if candidate['source_code']
+          end
           lines.join("\n")
         end
 
