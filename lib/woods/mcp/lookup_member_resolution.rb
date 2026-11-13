@@ -77,6 +77,10 @@ module Woods
         attr_reader :overridden
         # @return [Array<String>] what the index could not establish
         attr_reader :caveats
+        # @return [Candidate, nil] a call Woods does not know that names the
+        #   member when nothing else on that side defines it (the answer is
+        #   then not found)
+        attr_reader :unresolved_macro
 
         # @param unit [Hash] the owner's published unit
         # @param reference [Reference]
@@ -96,8 +100,7 @@ module Woods
           index = groups.index { |group| group.candidates.any? }
           return nil unless index
 
-          settle(groups, index)
-          self
+          settled?(groups, index) ? self : nil
         end
 
         # @return [Integer] the chain level of the answer
@@ -107,18 +110,41 @@ module Woods
 
         private
 
-        def settle(groups, index)
+        # @return [Boolean] false when the walk leaves no answer
+        def settled?(groups, index)
           group = groups[index]
           later = groups.drop(index + 1).flat_map { |other| other.candidates + other.extras }
           if !group.ordered && group.candidates.size > 1
             @ambiguous = group.candidates
-            @overridden = group.extras + later
+            @overridden = definite(group.extras + later)
           else
             @chosen = group.candidates.first
-            @overridden = group.candidates.drop(1) + group.extras + later
+            rest = group.candidates.drop(1) + group.extras + later
+            return answers_past_macro?(rest) if @chosen.origin == :possible_macro
+
+            @overridden = definite(rest)
           end
-          @overridden = @overridden.reject { |candidate| candidate.origin == :possible_macro }
           state_caveats
+          true
+        end
+
+        # A call Woods does not know answers only in front of another
+        # definition on that side, the one walking past it would answer
+        # confidently; it then lists every definition past it, further calls
+        # Woods does not know included. Alone, it leaves the member not found.
+        def answers_past_macro?(rest)
+          if definite(rest).empty?
+            @unresolved_macro = @chosen
+            @chosen = nil
+            return false
+          end
+          @overridden = rest
+          state_caveats
+          true
+        end
+
+        def definite(candidates)
+          candidates.reject { |candidate| candidate.origin == :possible_macro }
         end
 
         # [level, groups] for each unit of the chain, nearest first.

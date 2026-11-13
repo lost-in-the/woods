@@ -513,12 +513,15 @@ every `def` that carries the name as a literal positional argument:
   and for any of these calls that a later `private :name` (`private_class_method :name` for a class method) names.
 - For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
   instance-side call in the plain body does not.
-- Any other call carrying the name (a base class's DSL, `field :perform`) may define it, on either side.
-  The answer has the shape of every answer that cannot tell: no `member`, a statement that Woods cannot tell
-  which definition Ruby calls, and `candidates`.
+- Any other call carrying the name as a literal (a base class's DSL, `field :perform`) may define it, on either
+  side.
+  It matters only when another definition of the name on that side lies further along the walk (a `def`, a call
+  Woods knows, a concern): then the answer has the shape of every answer that cannot tell: no `member`, a
+  statement that Woods cannot tell which definition Ruby calls, and `candidates`.
   The first candidate is the call (its `member` names it as `defined_by`, its `note` says it may define the name);
-  then each definition it may override, nearest first, the first of which Ruby calls if the call does not define
-  the name.
+  then every definition the walk finds past it, further calls Woods does not know included, nearest first.
+  With no other definition on that side, the answer stays `not_found`, and its message names the call:
+  "`field` at line N of the published source of X names it and may define it."
   Calls that only refer to a method are not read as definitions: `private`, `protected`, `public`,
   `module_function`, `private_class_method`, `public_class_method`, `helper_method`, `validate`, `validates`,
   `validates_*`, and calls named `before_*`, `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.

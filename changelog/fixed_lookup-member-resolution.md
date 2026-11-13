@@ -16,5 +16,6 @@
   A name a class body defines by a call rather than a `def` (`attr_reader`, `alias_method`, `delegate`,
   `define_method`, ...) answered a superclass's `def` as inherited; that level's call is now the answer, under
   `defined_by`. A call Woods does not know that carries the name (a base class's DSL) now gives an answer that
-  says Woods cannot tell which definition Ruby calls and lists `candidates`, the call first, instead of presenting
-  the superclass's.
+  says Woods cannot tell which definition Ruby calls and lists `candidates`, the call first and then every
+  definition past it, instead of presenting the superclass's. Such a call with no other definition of the name on
+  that side leaves the member `not_found`, as before, and the message names the call.

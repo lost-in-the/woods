@@ -778,7 +778,7 @@ module Woods
 
               message = "Unit not found: #{identifier}#{" (type #{type})" if type}"
               owner = owners.first
-              message = "#{message}. #{LookupMember.missing_sentence(reference, owner)}" if owner
+              message = "#{message}. #{LookupMember.missing_sentence(reference, owner, find_unit: ancestor)}" if owner
               suggestions = reader.suggest_identifiers(identifier)
               extra = owner ? { member_of: { identifier: owner['identifier'], type: owner['type'] } } : {}
               respond_err.call(
