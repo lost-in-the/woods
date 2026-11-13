@@ -17,7 +17,25 @@ require 'woods/mcp/lookup_member'
 module RailsMacroOracle
   def self.path_of(name)
     declaration = /(?:module|class) #{name.split('::').last}\b/
-    RailsMacroOracle::FIXTURES.find { |_, source| source.match?(declaration) }&.first
+    fixtures.find { |_, source| source.match?(declaration) }&.first
+  end
+
+  # The fixtures, with the enum model written in the form this Rails takes:
+  # Rails 8.0 takes only `enum :name, values`, Rails 6.0 only `enum name: values`.
+  def self.fixtures
+    @fixtures ||= FIXTURES.merge('app/models/rails_macro_oracle/ticket.rb' => ticket_source)
+  end
+
+  def self.ticket_source
+    enums = if ActiveRecord.version >= Gem::Version.new('7.0')
+              ['enum :status, [:draft, :live]', 'enum :phase, { early: 0, late: 1 }, prefix: true',
+               'enum :stage, { fresh: 0, stale: 1 }, scopes: false']
+            else
+              ['enum status: [:draft, :live]', 'enum phase: { early: 0, late: 1 }, _prefix: true',
+               'enum stage: { fresh: 0, stale: 1 }, _scopes: false']
+            end
+    "module RailsMacroOracle\n  class Ticket < BaseRecord\n    self.table_name = 'oracle_tickets'\n" \
+      "#{enums.map { |line| "    #{line}\n" }.join}  end\nend\n"
   end
 end
 
@@ -44,6 +62,14 @@ RailsMacroOracle::FIXTURES = {
 
         def flagged
           :base
+        end
+
+        def target
+          :base
+        end
+
+        def self.audit_trail(*)
+          nil
         end
 
         def self.notes
@@ -105,6 +131,15 @@ RailsMacroOracle::FIXTURES = {
         class_attribute :quiet_flag, instance_accessor: false
         serialize :prefs
         has_secure_token :token
+        accepts_nested_attributes_for :notes, :tags
+        delegate_missing_to :target
+        attr_readonly :title
+        normalizes :email, with: ->(email) { email.strip }
+        encrypts :ssn
+        composed_of :balance, class_name: 'RailsMacroOracle::Money', mapping: [%w[cents cents]]
+        default_scope { all }
+        has_one :mark, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
+        audit_trail :mark
 
         private
 
@@ -147,12 +182,30 @@ RailsMacroOracle::FIXTURES = {
       end
     end
   RUBY
-  'app/controllers/rails_macro_oracle/panel_controller.rb' => <<~RUBY
+  'app/controllers/rails_macro_oracle/panel_controller.rb' => <<~RUBY,
     module RailsMacroOracle
       class PanelController < BasePanelController
         layout :pick_layout
         helper :rails_oracle_panel
         rescue_from StandardError, with: :recover
+      end
+    end
+  RUBY
+  'app/jobs/rails_macro_oracle/base_job.rb' => <<~RUBY,
+    module RailsMacroOracle
+      class BaseJob < ActiveJob::Base
+        def low
+          :base
+        end
+      end
+    end
+  RUBY
+  'app/jobs/rails_macro_oracle/report_job.rb' => <<~RUBY
+    module RailsMacroOracle
+      class ReportJob < BaseJob
+        queue_as :low
+        retry_on StandardError, wait: 1
+        discard_on ArgumentError
       end
     end
   RUBY
@@ -164,7 +217,8 @@ RailsMacroOracle::CONCERNS = %w[RailsMacroOracle::Ownable].freeze
 RailsMacroOracle::UNITS = [%w[RailsMacroOracle::BaseRecord model], %w[RailsMacroOracle::Widget model],
                            %w[RailsMacroOracle::Gadget model],
                            %w[RailsMacroOracle::Ownable concern], %w[RailsMacroOracle::BasePanelController controller],
-                           %w[RailsMacroOracle::PanelController controller]].freeze
+                           %w[RailsMacroOracle::PanelController controller], %w[RailsMacroOracle::Ticket model],
+                           %w[RailsMacroOracle::BaseJob job], %w[RailsMacroOracle::ReportJob job]].freeze
 
 # The per-side behaviour of common Rails macros in `lookup` member answers,
 # compared with a booted ActiveRecord and ActionController: a macro that
@@ -175,6 +229,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
   before(:context) do
     require 'active_record'
     require 'action_controller'
+    require 'active_job'
     ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: ':memory:')
     ActiveRecord::Schema.verbose = false
     ActiveRecord::Schema.define do
@@ -184,6 +239,14 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
         table.text :prefs
         table.string :token
         table.integer :keeper_id
+        table.string :email
+        table.string :ssn
+        table.integer :cents
+      end
+      create_table(:oracle_tickets) do |table|
+        table.integer :status
+        table.integer :phase
+        table.integer :stage
       end
       create_table(:oracle_tags, id: false) do |table|
         table.integer :widget_id
@@ -195,13 +258,19 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     File.write(File.join(@helper_dir, 'rails_oracle_panel_helper.rb'), "module RailsOraclePanelHelper\nend\n")
     $LOAD_PATH.unshift(@helper_dir)
     require 'rails_oracle_panel_helper'
-    RailsMacroOracle::FIXTURES.each { |path, source| TOPLEVEL_BINDING.eval(source, path, 1) }
-    RailsMacroOracle::Widget.define_attribute_methods
-    RailsMacroOracle::Gadget.define_attribute_methods
+    # `normalizes` (Rails 7.1) and `encrypts` (Rails 7.0) do not exist on older rows; a no-op stands in so
+    # the fixture's calls are read the same on every row.
+    @shims = %i[normalizes encrypts].reject { |macro| ActiveRecord::Base.respond_to?(macro) }
+    @shims.each { |macro| ActiveRecord::Base.singleton_class.define_method(macro) { |*, **| nil } }
+    RailsMacroOracle.const_set(:Money, Struct.new(:cents))
+    RailsMacroOracle.fixtures.each { |path, source| TOPLEVEL_BINDING.eval(source, path, 1) }
+    %i[Widget Gadget Ticket].each { |name| RailsMacroOracle.const_get(name).define_attribute_methods }
   end
 
   after(:context) do
-    %i[Ownable BaseRecord Widget Gadget BasePanelController PanelController].each do |name|
+    @shims.each { |macro| ActiveRecord::Base.singleton_class.send(:remove_method, macro) }
+    names = %i[Ownable BaseRecord Widget Gadget Ticket Money BasePanelController PanelController BaseJob ReportJob]
+    names.each do |name|
       RailsMacroOracle.send(:remove_const, name) if RailsMacroOracle.const_defined?(name, false)
     end
     Object.send(:remove_const, :RailsOraclePanelHelper)
@@ -224,7 +293,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     end
     return original if modules.empty?
 
-    sources = modules.map { |mod| [mod.name, RailsMacroOracle::FIXTURES.fetch(RailsMacroOracle.path_of(mod.name))] }
+    sources = modules.map { |mod| [mod.name, RailsMacroOracle.fixtures.fetch(RailsMacroOracle.path_of(mod.name))] }
     extractor.send(:insert_concern_block, klass, original, extractor.send(:build_concern_block, sources))
   end
 
@@ -232,7 +301,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     require 'woods/extractors/model_extractor'
     klass = Object.const_get(identifier)
     path = RailsMacroOracle.path_of(identifier)
-    original = RailsMacroOracle::FIXTURES.fetch(path)
+    original = RailsMacroOracle.fixtures.fetch(path)
     source = type == 'model' ? inlined(klass, original) : original
     JSON.parse(JSON.generate('identifier' => identifier, 'type' => type, 'file_path' => path,
                              'source_code' => source, 'metadata' => metadata(klass, original, source),
@@ -371,6 +440,22 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     'RailsMacroOracle::Gadget.config_flag=' => ['class_attribute', 'RailsMacroOracle::Widget'],
     'RailsMacroOracle::Gadget#hidden_flag' => ['class_attribute', 'RailsMacroOracle::Widget'],
     'RailsMacroOracle::Gadget.hidden_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#notes_attributes=' => ['accepts_nested_attributes_for', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#tags_attributes=' => ['accepts_nested_attributes_for', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#notes_attributes=' => ['accepts_nested_attributes_for', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#balance' => ['composed_of', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#balance=' => ['composed_of', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#target' => [nil, 'RailsMacroOracle::BaseRecord'],
+    'RailsMacroOracle::Ticket.draft' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket.not_draft' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#draft?' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#live!' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket.phase_early' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket.not_phase_late' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#phase_early?' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#stale?' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#fresh!' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::ReportJob#low' => [nil, 'RailsMacroOracle::BaseJob'],
     'RailsMacroOracle::PanelController#pick_layout' => [nil, 'RailsMacroOracle::BasePanelController'],
     'RailsMacroOracle::PanelController#recover' => [nil, 'RailsMacroOracle::BasePanelController'],
     'RailsMacroOracle::PanelController#rails_oracle_panel' => [nil, 'RailsMacroOracle::BasePanelController']
@@ -429,19 +514,38 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     'RailsMacroOracle::Widget#tone' => false, 'RailsMacroOracle::Widget#tone=' => false,
     'RailsMacroOracle::Widget#shade' => false, 'RailsMacroOracle::Widget#shade=' => false,
     'RailsMacroOracle::Widget#hue' => false, 'RailsMacroOracle::Widget#pref' => false,
-    'RailsMacroOracle::Widget#settings' => true, 'RailsMacroOracle::Widget#title' => true
+    'RailsMacroOracle::Widget#settings' => true, 'RailsMacroOracle::Widget#title' => true,
+    'RailsMacroOracle::Widget#notes_attributes' => false, 'RailsMacroOracle::Widget.balance' => false,
+    'RailsMacroOracle::Widget#oracle_widgets' => false,
+    'RailsMacroOracle::Widget#email' => true, 'RailsMacroOracle::Widget#ssn' => true,
+    'RailsMacroOracle::Widget#cents' => true,
+    'RailsMacroOracle::Ticket#status' => true, 'RailsMacroOracle::Ticket#status=' => true,
+    'RailsMacroOracle::Ticket.status' => false, 'RailsMacroOracle::Ticket#draft' => false,
+    'RailsMacroOracle::Ticket.early' => false, 'RailsMacroOracle::Ticket#early?' => false,
+    'RailsMacroOracle::Ticket.fresh' => false, 'RailsMacroOracle::Ticket.not_fresh' => false
   }.each do |identifier, column|
     it "does not answer #{identifier} as defined by the call that carries it" do
       truth = runtime(identifier)
 
       if column
-        expect(truth[:method].owner.name).to eq('RailsMacroOracle::Widget::GeneratedAttributeMethods')
+        owner = Woods::MCP::LookupMember.parse(identifier).owner
+        expect(truth[:method].owner.name).to eq("#{owner}::GeneratedAttributeMethods")
       else
         expect(truth).to be_nil
       end
       expect(answer(identifier)).to be_nil
       expect(missing(identifier)).not_to include('may define it')
     end
+  end
+
+  # A call Woods does not know may wrap or redefine what a known call beside it defines.
+  it 'says it cannot tell where an unknown call names what a known call in the same body defines' do
+    data = answer('RailsMacroOracle::Widget#mark')
+
+    expect(runtime('RailsMacroOracle::Widget#mark')[:method].owner.name)
+      .to eq('RailsMacroOracle::Widget::GeneratedAssociationMethods')
+    expect(data['statement']).to include('cannot tell')
+    expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(%w[audit_trail has_one])
   end
 
   it 'reads a store key under a prefix that is not a literal as one the call may define' do

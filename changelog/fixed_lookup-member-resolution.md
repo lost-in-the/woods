@@ -31,3 +31,7 @@
   other Rails calls' answers do, in the owner's own body and in a superclass.
   A Rails call names only the methods it defines: an association, `attribute` or `alias_attribute` its first
   argument (not `attribute`'s type), and `store_accessor` each key under its `prefix:` and `suffix:`.
+  `accepts_nested_attributes_for :items` after `has_many :items` no longer turns `Owner#items` into a cannot-tell
+  answer: it defines `items_attributes=` only. `composed_of` and `enum` (its value scopes and `value?`/`value!`)
+  are read as definers, and `delegate_missing_to`, `attr_readonly`, `normalizes`, `encrypts`, `default_scope`,
+  `queue_as`, `retry_on` and `discard_on` as calls that define none of the names they carry.
