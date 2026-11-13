@@ -125,6 +125,21 @@ RSpec.describe Woods::Extractors::MixinCalls do
     expect(calls("module M\n=begin\ninclude Hidden\n=end\n  include Shown\nend\n")).to eq([[:include, 'Shown']])
   end
 
+  it 'names a constant from its path, not its text, keeping a leading ::' do
+    source = <<~RUBY
+      module Stackable
+        include Depot:: # shared module
+          Weighable
+        include ::Depot::
+          Countable
+        extend self::ClassMethods
+      end
+    RUBY
+    expect(calls(source)).to eq(
+      [[:include, 'Depot::Weighable'], [:include, '::Depot::Countable'], [:extend, 'self::ClassMethods']]
+    )
+  end
+
   it 'reads nothing from an empty or missing source' do
     expect([calls(''), calls(nil), described_class.outside_owner('', 'Owner')]).to eq([[], [], []])
   end

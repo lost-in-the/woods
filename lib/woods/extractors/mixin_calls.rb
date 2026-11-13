@@ -75,8 +75,6 @@ module Woods
       # lexical module nesting it was written in, and every module and class
       # the source declares.
       class Visitor < Prism::Visitor
-        CONSTANTS = [Prism::ConstantReadNode, Prism::ConstantPathNode].freeze
-
         # @return [Array<Array(Symbol, String, Array<String>)>] call, constant
         #   as written, enclosing qualified names (innermost last)
         attr_reader :found
@@ -123,9 +121,8 @@ module Woods
         def visit_call_node(node)
           if @kinds.include?(node.name) && (!@own_only || own?(node))
             node.arguments&.arguments.to_a.each do |argument|
-              next unless CONSTANTS.any? { |type| argument.is_a?(type) }
-
-              @found << [node.name, argument.slice.gsub(/\s+/, ''), @nesting.dup]
+              name = constant_name(argument)
+              @found << [node.name, name, @nesting.dup] if name
             end
           end
           super
@@ -142,7 +139,7 @@ module Woods
         private
 
         def within(node)
-          path = node.constant_path.slice.gsub(/\s+/, '')
+          path = constant_name(node.constant_path) || node.constant_path.slice
           qualified = if path.start_with?('::') || @nesting.empty? then path.delete_prefix('::')
                       else "#{@nesting.last}::#{path}"
                       end
@@ -151,6 +148,22 @@ module Woods
           yield
         ensure
           @nesting.pop if qualified
+        end
+
+        # The constant a node names, built from its path (`A::B`, `::A::B`,
+        # `self::A`), or nil for anything else, including a path with a
+        # dynamic part (`base::A`).
+        def constant_name(node)
+          case node
+          when Prism::ConstantReadNode then node.name.to_s
+          when Prism::ConstantPathNode
+            prefix = case node.parent
+                     when nil then ''
+                     when Prism::SelfNode then 'self'
+                     else constant_name(node.parent)
+                     end
+            "#{prefix}::#{node.name}" if prefix
+          end
         end
 
         def own?(node)
