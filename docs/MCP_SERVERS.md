@@ -933,7 +933,7 @@ The text is one line per hop, in the order the edges run:
 ## Path from GET /orders to PaymentGateway
 
 3 hops, forward: GET /orders (route) reaches PaymentGateway (service).
-Evidence: weakest hop is at least static (hop 2). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
+Evidence: weakest hop is static (hop 3). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
 
 1. GET /orders (route) -[route_dispatch]-> OrdersController (controller)
 2. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
@@ -950,6 +950,9 @@ Each hop has `source`, `source_type`, `target`, `target_type` and `via`, every l
 A hop's `evidence` is the strongest class among its labels, because one strong reason is enough to believe an edge.
 `evidence_mixed: true` marks a class that is a floor.
 The path's `evidence` is its weakest hop's, with `weakest_hop` (counted from 1) unless every hop is `reflected`.
+The answer depends on which hops the path has, not their order.
+The path is `at least` its class only when every hop of that class is.
+One exact hop of the weakest class makes the path exactly that class, and `weakest_hop` names that hop.
 See [edge evidence](#edge-evidence) for the classes.
 `searches` records each search run with its bounds and the units it reached.
 With `direction: "either"` a reverse path still lists its hops as the edges run, from `to` toward `from`.
