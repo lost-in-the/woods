@@ -721,10 +721,28 @@ module Woods
           # Whether +name+ is +base+ under +prefix+ and +suffix+. An :unknown
           # prefix matches none or any one ending in `_` (the name equals the
           # base or ends with `_base`); an :unknown suffix likewise at the end.
+          # Plain string comparison: +name+ is the caller's, so no pattern is
+          # built from it or run over it.
           def affixed?(name, base, prefix, suffix)
-            head = prefix == :unknown ? '(?:\w+_)?' : Regexp.escape(prefix)
-            tail = suffix == :unknown ? '(?:_\w+)?' : Regexp.escape(suffix)
-            name.match?(/\A#{head}#{Regexp.escape(base)}#{tail}\z/)
+            return false if base.empty?
+
+            from = 0
+            while (at = name.index(base, from))
+              return true if affix_fits?(name[0...at], prefix, :end_with?) &&
+                             affix_fits?(name[(at + base.length)..], suffix, :start_with?)
+
+              from = at + 1
+            end
+            false
+          end
+
+          # Whether +part+ (what stands before or after the base) is the affix:
+          # the literal itself, or for an :unknown one nothing, or a word
+          # joined to the base by `_`.
+          def affix_fits?(part, affix, joined)
+            return part == affix unless affix == :unknown
+
+            part.empty? || (part.length > 1 && part.public_send(joined, '_'))
           end
 
           # '' for no affix; the store's name for `true`; the literal's;
