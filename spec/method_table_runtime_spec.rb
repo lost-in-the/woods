@@ -298,15 +298,28 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
     end
   end
 
-  # The same facts as Ruby reports them for every owner the table names.
-  def runtime_facts(source, owners)
+  # The same facts as Ruby reports them for every module and class the
+  # evaluated source defines, whatever the table names.
+  def runtime_facts(source)
     namespace = Module.new
     namespace.module_eval(source)
-    defined_facts(namespace, owners)
+    defined_facts(namespace)
   end
 
-  def defined_facts(namespace, owners)
-    owners.each_with_object({}) do |owner, facts|
+  # @return [Array<String>] each module and class under +namespace+, by its
+  #   name relative to it (`Outer`, `Outer::Inner`)
+  def defined_owners(namespace, prefix = nil)
+    namespace.constants(false).sort.flat_map do |name|
+      value = namespace.const_get(name, false)
+      next [] unless value.is_a?(Module)
+
+      owner = [prefix, name].compact.join('::')
+      [owner, *defined_owners(value, owner)]
+    end
+  end
+
+  def defined_facts(namespace)
+    defined_owners(namespace).each_with_object({}) do |owner, facts|
       constant = namespace.const_get(owner)
       { instance: constant, singleton: constant.singleton_class }.each do |side, target|
         %w[public private protected].each do |visibility|
@@ -320,9 +333,9 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
 
   fixtures.each do |label, source|
     it "agrees with Ruby for #{label}" do
-      table = table_facts(source)
-      owners = table.keys.map(&:first).uniq
-      expect(table).to eq(runtime_facts(source, owners))
+      runtime = runtime_facts(source)
+      expect(runtime).not_to be_empty
+      expect(table_facts(source)).to eq(runtime)
     end
   end
 
@@ -335,7 +348,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
     it "agrees with what Ruby defined before #{label} without a singleton method raised" do
       namespace = Module.new
       expect { namespace.module_eval(source) }.to raise_error(NameError, /helper/)
-      expect(table_facts(source)).to eq(defined_facts(namespace, %w[Tools]))
+      expect(table_facts(source)).to eq(defined_facts(namespace))
     end
   end
 end
