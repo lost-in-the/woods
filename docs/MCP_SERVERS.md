@@ -497,6 +497,31 @@ inlined from a concern (and through which superclass), or from a module the owne
 An answer from a superclass's own body names that unit in `inherited_from`; `member_of` stays the asked owner, and
 the entry's `unit` names the published source its `line` counts in.
 `other_definitions` lists the definitions the answer overrides.
+A class nested in the body of another class (its own superclass, for example) and published as its own lexical
+range, as a nested job or PORO is, answers from the definitions in that range, not the enclosing class's.
+Such a range carries no `source_line_map`, so its file lines are reported as not mapped.
+
+A class body can define the name by a call instead of a `def`, which the method table does not record.
+At each level, the unit's own body is read (a Prism walk of its published source) for a receiver-less call outside
+every `def` that carries the name as a literal positional argument:
+
+- A call Woods knows defines the name is the answer at that level, with `defined_by` naming it and the call as the
+  source: `attr`, `attr_reader`, `attr_writer` (`name=`), `attr_accessor` (both), `alias_method` and `alias` (the new
+  name; `alias_of` names the old one), `define_method`, `delegate` (with `prefix: true` it defines `target_name`,
+  with `prefix: :p` `p_name`), `def_delegator` (its alias argument, else its method) and `def_delegators`.
+  `visibility` is stated for `attr*` and `define_method`, which take the visibility in force where they are called,
+  and for any of these calls that a later `private :name` (`private_class_method :name` for a class method) names.
+- For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
+  instance-side call in the plain body does not.
+- Any other call carrying the name (a base class's DSL, `field :perform`) may define it, on either side: the answer
+  names that call as `defined_by`, says Woods cannot tell which definition Ruby calls, lists no
+  `other_definitions`, and gives each definition it might not override as a caveat.
+  Calls that only refer to a method are not read as definitions: `private`, `protected`, `public`,
+  `module_function`, `private_class_method`, `public_class_method`, `helper_method`, `validate`, `validates`,
+  `validates_*`, and calls named `before_*`, `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
+- A `def` and a call in one body: the later line is the one Ruby keeps.
+- Known limits: only calls written directly in the body are read, not inside a conditional, an `included do` block
+  or an inlined concern; Forwardable's hash form (`delegate [:a] => :b`) is not read.
 
 What the index cannot settle is said, never guessed:
 
@@ -516,12 +541,13 @@ What the index cannot settle is said, never guessed:
 Known limits: `prepend` is read only where the unit's own body writes it (not in a concern's `included` block, not
 on `singleton_class`), and on Rails 6.0 a prepended `ActiveSupport::Concern` does not extend its `class_methods`
 while Woods still answers them.
-Monkey patches, reopened classes and methods defined by metaprogramming are not in the published source.
+Monkey patches, reopened classes and methods defined by metaprogramming other than the class-body calls above
+(in a method, a loop, or from a computed name) are not in the published source.
 `type` selects the owner's type.
 An identifier that is itself a published unit (a route, for example) still returns that unit.
-When neither the owner's published source nor its published superclasses hold the method (defined by
-metaprogramming, or in a parent that is not published), the answer stays `not_found` and says so, keeps the
-suggestion of the owner, and names it in `_meta.member_of`.
+When neither the owner's published source nor its published superclasses hold the method or a class-body call
+that names it (defined by other metaprogramming, or in a parent that is not published), the answer stays
+`not_found` and says so, keeps the suggestion of the owner, and names it in `_meta.member_of`.
 A member answer is the whole method on one page: `evidence` other than `full`, `sections` and `page` are refused
 with `unsupported_argument`; look up the owner to use them.
 
