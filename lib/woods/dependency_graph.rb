@@ -91,6 +91,7 @@ module Woods
       @to_h = nil
       @suffix_groups = nil
       @pagerank = nil
+      @structural_graph = nil
     end
 
     # Register a unit in the graph.
@@ -112,6 +113,7 @@ module Woods
       @to_h = nil
       @suffix_groups = nil
       @pagerank = nil
+      @structural_graph = nil
 
       unregister(unit.identifier, type: unit.type) if @nodes[unit.identifier]&.key?(unit.type)
 
@@ -293,6 +295,7 @@ module Woods
       @to_h = nil
       @suffix_groups = nil
       @pagerank = nil
+      @structural_graph = nil
       unregister(identifier, type: type)
 
       return remove_all(identifier, nodes) unless type
@@ -334,6 +337,7 @@ module Woods
       return nil unless node
 
       @to_h = nil
+      @structural_graph&.forget_serialization
       attributes.each do |key, value|
         raise ArgumentError, "Unknown node attribute #{key.inspect}" unless NODE_ATTRIBUTE_KEYS.include?(key)
 
@@ -462,12 +466,21 @@ module Woods
     # Node and reverse-edge order are preserved, so scores over the view equal
     # scores over a graph the documents were never registered in.
     #
+    # The view is kept until the next {#register} or {#remove}. Writing the
+    # graph ranks it and analysing it ranks it again; when each call built
+    # its own view, the second ranked and serialized a copy the first had
+    # already paid for. {#annotate} changes node attributes, which the view
+    # shares, so it drops only the view's serialization. Treat the view as
+    # read-only: it is this graph's, not the caller's.
+    #
     # @return [DependencyGraph] self when no documentation is registered
     def structural_graph
       return self if DOCUMENTATION_UNIT_TYPES.none? { |type| @type_index[type]&.any? }
 
-      excluded = @nodes.keys.select { |identifier| documentation_only?(identifier) }.to_set
-      self.class.new.tap { |graph| graph.adopt_structure(*structural_state(excluded)) }
+      @structural_graph ||= begin
+        excluded = @nodes.keys.select { |identifier| documentation_only?(identifier) }.to_set
+        self.class.new.tap { |graph| graph.adopt_structure(*structural_state(excluded)) }
+      end
     end
 
     # Fetch a node's metadata without materializing the whole graph.
@@ -789,6 +802,12 @@ module Woods
     end
 
     protected
+
+    # Drop the memoized {#to_h} of a view whose node attributes changed
+    # through the graph it was taken from. See {#structural_graph}.
+    def forget_serialization
+      @to_h = nil
+    end
 
     # @see #structural_graph
     def adopt_structure(nodes, edges, reverse, reverse_via, file_map, type_index)
