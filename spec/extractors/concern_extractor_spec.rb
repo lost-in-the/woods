@@ -811,10 +811,10 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       unit = described_class.new.extract_concern_file(path)
 
       expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
-      expect(unit.metadata[:included_modules]).to eq(%w[ClassMethods Stackable::ClassMethods Depot::Countable::ClassMethods])
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Countable::ClassMethods])
     end
 
-    it 'lists only its own mixins in included_modules but keeps the edges of hook-form calls' do
+    it 'lists what a hook brings to the includer in included_modules, and keeps the edges of hook-form calls' do
       path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
         module Trackable
           include Depot::Weighable
@@ -831,12 +831,57 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
 
       unit = described_class.new.extract_concern_file(path)
 
-      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable])
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable::ClassMethods Depot::Sortable])
       expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
         [{ type: :concern, target: 'Depot::Weighable', via: :include },
          { type: :concern, target: 'Depot::Sortable', via: :include },
          { type: :concern, target: 'Depot::Countable', via: :extend }]
       )
+    end
+
+    it 'lists a module an included block or a class_eval in a hook includes' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            include Depot::Weighable
+          end
+
+          def self.included(base)
+            base.class_eval { include Depot::Sortable }
+            base.send(:include, Depot::Taggable)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Sortable])
+    end
+
+    it 'does not list a module the concern declares in its own body, however the call names it' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module ClassMethods; end
+          module Helpers; end
+
+          include Helpers
+          include ::Helpers
+          extend self::ClassMethods
+
+          def self.included(base)
+            base.extend ClassMethods
+            base.extend(self::ClassMethods)
+            base.extend(Trackable::ClassMethods)
+            base.extend(Depot::Countable::ClassMethods)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Helpers Depot::Countable::ClassMethods])
     end
 
     it 'excludes ActiveSupport::Concern from extend dependencies' do

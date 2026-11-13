@@ -917,10 +917,13 @@ excluded). They never decide the unit type.
   read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, `self.extend A` and a multi-line
   argument list.
   A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
-  `metadata.included_modules` lists only the concern's own mixins: calls without a receiver or on `self`,
-  outside a method body (a call inside an `included do` block still counts).
-  `base.extend ClassMethods` or `base.include A` in `self.included` acts on the including class, so it is not
-  listed there, but its constant still gives an `include` or `extend` edge.
+  Calls on another receiver and calls inside a method count too, so a hook's `base.include A`,
+  `base.class_eval { include A }` and an `included do` block's `include A` all list `A` and give its edge.
+  `metadata.included_modules` leaves out a module the concern declares in its own body, however the call names it
+  (`ClassMethods`, `self::ClassMethods`, `Trackable::ClassMethods` inside `Trackable`), resolved by lexical lookup
+  over the modules the file declares.
+  The `*Helper` includes of Phlex, ViewComponent and mailer units count only calls without a receiver or on
+  `self`, outside a method body.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked
