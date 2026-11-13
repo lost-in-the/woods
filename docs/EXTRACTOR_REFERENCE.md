@@ -903,7 +903,9 @@ excluded). They never decide the unit type.
 **Key details:**
 - Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
-- `include` and `extend` edges and `metadata.included_modules` come from real calls with constant arguments, read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, a multi-line argument list, and `base.extend ClassMethods` in `self.included`.
+- `include` and `extend` edges and `metadata.included_modules` come from real calls with constant arguments,
+  read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, a multi-line argument list,
+  and `base.extend ClassMethods` in `self.included`.
   A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
