@@ -75,28 +75,53 @@ module Woods
       private
 
       # Where a member answer's method is: the file a reader opens and its
-      # lines, then the lines in the owner's published source. Shared by the
-      # text renderers' `render_lookup_member`.
+      # lines, then the lines in the published source that holds it, the
+      # definitions it overrides and what the index could not establish.
+      # An answer the index cannot rank lists each candidate's place instead.
+      # Shared by the text renderers' `render_lookup_member`.
       #
       # @param data [Hash] a {LookupMember.answer}
       # @return [Array<String>]
       def member_location_lines(data)
-        member = data['member'] || {}
-        owner = data['member_of'] || {}
-        concern = data['defined_in']
-        file = concern ? concern['file_path'] : owner['file_path']
-        where = file ? "File: #{file}" : 'File: unknown'
-        where += " (#{concern['identifier']}, inlined into #{owner['identifier']})" if concern
-        first = member['file_line']
-        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
-        lines = [where, "Published source of #{owner['identifier']}: " \
-                        "#{member_lines(member['line'], member['end_line'])}"]
+        lines = data['member'] ? definition_location_lines(data, data) : []
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
-          lines << "Also defined at published source #{member_lines(other['line'], other['end_line'])}" \
-                   "#{from}; the definition above is the one Ruby calls."
+          lines << "Also defined at #{published_source_name(other, data)} " \
+                   "#{member_lines(other['line'], other['end_line'])}#{from}; the definition above overrides it."
         end
+        Array(data['caveats']).each { |caveat| lines << "Caveat: #{caveat}" }
         lines
+      end
+
+      # The file and lines of one definition: the answer's own, or one of its
+      # `candidates`.
+      #
+      # @param definition [Hash] holds `member` and optionally `defined_in`
+      #   and `inherited_from`
+      # @param data [Hash] the whole answer
+      # @return [Array<String>]
+      def definition_location_lines(definition, data)
+        member = definition['member'] || {}
+        owner = data['member_of'] || {}
+        concern = definition['defined_in']
+        ancestor = definition['inherited_from']
+        file = (concern || ancestor || owner)['file_path']
+        where = file ? "File: #{file}" : 'File: unknown'
+        if concern
+          role = concern['prepended'] ? 'prepended' : 'inlined'
+          where += " (#{concern['identifier']}, #{role} into #{concern['included_by'] || owner['identifier']})"
+        elsif ancestor
+          where += " (#{ancestor['identifier']}, inherited by #{owner['identifier']})"
+        end
+        first = member['file_line']
+        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
+        [where, "#{published_source_name(member, data)}: #{member_lines(member['line'], member['end_line'])}"]
+      end
+
+      # @return [String] "Published source of X", the unit whose published
+      #   source an entry's `line` counts in
+      def published_source_name(entry, data)
+        "Published source of #{entry['unit'] || data.dig('member_of', 'identifier')}"
       end
 
       def member_lines(first, last)

@@ -3,6 +3,7 @@
 require_relative '../method_table'
 require_relative '../file_lines'
 require_relative '../parse_cache'
+require_relative 'lookup_member_resolution'
 require 'set'
 
 module Woods
@@ -82,34 +83,127 @@ module Woods
                       name: match[3])
       end
 
-      # The member answer for +reference+ in +unit+.
+      # The member answer for +reference+ in +unit+: the definition Ruby
+      # calls, read through the published superclass chain
+      # ({Resolution}), or every candidate with a statement that the index
+      # cannot tell which one Ruby calls.
       #
       # @param unit [Hash] the owner's published unit
       # @param reference [Reference]
       # @param concern_file [#call, nil] concern name => its file path, or nil
-      # @return [Hash, nil] string-keyed answer, or nil when the unit's
-      #   published source holds no such method
-      def answer(unit, reference, concern_file: nil)
-        entry, others = locate(unit, reference)
-        return nil unless entry
+      # @param find_unit [#call, nil] (identifier, type) => a published unit,
+      #   to read the superclass chain; nil reads the owner's unit alone
+      # @return [Hash, nil] string-keyed answer, or nil when neither the
+      #   unit's published source nor its superclass chain holds such a method
+      def answer(unit, reference, concern_file: nil, find_unit: nil)
+        resolution = Resolution.new(unit, reference, find_unit: find_unit).call
+        return nil unless resolution
 
         owner = { 'identifier' => unit['identifier'], 'type' => unit['type'], 'file_path' => unit['file_path'] }
-        result = { 'identifier' => reference.identifier, 'member_of' => owner,
-                   'member' => entry, 'statement' => statement(reference, unit, entry) }
-        if entry['file_unit']
-          result['defined_in'] = { 'identifier' => entry['file_unit'],
-                                   'file_path' => concern_file&.call(entry['file_unit']) }
+        result = { 'identifier' => reference.identifier, 'member_of' => owner }
+        if resolution.ambiguous
+          result['statement'] = ambiguous_statement(reference, unit, resolution)
+          result['candidates'] = resolution.ambiguous.map do |candidate|
+            definition(candidate, resolution, concern_file)
+          end
+        else
+          shown = definition(resolution.chosen, resolution, concern_file)
+          result['member'] = shown.delete('member')
+          result['statement'] = statement(reference, unit, resolution)
+          result.merge!(shown.except('source_code'))
         end
+        others = resolution.overridden.map { |candidate| located(candidate, resolution) }
         result['other_definitions'] = others unless others.empty?
-        result['source_code'] = source_text(unit['source_code'], entry)
+        result['caveats'] = resolution.caveats unless resolution.caveats.empty?
+        result['source_code'] = shown['source_code'] if shown
         result
       end
 
-      # @return [String] the sentence that says what the answer is
-      def statement(reference, unit, entry)
-        kind = KIND_LABELS.fetch(entry['kind'], reference.kind_label)
-        "#{reference.identifier} is a #{entry['visibility']} #{kind} of #{unit['type']} unit " \
-          "#{unit['identifier']}, not a unit of its own. Look up #{unit['identifier']} for the whole unit."
+      # The answer without source text (`include_source: false`).
+      #
+      # @param answer [Hash] a {.answer}
+      # @return [Hash]
+      def without_source(answer)
+        result = answer.except('source_code')
+        return result unless result['candidates']
+
+        result.merge('candidates' => result['candidates'].map { |candidate| candidate.except('source_code') })
+      end
+
+      # One definition: its method table entry, where it comes from and its
+      # source text.
+      def definition(candidate, resolution, concern_file)
+        result = { 'member' => located(candidate, resolution) }
+        ancestor = resolution.chain[candidate.level]
+        if candidate.concern
+          result['defined_in'] = { 'identifier' => candidate.concern,
+                                   'file_path' => concern_file&.call(candidate.concern) }
+          result['defined_in']['prepended'] = true if candidate.origin == :prepended
+          result['defined_in']['included_by'] = ancestor['identifier'] unless candidate.level.zero?
+        elsif !candidate.level.zero?
+          result['inherited_from'] = { 'identifier' => ancestor['identifier'], 'type' => ancestor['type'],
+                                       'file_path' => ancestor['file_path'] }
+        end
+        result['source_code'] = source_text(candidate.unit['source_code'], candidate.entry)
+        result
+      end
+
+      # The candidate's entry; `unit` names the published unit whose source
+      # its `line`/`end_line` count in when that is not the asked owner's.
+      def located(candidate, resolution)
+        return candidate.entry if candidate.unit.equal?(resolution.chain.first)
+
+        candidate.entry.merge('unit' => candidate.unit['identifier'])
+      end
+
+      # @return [String] the sentence that says what the answer is and how it
+      #   was established
+      def statement(reference, unit, resolution)
+        chosen = resolution.chosen
+        entry = chosen.entry
+        head = "#{reference.identifier} is a #{entry['visibility']} " \
+               "#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
+        "#{head}#{origin_clause(unit, chosen, resolution.chain[chosen.level])}" \
+          "#{overrides(reference, resolution)} #{not_a_unit(unit)}"
+      end
+
+      # How the chosen definition reaches the owner.
+      def origin_clause(unit, chosen, ancestor)
+        owner = "#{unit['type']} unit #{unit['identifier']}"
+        inherited = !chosen.level.zero?
+        case chosen.origin
+        when :own
+          return " of #{owner}, defined in its own body." unless inherited
+
+          " that #{owner} inherits from #{ancestor['type']} unit #{ancestor['identifier']}, defined in its own body."
+        when :prepended
+          by = inherited ? "its superclass #{ancestor['identifier']}" : unit['identifier']
+          " of #{owner}, from module #{chosen.concern}, which #{by} prepends."
+        else
+          through = inherited ? ", which it gets through its superclass #{ancestor['identifier']}" : ''
+          " of #{owner}, inlined from concern #{chosen.concern}#{through}."
+        end
+      end
+
+      # @return [String] the statement of an answer the index cannot rank
+      def ambiguous_statement(reference, unit, resolution)
+        concerns = resolution.ambiguous.map(&:concern)
+        "#{reference.identifier}: #{concerns.size} concerns inlined into #{unit['type']} unit " \
+          "#{unit['identifier']} define the #{reference.kind_label} #{reference.name} " \
+          "(#{concerns.join(', ')}), and the index does not record the order in which they were included, " \
+          'so Woods cannot tell which one Ruby calls. Each definition is listed under candidates.' \
+          "#{overrides(reference, resolution, 'They override')} #{not_a_unit(unit)}"
+      end
+
+      def overrides(reference, resolution, subject = 'It overrides')
+        count = resolution.overridden.size
+        return '' if count.zero?
+
+        " #{subject} #{count} other definition#{'s' unless count == 1} of #{reference.name}."
+      end
+
+      def not_a_unit(unit)
+        "It is not a unit of its own; look up #{unit['identifier']} for the whole unit."
       end
 
       # @param reference [Reference]
@@ -134,38 +228,6 @@ module Woods
         methods_of(unit).any? do |entry|
           entry['name'] == reference.name && !entry['file_unit'] && lines.include?(entry['line'])
         end
-      end
-
-      # The definition Ruby would call, and the others of the same name.
-      # The unit's own definitions win over an inlined concern's, and the
-      # later of two definitions in one body wins.
-      #
-      # @return [Array(Hash, Array<Hash>), nil]
-      def locate(unit, reference)
-        class_method_lines = nil
-        own_class_methods = nil
-        matches = methods_of(unit).select do |entry|
-          next false unless entry['name'] == reference.name && member_owner?(entry, unit['identifier'])
-
-          unless entry['file_unit']
-            own_class_methods ||= ConcernClassMethods.own_lines(unit['source_code'], unit['identifier'])
-            next reference.kind?(entry) && !own_class_methods.include?(entry['line'])
-          end
-
-          class_method_lines ||= ConcernClassMethods.lines(unit['source_code'])
-          reference.concern_kind?(entry, class_method_lines)
-        end
-        return nil if matches.empty?
-
-        ordered = matches.map { |entry| reference.as_named(entry) }
-                         .sort_by { |entry| [entry['file_unit'] ? 0 : 1, entry['line'].to_i] }
-        [ordered.last, ordered[0...-1].reverse]
-      end
-
-      # An entry of the unit's own class body, or of an inlined concern's own
-      # module body. A nested class's method is not a member of the unit.
-      def member_owner?(entry, identifier)
-        entry['owner'] == (entry['file_unit'] || identifier)
       end
 
       # @return [Array<Hash>] the published method table, or one read from the
