@@ -206,7 +206,7 @@ module Woods
 
           stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
-            stats.each { |k, v| lines << "- **#{k}:** #{v}" }
+            stats.each { |k, v| lines << "- **#{k}:** #{inline_value(v)}" }
             lines << ''
           end
 
@@ -226,7 +226,7 @@ module Woods
                        elsif item.is_a?(Hash)
                          "- **#{item['identifier']}** (#{item['type']}) — #{item['dependent_count']} dependents"
                        else
-                         "- #{item}"
+                         "- #{inline_value(item)}"
                        end
             end
 
@@ -445,7 +445,7 @@ module Woods
         #   as plain text instead of printing Ruby's `Array#inspect` syntax.
         # @return [Object]
         def edge_value(value)
-          value.is_a?(Array) ? value.join(', ') : value
+          value.is_a?(Array) ? value.map { |item| inline_value(item) }.join(', ') : inline_value(value)
         end
 
         def render_traversal(label, data)
@@ -525,11 +525,12 @@ module Woods
                 lines << if item.is_a?(Hash)
                            "  - #{metadata_item_summary(item)}"
                          else
-                           "  - #{item}"
+                           "  - #{inline_value(item)}"
                          end
               end
             when Hash
-              lines << "**#{key}:** #{value.map { |k, v| "#{entry_label(metadata, key, k)}=#{v}" }.join(', ')}"
+              pairs = value.map { |k, v| "#{entry_label(metadata, key, k)}=#{inline_value(v)}" }
+              lines << "**#{key}:** #{pairs.join(', ')}"
             else
               lines << "**#{key}:** #{value}"
             end
@@ -576,7 +577,7 @@ module Woods
         end
 
         def metadata_value(value)
-          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : value
+          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : inline_value(value)
         end
 
         def file_lines(entry)
@@ -603,11 +604,13 @@ module Woods
             case value
             when Hash
               lines << "**#{key}:**"
-              value.each { |k, v| lines << "  - #{k}: #{v}" }
+              value.each { |k, v| lines << "  - #{k}: #{inline_value(v)}" }
             when Array
               lines << "**#{key}:** #{value.size} items"
               value.first(10).each do |item|
-                lines << "  - #{item.is_a?(Hash) ? item.values.first(3).join(', ') : item}"
+                shown = item.is_a?(Hash) ? item.values.first(3).map { |v| inline_value(v) }.join(', ') : item
+                shown = inline_value(shown)
+                lines << "  - #{shown}"
               end
             else
               lines << "**#{key}:** #{value}"
@@ -625,11 +628,11 @@ module Woods
             lines << "| #{keys.join(' | ')} |"
             lines << "| #{keys.map { '---' }.join(' | ')} |"
             array.each do |row|
-              lines << "| #{keys.map { |k| row[k] }.join(' | ')} |"
+              lines << "| #{keys.map { |k| inline_value(row[k]) }.join(' | ')} |"
             end
             lines.join("\n")
           else
-            array.map { |item| "- #{item}" }.join("\n")
+            array.map { |item| "- #{inline_value(item)}" }.join("\n")
           end
         end
       end
