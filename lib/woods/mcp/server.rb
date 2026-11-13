@@ -651,9 +651,11 @@ module Woods
                 selected = Retrieval::SourceEvidence.new(unit: unit, query: query, generation: reader.loaded_generation)
                                                     .render(mode: evidence, budget: budget || 2000,
                                                             counter: ->(text) { (text.length / 4.0).ceil })
+                # The text states each span, so the data beside it does not repeat them.
+                evidence_data = Retrieval::SourceEvidence.beside_text(selected.provenance)
                 next ::MCP::Tool::Response.new([{ type: 'text', text: selected.text }],
                                                structured_content: { text: selected.text,
-                                                                     data: { evidence: selected.provenance } },
+                                                                     data: { evidence: evidence_data } },
                                                meta: lookup_meta)
               end
               always_include = %w[type identifier file_path namespace]

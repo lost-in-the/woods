@@ -26,6 +26,22 @@ module Woods
         raise ArgumentError, 'evidence must be full, compact, or outline'
       end
 
+      # Per-span facts the evidence text does not state. The text names each
+      # span's kind, lexical owner, name and published lines; its bytes are
+      # the stated offsets of the source `source_sha256` identifies.
+      SPAN_FIELDS_BESIDE_TEXT = %i[name start_byte end_byte receiver physical_location].freeze
+
+      # Provenance for a response that also carries the evidence text, so a
+      # selected span is stated once: unit-level provenance is kept whole and
+      # each span record keeps its name plus what the text cannot state.
+      #
+      # @param provenance [Hash] a {Result#provenance} record
+      # @return [Hash] the record with span records reduced to
+      #   {SPAN_FIELDS_BESIDE_TEXT}, absent values left out
+      def self.beside_text(provenance)
+        provenance.merge(spans: provenance[:spans].map { |span| span.slice(*SPAN_FIELDS_BESIDE_TEXT).compact })
+      end
+
       def initialize(unit:, query: nil, generation: nil, parser: Ast::Parser.new)
         @unit = unit
         @source = field(:source_code).to_s

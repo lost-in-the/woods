@@ -1083,7 +1083,8 @@ RSpec.describe 'Index MCP tool contracts' do
     if name == 'lookup'
       expect(data.fetch('evidence')).to include('mode' => value, 'coordinate_system' => 'published_unit',
                                                 'owner' => { 'identifier' => 'Post', 'type' => 'model' })
-      expect(data.fetch('evidence').fetch('spans').map { |span| span.fetch('kind') }).to eq(['published_source'])
+      expect(data.fetch('evidence').fetch('spans').map { |span| span.fetch('name') }).to eq(['Post'])
+      expect(result.dig('content', 0, 'text')).to include('published_source  Post; published lines')
     else
       assert_retrieval_evidence_enum(value, result, data)
     end
