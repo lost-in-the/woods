@@ -154,6 +154,18 @@ RSpec.describe 'MCP lookup of a unit member' do
     end
   end
 
+  let(:util_source) do
+    <<~RUBY
+      module Canopy
+        module Util
+          module_function
+
+          def tool; end
+        end
+      end
+    RUBY
+  end
+
   # [directory, type, identifier, file_path, source, metadata]
   let(:units) do
     [
@@ -165,6 +177,9 @@ RSpec.describe 'MCP lookup of a unit member' do
       # An index that predates the published method table.
       ['controllers', 'controller', 'Admin::PostsController', 'app/controllers/admin/posts_controller.rb',
        admin_source, {}],
+      # A module whose own body uses module_function.
+      ['libs', 'lib', 'Canopy::Util', 'lib/canopy/util.rb', util_source,
+       { 'methods' => published_methods(util_source, identity_lines: 7) }],
       # A published unit whose identifier has the member form.
       ['routes', 'route', 'PostsController#index', 'config/routes.rb', 'get "/posts", to: "posts#index"', {}]
     ]
@@ -290,7 +305,6 @@ RSpec.describe 'MCP lookup of a unit member' do
       'Post.slugify' => 'def self. in a concern',
       'Post.helper' => 'class << self in a concern',
       'Post.tool' => 'a module_function of a concern',
-      'Post#tool' => 'a module_function of a concern, as an instance method',
       'Post#format' => 'a class_methods method, as an instance method'
     }.each do |identifier, form|
       it "does not answer #{form} (#{identifier}) as a member of the including unit" do
@@ -321,6 +335,42 @@ RSpec.describe 'MCP lookup of a unit member' do
       response = call(build, identifier: 'PostsController#create')
 
       expect(response.meta).to include(member_of: { identifier: 'PostsController', type: 'controller' })
+    end
+  end
+
+  describe 'module_function' do
+    # `module_function` makes a public singleton copy on the module and leaves
+    # the instance method private; an including class gets only the private
+    # instance method.
+    it "answers a concern's module_function as the includer's private instance method" do
+      data = member('Post#tool')
+
+      expect(data['member']).to include('name' => 'tool', 'kind' => 'instance', 'visibility' => 'private',
+                                        'file_unit' => 'Publishable')
+      expect(data['defined_in']).to include('identifier' => 'Publishable')
+      expect(data['statement']).to start_with('Post#tool is a private instance method of model unit Post,')
+    end
+
+    it 'does not change the published method table' do
+      call(build, identifier: 'Post#tool')
+      unit = JSON.parse(File.read(File.join(index_dir, 'models', collision_safe_filename('Post')), encoding: 'UTF-8'))
+
+      expect(unit['metadata']['methods'].find { |entry| entry['name'] == 'tool' })
+        .to include('kind' => 'module_function', 'visibility' => 'public')
+    end
+
+    it "answers a module's own module_function with a dot as a public module function" do
+      data = member('Canopy::Util.tool')
+
+      expect(data['member']).to include('kind' => 'module_function', 'visibility' => 'public')
+      expect(data['statement']).to start_with('Canopy::Util.tool is a public module function of lib unit')
+    end
+
+    it "answers a module's own module_function with # as its private instance method" do
+      data = member('Canopy::Util#tool')
+
+      expect(data['member']).to include('kind' => 'instance', 'visibility' => 'private')
+      expect(data['statement']).to start_with('Canopy::Util#tool is a private instance method of lib unit')
     end
   end
 

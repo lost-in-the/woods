@@ -473,8 +473,12 @@ A method inlined from a concern is a member only when the including class respon
 the concern and its file.
 An instance method of the concern answers `Owner#method`; a definition inside its `class_methods do` block answers
 `Owner.method`.
-The concern's own `def self.x`, `class << self` and `module_function` methods stay on the concern and are not
-members of the unit; look them up on the concern.
+A concern's `module_function` method answers `Owner#method` as a private instance method, the copy an including
+class receives; its public singleton copy stays on the concern.
+The concern's own `def self.x` and `class << self` methods stay on the concern and are not members of the unit;
+look them up on the concern.
+In a unit's own body, `Mod.method` answers a `module_function` as a public module function and `Mod#method` as a
+private instance method.
 Known limit: methods of a `module ClassMethods` inside a concern are not answered as class methods of the unit.
 When a name is defined more than once, the answer is the definition Ruby calls (the unit's own over a concern's,
 the later of two in one body), and `other_definitions` lists the rest.

@@ -88,19 +88,19 @@ module Woods
         where = file ? "File: #{file}" : 'File: unknown'
         where += " (#{concern['identifier']}, inlined into #{owner['identifier']})" if concern
         first = member['file_line']
-        where += first.is_a?(Integer) ? ", lines #{member_range(first, member['file_end_line'])}" : ', lines not mapped'
-        lines = [where, "Published source of #{owner['identifier']}: lines " \
-                        "#{member_range(member['line'], member['end_line'])}"]
+        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
+        lines = [where, "Published source of #{owner['identifier']}: " \
+                        "#{member_lines(member['line'], member['end_line'])}"]
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
-          lines << "Also defined at published source lines #{member_range(other['line'], other['end_line'])}" \
+          lines << "Also defined at published source #{member_lines(other['line'], other['end_line'])}" \
                    "#{from}; the definition above is the one Ruby calls."
         end
         lines
       end
 
-      def member_range(first, last)
-        last.is_a?(Integer) && last != first ? "#{first}-#{last}" : first.to_s
+      def member_lines(first, last)
+        last.is_a?(Integer) && last != first ? "lines #{first}-#{last}" : "line #{first}"
       end
 
       # The name printed for one entry of a metadata Hash: a controller's

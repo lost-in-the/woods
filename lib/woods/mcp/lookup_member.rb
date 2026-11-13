@@ -32,18 +32,32 @@ module Woods
           kinds.include?(entry['kind'])
         end
 
+        # The entry as the method +#+ names it: a `module_function`'s
+        # instance side is a private instance method (the published entry
+        # describes the public singleton copy). A copy; the published entry
+        # is not changed.
+        #
+        # @param entry [Hash] a method table entry
+        # @return [Hash]
+        def as_named(entry)
+          return entry unless separator == '#' && entry['kind'] == 'module_function'
+
+          entry.merge('kind' => 'instance', 'visibility' => 'private')
+        end
+
         # For a definition inlined from a concern: only what the including
-        # class responds to. Instance methods are mixed in, and the
+        # class responds to. Instance methods (a `module_function`'s private
+        # instance side among them) are mixed in, and the
         # definitions of `class_methods do` are extended onto it; the
-        # concern's own `def self.x`, `class << self` and `module_function`
-        # methods stay on the concern.
+        # concern's own `def self.x`, `class << self` and the singleton copy
+        # of a `module_function` stay on the concern.
         #
         # @param entry [Hash] a method table entry with `file_unit`
         # @param class_method_lines [Set<Integer>] lines of the concern's
         #   `class_methods` definitions, in published-source coordinates
         # @return [Boolean]
         def concern_kind?(entry, class_method_lines)
-          return entry['kind'] == 'instance' if separator == '#'
+          return %w[instance module_function].include?(entry['kind']) if separator == '#'
 
           entry['kind'] == 'singleton' && class_method_lines.include?(entry['line'])
         end
@@ -122,7 +136,8 @@ module Woods
         end
         return nil if matches.empty?
 
-        ordered = matches.sort_by { |entry| [entry['file_unit'] ? 0 : 1, entry['line'].to_i] }
+        ordered = matches.map { |entry| reference.as_named(entry) }
+                         .sort_by { |entry| [entry['file_unit'] ? 0 : 1, entry['line'].to_i] }
         [ordered.last, ordered[0...-1].reverse]
       end
 
