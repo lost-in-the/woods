@@ -13,6 +13,17 @@ module Woods
 
         # ── lookup ──────────────────────────────────────────────────
 
+        # @param data [Hash] a {LookupMember.answer}
+        # @return [String] Markdown naming the member, its owner and its lines
+        def render_lookup_member(data, **)
+          owner = data['member_of'] || {}
+          lines = ["## #{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", '',
+                   data['statement'], '']
+          member_location_lines(data).each { |line| lines << "- #{line}" }
+          lines.push('', '```ruby', data['source_code'].chomp, '```') if data['source_code']
+          lines.join("\n")
+        end
+
         # @param data [Hash] Unit data from IndexReader#find_unit
         # @return [String] Markdown-formatted unit
         def render_lookup(data, **)

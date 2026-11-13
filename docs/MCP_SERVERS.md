@@ -307,7 +307,7 @@ The remaining schemas require the specialized wiring described afterward.
 |---|---|
 | `woods_status` | Index health, generation, counts, and retrieval readiness |
 | `search` | Discover identifiers by regex, prefix, suffix, source, or metadata |
-| `lookup` | Fetch one exact unit with source, metadata, and relationships |
+| `lookup` | Fetch one exact unit with source, metadata, and relationships, or one method of a unit (`Owner#method`) |
 | `dependencies` | Traverse what a unit depends on (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `path` | How one unit reaches another: the shortest chain of published edges from `from` to `to`, one hop per line with its `via` labels ([paths](#paths-between-units)) |
@@ -460,6 +460,25 @@ prefer that concrete type for follow-up identity checks.
 `lookup` of an identifier published under more than one type still returns one
 unit (the type directory that sorts last) and names every type in
 `_meta.ambiguous_types`; pass the intended `type` to choose.
+
+**Included in Woods 2.2:** `lookup` answers one method of a unit.
+An identifier `Owner#method` (instance method) or `Owner.method` (class method) that is not itself a published unit,
+where `Owner` is one, answers with that method only: the file and line range a reader opens, the lines in the
+owner's published source, the method's source text, and a statement that it is a member of unit `Owner` (its type
+named), not a unit of its own.
+`_meta.member_of` names the owner unit.
+The lines come from the published method table (`metadata.methods`); a unit published before that table is read
+with a Prism walk of its published source.
+A method inlined from a concern is a member of the unit, and `defined_in` names the concern and its file.
+When a name is defined more than once, the answer is the definition Ruby calls (the unit's own over a concern's,
+the later of two in one body), and `other_definitions` lists the rest.
+`type` selects the owner's type.
+An identifier that is itself a published unit (a route, for example) still returns that unit.
+When the owner exists but the method is not in its published source (defined by metaprogramming or inherited from
+a parent), the answer stays `not_found` and says so, keeps the suggestion of the owner, and names it in
+`_meta.member_of`.
+A member answer is the whole method on one page: `evidence` other than `full`, `sections` and `page` are refused
+with `unsupported_argument`; look up the owner to use them.
 
 Identifier matches are ranked by how well they match, not by the order of type
 directories or summary files: the exact identifier first, then an exact short

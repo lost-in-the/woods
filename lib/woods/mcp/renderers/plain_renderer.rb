@@ -10,6 +10,16 @@ module Woods
       class PlainRenderer < ToolResponseRenderer
         DIVIDER = ('=' * 60).freeze
 
+        # @param data [Hash] a {LookupMember.answer}
+        # @return [String] plain text naming the member, its owner and its lines
+        def render_lookup_member(data, **)
+          owner = data['member_of'] || {}
+          lines = ["#{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", DIVIDER,
+                   data['statement'], '', *member_location_lines(data)]
+          lines.push('', data['source_code'].chomp) if data['source_code']
+          lines.join("\n")
+        end
+
         def render_lookup(data, **)
           return 'Unit not found' unless data.is_a?(Hash) && data['identifier']
 
