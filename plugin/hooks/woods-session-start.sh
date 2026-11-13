@@ -36,12 +36,13 @@ unavailable_summary() {
 source_advice() {
   if command -v jq >/dev/null 2>&1; then
     printf '%s' "$1" | jq -r 'if (.recommendations | type) == "array" then
-      .recommendations[] | select(. == "deep_check" or . == "fresh_capture" or . == "inspect_source_scan")
+      .recommendations[] | select(. == "deep_check" or . == "fresh_capture" or . == "inspect_source_scan"
+        or . == "map_source_root")
       else empty end' 2>/dev/null
   elif command -v ruby >/dev/null 2>&1; then
     printf '%s' "$1" | ruby -EUTF-8:UTF-8 -rjson -e '
       values = JSON.parse($stdin.read)["recommendations"]
-      allowed = %w[deep_check fresh_capture inspect_source_scan]
+      allowed = %w[deep_check fresh_capture inspect_source_scan map_source_root]
       puts values.select { |value| allowed.include?(value) } if values.is_a?(Array)
     ' 2>/dev/null
   fi
@@ -54,12 +55,13 @@ unknown_message() {
     return
   fi
   printf '%s' 'Woods source freshness is unknown: this check could not verify the current source contents.'
-  # Only the three literal identifiers above reach this word split.
+  # Only the four literal identifiers above reach this word split.
   for action in $advice; do
     case "$action" in
       deep_check) printf '%s' ' Request woods_status with source_check: deep; the quick reader reached its time limit.' ;;
       fresh_capture) printf '%s' ' Fix the capture or boot evidence reported by woods_status, then run woods-extract full in the application environment.' ;;
       inspect_source_scan) printf '%s' ' Inspect woods_status verification_reasons, source mapping, permissions and scan limits.' ;;
+      map_source_root) printf '%s' ' The source root recorded in the index is not a directory here: run the check where it exists, or map it to this checkout (WOODS_SOURCE_ROOT for the MCP server). A new extraction records the same root.' ;;
     esac
   done
   printf '\n'

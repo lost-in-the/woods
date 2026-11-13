@@ -4,6 +4,7 @@ require 'base64'
 require 'woods/generation'
 require 'woods/source_inputs/verifier'
 require 'woods/source_inputs/relocated_root'
+require 'woods/source_inputs/root_advice'
 
 module Woods
   module SourceInputs
@@ -78,7 +79,7 @@ module Woods
         result = Verifier.new(manifest: manifest, output_dir: @output, root: @root || relocated&.path,
                               root_source: relocated&.source, generation: @generation,
                               max_seconds: BUDGETS.fetch(@mode), deadline: deadline).call
-        relocated ? relocated.checked(result) : result
+        RootAdvice.annotate(relocated ? relocated.checked(result) : result)
       end
 
       # The budget covers the whole check: reading the manifest and preparing
@@ -96,6 +97,8 @@ module Woods
           advice << 'deep_check'
           reader_reasons -= ['scan_time_budget']
         end
+        return advice + RootAdvice.recommendations(reader_reasons) if result.key?('root_advice')
+
         advice << 'inspect_source_scan' unless reader_reasons.empty?
         advice << 'fresh_capture' if incomplete_capture?(manifest)
         advice

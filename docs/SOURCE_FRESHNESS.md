@@ -64,6 +64,13 @@ a source edit does not require an index generation change to become visible.
 - `inspect_source_limits`: source freshness is unavailable because evidence exceeds its size limit; the code index remains usable.
 - `fresh_capture`: the captured baseline, boot or consumer evidence is incomplete;
   fix the reported cause and run the launcher in a fresh process.
+- `map_source_root`: the root the index recorded is not a directory where the check runs, and no other root stood in.
+  This is the usual result for an index extracted in a container (root `/app`) and read by a server on the host.
+  Launch the server where the recorded root exists (through the container),
+  or set `WOODS_SOURCE_ROOT` in the server's environment to the path of the same checkout on this machine.
+  Another extraction records the same root, so `fresh_capture` is not returned with it.
+  The result also carries the same advice as text in `root_advice`.
+  See [a checkout served under another path](#a-checkout-served-under-another-path).
 
 Several recommendations can apply together. `verification_reasons` describes the
 current reader scan; `reasons` also retains capture failures. A quick reader limit
@@ -292,6 +299,12 @@ drift. `checked_root` and `root_source` always say which tree was checked. Set
 
 If no application owns the index directory, the result is `unknown` with
 `source_root_unavailable`, as before.
+
+In both `unknown` cases (no owning application, or no tie) the recommendation is `map_source_root`, with `root_advice`.
+The state and reason are unchanged.
+`fresh_capture` is not returned: another extraction records the same root.
+`inspect_source_scan` is returned only when the scan reported a reason of its own, such as a file limit.
+A recorded root that is a directory but cannot be read keeps `inspect_source_scan`.
 
 Drift against a relocated root follows the same rules as any other check:
 
