@@ -600,8 +600,13 @@ jobs:
       - name: Check for dependency vulnerabilities
         run: bundle exec bundle-audit check --update
 
+  # The release artifact must rebuild to identical bytes for a rerun of one
+  # SHA, so the toolchain is pinned: an exact Ruby patch, and the runner image
+  # that carries it. ruby/setup-ruby builds only the newest patch of a series
+  # for a newer image, so `ubuntu-latest` breaks this job when it moves on.
+  # Change the image and the Ruby patch together.
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Set up Ruby
