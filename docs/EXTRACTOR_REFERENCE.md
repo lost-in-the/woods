@@ -143,9 +143,15 @@ mailers, concerns, POROs, libs and the other constant-owned types) publish
 published `source_code` coordinates, sorted by line.
 - `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
   `class_methods do`) or `module_function`.
-- `visibility` follows the literal `private`, `protected` and `public` forms,
-  including `private def`, `private :name` after the definition and
-  `private_class_method`.
+- `kind` and `visibility` are what Ruby reports for the definition, read from the literal forms without running them.
+  - `private`, `protected` and `public`: bare, before a `def`, or after it with symbol, string or array arguments.
+  - `private_class_method` and `public_class_method`: before a `def self.` or after it with names.
+  - `module_function`: bare, before a `def`, or after the definitions with symbol or string names.
+  - `initialize`, `initialize_copy`, `initialize_dup`, `initialize_clone` and `respond_to_missing?` are private
+    instance methods even under a bare `public`, as in Ruby; a later `public :initialize` makes one public.
+- A `module_function` entry stands for a private instance method and a singleton copy; its `visibility` is the copy's.
+  A later `public :name` or `protected :name` splits it into an `instance` and a `singleton` entry.
+- A name passed before its definition (Ruby raises) leaves the entry as its definition reads.
 - `owner` is the lexical class or module, so a concern inlined as a commented
   display block owns its methods at their lines inside the block.
 - Methods defined by metaprogramming or on another receiver are absent.
@@ -897,6 +903,10 @@ excluded). They never decide the unit type.
 **Key details:**
 - Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
+- `include` and `extend` edges and `metadata.included_modules` come from real calls with constant arguments,
+  read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, a multi-line argument list,
+  and `base.extend ClassMethods` in `self.included`.
+  A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked
@@ -1732,7 +1742,7 @@ Git history is required.
 
 | Value | Meaning |
 |-------|---------|
-| `:new` | The commit that created the file is inside the window, and the file has at most two commits |
+| `:new` | The file's content first appeared inside the window, and the file has at most two commits |
 | `:hot` | Ten or more commits in the last 90 days |
 | `:active` | Three or more commits in the last 90 days |
 | `:stable` | At least one commit in the last 90 days |
@@ -1740,6 +1750,15 @@ Git history is required.
 
 A file written before the window and not touched since has `commit_count: 0`, no contributors and `:dormant`.
 That is a quiet file, not an uncommitted one: the window holds none of its history.
+
+A file renamed into place inside the window is not `:new` when its content is older.
+The history walk reads renames as a deletion and an addition, so a commit that creates a file and also deletes a path
+is read again with git's rename detection (`-M`, default similarity).
+A rename is followed back through the window to the commit that created its source.
+A source older than the window means the content is too: the file is classified by its counts.
+A source created inside the window keeps the file `:new`.
+`commit_count` still counts only the commits at the current name.
+The commit table (`git_commits.json`) still lists a renamed path as `added`.
 
 ### Full example JSON
 

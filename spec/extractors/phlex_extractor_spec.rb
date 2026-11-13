@@ -428,6 +428,7 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
         '/rails/app/components/page_component.rb' => <<~RUBY,
           class PageComponent < Phlex::HTML
             include ApplicationHelper
+            # include LegacyHelper once the old layout is gone
 
             def view_template
               render HeaderComponent.new
@@ -478,8 +479,8 @@ RSpec.describe Woods::Extractors::PhlexExtractor do
       extractor = described_class.new
       unit = extractor.extract_component(component_class)
 
-      expect(unit.dependencies).to include(
-        a_hash_including(type: :helper, target: 'ApplicationHelper', via: :include)
+      expect(unit.dependencies.select { |dep| dep[:via] == :include }).to eq(
+        [{ type: :helper, target: 'ApplicationHelper', via: :include }]
       )
     end
 
