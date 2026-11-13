@@ -14,5 +14,7 @@
   longer ends up in the name.
   A qualified declaration such as `module Outer::Trackable` inside `module Outer` is read as `Outer::Trackable`, so
   its own `ClassMethods` stays out of `metadata.included_modules`.
-  `extend self::ClassMethods` in a concern's body or hook no longer records an `extend` edge to a concern named
-  `self`, and `include self::Helpers` targets the concern's own `Helpers` instead of `self::Helpers`.
+  `extend self::ClassMethods` in a concern's body or `def self.included` no longer records an `extend` edge to a
+  concern named `self`, and `include self::Helpers` there targets the concern's own `Helpers`.
+  Where `self` is the including class or cannot be told (`base.class_eval { }`, `included do`, any other block,
+  an instance method), a `self::` constant gives no edge and is not listed in `metadata.included_modules`.

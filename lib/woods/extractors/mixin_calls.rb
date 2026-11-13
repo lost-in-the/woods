@@ -87,6 +87,7 @@ module Woods
           @method_depth = 0
           @nesting = []
           @declared = Set.new
+          @self_is = :other
         end
 
         # The declared module or class a constant names, by lexical lookup
@@ -97,9 +98,7 @@ module Woods
         # @return [String, nil]
         def resolve(name, nesting)
           candidates =
-            if name.start_with?('self::')
-              nesting.last(1).map { |scope| "#{scope}::#{name.delete_prefix('self::')}" }
-            elsif name.start_with?('::')
+            if name.start_with?('::')
               [name.delete_prefix('::')]
             else
               nesting.reverse.map { |scope| "#{scope}::#{name}" } << name
@@ -121,7 +120,7 @@ module Woods
         def visit_call_node(node)
           if @kinds.include?(node.name) && (!@own_only || own?(node))
             node.arguments&.arguments.to_a.each do |argument|
-              name = constant_name(argument)
+              name = self_resolved(constant_name(argument))
               @found << [node.name, name, @nesting.dup] if name
             end
           end
@@ -131,20 +130,67 @@ module Woods
         # @param node [Prism::DefNode]
         def visit_def_node(node)
           @method_depth += 1
-          super
+          self_is(self_in_method(node.receiver)) { super }
         ensure
           @method_depth -= 1
         end
 
+        # `class << self` in a module body: self is its singleton class.
+        #
+        # @param node [Prism::SingletonClassNode]
+        def visit_singleton_class_node(node)
+          inside = node.expression.is_a?(Prism::SelfNode) && @self_is == :module ? :singleton_class : :other
+          self_is(inside) { super }
+        end
+
+        # A block may run with any self (`class_eval`, `included do`).
+        #
+        # @param node [Prism::BlockNode]
+        def visit_block_node(node)
+          self_is(:other) { super }
+        end
+
+        # @param node [Prism::LambdaNode]
+        def visit_lambda_node(node)
+          self_is(:other) { super }
+        end
+
         private
 
-        def within(node)
+        def within(node, &block)
           qualified = declared_name(constant_name(node.constant_path) || node.constant_path.slice)
           @declared << qualified
           @nesting.push(qualified)
-          yield
+          self_is(:module, &block)
         ensure
           @nesting.pop if qualified
+        end
+
+        def self_is(state)
+          outer = @self_is
+          @self_is = state
+          yield
+        ensure
+          @self_is = outer
+        end
+
+        # What self is inside a method defined here: the module for
+        # `def self.x` in its body or `def x` in its `class << self`.
+        def self_in_method(receiver)
+          case receiver
+          when nil then @self_is == :singleton_class ? :module : :other
+          when Prism::SelfNode then @self_is == :module ? :module : :other
+          else :other
+          end
+        end
+
+        # `self::X` names the enclosing module's X only where self is that
+        # module; elsewhere it names nothing this source can tell.
+        def self_resolved(name)
+          return name unless name&.start_with?('self::')
+          return nil unless @self_is == :module && @nesting.any?
+
+          "::#{@nesting.last}::#{name.delete_prefix('self::')}"
         end
 
         # The qualified name of a module or class declared at +path+ here. A

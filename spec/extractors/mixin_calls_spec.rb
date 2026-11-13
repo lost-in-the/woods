@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'active_support/concern'
 require 'woods/extractors/mixin_calls'
 
 RSpec.describe Woods::Extractors::MixinCalls do
@@ -138,6 +139,63 @@ RSpec.describe Woods::Extractors::MixinCalls do
     expect(described_class.outside_owner(source, 'Outer::Trackable')).to eq([[:include, 'Depot::Weighable']])
   end
 
+  describe 'self:: in a mixin call' do
+    it 'is the module only in its body and its singleton methods, as Ruby evaluates self' do
+      plain = Module.new do
+        def self.included(base)
+          base.instance_variable_set(:@hook_self, self)
+          base.class_eval { @class_eval_self = self }
+        end
+      end
+      concern = Module.new do
+        extend ActiveSupport::Concern
+
+        included { @included_self = self }
+        class_methods { @class_methods_self = self }
+      end
+      includer = Class.new
+      includer.include(plain, concern)
+
+      expect(includer.instance_variable_get(:@hook_self)).to be(plain)
+      expect(includer.instance_variable_get(:@class_eval_self)).to be(includer)
+      expect(includer.instance_variable_get(:@included_self)).to be(includer)
+      expect(concern::ClassMethods.instance_variable_get(:@class_methods_self)).to be(concern::ClassMethods)
+    end
+
+    it 'names the enclosing module where self is that module, and nothing where it is not' do
+      source = <<~RUBY
+        module Trackable
+          extend self::ClassMethods
+          def self.included(base)
+            base.extend(self::ClassMethods)
+            base.class_eval { include self::Helpers }
+            base.instance_eval { extend self::Finders }
+          end
+          included do
+            include self::Scopes
+          end
+          class_methods do
+            include self::Queries
+          end
+          class << self
+            include self::Singleton
+            def extended(base)
+              base.extend(self::Extending)
+            end
+          end
+          def track
+            extend self::Instance
+          end
+        end
+      RUBY
+      expect(calls(source)).to eq([[:extend, '::Trackable::ClassMethods']])
+      expect(described_class.call(source, %i[include extend], own_only: false)).to eq(
+        [[:extend, '::Trackable::ClassMethods'], [:extend, '::Trackable::ClassMethods'],
+         [:extend, '::Trackable::Extending']]
+      )
+    end
+  end
+
   it 'names a constant from its path, not its text, keeping a leading ::' do
     source = <<~RUBY
       module Stackable
@@ -149,7 +207,7 @@ RSpec.describe Woods::Extractors::MixinCalls do
       end
     RUBY
     expect(calls(source)).to eq(
-      [[:include, 'Depot::Weighable'], [:include, '::Depot::Countable'], [:extend, 'self::ClassMethods']]
+      [[:include, 'Depot::Weighable'], [:include, '::Depot::Countable'], [:extend, '::Stackable::ClassMethods']]
     )
   end
 
