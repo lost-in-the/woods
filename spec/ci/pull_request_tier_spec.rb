@@ -10,7 +10,7 @@ require_relative '../../script/release_profile'
 # End-of-life lines run on main and version tags, which keep the full matrix
 # and the full incremental-equivalence depth. Every row still reports a
 # result on a pull request, so a required check never waits on a row that
-# was not scheduled; a skipped row's name ends in " (not run on PRs)".
+# was not scheduled; the `not-run` check lists the rows a pull request skips.
 # The `full-matrix` label runs every row on a pull request.
 #
 # Security support, as of 2026-10-28 (rubyonrails.org/maintenance,
@@ -21,15 +21,25 @@ RSpec.describe 'CI pull request tier' do
   let(:jobs) do
     YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true).fetch('jobs')
   end
-  # One condition decides whether a row runs, and the same text names the row:
-  # a pull request without the `full-matrix` label skips the `pr: false` rows,
-  # and their check names say so.
+  # One condition decides whether a row runs: a pull request without the
+  # `full-matrix` label skips the `pr: false` rows.
   let(:condition) do
     "github.event_name != 'pull_request' || matrix.pr || " \
       "contains(github.event.pull_request.labels.*.name, 'full-matrix')"
   end
   let(:active) { "${{ #{condition} }}" }
-  let(:suffix) { "${{ !(#{condition}) && ' (not run on PRs)' || '' }}" }
+  let(:names) do
+    {
+      'test' => 'Unit specs (Ruby ${{ matrix.ruby-version }})',
+      'test-required' => 'Unit specs (Ruby ${{ matrix.ruby-version }})',
+      'rails-matrix' => 'Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})',
+      'rails-required' => 'Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})'
+    }
+  end
+
+  def rendered(id, row)
+    jobs.fetch(id).fetch('name').gsub(/\$\{\{ matrix\.([\w-]+) \}\}/) { row.fetch(Regexp.last_match(1)) }
+  end
 
   def rows(*ids)
     ids.flat_map { |id| jobs.fetch(id).dig('strategy', 'matrix', 'include') }
@@ -82,31 +92,52 @@ RSpec.describe 'CI pull request tier' do
     expect(job.fetch('steps').map { |step| step.fetch('run') }.join).to include('gh workflow run ci.yml')
   end
 
-  # On main and tags the condition is true, so the suffix renders empty and the
-  # check names stay the ones script/validate-release-run and the release
-  # profile match.
-  it 'keeps the check names of main and tag runs unchanged' do
-    names = %w[test test-required rails-matrix rails-required].flat_map do |id|
-      job = jobs.fetch(id)
-      job.dig('strategy', 'matrix', 'include').map do |row|
-        job.fetch('name').delete_suffix(suffix).gsub(/\$\{\{ matrix\.([\w-]+) \}\}/) { row.fetch(Regexp.last_match(1)) }
-      end
-    end
+  # Rulesets and the release validator require these names on every event, so
+  # a skipped row keeps its name; the `not-run` check says what was skipped.
+  it 'names every matrix row the same on every event' do
+    names.each { |id, name| expect(jobs.fetch(id).fetch('name')).to eq(name) }
+    rendered_names = names.keys.flat_map { |id| rows(id).map { |row| rendered(id, row) } }
 
-    expect(names).to contain_exactly(
+    expect(rendered_names).to contain_exactly(
       *%w[3.0 3.1 3.2 3.3 3.4 4.0].map { |ruby| "Unit specs (Ruby #{ruby})" },
       *[%w[3.0 6.0], %w[3.0 6.1], %w[3.1 7.0], %w[3.2 7.1], %w[3.3 7.2], %w[3.3 8.0], %w[3.4 8.1], %w[4.0 8.0],
         %w[4.0 8.1]].map { |ruby, rails| "Booted extraction (Ruby #{ruby} / Rails #{rails})" }
     )
-    expect(ReleaseProfile::MAINTENANCE_JOBS.grep(/\A(Unit specs|Booted extraction) /) - names).to be_empty
+    expect(ReleaseProfile::MAINTENANCE_JOBS.grep(/\A(Unit specs|Booted extraction) /) - rendered_names).to be_empty
+  end
+
+  it 'lists exactly the rows a pull request skips, only when it skips them' do
+    job = jobs.fetch('not-run')
+    skipped = names.keys.flat_map { |id| rows(id).reject { |row| row.fetch('pr') }.map { |row| [id, row] } }
+    unit_rubies = skipped.select { |id, _| id.start_with?('test') }.map { |_, row| row.fetch('ruby-version') }
+    rails = skipped.reject { |id, _| id.start_with?('test') }.map { |_, row| row.fetch('rails') }
+
+    expect(job.fetch('if')).to eq("github.event_name == 'pull_request' && " \
+                                  "!contains(github.event.pull_request.labels.*.name, 'full-matrix')")
+    expect(job).not_to have_key('needs')
+    expect(job.fetch('name')).to eq("Not run on this PR: Ruby #{unit_rubies.min}-#{unit_rubies.max} units, " \
+                                    "Rails #{rails.min}-#{rails.max} booted (label full-matrix to run)")
+    named_range = ->(versions, all) { all.grep(versions.min..versions.max) }
+    expect(named_range.call(unit_rubies, rows('test', 'test-required').map { |row| row.fetch('ruby-version') }))
+      .to match_array(unit_rubies)
+    expect(named_range.call(rails, rows('rails-matrix', 'rails-required').map { |row| row.fetch('rails') }))
+      .to match_array(rails)
+    step = job.fetch('steps').tap { |s| expect(s.size).to eq(1) }.first
+    expect(step.dig('env', 'NOT_RUN').split(', ')).to eq(skipped.map { |id, row| rendered(id, row) })
+    expect(step.fetch('run')).to include('>> "$GITHUB_STEP_SUMMARY"', 'echo "::notice::${message}"')
+  end
+
+  it 'gates the run on every other job through one CI gate check' do
+    gate = jobs.fetch('ci-gate')
+
+    expect(gate.fetch('name')).to eq('CI gate')
+    expect(gate.fetch('if')).to eq('always()')
+    expect(gate.fetch('needs')).to match_array(jobs.keys - ['ci-gate'])
+    expect(gate.fetch('steps').tap { |s| expect(s.size).to eq(1) }.first.dig('env', 'FAILED'))
+      .to eq("${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}")
   end
 
   %w[test test-required rails-matrix rails-required].each do |id|
-    it "names #{id} rows that a pull request skips with the same condition that gates them" do
-      job = jobs.fetch(id)
-      expect(job.fetch('name')).to end_with(")#{suffix}")
-    end
-
     it "gates every step of #{id} on whether its row runs for this event" do
       job = jobs.fetch(id)
       expect(job.fetch('env')).to include('WOODS_CI_ROW_ACTIVE' => active)

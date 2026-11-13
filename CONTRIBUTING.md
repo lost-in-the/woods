@@ -158,12 +158,14 @@ The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast 
 
 A pull request runs only the rows of Ruby and Rails lines that still receive security releases.
 It skips unit specs on Ruby 3.0, 3.1 and 3.2, and booted extraction on Rails 6.0, 6.1, 7.0 and 7.1.
-Those checks still report, finish green in seconds, and are named `... (not run on PRs)`.
-`main` and version tags run every row under the unsuffixed names.
+Those checks keep their usual names and finish green in seconds without running a test; never cite them as coverage.
+The check `Not run on this PR: Ruby 3.0-3.2 units, Rails 6.0-7.1 booted (label full-matrix to run)` lists them.
+`main` and version tags run every row.
 To run every row on a pull request, add the `full-matrix` label.
 Adding it dispatches CI on the branch at full depth (`.github/workflows/full-matrix.yml`).
 Later pushes to the labeled pull request run every row at smoke depth.
 A pull request from a fork gets no dispatch, only the later pushes.
+The `CI gate` check needs every other CI job and fails when any of them fails or is cancelled.
 
 Run one Rails row locally:
 

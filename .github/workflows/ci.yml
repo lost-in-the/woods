@@ -40,15 +40,11 @@ jobs:
   # (previously only verified by hand). tokenizers is install-gated off 4.0 in
   # the Gemfile; the suite falls back to the chars/token ratio there. Pull
   # requests run the security-maintained Rubies (`pr: true`); main and version
-  # tags run every row. WOODS_CI_ROW_ACTIVE decides whether a row runs, and the
-  # job name repeats its condition: a row a pull request skips is named
-  # "... (not run on PRs)", so its seconds-long green check does not read as
-  # tested. On main and tags the suffix is empty and the names are unchanged.
+  # tags run every row. WOODS_CI_ROW_ACTIVE decides whether a row runs. A
+  # skipped row still reports green in seconds under its usual name (rulesets
+  # require these names), so the `not-run` job lists the skipped rows.
   test:
-    name: >-
-      Unit specs (Ruby ${{ matrix.ruby-version }})${{ !(github.event_name != 'pull_request' ||
-      matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
-      ' (not run on PRs)' || '' }}
+    name: Unit specs (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: ${{ github.event_name == 'pull_request' }}
@@ -124,10 +120,7 @@ jobs:
 
   # Coverage and retrieval quality must finish even if another Ruby row fails.
   test-required:
-    name: >-
-      Unit specs (Ruby ${{ matrix.ruby-version }})${{ !(github.event_name != 'pull_request' ||
-      matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
-      ' (not run on PRs)' || '' }}
+    name: Unit specs (Ruby ${{ matrix.ruby-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -183,10 +176,7 @@ jobs:
   # 60-operation/3-seed profile, preserving the release evidence at the exact
   # candidate commit. spec/ci/pull_request_tier_spec.rb holds this contract.
   rails-matrix:
-    name: >-
-      Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})${{ !(github.event_name !=
-      'pull_request' || matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
-      ' (not run on PRs)' || '' }}
+    name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: ${{ github.event_name == 'pull_request' }}
@@ -342,10 +332,7 @@ jobs:
 
   # Optional fixture bundles must finish even if another Rails row fails.
   rails-required:
-    name: >-
-      Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})${{ !(github.event_name !=
-      'pull_request' || matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
-      ' (not run on PRs)' || '' }}
+    name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -579,6 +566,28 @@ jobs:
           test "${TEST_RESULT}" = success
           test "${REQUIRED_RESULT}" = success
 
+  # On a pull request without the `full-matrix` label, the `pr: false` rows
+  # above report green in seconds without running a test. This check exists
+  # only then, and its name says which rows those are. It is not a required
+  # check and always succeeds. spec/ci/pull_request_tier_spec.rb holds its
+  # row list to the matrices.
+  not-run:
+    name: 'Not run on this PR: Ruby 3.0-3.2 units, Rails 6.0-7.1 booted (label full-matrix to run)'
+    if: github.event_name == 'pull_request' && !contains(github.event.pull_request.labels.*.name, 'full-matrix')
+    runs-on: ubuntu-latest
+    steps:
+      - name: List the rows this pull request does not test
+        env:
+          NOT_RUN: >-
+            Unit specs (Ruby 3.0), Unit specs (Ruby 3.1), Unit specs (Ruby 3.2),
+            Booted extraction (Ruby 3.0 / Rails 6.0), Booted extraction (Ruby 3.0 / Rails 6.1),
+            Booted extraction (Ruby 3.1 / Rails 7.0), Booted extraction (Ruby 3.2 / Rails 7.1)
+        run: |
+          message="Not run on this PR (green without running tests): ${NOT_RUN}."
+          message="${message} Label the PR full-matrix to run them."
+          echo "${message}" >> "$GITHUB_STEP_SUMMARY"
+          echo "::notice::${message}"
+
   security:
     runs-on: ubuntu-latest
     steps:
@@ -655,3 +664,35 @@ jobs:
           bundler-cache: true
       - name: Build the gem, install it, and boot it
         run: bundle exec rspec spec/integration/packaged_gem_spec.rb
+
+  # One stable context over every other job, for a ruleset to require in place
+  # of the per-row names. A skipped job (a row's `if`, or `not-run` off a pull
+  # request) counts as passing; a failed or cancelled one fails the gate.
+  # spec/ci/pull_request_tier_spec.rb fails when a job is missing from `needs`.
+  ci-gate:
+    name: CI gate
+    if: always()
+    needs:
+      - test
+      - test-required
+      - minimum-dependencies
+      - rails-matrix
+      - rails-required
+      - live-backends
+      - lint
+      - c-locale
+      - http-transport
+      - coverage
+      - not-run
+      - security
+      - build
+      - package-smoke
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every job to succeed or be skipped
+        env:
+          FAILED: ${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          echo "${RESULTS}"
+          test "${FAILED}" = false
