@@ -530,13 +530,25 @@ every `def` that carries the name as a literal positional argument:
   "`field` at line N of the published source of X names it and may define it."
   Calls that only refer to a method are not read as definitions: `private`, `protected`, `public`,
   `module_function`, `private_class_method`, `public_class_method`, `helper_method`, `validate`, `validates`,
-  `validates_*`, `serialize`, `has_secure_token`, `layout`, `helper`, `rescue_from`, and calls named `before_*`,
-  `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
-- Rails calls are read by the side they define, as checked against a booted Rails 8.0:
+  `validates_*` (`validates_with` among them), `serialize`, `has_secure_token`, `layout`, `helper`, `rescue_from`,
+  `delegate_missing_to`, `attr_readonly`, `normalizes`, `encrypts`, `default_scope`, `queue_as`, `retry_on`,
+  `discard_on`, and calls named `before_*`, `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
+  An assignment such as `self.table_name = 'x'` has a receiver and is never read.
+- Rails calls are read by the side they define, as checked against booted Rails 8.0 and 6.0:
   - `has_one`, `has_many`, `belongs_to`, `has_and_belongs_to_many` and `alias_attribute` (each for its first
     argument only) and `store_accessor` (each key after the store's, renamed by a literal `prefix:` or `suffix:` as
     Active Record names it) define the instance method and its writer (`name=`), never a class method.
     A `prefix:` or `suffix:` that is not a literal leaves each key one the call may define.
+  - `accepts_nested_attributes_for` defines `name_attributes=` for each name it carries, in the association
+    module, and never `name`.
+  - `composed_of` defines `name` and `name=` (its first argument) on the class itself, ranked by line.
+  - `enum` defines, for each literal value, the scopes `value` and `not_value` (class side, ranked by line) and
+    `value?` and `value!` (instance side, in a module the model includes at its first `enum`), renamed by
+    `prefix:` and `suffix:` (`_prefix:` and `_suffix:` in the hash form) and left out by `scopes: false` and
+    `instance_methods: false`; an option that is not a literal leaves them possible.
+    The enum's own name is its attribute's, which the call does not define.
+    Both the positional form (`enum :status, [...]`, Rails 7.0 on) and the hash form (`enum status: [...]`, up to
+    Rails 7.2) are read.
     The association and alias methods live in a module the model includes when it is created, so the model's own
     `def`s and its concerns come first; `store_accessor`'s module comes after the model's own `def`s.
   - `attribute` defines the instance method and its writer for its first argument (the second is its type).
@@ -546,6 +558,8 @@ every `def` that carries the name as a literal positional argument:
   - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
     `instance_reader`, `instance_writer`, `instance_accessor` and `instance_predicate` options allow (none of
     `name?` with `instance_predicate: false`); a non-literal option leaves the method possible.
+  `has_one_attached`, `has_many_attached`, `has_rich_text` and `has_secure_password` are not in the table: their
+  frameworks could not be checked in a booted Rails here, so they are calls Woods does not know.
   These methods are public wherever they are written, `scope` included, unless a later `private :name`
   (`private_class_method :name` for a class method) names them; the answer states it at every level.
 - A `def` and a call in one body: the later line is the one Ruby keeps.

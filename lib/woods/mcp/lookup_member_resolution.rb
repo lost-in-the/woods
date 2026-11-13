@@ -471,8 +471,12 @@ module Woods
           CLASS_VISIBILITY = %w[private_class_method public_class_method].freeze
           # Rails calls that define instance methods (each name and `name=`) in a
           # module the model includes when it is created, so its own body and
-          # its concerns come before them: associations and attribute aliases.
-          GENERATED = %w[has_one has_many belongs_to has_and_belongs_to_many alias_attribute].freeze
+          # its concerns come before them: associations and attribute aliases,
+          # and `accepts_nested_attributes_for` (`name_attributes=` only).
+          GENERATED = %w[has_one has_many belongs_to has_and_belongs_to_many alias_attribute
+                         accepts_nested_attributes_for].freeze
+          # `composed_of` defines `name` and `name=` on the class itself.
+          COMPOSED = 'composed_of'
           # `attribute` defines the same way, but Active Record skips a method
           # a superclass below it already implements, so every application
           # definition in the chain comes first.
@@ -482,13 +486,19 @@ module Woods
           STORE = 'store_accessor'
           # Where Ruby ranks what a call defines; any other call defines on the
           # class itself, ranked by line with its `def`s.
-          RANKS = GENERATED.to_h { |macro| [macro, :generated] }.merge(STORE => :store, ATTRIBUTE => :fallback).freeze
+          RANKS = GENERATED.to_h { |macro| [macro, :generated] }
+                           .merge(STORE => :store, ATTRIBUTE => :fallback, COMPOSED => :own).freeze
+          # `enum` options, besides its values: in the hash form each is
+          # written with a leading underscore.
+          ENUM_OPTIONS = %w[prefix suffix scopes default validate instance_methods].freeze
           # Calls whose methods are public wherever they are written.
-          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, 'class_attribute', 'scope'].freeze
-          # Calls that name a method without defining it.
+          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, COMPOSED, 'class_attribute', 'scope', 'enum'].freeze
+          # Calls that name a method, a column, an association or a queue
+          # without defining a method of that name.
           REFERENCES = %w[private protected public module_function private_class_method public_class_method
                           private_constant public_constant helper_method validate validates serialize
-                          has_secure_token layout helper rescue_from].freeze
+                          has_secure_token layout helper rescue_from delegate_missing_to attr_readonly normalizes
+                          encrypts default_scope queue_as retry_on discard_on].freeze
           REFERENCE_PREFIX = /\A(?:(?:before|after|around|skip|prepend|append)_|validates_)/
 
           module_function
@@ -579,7 +589,7 @@ module Woods
                          end
             alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
             [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known,
-              RANKS.fetch(macro, :own)]]
+              rank(macro, side)]]
           end
 
           # The visibility Ruby gives the method a known call defines, where it
@@ -603,6 +613,7 @@ module Woods
             arguments = positional(node)
             return rails_instance(macro, node, arguments, name, side) if RANKS.key?(macro)
             return class_attribute(keywords(node), names(arguments), name, side) if macro == 'class_attribute'
+            return enum(node, arguments, name, side) if macro == 'enum'
             return side == :class_body && literals(arguments.first) == [name] ? :known : nil if macro == 'scope'
 
             if DEFINERS.include?(macro)
@@ -618,6 +629,64 @@ module Woods
             :possible if arguments.flat_map { |argument| literals(argument) }.include?(name)
           end
 
+          # An enum's value methods on the instance side are in a module the
+          # model includes at its first `enum` call; its scopes are defined on
+          # the class itself.
+          def rank(macro, side)
+            macro == 'enum' && side == :instance ? :store : RANKS.fetch(macro, :own)
+          end
+
+          # `enum` defines, for each literal value, the scopes `value` and
+          # `not_value` on the class side and `value?` and `value!` on the
+          # instance side, renamed by `prefix:` and `suffix:` and left out by
+          # `scopes: false` and `instance_methods: false`; an option that is
+          # not a literal leaves them possible. The enum's own name is its
+          # attribute's, which the call does not define. Positional
+          # (`enum :status, [...]`) and hash (`enum status: [...]`) forms.
+          def enum(node, arguments, name, side)
+            return nil if side == :singleton_body
+
+            verdicts = enum_definitions(node, arguments).map do |enum_name, values, options|
+              enum_verdict(enum_name, values, options, name, side)
+            end
+            (%i[known possible] & verdicts).first
+          end
+
+          # [enum name, its literal values or nil, its options] for each enum
+          # the call declares.
+          def enum_definitions(node, arguments)
+            options = keywords(node)
+            enum_name = literals(arguments.first).first
+            if enum_name
+              values = arguments[1] ? enum_values(arguments[1]) : options.keys - ENUM_OPTIONS
+              return [[enum_name, values, options.slice(*ENUM_OPTIONS)]]
+            end
+            settings = options.select { |key, _| key.start_with?('_') }.transform_keys { |key| key.delete_prefix('_') }
+            options.reject { |key, _| key.start_with?('_') }.map { |key, value| [key, enum_values(value), settings] }
+          end
+
+          def enum_values(node)
+            case node
+            when Prism::ArrayNode then names([node])
+            when Prism::HashNode, Prism::KeywordHashNode
+              node.elements.filter_map { |element| element.is_a?(Prism::AssocNode) && literals(element.key).first }
+            end
+          end
+
+          def enum_verdict(enum_name, values, options, name, side)
+            switch = flag(options[side == :instance ? 'instance_methods' : 'scopes'], true)
+            return nil if values.nil? || switch == false
+
+            prefix = affix(options['prefix'], enum_name) { |value| "#{value}_" }
+            suffix = affix(options['suffix'], enum_name) { |value| "_#{value}" }
+            uncertain = [prefix, suffix, switch].include?(:unknown)
+            bases = uncertain ? values : values.map { |value| "#{prefix}#{value}#{suffix}" }
+            defined = bases.flat_map { |base| side == :instance ? ["#{base}?", "#{base}!"] : [base, "not_#{base}"] }
+            return nil unless defined.include?(name)
+
+            uncertain ? :possible : :known
+          end
+
           # An association, attribute or store accessor defines the instance
           # side only, a method and its writer: an association, `attribute`
           # and `alias_attribute` for their first argument only (the rest is a
@@ -625,6 +694,9 @@ module Woods
           def rails_instance(macro, node, arguments, name, side)
             return nil unless side == :instance
             return store_accessor(keywords(node), arguments, name) if macro == STORE
+            if macro == 'accepts_nested_attributes_for'
+              return names(arguments).map { |each| "#{each}_attributes=" }.include?(name) ? :known : nil
+            end
 
             accessors(literals(arguments.first)).include?(name) ? :known : nil
           end
