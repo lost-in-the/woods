@@ -143,9 +143,15 @@ mailers, concerns, POROs, libs and the other constant-owned types) publish
 published `source_code` coordinates, sorted by line.
 - `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
   `class_methods do`) or `module_function`.
-- `visibility` follows the literal `private`, `protected` and `public` forms,
-  including `private def`, `private :name` after the definition and
-  `private_class_method`.
+- `kind` and `visibility` are what Ruby reports for the definition, read from the literal forms without running them.
+  - `private`, `protected` and `public`: bare, before a `def`, or after it with symbol, string or array arguments.
+  - `private_class_method` and `public_class_method`: before a `def self.` or after it with names.
+  - `module_function`: bare, before a `def`, or after the definitions with symbol or string names.
+  - `initialize`, `initialize_copy`, `initialize_dup`, `initialize_clone` and `respond_to_missing?` are private
+    instance methods even under a bare `public`, as in Ruby; a later `public :initialize` makes one public.
+- A `module_function` entry stands for a private instance method and a singleton copy; its `visibility` is the copy's.
+  A later `public :name` or `protected :name` splits it into an `instance` and a `singleton` entry.
+- A name passed before its definition (Ruby raises) leaves the entry as its definition reads.
 - `owner` is the lexical class or module, so a concern inlined as a commented
   display block owns its methods at their lines inside the block.
 - Methods defined by metaprogramming or on another receiver are absent.
