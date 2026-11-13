@@ -24,8 +24,10 @@ Call `woods_status` before relying on the index. Require a ready index with a cu
 2. **Inspect** the best match with `lookup`.
    To read one method, `lookup` `Owner#method` or `Owner.method` (Woods 2.2).
    The answer is that method's lines and source, a member of unit `Owner`, not a unit.
-   A `not_found` that says the owner exists means the method is not in its published source
-   (metaprogramming or a parent class); look up the owner.
+   Its `statement` says where the definition comes from (own body, `inherited_from` a superclass, a concern);
+   read `caveats` before relying on it, and when it lists `candidates`, Woods cannot tell which one Ruby calls.
+   A `not_found` that says the owner exists means the method is in neither its published source nor its
+   published superclasses (metaprogramming, or a parent that is not published); look up the owner.
 3. **Traverse** with `dependencies` (what it uses), `dependents` (what uses it), or `trace_flow`, starting at depth 1–2 with filters.
 4. **Verify** important claims against the returned source paths and current repository files.
 
