@@ -594,6 +594,14 @@ LookupMemberOracle::FIXTURES = {
         def beta_name
           :base
         end
+
+        def relay
+          :base
+        end
+
+        def whisper
+          :base
+        end
       end
     end
   RUBY
@@ -661,6 +669,17 @@ LookupMemberOracle::FIXTURES = {
                  :second_item,
                  to: :helper
         some_dsl :alpha_name, :beta_name
+        field :fresh_only
+        column :ghost
+        field :relay
+        delegate :whisper, to: :helper, private: true
+
+        private
+
+        def muted
+          :own
+        end
+        alias_method :muted_alias, :muted
       end
     end
   RUBY
@@ -670,6 +689,7 @@ LookupMemberOracle::FIXTURES = {
         def total
           :child
         end
+        column :relay
       end
     end
   RUBY
@@ -718,7 +738,7 @@ LookupMemberOracle::UNITS = [
 # with the names only a macro defines.
 LookupMemberOracle::NAMES = LookupMemberOracle::FIXTURES.values.flat_map do |source|
   source.scan(/def (?:self\.)?(\w+)/).flatten
-end.push('setter=', 'total=', 'helper_notify').uniq.freeze
+end.push('setter=', 'total=', 'helper_notify', 'fresh_only', 'ghost').uniq.freeze
 
 # The rule `lookup` holds for `Owner#name` and `Owner.name`: a member answer
 # names the method the owner really responds to, and where the published
@@ -889,11 +909,22 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
     wrong_owner = owner_violation(identifier, reference, data)
     return wrong_owner if wrong_owner
+
+    wrong_visibility = visibility_violation(identifier, data, truth)
+    return wrong_visibility if wrong_visibility
     return :exact if LookupMemberOracle::LOCATED_ELSEWHERE.include?(data.dig('member', 'defined_by'))
 
     site = named(data)
     site.delete('visibility') unless data['member'].key?('visibility')
     site == truth.slice(*site.keys) ? :exact : "#{identifier}: answered #{site}, Ruby calls #{truth}"
+  end
+
+  # A violation String when the answer states a visibility Ruby does not give.
+  def visibility_violation(identifier, data, truth)
+    visibility = data.dig('member', 'visibility')
+    return if visibility.nil? || visibility == truth['visibility']
+
+    "#{identifier}: answered #{visibility}, Ruby's is #{truth['visibility']}"
   end
 
   # A cannot-tell answer whose first candidate is a call Woods does not know.
@@ -908,8 +939,10 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     return "#{identifier}: a macro candidate without cannot tell" unless data['statement'].include?('cannot tell')
     return :stated if truth.nil? || candidate_sites(data).include?(truth.slice('file', 'line'))
 
-    level = data.merge('inherited_from' => data['candidates'].first['inherited_from'])
-    return :stated unless owner_violation(identifier, reference, level)
+    macros = data['candidates'].select { |candidate| candidate.dig('member', 'defined_by') }
+    return :stated if macros.any? do |macro|
+      !owner_violation(identifier, reference, data.merge('inherited_from' => macro['inherited_from']))
+    end
 
     "#{identifier}: candidates #{candidate_sites(data)} miss #{truth}"
   end
@@ -924,11 +957,22 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     "#{identifier}: answered #{level}, Ruby's owner is #{actual}" unless actual == expected
   end
 
+  def published_line(identifier, text)
+    units.fetch(identifier)['source_code'].lines.index { |line| line.include?(text) } + 1
+  end
+
+  # The sentence a not-found answer adds for an owner that is published.
+  def missing(identifier)
+    reference = Woods::MCP::LookupMember.parse(identifier)
+    Woods::MCP::LookupMember.missing_sentence(reference, units.fetch(reference.owner), find_unit: find_unit)
+  end
+
   # Not answered: right when Ruby does not respond, or calls a definition no
   # published unit holds.
   def unanswered_verdict(identifier, truth)
     hidden = %w[LookupOracle::HiddenBase LookupOracle::AbstractBase].map { |name| path_of(name) }
     return :exact unless truth && LookupMemberOracle::FIXTURES.key?(truth['file']) && !hidden.include?(truth['file'])
+    return :stated if missing(identifier).include?('names it and may define it')
 
     "#{identifier}: not answered, Ruby calls #{truth}"
   end
@@ -952,14 +996,16 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     expect(identifiers.size).to eq(LookupMemberOracle::UNITS.size * LookupMemberOracle::NAMES.size * 2)
     # Only what the index cannot settle is left to a statement: a prepended
     # module it does not publish, a superclass it did not read, a
-    # controller's concerns, whose include order it does not record, and a
-    # macro it does not know, on either side.
+    # controller's concerns, whose include order it does not record, a
+    # macro it does not know in front of another definition, and a macro
+    # that alone may define the name, named in the not-found answer.
     expect(verdicts.select { |_, verdict| verdict == :stated }.keys).to contain_exactly(
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
       'LookupOracle::DirectRecord#link_target',
       'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for',
-      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name], %w[# .])
-                                 .map { |owner, name, side| "LookupOracle::#{owner}#{side}#{name}" }
+      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name relay])
+                                 .map { |owner, name| "LookupOracle::#{owner}##{name}" },
+      *%w[MacroRecord MacroChild].map { |owner| "LookupOracle::#{owner}#fresh_only" }
     )
   end
 
@@ -1285,6 +1331,38 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
         expect(answer("LookupOracle::MacroRecord##{name}")['inherited_from'])
           .to include('identifier' => 'LookupOracle::MacroBase'), name
       end
+    end
+
+    it 'answers not found, naming the macro, when nothing else on that side defines the name' do
+      expect(answer('LookupOracle::MacroRecord.refresh')).to be_nil
+      expect(answer('LookupOracle::MacroRecord#ghost')).to be_nil
+      expect(missing('LookupOracle::MacroRecord#ghost'))
+        .to end_with("`column` at line #{published_line('LookupOracle::MacroRecord', 'column :ghost')} of the " \
+                     'published source of LookupOracle::MacroRecord names it and may define it.')
+      expect(missing('LookupOracle::MacroChild#fresh_only'))
+        .to include("`field` at line #{published_line('LookupOracle::MacroRecord', 'field :fresh_only')} of the " \
+                    'published source of LookupOracle::MacroRecord names it')
+    end
+
+    it 'lists every definition past the macro, further macros included, nearest first' do
+      data = answer('LookupOracle::MacroChild#relay')
+
+      expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') })
+        .to eq(['column', 'field', nil])
+      expect(data['candidates'].map { |candidate| candidate.dig('inherited_from', 'identifier') })
+        .to eq([nil, 'LookupOracle::MacroRecord', 'LookupOracle::MacroBase'])
+    end
+
+    it 'says an instance method with the right article when Ruby fixes no visibility Woods reads' do
+      expect(answer('LookupOracle::ForwardedRecord#perform')['statement'])
+        .to start_with('LookupOracle::ForwardedRecord#perform is an instance method of')
+    end
+
+    it 'states the visibility delegate and alias_method give' do
+      expect(answer('LookupOracle::MacroRecord#runner')['member']).to include('visibility' => 'public')
+      expect(answer('LookupOracle::MacroRecord#whisper')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#muted_alias')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#label')['member']).not_to have_key('visibility')
     end
 
     it 'keeps a plain-body instance macro off the class side' do

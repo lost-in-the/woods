@@ -170,6 +170,7 @@ RSpec.describe 'MCP lookup of a unit member' do
         def destroy
           head :gone
         end
+        track_action :audit_trail
       end
     RUBY
   end
@@ -547,6 +548,16 @@ RSpec.describe 'MCP lookup of a unit member' do
                                    'Did you mean: Post (model)?')
       expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Post', type: 'model' },
                                        suggestions: [{ identifier: 'Post', type: 'model' }])
+    end
+  end
+
+  describe 'an owner whose chain names the member only in a macro Woods does not know' do
+    it 'answers not found and names the macro' do
+      response = call(build, identifier: 'PostsController#audit_trail')
+
+      expect(response.meta).to include(error_code: :not_found)
+      expect(text(response)).to include('`track_action` at line 9 of the published source of ApplicationController ' \
+                                        'names it and may define it.')
     end
   end
 

@@ -210,8 +210,9 @@ module Woods
                  "#{reference.name}, Ruby calls the next one. #{not_a_unit(unit)}"
         end
         how = "defined in its own body by #{call}#{", as an alias of #{entry['alias_of']}" if entry['alias_of']}"
-        visibility = "#{entry['visibility']} " if entry['visibility']
-        head = "#{reference.identifier} is a #{visibility}#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
+        label = KIND_LABELS.fetch(entry['kind'], reference.kind_label)
+        kind = entry['visibility'] ? "#{entry['visibility']} #{label}" : label
+        head = "#{reference.identifier} is #{kind.match?(/\A[aeiou]/) ? 'an' : 'a'} #{kind}"
         origin = if chosen.level.zero?
                    " of #{owner}, #{how}."
                  else
@@ -221,16 +222,16 @@ module Woods
       end
 
       # The candidates of an answer from a call Woods does not know: the
-      # call, with a note that it may define the name, then each definition
-      # it may override, nearest first (the first runs if the call does not
-      # define the name).
+      # call, then every definition past it, nearest first; each call Woods
+      # does not know carries a note that it may define the name.
       def possible_macro_candidates(reference, resolution, concern_file)
-        macro, *others = [resolution.chosen, *resolution.overridden].map do |candidate|
-          definition(candidate, resolution, concern_file)
+        [resolution.chosen, *resolution.overridden].map do |candidate|
+          shown = definition(candidate, resolution, concern_file)
+          next shown unless candidate.origin == :possible_macro
+
+          shown.merge('note' => "may define #{reference.name}: Woods does not know what " \
+                                "`#{candidate.entry['defined_by']}` does")
         end
-        defined_by = resolution.chosen.entry['defined_by']
-        macro['note'] = "may define #{reference.name}: Woods does not know what `#{defined_by}` does"
-        [macro, *others]
       end
 
       # @return [String] the statement of an answer the index cannot rank
@@ -256,15 +257,31 @@ module Woods
 
       # @param reference [Reference]
       # @param unit [Hash] the owner's published unit
+      # @param find_unit [#call, nil] as for {.answer}, to read the superclass
+      #   chain for a call that names the member
       # @return [String] the sentence a not-found answer adds when the owner exists
-      def missing_sentence(reference, unit)
+      def missing_sentence(reference, unit, find_unit: nil)
         sentence = "#{unit['identifier']} (#{unit['type']}) is a published unit, but #{reference.name} " \
                    "(#{reference.kind_label}) was not found in its published source."
-        return sentence unless given_class_method?(unit, reference)
+        if given_class_method?(unit, reference)
+          sentence = "#{sentence} #{reference.name} is defined in its `class_methods do` block: a class method " \
+                     "#{unit['identifier']} gives to the classes that include it, not a method of " \
+                     "#{unit['identifier']} itself. Look it up as a class method of a class that includes " \
+                     "#{unit['identifier']}."
+        end
+        hint = macro_hint(reference, unit, find_unit)
+        hint ? "#{sentence} #{hint}" : sentence
+      end
 
-        "#{sentence} #{reference.name} is defined in its `class_methods do` block: a class method " \
-          "#{unit['identifier']} gives to the classes that include it, not a method of #{unit['identifier']} " \
-          "itself. Look it up as a class method of a class that includes #{unit['identifier']}."
+      # A call Woods does not know that names the member, where nothing else
+      # on that side defines it.
+      def macro_hint(reference, unit, find_unit)
+        resolution = Resolution.new(unit, reference, find_unit: find_unit)
+        return nil if resolution.call
+
+        site = resolution.unresolved_macro
+        site && "`#{site.entry['defined_by']}` at line #{site.entry['line']} of the published source of " \
+                "#{site.unit['identifier']} names it and may define it."
       end
 
       # Whether +reference+ names a class method the unit's own

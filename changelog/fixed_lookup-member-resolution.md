@@ -16,5 +16,12 @@
   A name a class body defines by a call rather than a `def` (`attr_reader`, `alias_method`, `delegate`,
   `define_method`, ...) answered a superclass's `def` as inherited; that level's call is now the answer, under
   `defined_by`. A call Woods does not know that carries the name (a base class's DSL) now gives an answer that
-  says Woods cannot tell which definition Ruby calls and lists `candidates`, the call first, instead of presenting
-  the superclass's.
+  says Woods cannot tell which definition Ruby calls and lists `candidates`, the call first and then every
+  definition past it, instead of presenting the superclass's. Such a call with no other definition of the name on
+  that side leaves the member `not_found`, as before, and the message names the call.
+  An answer from such a call states the visibility Ruby gives it where Ruby fixes it (`delegate` public unless
+  `private: true`, an alias that of the method it copies), and no longer reads "a instance method" without one.
+  Common Rails calls are read by the side they define: associations, `attribute`, `alias_attribute` and
+  `store_accessor` define instance methods, ranked where Ruby ranks the modules they define into; `scope` a class
+  method; `class_attribute` both sides, as its options allow; and `serialize`, `has_secure_token`, `layout`,
+  `helper` and `rescue_from` define none of the names they carry.
