@@ -17,6 +17,13 @@ module Woods
                    identifier: data['identifier'], type: data['type'])
         end
 
+        # @param data [Hash] a {LookupMember.answer}
+        # @return [String] XML-wrapped Markdown
+        def render_lookup_member(data, **)
+          wrap_xml('lookup_result', super, identifier: data['identifier'],
+                                           member_of: data.dig('member_of', 'identifier'))
+        end
+
         # @param data [Hash] Search results
         # @return [String] XML-wrapped Markdown
         def render_search(data, **)

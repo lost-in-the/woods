@@ -74,6 +74,35 @@ module Woods
 
       private
 
+      # Where a member answer's method is: the file a reader opens and its
+      # lines, then the lines in the owner's published source. Shared by the
+      # text renderers' `render_lookup_member`.
+      #
+      # @param data [Hash] a {LookupMember.answer}
+      # @return [Array<String>]
+      def member_location_lines(data)
+        member = data['member'] || {}
+        owner = data['member_of'] || {}
+        concern = data['defined_in']
+        file = concern ? concern['file_path'] : owner['file_path']
+        where = file ? "File: #{file}" : 'File: unknown'
+        where += " (#{concern['identifier']}, inlined into #{owner['identifier']})" if concern
+        first = member['file_line']
+        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
+        lines = [where, "Published source of #{owner['identifier']}: " \
+                        "#{member_lines(member['line'], member['end_line'])}"]
+        Array(data['other_definitions']).each do |other|
+          from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
+          lines << "Also defined at published source #{member_lines(other['line'], other['end_line'])}" \
+                   "#{from}; the definition above is the one Ruby calls."
+        end
+        lines
+      end
+
+      def member_lines(first, last)
+        last.is_a?(Integer) && last != first ? "lines #{first}-#{last}" : "line #{first}"
+      end
+
       # The name printed for one entry of a metadata Hash: a controller's
       # routed action that nothing answers is marked in its `routes`.
       #

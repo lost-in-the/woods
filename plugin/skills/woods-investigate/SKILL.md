@@ -22,6 +22,10 @@ Call `woods_status` before relying on the index. Require a ready index with a cu
 
 1. **Discover** with `search` when the exact identifier is unknown (regex `query`, or safer `exact_prefix`/`exact_suffix` for namespaced names; restrict `types`).
 2. **Inspect** the best match with `lookup`.
+   To read one method, `lookup` `Owner#method` or `Owner.method` (Woods 2.2).
+   The answer is that method's lines and source, a member of unit `Owner`, not a unit.
+   A `not_found` that says the owner exists means the method is not in its published source
+   (metaprogramming or a parent class); look up the owner.
 3. **Traverse** with `dependencies` (what it uses), `dependents` (what uses it), or `trace_flow`, starting at depth 1–2 with filters.
 4. **Verify** important claims against the returned source paths and current repository files.
 

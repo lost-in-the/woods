@@ -32,6 +32,7 @@ require_relative 'hydration'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
+require_relative 'lookup_member'
 require_relative 'lookup_pages'
 require_relative 'path_tool'
 require_relative 'protocol_policy'
@@ -535,8 +536,18 @@ module Woods
           result[:nodes_offset] = offset if offset.positive?
         end
 
+        # The published units +owner+ names, of +type+ when one is given:
+        # the candidates a member identifier can belong to.
+        def lookup_member_owners(reader, owner, type)
+          return [reader.find_unit(owner, type: type)].compact if type
+
+          units = reader.identifier_types(owner).filter_map { |shared| reader.find_unit(owner, type: shared) }
+          units.empty? ? [reader.find_unit(owner)].compact : units
+        end
+
         def define_lookup_tool(server, reader, respond, respond_err, renderer)
           coerce = method(:coerce_array)
+          member_owners = method(:lookup_member_owners)
           coerce_int = method(:coerce_integer)
           server.define_tool(
             name: 'lookup',
@@ -547,12 +558,16 @@ module Woods
                          '`name` is accepted as an alias for `identifier` for discoverability. ' \
                          'A full answer longer than the page limit comes in pages: nothing is dropped, and each ' \
                          'page says which `page` and `answer_id` to ask for next. In the JSON format each ' \
-                         'page is a JSON object holding part of the unit; merging the pages gives the unit.',
+                         'page is a JSON object holding part of the unit; merging the pages gives the unit. ' \
+                         'An identifier `Owner#method` (instance) or `Owner.method` (class method) that is not ' \
+                         'itself a unit answers with that one method of unit Owner: its file and lines and its ' \
+                         'source, stated as a member of Owner, not a unit.',
             input_schema: {
               properties: {
                 identifier: { type: 'string',
                               description: 'Exact unit identifier ' \
-                                           '(e.g. "Post", "PostsController", "Api::V1::HealthController")' },
+                                           '(e.g. "Post", "PostsController", "Api::V1::HealthController"), ' \
+                                           'or a member of one ("PostsController#create", "Post.recent")' },
                 name: { type: 'string', description: 'Alias for `identifier`. Either one works.' },
                 type: { type: 'string',
                         description: 'Optional actual published unit type, to disambiguate shared identifiers.' },
@@ -729,14 +744,47 @@ module Woods
                                         structured_content: { text: body, data: data },
                                         meta: (lookup_meta || {}).merge(lookup_page: where))
             else
+              # `Owner#method` / `Owner.method` that names no unit: the owner's
+              # unit narrowed to that method.
+              reference = LookupMember.parse(identifier)
+              owners = reference ? member_owners.call(reader, reference.owner, type) : []
+              concern_file = ->(concern) { reader.find_unit(concern, type: 'concern')&.fetch('file_path', nil) }
+              answer = nil
+              owner = owners.find do |candidate|
+                answer = LookupMember.answer(candidate, reference, concern_file: concern_file)
+              end
+              if answer
+                member_of = { identifier: owner['identifier'], type: owner['type'] }
+                if evidence != 'full' || sections&.any? || (coerce_int.call(page) || 1) > 1
+                  next respond_err.call(
+                    "#{identifier} is a member of #{owner['identifier']}; its answer is that one method, in " \
+                    'full and on one page. Drop evidence, sections and page, or look up ' \
+                    "#{owner['identifier']} to use them on the whole unit.",
+                    code: :unsupported_argument, tool: 'lookup', member_of: member_of
+                  )
+                end
+                if source_sha256 && Digest::SHA256.hexdigest(owner['source_code'].to_s) != source_sha256
+                  next respond_err.call('Published source changed since the excerpt; ' \
+                                        'retrieve fresh evidence before verification.',
+                                        code: :stale_index, tool: 'lookup', argument: 'source_sha256')
+                end
+                answer = answer.except('source_code') if include_source == false
+                next respond.call(renderer.render(:lookup_member, answer), meta: { member_of: member_of })
+              end
+
+              message = "Unit not found: #{identifier}#{" (type #{type})" if type}"
+              owner = owners.first
+              message = "#{message}. #{LookupMember.missing_sentence(reference, owner)}" if owner
               suggestions = reader.suggest_identifiers(identifier)
+              extra = owner ? { member_of: { identifier: owner['identifier'], type: owner['type'] } } : {}
               respond_err.call(
-                IdentifierSuggestions.append("Unit not found: #{identifier}#{" (type #{type})" if type}", suggestions),
+                IdentifierSuggestions.append(message, suggestions),
                 code: :not_found,
                 identifier: identifier,
                 tool: 'lookup',
                 suggestions: suggestions,
-                hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.'
+                hint: 'Use `search` to find identifiers by pattern, then `lookup` on the exact match.',
+                **extra
               )
             end
           end

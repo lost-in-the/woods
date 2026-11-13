@@ -71,11 +71,13 @@ RSpec.describe 'MCP answers for an identifier the index lacks' do
   describe 'lookup' do
     let(:server) { build(:markdown) }
 
-    it 'suggests the owner of a Class#method reference' do
+    it 'suggests the owner of a Class#method reference whose method is not published' do
       response = call(server, 'lookup', identifier: 'Post#publish')
 
       expect(response.error?).to be(true)
-      expect(text(response)).to eq('Unit not found: Post#publish. Did you mean: Post (model)?')
+      expect(text(response)).to eq('Unit not found: Post#publish. Post (model) is a published unit, but publish ' \
+                                   '(instance method) was not found in its published source. ' \
+                                   'Did you mean: Post (model)?')
       expect(response.meta).to include(error_code: :not_found, suggestions: [{ identifier: 'Post', type: 'model' }])
     end
 
