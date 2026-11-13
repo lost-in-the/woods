@@ -25,3 +25,7 @@
   `store_accessor` define instance methods, ranked where Ruby ranks the modules they define into; `scope` a class
   method; `class_attribute` both sides, as its options allow; and `serialize`, `has_secure_token`, `layout`,
   `helper` and `rescue_from` define none of the names they carry.
+  A `delegate` or `alias_method` passed to `private` (`private delegate :x, to: :y`) is answered as private, as
+  Ruby makes it, not as public or as the aliased method's visibility.
+  An answer from `scope` now states its visibility (public, unless a later `private_class_method` names it), as the
+  other Rails calls' answers do, in the owner's own body and in a superclass.

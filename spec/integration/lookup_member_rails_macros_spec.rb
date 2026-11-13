@@ -15,124 +15,150 @@ require 'woods/mcp/lookup_member'
 # answers. Each base class defines the names its subclass's macros carry, so
 # a macro read on the wrong side, or not at all, gives a wrong answer.
 module RailsMacroOracle
-  FIXTURES = {
-    'app/models/concerns/rails_macro_oracle/ownable.rb' => <<~RUBY,
-      module RailsMacroOracle
-        module Ownable
-          extend ActiveSupport::Concern
-
-          def keeper
-            :concern
-          end
-        end
-      end
-    RUBY
-    'app/models/rails_macro_oracle/base_record.rb' => <<~RUBY,
-      module RailsMacroOracle
-        class BaseRecord < ActiveRecord::Base
-          self.abstract_class = true
-
-          def self.notes
-            :base
-          end
-
-          def self.score
-            :base
-          end
-
-          def notes
-            :base
-          end
-
-          def recent
-            :base
-          end
-
-          def nickname
-            :base
-          end
-
-          def theme
-            :base
-          end
-
-          def config_flag
-            :base
-          end
-
-          def secret_score
-            :base
-          end
-        end
-      end
-    RUBY
-    'app/models/rails_macro_oracle/widget.rb' => <<~RUBY,
-      module RailsMacroOracle
-        class Widget < BaseRecord
-          include Ownable
-
-          self.table_name = 'oracle_widgets'
-          has_many :notes, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
-          belongs_to :keeper, class_name: 'RailsMacroOracle::Widget', optional: true
-          has_one :badge, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
-          has_and_belongs_to_many :tags, class_name: 'RailsMacroOracle::Widget', join_table: 'oracle_tags',
-                                         association_foreign_key: :tag_id
-          attribute :score, :integer
-          alias_attribute :nickname, :title
-          store_accessor :settings, :theme, :color
-          scope :recent, -> { all }
-          class_attribute :config_flag
-          class_attribute :quiet_flag, instance_accessor: false
-          serialize :prefs
-          has_secure_token :token
-
-          private
-
-          attribute :secret_score, :integer
-          attribute :hidden_score, :integer
-        end
-      end
-    RUBY
-    'app/controllers/rails_macro_oracle/base_panel_controller.rb' => <<~RUBY,
-      module RailsMacroOracle
-        class BasePanelController < ActionController::Base
-          def pick_layout
-            'base'
-          end
-
-          def recover
-            :base
-          end
-
-          def rails_oracle_panel
-            :base
-          end
-        end
-      end
-    RUBY
-    'app/controllers/rails_macro_oracle/panel_controller.rb' => <<~RUBY
-      module RailsMacroOracle
-        class PanelController < BasePanelController
-          layout :pick_layout
-          helper :rails_oracle_panel
-          rescue_from StandardError, with: :recover
-        end
-      end
-    RUBY
-  }.freeze
-
-  CONCERNS = %w[RailsMacroOracle::Ownable].freeze
-
-  # [identifier, type]
-  UNITS = [%w[RailsMacroOracle::BaseRecord model], %w[RailsMacroOracle::Widget model],
-           %w[RailsMacroOracle::Ownable concern], %w[RailsMacroOracle::BasePanelController controller],
-           %w[RailsMacroOracle::PanelController controller]].freeze
-
   def self.path_of(name)
     declaration = /(?:module|class) #{name.split('::').last}\b/
-    FIXTURES.find { |_, source| source.match?(declaration) }&.first
+    RailsMacroOracle::FIXTURES.find { |_, source| source.match?(declaration) }&.first
   end
 end
+
+RailsMacroOracle::FIXTURES = {
+  'app/models/concerns/rails_macro_oracle/ownable.rb' => <<~RUBY,
+    module RailsMacroOracle
+      module Ownable
+        extend ActiveSupport::Concern
+
+        def keeper
+          :concern
+        end
+      end
+    end
+  RUBY
+  'app/models/rails_macro_oracle/base_record.rb' => <<~RUBY,
+    module RailsMacroOracle
+      class BaseRecord < ActiveRecord::Base
+        self.abstract_class = true
+
+        scope :flagged, lambda {
+          where(title: 'flagged')
+        }
+
+        def flagged
+          :base
+        end
+
+        def self.notes
+          :base
+        end
+
+        def self.score
+          :base
+        end
+
+        def notes
+          :base
+        end
+
+        def recent
+          :base
+        end
+
+        def nickname
+          :base
+        end
+
+        def theme
+          :base
+        end
+
+        def config_flag
+          :base
+        end
+
+        def secret_score
+          :base
+        end
+      end
+    end
+  RUBY
+  'app/models/rails_macro_oracle/widget.rb' => <<~RUBY,
+    module RailsMacroOracle
+      class Widget < BaseRecord
+        include Ownable
+
+        self.table_name = 'oracle_widgets'
+        has_many :notes, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
+        belongs_to :keeper, class_name: 'RailsMacroOracle::Widget', optional: true
+        has_one :badge, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
+        has_and_belongs_to_many :tags, class_name: 'RailsMacroOracle::Widget', join_table: 'oracle_tags',
+                                       association_foreign_key: :tag_id
+        attribute :score, :integer
+        alias_attribute :nickname, :title
+        store_accessor :settings, :theme, :color
+        scope :recent, -> { all }
+        class_attribute :config_flag
+        class_attribute :quiet_flag, instance_accessor: false
+        serialize :prefs
+        has_secure_token :token
+
+        private
+
+        attribute :secret_score, :integer
+        attribute :hidden_score, :integer
+        has_many :hidden_notes, class_name: 'RailsMacroOracle::Widget', foreign_key: :keeper_id
+        belongs_to :hidden_keeper, class_name: 'RailsMacroOracle::Widget', optional: true, foreign_key: :keeper_id
+        alias_attribute :hidden_alias, :title
+        store_accessor :settings, :hidden_theme
+        scope :hidden_recent, -> { all }
+        class_attribute :hidden_flag
+
+        public
+
+        scope :sealed, -> { all }
+        private_class_method :sealed
+      end
+    end
+  RUBY
+  'app/models/rails_macro_oracle/gadget.rb' => <<~RUBY,
+    module RailsMacroOracle
+      class Gadget < Widget
+      end
+    end
+  RUBY
+  'app/controllers/rails_macro_oracle/base_panel_controller.rb' => <<~RUBY,
+    module RailsMacroOracle
+      class BasePanelController < ActionController::Base
+        def pick_layout
+          'base'
+        end
+
+        def recover
+          :base
+        end
+
+        def rails_oracle_panel
+          :base
+        end
+      end
+    end
+  RUBY
+  'app/controllers/rails_macro_oracle/panel_controller.rb' => <<~RUBY
+    module RailsMacroOracle
+      class PanelController < BasePanelController
+        layout :pick_layout
+        helper :rails_oracle_panel
+        rescue_from StandardError, with: :recover
+      end
+    end
+  RUBY
+}.freeze
+
+RailsMacroOracle::CONCERNS = %w[RailsMacroOracle::Ownable].freeze
+
+# [identifier, type]
+RailsMacroOracle::UNITS = [%w[RailsMacroOracle::BaseRecord model], %w[RailsMacroOracle::Widget model],
+                           %w[RailsMacroOracle::Gadget model],
+                           %w[RailsMacroOracle::Ownable concern], %w[RailsMacroOracle::BasePanelController controller],
+                           %w[RailsMacroOracle::PanelController controller]].freeze
 
 # The per-side behaviour of common Rails macros in `lookup` member answers,
 # compared with a booted ActiveRecord and ActionController: a macro that
@@ -165,10 +191,11 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     require 'rails_oracle_panel_helper'
     RailsMacroOracle::FIXTURES.each { |path, source| TOPLEVEL_BINDING.eval(source, path, 1) }
     RailsMacroOracle::Widget.define_attribute_methods
+    RailsMacroOracle::Gadget.define_attribute_methods
   end
 
   after(:context) do
-    %i[Ownable BaseRecord Widget BasePanelController PanelController].each do |name|
+    %i[Ownable BaseRecord Widget Gadget BasePanelController PanelController].each do |name|
       RailsMacroOracle.send(:remove_const, name) if RailsMacroOracle.const_defined?(name, false)
     end
     Object.send(:remove_const, :RailsOraclePanelHelper)
@@ -250,6 +277,14 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     { method: target.instance_method(name), visibility: visibility }
   end
 
+  # Active Record generates an inherited `attribute`'s methods again in the
+  # subclass's own module, unless an application class already defines the
+  # name: the declaration is the superclass's, the module the owner's.
+  def regenerated?(identifier, macro, truth)
+    macro == 'attribute' &&
+      owned_at?(truth[:method].owner, Object.const_get(Woods::MCP::LookupMember.parse(identifier).owner))
+  end
+
   # Whether +owner+ (a method's owner) belongs to +level+: the class itself,
   # its singleton class, or a module the class includes itself (a generated
   # attribute, association or store module), not one a superclass includes.
@@ -287,6 +322,40 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     'RailsMacroOracle::Widget.notes' => [nil, 'RailsMacroOracle::BaseRecord'],
     'RailsMacroOracle::Widget.score' => [nil, 'RailsMacroOracle::BaseRecord'],
     'RailsMacroOracle::Widget#recent' => [nil, 'RailsMacroOracle::BaseRecord'],
+    'RailsMacroOracle::Widget.flagged' => ['scope', 'RailsMacroOracle::BaseRecord'],
+    'RailsMacroOracle::Widget#flagged' => [nil, 'RailsMacroOracle::BaseRecord'],
+    'RailsMacroOracle::Widget.sealed' => ['scope', 'RailsMacroOracle::Widget'],
+    # Under a bare `private` in the body.
+    'RailsMacroOracle::Widget#hidden_notes' => ['has_many', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_notes=' => ['has_many', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_keeper' => ['belongs_to', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_alias' => ['alias_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_alias=' => ['alias_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_theme' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_theme=' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget.hidden_recent' => ['scope', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_flag' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_flag=' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#hidden_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget.hidden_flag' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget.hidden_flag=' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget.hidden_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    # Inherited by a subclass with an empty body.
+    'RailsMacroOracle::Gadget#notes' => ['has_many', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#keeper=' => ['belongs_to', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#score' => ['attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#hidden_score' => ['attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#nickname=' => ['alias_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#theme' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#hidden_theme' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget.recent' => ['scope', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget.flagged' => ['scope', 'RailsMacroOracle::BaseRecord'],
+    'RailsMacroOracle::Gadget.sealed' => ['scope', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget.hidden_recent' => ['scope', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#config_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget.config_flag=' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget#hidden_flag' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Gadget.hidden_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
     'RailsMacroOracle::PanelController#pick_layout' => [nil, 'RailsMacroOracle::BasePanelController'],
     'RailsMacroOracle::PanelController#recover' => [nil, 'RailsMacroOracle::BasePanelController'],
     'RailsMacroOracle::PanelController#rails_oracle_panel' => [nil, 'RailsMacroOracle::BasePanelController']
@@ -298,8 +367,10 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
       expect(data).to include('member'), data.inspect
       expect(data['member']['defined_by']).to eq(macro)
       expect(data.dig('inherited_from', 'identifier') || data.dig('member_of', 'identifier')).to eq(level)
-      expect(owned_at?(truth[:method].owner, Object.const_get(level))).to be(true), truth[:method].owner.inspect
-      expect(data['member']['visibility']).to eq(truth[:visibility]) if data['member'].key?('visibility')
+      expect(owned_at?(truth[:method].owner, Object.const_get(level)) || regenerated?(identifier, macro, truth))
+        .to be(true), truth[:method].owner.inspect
+      expect(data['member']['visibility']).to eq(truth[:visibility])
+      expect(data['statement']).to include("is a #{truth[:visibility]} ")
       file, line = truth[:method].source_location
       expect(data['member']['file_line']).to eq(line) if file == data.dig('member_of', 'file_path')
     end

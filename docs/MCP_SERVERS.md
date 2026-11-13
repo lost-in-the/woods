@@ -511,8 +511,11 @@ every `def` that carries the name as a literal positional argument:
   with `prefix: :p` `p_name`), `def_delegator` (its alias argument, else its method) and `def_delegators`.
   `visibility` is stated where Ruby fixes it: for `attr*` and `define_method`, the visibility in force where they
   are called; for `delegate`, public unless `private: true`; for `alias_method` and `alias`, that of the method
-  they copy when its `def` comes earlier in the same body; and for any of these calls that a later `private :name`
-  (`private_class_method :name` for a class method) names.
+  they copy when its `def` comes earlier in the same body; for `attr*`, `define_method`, `delegate` and
+  `alias_method` passed to `private` (`private delegate :x, to: :y`), which return the names they define, that
+  visibility; and for any of these calls that a later `private :name` (`private_class_method :name` for a class
+  method) names.
+  The visibility is the same whether the answer is the owner's own body or a superclass's.
   Elsewhere the statement names no visibility.
 - For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
   instance-side call in the plain body does not.
@@ -541,7 +544,8 @@ every `def` that carries the name as a literal positional argument:
   - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
     `instance_reader`, `instance_writer`, `instance_accessor` and `instance_predicate` options allow (none of
     `name?` with `instance_predicate: false`); a non-literal option leaves the method possible.
-  These methods are public wherever they are written.
+  These methods are public wherever they are written, `scope` included, unless a later `private :name`
+  (`private_class_method :name` for a class method) names them; the answer states it at every level.
 - A `def` and a call in one body: the later line is the one Ruby keeps.
 - Known limits: only calls written directly in the body are read, not inside a conditional, an `included do` block
   or an inlined concern; Forwardable's hash form (`delegate [:a] => :b`) is not read.
