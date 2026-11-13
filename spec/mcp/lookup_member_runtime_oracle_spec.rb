@@ -192,6 +192,72 @@ LookupMemberOracle::FIXTURES = {
       end
     end
   RUBY
+  'app/models/concerns/lookup_oracle/bundling.rb' => <<~RUBY,
+    module LookupOracle
+      module Bundling
+        extend ActiveSupport::Concern
+        include Sorting
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/abstract_base.rb' => <<~RUBY,
+    module LookupOracle
+      class AbstractBase
+        include Linking
+
+        def link_target
+          :abstract
+        end
+
+        def tag_label
+          :abstract
+        end
+
+        def shared_name
+          :abstract
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/direct_record.rb' => <<~RUBY,
+    module LookupOracle
+      class DirectRecord < AbstractBase
+        include Tagging
+        include Bundling
+      end
+    end
+  RUBY
+  'app/models/concerns/lookup_oracle/wrapping.rb' => <<~RUBY,
+    module LookupOracle
+      module Wrapping
+        def wrap_call
+          :wrapping
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/wrap_base.rb' => <<~RUBY,
+    module LookupOracle
+      class WrapBase
+        prepend Wrapping
+
+        def wrap_call
+          :wrap_base
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/rewrapped_record.rb' => <<~RUBY,
+    module LookupOracle
+      class RewrappedRecord < WrapBase
+        prepend Wrapping
+
+        def wrap_call
+          :rewrapped
+        end
+      end
+    end
+  RUBY
   'lib/lookup_oracle/helpers.rb' => <<~RUBY,
     module LookupOracle
       module Helpers
@@ -342,15 +408,18 @@ LookupMemberOracle::FIXTURES = {
 
 # Modules the extractors would treat as application concerns. The top-level
 # tracing module is application code but not a concern, so it is not inlined.
-LookupMemberOracle::CONCERNS = %w[Linking Stamping Tagging Sorting Grouping Auditing Signing Sealing Helpers]
-                               .map { |name| "LookupOracle::#{name}" }.freeze
+LookupMemberOracle::CONCERNS = %w[
+  Linking Stamping Tagging Sorting Grouping Auditing Signing Sealing Bundling Wrapping Helpers
+].map { |name| "LookupOracle::#{name}" }.freeze
 
-# [identifier, type]; HiddenBase is deliberately not published.
+# [identifier, type]; HiddenBase and AbstractBase are deliberately not published (as an abstract
+# `ApplicationRecord` is not).
 LookupMemberOracle::UNITS = [
   %w[LookupOracle::BaseRecord model], %w[LookupOracle::MidRecord model], %w[LookupOracle::LeafRecord model],
   %w[LookupOracle::PrependedRecord model], %w[LookupOracle::TracedRecord model],
   %w[LookupOracle::OrphanRecord model], %w[LookupOracle::SealedRecord model],
   %w[LookupOracle::CoSealedRecord model], %w[LookupOracle::TwiceSealedRecord model],
+  %w[LookupOracle::DirectRecord model], %w[LookupOracle::WrapBase model], %w[LookupOracle::RewrappedRecord model],
   %w[LookupOracle::BaseController controller], %w[LookupOracle::MidController controller],
   %w[LookupOracle::LeafController controller],
   %w[LookupOracle::Stamping concern], %w[LookupOracle::Tagging concern], %w[LookupOracle::Grouping concern],
@@ -494,8 +563,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
   # Not answered: right when Ruby does not respond, or calls a definition no
   # published unit holds.
   def unanswered_verdict(identifier, truth)
-    hidden = path_of('LookupOracle::HiddenBase')
-    return :exact unless truth && LookupMemberOracle::FIXTURES.key?(truth['file']) && truth['file'] != hidden
+    hidden = %w[LookupOracle::HiddenBase LookupOracle::AbstractBase].map { |name| path_of(name) }
+    return :exact unless truth && LookupMemberOracle::FIXTURES.key?(truth['file']) && !hidden.include?(truth['file'])
 
     "#{identifier}: not answered, Ruby calls #{truth}"
   end
@@ -519,7 +588,25 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     # controller's concerns, whose include order it does not record.
     expect(verdicts.select { |_, verdict| verdict == :stated }.keys).to contain_exactly(
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
+      'LookupOracle::DirectRecord#link_target',
       'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for'
+    )
+  end
+
+  it 'states a caveat only where the published source cannot place the answer' do
+    identifiers = LookupMemberOracle::UNITS.flat_map do |(owner, _)|
+      LookupMemberOracle::NAMES.flat_map { |name| ["#{owner}##{name}", "#{owner}.#{name}"] }
+    end
+
+    # A prepend of a module the index does not publish (every TracedRecord
+    # answer), and a concern that reaches the unit only through an unread
+    # superclass (OrphanRecord's Tagging, DirectRecord's Linking).
+    expect(identifiers.select { |identifier| answer(identifier)&.key?('caveats') }).to contain_exactly(
+      'LookupOracle::TracedRecord#tag_label', 'LookupOracle::TracedRecord#shared_name',
+      'LookupOracle::TracedRecord.finder_for', 'LookupOracle::TracedRecord#trace_call',
+      'LookupOracle::OrphanRecord#tag_label', 'LookupOracle::OrphanRecord#shared_name',
+      'LookupOracle::OrphanRecord.finder_for',
+      'LookupOracle::DirectRecord#link_target', 'LookupOracle::DirectRecord.link_scope'
     )
   end
 
@@ -604,6 +691,35 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       data = answer('LookupOracle::OrphanRecord#tag_label')
 
       expect(data['caveats']).to include(a_string_including('LookupOracle::HiddenBase is not a published unit'))
+    end
+
+    it 'needs no caveat for a concern the unit itself includes, under an unpublished parent' do
+      data = answer('LookupOracle::DirectRecord#tag_label')
+
+      expect(data['defined_in']).to include('identifier' => 'LookupOracle::Tagging')
+      expect(data).not_to have_key('caveats')
+    end
+
+    it 'places a concern an included concern depends on at the level that includes it' do
+      data = answer('LookupOracle::DirectRecord#shared_name')
+
+      expect(data['defined_in']).to include('identifier' => 'LookupOracle::Sorting')
+      expect(data).not_to have_key('caveats')
+    end
+
+    it 'says why when the concern reaches the unit only through the unpublished parent' do
+      expect(answer('LookupOracle::DirectRecord#link_target')['caveats']).to eq(
+        ['No unit Woods read (LookupOracle::DirectRecord) includes LookupOracle::Linking in its own body, so ' \
+         'LookupOracle::DirectRecord includes it through a superclass Woods did not read (its parent ' \
+         'LookupOracle::AbstractBase is not a published unit); that superclass\'s own definition of link_target ' \
+         'could come first.']
+      )
+    end
+
+    it 'prepends a plain module again where a subclass prepends it, but not a concern' do
+      expect(answer('LookupOracle::RewrappedRecord#wrap_call')['defined_in'])
+        .to include('identifier' => 'LookupOracle::Wrapping', 'prepended' => true)
+      expect(answer('LookupOracle::CoSealedRecord#seal')).not_to have_key('caveats')
     end
   end
 end

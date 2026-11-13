@@ -5,7 +5,9 @@
   answered the later line, which for a model is the concern Ruby reaches last; a model's concerns are now ranked in
   their published `included_modules` order, while a controller's, sorted by name, are listed as `candidates` with
   a statement that Woods cannot tell which one Ruby calls. A concern a class prepends now outranks its own body,
-  and a `prepend` of a module whose source is not inlined, or a chain that stops at an unpublished parent under an
-  inlined-concern answer, adds a `caveats` entry. A concern unit no longer answers `Concern.x` for a definition in
-  its own `class_methods do` block; the not-found answer says it is a class method the concern gives to its
-  includers. The `statement` now says how the answer was established (own body, inherited, inlined, prepended).
+  and a `prepend` of a module whose source is not inlined adds a `caveats` entry, as does an inlined-concern answer
+  under an unpublished parent (an abstract `ApplicationRecord`) when no read unit's body is shown, by a Prism
+  walk, to include that concern, since the parent's own definition could then come first. A concern unit no
+  longer answers `Concern.x` for a definition in its own `class_methods do` block; the not-found answer says it
+  is a class method the concern gives to its includers. The `statement` now says how the answer was established
+  (own body, inherited, inlined, prepended).

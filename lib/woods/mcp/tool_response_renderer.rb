@@ -86,7 +86,7 @@ module Woods
         lines = data['member'] ? definition_location_lines(data, data) : []
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
-          lines << "Also defined at #{published_source_name(other, data)} " \
+          lines << "Also defined in the published source of #{other['unit'] || data.dig('member_of', 'identifier')}, " \
                    "#{member_lines(other['line'], other['end_line'])}#{from}; the definition above overrides it."
         end
         Array(data['caveats']).each { |caveat| lines << "Caveat: #{caveat}" }
