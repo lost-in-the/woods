@@ -7,3 +7,7 @@
   later `public :name` or `protected :name` on a module function splits it into an `instance` and a `singleton`
   entry.
   A spec evaluates each covered form and compares the table with Ruby's own answer.
+  A `def` written inline after `private`, `protected`, `public`, `private_class_method` or `public_class_method` under
+  a bare `module_function` is now read as a module function, then changed by that call.
+  `private_class_method def x` there was an `instance` entry reading public and is now private on both sides, and
+  `private def x` keeps its public singleton copy.

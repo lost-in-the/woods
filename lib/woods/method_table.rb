@@ -127,7 +127,9 @@ module Woods
 
     # The visibility calls of a body, for {Walker}: `private`, `protected`,
     # `public`, `module_function`, `private_class_method` and
-    # `public_class_method`, bare or with definitions or names.
+    # `public_class_method`, bare or with definitions or names. A `def`
+    # written as the argument is defined first, as a plain `def` at that
+    # point, and the call then changes that one entry as it would by name.
     module VisibilityCalls
       private
 
@@ -140,12 +142,12 @@ module Woods
           state[:visibility] = node.name == :module_function ? 'public' : node.name.to_s
           return []
         end
-        return module_function_call(arguments, owner, singleton) if node.name == :module_function
+        return module_function_call(arguments, owner, singleton, state) if node.name == :module_function
 
         visibility = node.name.to_s
         arguments.flat_map do |argument|
           if argument.is_a?(Prism::DefNode)
-            [definition(argument, owner, singleton, visibility, false)].compact
+            inline_definition(argument, owner, singleton, state) { |entry| Marks.side(entry, singleton, visibility) }
           else
             @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, singleton, visibility)
             []
@@ -155,9 +157,13 @@ module Woods
 
       # `module_function def x` and `module_function :x, 'y'` (symbols and
       # strings only; Ruby refuses an array).
-      def module_function_call(arguments, owner, singleton)
+      def module_function_call(arguments, owner, singleton, state)
         arguments.flat_map do |argument|
-          next [definition(argument, owner, singleton, 'public', true)].compact if argument.is_a?(Prism::DefNode)
+          if argument.is_a?(Prism::DefNode)
+            next inline_definition(argument, owner, singleton, state) do |entry|
+              singleton ? [entry] : Marks.module_functions([entry], [entry['name']], owner)
+            end
+          end
 
           names = Names.symbol_names(argument) unless argument.is_a?(Prism::ArrayNode)
           @entries = Marks.module_functions(@entries, Array(names), owner) unless singleton
@@ -168,7 +174,7 @@ module Woods
       # `private_class_method def self.x` and `private_class_method :x, ...`
       # (and `public_class_method`): the visibility of singleton methods
       # already defined; the usual form follows the definition.
-      def class_method_visibility(node, owner)
+      def class_method_visibility(node, owner, state)
         visibility = CLASS_METHOD_VISIBILITY.fetch(node.name)
         node.arguments&.arguments.to_a.flat_map do |argument|
           unless argument.is_a?(Prism::DefNode)
@@ -176,10 +182,15 @@ module Woods
             next []
           end
 
-          entry = definition(argument, owner, false, 'public', false)
-          entry['visibility'] = visibility if entry && entry['kind'] == 'singleton'
-          [entry].compact
+          inline_definition(argument, owner, false, state) { |entry| Marks.side(entry, true, visibility) }
         end
+      end
+
+      # @yieldparam entry [Hash] the definition as a plain `def` reads
+      # @yieldreturn [Array<Hash>] the entries the call leaves
+      def inline_definition(node, owner, singleton, state)
+        entry = plain_definition(node, owner, singleton, state)
+        entry ? yield(entry) : []
       end
     end
 
@@ -223,8 +234,7 @@ module Woods
       def statement_entries(node, owner, singleton, state)
         case node
         when Prism::DefNode
-          visibility = always_private?(node, state) ? 'private' : state[:visibility]
-          [definition(node, owner, singleton, visibility, state[:module_function])].compact
+          [plain_definition(node, owner, singleton, state)].compact
         when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
           nested_body(node, owner)
         when Prism::CallNode
@@ -250,9 +260,16 @@ module Woods
         name = node.name
         return visibility_call(node, owner, singleton, state) if VISIBILITY_CALLS.include?(name)
         return class_methods_block(node, owner) if name == :class_methods && node.block
-        return class_method_visibility(node, owner) if CLASS_METHOD_VISIBILITY.key?(name) && !singleton
+        return class_method_visibility(node, owner, state) if CLASS_METHOD_VISIBILITY.key?(name) && !singleton
 
         []
+      end
+
+      # A `def` under the body's current default visibility and
+      # `module_function`.
+      def plain_definition(node, owner, singleton, state)
+        visibility = always_private?(node, state) ? 'private' : state[:visibility]
+        definition(node, owner, singleton, visibility, state[:module_function])
       end
 
       # A plain `def` of a name Ruby always defines private, outside a
