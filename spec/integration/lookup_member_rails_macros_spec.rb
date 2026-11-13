@@ -3,6 +3,8 @@
 require 'spec_helper'
 require 'json'
 require 'pathname'
+require 'tmpdir'
+require 'fileutils'
 require 'woods'
 require 'woods/method_table'
 require 'woods/file_lines'
@@ -156,7 +158,11 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
         table.integer :tag_id
       end
     end
-    Object.const_set(:RailsOraclePanelHelper, Module.new)
+    # `helper :name` loads `<name>_helper.rb` by file on Rails 6.0 and by constant from 6.1 on.
+    @helper_dir = Dir.mktmpdir('rails_oracle_helpers')
+    File.write(File.join(@helper_dir, 'rails_oracle_panel_helper.rb'), "module RailsOraclePanelHelper\nend\n")
+    $LOAD_PATH.unshift(@helper_dir)
+    require 'rails_oracle_panel_helper'
     RailsMacroOracle::FIXTURES.each { |path, source| TOPLEVEL_BINDING.eval(source, path, 1) }
     RailsMacroOracle::Widget.define_attribute_methods
   end
@@ -166,6 +172,9 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
       RailsMacroOracle.send(:remove_const, name) if RailsMacroOracle.const_defined?(name, false)
     end
     Object.send(:remove_const, :RailsOraclePanelHelper)
+    $LOAD_PATH.delete(@helper_dir)
+    $LOADED_FEATURES.delete(File.join(@helper_dir, 'rails_oracle_panel_helper.rb'))
+    FileUtils.remove_entry(@helper_dir)
     ActiveRecord::Base.remove_connection
   end
 
