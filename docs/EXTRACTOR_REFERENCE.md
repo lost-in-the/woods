@@ -911,9 +911,10 @@ excluded). They never decide the unit type.
   read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, `self.extend A` and a multi-line
   argument list.
   A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
-  A call on another receiver or inside a method acts on something else and declares nothing either:
-  `base.extend ClassMethods` or `base.include A` in `self.included` is no mixin of the concern.
-  A call inside an `included do` block still counts.
+  `metadata.included_modules` lists only the concern's own mixins: calls without a receiver or on `self`,
+  outside a method body (a call inside an `included do` block still counts).
+  `base.extend ClassMethods` or `base.include A` in `self.included` acts on the including class, so it is not
+  listed there, but its constant still gives an `include` or `extend` edge.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked

@@ -396,7 +396,8 @@ module Woods
       # Detect other modules included or extended by this concern (for metadata display).
       #
       # Returns every constant passed to a real include/extend call
-      # ({MixinCalls}), excluding ActiveSupport::Concern itself.
+      # ({MixinCalls}) that mixes into the concern itself, excluding
+      # ActiveSupport::Concern.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Module names
@@ -404,26 +405,28 @@ module Woods
         mixin_names(source, %i[include extend])
       end
 
-      # Detect modules explicitly included by this concern.
+      # Detect modules this concern's include calls reference, including a
+      # hook's `base.include` that applies them to the including class.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Included module names
       def detect_includes(source)
-        mixin_names(source, %i[include])
+        mixin_names(source, %i[include], own_only: false)
       end
 
-      # Detect modules explicitly extended by this concern.
+      # Detect modules this concern's extend calls reference, including a
+      # hook's `base.extend` that applies them to the including class.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Extended module names
       def detect_extends(source)
-        mixin_names(source, %i[extend])
+        mixin_names(source, %i[extend], own_only: false)
       end
 
       # @return [Array<String>] normalized constants of the +kinds+ calls,
       #   without ActiveSupport::Concern
-      def mixin_names(source, kinds)
-        MixinCalls.call(source, kinds).map { |_kind, name| ConstantPaths.normalize(name) }
+      def mixin_names(source, kinds, own_only: true)
+        MixinCalls.call(source, kinds, own_only: own_only).map { |_kind, name| ConstantPaths.normalize(name) }
                   .reject { |name| name == 'ActiveSupport::Concern' }
       end
 

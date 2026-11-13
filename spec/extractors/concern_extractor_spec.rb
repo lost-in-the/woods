@@ -778,13 +778,15 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
     it 'maps an extended ClassMethods module to the module that owns it' do
       path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
         module Stackable
+          def self.included(base)
+            base.extend ClassMethods
+            base.extend Stackable::ClassMethods
+            base.extend Depot::Countable::ClassMethods
+          end
+
           module ClassMethods
             def stack_all; end
           end
-
-          extend ClassMethods
-          extend Stackable::ClassMethods
-          extend Depot::Countable::ClassMethods
         end
       RUBY
 
@@ -793,17 +795,15 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
     end
 
-    it 'declares no mixin for an include, extend or prepend sent to the including class from a hook' do
+    it 'lists only its own mixins in included_modules but keeps the edges of hook-form calls' do
       path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
         module Trackable
+          include Depot::Weighable
+
           def self.included(base)
             base.extend(ClassMethods)
-            base.include(Depot::Weighable)
-            base.send(:include, Depot::Sortable)
-          end
-
-          def self.prepended(klass)
-            klass.prepend Depot::Countable::ClassMethods
+            base.extend(Depot::Countable::ClassMethods)
+            base.include(Depot::Sortable)
           end
 
           module ClassMethods; end
@@ -812,8 +812,12 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
 
       unit = described_class.new.extract_concern_file(path)
 
-      expect(unit.metadata[:included_modules]).to eq([])
-      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq([])
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable])
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Sortable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :extend }]
+      )
     end
 
     it 'excludes ActiveSupport::Concern from extend dependencies' do

@@ -58,6 +58,23 @@ RSpec.describe Woods::Extractors::MixinCalls do
     expect(calls(source)).to eq([])
   end
 
+  it 'reads calls on any receiver and inside methods, but not through send, when asked for every call' do
+    source = <<~RUBY
+      module Trackable
+        include Own
+        def self.included(base)
+          base.extend(ClassMethods)
+          base.include(Helpers)
+          base.send(:include, Sending)
+          extend Inside
+        end
+      end
+    RUBY
+    expect(described_class.call(source, %i[include extend prepend], own_only: false)).to eq(
+      [[:include, 'Own'], [:extend, 'ClassMethods'], [:include, 'Helpers'], [:extend, 'Inside']]
+    )
+  end
+
   it 'ignores comments, strings, heredocs, method names and non-constant arguments' do
     source = <<~'RUBY'
       module Stackable
