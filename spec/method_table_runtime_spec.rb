@@ -160,7 +160,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         module_function def helper; end
       end
     RUBY
-    'nested owners' => <<~RUBY
+    'nested owners' => <<~RUBY,
       module Outer
         def self.a; end
         class Inner
@@ -172,18 +172,102 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
+    'module_function :a over an earlier def self.a' => <<~RUBY,
+      module Util
+        def a; end
+        private_class_method def self.a; end
+        def b; end
+        def self.b; end
+        private_class_method :b
+        module_function :a, :b
+      end
+    RUBY
+    'def self.a after module_function :a' => <<~RUBY,
+      module Util
+        def a; end
+        module_function :a
+        def self.a; end
+      end
+    RUBY
+    'def a after module_function :a' => <<~RUBY,
+      module Util
+        def a; end
+        module_function :a
+        def a; end
+      end
+    RUBY
+    'bare module_function def, then def self.a and def a' => <<~RUBY,
+      module Util
+        module_function
+        def a; end
+        def b; end
+        public
+        def self.a; end
+        def b; end
+      end
+    RUBY
+    'def self.a, then a bare module_function def' => <<~RUBY,
+      module Util
+        def self.a; end
+        module_function
+        def a; end
+      end
+    RUBY
+    'def a twice and private before a redefinition' => <<~RUBY,
+      class Account
+        def a; end
+        private
+        def a; end
+        public
+        def b; end
+        private :b
+        def b; end
+      end
+    RUBY
+    'singleton redefinitions and class-method visibility around them' => <<~RUBY,
+      class Account
+        def self.a; end
+        private_class_method :a
+        def self.a; end
+        def self.b; end
+        class << self
+          private
+          def b; end
+        end
+        def self.c; end
+        public_class_method :c
+        private_class_method def self.c; end
+      end
+    RUBY
+    'class-method visibility around module functions' => <<~RUBY
+      module Util
+        module_function
+        def a; end
+        private_class_method :a
+        def b; end
+        private_class_method :b
+        public_class_method :b
+        public
+        def c; end
+        def self.c; end
+        private_class_method :c
+        module_function :c
+      end
+    RUBY
   }.freeze
 
-  # [owner, side, name] => visibility, from the table.
+  # [owner, side, name] => [visibility, definition line], from the table.
+  # Two entries for one method (a dead definition beside the live one) fail.
   def table_facts(source)
     described_class.call(source).each_with_object({}) do |entry, facts|
-      owner, name, visibility = entry.values_at('owner', 'name', 'visibility')
-      case entry['kind']
-      when 'instance' then facts[[owner, :instance, name]] = visibility
-      when 'singleton' then facts[[owner, :singleton, name]] = visibility
-      when 'module_function'
-        facts[[owner, :instance, name]] = 'private'
-        facts[[owner, :singleton, name]] = visibility
+      owner, name, visibility, line = entry.values_at('owner', 'name', 'visibility', 'line')
+      sides = { 'instance' => { instance: visibility }, 'singleton' => { singleton: visibility },
+                'module_function' => { instance: 'private', singleton: visibility } }.fetch(entry['kind'])
+      sides.each do |side, side_visibility|
+        key = [owner, side, name]
+        raise "two entries for #{key.inspect}" if facts.key?(key)
+
+        facts[key] = [side_visibility, line]
       end
     end
   end
@@ -201,7 +285,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       { instance: constant, singleton: constant.singleton_class }.each do |side, target|
         %w[public private protected].each do |visibility|
           target.send(:"#{visibility}_instance_methods", false).each do |name|
-            facts[[owner, side, name.to_s]] = visibility
+            facts[[owner, side, name.to_s]] = [visibility, target.instance_method(name).source_location.last]
           end
         end
       end
