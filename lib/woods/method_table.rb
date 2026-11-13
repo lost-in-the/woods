@@ -22,7 +22,8 @@ module Woods
   # metaprogramming is absent. A `module_function` entry stands for a private
   # instance method and a singleton copy of the entry's visibility; a later
   # call that makes the instance side public or protected splits it into one
-  # `instance` and one `singleton` entry.
+  # `instance` and one `singleton` entry. Statements apply in order, so the
+  # table holds one entry per method and side: the definition Ruby calls.
   module MethodTable
     # Unit types whose source is a class or module body.
     TYPES = %w[model controller service job mailer concern poro lib manager policy validator serializer
@@ -133,34 +134,32 @@ module Woods
 
       # `private` alone changes the default; `private def x` and `private :x`
       # mark only the named methods.
-      def visibility_call(node, owner, singleton, state)
+      def visibility_call(node, owner, scope, state)
         arguments = node.arguments&.arguments.to_a
         if arguments.empty?
           state[:module_function] = node.name == :module_function
           state[:visibility] = node.name == :module_function ? 'public' : node.name.to_s
           return []
         end
-        return module_function_call(arguments, owner, singleton) if node.name == :module_function
+        return module_function_call(arguments, owner, scope) if node.name == :module_function
 
         visibility = node.name.to_s
         arguments.flat_map do |argument|
-          if argument.is_a?(Prism::DefNode)
-            [definition(argument, owner, singleton, visibility, false)].compact
-          else
-            @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, singleton, visibility)
-            []
-          end
+          next [definition(argument, owner, scope, visibility, false)].compact if argument.is_a?(Prism::DefNode)
+
+          @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, scope, visibility)
+          []
         end
       end
 
       # `module_function def x` and `module_function :x, 'y'` (symbols and
       # strings only; Ruby refuses an array).
-      def module_function_call(arguments, owner, singleton)
+      def module_function_call(arguments, owner, scope)
         arguments.flat_map do |argument|
-          next [definition(argument, owner, singleton, 'public', true)].compact if argument.is_a?(Prism::DefNode)
+          next [definition(argument, owner, scope, 'public', true)].compact if argument.is_a?(Prism::DefNode)
 
           names = Names.symbol_names(argument) unless argument.is_a?(Prism::ArrayNode)
-          @entries = Marks.module_functions(@entries, Array(names), owner) unless singleton
+          @entries = Marks.module_functions(@entries, Array(names), owner) if scope == 'instance'
           []
         end
       end
@@ -172,11 +171,11 @@ module Woods
         visibility = CLASS_METHOD_VISIBILITY.fetch(node.name)
         node.arguments&.arguments.to_a.flat_map do |argument|
           unless argument.is_a?(Prism::DefNode)
-            @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, true, visibility)
+            @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, 'singleton', visibility)
             next []
           end
 
-          entry = definition(argument, owner, false, 'public', false)
+          entry = definition(argument, owner, 'instance', 'public', false)
           entry['visibility'] = visibility if entry && entry['kind'] == 'singleton'
           [entry].compact
         end
@@ -186,6 +185,12 @@ module Woods
     # One walk of a parsed tree: the qualified owner from the lexical class
     # and module nesting, the default visibility of each body, and the
     # singleton scopes of `def self.`, `class << self` and `class_methods do`.
+    #
+    # Statements apply in order, as Ruby runs them: an entry is the method
+    # Ruby holds once the body has run. A definition replaces the earlier
+    # one on the same side (`def a` twice keeps the later), and a call
+    # changes what is already defined. A module function holds both sides,
+    # so a later definition on one side leaves the copy on the other.
     class Walker
       include VisibilityCalls
 
@@ -196,22 +201,26 @@ module Woods
       # @param root [Prism::Node]
       # @return [Array<Hash>]
       def call(root)
-        visit_body(root, nil, singleton: false)
-        @entries
+        visit_body(root, nil, scope: 'instance')
+        @entries.each { |entry| entry.delete(Marks::SCOPE) }
       end
 
       private
 
-      # +extension+ marks a `class_methods do` body: its definitions are
-      # singleton methods of the including class, but Ruby defines them in a
-      # module, not a singleton class.
-      def visit_body(node, owner, singleton:, extension: false)
+      # +scope+ is where a plain `def` lands: `instance`, `singleton` (the
+      # singleton class) or `extension` (a `class_methods do` body: singleton
+      # methods of the including class, defined in a module).
+      def visit_body(node, owner, scope:)
         statements = node.is_a?(Prism::ProgramNode) ? node.statements&.body : body_statements(node)
-        state = { visibility: 'public', module_function: false, singleton_class: singleton && !extension }
+        state = { visibility: 'public', module_function: false, scope: scope }
         Array(statements).each do |statement|
-          found = statement_entries(statement, owner, singleton, state) # may replace @entries
-          @entries.concat(found)
+          statement_entries(statement, owner, scope, state).each { |entry| place(entry) }
         end
+      end
+
+      # Add a definition, replacing what it overwrites in Ruby.
+      def place(entry)
+        @entries = Marks.replace(@entries, entry)
       end
 
       def body_statements(node)
@@ -220,15 +229,15 @@ module Woods
         node.is_a?(Prism::StatementsNode) ? node.body : [node]
       end
 
-      def statement_entries(node, owner, singleton, state)
+      def statement_entries(node, owner, scope, state)
         case node
         when Prism::DefNode
           visibility = always_private?(node, state) ? 'private' : state[:visibility]
-          [definition(node, owner, singleton, visibility, state[:module_function])].compact
+          [definition(node, owner, scope, visibility, state[:module_function])].compact
         when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
           nested_body(node, owner)
         when Prism::CallNode
-          call_entries(node, owner, singleton, state)
+          call_entries(node, owner, scope, state)
         else
           []
         end
@@ -236,21 +245,21 @@ module Woods
 
       def nested_body(node, owner)
         if node.is_a?(Prism::SingletonClassNode)
-          visit_body(node.body, owner, singleton: true) if node.expression.is_a?(Prism::SelfNode)
+          visit_body(node.body, owner, scope: 'singleton') if node.expression.is_a?(Prism::SelfNode)
         else
           inner = Names.qualified(owner, node.constant_path)
-          visit_body(node.body, inner, singleton: false) if inner
+          visit_body(node.body, inner, scope: 'instance') if inner
         end
         []
       end
 
-      def call_entries(node, owner, singleton, state)
+      def call_entries(node, owner, scope, state)
         return [] unless node.receiver.nil?
 
         name = node.name
-        return visibility_call(node, owner, singleton, state) if VISIBILITY_CALLS.include?(name)
+        return visibility_call(node, owner, scope, state) if VISIBILITY_CALLS.include?(name)
         return class_methods_block(node, owner) if name == :class_methods && node.block
-        return class_method_visibility(node, owner) if CLASS_METHOD_VISIBILITY.key?(name) && !singleton
+        return class_method_visibility(node, owner) if CLASS_METHOD_VISIBILITY.key?(name) && scope == 'instance'
 
         []
       end
@@ -260,79 +269,126 @@ module Woods
       # call runs after the definition. Under `module_function` the instance
       # side is private anyway and the entry's visibility is the public copy's.
       def always_private?(node, state)
-        return false if node.receiver || state[:singleton_class] || state[:module_function]
+        return false if node.receiver || state[:scope] == 'singleton' || state[:module_function]
 
         ALWAYS_PRIVATE.include?(node.name.to_s)
       end
 
       def class_methods_block(node, owner)
         body = node.block.body
-        visit_body(body, owner, singleton: true, extension: true) if body
+        visit_body(body, owner, scope: 'extension') if body
         []
       end
 
-      def definition_kind(receiver, singleton, module_function)
-        return 'module_function' if module_function
+      # Where the definition lands: `def self.x` on the owner's singleton
+      # class (or, inside `class_methods do`, the module's own, kept apart).
+      def definition_scope(receiver, scope)
+        return scope unless receiver
 
-        singleton || receiver ? 'singleton' : 'instance'
+        scope == 'extension' ? 'extension_singleton' : 'singleton'
       end
 
-      def definition(node, owner, singleton, visibility, module_function)
+      def definition_kind(landing, module_function)
+        return landing == 'instance' ? 'instance' : 'singleton' unless module_function && landing == 'instance'
+
+        'module_function'
+      end
+
+      def definition(node, owner, scope, visibility, module_function)
         return nil unless owner
 
         receiver = node.receiver
         return nil if receiver && !receiver.is_a?(Prism::SelfNode)
 
         visibility = 'public' if receiver # `private` does not apply to `def self.x`
-        { 'name' => node.name.to_s, 'kind' => definition_kind(receiver, singleton, module_function),
-          'line' => node.location.start_line,
-          'end_line' => node.location.end_line, 'visibility' => visibility, 'owner' => owner }
+        landing = definition_scope(receiver, scope)
+        { 'name' => node.name.to_s, 'kind' => definition_kind(landing, module_function),
+          'line' => node.location.start_line, 'end_line' => node.location.end_line,
+          'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing }
       end
     end
 
-    # Calls that change methods already defined in an owner. Each returns
-    # the entries to keep.
+    # What a call or a definition does to methods already defined in an
+    # owner. A module function's entry holds two slots, the private instance
+    # method and the singleton copy whose visibility the entry carries.
     module Marks
+      # The internal key naming where an entry was defined; removed before
+      # the table is returned.
+      SCOPE = 'scope'
+
       module_function
 
-      # `private :name` applies to a method already defined in this owner; a
-      # name declared before its definition is left as the definition reads.
-      # A module function's entry carries its singleton side's visibility and
-      # a private instance side: the singleton side takes the new visibility,
-      # and an instance side made public or protected splits the entry.
+      # @param entry [Hash]
+      # @return [Array<String>] the slots the entry's method occupies
+      def slots(entry)
+        entry['kind'] == 'module_function' ? %w[instance singleton] : [entry[SCOPE]]
+      end
+
+      # The entry reduced to the slots it still holds, or nil for none.
+      #
+      # @param entry [Hash]
+      # @param remaining [Array<String>]
+      # @return [Hash, nil]
+      def narrow(entry, remaining)
+        return entry if remaining == slots(entry)
+        return nil if remaining.empty?
+
+        side = remaining.first
+        visibility = side == 'instance' ? 'private' : entry['visibility']
+        entry.merge('kind' => side, 'visibility' => visibility, SCOPE => side)
+      end
+
+      # `private :name` applies to a method already defined in this owner and
+      # scope; a name declared before its definition is left as the
+      # definition reads. On a module function, the singleton side takes the
+      # new visibility, and an instance side made public or protected splits
+      # the entry.
       #
       # @return [Array<Hash>]
-      def visibility(entries, names, owner, singleton, visibility)
+      def visibility(entries, names, owner, scope, visibility)
         entries.flat_map do |entry|
           next [entry] unless names.include?(entry['name']) && entry['owner'] == owner
 
-          side(entry, singleton, visibility)
+          side(entry, scope, visibility)
         end
       end
 
-      def side(entry, singleton, visibility)
+      def side(entry, scope, visibility)
         if entry['kind'] == 'module_function'
-          return [entry.merge('visibility' => visibility)] if singleton
-          return [entry] if visibility == 'private'
+          return [entry.merge('visibility' => visibility)] if scope == 'singleton'
+          return [entry] if scope != 'instance' || visibility == 'private'
 
-          return [entry.merge('kind' => 'instance', 'visibility' => visibility), entry.merge('kind' => 'singleton')]
+          return [narrow(entry, %w[instance]).merge('visibility' => visibility), narrow(entry, %w[singleton])]
         end
-        entry['visibility'] = visibility if entry['kind'] == (singleton ? 'singleton' : 'instance')
+        entry['visibility'] = visibility if entry[SCOPE] == scope
         [entry]
       end
 
       # Ruby makes the instance method private and copies it, public, onto
-      # the singleton class. A name not yet defined (Ruby raises) is left.
+      # the singleton class, replacing any singleton method of that name. A
+      # name with no instance method yet (Ruby raises) is left.
       #
       # @return [Array<Hash>]
       def module_functions(entries, names, owner)
-        entries.each do |entry|
-          next unless names.include?(entry['name']) && entry['owner'] == owner
-          next unless %w[instance module_function].include?(entry['kind'])
+        names.uniq.reduce(entries) do |held, name|
+          source = held.find { |entry| entry.values_at('owner', 'name', SCOPE) == [owner, name, 'instance'] }
+          next held unless source # neither an instance method nor a module function
 
-          entry['kind'] = 'module_function'
-          entry['visibility'] = 'public'
+          copy = source.merge('kind' => 'module_function', 'visibility' => 'public')
+          replace(held, copy)
         end
+      end
+
+      # +entries+ with +entry+ added and what it overwrites removed or narrowed.
+      #
+      # @return [Array<Hash>]
+      def replace(entries, entry)
+        taken = slots(entry)
+        entries.filter_map do |held|
+          next held unless held['owner'] == entry['owner'] && held['name'] == entry['name']
+
+          narrow(held, slots(held) - taken)
+        end << entry
       end
     end
 
