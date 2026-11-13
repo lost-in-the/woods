@@ -30,6 +30,25 @@ RSpec.describe Woods::EdgeEvidence do
       expect(described_class.for('test_mapping', 'test_coverage')).to eq('static')
     end
 
+    # The rule: a class is never stronger than the mechanism that made the
+    # edge. A runtime check that the target exists does not make a named
+    # relationship verified when nothing checked the relationship itself.
+    it 'calls a polymorphic interface edge static: the target is the association name, camelized' do
+      expect(described_class.for('model', 'polymorphic_interface')).to eq('static')
+      expect(described_class.mixed?('model', 'polymorphic_interface')).to be(false)
+    end
+
+    it 'calls an external consumer table edge static: an operator declared it, nothing observed it' do
+      expect(described_class.for('external_consumer', 'reads_table')).to eq('static')
+      expect(described_class.for('external_consumer', 'writes_table')).to eq('static')
+    end
+
+    it 'keeps the edges reflection and the live schema do report' do
+      expect(described_class.for('model', 'has_many')).to eq('reflected')
+      expect(described_class.for('model', 'table')).to eq('reflected')
+      expect(described_class.for('migration', 'table_name')).to eq('verified')
+    end
+
     it 'accepts symbols as the graph holds them' do
       expect(described_class.for(:model, :has_many)).to eq('reflected')
     end
@@ -103,6 +122,57 @@ RSpec.describe Woods::EdgeEvidence do
     it 'is unknown for an unlabelled edge' do
       expect(described_class.edge('model', [])).to eq(evidence: 'unknown', mixed: false)
       expect(described_class.edge('model', [nil])).to eq(evidence: 'unknown', mixed: false)
+    end
+  end
+
+  describe '.path' do
+    # The rule: a path's evidence is a function of the set of its hops, not
+    # their order. It is as weak as its weakest hop, and exactly that class
+    # when one hop of that class is exact; "at least" only when every hop of
+    # that class is itself a floor.
+    def hop(evidence, mixed: false)
+      mixed ? { evidence: evidence, evidence_mixed: true } : { evidence: evidence }
+    end
+
+    def summaries(hops)
+      hops.permutation.map { |order| described_class.path(order).except(:weakest_hop) }.uniq
+    end
+
+    it 'is exact when one weakest hop is exact and another is a floor, in every order' do
+      hops = [hop('static', mixed: true), hop('static'), hop('reflected')]
+
+      expect(summaries(hops)).to eq([{ evidence: 'static' }])
+    end
+
+    it 'is a floor only when every weakest hop is one, in every order' do
+      hops = [hop('static', mixed: true), hop('static', mixed: true), hop('verified')]
+
+      expect(summaries(hops)).to eq([{ evidence: 'static', evidence_mixed: true }])
+    end
+
+    it 'ignores a floor on a stronger hop' do
+      hops = [hop('verified', mixed: true), hop('static'), hop('reflected')]
+
+      expect(summaries(hops)).to eq([{ evidence: 'static' }])
+    end
+
+    it 'is unknown, never a floor, as soon as one hop is unknown, in every order' do
+      hops = [hop('static', mixed: true), hop('unknown'), hop('verified')]
+
+      expect(summaries(hops)).to eq([{ evidence: 'unknown' }])
+    end
+
+    it 'names a weakest hop that carries the class the path reports' do
+      exact_last = described_class.path([hop('static', mixed: true), hop('verified'), hop('static')])
+      floor_only = described_class.path([hop('reflected'), hop('static', mixed: true)])
+
+      expect(exact_last).to eq(evidence: 'static', weakest_hop: 3)
+      expect(floor_only).to eq(evidence: 'static', weakest_hop: 2, evidence_mixed: true)
+    end
+
+    it 'names no hop for a path reflected end to end, and nothing for no hops' do
+      expect(described_class.path([hop('reflected'), hop('reflected')])).to eq(evidence: 'reflected')
+      expect(described_class.path([])).to eq({})
     end
   end
 
