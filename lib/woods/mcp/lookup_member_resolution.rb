@@ -679,12 +679,15 @@ module Woods
 
             prefix = affix(options['prefix'], enum_name) { |value| "#{value}_" }
             suffix = affix(options['suffix'], enum_name) { |value| "_#{value}" }
-            uncertain = [prefix, suffix, switch].include?(:unknown)
-            bases = uncertain ? values : values.map { |value| "#{prefix}#{value}#{suffix}" }
-            defined = bases.flat_map { |base| side == :instance ? ["#{base}?", "#{base}!"] : [base, "not_#{base}"] }
-            return nil unless defined.include?(name)
+            targets = if side == :instance
+                        [name[/\A(.+)[?!]\z/, 1]].compact
+                      else
+                        [name, (name.delete_prefix('not_') if name.start_with?('not_'))].compact
+                      end
+            hit = values.product(targets).any? { |value, target| affixed?(target, value, prefix, suffix) }
+            return nil unless hit
 
-            uncertain ? :possible : :known
+            [prefix, suffix, switch].include?(:unknown) ? :possible : :known
           end
 
           # An association, attribute or store accessor defines the instance
@@ -703,16 +706,25 @@ module Woods
 
           # `store_accessor :store, :key, prefix:, suffix:` defines
           # `<prefix>key<suffix>` for each key after the store, as Active Record
-          # names it; a prefix or suffix that is not a literal leaves each key
-          # possible.
+          # names it; a prefix or suffix that is not a literal makes every name
+          # it could give possible ({#affixed?}).
           def store_accessor(options, arguments, name)
             store = literals(arguments.first).first
             prefix = affix(options['prefix'], store) { |value| "#{value}_" }
             suffix = affix(options['suffix'], store) { |value| "_#{value}" }
-            keys = names(arguments.drop(1))
-            return accessors(keys).include?(name) ? :possible : nil if [prefix, suffix].include?(:unknown)
+            target = name.delete_suffix('=')
+            return nil unless names(arguments.drop(1)).any? { |key| affixed?(target, key, prefix, suffix) }
 
-            accessors(keys.map { |key| "#{prefix}#{key}#{suffix}" }).include?(name) ? :known : nil
+            [prefix, suffix].include?(:unknown) ? :possible : :known
+          end
+
+          # Whether +name+ is +base+ under +prefix+ and +suffix+. An :unknown
+          # prefix matches none or any one ending in `_` (the name equals the
+          # base or ends with `_base`); an :unknown suffix likewise at the end.
+          def affixed?(name, base, prefix, suffix)
+            head = prefix == :unknown ? '(?:\w+_)?' : Regexp.escape(prefix)
+            tail = suffix == :unknown ? '(?:_\w+)?' : Regexp.escape(suffix)
+            name.match?(/\A#{head}#{Regexp.escape(base)}#{tail}\z/)
           end
 
           # '' for no affix; the store's name for `true`; the literal's;

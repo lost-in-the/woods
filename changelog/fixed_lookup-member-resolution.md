@@ -35,3 +35,6 @@
   answer: it defines `items_attributes=` only. `composed_of` and `enum` (its value scopes and `value?`/`value!`)
   are read as definers, and `delegate_missing_to`, `attr_readonly`, `normalizes`, `encrypts`, `default_scope`,
   `queue_as`, `retry_on` and `discard_on` as calls that define none of the names they carry.
+  A `store_accessor` or `enum` option that is not a literal no longer hides the names the call may define: a
+  superclass method such as `lamp_glow` under `prefix: SOME_CONSTANT` is a cannot-tell answer, not a confident one.
+  A candidates answer no longer says "the definition above overrides" a farther definition.

@@ -538,14 +538,16 @@ every `def` that carries the name as a literal positional argument:
   - `has_one`, `has_many`, `belongs_to`, `has_and_belongs_to_many` and `alias_attribute` (each for its first
     argument only) and `store_accessor` (each key after the store's, renamed by a literal `prefix:` or `suffix:` as
     Active Record names it) define the instance method and its writer (`name=`), never a class method.
-    A `prefix:` or `suffix:` that is not a literal leaves each key one the call may define.
+    A `prefix:` that is not a literal makes any name equal to the key or ending in `_key` one the call may define,
+    and a `suffix:` likewise any name starting with `key_`; a literal affix on the other side stays exact.
   - `accepts_nested_attributes_for` defines `name_attributes=` for each name it carries, in the association
     module, and never `name`.
   - `composed_of` defines `name` and `name=` (its first argument) on the class itself, ranked by line.
   - `enum` defines, for each literal value, the scopes `value` and `not_value` (class side, ranked by line) and
     `value?` and `value!` (instance side, in a module the model includes at its first `enum`), renamed by
     `prefix:` and `suffix:` (`_prefix:` and `_suffix:` in the hash form) and left out by `scopes: false` and
-    `instance_methods: false`; an option that is not a literal leaves them possible.
+    `instance_methods: false`; an option that is not a literal leaves them possible, still named by the affixes
+    that are literals.
     The enum's own name is its attribute's, which the call does not define.
     Both the positional form (`enum :status, [...]`, Rails 7.0 on) and the hash form (`enum status: [...]`, up to
     Rails 7.2) are read.

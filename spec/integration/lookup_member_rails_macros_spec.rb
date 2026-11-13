@@ -29,12 +29,15 @@ module RailsMacroOracle
   def self.ticket_source
     enums = if ActiveRecord.version >= Gem::Version.new('7.0')
               ['enum :status, [:draft, :live]', 'enum :phase, { early: 0, late: 1 }, prefix: true',
-               'enum :stage, { fresh: 0, stale: 1 }, scopes: false']
+               'enum :stage, { fresh: 0, stale: 1 }, scopes: false',
+               'enum :level, [:low_tier], prefix: true, scopes: ENABLE_SCOPES']
             else
               ['enum status: [:draft, :live]', 'enum phase: { early: 0, late: 1 }, _prefix: true',
-               'enum stage: { fresh: 0, stale: 1 }, _scopes: false']
+               'enum stage: { fresh: 0, stale: 1 }, _scopes: false',
+               'enum level: [:low_tier], _prefix: true, _scopes: ENABLE_SCOPES']
             end
-    "module RailsMacroOracle\n  class Ticket < BaseRecord\n    self.table_name = 'oracle_tickets'\n" \
+    "module RailsMacroOracle\n  class Ticket < BaseRecord\n    self.table_name = 'oracle_tickets'\n    " \
+      "ENABLE_SCOPES = true\n" \
       "#{enums.map { |line| "    #{line}\n" }.join}  end\nend\n"
   end
 end
@@ -70,6 +73,14 @@ RailsMacroOracle::FIXTURES = {
 
         def self.audit_trail(*)
           nil
+        end
+
+        def lamp_glow
+          :base
+        end
+
+        def self.level_low_tier
+          :base
         end
 
         def self.notes
@@ -247,6 +258,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
         table.integer :status
         table.integer :phase
         table.integer :stage
+        table.integer :level
       end
       create_table(:oracle_tags, id: false) do |table|
         table.integer :widget_id
@@ -455,6 +467,7 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     'RailsMacroOracle::Ticket#phase_early?' => ['enum', 'RailsMacroOracle::Ticket'],
     'RailsMacroOracle::Ticket#stale?' => ['enum', 'RailsMacroOracle::Ticket'],
     'RailsMacroOracle::Ticket#fresh!' => ['enum', 'RailsMacroOracle::Ticket'],
+    'RailsMacroOracle::Ticket#level_low_tier?' => ['enum', 'RailsMacroOracle::Ticket'],
     'RailsMacroOracle::ReportJob#low' => [nil, 'RailsMacroOracle::BaseJob'],
     'RailsMacroOracle::PanelController#pick_layout' => [nil, 'RailsMacroOracle::BasePanelController'],
     'RailsMacroOracle::PanelController#recover' => [nil, 'RailsMacroOracle::BasePanelController'],
@@ -553,6 +566,30 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     expect(runtime('RailsMacroOracle::Widget#lamp_glow')).not_to be_nil
     expect(answer('RailsMacroOracle::Widget#glow')).to be_nil
     expect(missing('RailsMacroOracle::Widget#glow')).to include('`store_accessor` at line').and include('may define it')
+  end
+
+  # The prefix is not a literal, so the call may define any name ending in
+  # `_glow`; the superclass's `lamp_glow` is then not the confident answer.
+  it 'cannot tell past a store key under a prefix that is not a literal, as Ruby calls the store accessor' do
+    data = answer('RailsMacroOracle::Widget#lamp_glow')
+
+    owner = runtime('RailsMacroOracle::Widget#lamp_glow')[:method].owner
+    expect(owned_at?(owner, RailsMacroOracle::Widget)).to be(true)
+    expect(data['statement']).to include('cannot tell')
+    expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(['store_accessor', nil])
+    expect(data['candidates'].last['inherited_from']).to include('identifier' => 'RailsMacroOracle::BaseRecord')
+  end
+
+  # `scopes:` is not a literal, so the scope may or may not exist; its name is
+  # still the prefixed one.
+  it 'cannot tell past an enum scope whose enablement is not a literal, under its known prefix' do
+    data = answer('RailsMacroOracle::Ticket.level_low_tier')
+
+    expect(runtime('RailsMacroOracle::Ticket.level_low_tier')[:method].owner)
+      .to eq(RailsMacroOracle::Ticket.singleton_class)
+    expect(data['statement']).to include('cannot tell')
+    expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(['enum', nil])
+    expect(answer('RailsMacroOracle::Ticket.low_tier')).to be_nil
   end
 
   it 'does not read serialize or has_secure_token as a definition of the column they name' do
