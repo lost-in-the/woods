@@ -122,6 +122,21 @@ module Woods
         value.nil? ? 'null' : inline_value(value)
       end
 
+      # Whether a lookup value says nothing, so its key is not printed: nil,
+      # an empty string or list, or a Hash holding only such values. `false`
+      # and `0` are answers.
+      #
+      # @param value [Object]
+      # @return [Boolean]
+      def uninformative?(value)
+        case value
+        when nil then true
+        when String, Array then value.empty?
+        when Hash then value.all? { |_, nested| uninformative?(nested) }
+        else false
+        end
+      end
+
       # The name printed for one entry of a metadata Hash: a controller's
       # routed action that nothing answers is marked in its `routes`.
       #
