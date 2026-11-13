@@ -906,6 +906,28 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       )
     end
 
+    it 'names no module for self:: where self is the including class' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            include self::Helpers
+          end
+
+          def self.included(base)
+            super
+            base.class_eval { include self::Finders }
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq([])
+      expect(unit.metadata[:included_modules]).to eq([])
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable

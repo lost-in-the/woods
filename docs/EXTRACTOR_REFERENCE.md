@@ -924,6 +924,9 @@ excluded). They never decide the unit type.
   `metadata.included_modules` leaves out a module the concern declares in its own body, however the call names it
   (`ClassMethods`, `self::ClassMethods`, `Trackable::ClassMethods` inside `Trackable`), resolved by lexical lookup
   over the modules the file declares.
+  `self::X` names the enclosing module's `X` only where Ruby evaluates `self` as that module: in its body and in its
+  `def self.` methods.
+  Inside a block (`included do`, `base.class_eval { }`) or an instance method it names nothing: no edge, no listing.
   The `*Helper` includes of Phlex, ViewComponent and mailer units count only calls without a receiver or on
   `self`, outside a method body.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
