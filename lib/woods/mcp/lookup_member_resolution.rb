@@ -3,6 +3,7 @@
 require 'prism'
 require 'set'
 require_relative '../method_table'
+require_relative '../file_lines'
 require_relative '../parse_cache'
 
 module Woods
@@ -17,7 +18,8 @@ module Woods
       #
       # 1. modules the unit's own body prepends (`prepend P` read by a Prism
       #    walk), when P's source is inlined;
-      # 2. the unit's own body;
+      # 2. the unit's own body: its `def`s and the class-body macros that
+      #    define the name ({Macros}), the later line first;
       # 3. the concerns inlined at this level: the inlined concerns of the
       #    unit that its parent's unit does not also inline (Ruby skips a
       #    module a superclass already includes).
@@ -26,6 +28,9 @@ module Woods
       # where the extractor writes them in `included_modules` order (a model,
       # nearest first). A controller's are sorted by name, so two of its
       # concerns that define the name are reported as candidates, not ranked.
+      #
+      # A call Woods does not know that may define the name is an answer
+      # that says it cannot tell, not a step past that level.
       #
       # What the index cannot settle is stated as a caveat: a prepended
       # module whose source is not inlined, and a chain that stops at a parent
@@ -53,7 +58,8 @@ module Woods
 
         # One definition of the member. +unit+ is the published unit whose
         # source holds the entry's lines; +level+ indexes the superclass chain;
-        # +origin+ is :own, :concern or :prepended.
+        # +origin+ is :own, :concern or :prepended, or :macro / :possible_macro
+        # for a class-body call that defines the name / may define it.
         Candidate = Struct.new(:entry, :unit, :level, :origin, :concern, keyword_init: true)
 
         # Definitions of equal standing. An unordered group with several
@@ -111,6 +117,7 @@ module Woods
             @chosen = group.candidates.first
             @overridden = group.candidates.drop(1) + group.extras + later
           end
+          @overridden = @overridden.reject { |candidate| candidate.origin == :possible_macro }
           state_caveats
         end
 
@@ -142,7 +149,10 @@ module Woods
           [Group.new(found.map(&:first), false, found.flat_map { |candidates| candidates.drop(1) })]
         end
 
-        # The unit's own definitions of the member, latest first.
+        # The unit's own definitions of the member, latest first: its `def`s
+        # and the class-body macros that define the name (:macro) or may
+        # (:possible_macro). Both define on the class itself, so the later
+        # line is the one Ruby keeps.
         def own_candidates(unit, level)
           name = written_name(unit)
           class_methods = ConcernClassMethods.own_lines(unit['source_code'], name)
@@ -150,7 +160,20 @@ module Woods
             entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
               @reference.kind?(entry) && !class_methods.include?(entry['line'])
           end
-          candidates(entries, unit, level, :own, nil)
+          found = candidates(entries, unit, level, :own, nil) + macro_candidates(unit, level, name)
+          found.sort_by { |candidate| -candidate.entry['line'].to_i }
+        end
+
+        def macro_candidates(unit, level, name)
+          sites = Macros.sites(unit['source_code'], name, @reference)
+          return [] if sites.empty?
+
+          metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
+          locator = FileLines::Locator.new(unit['source_code'], metadata['source_line_map'])
+          sites.map do |entry, known|
+            Candidate.new(entry: locator.annotate(entry), unit: unit, level: level,
+                          origin: known ? :macro : :possible_macro, concern: nil)
+          end
         end
 
         def written_name(unit)
@@ -319,6 +342,183 @@ module Woods
               found.last[1] << inner
               declarations(statement.body, inner, found)
             end
+            found
+          end
+        end
+
+        # Receiver-less calls written directly in a unit's own class or module
+        # body, outside every `def`, that carry the member's name as a
+        # literal positional argument: definitions the method table cannot
+        # see, read by a Prism walk. A call Woods knows defines the name
+        # (`attr_reader`, `alias_method`, `delegate`, ...) is a definition; any
+        # other call but a name reference (visibility, callbacks, validations,
+        # `helper_method`) may define it.
+        #
+        # An instance member is read from the body itself; a class member
+        # from `define_singleton_method` in the body, from every call in its
+        # `class << self` bodies, and from a call in the body Woods does not
+        # know, which may define either side.
+        module Macros
+          # Calls that define the instance methods they name.
+          DEFINERS = %w[attr attr_reader attr_writer attr_accessor alias_method define_method delegate
+                        def_delegator def_instance_delegator def_delegators def_instance_delegators].freeze
+          # Definers whose method takes the visibility in force where it is
+          # called (or of a `private` the call is the argument of).
+          SCOPED = %w[attr attr_reader attr_writer attr_accessor define_method].freeze
+          SINGLETON_DEFINER = 'define_singleton_method'
+          VISIBILITY = %w[private protected public].freeze
+          # Calls that name a method without defining it.
+          REFERENCES = %w[private protected public module_function private_class_method public_class_method
+                          private_constant public_constant helper_method validate validates].freeze
+          REFERENCE_PREFIX = /\A(?:(?:before|after|around|skip|prepend|append)_|validates_)/
+
+          module_function
+
+          # @param source [String, nil] the unit's published source
+          # @param written_name [String] the unit's declaration name in it
+          # @param reference [Reference]
+          # @return [Array<Array(Hash, Boolean)>] a method table style entry
+          #   (`defined_by`, `line`, `end_line`, and `visibility` or
+          #   `alias_of` where they are known) for each call, and whether
+          #   Woods knows that call defines the name
+          def sites(source, written_name, reference)
+            return [] unless source.is_a?(String)
+
+            parsed = Woods::ParseCache.parse(source)
+            return [] if parsed.errors.any?
+
+            body = Prepends.body_of(parsed.value.statements, nil, written_name)
+            statements = ConcernClassMethods.statements(body)
+            found = scan(statements, reference, reference.separator == '#' ? :instance : :class_body)
+            if reference.separator == '.'
+              statements.each do |node|
+                next unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
+
+                found.concat(scan(ConcernClassMethods.statements(node.body), reference, :singleton_body))
+              end
+            end
+            found.map { |entry, known| [entry.merge('owner' => written_name), known] }
+          end
+
+          # The calls among one body's statements, with the default
+          # visibility each is written under.
+          def scan(statements, reference, side)
+            visibility = 'public'
+            statements.flat_map do |node|
+              if node.is_a?(Prism::CallNode) && node.receiver.nil? && VISIBILITY.include?(node.name.to_s)
+                arguments = node.arguments&.arguments.to_a
+                visibility = node.name.to_s if arguments.empty?
+                next arguments.flat_map { |argument| site(argument, reference, side, node.name.to_s) }
+              end
+              site(node, reference, side, visibility)
+            end
+          end
+
+          def site(node, reference, side, visibility)
+            if node.is_a?(Prism::AliasMethodNode)
+              return [] unless side != :class_body && literals(node.new_name) == [reference.name]
+
+              return [[entry(node, 'alias', reference, alias_of: literals(node.old_name).first), true]]
+            end
+            return [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+
+            macro = node.name.to_s
+            verdict = defines(macro, node, reference.name, side)
+            return [] unless verdict
+
+            visibility = nil unless verdict == :known && SCOPED.include?(macro)
+            alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
+            [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known]]
+          end
+
+          # :known when the call defines +name+ on this side, :possible
+          # when Woods does not know the call, nil otherwise.
+          def defines(macro, node, name, side)
+            arguments = positional(node)
+            if DEFINERS.include?(macro)
+              return nil if side == :class_body
+
+              return defined_names(macro, node, arguments).include?(name) ? :known : delegate_unknown(macro, node, name)
+            end
+            if macro == SINGLETON_DEFINER
+              return side == :class_body && literals(arguments.first) == [name] ? :known : nil
+            end
+            return nil if REFERENCES.include?(macro) || macro.match?(REFERENCE_PREFIX)
+
+            :possible if arguments.flat_map { |argument| literals(argument) }.include?(name)
+          end
+
+          def defined_names(macro, node, arguments)
+            case macro
+            when 'attr_writer' then names(arguments).map { |name| "#{name}=" }
+            when 'attr_accessor' then names(arguments).flat_map { |name| [name, "#{name}="] }
+            when 'alias_method', 'define_method' then literals(arguments.first)
+            when 'delegate' then delegated(node, arguments)
+            when 'def_delegator', 'def_instance_delegator' then literals(arguments[2] || arguments[1])
+            when 'def_delegators', 'def_instance_delegators' then names(arguments.drop(1))
+            else names(arguments)
+            end
+          end
+
+          # `delegate :x, to: :y` defines x; with `prefix: true` it defines
+          # y_x, and with `prefix: :p` p_x.
+          def delegated(node, arguments)
+            prefix = delegate_prefix(node)
+            return [] if prefix == :unknown
+
+            names(arguments).map { |name| prefix ? "#{prefix}_#{name}" : name }
+          end
+
+          # A `delegate` whose prefix is not a literal may define the name.
+          def delegate_unknown(macro, node, name)
+            return nil unless macro == 'delegate' && delegate_prefix(node) == :unknown
+
+            names(positional(node)).include?(name) ? :possible : nil
+          end
+
+          # @return [String, nil, :unknown] the prefix a `delegate` call adds
+          def delegate_prefix(node)
+            options = keywords(node)
+            prefix = options['prefix']
+            case prefix
+            when nil, Prism::FalseNode, Prism::NilNode then nil
+            when Prism::TrueNode
+              target = literals(options['to']).first
+              target ? target.delete_prefix('@') : :unknown
+            else literals(prefix).first || :unknown
+            end
+          end
+
+          def keywords(node)
+            hash = node.arguments&.arguments.to_a.find { |argument| argument.is_a?(Prism::KeywordHashNode) }
+            (hash ? hash.elements : []).each_with_object({}) do |element, found|
+              next unless element.is_a?(Prism::AssocNode)
+
+              key = literals(element.key).first
+              found[key] = element.value if key
+            end
+          end
+
+          def positional(node)
+            node.arguments&.arguments.to_a.reject do |argument|
+              argument.is_a?(Prism::KeywordHashNode) || argument.is_a?(Prism::BlockArgumentNode)
+            end
+          end
+
+          def names(arguments)
+            arguments.flat_map { |argument| literals(argument) }
+          end
+
+          def literals(node)
+            MethodTable::Names.symbol_names(node)
+          end
+
+          def entry(node, macro, reference, visibility: nil, alias_of: nil)
+            found = { 'name' => reference.name, 'kind' => reference.separator == '#' ? 'instance' : 'singleton',
+                      'line' => node.location.start_line, 'end_line' => node.location.end_line,
+                      'defined_by' => macro }
+            found['visibility'] = visibility if visibility
+            found['alias_of'] = alias_of if alias_of
             found
           end
         end

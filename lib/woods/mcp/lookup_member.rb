@@ -112,9 +112,14 @@ module Woods
           result['statement'] = statement(reference, unit, resolution)
           result.merge!(shown.except('source_code'))
         end
-        others = resolution.overridden.map { |candidate| located(candidate, resolution) }
-        result['other_definitions'] = others unless others.empty?
-        result['caveats'] = resolution.caveats unless resolution.caveats.empty?
+        caveats = resolution.caveats
+        if resolution.chosen&.origin == :possible_macro
+          caveats = possible_macro_caveats(reference, resolution) + caveats
+        else
+          others = resolution.overridden.map { |candidate| located(candidate, resolution) }
+          result['other_definitions'] = others unless others.empty?
+        end
+        result['caveats'] = caveats unless caveats.empty?
         result['source_code'] = shown['source_code'] if shown
         result
       end
@@ -160,6 +165,8 @@ module Woods
       #   was established
       def statement(reference, unit, resolution)
         chosen = resolution.chosen
+        return macro_statement(reference, unit, resolution) if %i[macro possible_macro].include?(chosen.origin)
+
         entry = chosen.entry
         head = "#{reference.identifier} is a #{entry['visibility']} " \
                "#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
@@ -182,6 +189,45 @@ module Woods
         else
           through = inherited ? ", which it gets through its superclass #{ancestor['identifier']}" : ''
           " of #{owner}, inlined from concern #{chosen.concern}#{through}."
+        end
+      end
+
+      # The statement of an answer from a class-body call: the level whose
+      # own body makes it, and whether Woods knows that it defines the name.
+      def macro_statement(reference, unit, resolution)
+        chosen = resolution.chosen
+        entry = chosen.entry
+        level = resolution.chain[chosen.level]
+        owner = "#{unit['type']} unit #{unit['identifier']}"
+        call = "`#{entry['defined_by']}` (line #{entry['line']} of its published source)"
+        if chosen.origin == :possible_macro
+          where = chosen.level.zero? ? owner : "#{level['type']} unit #{level['identifier']}, a superclass of #{owner},"
+          return "#{reference.identifier}: #{where} calls #{call} in its own body with #{reference.name} as an " \
+                 "argument, so it may define the #{reference.kind_label} #{reference.name} there. Woods does not " \
+                 "know what `#{entry['defined_by']}` does, so it cannot tell which definition Ruby calls. " \
+                 "#{not_a_unit(unit)}"
+        end
+        how = "defined in its own body by #{call}#{", as an alias of #{entry['alias_of']}" if entry['alias_of']}"
+        visibility = "#{entry['visibility']} " if entry['visibility']
+        head = "#{reference.identifier} is a #{visibility}#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
+        origin = if chosen.level.zero?
+                   " of #{owner}, #{how}."
+                 else
+                   " that #{owner} inherits from #{level['type']} unit #{level['identifier']}, #{how}."
+                 end
+        "#{head}#{origin}#{overrides(reference, resolution)} #{not_a_unit(unit)}"
+      end
+
+      # What an answer that cannot tell says of the definitions it may
+      # override: each one runs only if the call does not define the name.
+      def possible_macro_caveats(reference, resolution)
+        chosen = resolution.chosen
+        level = resolution.chain[chosen.level]['identifier']
+        resolution.overridden.map do |candidate|
+          "#{candidate.concern || candidate.unit['identifier']} also defines #{reference.name} " \
+            "(line #{candidate.entry['line']} of the published source of #{candidate.unit['identifier']}); " \
+            "Ruby calls that definition only if `#{chosen.entry['defined_by']}` does not " \
+            "define #{reference.name} in #{level}."
         end
       end
 

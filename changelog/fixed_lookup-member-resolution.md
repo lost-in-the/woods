@@ -11,3 +11,7 @@
   includers. The `statement` now says how the answer was established (own body, inherited, inlined, prepended).
   A class nested in its own superclass's body, published as its own lexical range (a nested job or PORO), answered
   the enclosing class's definition of the name; it now answers its own, and inherits only what it does not define.
+  A name a class body defines by a call rather than a `def` (`attr_reader`, `alias_method`, `delegate`,
+  `define_method`, ...) answered a superclass's `def` as inherited; that level's call is now the answer, under
+  `defined_by`. A call Woods does not know that carries the name (a base class's DSL) now gives an answer that
+  names the call and says Woods cannot tell which definition Ruby calls, instead of presenting the superclass's.

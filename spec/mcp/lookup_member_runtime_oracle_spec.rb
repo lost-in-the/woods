@@ -5,6 +5,8 @@ require 'pathname'
 require 'active_support'
 require 'active_support/concern'
 require 'active_support/core_ext/module/introspection'
+require 'active_support/core_ext/module/delegation'
+require 'forwardable'
 require 'woods'
 require 'woods/method_table'
 require 'woods/file_lines'
@@ -12,6 +14,7 @@ require 'woods/source_line_map'
 require 'woods/extractors/model_extractor'
 require 'woods/extractors/controller_extractor'
 require 'woods/extractors/job_extractor'
+require 'woods/extractors/service_extractor'
 require 'woods/mcp/lookup_member'
 
 # Fixture classes and modules for the lookup member runtime oracle.
@@ -339,7 +342,7 @@ LookupMemberOracle::FIXTURES = {
       end
     end
   RUBY
-  'app/jobs/lookup_oracle/report_job.rb' => <<~RUBY
+  'app/jobs/lookup_oracle/report_job.rb' => <<~RUBY,
     module LookupOracle
       class ReportJob
         def perform
@@ -372,7 +375,172 @@ LookupMemberOracle::FIXTURES = {
       end
     end
   RUBY
+  'app/services/lookup_oracle/macro_base.rb' => <<~RUBY,
+    module LookupOracle
+      class MacroBase
+        def self.field(name)
+          define_method(name) { :field }
+        end
+
+        def self.column(_name)
+          nil
+        end
+
+        def self.before_action(*)
+          nil
+        end
+
+        def self.validate(*)
+          nil
+        end
+
+        def self.build
+          :base
+        end
+
+        def self.label
+          :base
+        end
+
+        def perform
+          :base
+        end
+
+        def label
+          :base
+        end
+
+        def summary
+          :base
+        end
+
+        def status
+          :base
+        end
+
+        def total
+          :base
+        end
+
+        def reader
+          :base
+        end
+
+        def runner
+          :base
+        end
+
+        def notify
+          :base
+        end
+
+        def helper
+          :base
+        end
+
+        def refresh
+          :base
+        end
+
+        def archive
+          :base
+        end
+
+        def prepare
+          :base
+        end
+
+        def guarded
+          :base
+        end
+
+        def score
+          :base
+        end
+
+        def tally
+          :base
+        end
+
+        def secret
+          :base
+        end
+
+        def concealed
+          :base
+        end
+      end
+    end
+  RUBY
+  'app/services/lookup_oracle/macro_record.rb' => <<~RUBY,
+    module LookupOracle
+      class MacroRecord < MacroBase
+        attr_reader :perform
+        attr_writer :setter
+        attr_accessor :total
+        alias_method :label, :summary
+        alias status summary
+        define_method(:reader) { :own }
+        delegate :runner, to: :helper
+        delegate :notify, to: :helper, prefix: true
+        field :refresh
+        column :archive
+        before_action :prepare
+        validate :prepare
+        attr_reader :score
+
+        def score
+          :own
+        end
+
+        def tally
+          :own
+        end
+
+        alias_method :tally, :summary
+
+        def compute
+          send(:guarded)
+        end
+
+        class << self
+          attr_reader :build
+        end
+
+        define_singleton_method(:label) { :own }
+
+        private attr_reader :concealed
+
+        private
+
+        attr_reader :secret
+      end
+    end
+  RUBY
+  'app/services/lookup_oracle/macro_child.rb' => <<~RUBY,
+    module LookupOracle
+      class MacroChild < MacroRecord
+        def total
+          :child
+        end
+      end
+    end
+  RUBY
+  'app/services/lookup_oracle/forwarded_record.rb' => <<~RUBY
+    module LookupOracle
+      class ForwardedRecord < MacroBase
+        extend Forwardable
+
+        def_delegator :@helper, :fetch, :perform
+        def_delegators :@helper, :runner, :reader
+      end
+    end
+  RUBY
 }.freeze
+
+# Macros whose method Ruby locates somewhere other than the call: an alias
+# at the aliased method, a Forwardable delegator in its library.
+LookupMemberOracle::LOCATED_ELSEWHERE = %w[alias alias_method def_delegator def_delegators].freeze
 
 # Modules the extractors would treat as application concerns. The top-level
 # tracing module is application code but not a concern, so it is not inlined.
@@ -390,13 +558,16 @@ LookupMemberOracle::UNITS = [
   %w[LookupOracle::Stamping concern], %w[LookupOracle::Tagging concern], %w[LookupOracle::Grouping concern],
   %w[LookupOracle::Helpers lib],
   %w[LookupOracle::ReportJob job], %w[LookupOracle::ReportJob::Preview job],
-  %w[LookupOracle::ReportJob::Preview::Draft job]
+  %w[LookupOracle::ReportJob::Preview::Draft job],
+  %w[LookupOracle::MacroBase service], %w[LookupOracle::MacroRecord service], %w[LookupOracle::MacroChild service],
+  %w[LookupOracle::ForwardedRecord service]
 ].freeze
 
-# Every method name the fixtures define, asked of every unit as `#` and `.`.
+# Every method name the fixtures define, asked of every unit as `#` and `.`,
+# with the names only a macro defines.
 LookupMemberOracle::NAMES = LookupMemberOracle::FIXTURES.values.flat_map do |source|
   source.scan(/def (?:self\.)?(\w+)/).flatten
-end.uniq.freeze
+end.push('setter=', 'total=', 'helper_notify').uniq.freeze
 
 # The rule `lookup` holds for `Owner#name` and `Owner.name`: a member answer
 # names the method the owner really responds to, and where the published
@@ -450,11 +621,14 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     source = case type
              when 'model', 'controller' then inlined(klass, type, original)
              when 'job' then job_source(identifier, original)
+             when 'service' then service_source(identifier, original)
              else original
              end
-    locator = Woods::FileLines::Locator.new(source, Woods::SourceLineMap.build(original, source),
+    map = Woods::SourceLineMap.build(original, source)
+    locator = Woods::FileLines::Locator.new(source, map,
                                             identity_lines: Woods::SourceLineMap.identity_lines(original, source))
     metadata = { 'methods' => Woods::MethodTable.call(source).map { |entry| locator.annotate(entry) } }
+    metadata['source_line_map'] = map if map
     metadata['parent_class'] = klass.superclass.name if klass.is_a?(Class)
     JSON.parse(JSON.generate('identifier' => identifier, 'type' => type, 'file_path' => path,
                              'source_code' => source, 'metadata' => metadata, 'dependencies' => inheritance(klass)))
@@ -470,6 +644,11 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     extractor = (model ? Woods::Extractors::ModelExtractor : Woods::Extractors::ControllerExtractor).allocate
     sources = modules.map { |mod| [mod.name, LookupMemberOracle::FIXTURES.fetch(path_of(mod.name))] }
     extractor.send(:insert_concern_block, klass, original, extractor.send(:build_concern_block, sources))
+  end
+
+  # A service's source under the service extractor's banner.
+  def service_source(identifier, original)
+    Woods::Extractors::ServiceExtractor.allocate.send(:annotate_source, original, identifier)
   end
 
   # A job's source as the job extractor publishes it: a class nested in
@@ -540,12 +719,40 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     truth = runtime(Object.const_get(reference.owner), reference.separator, reference.name)
     data = answer(identifier)
     return unanswered_verdict(identifier, truth) unless data
+    return macro_verdict(identifier, reference, data, truth) if data.dig('member', 'defined_by')
     return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
     return candidates_verdict(identifier, data, truth) if data['candidates']
     return :exact if named(data) == truth
     return :stated if Array(data['caveats']).any?
 
     "#{identifier}: answered #{named(data)}, Ruby calls #{truth}"
+  end
+
+  # A macro answer: a stated cannot-tell, or the macro of the level whose
+  # class (or singleton class) Ruby reports as the method's owner, at the
+  # line Ruby reports where that is the call, with its visibility where the
+  # answer states one.
+  def macro_verdict(identifier, reference, data, truth)
+    return :stated if data['statement'].include?('cannot tell')
+    return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
+
+    wrong_owner = owner_violation(identifier, reference, data)
+    return wrong_owner if wrong_owner
+    return :exact if LookupMemberOracle::LOCATED_ELSEWHERE.include?(data.dig('member', 'defined_by'))
+
+    site = named(data)
+    site.delete('visibility') unless data['member'].key?('visibility')
+    site == truth.slice(*site.keys) ? :exact : "#{identifier}: answered #{site}, Ruby calls #{truth}"
+  end
+
+  # A violation String unless Ruby's owner of the method is the answer's
+  # level (its singleton class for a class method).
+  def owner_violation(identifier, reference, data)
+    owner = Object.const_get(reference.owner)
+    level = Object.const_get(data.dig('inherited_from', 'identifier') || reference.owner)
+    target, expected = reference.separator == '#' ? [owner, level] : [owner.singleton_class, level.singleton_class]
+    actual = target.instance_method(reference.name).owner
+    "#{identifier}: answered #{level}, Ruby's owner is #{actual}" unless actual == expected
   end
 
   # Not answered: right when Ruby does not respond, or calls a definition no
@@ -572,11 +779,14 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     expect(violations).to be_empty, "#{violations.size} answers disagree with Ruby:\n#{violations.join("\n")}"
     expect(identifiers.size).to eq(LookupMemberOracle::UNITS.size * LookupMemberOracle::NAMES.size * 2)
     # Only what the index cannot settle is left to a statement: a prepended
-    # module it does not publish, a superclass it did not read, and a
-    # controller's concerns, whose include order it does not record.
+    # module it does not publish, a superclass it did not read, a
+    # controller's concerns, whose include order it does not record, and a
+    # macro it does not know, on either side.
     expect(verdicts.select { |_, verdict| verdict == :stated }.keys).to contain_exactly(
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
-      'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for'
+      'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for',
+      *%w[MacroRecord MacroChild].product(%w[#refresh #archive .refresh .archive])
+                                 .map { |owner, name| "LookupOracle::#{owner}#{name}" }
     )
   end
 
@@ -712,6 +922,100 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
       expect(data['member']).to include('owner' => 'LookupOracle::ReportJob', 'file_line' => 3)
       expect(data).not_to have_key('other_definitions')
+    end
+  end
+
+  # A class body can define the name by a macro the method table cannot
+  # see. The level that does so is the answer, or, for a macro Woods does
+  # not know, the level that may; a superclass `def` is never presented as
+  # what runs past it.
+  describe 'a name defined by a class-body macro (N2)' do
+    {
+      'LookupOracle::MacroRecord#perform' => ['attr_reader', 3],
+      'LookupOracle::MacroRecord#setter=' => ['attr_writer', 4],
+      'LookupOracle::MacroRecord#total' => ['attr_accessor', 5],
+      'LookupOracle::MacroRecord#total=' => ['attr_accessor', 5],
+      'LookupOracle::MacroRecord#label' => ['alias_method', 6],
+      'LookupOracle::MacroRecord#status' => ['alias', 7],
+      'LookupOracle::MacroRecord#reader' => ['define_method', 8],
+      'LookupOracle::MacroRecord#runner' => ['delegate', 9],
+      'LookupOracle::MacroRecord#helper_notify' => ['delegate', 10],
+      'LookupOracle::MacroRecord.build' => ['attr_reader', 32],
+      'LookupOracle::MacroRecord.label' => ['define_singleton_method', 35],
+      'LookupOracle::ForwardedRecord#perform' => ['def_delegator', 5],
+      'LookupOracle::ForwardedRecord#runner' => ['def_delegators', 6]
+    }.each do |identifier, (macro, line)|
+      it "answers #{identifier} as defined in its own body by #{macro}" do
+        data = answer(identifier)
+
+        expect(data['member']).to include('defined_by' => macro, 'file_line' => line)
+        expect(data).not_to have_key('inherited_from')
+        expect(data['statement']).to include("by `#{macro}`").and include('in its own body')
+        expect(data['statement']).not_to include('cannot tell')
+      end
+    end
+
+    it 'lists the superclass def a known macro overrides, with the call as the source' do
+      data = answer('LookupOracle::MacroRecord#perform')
+
+      expect(data['source_code']).to eq("    attr_reader :perform\n")
+      expect(data['other_definitions']).to contain_exactly(include('unit' => 'LookupOracle::MacroBase'))
+    end
+
+    it 'names the aliased method of an alias' do
+      expect(answer('LookupOracle::MacroRecord#label')['member']).to include('alias_of' => 'summary')
+      expect(answer('LookupOracle::MacroRecord#status')['member']).to include('alias_of' => 'summary')
+    end
+
+    it 'answers a macro of a superclass level as inherited, below a nearer def' do
+      inherited = answer('LookupOracle::MacroChild#perform')
+
+      expect(inherited['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
+      expect(inherited['member']).to include('defined_by' => 'attr_reader', 'file_line' => 3)
+      expect(answer('LookupOracle::MacroChild#total')['member']).not_to have_key('defined_by')
+    end
+
+    it 'answers whichever of a def and a known macro in one body comes later' do
+      expect(answer('LookupOracle::MacroRecord#score')['member']).to include('file_line' => 17)
+      expect(answer('LookupOracle::MacroRecord#score')['member']).not_to have_key('defined_by')
+      expect(answer('LookupOracle::MacroRecord#tally')['member'])
+        .to include('defined_by' => 'alias_method', 'file_line' => 25)
+    end
+
+    it 'reads the visibility of attr_reader from `private attr_reader` and from a bare private' do
+      expect(answer('LookupOracle::MacroRecord#concealed')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#secret')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#perform')['member']).to include('visibility' => 'public')
+    end
+
+    it 'says it cannot tell for a macro it does not know, without presenting the superclass def as the answer' do
+      %w[LookupOracle::MacroRecord#refresh LookupOracle::MacroRecord#archive].each do |identifier|
+        data = answer(identifier)
+
+        expect(data['member']).to include('defined_by' => a_string_matching(/\A(field|column)\z/))
+        expect(data['statement']).to include('may define').and include('cannot tell')
+        expect(data).not_to have_key('other_definitions')
+        expect(data['caveats']).to include(a_string_including('LookupOracle::MacroBase also defines'))
+      end
+    end
+
+    it 'says it cannot tell through a superclass level whose macro it does not know' do
+      data = answer('LookupOracle::MacroChild#refresh')
+
+      expect(data['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
+      expect(data['statement']).to include('cannot tell')
+    end
+
+    it 'does not take a name a macro only refers to as a definition of it' do
+      %w[prepare guarded summary helper notify].each do |name|
+        expect(answer("LookupOracle::MacroRecord##{name}")['inherited_from'])
+          .to include('identifier' => 'LookupOracle::MacroBase'), name
+      end
+    end
+
+    it 'keeps a plain-body instance macro off the class side' do
+      expect(answer('LookupOracle::MacroRecord.perform')).to be_nil
+      expect(answer('LookupOracle::MacroRecord#build')).to be_nil
     end
   end
 end
