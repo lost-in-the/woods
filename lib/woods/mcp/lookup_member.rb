@@ -2,6 +2,8 @@
 
 require_relative '../method_table'
 require_relative '../file_lines'
+require_relative '../parse_cache'
+require 'set'
 
 module Woods
   module MCP
@@ -28,6 +30,22 @@ module Woods
         def kind?(entry)
           kinds = separator == '#' ? %w[instance module_function] : %w[singleton module_function]
           kinds.include?(entry['kind'])
+        end
+
+        # For a definition inlined from a concern: only what the including
+        # class responds to. Instance methods are mixed in, and the
+        # definitions of `class_methods do` are extended onto it; the
+        # concern's own `def self.x`, `class << self` and `module_function`
+        # methods stay on the concern.
+        #
+        # @param entry [Hash] a method table entry with `file_unit`
+        # @param class_method_lines [Set<Integer>] lines of the concern's
+        #   `class_methods` definitions, in published-source coordinates
+        # @return [Boolean]
+        def concern_kind?(entry, class_method_lines)
+          return entry['kind'] == 'instance' if separator == '#'
+
+          entry['kind'] == 'singleton' && class_method_lines.include?(entry['line'])
         end
       end
 
@@ -94,8 +112,13 @@ module Woods
       #
       # @return [Array(Hash, Array<Hash>), nil]
       def locate(unit, reference)
+        class_method_lines = nil
         matches = methods_of(unit).select do |entry|
-          entry['name'] == reference.name && reference.kind?(entry) && member_owner?(entry, unit['identifier'])
+          next false unless entry['name'] == reference.name && member_owner?(entry, unit['identifier'])
+          next reference.kind?(entry) unless entry['file_unit']
+
+          class_method_lines ||= ConcernClassMethods.lines(unit['source_code'])
+          reference.concern_kind?(entry, class_method_lines)
         end
         return nil if matches.empty?
 
@@ -122,6 +145,76 @@ module Woods
 
         locator = FileLines::Locator.new(source, metadata['source_line_map'])
         table.map { |entry| locator.annotate(entry) }
+      end
+
+      # The lines of the definitions an inlined concern makes inside its
+      # `class_methods do` block, read by a Prism walk of each decoded block
+      # ({Woods::MethodTable.named_blocks}). Only a definition written
+      # directly in that block (or as `private def`) counts; a block that does
+      # not parse contributes nothing, so its singletons are not members.
+      # `module ClassMethods` is not read: its methods are not answered.
+      module ConcernClassMethods
+        VISIBILITY = %i[private protected public].freeze
+
+        module_function
+
+        # @param source [String, nil] the unit's published source
+        # @return [Set<Integer>] published-source lines of those definitions
+        def lines(source)
+          return Set.new unless source.is_a?(String)
+
+          MethodTable.named_blocks(source.lines(chomp: true)).each_with_object(Set.new) do |(first, text, name), found|
+            parsed = Woods::ParseCache.parse(text)
+            next if parsed.errors.any?
+
+            definitions(parsed.value.statements, nil, name).each { |line| found << (line + first - 1) }
+          end
+        end
+
+        # Start lines of the `class_methods` definitions in the body of the
+        # module named +concern+.
+        def definitions(node, owner, concern)
+          statements(node).flat_map do |statement|
+            next [] unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
+
+            inner = MethodTable::Names.qualified(owner, statement.constant_path)
+            next [] unless inner
+
+            inner == concern ? class_methods_in(statement.body) : definitions(statement.body, inner, concern)
+          end
+        end
+
+        def class_methods_in(body)
+          statements(body).flat_map do |statement|
+            next [] unless class_methods_call?(statement)
+
+            statements(statement.block.body).flat_map { |inner| definition_lines(inner) }
+          end
+        end
+
+        def class_methods_call?(node)
+          node.is_a?(Prism::CallNode) && node.receiver.nil? && node.name == :class_methods &&
+            node.block.is_a?(Prism::BlockNode)
+        end
+
+        def definition_lines(node)
+          case node
+          when Prism::DefNode then node.receiver ? [] : [node.location.start_line]
+          when Prism::CallNode
+            return [] unless node.receiver.nil? && VISIBILITY.include?(node.name)
+
+            node.arguments&.arguments.to_a.flat_map { |argument| definition_lines(argument) }
+          else []
+          end
+        end
+
+        def statements(node)
+          case node
+          when Prism::StatementsNode then node.body
+          when nil then []
+          else [node]
+          end
+        end
       end
 
       # The definition's lines of the published source; a definition inside

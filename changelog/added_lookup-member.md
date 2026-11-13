@@ -2,5 +2,7 @@
   not itself a published unit and its owner is, returns that method's file and line range, its published source
   lines and source text, stated as a member of the owner unit (`_meta.member_of`), not a unit of its own. Lines come
   from the published method table, or a Prism walk of older units' source; a method inlined from a concern names the
-  concern's file. An owner without the method still answers `not_found`, now saying the owner exists and the method
-  is not in its published source. An identifier that is a published unit keeps resolving to it.
+  concern's file, and counts only when the including class responds to it (its instance methods and its
+  `class_methods do` definitions, never the concern's own `def self.x`, `class << self` or `module_function`).
+  An owner without the method still answers `not_found`, now saying the owner exists and the method is not in its
+  published source. An identifier that is a published unit keeps resolving to it.

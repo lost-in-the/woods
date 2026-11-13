@@ -469,7 +469,13 @@ named), not a unit of its own.
 `_meta.member_of` names the owner unit.
 The lines come from the published method table (`metadata.methods`); a unit published before that table is read
 with a Prism walk of its published source.
-A method inlined from a concern is a member of the unit, and `defined_in` names the concern and its file.
+A method inlined from a concern is a member only when the including class responds to it, and `defined_in` names
+the concern and its file.
+An instance method of the concern answers `Owner#method`; a definition inside its `class_methods do` block answers
+`Owner.method`.
+The concern's own `def self.x`, `class << self` and `module_function` methods stay on the concern and are not
+members of the unit; look them up on the concern.
+Known limit: methods of a `module ClassMethods` inside a concern are not answered as class methods of the unit.
 When a name is defined more than once, the answer is the definition Ruby calls (the unit's own over a concern's,
 the later of two in one body), and `other_definitions` lists the rest.
 `type` selects the owner's type.

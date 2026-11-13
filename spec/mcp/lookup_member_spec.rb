@@ -29,10 +29,69 @@ RSpec.describe 'MCP lookup of a unit member' do
     CONCERN
   end
 
-  let(:publishable_code) { "module Publishable\n  def archive\n    update!(archived: true)\n  end\nend\n" }
+  # A concern's own singleton methods (`def self.x`, `class << self`,
+  # `module_function`) are not methods of the class that includes it; only
+  # its `class_methods do` definitions are.
+  let(:publishable_code) do
+    <<~RUBY
+      module Publishable
+        def archive
+          update!(archived: true)
+        end
+
+        def self.format(value)
+          value.to_s
+        end
+
+        def self.slugify(value)
+          value.to_s.parameterize
+        end
+
+        class << self
+          def helper; end
+        end
+
+        module_function
+
+        def tool; end
+      end
+    RUBY
+  end
+
+  let(:formatting_code) do
+    <<~RUBY
+      module Formatting
+        extend ActiveSupport::Concern
+
+        class_methods do
+          def format(value)
+            value.to_s.upcase
+          end
+
+          private def hidden; end
+        end
+      end
+    RUBY
+  end
+
+  let(:money_columns_code) do
+    <<~RUBY
+      module Canopy
+        module MoneyColumns
+          class_methods do
+            def money_column(name)
+              name
+            end
+          end
+        end
+      end
+    RUBY
+  end
 
   let(:post_source) do
-    <<~RUBY + concern_block('Publishable', publishable_code)
+    blocks = concern_block('Publishable', publishable_code) + concern_block('Formatting', formatting_code) +
+             concern_block('Canopy::MoneyColumns', money_columns_code)
+    <<~RUBY + blocks
       class Post < ApplicationRecord
         def self.recent
           order(:id)
@@ -206,6 +265,40 @@ RSpec.describe 'MCP lookup of a unit member' do
       expect(data['defined_in']).to eq('identifier' => 'Publishable',
                                        'file_path' => 'app/models/concerns/publishable.rb')
       expect(data['source_code']).to eq("  def archive\n    update!(archived: true)\n  end\n")
+    end
+
+    it 'answers a class method a concern declares in class_methods' do
+      data = member('Post.format')
+
+      expect(data['member']).to include('name' => 'format', 'kind' => 'singleton', 'file_unit' => 'Formatting',
+                                        'file_line' => 5, 'file_end_line' => 7)
+      expect(data['source_code']).to eq("    def format(value)\n      value.to_s.upcase\n    end\n")
+      expect(data['statement']).to start_with('Post.format is a public class method of model unit Post')
+    end
+
+    it 'never lists a concern-local singleton beside the class_methods definition' do
+      expect(member('Post.format')).not_to have_key('other_definitions')
+    end
+
+    it 'answers class_methods of a namespaced concern, and their visibility' do
+      expect(member('Post.money_column')['member']).to include('file_unit' => 'Canopy::MoneyColumns',
+                                                               'file_line' => 4, 'file_end_line' => 6)
+      expect(member('Post.hidden')['member']).to include('visibility' => 'private', 'file_unit' => 'Formatting')
+    end
+
+    {
+      'Post.slugify' => 'def self. in a concern',
+      'Post.helper' => 'class << self in a concern',
+      'Post.tool' => 'a module_function of a concern',
+      'Post#tool' => 'a module_function of a concern, as an instance method',
+      'Post#format' => 'a class_methods method, as an instance method'
+    }.each do |identifier, form|
+      it "does not answer #{form} (#{identifier}) as a member of the including unit" do
+        response = call(build, identifier: identifier)
+
+        expect(response.error?).to be(true)
+        expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Post', type: 'model' })
+      end
     end
 
     it 'leaves the source out with include_source: false' do
