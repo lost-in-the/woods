@@ -113,7 +113,7 @@ module Woods
       # @raise [PageTooSmall] when the position lines alone fill the page
       def text_pieces(text, max_chars)
         room = max_chars - text_frame_chars(text.length)
-        raise PageTooSmall, max_chars - room + 1 unless room.positive?
+        raise PageTooSmall, smallest_max_chars(text) unless room.positive?
 
         split(text, room)
       end
@@ -157,12 +157,58 @@ module Woods
       #   a number, a key) does not fit on a page of +max_chars+
       def json_pages(unit, max_chars, total_chars: nil)
         total_chars ||= JSON.pretty_generate(unit).length
+        pages, bound = cut_json(unit, max_chars, total_chars)
+        raise PageTooSmall, smallest_json_chars(unit, total_chars) if bound
+
+        pages
+      end
+
+      # The smallest page size, at least {MIN_MAX_CHARS}, at which +text+
+      # (or, in the JSON format, +unit+) can be cut into pages: the size
+      # serves the answer and the one below it does not, so a refused caller
+      # retries once.
+      #
+      # @param text [String] the complete rendering
+      # @param unit [Hash, nil] the unit, when the format is JSON
+      # @return [Integer]
+      def smallest_max_chars(text, unit: nil)
+        return smallest_json_chars(unit, text.length) if unit
+
+        [text_frame_chars(text.length) + 1, MIN_MAX_CHARS].max
+      end
+
+      # The words of every refusal of a page too small.
+      #
+      # @param required [Integer] the smallest page size that serves the answer
+      # @return [String]
+      def refusal(required)
+        "pages of at least #{required} characters hold it. Pass max_chars: #{required} or more, or ask for " \
+          'less with sections or include_source: false.'
+      end
+
+      # Raised when no page of the requested size can hold the answer.
+      class PageTooSmall < StandardError
+        # @return [Integer] the smallest page size that holds it ({LookupPages.smallest_max_chars})
+        attr_reader :required
+
+        # @param required [Integer]
+        def initialize(required)
+          @required = required
+          super("This lookup answer cannot be cut into pages that small; #{LookupPages.refusal(required)}")
+        end
+      end
+
+      # {.json_pages} at one size, without refusing.
+      #
+      # @return [Array(Array<Hash>, Integer)] the pages, and nil or, when a
+      #   value that cannot be cut does not fit, a larger size at which it does
+      def cut_json(unit, max_chars, total_chars)
         frame = placeholder(total_chars)
         capacity = max_chars - render_json(frame, { 'unit' => {}, 'parts' => [] }).length - JSON_OPENING_CHARS
         sizer = JsonSizer.new(frame.pages)
         parts = unit.flat_map { |key, value| json_parts(sizer, [key.to_s], value, capacity) }
         pages, overflow = pack(parts, sizer, capacity)
-        raise PageTooSmall, max_chars + overflow if overflow.positive?
+        return [nil, max_chars + overflow] if overflow.positive?
 
         # The sizes above are upper bounds; a page over the limit is a bug
         # here, and is never sent.
@@ -170,28 +216,16 @@ module Woods
           length = render_json(frame, page).length
           raise "lookup JSON page of #{length} characters exceeds #{max_chars}" if length > max_chars
         end
-        pages
+        [pages, nil]
       end
 
-      # The smallest page size, at least {MIN_MAX_CHARS}, at which +text+
-      # (or, in the JSON format, +unit+) can be cut into pages, so a refused
-      # caller can retry once. {PageTooSmall#required} is only an upper bound:
-      # it measures the part that did not fit at its longest. The size found
-      # serves the answer and the one below it does not.
-      #
-      # @param text [String] the complete rendering
-      # @param unit [Hash, nil] the unit, when the format is JSON
-      # @return [Integer]
-      def smallest_max_chars(text, unit: nil)
-        fits = lambda do |size|
-          unit ? json_pages(unit, size, total_chars: text.length) : text_pieces(text, size)
-          nil
-        rescue PageTooSmall => e
-          e.required
-        end
+      # The bound {.cut_json} gives measures the part that did not fit at its
+      # longest, so it can exceed the smallest size: a binary search between
+      # the last refused size and it finds the smallest.
+      def smallest_json_chars(unit, total_chars)
         low = MIN_MAX_CHARS - 1
         high = MIN_MAX_CHARS
-        while (bound = fits.call(high))
+        while (bound = cut_json(unit, high, total_chars).last)
           raise "lookup page bound #{bound} does not exceed the refused size #{high}" unless bound > high
 
           low = high
@@ -199,21 +233,9 @@ module Woods
         end
         while high - low > 1
           middle = (low + high) / 2
-          fits.call(middle) ? low = middle : high = middle
+          cut_json(unit, middle, total_chars).last ? low = middle : high = middle
         end
         high
-      end
-
-      # Raised when no page of the requested size can hold the answer.
-      class PageTooSmall < StandardError
-        # @return [Integer] a page size that holds it (see {LookupPages.smallest_max_chars} for the smallest)
-        attr_reader :required
-
-        # @param required [Integer]
-        def initialize(required)
-          @required = required
-          super("a lookup page must be at least #{required} characters for this answer")
-        end
       end
 
       # Characters a JSON page's `unit` and `parts` take beyond their empty

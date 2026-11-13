@@ -727,21 +727,19 @@ module Woods
               # The limit bounds each page as sent, position lines and JSON
               # envelope included, so a page smaller than those is refused,
               # as is one too small for a list item the JSON format cannot cut.
+              json_unit = filtered if renderer.is_a?(Renderers::JsonRenderer)
               begin
-                raise LookupPages::PageTooSmall, LookupPages::MIN_MAX_CHARS if limit < LookupPages::MIN_MAX_CHARS
-
-                if renderer.is_a?(Renderers::JsonRenderer)
-                  unit_pages = LookupPages.json_pages(filtered, limit, total_chars: text.length)
+                if limit < LookupPages::MIN_MAX_CHARS
+                  raise LookupPages::PageTooSmall, LookupPages.smallest_max_chars(text, unit: json_unit)
                 end
+
+                unit_pages = LookupPages.json_pages(json_unit, limit, total_chars: text.length) if json_unit
                 pages = unit_pages ? unit_pages.size : LookupPages.text_pieces(text, limit).size
-              rescue LookupPages::PageTooSmall
-                json_unit = filtered if renderer.is_a?(Renderers::JsonRenderer)
-                required = LookupPages.smallest_max_chars(text, unit: json_unit)
+              rescue LookupPages::PageTooSmall => e
                 next respond_err.call(
                   "lookup of #{identifier} cannot be cut into pages of #{limit} characters; " \
-                  "pages of at least #{required} hold it. Pass max_chars: #{required} or more, or ask for " \
-                  'less with sections or include_source: false.',
-                  code: :invalid_params, tool: 'lookup', argument: 'max_chars', required_max_chars: required
+                  "#{LookupPages.refusal(e.required)}",
+                  code: :invalid_params, tool: 'lookup', argument: 'max_chars', required_max_chars: e.required
                 )
               end
               unless page_number.between?(1, pages)
