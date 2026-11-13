@@ -130,7 +130,8 @@ module Woods
     # `public`, `module_function`, `private_class_method` and
     # `public_class_method`, bare or with definitions or names. A `def`
     # written as the argument is defined first, as a plain `def` at that
-    # point, and the call then changes that one entry as it would by name.
+    # point; the call then receives the name `def` returns and acts on
+    # whatever method of that name is held, as it would for `:name`.
     module VisibilityCalls
       private
 
@@ -148,7 +149,9 @@ module Woods
         visibility = node.name.to_s
         arguments.flat_map do |argument|
           if argument.is_a?(Prism::DefNode)
-            next inline_definition(argument, owner, scope, state) { |entry| Marks.side(entry, scope, visibility) }
+            next inline_definition(argument, owner, scope, state) do |name|
+              Marks.visibility(@entries, [name], owner, scope, visibility)
+            end
           end
 
           @entries = Marks.visibility(@entries, Names.symbol_names(argument), owner, scope, visibility)
@@ -161,8 +164,8 @@ module Woods
       def module_function_call(arguments, owner, scope, state)
         arguments.flat_map do |argument|
           if argument.is_a?(Prism::DefNode)
-            next inline_definition(argument, owner, scope, state) do |entry|
-              scope == 'instance' ? Marks.module_functions([entry], [entry['name']], owner) : [entry]
+            next inline_definition(argument, owner, scope, state) do |name|
+              scope == 'instance' ? Marks.module_functions(@entries, [name], owner) : @entries
             end
           end
 
@@ -183,15 +186,20 @@ module Woods
             next []
           end
 
-          inline_definition(argument, owner, 'instance', state) { |entry| Marks.side(entry, 'singleton', visibility) }
+          inline_definition(argument, owner, 'instance', state) do |name|
+            Marks.visibility(@entries, [name], owner, 'singleton', visibility)
+          end
         end
       end
 
-      # @yieldparam entry [Hash] the definition as a plain `def` reads
+      # @yieldparam name [String] the name the `def` returns
       # @yieldreturn [Array<Hash>] the entries the call leaves
+      # @return [Array] nothing more to place
       def inline_definition(node, owner, scope, state)
         entry = plain_definition(node, owner, scope, state)
-        entry ? yield(entry) : []
+        place(entry) if entry
+        @entries = yield(node.name.to_s)
+        []
       end
     end
 
@@ -317,7 +325,7 @@ module Woods
         return nil unless owner
 
         receiver = node.receiver
-        return nil if receiver && !receiver.is_a?(Prism::SelfNode)
+        return nil if receiver && (!receiver.is_a?(Prism::SelfNode) || scope == 'singleton')
 
         visibility = 'public' if receiver # `private` does not apply to `def self.x`
         landing = definition_scope(receiver, scope)

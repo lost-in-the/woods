@@ -10,3 +10,9 @@
   A module the concern brings in from elsewhere stays listed wherever the call is written.
   The `*Helper` includes of Phlex, ViewComponent and mailer units count only calls without a receiver or on
   `self`, outside a method body.
+  A constant's name comes from its parsed path, so a comment inside a multi-line `Depot::` + `Weighable` path no
+  longer ends up in the name.
+  A qualified declaration such as `module Outer::Trackable` inside `module Outer` is read as `Outer::Trackable`, so
+  its own `ClassMethods` stays out of `metadata.included_modules`.
+  `extend self::ClassMethods` in a concern's body or hook no longer records an `extend` edge to a concern named
+  `self`, and `include self::Helpers` targets the concern's own `Helpers` instead of `self::Helpers`.

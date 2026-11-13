@@ -239,6 +239,32 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         private_class_method def self.c; end
       end
     RUBY
+    'an inline def under class-method visibility acts on the singleton of that name' => <<~RUBY,
+      class Report
+        def self.a; end
+        private_class_method def a; end
+        def self.b; end
+        private_class_method :b
+        public_class_method def b; end
+      end
+    RUBY
+    'an inline def under private after an instance method of that name' => <<~RUBY,
+      class Report
+        def a; end
+        private def a; end
+        def b; end
+        private def self.b; end
+      end
+    RUBY
+    'def self. inside class << self' => <<~RUBY,
+      class Report
+        def self.a; end
+        class << self
+          def self.a; end
+          def self.b; end
+        end
+      end
+    RUBY
     'class-method visibility around module functions' => <<~RUBY
       module Util
         module_function
