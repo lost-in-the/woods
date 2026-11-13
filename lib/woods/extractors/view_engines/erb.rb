@@ -225,7 +225,11 @@ module Woods
 
             body = scanner.scan_until(ERB_TAG_CLOSE)&.delete_suffix('%>')
             body ||= scanner.rest.tap { scanner.terminate }
-            code << (body.start_with?('#') ? "\n" * body.count("\n") : "#{body.sub(ERB_TAG_MARKER, '').delete_suffix('-')};")
+            code << (if body.start_with?('#')
+                       "\n" * body.count("\n")
+                     else
+                       "#{body.sub(ERB_TAG_MARKER, '').delete_suffix('-')};"
+                     end)
           end
           code
         end

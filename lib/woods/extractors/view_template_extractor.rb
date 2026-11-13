@@ -418,7 +418,8 @@ module Woods
       # @return [Array<String>]
       def partial_under_prefixes(engine, partial_name, identifier, prefixes)
         prefixes.each do |prefix|
-          found = existing_partial_identifiers(engine.resolve_partial_identifier("#{prefix}/#{partial_name}", identifier))
+          found = existing_partial_identifiers(engine.resolve_partial_identifier("#{prefix}/#{partial_name}",
+                                                                                 identifier))
           return found if found.any?
         end
         []

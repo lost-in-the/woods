@@ -182,12 +182,10 @@ Metrics/ParameterLists:
     - 'lib/woods/unblocked/**/*'
     - 'lib/woods/obsidian/**/*'
 
-# MCP descriptions, GraphQL schemas, and regex patterns exceed 120 chars
+# One limit everywhere: a longer line cannot be read in a pull-request diff.
+# A long description string continues with a trailing backslash.
 Layout/LineLength:
-  Exclude:
-    - 'lib/woods/mcp/**/*'
-    - 'lib/woods/extractors/**/*'
-    - 'lib/tasks/**/*'
+  Max: 120
 
 # Short param names are conventional in comparison/math methods
 Naming/MethodParameterName:

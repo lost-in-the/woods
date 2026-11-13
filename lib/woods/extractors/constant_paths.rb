@@ -222,7 +222,8 @@ module Woods
         found
       end
 
-      private_class_method :pending, :resolved, :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call, :walk_assoc, :record, :record_literal,
+      private_class_method :pending, :resolved, :loaded_scopes, :aliased, :walk, :walk_declaration, :walk_call,
+                           :walk_assoc, :record, :record_literal,
                            :constant_node?, :constant?, :token_references
     end
   end

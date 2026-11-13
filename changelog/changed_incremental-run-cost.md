@@ -1,0 +1,8 @@
+- Extraction does less work that grows with the size of the index.
+  PageRank iterates over node positions instead of identifiers, which halves its time on a 10,000-unit graph
+  (0.48 s to 0.22 s) and applies to every run that writes the graph; the scores are bit-identical.
+  The source-input scan no longer resolves the path of each regular file:
+  a file resolves to its own name under its directory's resolved path, and only a symlink is resolved on its own.
+  Controller route info is rendered for the controllers a run extracts instead of for every route in the application.
+  Measured on a 10,392-unit application, a one-comment `woods:incremental` run went from 13.5 s to 12.5 s;
+  Rails boot, eager load and drawing the routes file remain 5.4 s of that.

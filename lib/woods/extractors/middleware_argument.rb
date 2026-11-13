@@ -21,7 +21,9 @@ module Woods
         when NilClass then nested ? 'nil' : ''
         when Array then "[#{value.map { |item| render(item, ancestors, nested: true) }.join(', ')}]"
         when Hash
-          pairs = value.map { |key, item| "#{render(key, ancestors, nested: true)}=>#{render(item, ancestors, nested: true)}" }
+          pairs = value.map do |key, item|
+            "#{render(key, ancestors, nested: true)}=>#{render(item, ancestors, nested: true)}"
+          end
           "{#{pairs.join(', ')}}"
         when Module then module_name(value)
         when Proc then "#<#{value.lambda? ? 'lambda' : 'Proc'} #{site(value.source_location)}>"

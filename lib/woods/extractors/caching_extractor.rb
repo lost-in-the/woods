@@ -67,7 +67,7 @@ module Woods
         # backslash pair is a token outside strings too: an escape honored
         # only inside a string merges states. An unbounded `.*?` rescanned
         # the rest of the line from every `cache` (polynomial on Ruby < 3.2).
-        fragment: /(?<![.:])\bcache(?:_if|_unless)?\s++(?:\\.|"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'|(?!\bcache(?:_if|_unless)?\s)[^\n"'\\])*?\bdo\b|(?<![.:])\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/,
+        fragment: /(?<![.:])\bcache(?:_if|_unless)?\s++(?:\\.|"(?:[^"\\\n]|\\.)*+"|'(?:[^'\\\n]|\\.)*+'|(?!\bcache(?:_if|_unless)?\s)[^\n"'\\])*?\bdo\b|(?<![.:])\bcache(?:_if|_unless)?\s*+\(|\bjson\.cache(?:_if)?!/, # rubocop:disable Layout/LineLength -- one linear-time alternation; splitting it hides the token structure
         # A bare key method inside the arguments of a call matched above is
         # skipped (see #extract_cache_calls).
         cache_key: /\bcache_key(?:_with_version)?\b/,
@@ -346,7 +346,8 @@ module Woods
       def infer_cache_strategy(source, cache_calls, patterns = CACHE_PATTERNS)
         has_action    = source.match?(patterns[:caches_action])
         has_fragment  = patterns.key?(:fragment) && source.match?(patterns[:fragment])
-        has_low_level = source.match?(/Rails\.cache\.(?:fetch|read|write)/) || cache_calls.any? { |call| call.key?(:store) }
+        has_low_level = source.match?(/Rails\.cache\.(?:fetch|read|write)/) ||
+                        cache_calls.any? { |call| call.key?(:store) }
 
         active_strategies = [has_action, has_fragment, has_low_level].count(true)
 

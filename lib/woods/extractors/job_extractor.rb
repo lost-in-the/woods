@@ -168,7 +168,8 @@ module Woods
         unit.namespace = extract_namespace(job_class.name)
         unit.source_code = annotate_source(source, job_class.name)
         unit.metadata = extract_metadata_from_class(job_class, source)
-        unit.dependencies = with_inheritance(extract_dependencies(source, job_class.name), inheritance_dependency(job_class))
+        unit.dependencies = with_inheritance(extract_dependencies(source, job_class.name),
+                                             inheritance_dependency(job_class))
         MethodEffects.apply(unit, source)
 
         unit

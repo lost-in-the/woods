@@ -80,7 +80,8 @@ module Woods
         rescue Woods::Generation::InvalidMarker
           return super if DIAGNOSTIC_TOOL_NAMES.include?(request[:name])
 
-          message = 'Published generation marker is unavailable or malformed; run woods:validate and restore or rebuild the index.'
+          message = 'Published generation marker is unavailable or malformed; ' \
+                    'run woods:validate and restore or rebuild the index.'
           meta = { error_code: :corrupt_artifact, tool: request[:name] }
           meta[:completeness] = SearchResults.unavailable if request[:name] == 'search'
           ::MCP::Tool::Response.new(

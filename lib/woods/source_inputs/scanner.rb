@@ -102,7 +102,7 @@ module Woods
 
         @visited += 1
         check_budget!
-        visit(path, relative)
+        visit(path, relative, stat, ancestors.last)
       rescue SystemCallError, IOError
         error('source_tree_unavailable', relative)
       end
@@ -175,20 +175,38 @@ module Woods
       end
 
       # Refuse external paths and unreadable inputs without hashing their bytes.
-      def visit(path, relative)
+      #
+      # @param stat [File::Stat] the entry's own `lstat`
+      # @param parent [String] the resolved path of the directory holding it
+      def visit(path, relative, stat, parent)
         consumers = @scopes.for_path(relative)
         return if consumers.empty?
 
-        real = SourcePathEncoding.utf8!(File.realpath(path))
+        real, target = resolved_entry(path, stat, parent)
         return error('external_source_path', relative) unless real.start_with?("#{@resolved_root}/")
 
-        current = stamp(File.stat(real))
+        current = stamp(target)
         identity = known_identity(relative, current) || read_identity(path, real, current)
         record(relative, identity, current, consumers) if identity
       rescue SystemCallError, IOError
         error('source_file_unreadable', relative)
       rescue EncodingError, SourcePathEncoding::Invalid
         error('undecodable_source_path', SourcePathEncoding.diagnostic(relative))
+      end
+
+      # An entry's resolved path and the stat of what it resolves to.
+      #
+      # Only a symlink needs resolving. Any other entry resolves to its own
+      # name under its directory's resolved path, which {#descend} already
+      # holds, and its `lstat` is its `stat`. Resolving every file again cost
+      # a walk of each path's components: most of a scan of an unchanged tree.
+      #
+      # @return [Array(String, File::Stat)]
+      def resolved_entry(path, stat, parent)
+        return ["#{parent}/#{File.basename(path)}", stat] unless stat.symlink?
+
+        real = SourcePathEncoding.utf8!(File.realpath(path))
+        [real, File.stat(real)]
       end
 
       def record(relative, identity, current, consumers)

@@ -43,7 +43,8 @@ module Woods
       REGEX_WINDOW = 2_000
 
       # A slash after one of these starts a regular expression, not a division.
-      REGEX_PRECEDING_KEYWORDS = %w[return typeof case in of delete void throw new else do yield await instanceof].freeze
+      REGEX_PRECEDING_KEYWORDS = %w[return typeof case in of delete void throw new else do yield await
+                                    instanceof].freeze
       VALUE_ENDING_PUNCTUATION = [')', ']', '}'].freeze
 
       # What a token starting with each byte is, so a step tries one pattern.

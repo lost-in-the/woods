@@ -151,12 +151,12 @@ module Woods
 
         def normalize(root)
           unless root.is_a?(String) && !root.empty? && !root.include?("\0")
-            raise Refused.new('`root` must be an absolute worktree path string.', argument: 'root',
-                                                                                  hint: 'Pass root: "/absolute/path/to/worktree".')
+            raise Refused.new('`root` must be an absolute worktree path string.',
+                              argument: 'root', hint: 'Pass root: "/absolute/path/to/worktree".')
           end
           unless root.start_with?('/')
-            raise Refused.new("`root` must be an absolute path; got #{root.inspect}.", argument: 'root',
-                                                                                       hint: 'Pass root: "/absolute/path/to/worktree".')
+            raise Refused.new("`root` must be an absolute path; got #{root.inspect}.",
+                              argument: 'root', hint: 'Pass root: "/absolute/path/to/worktree".')
           end
 
           real(root)

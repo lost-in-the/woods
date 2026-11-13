@@ -244,7 +244,8 @@ module Woods
         end
 
         # rename_table has two table arguments
-        source.scan(/rename_table\s*+\(?\s*+#{TABLE_NAME}\s*,\s*#{TABLE_NAME}/).each do |_from_symbol, _from_string, symbol, string|
+        source.scan(/rename_table\s*+\(?\s*+#{TABLE_NAME}\s*,\s*#{TABLE_NAME}/)
+              .each do |_from_symbol, _from_string, symbol, string|
           tables << (symbol || string)
         end
 

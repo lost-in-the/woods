@@ -156,11 +156,12 @@ module Woods
       end
 
       def record_for(definition, file, name, task, computed:)
+        runtime_prerequisites = task && !definition[:prerequisites_literal]
         definition.merge(
           name: name, file: file, enhancement: false, name_source: computed ? 'runtime' : nil,
           namespace: computed ? name.split(':')[0...-1] : definition[:namespace],
           description: definition[:description] || (task[:description] if task && !definition[:description_literal]),
-          prerequisites: task && !definition[:prerequisites_literal] ? task[:prerequisites] : definition[:prerequisites],
+          prerequisites: runtime_prerequisites ? task[:prerequisites] : definition[:prerequisites],
           arguments: computed && definition[:arguments].empty? ? task[:arguments] : definition[:arguments]
         )
       end

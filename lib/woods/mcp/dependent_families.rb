@@ -159,7 +159,8 @@ module Woods
           unknown = values.reject { |value| SELECTOR_VALUES.include?(value) }
           unless unknown.empty?
             raise ArgumentError, "unknown families value#{'s' if unknown.size > 1}: " \
-                                 "#{unknown.map(&:inspect).uniq.join(', ')}; expected any of #{SELECTOR_VALUES.join(', ')}"
+                                 "#{unknown.map(&:inspect).uniq.join(', ')}; " \
+                                 "expected any of #{SELECTOR_VALUES.join(', ')}"
           end
 
           requested = SELECTOR_VALUES.select { |value| values.include?(value) }

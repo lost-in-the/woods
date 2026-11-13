@@ -343,7 +343,8 @@ module Woods
       # @return [Array<Array(String, Hash)>] each form action helper that
       #   names a live route, with its resolution
       def form_route_helpers(source)
-        FormActionScan.route_helpers(CommentBlanking.ruby(source), stop: FORM_SPAN_STOP).filter_map do |route_name, suffix|
+        FormActionScan.route_helpers(CommentBlanking.ruby(source),
+                                     stop: FORM_SPAN_STOP).filter_map do |route_name, suffix|
           helper = "#{route_name}_#{suffix}"
           resolved = resolve_route_helper(helper)
           [helper, resolved] if resolved

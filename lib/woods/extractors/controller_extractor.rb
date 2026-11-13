@@ -140,7 +140,9 @@ module Woods
 
         unit
       rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(
+          self, "[Woods] Failed to extract controller #{controller.name}: #{e.class}: #{e.message}"
+        )
         SourceInputs::ConsumerErrors.log(self, "[Woods]   #{e.backtrace&.first(5)&.join("\n  ")}")
         nil
       end
@@ -154,26 +156,43 @@ module Woods
       # Build a map of controller -> action -> route info from Rails routes.
       # Actions are key-sorted; each action's routes stay in route-table
       # order, which is the order Rails matches them in.
+      #
+      # One pass groups the route table by controller, which costs a hash
+      # read per route. A controller's route info (path spec, verb,
+      # constraints) is rendered the first time that controller is asked
+      # for: an incremental run that re-extracts three controllers of a
+      # 3,000-route application renders three controllers' routes, not all.
+      #
+      # @return [Hash{String => Hash}] controller name => action => routes;
+      #   a controller with no route reads as nil
       def build_routes_map
-        routes = {}
-
+        names = Hash.new { |cache, path| cache[path] = "#{path.camelize}Controller" }
+        grouped = Hash.new { |groups, name| groups[name] = [] }
         Rails.application.routes.routes.each do |route|
-          next unless route.defaults[:controller]
+          path = route.defaults[:controller]
+          grouped[names[path]] << route if path
+        end
+        grouped.default_proc = nil
 
-          controller = "#{route.defaults[:controller].camelize}Controller"
-          action = route.defaults[:action]
+        Hash.new do |map, name|
+          routes = grouped[name]
+          map[name] = controller_routes(routes) if routes
+        end
+      end
 
-          routes[controller] ||= {}
-          routes[controller][action] ||= []
-          routes[controller][action] << {
+      # @param routes [Array<ActionDispatch::Journey::Route>] one controller's routes, in table order
+      # @return [Hash{String => Array<Hash>}] action => route info, key-sorted
+      def controller_routes(routes)
+        actions = {}
+        routes.each do |route|
+          (actions[route.defaults[:action]] ||= []) << {
             verb: extract_verb(route),
             path: route.path.spec.to_s.gsub('(.:format)', ''),
             name: route.name,
             constraints: route.constraints.except(:request_method)
           }
         end
-
-        routes.transform_values { |actions| actions.sort.to_h }
+        actions.sort.to_h
       end
 
       # Rails leaves the verb blank for `match ..., via: :all`. The route
@@ -840,7 +859,9 @@ module Woods
 
           # What each action body and its applicable filters say (W-7)
           action_facts: resolve_action_facts(controller, actions, view_prefix: controller_view_prefix(controller),
-                                                                  permitted: permitted_params.transform_values { |p| p[:model] }),
+                                                                  permitted: permitted_params.transform_values do |p|
+                                                                    p[:model]
+                                                                  end),
           inherited_gem_actions: resolve_inherited_gem_actions(controller),
           routes: routes_map[controller.name] || {},
 

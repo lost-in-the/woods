@@ -143,8 +143,8 @@ module Woods
         node.is_a?(Prism::CallNode) && DURATION_METHODS.include?(node.name) && node.arguments.nil? &&
           (node.receiver.is_a?(Prism::IntegerNode) || node.receiver.is_a?(Prism::FloatNode))
       end
-      private_class_method :parse_call, :call_at_start, :snippets, :argument_range, :positional_arguments, :key_expression,
-                           :keyword_options, :literal?
+      private_class_method :parse_call, :call_at_start, :snippets, :argument_range, :positional_arguments,
+                           :key_expression, :keyword_options, :literal?
     end
   end
 end

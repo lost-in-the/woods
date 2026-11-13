@@ -241,6 +241,16 @@ RSpec.describe Woods::MCP::LookupPages do
       expect(text(response)).to include('page, max_chars and answer_id apply only to full evidence')
     end
 
+    it 'refuses budget and query on a full lookup and says how to use them' do
+      [{ budget: 3000 }, { query: 'refund' }].each do |arguments|
+        response = lookup(**arguments)
+
+        expect(response.error?).to be(true)
+        expect(text(response)).to include('Add evidence: "compact" (or "outline") to use them')
+                              .and include('page a full lookup with max_chars and page')
+      end
+    end
+
     describe 'in the JSON format' do
       def json_page(number)
         JSON.parse(text(page_of(number, :json, max_chars: 3000)))

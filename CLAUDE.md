@@ -231,6 +231,11 @@ exe/
 ## Code Conventions
 
 - `frozen_string_literal: true` on every file
+- Lines stay within 120 columns in every file type, so a pull-request diff reads without scrolling.
+  RuboCop enforces it for Ruby.
+  `script/check-line-length` enforces it on the lines a branch adds to Markdown, YAML and shell.
+  Write Markdown prose one sentence per line, and split a long Ruby string with a trailing backslash.
+  Do not reflow existing lines you are not otherwise changing.
 - YARD documentation on every public method and class
 - Extractors follow a consistent interface: `initialize`, `extract_all`, `extract_<type>_file(path)`
 - All extractors return `Array<ExtractedUnit>`

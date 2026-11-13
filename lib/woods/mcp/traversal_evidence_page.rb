@@ -20,7 +20,8 @@ module Woods
           source = edge[:source][:identifier]
           target = edge[:target][:identifier]
           witness_edges.include?(id) ||
-            (needed.include?(source) && needed.include?(target) && (visible.include?(source) || visible.include?(target)))
+            (needed.include?(source) && needed.include?(target) &&
+              (visible.include?(source) || visible.include?(target)))
         end
         result[:explanation] = explanation.merge(edges: edges, witnesses: page_witnesses.to_h do |identifier, witness|
           [identifier, witness.merge(context: !visible.include?(identifier))]

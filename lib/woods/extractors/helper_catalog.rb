@@ -382,8 +382,9 @@ module Woods
       end
 
       def default_context_files
-        @default_context_files ||= Array(default_context&.ancestors).filter_map { |mod| mod.name && constant_file(mod.name) }
-                                                                    .select { |file| app_file?(file) }.to_set
+        @default_context_files ||= Array(default_context&.ancestors)
+                                   .filter_map { |mod| mod.name && constant_file(mod.name) }
+                                   .select { |file| app_file?(file) }.to_set
       end
 
       # ── Edges ───────────────────────────────────────────────────────────

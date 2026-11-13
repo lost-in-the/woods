@@ -10,9 +10,9 @@ require_relative '../path_dispatcher'
 module Woods
   module Extractors
     # Discovers modules whose canonical declaration and own behavior or data
-    # live in a file the PORO extractor scans ({PathDispatcher.poro_path?}). It does not autoload constants or invoke application
-    # methods. Cross-file reopenings deliberately do not become additional
-    # source owners.
+    # live in a file the PORO extractor scans ({PathDispatcher.poro_path?}). It does not
+    # autoload constants or invoke application methods. Cross-file reopenings
+    # deliberately do not become additional source owners.
     class StandaloneModuleDiscovery
       CORE_SINGLETON = Object.instance_method(:singleton_class)
       CORE_SOURCE = Module.instance_method(:const_source_location)
@@ -24,7 +24,9 @@ module Woods
       CORE_CONST_GET = Module.instance_method(:const_get)
       CORE_AUTOLOAD = Module.instance_method(:autoload?)
       VISIBILITIES = %i[public protected private].freeze
-      CORE_LISTS = VISIBILITIES.to_h { |visibility| [visibility, Module.instance_method("#{visibility}_instance_methods")] }
+      CORE_LISTS = VISIBILITIES.to_h do |visibility|
+        [visibility, Module.instance_method("#{visibility}_instance_methods")]
+      end
                                .freeze
 
       def initialize(root: Rails.root, concerns: ConcernExtractor.new)

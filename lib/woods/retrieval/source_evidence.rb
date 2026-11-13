@@ -60,8 +60,7 @@ module Woods
         spans = source_spans
         selected = []
         metadata = []
-        ordered = spans.sort_by { |span| [-relevance(span), span.start_byte] }
-        relevant, other = ordered.partition { |span| @query.empty? || relevance(span).positive? }
+        relevant, other = ranked(spans).partition { |span| @query.empty? || relevance(span).positive? }
         relevant.each do |span|
           trial = selected + [span]
           selected = trial if counter.call(format_evidence(mode, trial, metadata, spans.size)) <= budget
@@ -163,6 +162,24 @@ module Woods
                    start_line: @source.byteslice(0, start_byte).count("\n") + 1,
                    end_line: @source.byteslice(0, end_byte).count("\n") + 1)
         end
+      end
+
+      # The unit's own definitions before the concerns inlined into it, then
+      # by relevance. Relevance counts the query terms a span holds, and a
+      # concern block holds a whole module, so it matches more terms than any
+      # one method: ranked on the count alone, a few concerns took the budget
+      # and the unit's matching action was omitted. A lookup names this unit,
+      # so its matching code is the answer and a concern is context for it.
+      # A concern still precedes every span that matches nothing.
+      def ranked(spans)
+        spans.sort_by do |span|
+          score = relevance(span)
+          [score.positive? && concern?(span) ? 1 : 0, -score, span.start_byte]
+        end
+      end
+
+      def concern?(span)
+        span.kind == 'inlined_concern_display'
       end
 
       def terms(value)

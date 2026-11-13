@@ -162,7 +162,8 @@ module Woods
       def included_concerns(source, root)
         names = include_names(source)
         names.filter_map do |name|
-          path = CONCERN_DIRECTORIES.map { |dir| File.join(root, dir, "#{name.underscore}.rb") }.find { |p| File.file?(p) }
+          path = CONCERN_DIRECTORIES.map { |dir| File.join(root, dir, "#{name.underscore}.rb") }
+                                    .find { |p| File.file?(p) }
           [SourceFile.read(path), relative(path, root)] if path
         end
       end

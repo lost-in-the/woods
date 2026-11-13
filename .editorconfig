@@ -1,0 +1,23 @@
+root = true
+
+[*]
+end_of_line = lf
+insert_final_newline = true
+charset = utf-8
+
+# Ruby: enforced by RuboCop (Layout/LineLength).
+[*.{rb,rake,gemspec,tt,erb}]
+indent_style = space
+indent_size = 2
+max_line_length = 120
+
+[{Gemfile,Rakefile,Appraisals,exe/*,bin/*,script/*}]
+max_line_length = 120
+
+# Markdown, YAML and shell: enforced on added lines by script/check-line-length.
+# Markdown prose is written one sentence per line.
+[*.{md,yml,yaml,sh}]
+max_line_length = 120
+
+[{*.json,CHANGELOG.md,spec/fixtures/**,plugin/hooks/woods-input-rules.sh}]
+max_line_length = off

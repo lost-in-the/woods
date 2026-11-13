@@ -771,13 +771,10 @@ module Woods
       return {} if @nodes.empty?
 
       node_ids, unranked = @nodes.keys.partition { |id| ranked?(id) }
-      weights = resolvable_edge_weights
-      base_score = node_ids.empty? ? 0.0 : 1.0 / node_ids.size
-      scores = node_ids.to_h { |id| [id, base_score] }
-
-      iterations.times do
-        scores = pagerank_step(node_ids, scores, weights, damping)
-      end
+      incoming, dangling = pagerank_links(node_ids)
+      ranks = Array.new(node_ids.size, node_ids.empty? ? 0.0 : 1.0 / node_ids.size)
+      iterations.times { ranks = pagerank_step(ranks, incoming, dangling, damping) }
+      scores = node_ids.zip(ranks).to_h
 
       unranked.each { |id| scores[id] = 0.0 }
       scores
@@ -988,30 +985,51 @@ module Woods
     # the same stable order the pre-#205 implementation used, so two runs
     # over the same graph produce identical floats.
     #
-    # @param node_ids [Array<String>] All registered identifiers
-    # @param scores [Hash{String => Float}] Scores from the previous iteration
-    # @param weights [Hash{String => Array(Hash, Integer)}] See {#resolvable_edge_weights}
+    # @param ranks [Array<Float>] ranks from the previous iteration, by node position
+    # @param incoming [Array<Array>] per node, its rank-carrying links; see {#pagerank_links}
+    # @param dangling [Array<Integer>] positions of the dangling nodes
     # @param damping [Float] Damping factor
-    # @return [Hash{String => Float}] Next iteration's scores
-    def pagerank_step(node_ids, scores, weights, damping)
-      n = node_ids.size
-      # Collect rank from dangling nodes (no *resolvable* outgoing edges) and redistribute
-      dangling_sum = node_ids.sum { |id| weights.key?(id) ? 0.0 : scores[id] }
+    # @return [Array<Float>] Next iteration's ranks
+    def pagerank_step(ranks, incoming, dangling, damping)
+      n = ranks.size
+      # Rank held by dangling nodes (no *resolvable* outgoing edge) is redistributed.
+      # `sum` with no initial value: Ruby compensates a float sum only when
+      # it starts from an Integer, and the published scores depend on it.
+      dangling_share = dangling.sum { |index| ranks[index] } / n.to_f
+      base = (1.0 - damping) / n
 
-      node_ids.to_h do |id|
-        # Sum contributions from nodes that depend on this one
-        rank_sum = (@reverse[id] || []).sum do |src|
-          counts, out_degree = weights[src]
-          multiplicity = counts ? counts[id] : 0
-          # `fetch(src, 0.0)`: {.from_h} accepts (and {#registered_types}
-          # relies on) a hash carrying edges for an identifier it has no node
-          # for. Such a source is absent from +node_ids+, so it holds no rank
-          # to give — `scores[src]` was nil and crashed the refresh (EXTB-10).
-          multiplicity.positive? ? scores.fetch(src, 0.0) * multiplicity / out_degree : 0.0
-        end
-
-        [id, ((1.0 - damping) / n) + (damping * (rank_sum + (dangling_sum / n)))]
+      incoming.map do |links|
+        rank_sum = links.sum { |source, multiplicity, out_degree| ranks[source] * multiplicity / out_degree }
+        base + (damping * (rank_sum + dangling_share))
       end
+    end
+
+    # The link structure {#pagerank_step} iterates over, by node position
+    # rather than by identifier. Twenty iterations over a large graph spent
+    # most of their time hashing identifier strings; positions are resolved
+    # once here.
+    #
+    # A link is kept in the order {@reverse} holds its source, and only when
+    # it carries rank: the source is ranked and has a resolvable edge to the
+    # node. {.from_h} accepts (and {#registered_types} relies on) edges for an
+    # identifier with no node; such a source holds no rank to give (EXTB-10).
+    #
+    # @param node_ids [Array<String>] the ranked identifiers
+    # @return [Array(Array<Array<Array(Integer, Integer, Integer)>>, Array<Integer>)]
+    #   per node, `[source position, edge multiplicity, source out-degree]`
+    #   links; and the positions of the dangling nodes
+    def pagerank_links(node_ids)
+      weights = resolvable_edge_weights
+      position = {}
+      node_ids.each_with_index { |id, index| position[id] = index }
+      incoming = node_ids.map do |id|
+        (@reverse[id] || []).filter_map do |source|
+          counts, out_degree = weights[source]
+          multiplicity = counts ? counts[id] : 0
+          [position.fetch(source), multiplicity, out_degree] if multiplicity.positive?
+        end
+      end
+      [incoming, node_ids.each_index.reject { |index| weights.key?(node_ids[index]) }]
     end
 
     # Per-source PageRank link weights over **resolvable** edges only — edges

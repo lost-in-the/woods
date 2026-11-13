@@ -202,10 +202,22 @@ module Woods
       #
       # @return [String]
       def build_source_annotation(name, records, file)
-        description = records.select { |record| record[:file] == file }.filter_map { |record| record[:description] }.first
+        here = records.select { |record| record[:file] == file }
+        description = here.filter_map { |record| record[:description] }.first
         header = "# Rake task: #{name}"
         header += "\n# #{description}" if description
-        "#{header}\n#{published_source(rake_file_data(file))}"
+        "#{header}\n#{definition_pointer(here, file)}\n#{published_source(rake_file_data(file))}"
+      end
+
+      # Where in the file below the task is defined. The unit carries the
+      # whole rake file, because a task calls the helpers and constants its
+      # file defines; in a file of twenty tasks the reader needs the line.
+      #
+      # @return [String] one comment line
+      def definition_pointer(records, file)
+        lines = records.filter_map { |record| record[:line] }.uniq.sort
+        where = lines.empty? ? '' : ", line#{'s' if lines.size > 1} #{lines.join(', ')}"
+        "# Defined in #{relative_path(file)}#{where}; the whole file follows."
       end
 
       # Build metadata hash for the unit.

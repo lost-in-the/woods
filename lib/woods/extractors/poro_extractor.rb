@@ -260,7 +260,9 @@ module Woods
       def skip_inputs(file_path)
         source = SourceFile.read(file_path)
         analysis = collector.call(source)
-        declarations = analysis.fetch('declarations').select { |declaration| declaration.fetch('singleton_depth', 0).zero? }
+        declarations = analysis.fetch('declarations').select do |declaration|
+          declaration.fetch('singleton_depth', 0).zero?
+        end
         [source, analysis, declarations]
       end
 
@@ -345,14 +347,17 @@ module Woods
           declaration['kind'] == 'class' && declaration.fetch('singleton_depth', 0).zero? &&
             !modules.include?(declaration['owner']) && !owners.include?(declaration['owner']) &&
             !ar_names.include?(declaration['owner']) &&
-            declaration.fetch('enclosing_nesting', []).all? { |name| modules.include?(name) || owners.include?(name) } &&
+            declaration.fetch('enclosing_nesting', []).all? do |name|
+              modules.include?(name) || owners.include?(name)
+            end &&
             unit_worthy?(declaration, source, lines, file_path)
         end
         @module_discovery.owned_classes(file_path, candidates).filter_map do |identifier|
           next if runtime_family(identifier)
 
           declaration = candidates.find { |candidate| candidate['owner'] == identifier }
-          nested_class_unit(file_path, source, identifier, lines[(declaration['line'] - 1)...declaration['end_line']].join)
+          nested_class_unit(file_path, source, identifier,
+                            lines[(declaration['line'] - 1)...declaration['end_line']].join)
         end
       end
 
