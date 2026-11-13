@@ -22,7 +22,7 @@ module Woods
   # `partial_reason`, so "no path within the bound" is never read as "no path
   # exists".
   class ShortestPath
-    DEFAULT_MAX_DEPTH = 6
+    DEFAULT_MAX_DEPTH = 10
     DEFAULT_MAX_NODES = 10_000
     DIRECTIONS = %w[forward either].freeze
 

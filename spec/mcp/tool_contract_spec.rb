@@ -571,7 +571,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   # The fixture graph records Comment -> Post as a bare target, so the hop has no via.
-  def expected_path(max_depth: 6, max_nodes: 10_000)
+  def expected_path(max_depth: 10, max_nodes: 10_000)
     {
       'from' => { 'identifier' => 'Comment', 'type' => 'model' },
       'to' => { 'identifier' => 'Post', 'type' => 'model' },

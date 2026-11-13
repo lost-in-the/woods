@@ -796,7 +796,7 @@ It replaces assembling the chain from several `dependencies` and `dependents` ca
 |---|---|
 | `from`, `to` | Exact identifiers. Both are required. |
 | `from_type`, `to_type` | The unit type of that end, for an identifier registered under several types. |
-| `max_depth` | Most hops a path may have: 1 to 20, default 6. |
+| `max_depth` | Most hops a path may have: 1 to 20, default 10. |
 | `max_nodes` | Most units one search may reach: 1 to 10000, default 10000. |
 | `direction` | `forward` (default) follows edges from `from` toward `to`. `either` also searches from `to` toward `from` when the forward search finds nothing. |
 | `root` | A linked worktree whose index answers the call ([worktree setup](MCP_WORKTREE_SETUP.md)). |

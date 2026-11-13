@@ -2,7 +2,7 @@
   chain of published edges from `from` to `to`.
   Each hop names both units, their types and every `via` label on that edge.
   - **Arguments:** `from` and `to`, `from_type` and `to_type` for an identifier registered under several unit
-    types, `max_depth` (1 to 20, default 6), `max_nodes` (1 to 10000, default 10000), `direction` (`forward`,
+    types, `max_depth` (1 to 20, default 10), `max_nodes` (1 to 10000, default 10000), `direction` (`forward`,
     or `either` to also try `to` reaching `from`) and the worktree `root`.
   - **Search:** breadth-first over the pinned generation's forward edges, with neighbours visited in sorted
     order, so the same shortest path is returned whatever order the units were extracted in.
