@@ -75,6 +75,34 @@ RSpec.describe Woods::Extractors::MixinCalls do
     )
   end
 
+  describe '.outside_owner' do
+    it 'reads every call but drops a constant that resolves to a module the owner declares' do
+      source = <<~RUBY
+        module Outer
+          module Helpers; end
+
+          module Trackable
+            module ClassMethods
+              module Deep; end
+            end
+
+            include Helpers
+            include ClassMethods::Deep
+            extend self::ClassMethods
+
+            def self.included(base)
+              base.extend(Outer::Trackable::ClassMethods)
+              base.include(::Trackable::ClassMethods)
+            end
+          end
+        end
+      RUBY
+      expect(described_class.outside_owner(source, 'Outer::Trackable')).to eq(
+        [[:include, 'Helpers'], [:include, '::Trackable::ClassMethods']]
+      )
+    end
+  end
+
   it 'ignores comments, strings, heredocs, method names and non-constant arguments' do
     source = <<~'RUBY'
       module Stackable
@@ -95,6 +123,10 @@ RSpec.describe Woods::Extractors::MixinCalls do
 
   it 'ignores a =begin block' do
     expect(calls("module M\n=begin\ninclude Hidden\n=end\n  include Shown\nend\n")).to eq([[:include, 'Shown']])
+  end
+
+  it 'reads nothing from an empty or missing source' do
+    expect([calls(''), calls(nil), described_class.outside_owner('', 'Owner')]).to eq([[], [], []])
   end
 
   it 'filters by kind' do
