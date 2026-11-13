@@ -270,6 +270,7 @@ jobs:
           spec/integration/inflected_naming_spec.rb
           spec/integration/assigned_value_classes_spec.rb
           spec/integration/autoload_concern_reload_spec.rb
+          spec/integration/lookup_member_rails_macros_spec.rb
           ${{ matrix.rails == '7.2' && 'spec/integration/library_contributors_spec.rb' || '' }}
 
       # Differential harness for incremental extraction (#164): random

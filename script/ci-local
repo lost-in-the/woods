@@ -71,7 +71,8 @@ BOOTED_STEPS = [
   %w[spec/integration/console_credential_serialization_spec.rb],
   %w[spec/integration/multi_worktree_spec.rb],
   %w[spec/integration/inflected_naming_spec.rb],
-  %w[spec/integration/assigned_value_classes_spec.rb]
+  %w[spec/integration/assigned_value_classes_spec.rb],
+  %w[spec/integration/lookup_member_rails_macros_spec.rb]
 ].freeze
 
 BOOTED_ROWS = [
