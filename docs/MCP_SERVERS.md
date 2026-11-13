@@ -477,16 +477,51 @@ A concern's `module_function` method answers `Owner#method` as a private instanc
 class receives; its public singleton copy stays on the concern.
 The concern's own `def self.x` and `class << self` methods stay on the concern and are not members of the unit;
 look them up on the concern.
+On a concern unit itself, `Concern.method` does not answer a definition inside its own `class_methods do` block:
+the concern module does not respond to it.
+The not-found answer says it is a class method the concern gives to the classes that include it.
 In a unit's own body, `Mod.method` answers a `module_function` as a public module function and `Mod#method` as a
 private instance method.
 Known limit: methods of a `module ClassMethods` inside a concern are not answered as class methods of the unit.
-When a name is defined more than once, the answer is the definition Ruby calls (the unit's own over a concern's,
-the later of two in one body), and `other_definitions` lists the rest.
+
+The rule: a member answer is the method the owner responds to, and where the published index cannot establish
+that, the answer says so instead of guessing.
+Woods reads the definitions in Ruby's method resolution order, as far as the index records it.
+For the owner, then each superclass unit (by its `:inheritance` edge, else `metadata.parent_class`), nearest first:
+a concern the unit's own body prepends (a `prepend` call read by a Prism walk, whose source is inlined), the unit's
+own body, then the concerns first inlined at that level.
+A concern's level is the furthest unit of the chain that inlines it, since Ruby does not include a module a
+superclass already includes.
+The `statement` says how the answer was established: defined in the owner's own body, inherited from an ancestor,
+inlined from a concern (and through which superclass), or from a module the owner prepends.
+An answer from a superclass's own body names that unit in `inherited_from`; `member_of` stays the asked owner, and
+the entry's `unit` names the published source its `line` counts in.
+`other_definitions` lists the definitions the answer overrides.
+
+What the index cannot settle is said, never guessed:
+
+- A model's inlined concerns are written nearest first (`included_modules`), so the first one that defines the name
+  is the one Ruby calls.
+  A controller's are sorted by name, so when two of its concerns at one level define the name, the answer has no
+  `member`: `candidates` lists each definition with its concern and lines, and the statement says the index does
+  not record the include order, so Woods cannot tell which one Ruby calls.
+- A `prepend` of a module whose source is not inlined adds a `caveats` entry: that module may define the name and
+  would run first.
+- When the walk stops at a parent that is not a published unit (an abstract `ApplicationRecord`, for example), an
+  answer from an inlined concern of the last unit read carries a caveat that the chain was not fully read: a
+  definition in that parent could come first.
+  The walk also stops at a cycle, after 16 superclasses, and, from a model or controller, at a parent published
+  as a type that does not inline concerns.
+
+Known limits: `prepend` is read only where the unit's own body writes it (not in a concern's `included` block, not
+on `singleton_class`), and on Rails 6.0 a prepended `ActiveSupport::Concern` does not extend its `class_methods`
+while Woods still answers them.
+Monkey patches, reopened classes and methods defined by metaprogramming are not in the published source.
 `type` selects the owner's type.
 An identifier that is itself a published unit (a route, for example) still returns that unit.
-When the owner exists but the method is not in its published source (defined by metaprogramming or inherited from
-a parent), the answer stays `not_found` and says so, keeps the suggestion of the owner, and names it in
-`_meta.member_of`.
+When neither the owner's published source nor its published superclasses hold the method (defined by
+metaprogramming, or in a parent that is not published), the answer stays `not_found` and says so, keeps the
+suggestion of the owner, and names it in `_meta.member_of`.
 A member answer is the whole method on one page: `evidence` other than `full`, `sections` and `page` are refused
 with `unsupported_argument`; look up the owner to use them.
 
