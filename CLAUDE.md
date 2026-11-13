@@ -319,6 +319,16 @@ Key references:
 - Agents may push branches and open draft PRs freely; merging needs the maintainer's approval.
 - Open every PR as a draft. Hosted CI and the automated review run on the draft.
 - One PR CI run takes about 8 minutes (a `main` or tag run, which adds the older Ruby and Rails rows at full harness depth, takes longer), and every push restarts it. Batch fixes and push once; never push only to re-trigger CI.
+- What a PR run executes is set by `WOODS_CI_ROW_ACTIVE` in `.github/workflows/ci.yml`.
+  - Runs: unit specs on Ruby 3.3, 3.4 and 4.0.
+  - Runs: booted extraction on Ruby 3.3/Rails 7.2, 3.3/8.0, 3.4/8.1, 4.0/8.0 and 4.0/8.1.
+    The incremental harness runs there at smoke depth (8 operations, seed 1).
+  - Skipped: unit specs on Ruby 3.0, 3.1 and 3.2, and booted extraction on Rails 6.0, 6.1, 7.0 and 7.1.
+    Their checks finish green in seconds and are named `... (not run on PRs)`; never cite one as coverage.
+  - The `full-matrix` label runs every row.
+    Adding it dispatches CI on the branch at full depth (`.github/workflows/full-matrix.yml`).
+    Later pushes to the labeled PR run every row at smoke depth, with unsuffixed names.
+    A fork's PR gets no dispatch, only the later pushes.
 - When CI is green and the review's findings are handled, mark the PR ready for review and request the maintainer (`LeahArmstrong`, per `.github/CODEOWNERS`). The maintainer approves, comments, or follows up in the agent session.
 - Merging to `main` is not a release. A flaky or unrelated failure can be named on the PR and handled separately rather than block a merge. The README badge shows `main`'s CI, and releases still require every job in `script/validate-release-run` on the tagged commit.
 
