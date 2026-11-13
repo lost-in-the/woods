@@ -44,6 +44,8 @@ module Woods
                   lines << "    - #{shown}"
                 end
               when Hash
+                next if value.empty?
+
                 pairs = value.map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{inline_value(v)}" }
                 lines << "  #{key}: #{pairs.join(', ')}"
               else

@@ -195,6 +195,26 @@ RSpec.describe Woods::MCP::Server do
       end
     end
 
+    it 'prints no routes_without_action for a controller whose every route has an action, ' \
+       'even one its unit file carries' do
+      Dir.mktmpdir do |dir|
+        FileUtils.cp_r("#{fixture_dir}/.", dir)
+        path = Dir[File.join(dir, 'controllers', 'PostsController*.json')].first
+        unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        unit['metadata']['routes_without_action'] = []
+        File.write(path, JSON.generate(unit))
+        File.write(File.join(dir, 'graph_analysis.json'), JSON.generate('unresolvable_routes' => []))
+
+        %i[json markdown plain].each do |format|
+          text = call_tool(described_class.build(index_dir: dir, response_format: format), 'lookup',
+                           identifier: 'PostsController').content.first[:text]
+
+          expect(text).to include('PostsController')
+          expect(text).not_to include('routes_without_action')
+        end
+      end
+    end
+
     it 'returns unit data for a valid identifier' do
       response = call_tool(server, 'lookup', identifier: 'Post')
       data = parse_response(response)

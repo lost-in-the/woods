@@ -41,6 +41,17 @@ RSpec.describe Woods::MCP::Renderers::MarkdownRenderer do
       expect(out).to include("**routes_without_action:**\n  - destroy")
     end
 
+    it 'prints no metadata key that has nothing to say' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'ThingsController', 'type' => 'controller',
+                              'metadata' => { 'routes' => { 'show' => 'GET /things/:id' },
+                                              'routes_without_action' => [], 'empty_hash' => {} }
+                            })
+      expect(out).not_to include('**routes_without_action:**')
+      expect(out).not_to include('**empty_hash:**')
+      expect(out).to include('show=GET /things/:id')
+    end
+
     it 'marks no route of a unit that carries no routes_without_action' do
       out = renderer.render(:lookup, {
                               'identifier' => 'ThingsController', 'type' => 'controller',

@@ -445,6 +445,7 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
   `resources :things` draws seven routes, and a controller defining `create`, `show` and `update` reads
   `routes_without_action: [destroy, edit, index, new]`.
   The MCP `lookup` tool adds it after `routes` when it reads a controller unit, and only when the list is not empty.
+  When the list is empty the key is absent, even if a unit file carries one, and no text format prints it.
   The text formats also mark each such action in `routes` as `destroy (no action)`.
   It is the `missing_action` verdict of `graph_analysis`' `unresolvable_routes`, read from the same generation.
   An action with a method (its own, inherited or gem-defined), an implicit template or `action_missing` is not listed.

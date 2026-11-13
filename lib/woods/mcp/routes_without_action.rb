@@ -35,23 +35,28 @@ module Woods
         entries.filter_map do |entry|
           next unless entry.is_a?(Hash) && entry['controller'] == controller && entry['reason'] == 'missing_action'
 
-          entry['action']
+          action = entry['action']
+          action if action.is_a?(String) && !action.strip.empty?
         end.uniq.sort
       end
 
       # A controller unit with {KEY} placed after `routes` (last when the unit
-      # records no routes). Any other unit, and a controller whose every route
-      # has an action, is returned as given.
+      # records no routes). Any other unit is returned as given. A controller
+      # whose every route has an action carries no {KEY}: an annotation with
+      # nothing to say is absent, so a key the unit itself carries (it is
+      # never published, so it can only be stale) is dropped.
       #
       # @param unit [Hash] published unit, string keys
       # @param graph_analysis [Hash, nil] parsed `graph_analysis.json`
-      # @return [Hash] the unit, or a copy carrying the key
+      # @return [Hash] the unit, or a copy with the key set or removed
       def annotate(unit, graph_analysis)
         metadata = unit['metadata']
         return unit unless unit['type'] == 'controller' && metadata.is_a?(Hash)
 
         flagged = actions(unit['identifier'], graph_analysis)
-        return unit if flagged.empty?
+        if flagged.empty?
+          return metadata.key?(KEY) ? unit.merge('metadata' => metadata.except(KEY)) : unit
+        end
 
         unit.merge('metadata' => insert(metadata, flagged))
       end
