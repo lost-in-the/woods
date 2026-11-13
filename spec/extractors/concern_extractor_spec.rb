@@ -884,6 +884,28 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.metadata[:included_modules]).to eq(%w[Helpers Depot::Countable::ClassMethods])
     end
 
+    it 'reads self:: in a mixin call as the concern itself, so its own ClassMethods gives no edge' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module ClassMethods; end
+          module Helpers; end
+
+          extend self::ClassMethods
+          include self::Helpers
+
+          def self.included(base)
+            base.extend(self::ClassMethods)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Trackable::Helpers', via: :include }]
+      )
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable

@@ -469,14 +469,14 @@ module Woods
       def extract_dependencies(source, module_name = nil)
         # Concerns included by this concern (add instance-level behavior)
         deps = detect_includes(source).map do |mod|
-          { type: :concern, target: mod, via: :include }
+          { type: :concern, target: within_self(mod, module_name), via: :include }
         end
 
         # Concerns extended by this concern (add class-level behavior). A
         # `ClassMethods` module belongs to the mixin that declares it, and the
         # concern's own is no dependency at all.
         detect_extends(source).each do |mod|
-          owner = mod == 'ClassMethods' ? module_name : ConstantPaths.mixin_owner(mod)
+          owner = mod == 'ClassMethods' ? module_name : ConstantPaths.mixin_owner(within_self(mod, module_name))
           deps << { type: :concern, target: owner, via: :extend } unless owner == module_name
         end
 
@@ -487,6 +487,17 @@ module Woods
         deps.concat(scan_config_dependencies(source))
 
         consolidate_dependencies(deps)
+      end
+
+      # `self::X` written in the concern's body or hooks is the concern's own X.
+      #
+      # @param name [String] a mixin constant as normalized
+      # @param module_name [String, nil] The concern's own identifier
+      # @return [String]
+      def within_self(name, module_name)
+        return name unless module_name && name.start_with?('self::')
+
+        "#{module_name}::#{name.delete_prefix('self::')}"
       end
     end
   end
