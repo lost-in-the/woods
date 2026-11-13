@@ -37,19 +37,19 @@ module Woods
           lines << "Namespace: #{data['namespace']}" if data['namespace']
           lines << ''
 
-          if data['metadata'].is_a?(Hash) && data['metadata'].any?
+          if data['metadata'].is_a?(Hash) && !uninformative?(data['metadata'])
             lines << 'Metadata:'
             data['metadata'].each do |key, value|
+              next if uninformative?(value)
+
               case value
               when Array
-                next if value.empty?
-
+                items = value.reject { |item| uninformative?(item) }
                 lines << "  #{key}:"
-                value.each do |item|
-                  lines << "    - #{item.is_a?(Hash) ? item.map { |k, v| "#{k}: #{v}" }.join(', ') : item}"
-                end
+                items.each { |item| lines << "    - #{list_item(item)}" }
               when Hash
-                pairs = value.map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{v}" }
+                pairs = value.reject { |_, v| uninformative?(v) }
+                             .map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{entry_value(v)}" }
                 lines << "  #{key}: #{pairs.join(', ')}"
               else
                 lines << "  #{key}: #{value}"
@@ -67,11 +67,11 @@ module Woods
           end
 
           if data['dependencies'].is_a?(Array) && data['dependencies'].any?
-            lines << "Dependencies: #{data['dependencies'].join(', ')}"
+            lines << "Dependencies: #{data['dependencies'].map { |dep| list_item(dep) }.join('; ')}"
           end
 
           if data['dependents'].is_a?(Array) && data['dependents'].any?
-            lines << "Dependents: #{data['dependents'].join(', ')}"
+            lines << "Dependents: #{data['dependents'].map { |dep| list_item(dep) }.join('; ')}"
           end
 
           lines.join("\n").rstrip
@@ -171,7 +171,7 @@ module Woods
 
           stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
-            stats.each { |k, v| lines << "  #{k}: #{v}" }
+            stats.each { |k, v| lines << "  #{k}: #{inline_value(v)}" }
             lines << ''
           end
 
@@ -188,7 +188,7 @@ module Woods
                        elsif item.is_a?(Hash)
                          "  #{item['identifier']} (#{item['type']}) - #{item['dependent_count']} dependents"
                        else
-                         "  #{item}"
+                         "  #{inline_value(item)}"
                        end
             end
 
@@ -296,15 +296,34 @@ module Woods
         def render_default(data)
           case data
           when Hash
-            data.map { |k, v| "#{k}: #{v}" }.join("\n")
+            data.map { |k, v| "#{k}: #{inline_value(v)}" }.join("\n")
           when Array
-            data.map { |item| "  #{item}" }.join("\n")
+            data.map { |item| "  #{inline_value(item)}" }.join("\n")
           else
             data.to_s
           end
         end
 
         private
+
+        # One entry of a list in a lookup (a metadata list, dependencies,
+        # dependents): a Hash as its informative `key: value` pairs, anything
+        # else as text.
+        def list_item(item)
+          return inline_value(item) unless item.is_a?(Hash)
+
+          item.reject { |_, v| uninformative?(v) }.map { |k, v| "#{k}: #{entry_value(v)}" }.join(', ')
+        end
+
+        def entry_value(value)
+          case value
+          when Hash then "(#{list_item(value)})"
+          when Array
+            shown = value.reject { |item| uninformative?(item) }.map { |item| entry_value(item) }
+            "[#{shown.join(', ')}]"
+          else inline_value(value)
+          end
+        end
 
         # @param item [Hash] string-keyed edge-shaped report item
         # @return [String]
@@ -328,7 +347,7 @@ module Woods
         #   as plain text instead of printing Ruby's `Array#inspect` syntax.
         # @return [Object]
         def edge_value(value)
-          value.is_a?(Array) ? value.join(', ') : value
+          value.is_a?(Array) ? value.map { |item| inline_value(item) }.join(', ') : inline_value(value)
         end
 
         def render_plain_traversal(label, data)

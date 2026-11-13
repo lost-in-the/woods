@@ -46,7 +46,8 @@ module Woods
           lines << "**Namespace:** #{data['namespace']}" if data['namespace']
           lines << ''
 
-          lines << render_metadata_section(data['metadata']) if data['metadata'].is_a?(Hash) && data['metadata'].any?
+          metadata = data['metadata']
+          lines << render_metadata_section(metadata) if metadata.is_a?(Hash) && !uninformative?(metadata)
 
           if data['source_code']
             lines << '### Source'
@@ -60,14 +61,14 @@ module Woods
           if data['dependencies'].is_a?(Array) && data['dependencies'].any?
             lines << '### Dependencies'
             lines << ''
-            data['dependencies'].each { |dep| lines << "- #{dep}" }
+            data['dependencies'].each { |dep| lines << "- #{list_item(dep)}" }
             lines << ''
           end
 
           if data['dependents'].is_a?(Array) && data['dependents'].any?
             lines << '### Dependents'
             lines << ''
-            data['dependents'].each { |dep| lines << "- #{dep}" }
+            data['dependents'].each { |dep| lines << "- #{list_item(dep)}" }
             lines << ''
           end
 
@@ -212,7 +213,7 @@ module Woods
 
           stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
-            stats.each { |k, v| lines << "- **#{k}:** #{v}" }
+            stats.each { |k, v| lines << "- **#{k}:** #{inline_value(v)}" }
             lines << ''
           end
 
@@ -232,7 +233,7 @@ module Woods
                        elsif item.is_a?(Hash)
                          "- **#{item['identifier']}** (#{item['type']}) — #{item['dependent_count']} dependents"
                        else
-                         "- #{item}"
+                         "- #{inline_value(item)}"
                        end
             end
 
@@ -451,7 +452,7 @@ module Woods
         #   as plain text instead of printing Ruby's `Array#inspect` syntax.
         # @return [Object]
         def edge_value(value)
-          value.is_a?(Array) ? value.join(', ') : value
+          value.is_a?(Array) ? value.map { |item| inline_value(item) }.join(', ') : inline_value(value)
         end
 
         def render_traversal(label, data)
@@ -522,20 +523,17 @@ module Woods
           lines << ''
 
           metadata.each do |key, value|
+            next if uninformative?(value)
+
             case value
             when Array
-              next if value.empty?
-
+              items = value.reject { |item| uninformative?(item) }
               lines << "**#{key}:**"
-              value.each do |item|
-                lines << if item.is_a?(Hash)
-                           "  - #{metadata_item_summary(item)}"
-                         else
-                           "  - #{item}"
-                         end
-              end
+              items.each { |item| lines << "  - #{list_item(item)}" }
             when Hash
-              lines << "**#{key}:** #{value.map { |k, v| "#{entry_label(metadata, key, k)}=#{v}" }.join(', ')}"
+              pairs = value.reject { |_, v| uninformative?(v) }
+                           .map { |k, v| "#{entry_label(metadata, key, k)}=#{metadata_value(v)}" }
+              lines << "**#{key}:** #{pairs.join(', ')}"
             else
               lines << "**#{key}:** #{value}"
             end
@@ -572,17 +570,20 @@ module Woods
           pairs.join(', ')
         end
 
-        def uninformative?(value)
-          case value
-          when nil then true
-          when String, Array then value.empty?
-          when Hash then value.all? { |_, nested| uninformative?(nested) }
-          else false
-          end
+        # One entry of a list in a lookup (a metadata list, dependencies,
+        # dependents): a Hash as its `key: value` pairs, anything else as text.
+        def list_item(item)
+          item.is_a?(Hash) ? metadata_item_summary(item) : inline_value(item)
         end
 
         def metadata_value(value)
-          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : value
+          case value
+          when Hash then "(#{metadata_item_summary(value)})"
+          when Array
+            shown = value.reject { |item| uninformative?(item) }.map { |item| metadata_value(item) }
+            "[#{shown.join(', ')}]"
+          else inline_value(value)
+          end
         end
 
         def file_lines(entry)
@@ -609,11 +610,13 @@ module Woods
             case value
             when Hash
               lines << "**#{key}:**"
-              value.each { |k, v| lines << "  - #{k}: #{v}" }
+              value.each { |k, v| lines << "  - #{k}: #{inline_value(v)}" }
             when Array
               lines << "**#{key}:** #{value.size} items"
               value.first(10).each do |item|
-                lines << "  - #{item.is_a?(Hash) ? item.values.first(3).join(', ') : item}"
+                shown = item.is_a?(Hash) ? item.values.first(3).map { |v| inline_value(v) }.join(', ') : item
+                shown = inline_value(shown)
+                lines << "  - #{shown}"
               end
             else
               lines << "**#{key}:** #{value}"
@@ -631,11 +634,11 @@ module Woods
             lines << "| #{keys.join(' | ')} |"
             lines << "| #{keys.map { '---' }.join(' | ')} |"
             array.each do |row|
-              lines << "| #{keys.map { |k| row[k] }.join(' | ')} |"
+              lines << "| #{keys.map { |k| inline_value(row[k]) }.join(' | ')} |"
             end
             lines.join("\n")
           else
-            array.map { |item| "- #{item}" }.join("\n")
+            array.map { |item| "- #{inline_value(item)}" }.join("\n")
           end
         end
       end

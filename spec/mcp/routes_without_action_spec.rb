@@ -123,6 +123,16 @@ RSpec.describe Woods::MCP::RoutesWithoutAction do
       expect(described_class.actions('GoneController', analysis)).to eq([])
     end
 
+    it 'lists no blank action name' do
+      analysis = { 'unresolvable_routes' => [
+        { 'route' => 'GET /x', 'controller' => 'ThingsController', 'action' => '', 'reason' => 'missing_action' },
+        { 'route' => 'GET /y', 'controller' => 'ThingsController', 'action' => nil, 'reason' => 'missing_action' },
+        { 'route' => 'GET /z', 'controller' => 'ThingsController', 'action' => 'zap', 'reason' => 'missing_action' }
+      ] }
+
+      expect(described_class.actions('ThingsController', analysis)).to eq(%w[zap])
+    end
+
     it 'lists nothing when the analysis is missing or predates the report' do
       expect(described_class.actions('ThingsController', nil)).to eq([])
       expect(described_class.actions('ThingsController', {})).to eq([])
@@ -166,6 +176,21 @@ RSpec.describe Woods::MCP::RoutesWithoutAction do
       unit = unit_hash('ThingsController', 'actions' => %w[show])
 
       expect(described_class.annotate(unit, { 'unresolvable_routes' => [] })).to equal(unit)
+    end
+
+    it 'drops a key the unit carries when nothing is flagged, without changing the unit given' do
+      unit = unit_hash('ThingsController', 'actions' => %w[show], 'routes_without_action' => [])
+
+      annotated = described_class.annotate(unit, { 'unresolvable_routes' => [] })
+
+      expect(annotated['metadata']).to eq('actions' => %w[show])
+      expect(unit['metadata']).to have_key('routes_without_action')
+    end
+
+    it 'replaces a stale key the unit carries with the generation verdict' do
+      unit = unit_hash('ThingsController', 'actions' => %w[show], 'routes_without_action' => %w[gone])
+
+      expect(described_class.annotate(unit, analysis)['metadata']['routes_without_action']).to eq(%w[destroy])
     end
 
     it 'leaves a unit of another type alone, even one sharing the identifier' do
