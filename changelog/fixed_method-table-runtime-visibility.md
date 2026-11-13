@@ -11,3 +11,5 @@
   a bare `module_function` is now read as a module function, then changed by that call.
   `private_class_method def x` there was an `instance` entry reading public and is now private on both sides, and
   `private def x` keeps its public singleton copy.
+  A `def self.x` under a bare `module_function` is a `singleton` entry, not a `module_function` one: Ruby defines
+  no instance method for it.

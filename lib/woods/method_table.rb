@@ -289,7 +289,7 @@ module Woods
       end
 
       def definition_kind(receiver, singleton, module_function)
-        return 'module_function' if module_function
+        return 'module_function' if module_function && !receiver
 
         singleton || receiver ? 'singleton' : 'instance'
       end

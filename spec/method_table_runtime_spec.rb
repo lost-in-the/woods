@@ -146,6 +146,14 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         public def initialize; end
       end
     RUBY
+    'def self. forms under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+        def self.plain; end
+        private_class_method def self.hidden; end
+        public_class_method def self.shown; end
+      end
+    RUBY
     'module_function def under a bare private' => <<~RUBY,
       module Tools
         private
