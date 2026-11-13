@@ -280,12 +280,23 @@ module Woods
         [pages.map { |page| page.slice('unit', 'parts') }, overflow]
       end
 
-      # Merge +pages+ back into the unit, by the rule a client is given.
+      # Merge +pages+ back into the unit, by the rule a client is given. The
+      # pages are not changed: the unit is built from copies of them.
       #
       # @param pages [Array<Hash>] `unit` objects, in page order
       # @return [Hash]
       def merge_json_units(pages)
-        pages.each_with_object({}) { |unit, whole| merge_into(whole, unit) }
+        pages.each_with_object({}) { |unit, whole| merge_into(whole, deep_copy(unit)) }
+      end
+
+      # @return [Object] +value+ with every Hash, Array and String copied
+      def deep_copy(value)
+        case value
+        when Hash then value.to_h { |key, nested| [key, deep_copy(nested)] }
+        when Array then value.map { |item| deep_copy(item) }
+        when String then value.dup
+        else value
+        end
       end
 
       # One page of {.json_pages} as the JSON text of an answer.

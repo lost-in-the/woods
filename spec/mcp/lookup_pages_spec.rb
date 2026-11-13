@@ -386,6 +386,19 @@ RSpec.describe Woods::MCP::LookupPages do
         expect(pages.size).to be > 1
       end
 
+      it 'merges without changing the pages it was given' do
+        first = { 'metadata' => { 'a' => 'x', 'nested' => { 'list' => [1] } }, 'source_code' => "one\n" }
+        second = { 'metadata' => { 'b' => 'y', 'nested' => { 'list' => [2] } }, 'source_code' => "two\n" }
+        before = Marshal.load(Marshal.dump([first, second]))
+
+        merged = described_class.merge_json_units([first, second])
+        merged['metadata']['nested']['list'] << 3
+
+        expect([first, second]).to eq(before)
+        expect(merged).to eq('metadata' => { 'a' => 'x', 'nested' => { 'list' => [1, 2, 3] }, 'b' => 'y' },
+                             'source_code' => "one\ntwo\n")
+      end
+
       it 'answers one page for a small unit' do
         pages, merged = roundtrip({ 'identifier' => 'Order', 'metadata' => {} }, 1500)
 
