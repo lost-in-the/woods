@@ -54,21 +54,21 @@ RSpec.describe Woods::MCP::LookupPages do
   end
 
   describe '.page' do
-    let(:text) { Array.new(30) { |index| "row #{index}\n" }.join }
+    let(:text) { Array.new(300) { |index| "row #{index}\n" }.join }
 
     it 'reports where each page sits and what comes next' do
-      first = described_class.page(text, max_chars: 100, number: 1)
-      last = described_class.page(text, max_chars: 100, number: first.pages)
+      first = described_class.page(text, max_chars: 1000, number: 1)
+      last = described_class.page(text, max_chars: 1000, number: first.pages)
 
       expect(first.to_h).to include(page: 1, first_char: 1, total_chars: text.length, next_page: 2)
       expect(last.to_h).to include(page: first.pages, last_char: text.length, next_page: nil)
     end
 
     it 'has no page past the last or before the first' do
-      count = described_class.page(text, max_chars: 100, number: 1).pages
+      count = described_class.page(text, max_chars: 1000, number: 1).pages
 
-      expect(described_class.page(text, max_chars: 100, number: count + 1)).to be_nil
-      expect(described_class.page(text, max_chars: 100, number: 0)).to be_nil
+      expect(described_class.page(text, max_chars: 1000, number: count + 1)).to be_nil
+      expect(described_class.page(text, max_chars: 1000, number: 0)).to be_nil
     end
   end
 
@@ -215,6 +215,37 @@ RSpec.describe Woods::MCP::LookupPages do
       end
     end
 
+    it 'refuses a page size below the smallest, naming it' do
+      response = lookup(max_chars: 500)
+
+      expect(response.error?).to be(true)
+      expect(response.meta).to include(error_code: :invalid_params, argument: 'max_chars', required_max_chars: 1000)
+      expect(text(response)).to include('Pass max_chars: 1000 or more')
+    end
+
+    it 'answers a unit shorter than a page below the smallest whole' do
+      response = lookup(max_chars: 500, sections: %w[type])
+
+      expect(response.error?).to be(false)
+      expect(text(response)).not_to include('lookup page')
+    end
+
+    it 'refuses a JSON page size too small for a list item it cannot cut, naming one that holds it' do
+      path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+      unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+      unit['metadata'] = unit.fetch('metadata').merge('items' => [{ 'note' => 'n' * 2500 }])
+      File.write(path, JSON.generate(unit))
+
+      refused = lookup(:json, max_chars: 1500)
+      required = refused.meta.fetch(:required_max_chars)
+      served = lookup(:json, max_chars: required)
+
+      expect(refused.error?).to be(true)
+      expect(refused.meta).to include(error_code: :invalid_params, argument: 'max_chars')
+      expect(served.error?).to be(false)
+      expect(text(served).length).to be <= required
+    end
+
     it 'pages by default at the configured limit' do
       stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '4000'))
 
@@ -290,8 +321,8 @@ RSpec.describe Woods::MCP::LookupPages do
         sources.each { |source, (first, last)| expect(source.lines.size).to eq(last - first + 1) }
       end
 
-      it 'keeps each page near the limit' do
-        (1..pages).each { |number| expect(text(page_of(number, :json, max_chars: 3000)).length).to be <= 3600 }
+      it 'keeps each page within the limit' do
+        (1..pages).each { |number| expect(text(page_of(number, :json, max_chars: 3000)).length).to be <= 3000 }
       end
 
       it 'says in each page how to get the next and how to merge' do
@@ -346,7 +377,7 @@ RSpec.describe Woods::MCP::LookupPages do
         spans.each_cons(2) { |before, after| expect(after['items'].first).to eq(before['items'].last + 1) }
       end
 
-      it 'keeps a value it cannot cut whole on a page of its own' do
+      it 'cuts a long string with no line breaks inside the line' do
         unit = { 'identifier' => 'Order', 'blob' => 'x' * 5000, 'count' => 3, 'flag' => false, 'nothing' => nil }
 
         pages, merged = roundtrip(unit, 1500)
