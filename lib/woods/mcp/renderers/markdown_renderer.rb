@@ -45,7 +45,8 @@ module Woods
           lines << "**Namespace:** #{data['namespace']}" if data['namespace']
           lines << ''
 
-          lines << render_metadata_section(data['metadata']) if data['metadata'].is_a?(Hash) && data['metadata'].any?
+          metadata = data['metadata']
+          lines << render_metadata_section(metadata) if metadata.is_a?(Hash) && !uninformative?(metadata)
 
           if data['source_code']
             lines << '### Source'
@@ -59,14 +60,14 @@ module Woods
           if data['dependencies'].is_a?(Array) && data['dependencies'].any?
             lines << '### Dependencies'
             lines << ''
-            data['dependencies'].each { |dep| lines << "- #{dep}" }
+            data['dependencies'].each { |dep| lines << "- #{list_item(dep)}" }
             lines << ''
           end
 
           if data['dependents'].is_a?(Array) && data['dependents'].any?
             lines << '### Dependents'
             lines << ''
-            data['dependents'].each { |dep| lines << "- #{dep}" }
+            data['dependents'].each { |dep| lines << "- #{list_item(dep)}" }
             lines << ''
           end
 
@@ -521,22 +522,16 @@ module Woods
           lines << ''
 
           metadata.each do |key, value|
+            next if uninformative?(value)
+
             case value
             when Array
-              next if value.empty?
-
+              items = value.reject { |item| uninformative?(item) }
               lines << "**#{key}:**"
-              value.each do |item|
-                lines << if item.is_a?(Hash)
-                           "  - #{metadata_item_summary(item)}"
-                         else
-                           "  - #{inline_value(item)}"
-                         end
-              end
+              items.each { |item| lines << "  - #{list_item(item)}" }
             when Hash
-              next if value.empty?
-
-              pairs = value.map { |k, v| "#{entry_label(metadata, key, k)}=#{inline_value(v)}" }
+              pairs = value.reject { |_, v| uninformative?(v) }
+                           .map { |k, v| "#{entry_label(metadata, key, k)}=#{metadata_value(v)}" }
               lines << "**#{key}:** #{pairs.join(', ')}"
             else
               lines << "**#{key}:** #{value}"
@@ -574,17 +569,20 @@ module Woods
           pairs.join(', ')
         end
 
-        def uninformative?(value)
-          case value
-          when nil then true
-          when String, Array then value.empty?
-          when Hash then value.all? { |_, nested| uninformative?(nested) }
-          else false
-          end
+        # One entry of a list in a lookup (a metadata list, dependencies,
+        # dependents): a Hash as its `key: value` pairs, anything else as text.
+        def list_item(item)
+          item.is_a?(Hash) ? metadata_item_summary(item) : inline_value(item)
         end
 
         def metadata_value(value)
-          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : inline_value(value)
+          case value
+          when Hash then "(#{metadata_item_summary(value)})"
+          when Array
+            shown = value.reject { |item| uninformative?(item) }.map { |item| metadata_value(item) }
+            "[#{shown.join(', ')}]"
+          else inline_value(value)
+          end
         end
 
         def file_lines(entry)

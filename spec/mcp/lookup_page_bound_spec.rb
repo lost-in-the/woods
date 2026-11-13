@@ -122,6 +122,36 @@ RSpec.describe Woods::MCP::LookupPages, 'page size bound' do
       }
   end
 
+  describe '.smallest_max_chars' do
+    def json_fits?(unit, size)
+      described_class.json_pages(unit, size)
+      true
+    rescue Woods::MCP::LookupPages::PageTooSmall
+      false
+    end
+
+    uncuttable = { 'identifier' => 'Widget', 'metadata' => { 'items' => [{ 'blob' => 'x' * 3000 }] } }
+    generated_units.merge('one uncuttable list item' => uncuttable).each do |name, unit|
+      it "names a JSON page size for #{name} that serves it, when the one below does not" do
+        whole = JSON.pretty_generate(unit)
+        size = described_class.smallest_max_chars(whole, unit: unit)
+
+        expect(json_page_texts(unit, size).map(&:length).max).to be <= size
+        expect(size == Woods::MCP::LookupPages::MIN_MAX_CHARS || !json_fits?(unit, size - 1)).to be(true)
+      end
+    end
+
+    it 'names the smallest page for a text rendering' do
+      text = Woods::MCP::ToolResponseRenderer.for(:markdown).render(:lookup, mixed_unit_for_text)
+
+      expect(described_class.smallest_max_chars(text)).to eq(Woods::MCP::LookupPages::MIN_MAX_CHARS)
+    end
+
+    def mixed_unit_for_text
+      self.class.mixed_unit
+    end
+  end
+
   it 'still answers a unit that fits whole on one page' do
     unit = { 'identifier' => 'Widget', 'metadata' => { 'items' => [{ 'name' => 'a' }] } }
 

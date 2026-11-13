@@ -734,12 +734,14 @@ module Woods
                   unit_pages = LookupPages.json_pages(filtered, limit, total_chars: text.length)
                 end
                 pages = unit_pages ? unit_pages.size : LookupPages.text_pieces(text, limit).size
-              rescue LookupPages::PageTooSmall => e
+              rescue LookupPages::PageTooSmall
+                json_unit = filtered if renderer.is_a?(Renderers::JsonRenderer)
+                required = LookupPages.smallest_max_chars(text, unit: json_unit)
                 next respond_err.call(
                   "lookup of #{identifier} cannot be cut into pages of #{limit} characters; " \
-                  "pages of at least #{e.required} hold it. Pass max_chars: #{e.required} or more, or ask for " \
+                  "pages of at least #{required} hold it. Pass max_chars: #{required} or more, or ask for " \
                   'less with sections or include_source: false.',
-                  code: :invalid_params, tool: 'lookup', argument: 'max_chars', required_max_chars: e.required
+                  code: :invalid_params, tool: 'lookup', argument: 'max_chars', required_max_chars: required
                 )
               end
               unless page_number.between?(1, pages)
