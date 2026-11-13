@@ -601,7 +601,7 @@ module Woods
           # when Woods does not know the call, nil otherwise.
           def defines(macro, node, name, side)
             arguments = positional(node)
-            return rails_instance(macro, arguments, name, side) if RANKS.key?(macro)
+            return rails_instance(macro, node, arguments, name, side) if RANKS.key?(macro)
             return class_attribute(keywords(node), names(arguments), name, side) if macro == 'class_attribute'
             return side == :class_body && literals(arguments.first) == [name] ? :known : nil if macro == 'scope'
 
@@ -619,16 +619,44 @@ module Woods
           end
 
           # An association, attribute or store accessor defines the instance
-          # side only: `name` and `name=`.
-          def rails_instance(macro, arguments, name, side)
+          # side only, a method and its writer: an association, `attribute`
+          # and `alias_attribute` for their first argument only (the rest is a
+          # scope, a type or the aliased attribute).
+          def rails_instance(macro, node, arguments, name, side)
             return nil unless side == :instance
+            return store_accessor(keywords(node), arguments, name) if macro == STORE
 
-            named = case macro
-                    when 'alias_attribute' then literals(arguments.first)
-                    when STORE then names(arguments.drop(1))
-                    else names(arguments)
-                    end
-            named.flat_map { |each| [each, "#{each}="] }.include?(name) ? :known : nil
+            accessors(literals(arguments.first)).include?(name) ? :known : nil
+          end
+
+          # `store_accessor :store, :key, prefix:, suffix:` defines
+          # `<prefix>key<suffix>` for each key after the store, as Active Record
+          # names it; a prefix or suffix that is not a literal leaves each key
+          # possible.
+          def store_accessor(options, arguments, name)
+            store = literals(arguments.first).first
+            prefix = affix(options['prefix'], store) { |value| "#{value}_" }
+            suffix = affix(options['suffix'], store) { |value| "_#{value}" }
+            keys = names(arguments.drop(1))
+            return accessors(keys).include?(name) ? :possible : nil if [prefix, suffix].include?(:unknown)
+
+            accessors(keys.map { |key| "#{prefix}#{key}#{suffix}" }).include?(name) ? :known : nil
+          end
+
+          # '' for no affix; the store's name for `true`; the literal's;
+          # :unknown for any other value.
+          def affix(node, store)
+            case node
+            when nil, Prism::FalseNode, Prism::NilNode then ''
+            when Prism::TrueNode then store ? yield(store) : :unknown
+            else
+              value = literals(node).first
+              value ? yield(value) : :unknown
+            end
+          end
+
+          def accessors(named)
+            named.flat_map { |each| [each, "#{each}="] }
           end
 
           # `class_attribute :x` defines `x`, `x=` and `x?` on the class side,

@@ -533,12 +533,13 @@ every `def` that carries the name as a literal positional argument:
   `validates_*`, `serialize`, `has_secure_token`, `layout`, `helper`, `rescue_from`, and calls named `before_*`,
   `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
 - Rails calls are read by the side they define, as checked against a booted Rails 8.0:
-  - `has_one`, `has_many`, `belongs_to`, `has_and_belongs_to_many`, `alias_attribute` (its first argument) and
-    `store_accessor` (the names after the store's) define the instance method and its writer (`name=`), never a
-    class method.
+  - `has_one`, `has_many`, `belongs_to`, `has_and_belongs_to_many` and `alias_attribute` (each for its first
+    argument only) and `store_accessor` (each key after the store's, renamed by a literal `prefix:` or `suffix:` as
+    Active Record names it) define the instance method and its writer (`name=`), never a class method.
+    A `prefix:` or `suffix:` that is not a literal leaves each key one the call may define.
     The association and alias methods live in a module the model includes when it is created, so the model's own
     `def`s and its concerns come first; `store_accessor`'s module comes after the model's own `def`s.
-  - `attribute` defines the instance method and its writer, but Active Record skips one that a class between the
+  - `attribute` defines the instance method and its writer for its first argument (the second is its type), but Active Record skips one that a class between the
     model and `ActiveRecord::Base` already implements, so every application definition in the chain comes first.
   - `scope` defines the class method only, ranked by line with the class's own `def self.` methods.
   - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
