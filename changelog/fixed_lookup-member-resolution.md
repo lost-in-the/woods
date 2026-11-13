@@ -27,3 +27,5 @@
   `helper` and `rescue_from` define none of the names they carry.
   A `delegate` or `alias_method` passed to `private` (`private delegate :x, to: :y`) is answered as private, as
   Ruby makes it, not as public or as the aliased method's visibility.
+  An answer from `scope` now states its visibility (public, unless a later `private_class_method` names it), as the
+  other Rails calls' answers do, in the owner's own body and in a superclass.

@@ -484,7 +484,7 @@ module Woods
           # class itself, ranked by line with its `def`s.
           RANKS = GENERATED.to_h { |macro| [macro, :generated] }.merge(STORE => :store, ATTRIBUTE => :fallback).freeze
           # Calls whose methods are public wherever they are written.
-          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, 'class_attribute'].freeze
+          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, 'class_attribute', 'scope'].freeze
           # Calls that name a method without defining it.
           REFERENCES = %w[private protected public module_function private_class_method public_class_method
                           private_constant public_constant helper_method validate validates serialize

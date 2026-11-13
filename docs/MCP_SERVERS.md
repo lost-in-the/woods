@@ -544,7 +544,8 @@ every `def` that carries the name as a literal positional argument:
   - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
     `instance_reader`, `instance_writer`, `instance_accessor` and `instance_predicate` options allow (none of
     `name?` with `instance_predicate: false`); a non-literal option leaves the method possible.
-  These methods are public wherever they are written.
+  These methods are public wherever they are written, `scope` included, unless a later `private :name`
+  (`private_class_method :name` for a class method) names them; the answer states it at every level.
 - A `def` and a call in one body: the later line is the one Ruby keeps.
 - Known limits: only calls written directly in the body are read, not inside a conditional, an `included do` block
   or an inlined concern; Forwardable's hash form (`delegate [:a] => :b`) is not read.
