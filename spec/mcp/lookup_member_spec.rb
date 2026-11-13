@@ -70,6 +70,8 @@ RSpec.describe 'MCP lookup of a unit member' do
 
           private def hidden; end
         end
+
+        def self.registry; end
       end
     RUBY
   end
@@ -172,6 +174,8 @@ RSpec.describe 'MCP lookup of a unit member' do
       ['models', 'model', 'Post', 'app/models/post.rb', post_source,
        { 'methods' => published_methods(post_source, identity_lines: 17) }],
       ['concerns', 'concern', 'Publishable', 'app/models/concerns/publishable.rb', 'module Publishable; end', {}],
+      ['concerns', 'concern', 'Formatting', 'app/models/concerns/formatting.rb', formatting_code,
+       { 'methods' => published_methods(formatting_code, identity_lines: 14) }],
       ['controllers', 'controller', 'PostsController', 'app/controllers/posts_controller.rb', controller_source,
        { 'methods' => published_methods(controller_source, shift: 10) }],
       # An index that predates the published method table.
@@ -371,6 +375,29 @@ RSpec.describe 'MCP lookup of a unit member' do
 
       expect(data['member']).to include('kind' => 'instance', 'visibility' => 'private')
       expect(data['statement']).to start_with('Canopy::Util#tool is a private instance method of lib unit')
+    end
+  end
+
+  describe "a concern's own class methods" do
+    # `class_methods do` extends the classes that include the concern; the
+    # concern module itself does not respond to those methods.
+    it 'does not answer a class_methods definition as a class method of the concern' do
+      response = call(build, identifier: 'Formatting.format')
+
+      expect(response.error?).to be(true)
+      expect(text(response)).to include('Formatting (concern) is a published unit, but format (class method) was ' \
+                                        'not found in its published source. format is defined in its ' \
+                                        '`class_methods do` block: a class method Formatting gives to the ' \
+                                        'classes that include it, not a method of Formatting itself.')
+      expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Formatting', type: 'concern' })
+    end
+
+    it 'does not answer a private class_methods definition either' do
+      expect(call(build, identifier: 'Formatting.hidden').error?).to be(true)
+    end
+
+    it "keeps answering the concern's own def self.x" do
+      expect(member('Formatting.registry')['member']).to include('name' => 'registry', 'kind' => 'singleton')
     end
   end
 

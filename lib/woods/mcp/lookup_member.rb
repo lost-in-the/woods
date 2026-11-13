@@ -116,8 +116,24 @@ module Woods
       # @param unit [Hash] the owner's published unit
       # @return [String] the sentence a not-found answer adds when the owner exists
       def missing_sentence(reference, unit)
-        "#{unit['identifier']} (#{unit['type']}) is a published unit, but #{reference.name} " \
-          "(#{reference.kind_label}) was not found in its published source."
+        sentence = "#{unit['identifier']} (#{unit['type']}) is a published unit, but #{reference.name} " \
+                   "(#{reference.kind_label}) was not found in its published source."
+        return sentence unless given_class_method?(unit, reference)
+
+        "#{sentence} #{reference.name} is defined in its `class_methods do` block: a class method " \
+          "#{unit['identifier']} gives to the classes that include it, not a method of #{unit['identifier']} " \
+          "itself. Look it up as a class method of a class that includes #{unit['identifier']}."
+      end
+
+      # Whether +reference+ names a class method the unit's own
+      # `class_methods do` block defines (one it gives to its includers).
+      def given_class_method?(unit, reference)
+        return false unless reference.separator == '.'
+
+        lines = ConcernClassMethods.own_lines(unit['source_code'], unit['identifier'])
+        methods_of(unit).any? do |entry|
+          entry['name'] == reference.name && !entry['file_unit'] && lines.include?(entry['line'])
+        end
       end
 
       # The definition Ruby would call, and the others of the same name.
@@ -127,9 +143,14 @@ module Woods
       # @return [Array(Hash, Array<Hash>), nil]
       def locate(unit, reference)
         class_method_lines = nil
+        own_class_methods = nil
         matches = methods_of(unit).select do |entry|
           next false unless entry['name'] == reference.name && member_owner?(entry, unit['identifier'])
-          next reference.kind?(entry) unless entry['file_unit']
+
+          unless entry['file_unit']
+            own_class_methods ||= ConcernClassMethods.own_lines(unit['source_code'], unit['identifier'])
+            next reference.kind?(entry) && !own_class_methods.include?(entry['line'])
+          end
 
           class_method_lines ||= ConcernClassMethods.lines(unit['source_code'])
           reference.concern_kind?(entry, class_method_lines)
@@ -162,8 +183,11 @@ module Woods
         table.map { |entry| locator.annotate(entry) }
       end
 
-      # The lines of the definitions an inlined concern makes inside its
-      # `class_methods do` block, read by a Prism walk of each decoded block
+      # The lines of the definitions a concern makes inside its
+      # `class_methods do` block: for an inlined concern ({.lines}), class
+      # methods of the including unit; for a concern unit's own body
+      # ({.own_lines}), class methods it gives to its includers and does not
+      # respond to itself. Read by a Prism walk of each decoded block
       # ({Woods::MethodTable.named_blocks}). Only a definition written
       # directly in that block (or as `private def`) counts; a block that does
       # not parse contributes nothing, so its singletons are not members.
@@ -184,6 +208,21 @@ module Woods
 
             definitions(parsed.value.statements, nil, name).each { |line| found << (line + first - 1) }
           end
+        end
+
+        # The lines of the definitions a concern unit's own `class_methods do`
+        # block makes: class methods of its includers, not of the concern.
+        #
+        # @param source [String, nil] the unit's published source
+        # @param identifier [String] the unit's identifier
+        # @return [Set<Integer>] published-source lines of those definitions
+        def own_lines(source, identifier)
+          return Set.new unless source.is_a?(String)
+
+          parsed = Woods::ParseCache.parse(source)
+          return Set.new if parsed.errors.any?
+
+          definitions(parsed.value.statements, nil, identifier).to_set
         end
 
         # Start lines of the `class_methods` definitions in the body of the
