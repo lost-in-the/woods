@@ -402,6 +402,10 @@ LookupMemberOracle::FIXTURES = {
           nil
         end
 
+        def self.some_dsl(*names)
+          names.each { |name| define_method(name) { :dsl } }
+        end
+
         def self.build
           :base
         end
@@ -493,6 +497,26 @@ LookupMemberOracle::FIXTURES = {
         def checked
           :base
         end
+
+        def secondary
+          :base
+        end
+
+        def guardian
+          :base
+        end
+
+        def second_item
+          :base
+        end
+
+        def alpha_name
+          :base
+        end
+
+        def beta_name
+          :base
+        end
       end
     end
   RUBY
@@ -550,6 +574,16 @@ LookupMemberOracle::FIXTURES = {
         private_class_method :quiet
         helper_method :exposed
         validates :checked
+        attr_reader :primary, :secondary
+        protected
+
+        attr_reader :guardian
+        public
+
+        delegate :first_item,
+                 :second_item,
+                 to: :helper
+        some_dsl :alpha_name, :beta_name
       end
     end
   RUBY
@@ -821,8 +855,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     expect(verdicts.select { |_, verdict| verdict == :stated }.keys).to contain_exactly(
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
       'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for',
-      *%w[MacroRecord MacroChild].product(%w[#refresh #archive .refresh .archive])
-                                 .map { |owner, name| "LookupOracle::#{owner}#{name}" }
+      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name], %w[# .])
+                                 .map { |owner, name, side| "LookupOracle::#{owner}#{side}#{name}" }
     )
   end
 
@@ -979,7 +1013,10 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       'LookupOracle::MacroRecord.build' => ['attr_reader', 32],
       'LookupOracle::MacroRecord.label' => ['define_singleton_method', 35],
       'LookupOracle::ForwardedRecord#perform' => ['def_delegator', 5],
-      'LookupOracle::ForwardedRecord#runner' => ['def_delegators', 6]
+      'LookupOracle::ForwardedRecord#runner' => ['def_delegators', 6],
+      'LookupOracle::MacroRecord#secondary' => ['attr_reader', 54],
+      'LookupOracle::MacroRecord#guardian' => ['attr_reader', 57],
+      'LookupOracle::MacroRecord#second_item' => ['delegate', 60]
     }.each do |identifier, (macro, line)|
       it "answers #{identifier} as defined in its own body by #{macro}" do
         data = answer(identifier)
@@ -1038,6 +1075,27 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
         expect(data['statement']).to include('may define').and include('cannot tell')
         expect(data).not_to have_key('other_definitions')
         expect(data['caveats']).to include(a_string_including('LookupOracle::MacroBase also defines'))
+      end
+    end
+
+    it 'reads attr_reader under a bare protected as protected' do
+      expect(answer('LookupOracle::MacroRecord#guardian')['member']).to include('visibility' => 'protected')
+    end
+
+    it 'answers a multi-line delegate from the whole call' do
+      data = answer('LookupOracle::MacroRecord#second_item')
+
+      expect(data['member']).to include('line' => data['member']['end_line'] - 2)
+      expect(data['source_code']).to include(':second_item,').and include('to: :helper')
+    end
+
+    it 'stops at an unknown macro for every literal it carries, and says it cannot tell' do
+      %w[alpha_name beta_name].each do |name|
+        data = answer("LookupOracle::MacroRecord##{name}")
+
+        expect(data['member']).to include('defined_by' => 'some_dsl', 'file_line' => 63)
+        expect(data['statement']).to include('may define').and include('cannot tell')
+        expect(data).not_to have_key('other_definitions')
       end
     end
 
