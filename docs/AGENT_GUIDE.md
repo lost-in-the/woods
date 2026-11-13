@@ -71,6 +71,7 @@ The limit bounds the whole text of each page as sent, in characters: its positio
 `lookup_page` object, indentation and escapes, are counted.
 A `max_chars` below 1,000 is refused with `invalid_params` and `_meta.required_max_chars`.
 So is, in the JSON format, a size at which one list item does not fit on a page (items are never cut).
+`required_max_chars` is the smallest page size that serves the unit in that format: retry once with it.
 
 - Each page states its position and which `page` and `answer_id` to ask for
   next. Call `lookup` again with the same arguments plus those two.

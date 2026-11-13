@@ -173,9 +173,40 @@ module Woods
         pages
       end
 
+      # The smallest page size, at least {MIN_MAX_CHARS}, at which +text+
+      # (or, in the JSON format, +unit+) can be cut into pages, so a refused
+      # caller can retry once. {PageTooSmall#required} is only an upper bound:
+      # it measures the part that did not fit at its longest. The size found
+      # serves the answer and the one below it does not.
+      #
+      # @param text [String] the complete rendering
+      # @param unit [Hash, nil] the unit, when the format is JSON
+      # @return [Integer]
+      def smallest_max_chars(text, unit: nil)
+        fits = lambda do |size|
+          unit ? json_pages(unit, size, total_chars: text.length) : text_pieces(text, size)
+          nil
+        rescue PageTooSmall => e
+          e.required
+        end
+        low = MIN_MAX_CHARS - 1
+        high = MIN_MAX_CHARS
+        while (bound = fits.call(high))
+          raise "lookup page bound #{bound} does not exceed the refused size #{high}" unless bound > high
+
+          low = high
+          high = bound
+        end
+        while high - low > 1
+          middle = (low + high) / 2
+          fits.call(middle) ? low = middle : high = middle
+        end
+        high
+      end
+
       # Raised when no page of the requested size can hold the answer.
       class PageTooSmall < StandardError
-        # @return [Integer] the smallest page size that holds it
+        # @return [Integer] a page size that holds it (see {LookupPages.smallest_max_chars} for the smallest)
         attr_reader :required
 
         # @param required [Integer]

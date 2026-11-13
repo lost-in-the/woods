@@ -246,6 +246,80 @@ RSpec.describe Woods::MCP::LookupPages do
       expect(text(served).length).to be <= required
     end
 
+    describe 'a page size too small, refused with the smallest that serves the unit' do
+      def publish_uncuttable_item
+        path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+        unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        unit['metadata'] = unit.fetch('metadata').merge('items' => [{ 'note' => 'n' * 2500 }])
+        File.write(path, JSON.generate(unit))
+      end
+
+      def configure_limit(chars)
+        stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => chars.to_s))
+      end
+
+      def call_over_the_wire(format, arguments)
+        server = Woods::MCP::Server.build(index_dir: index_dir, response_format: format, warmup: false)
+        message = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                    params: { name: 'lookup', arguments: { 'identifier' => 'Post' }.merge(arguments) } }
+        JSON.parse(server.handle_json(JSON.generate(message))).fetch('result')
+      end
+
+      it 'names, for JSON at a configured limit below the smallest page, the smallest size that serves it' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = lookup(:json)
+        required = refused.meta.fetch(:required_max_chars)
+
+        expect(refused.error?).to be(true)
+        expect(refused.meta).to include(error_code: :invalid_params, argument: 'max_chars')
+        expect(required).to be > Woods::MCP::LookupPages::MIN_MAX_CHARS
+        expect(text(refused)).to include("Pass max_chars: #{required} or more")
+        expect(lookup(:json, max_chars: required).error?).to be(false)
+        expect(lookup(:json, max_chars: required - 1).meta).to include(required_max_chars: required)
+      end
+
+      it 'names the smallest page for a text format at a configured limit below it, and that size serves it' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = lookup(:markdown)
+        served = lookup(:markdown, max_chars: refused.meta.fetch(:required_max_chars))
+
+        expect(refused.meta).to include(required_max_chars: Woods::MCP::LookupPages::MIN_MAX_CHARS)
+        expect(text(refused)).to include('Pass max_chars: 1000 or more')
+        expect(served.error?).to be(false)
+        expect(text(served).length).to be <= Woods::MCP::LookupPages::MIN_MAX_CHARS
+      end
+
+      it 'answers the refusal over the wire as a tool error, and the size it names serves the unit' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = call_over_the_wire(:json, {})
+        required = refused.dig('_meta', 'required_max_chars')
+        served = call_over_the_wire(:json, 'max_chars' => required)
+
+        expect(refused['isError']).to be(true)
+        expect(refused.dig('content', 0, 'text')).to include("Pass max_chars: #{required} or more")
+        expect(served['isError']).to be(false)
+        expect(served.dig('content', 0, 'text').length).to be <= required
+      end
+
+      it 'names the smallest size when a schema-valid JSON page is too small' do
+        publish_uncuttable_item
+
+        refused = call_over_the_wire(:json, 'max_chars' => 1000)
+        required = refused.dig('_meta', 'required_max_chars')
+
+        expect(refused['isError']).to be(true)
+        expect(call_over_the_wire(:json, 'max_chars' => required)['isError']).to be(false)
+        expect(call_over_the_wire(:json, 'max_chars' => required - 1).dig('_meta', 'required_max_chars'))
+          .to eq(required)
+      end
+    end
+
     it 'pages by default at the configured limit' do
       stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '4000'))
 
