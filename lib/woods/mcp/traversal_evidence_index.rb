@@ -1,12 +1,17 @@
 # frozen_string_literal: true
 
 require 'set'
+require_relative '../edge_evidence'
 
 module Woods
   module MCP
     # A generation-scoped view retaining typed edge ownership. Only node/variant
     # indexes are prepared eagerly; relationship arrays remain lazy and every
     # examined relationship consumes the caller's work budget.
+    #
+    # Each record also says how Woods knows the edge ({Woods::EdgeEvidence}),
+    # read by the type of the unit the edge leaves: `evidence`, and
+    # `evidence_mixed: true` when that class is a floor.
     class TraversalEvidenceIndex
       ATTRIBUTES = %w[via through through_db disable_joins].freeze
 
@@ -93,6 +98,8 @@ module Woods
       def record(source, type, target, stored)
         result = { source: { identifier: source, type: type }, target: identity(target) }
         ATTRIBUTES.each { |attribute| result[attribute.to_sym] = stored[attribute] }
+        result[:evidence] = EdgeEvidence.for(type, result[:via])
+        result[:evidence_mixed] = true if EdgeEvidence.mixed?(type, result[:via])
         result
       end
     end

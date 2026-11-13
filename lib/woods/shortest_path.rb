@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'edge_evidence'
+
 module Woods
   # A shortest chain of published forward edges from one unit to another:
   # the search behind {DependencyGraph#shortest_path} and the Index Server's
@@ -21,6 +23,10 @@ module Woods
   # units. A stopped search answers `exhaustive: false` with a
   # `partial_reason`, so "no path within the bound" is never read as "no path
   # exists".
+  #
+  # Every hop says how Woods knows its edge ({EdgeEvidence}): the strongest
+  # class among the edge's vias, read by the type of the unit the edge
+  # leaves. A path is as well supported as its weakest hop.
   class ShortestPath
     DEFAULT_MAX_DEPTH = 10
     DEFAULT_MAX_NODES = 10_000
@@ -42,8 +48,12 @@ module Woods
     # @return [Hash] `from:` and `to:` (`{ identifier:, type: }`), `found:`,
     #   `direction:` (`forward` or `reverse`, nil when not found), `hop_count:`
     #   (nil when not found), `hops:` in the order the edges run (`{ source:,
-    #   source_type:, target:, target_type:, via: [String] }`, plus
-    #   `target_types:` for a shared identifier) and `searches:` (one
+    #   source_type:, target:, target_type:, via: [String], evidence: }`, plus
+    #   `target_types:` for a shared identifier and `evidence_mixed: true`
+    #   when the evidence is a floor), `evidence:` (the weakest hop's class,
+    #   with `weakest_hop:`, counted from 1, unless every hop is `reflected`,
+    #   and `evidence_mixed: true` when that hop's is a floor; absent with no
+    #   hops) and `searches:` (one
     #   `{ direction:, exhaustive:, max_depth:, max_nodes:, visited_nodes: }`
     #   per search run, with `partial_reason:` when a bound stopped it). Only
     #   when not found: `exhaustive:` (whether every search ran to its end)
@@ -74,6 +84,19 @@ module Woods
     # @return [Hash]
     def reached(search)
       { direction: search[:direction], hop_count: search[:hops].size, hops: search[:hops] }
+        .merge(path_evidence(search[:hops]))
+    end
+
+    # @return [Hash] the weakest hop's evidence, and which hop that is
+    def path_evidence(hops)
+      weakest = EdgeEvidence.weakest(hops.map { |hop| hop[:evidence] })
+      return {} unless weakest
+      return { evidence: weakest } if weakest == EdgeEvidence::REFLECTED
+
+      index = hops.index { |hop| hop[:evidence] == weakest }
+      evidence = { evidence: weakest, weakest_hop: index + 1 }
+      evidence[:evidence_mixed] = true if hops[index][:evidence_mixed]
+      evidence
     end
 
     # @return [Hash] whether every search ran to its end, and what stopped the first that did not
@@ -172,6 +195,9 @@ module Woods
       hop = { source: source.first, source_type: source.last.to_s, target: target.first,
               target_type: target.last.to_s, via: labels.compact.uniq.sort }
       hop[:target_types] = target_types.map(&:to_s) if target_types.size > 1
+      evidence = EdgeEvidence.edge(hop[:source_type], hop[:via])
+      hop[:evidence] = evidence[:evidence]
+      hop[:evidence_mixed] = true if evidence[:mixed]
       hop
     end
 

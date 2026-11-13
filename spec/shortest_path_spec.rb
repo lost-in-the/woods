@@ -36,7 +36,7 @@ RSpec.describe 'Woods::DependencyGraph#shortest_path' do
       expect(result).to include(found: true, direction: 'forward', hop_count: 1)
       expect(result[:hops]).to eq(
         [{ source: 'OrdersController', source_type: 'controller', target: 'Order', target_type: 'model',
-           via: ['code_reference'] }]
+           via: ['code_reference'], evidence: 'static', evidence_mixed: true }]
       )
       expect(result[:from]).to eq(identifier: 'OrdersController', type: 'controller')
       expect(result[:to]).to eq(identifier: 'Order', type: 'model')
@@ -169,6 +169,76 @@ RSpec.describe 'Woods::DependencyGraph#shortest_path' do
     end
   end
 
+  # The rule: a hop's evidence is the strongest of its vias, read by the type
+  # of the unit the edge leaves; a path is as well supported as its weakest
+  # hop, and one unclassified hop leaves the whole path unclassified.
+  describe 'evidence' do
+    it 'takes the strongest via of a hop' do
+      register(make_unit(:model, 'Comment', { target: 'Post', via: :code_reference },
+                         { target: 'Post', via: :belongs_to }), make_unit(:model, 'Post'))
+
+      result = graph.shortest_path('Comment', 'Post')
+
+      expect(result[:hops].first).to include(evidence: 'reflected')
+      expect(result[:hops].first).not_to have_key(:evidence_mixed)
+      expect(result).to include(evidence: 'reflected')
+      expect(result).not_to have_key(:weakest_hop)
+    end
+
+    it 'gives the path its weakest hop and says which one' do
+      register(make_unit(:route, 'GET /orders', { target: 'OrdersController', via: :route_dispatch }),
+               make_unit(:controller, 'OrdersController', { target: 'orders/index', via: :job_enqueue }),
+               make_unit(:view_template, 'orders/index', { target: 'Order', via: :view_render }),
+               make_unit(:model, 'Order'))
+
+      result = graph.shortest_path('GET /orders', 'Order')
+
+      expect(result[:hops].map { |hop| hop[:evidence] }).to eq(%w[reflected static verified])
+      expect(result).to include(evidence: 'static', weakest_hop: 2)
+      expect(result).not_to have_key(:evidence_mixed)
+    end
+
+    it 'marks a hop whose pair two mechanisms produce, and the path it is weakest in' do
+      register(make_unit(:controller, 'A', 'B'), make_unit(:service, 'B'))
+
+      result = graph.shortest_path('A', 'B')
+
+      expect(result[:hops].first).to include(evidence: 'static', evidence_mixed: true)
+      expect(result).to include(evidence: 'static', weakest_hop: 1, evidence_mixed: true)
+    end
+
+    it 'is unknown for an unlabelled or unlisted hop, and then for the path' do
+      register(make_unit(:model, 'A', { target: 'B', via: :belongs_to }),
+               make_unit(:model, 'B', { target: 'C', via: :teleports_to }),
+               make_unit(:model, 'C', { target: 'D', via: nil }), make_unit(:model, 'D'))
+
+      result = graph.shortest_path('A', 'D')
+
+      expect(result[:hops].map { |hop| hop[:evidence] }).to eq(%w[reflected unknown unknown])
+      expect(result).to include(evidence: 'unknown', weakest_hop: 2)
+    end
+
+    it 'classifies a reverse hop by the unit the edge leaves, not the unit asked about' do
+      register(make_unit(:concern, 'Auditable'), make_unit(:model, 'Order', { target: 'Auditable', via: :include }),
+               make_unit(:concern, 'Trackable', { target: 'Auditable', via: :include }))
+
+      from_model = graph.shortest_path('Auditable', 'Order', direction: 'either')
+      from_concern = graph.shortest_path('Auditable', 'Trackable', direction: 'either')
+
+      expect(from_model).to include(direction: 'reverse', evidence: 'verified')
+      expect(from_model[:hops].first).to include(source_type: 'model', evidence: 'verified')
+      expect(from_concern).to include(direction: 'reverse', evidence: 'static')
+      expect(from_concern[:hops].first).to include(source_type: 'concern', evidence: 'static')
+    end
+
+    it 'carries no evidence for zero hops or no path' do
+      register(make_unit(:model, 'A'), make_unit(:model, 'B'))
+
+      expect(graph.shortest_path('A', 'A')).not_to have_key(:evidence)
+      expect(graph.shortest_path('A', 'B')).not_to have_key(:evidence)
+    end
+  end
+
   describe 'direction' do
     before { register(make_unit(:model, 'Comment', { target: 'Post', via: :belongs_to }), make_unit(:model, 'Post')) }
 
@@ -181,7 +251,7 @@ RSpec.describe 'Woods::DependencyGraph#shortest_path' do
 
       expect(result).to include(found: true, direction: 'reverse', hop_count: 1)
       expect(result[:hops]).to eq([{ source: 'Comment', source_type: 'model', target: 'Post', target_type: 'model',
-                                     via: ['belongs_to'] }])
+                                     via: ['belongs_to'], evidence: 'reflected' }])
       expect(result[:from]).to eq(identifier: 'Post', type: 'model')
     end
 

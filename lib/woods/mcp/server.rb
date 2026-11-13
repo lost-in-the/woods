@@ -926,7 +926,8 @@ module Woods
             identifier: { type: 'string', description: 'Unit identifier to start from' },
             depth: { type: 'integer', description: 'Maximum traversal depth (default: 2)' },
             explain: { type: 'boolean',
-                       description: 'Include recorded relationship evidence ' \
+                       description: 'Include recorded relationship evidence, each edge with how Woods knows ' \
+                                    'it (evidence: reflected, verified, static or unknown), ' \
                                     'and shared shortest witnesses (default: false)' },
             types: {
               type: 'array', items: { type: 'string' },

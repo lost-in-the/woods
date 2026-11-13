@@ -576,8 +576,10 @@ RSpec.describe 'Index MCP tool contracts' do
       'from' => { 'identifier' => 'Comment', 'type' => 'model' },
       'to' => { 'identifier' => 'Post', 'type' => 'model' },
       'found' => true, 'direction' => 'forward', 'hop_count' => 1,
+      # The fixture graph's legacy edge has no via, so its evidence is unknown.
       'hops' => [{ 'source' => 'Comment', 'source_type' => 'model', 'target' => 'Post', 'target_type' => 'model',
-                   'via' => [] }],
+                   'via' => [], 'evidence' => 'unknown' }],
+      'evidence' => 'unknown', 'weakest_hop' => 1,
       'searches' => [{ 'direction' => 'forward', 'exhaustive' => true, 'max_depth' => max_depth,
                        'max_nodes' => max_nodes, 'visited_nodes' => 2 }],
       'graph_coverage' => expected_graph_coverage

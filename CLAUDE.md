@@ -172,6 +172,7 @@ lib/
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
 │   ├── shortest_path.rb                 # Shortest chain of edges between two units (DependencyGraph#shortest_path, MCP `path`)
+│   ├── edge_evidence.rb                 # (source type, via) => reflected/verified/static/unknown, read at query time
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
