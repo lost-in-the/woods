@@ -96,8 +96,10 @@ module Woods
     CATALOG = {
       'model' => scans.merge(
         'belongs_to' => r, 'has_many' => r, 'has_one' => r, 'has_and_belongs_to_many' => r,
-        'polymorphic_interface' => r, 'through_chain' => r, 'table' => r, 'inheritance' => r,
-        'include' => v, 'extend' => v
+        'through_chain' => r, 'table' => r, 'inheritance' => r, 'include' => v, 'extend' => v,
+        # The association name camelized; Rails never resolves an interface,
+        # and the existence check proves only that a constant has the name.
+        'polymorphic_interface' => s
       ),
       'controller' => scans.merge(helpers, 'include' => v, 'extend' => v, 'render' => v, 'redirect_to' => v,
                                            'action_source' => r, 'inheritance' => r),
@@ -128,7 +130,9 @@ module Woods
       'database_table' => { 'foreign_key' => r },
       'database_view' => { 'view_source' => v, 'table_name' => v },
       'migration' => scans.merge('migrates' => v, 'table_name' => v, 'reference' => v),
-      'external_consumer' => { 'reads_table' => v, 'writes_table' => v },
+      # An operator's declaration about another application; the live schema
+      # only confirms that the declared table exists.
+      'external_consumer' => { 'reads_table' => s, 'writes_table' => s },
       'view_template' => { 'render' => s, 'view_render' => v }.merge(navigation, helpers, frontend),
       'graphql_operation' => { 'root_field' => v, 'type_reference' => v, 'fragment_spread' => s },
       'factory' => { 'factory_for' => s, 'factory_parent' => s, 'factory_association' => s },
