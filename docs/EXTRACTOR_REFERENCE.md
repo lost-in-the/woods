@@ -165,7 +165,8 @@ published `source_code` coordinates, sorted by line.
   module function and leaves the other as its own entry.
 - `owner` is the lexical class or module, so a concern inlined as a commented
   display block owns its methods at their lines inside the block.
-- Methods defined by metaprogramming or on another receiver are absent.
+- Methods defined by metaprogramming or on another receiver are absent, and so is a `def self.x` inside
+  `class << self`, which Ruby defines on the singleton class's own singleton class.
 
 **Callback declarations (#817).** Each model callback entry whose method is
 declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with

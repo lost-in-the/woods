@@ -13,6 +13,8 @@
   Such an inline `def` passes its name to the call as Ruby does, so `private_class_method def a` beside an earlier
   `def self.a` now marks `self.a` private instead of the new instance method, and `private def self.b` marks an
   instance method `b`.
+  A `def self.x` inside `class << self` is left out instead of replacing the owner's own `self.x`: Ruby defines it
+  on the singleton class's singleton class.
   A `def self.x` under a bare `module_function` is a `singleton` entry, not a `module_function` one: Ruby defines
   no instance method for it.
   The table now applies the body's statements in order: a later definition replaces the earlier one on the same

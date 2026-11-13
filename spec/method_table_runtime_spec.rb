@@ -256,6 +256,15 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         private def self.b; end
       end
     RUBY
+    'def self. inside class << self' => <<~RUBY,
+      class Report
+        def self.a; end
+        class << self
+          def self.a; end
+          def self.b; end
+        end
+      end
+    RUBY
     'class-method visibility around module functions' => <<~RUBY
       module Util
         module_function

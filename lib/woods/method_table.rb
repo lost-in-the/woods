@@ -325,7 +325,7 @@ module Woods
         return nil unless owner
 
         receiver = node.receiver
-        return nil if receiver && !receiver.is_a?(Prism::SelfNode)
+        return nil if receiver && (!receiver.is_a?(Prism::SelfNode) || scope == 'singleton')
 
         visibility = 'public' if receiver # `private` does not apply to `def self.x`
         landing = definition_scope(receiver, scope)
