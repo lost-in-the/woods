@@ -111,10 +111,7 @@ module Woods
     #
     # @param unit [ExtractedUnit] The unit to register
     def register(unit)
-      @to_h = nil
-      @suffix_groups = nil
-      @pagerank = nil
-      @structural_graph = nil
+      invalidate_derived
 
       unregister(unit.identifier, type: unit.type) if @nodes[unit.identifier]&.key?(unit.type)
 
@@ -160,6 +157,7 @@ module Woods
     # @param type [Symbol, nil] Restrict to one registered type
     # @return [void]
     def unregister(identifier, type: nil)
+      invalidate_derived
       withdrawing = registered_types(identifier, type).to_set
 
       withdrawing.each do |t|
@@ -271,6 +269,29 @@ module Woods
     end
     private :registered_types
 
+    # Drop every value derived from the graph. Every public mutator calls
+    # this and nothing else clears a memo, so a new mutator cannot forget
+    # one: {#to_h}, {#suffix_groups}, {#pagerank} and {#structural_graph}.
+    #
+    # A change to node attributes alone ({#annotate}) moves no node and no
+    # edge, so it keeps the ranking, the suffix index and the structural view
+    # (which shares the attribute hashes) and drops only serializations.
+    #
+    # @param structure [Boolean] false when only node attributes changed
+    # @return [void]
+    def invalidate_derived(structure: true)
+      @to_h = nil
+      unless structure
+        @structural_graph&.forget_serialization
+        return
+      end
+
+      @suffix_groups = nil
+      @pagerank = nil
+      @structural_graph = nil
+    end
+    private :invalidate_derived
+
     # Fully remove a unit from the graph — node, forward edges, reverse-edge
     # contributions, file-map entry, and type-index entry.
     #
@@ -293,10 +314,7 @@ module Woods
       return nil unless nodes&.any?
       return nil if type && !nodes.key?(type)
 
-      @to_h = nil
-      @suffix_groups = nil
-      @pagerank = nil
-      @structural_graph = nil
+      invalidate_derived
       unregister(identifier, type: type)
 
       return remove_all(identifier, nodes) unless type
@@ -337,8 +355,7 @@ module Woods
       node = @nodes.dig(identifier, type)
       return nil unless node
 
-      @to_h = nil
-      @structural_graph&.forget_serialization
+      invalidate_derived(structure: false)
       attributes.each do |key, value|
         raise ArgumentError, "Unknown node attribute #{key.inspect}" unless NODE_ATTRIBUTE_KEYS.include?(key)
 
@@ -467,7 +484,7 @@ module Woods
     # Node and reverse-edge order are preserved, so scores over the view equal
     # scores over a graph the documents were never registered in.
     #
-    # The view is kept until the next {#register} or {#remove}. Writing the
+    # The view is kept until the next {#register}, {#unregister} or {#remove}. Writing the
     # graph ranks it and analysing it ranks it again; when each call built
     # its own view, the second ranked and serialized a copy the first had
     # already paid for. {#annotate} changes node attributes, which the view
@@ -780,8 +797,8 @@ module Woods
     # dangling, exactly like a node with no edges at all — its rank
     # redistributes uniformly instead of vanishing.
     #
-    # Memoized per damping and iteration count until the next {#register} or
-    # {#remove}: writing the graph and analysing it both rank it, and on a
+    # Memoized per damping and iteration count until the next {#register},
+    # {#unregister} or {#remove}: writing the graph and analysing it both rank it, and on a
     # large index each ranking costs a fraction of a second. Node attributes
     # ({#annotate}) take no part in it. Each call returns its own copy.
     #
@@ -1097,7 +1114,7 @@ module Woods
 
     public
 
-    # Serialize graph for persistence. Memoized — cache is invalidated on register.
+    # Serialize graph for persistence. Memoized until the next mutation.
     # Returns a dup so callers can't pollute the cached hash.
     #
     # ## Wire format and the `variants` key (#225)
