@@ -10,6 +10,9 @@
   a bare `module_function` is now read as a module function, then changed by that call.
   `private_class_method def x` there was an `instance` entry reading public and is now private on both sides, and
   `private def x` keeps its public singleton copy.
+  Such an inline `def` passes its name to the call as Ruby does, so `private_class_method def a` beside an earlier
+  `def self.a` now marks `self.a` private instead of the new instance method, and `private def self.b` marks an
+  instance method `b`.
   A `def self.x` under a bare `module_function` is a `singleton` entry, not a `module_function` one: Ruby defines
   no instance method for it.
   The table now applies the body's statements in order: a later definition replaces the earlier one on the same
