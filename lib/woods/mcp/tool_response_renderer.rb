@@ -103,6 +103,41 @@ module Woods
         last.is_a?(Integer) && last != first ? "lines #{first}-#{last}" : "line #{first}"
       end
 
+      # A value as tool text prints it: a Hash as `(key: value, ...)` and an
+      # Array as `[a, b]`, nested alike, so no Ruby `inspect` form (`{"k" =>
+      # "v"}`, `["a", "b"]`) ever reaches an agent, who would read it as data.
+      # Inside them nil prints as `null`; any other value prints as itself.
+      #
+      # @param value [Object]
+      # @return [String]
+      def inline_value(value)
+        case value
+        when Hash then value.empty? ? '{}' : "(#{value.map { |k, v| "#{k}: #{nested_value(v)}" }.join(', ')})"
+        when Array then "[#{value.map { |item| nested_value(item) }.join(', ')}]"
+        else value.to_s
+        end
+      end
+
+      def nested_value(value)
+        value.nil? ? 'null' : inline_value(value)
+      end
+
+      # Whether a lookup value says nothing, so its key is not printed: nil,
+      # an empty string, or a list or Hash holding only such values. `false`
+      # and `0` are answers.
+      #
+      # @param value [Object]
+      # @return [Boolean]
+      def uninformative?(value)
+        case value
+        when nil then true
+        when String then value.empty?
+        when Array then value.all? { |item| uninformative?(item) }
+        when Hash then value.all? { |_, nested| uninformative?(nested) }
+        else false
+        end
+      end
+
       # The name printed for one entry of a metadata Hash: a controller's
       # routed action that nothing answers is marked in its `routes`.
       #
@@ -215,8 +250,8 @@ module Woods
         ]
         scope = fetch_key(data, :applied_scope)
         if scope
-          lines << "Applied scope: packages=#{fetch_key(scope, :packages).inspect}; " \
-                   "source_paths=#{fetch_key(scope, :source_paths).inspect}; " \
+          lines << "Applied scope: packages=#{nested_value(fetch_key(scope, :packages))}; " \
+                   "source_paths=#{nested_value(fetch_key(scope, :source_paths))}; " \
                    "eligible units=#{fetch_key(scope, :eligible_units)}."
         end
         hint = fetch_key(data, :hint)

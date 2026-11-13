@@ -54,21 +54,21 @@ RSpec.describe Woods::MCP::LookupPages do
   end
 
   describe '.page' do
-    let(:text) { Array.new(30) { |index| "row #{index}\n" }.join }
+    let(:text) { Array.new(300) { |index| "row #{index}\n" }.join }
 
     it 'reports where each page sits and what comes next' do
-      first = described_class.page(text, max_chars: 100, number: 1)
-      last = described_class.page(text, max_chars: 100, number: first.pages)
+      first = described_class.page(text, max_chars: 1000, number: 1)
+      last = described_class.page(text, max_chars: 1000, number: first.pages)
 
       expect(first.to_h).to include(page: 1, first_char: 1, total_chars: text.length, next_page: 2)
       expect(last.to_h).to include(page: first.pages, last_char: text.length, next_page: nil)
     end
 
     it 'has no page past the last or before the first' do
-      count = described_class.page(text, max_chars: 100, number: 1).pages
+      count = described_class.page(text, max_chars: 1000, number: 1).pages
 
-      expect(described_class.page(text, max_chars: 100, number: count + 1)).to be_nil
-      expect(described_class.page(text, max_chars: 100, number: 0)).to be_nil
+      expect(described_class.page(text, max_chars: 1000, number: count + 1)).to be_nil
+      expect(described_class.page(text, max_chars: 1000, number: 0)).to be_nil
     end
   end
 
@@ -215,6 +215,111 @@ RSpec.describe Woods::MCP::LookupPages do
       end
     end
 
+    it 'refuses a page size below the smallest, naming it' do
+      response = lookup(max_chars: 500)
+
+      expect(response.error?).to be(true)
+      expect(response.meta).to include(error_code: :invalid_params, argument: 'max_chars', required_max_chars: 1000)
+      expect(text(response)).to include('Pass max_chars: 1000 or more')
+    end
+
+    it 'answers a unit shorter than a page below the smallest whole' do
+      response = lookup(max_chars: 500, sections: %w[type])
+
+      expect(response.error?).to be(false)
+      expect(text(response)).not_to include('lookup page')
+    end
+
+    it 'refuses a JSON page size too small for a list item it cannot cut, naming one that holds it' do
+      path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+      unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+      unit['metadata'] = unit.fetch('metadata').merge('items' => [{ 'note' => 'n' * 2500 }])
+      File.write(path, JSON.generate(unit))
+
+      refused = lookup(:json, max_chars: 1500)
+      required = refused.meta.fetch(:required_max_chars)
+      served = lookup(:json, max_chars: required)
+
+      expect(refused.error?).to be(true)
+      expect(refused.meta).to include(error_code: :invalid_params, argument: 'max_chars')
+      expect(served.error?).to be(false)
+      expect(text(served).length).to be <= required
+    end
+
+    describe 'a page size too small, refused with the smallest that serves the unit' do
+      def publish_uncuttable_item
+        path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+        unit = JSON.parse(File.read(path, encoding: 'UTF-8'))
+        unit['metadata'] = unit.fetch('metadata').merge('items' => [{ 'note' => 'n' * 2500 }])
+        File.write(path, JSON.generate(unit))
+      end
+
+      def configure_limit(chars)
+        stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => chars.to_s))
+      end
+
+      def call_over_the_wire(format, arguments)
+        server = Woods::MCP::Server.build(index_dir: index_dir, response_format: format, warmup: false)
+        message = { jsonrpc: '2.0', id: 1, method: 'tools/call',
+                    params: { name: 'lookup', arguments: { 'identifier' => 'Post' }.merge(arguments) } }
+        JSON.parse(server.handle_json(JSON.generate(message))).fetch('result')
+      end
+
+      it 'names, for JSON at a configured limit below the smallest page, the smallest size that serves it' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = lookup(:json)
+        required = refused.meta.fetch(:required_max_chars)
+
+        expect(refused.error?).to be(true)
+        expect(refused.meta).to include(error_code: :invalid_params, argument: 'max_chars')
+        expect(required).to be > Woods::MCP::LookupPages::MIN_MAX_CHARS
+        expect(text(refused)).to include("Pass max_chars: #{required} or more")
+        expect(lookup(:json, max_chars: required).error?).to be(false)
+        expect(lookup(:json, max_chars: required - 1).meta).to include(required_max_chars: required)
+      end
+
+      it 'names the smallest page for a text format at a configured limit below it, and that size serves it' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = lookup(:markdown)
+        served = lookup(:markdown, max_chars: refused.meta.fetch(:required_max_chars))
+
+        expect(refused.meta).to include(required_max_chars: Woods::MCP::LookupPages::MIN_MAX_CHARS)
+        expect(text(refused)).to include('Pass max_chars: 1000 or more')
+        expect(served.error?).to be(false)
+        expect(text(served).length).to be <= Woods::MCP::LookupPages::MIN_MAX_CHARS
+      end
+
+      it 'answers the refusal over the wire as a tool error, and the size it names serves the unit' do
+        publish_uncuttable_item
+        configure_limit(500)
+
+        refused = call_over_the_wire(:json, {})
+        required = refused.dig('_meta', 'required_max_chars')
+        served = call_over_the_wire(:json, 'max_chars' => required)
+
+        expect(refused['isError']).to be(true)
+        expect(refused.dig('content', 0, 'text')).to include("Pass max_chars: #{required} or more")
+        expect(served['isError']).to be(false)
+        expect(served.dig('content', 0, 'text').length).to be <= required
+      end
+
+      it 'names the smallest size when a schema-valid JSON page is too small' do
+        publish_uncuttable_item
+
+        refused = call_over_the_wire(:json, 'max_chars' => 1000)
+        required = refused.dig('_meta', 'required_max_chars')
+
+        expect(refused['isError']).to be(true)
+        expect(call_over_the_wire(:json, 'max_chars' => required)['isError']).to be(false)
+        expect(call_over_the_wire(:json, 'max_chars' => required - 1).dig('_meta', 'required_max_chars'))
+          .to eq(required)
+      end
+    end
+
     it 'pages by default at the configured limit' do
       stub_const('ENV', ENV.to_h.merge('WOODS_MCP_LOOKUP_MAX_CHARS' => '4000'))
 
@@ -290,8 +395,8 @@ RSpec.describe Woods::MCP::LookupPages do
         sources.each { |source, (first, last)| expect(source.lines.size).to eq(last - first + 1) }
       end
 
-      it 'keeps each page near the limit' do
-        (1..pages).each { |number| expect(text(page_of(number, :json, max_chars: 3000)).length).to be <= 3600 }
+      it 'keeps each page within the limit' do
+        (1..pages).each { |number| expect(text(page_of(number, :json, max_chars: 3000)).length).to be <= 3000 }
       end
 
       it 'says in each page how to get the next and how to merge' do
@@ -346,13 +451,26 @@ RSpec.describe Woods::MCP::LookupPages do
         spans.each_cons(2) { |before, after| expect(after['items'].first).to eq(before['items'].last + 1) }
       end
 
-      it 'keeps a value it cannot cut whole on a page of its own' do
+      it 'cuts a long string with no line breaks inside the line' do
         unit = { 'identifier' => 'Order', 'blob' => 'x' * 5000, 'count' => 3, 'flag' => false, 'nothing' => nil }
 
         pages, merged = roundtrip(unit, 1500)
 
         expect(merged).to eq(unit)
         expect(pages.size).to be > 1
+      end
+
+      it 'merges without changing the pages it was given' do
+        first = { 'metadata' => { 'a' => 'x', 'nested' => { 'list' => [1] } }, 'source_code' => "one\n" }
+        second = { 'metadata' => { 'b' => 'y', 'nested' => { 'list' => [2] } }, 'source_code' => "two\n" }
+        before = Marshal.load(Marshal.dump([first, second]))
+
+        merged = described_class.merge_json_units([first, second])
+        merged['metadata']['nested']['list'] << 3
+
+        expect([first, second]).to eq(before)
+        expect(merged).to eq('metadata' => { 'a' => 'x', 'nested' => { 'list' => [1, 2, 3] }, 'b' => 'y' },
+                             'source_code' => "one\ntwo\n")
       end
 
       it 'answers one page for a small unit' do

@@ -597,8 +597,9 @@ module Woods
                                           'is refused if the unit has changed since, so pages of two versions ' \
                                           'are never mixed.' },
                 max_chars: { type: 'integer',
-                             description: 'Characters per page of a full lookup (default: ' \
-                                          "#{LookupPages::DEFAULT_MAX_CHARS}, or #{LookupPages::ENV_NAME})." }
+                             description: 'Characters per page of a full lookup, counting the whole page text ' \
+                                          "sent (default: #{LookupPages::DEFAULT_MAX_CHARS}, or " \
+                                          "#{LookupPages::ENV_NAME}; at least #{LookupPages::MIN_MAX_CHARS})." }
               }
               # NOTE: 'identifier' is not listed as required — `name` is an
               # accepted alias. The handler validates that one of the two
@@ -721,8 +722,24 @@ module Woods
               # is a readable part of it that parses; the other formats cut
               # the rendered text at line ends.
               limit = page_limit || text.length
-              unit_pages = LookupPages.json_pages(filtered, limit) if renderer.is_a?(Renderers::JsonRenderer)
-              pages = unit_pages ? unit_pages.size : LookupPages.split(text, limit).size
+              # The limit bounds each page as sent, position lines and JSON
+              # envelope included, so a page smaller than those is refused,
+              # as is one too small for a list item the JSON format cannot cut.
+              json_unit = filtered if renderer.is_a?(Renderers::JsonRenderer)
+              begin
+                if limit < LookupPages::MIN_MAX_CHARS
+                  raise LookupPages::PageTooSmall, LookupPages.smallest_max_chars(text, unit: json_unit)
+                end
+
+                unit_pages = LookupPages.json_pages(json_unit, limit, total_chars: text.length) if json_unit
+                pages = unit_pages ? unit_pages.size : LookupPages.text_pieces(text, limit).size
+              rescue LookupPages::PageTooSmall => e
+                next respond_err.call(
+                  "lookup of #{identifier} cannot be cut into pages of #{limit} characters; " \
+                  "#{LookupPages.refusal(e.required)}",
+                  code: :invalid_params, tool: 'lookup', argument: 'max_chars', required_max_chars: e.required
+                )
+              end
               unless page_number.between?(1, pages)
                 next respond_err.call("lookup of #{identifier} has #{pages} page#{'s' unless pages == 1}; " \
                                       "page #{page_number} does not exist.",
