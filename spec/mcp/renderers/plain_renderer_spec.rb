@@ -19,6 +19,25 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
       expect(out).to include('File: app/models/user.rb')
     end
 
+    it 'marks a route no action answers and leaves the others as they are' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'ThingsController', 'type' => 'controller',
+                              'metadata' => { 'routes' => { 'show' => 'GET /things/:id',
+                                                            'destroy' => 'DELETE /things/:id' },
+                                              'routes_without_action' => ['destroy'] }
+                            })
+      expect(out).to include('  routes: show=GET /things/:id, destroy (no action)=DELETE /things/:id')
+      expect(out).to include("  routes_without_action:\n    - destroy")
+    end
+
+    it 'marks no route of a unit that carries no routes_without_action' do
+      out = renderer.render(:lookup, {
+                              'identifier' => 'ThingsController', 'type' => 'controller',
+                              'metadata' => { 'routes' => { 'destroy' => 'DELETE /things/:id' } }
+                            })
+      expect(out).to include('  routes: destroy=DELETE /things/:id')
+    end
+
     it 'returns a not-found message for non-hash input' do
       expect(renderer.render(:lookup, nil)).to eq('Unit not found')
       expect(renderer.render(:lookup, 'string input')).to eq('Unit not found')

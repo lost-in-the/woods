@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'dependent_families'
+require_relative 'routes_without_action'
 require_relative 'traversal_evidence_index'
 require_relative 'traversal_evidence_text'
 
@@ -71,6 +72,17 @@ module Woods
       end
 
       private
+
+      # The name printed for one entry of a metadata Hash: a controller's
+      # routed action that nothing answers is marked in its `routes`.
+      #
+      # @param metadata [Hash] the unit's metadata
+      # @param key [String] the metadata key being rendered
+      # @param name [String] the entry's own key
+      # @return [String]
+      def entry_label(metadata, key, name)
+        RoutesWithoutAction.route_label(metadata, key, name)
+      end
 
       # The dispatch target and verdict of an `unresolvable_routes` entry.
       #
