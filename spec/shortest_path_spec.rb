@@ -231,6 +231,24 @@ RSpec.describe 'Woods::DependencyGraph#shortest_path' do
 
       expect(chain(graph.shortest_path('A', 'D'))).to eq([%w[A B], %w[B D]])
     end
+
+    context 'when the depth bound stops the search one hop short of a document' do
+      before do
+        register(make_unit(:service, 'A', 'B'), make_unit(:service, 'B', 'docs/deep.md', 'docs/other.md'),
+                 make_unit(:doc, 'docs/deep.md'), make_unit(:doc, 'docs/other.md'), make_unit(:model, 'Z'))
+      end
+
+      it 'reports the bound when the document is the goal, and finds it one hop deeper' do
+        stopped = graph.shortest_path('A', 'docs/deep.md', max_depth: 1)
+
+        expect(stopped).to include(found: false, exhaustive: false, partial_reason: 'max_depth')
+        expect(graph.shortest_path('A', 'docs/deep.md', max_depth: 2)).to include(found: true, hop_count: 2)
+      end
+
+      it 'stays exhaustive when the only units beyond the bound are documents that are not the goal' do
+        expect(graph.shortest_path('A', 'Z', max_depth: 1)).to include(found: false, exhaustive: true)
+      end
+    end
   end
 
   describe 'schema units' do

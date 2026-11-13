@@ -105,7 +105,7 @@ module Woods
     def walk_to(goal, walk)
       until walk[:queue].empty?
         node, depth = walk[:queue].shift
-        outcome = depth < @max_depth ? expand(node, depth, goal, walk) : frontier(node, walk[:parents])
+        outcome = depth < @max_depth ? expand(node, depth, goal, walk) : frontier(node, goal, walk[:parents])
         return trail(goal, walk[:parents]) if outcome == :found
 
         walk[:stopped] ||= outcome
@@ -134,11 +134,13 @@ module Woods
 
     # A node at `max_depth` is not expanded. Every node nearer the start has
     # been by now, so an unvisited neighbour here is one only a longer path
-    # could reach: the search is then bounded, not exhaustive.
+    # could reach: the search is then bounded, not exhaustive. The goal is
+    # passed on so a document that is the goal counts as such a neighbour;
+    # any other document is not a unit a path may continue through.
     #
     # @return [String, nil]
-    def frontier(node, parents)
-      'max_depth' if neighbours(node, nil).any? { |neighbour, _| !parents.key?(neighbour) }
+    def frontier(node, goal, parents)
+      'max_depth' if neighbours(node, goal).any? { |neighbour, _| !parents.key?(neighbour) }
     end
 
     # The typed nodes a node's edges reach, with the hop that reaches each,

@@ -179,6 +179,24 @@ RSpec.describe 'MCP path tool' do
       expect(ending.dig('structuredContent', 'data')).to include('found' => true, 'hop_count' => 1)
     end
 
+    context 'when max_depth stops one hop short of a document that is the goal' do
+      let(:graph) do
+        Woods::DependencyGraph.new.tap do |graph|
+          [unit(:service, 'CheckoutService', 'PaymentGateway'), unit(:service, 'PaymentGateway', 'docs/payments.md'),
+           unit(:doc, 'docs/payments.md')].each { |unit| graph.register(unit) }
+        end
+      end
+
+      it 'says the bound stopped the search, not that no path exists' do
+        result = rpc(build, 'from' => 'CheckoutService', 'to' => 'docs/payments.md', 'max_depth' => 1)
+
+        expect(result.dig('structuredContent', 'data'))
+          .to include('found' => false, 'exhaustive' => false, 'partial_reason' => 'max_depth')
+        expect(text(result)).to include('The search stopped at max_depth, so this does not show that no path exists.')
+        expect(text(result)).not_to include('The search was exhaustive')
+      end
+    end
+
     it 'does not suggest either once both directions were searched' do
       result = rpc(build, 'from' => 'Post', 'to' => 'OrdersController', 'direction' => 'forward')
       both = rpc(build, 'from' => 'reports', 'from_type' => 'factory', 'to' => 'OrdersController',
