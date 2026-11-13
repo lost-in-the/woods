@@ -246,22 +246,28 @@ module Woods
         fields
       end
 
-      # A path is as well supported as its weakest hop.
+      # A path is as well supported as its weakest hop. The answer depends on
+      # the set of hops, not their order: when one hop of the weakest class
+      # is exactly that class, so is the path, and the path is a floor ("at
+      # least") only when every hop of that class is one.
       #
       # @param hops [Array<Hash>] hops carrying `:evidence`, and
       #   `:evidence_mixed` when that class is a floor
       # @return [Hash] `evidence:`, plus `weakest_hop:` (counted from 1) unless
-      #   every hop is reflected, and `evidence_mixed: true` when that hop's
-      #   class is a floor; empty for a path with no hops
+      #   every hop is reflected, and `evidence_mixed: true` when the path's
+      #   class is a floor; empty for a path with no hops. `weakest_hop` is the
+      #   first exact hop of the weakest class, or the first floor when there
+      #   is none.
       def path(hops)
         weakest = weakest(hops.map { |hop| hop[:evidence] })
         return {} unless weakest
         return { evidence: weakest } if weakest == REFLECTED
 
-        index = hops.index { |hop| hop[:evidence] == weakest }
-        summary = { evidence: weakest, weakest_hop: index + 1 }
-        summary[:evidence_mixed] = true if hops[index][:evidence_mixed]
-        summary
+        candidates = hops.each_index.select { |index| hops[index][:evidence] == weakest }
+        exact = candidates.find { |index| !hops[index][:evidence_mixed] }
+        return { evidence: weakest, weakest_hop: exact + 1 } if exact
+
+        { evidence: weakest, weakest_hop: candidates.first + 1, evidence_mixed: true }
       end
 
       # @param evidence [String] one of {CLASSES}
