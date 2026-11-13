@@ -112,6 +112,9 @@ RSpec.describe 'release workflow contract' do
     commands = run_commands(ci_build)
 
     expect(setup.dig('with', 'ruby-version')).to eq('3.3.10')
+    # An exact Ruby patch exists only on the image it was built for: a floating
+    # `ubuntu-latest` drops it when the image moves on, and the build then fails.
+    expect(ci_build.fetch('runs-on')).to eq('ubuntu-24.04')
     expect(commands).to include('export SOURCE_DATE_EPOCH="$(git show -s --format=%ct "$GITHUB_SHA")"')
 
     Dir.mktmpdir('woods-reproducible-gem') do |directory|
