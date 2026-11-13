@@ -114,7 +114,7 @@ module Woods
         # @return [String] Markdown: the answer in a sentence, then one numbered line per hop
         def render_path(data, **)
           lines = ["## Path from #{data.dig(:from, :identifier)} to #{data.dig(:to, :identifier)}", '',
-                   PathTool.summary(data)]
+                   PathTool.summary(data), PathTool.evidence_line(data)].compact
           lines << data[:hint] if data[:hint]
           lines << '' if data[:hops].any?
           data[:hops].each_with_index { |hop, index| lines << "#{index + 1}. #{PathTool.hop_line(hop)}" }

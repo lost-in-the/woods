@@ -145,6 +145,21 @@ RSpec.describe 'Booted-app extraction', :booted_app do
     expect(index_for(:routes).map { |entry| entry['type'] }).to include('route')
   end
 
+  # The drift guard for Woods::EdgeEvidence: an extractor that starts emitting
+  # a (unit type, via) pair the catalog does not list fails here.
+  it 'classifies the evidence of every extracted (unit type, via) pair' do
+    require 'woods/edge_evidence'
+    pairs = Dir[File.join(payload_dir, '*', '*.json')].reject { |path| File.basename(path).start_with?('_') }
+                                                      .flat_map do |path|
+      unit = JSON.parse(Woods::AtomicFile.read(path))
+      Array(unit['dependencies']).map { |dependency| [unit['type'], dependency['via']] }
+    end.uniq
+    expect(pairs.size).to be > 10
+    unknown = pairs.select { |type, via| Woods::EdgeEvidence.for(type, via) == 'unknown' }
+    expect(unknown).to eq([]), "Woods::EdgeEvidence::CATALOG lists no class for: #{unknown.sort.inspect}. " \
+                               'Read the emitting code and add each pair (docs/MCP_SERVERS.md, Edge evidence).'
+  end
+
   it 'extracts the application models from real source' do
     identifiers = index_for(:models).map { |u| u['identifier'] }
     expect(identifiers).to include('Post', 'Comment')

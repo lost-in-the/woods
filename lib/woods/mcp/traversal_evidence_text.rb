@@ -1,9 +1,16 @@
 # frozen_string_literal: true
 
+require_relative '../edge_evidence'
+require_relative 'traversal_evidence_index'
+
 module Woods
   module MCP
     # Equivalent evidence for all text renderers; JSON retains the same records.
     module TraversalEvidenceText
+      # One line that defines the `evidence` attribute's values.
+      EVIDENCE_LEGEND = "Evidence: #{EdgeEvidence::LEGEND} unknown = no classification in this build. " \
+                        'None means the code runs.'.freeze
+
       def self.lines(explanation)
         return [] unless explanation
 
@@ -17,8 +24,9 @@ module Woods
             "#{attribute}=#{stored.nil? ? 'unknown' : stored}"
           end
           lines << "#{id}: #{identity(value(edge, :source))} -> #{identity(value(edge, :target))}; " \
-                   "#{attributes.join('; ')}"
+                   "#{attributes.join('; ')}; evidence=#{evidence(edge)}"
         end
+        lines << EVIDENCE_LEGEND if value(explanation, :edges).any?
         lines << 'Witnesses: direct = recorded root relationship; ' \
                  'transitive = inferred reachability, not observed execution.'
         value(explanation, :witnesses).each do |identifier, witness|
@@ -39,6 +47,10 @@ module Woods
         "#{value(endpoint, :identifier)} (#{label})"
       end
 
+      def self.evidence(edge)
+        EdgeEvidence.label(value(edge, :evidence) || EdgeEvidence::UNKNOWN, value(edge, :evidence_mixed))
+      end
+
       def self.witness_line(identifier, witness)
         parent = value(witness, :parent) || 'none'
         edge = value(witness, :edge_id) || 'none'
@@ -52,7 +64,7 @@ module Woods
       def self.value(hash, key)
         hash.key?(key.to_sym) ? hash[key.to_sym] : hash[key.to_s]
       end
-      private_class_method :identity, :witness_line, :value
+      private_class_method :identity, :evidence, :witness_line, :value
     end
   end
 end

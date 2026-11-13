@@ -176,6 +176,12 @@ selector is `new`; for `Target.send(:call)`, it is `send`. Inherited job APIs an
 framework-mediated mailer dispatch do not establish a method-definition owner.
 This field adds no method table, excerpt, anchor or method-scoped reverse impact.
 
+The Index Server's edge evidence (`path`, `explain: true`; Woods 2.2) uses the same three words for edges, with a
+wider `verified`: source text resolved against live runtime tables.
+Every edge a `verified` span adds is `verified` there, and so are route-helper, component and schema resolutions
+that are not spans.
+See [edge evidence](MCP_SERVERS.md#edge-evidence).
+
 Static, ambiguous and declaration spans share the array (#751):
 
 ```json
@@ -189,6 +195,8 @@ Static, ambiguous and declaration spans share the array (#751):
   `target` or `target_type`. Never pick one silently.
 - `static` means the literal spelling names exactly one indexed unit while the
   runtime lookup did not verify it.
+  A `static` span is not an edge; a `static` [edge](MCP_SERVERS.md#edge-evidence) is a published edge found by a
+  source-text match.
 - Neither adds a graph edge.
 - `kind` values are `constant`, `association`, `callback_method` and `scope`.
   Readers must ignore kinds they do not know.

@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'woods/mcp/traversal_evidence'
+require 'woods/mcp/traversal_evidence_text'
 
 RSpec.describe Woods::MCP::TraversalEvidence do
   def graph
@@ -39,6 +40,79 @@ RSpec.describe Woods::MCP::TraversalEvidence do
     expect(result[:explanation][:witnesses]['A']).to include(parent: 'B', impact: 'direct')
   end
 
+  # The rule: an explained edge says how Woods knows it, read by the type of
+  # the unit the edge leaves, in either traversal direction.
+  describe 'edge evidence' do
+    def evidence_graph
+      { 'nodes' => { 'Auditable' => { 'type' => 'concern' }, 'Order' => { 'type' => 'model' },
+                     'Trackable' => { 'type' => 'concern' }, 'OrdersController' => { 'type' => 'controller' } },
+        'edges' => { 'Order' => [{ 'target' => 'Auditable', 'via' => 'include' }],
+                     'Trackable' => [{ 'target' => 'Auditable', 'via' => 'include' }],
+                     'OrdersController' => [{ 'target' => 'Order', 'via' => 'code_reference' },
+                                            { 'target' => 'Order', 'via' => 'teleports_to' }, 'Auditable'] },
+        'reverse' => { 'Auditable' => %w[Order Trackable OrdersController], 'Order' => ['OrdersController'] } }
+    end
+
+    def evidence_by_edge(result)
+      result[:explanation][:edges].values.to_h do |edge|
+        [[edge[:source][:identifier], edge[:via]], edge.slice(:evidence, :evidence_mixed)]
+      end
+    end
+
+    it 'classifies each forward edge, marks a floor, and leaves the unlisted and the unlabelled unknown' do
+      edges = evidence_by_edge(walk(evidence_graph, root: 'OrdersController', depth: 2))
+
+      expect(edges).to eq(
+        %w[OrdersController code_reference] => { evidence: 'static', evidence_mixed: true },
+        %w[OrdersController teleports_to] => { evidence: 'unknown' },
+        ['OrdersController', nil] => { evidence: 'unknown' },
+        %w[Order include] => { evidence: 'verified', evidence_mixed: true }
+      )
+    end
+
+    it 'classifies a dependents row by the unit the edge leaves, not the unit asked about' do
+      edges = evidence_by_edge(walk(evidence_graph, root: 'Auditable', direction: :reverse, depth: 1))
+
+      expect(edges).to include(%w[Order include] => { evidence: 'verified', evidence_mixed: true },
+                               %w[Trackable include] => { evidence: 'static', evidence_mixed: true })
+    end
+
+    it 'reads the source type a reverse_via record states' do
+      data = evidence_graph.merge(
+        'reverse_via' => { 'Auditable' => [{ 'source' => 'Order', 'source_type' => 'model', 'via' => 'include' },
+                                           { 'source' => 'Trackable', 'source_type' => 'concern',
+                                             'via' => 'include' }] }
+      )
+      edges = evidence_by_edge(walk(data, root: 'Auditable', direction: :reverse, depth: 1))
+
+      expect(edges).to eq(%w[Order include] => { evidence: 'verified', evidence_mixed: true },
+                          %w[Trackable include] => { evidence: 'static', evidence_mixed: true })
+    end
+
+    it 'is unknown for an edge whose source has no recorded type' do
+      data = { 'nodes' => { 'A' => {}, 'B' => { 'type' => 'model' } },
+               'edges' => { 'A' => [{ 'target' => 'B', 'via' => 'belongs_to' }] }, 'reverse' => { 'B' => ['A'] } }
+
+      expect(evidence_by_edge(walk(data, depth: 1))).to eq(%w[A belongs_to] => { evidence: 'unknown' })
+    end
+
+    it 'renders the attribute after the recorded ones, with one line that defines the classes' do
+      text = Woods::MCP::TraversalEvidenceText.lines(
+        walk(evidence_graph, root: 'OrdersController', depth: 2)[:explanation]
+      )
+
+      expect(text).to include(
+        'e0: OrdersController (controller) -> Order (model); via=code_reference; through=unknown; ' \
+        'through_db=unknown; disable_joins=unknown; evidence=at least static',
+        'e3: Order (model) -> Auditable (concern); via=include; through=unknown; through_db=unknown; ' \
+        'disable_joins=unknown; evidence=at least verified'
+      )
+      expect(text.grep(/evidence=unknown\z/).size).to eq(2)
+      expect(text).to include("Evidence: #{Woods::EdgeEvidence::LEGEND} unknown = no classification in this " \
+                              'build. None means the code runs.')
+    end
+  end
+
   it 'never guesses target types across a primary/variant collision' do
     data = graph
     data['variants'] =
@@ -59,7 +133,7 @@ RSpec.describe Woods::MCP::TraversalEvidence do
     expect(result[:explanation][:edges].values.first).to include(
       source: { identifier: 'A', type: 'model' },
       target: { identifier: 'Outside', type: nil, candidate_types: [], resolution: 'unresolved' },
-      via: nil, through: nil, through_db: nil, disable_joins: nil
+      via: nil, through: nil, through_db: nil, disable_joins: nil, evidence: 'unknown'
     )
   end
 

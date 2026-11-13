@@ -33,6 +33,7 @@ RSpec.describe 'Traversal explanation contract' do
       root = name == 'dependencies' ? 'Comment' : 'Post'
       compact = call_tool(name, identifier: root)
       expect(call_tool(name, identifier: root, explain: false)).to eq(compact)
+      expect(JSON.generate(compact)).not_to match(/evidence/i)
       expect(compact.dig('structuredContent', 'data')).not_to have_key('explanation')
       invalid = call_tool(name, identifier: root, explain: 'yes')
       expect(invalid['isError']).to be(true)
@@ -47,7 +48,8 @@ RSpec.describe 'Traversal explanation contract' do
     expect(explanation['direction']).to eq('reverse')
     expect(explanation['edges'].values.first).to include(
       'source' => { 'identifier' => 'Comment', 'type' => 'model' },
-      'target' => { 'identifier' => 'Post', 'type' => 'model' }, 'via' => nil, 'disable_joins' => nil
+      'target' => { 'identifier' => 'Post', 'type' => 'model' }, 'via' => nil, 'disable_joins' => nil,
+      'evidence' => 'unknown'
     )
   end
 
@@ -73,7 +75,8 @@ RSpec.describe 'Traversal explanation contract' do
       text = call_tool(format: format, identifier: 'Comment', explain: true).dig('structuredContent', 'text')
       expect(text).to include('Post (ambiguous; candidate types: model, service)',
                               'Outside (unresolved; candidate types: none)',
-                              'via=has_many; through=subscriptions; through_db=reporting; disable_joins=false',
+                              'via=has_many; through=subscriptions; through_db=reporting; disable_joins=false; ' \
+                              'evidence=reflected', 'Evidence: reflected = reported by Rails;',
                               'Outside: transitive; parent=Post;', 'witness types unambiguous=no')
     end
 

@@ -241,7 +241,11 @@ row. Report `direct` relationships separately from `transitive` inferred impact.
 Follow `parent`/`edge_id` references; `context: true` ancestors are outside the
 current result page. Unknown labels and ambiguous candidate types stay unknown;
 `typed_path_complete: false` does not establish a uniquely typed path. True means
-only unambiguous witness types, not complete source coverage. Supporting text
+only unambiguous witness types, not complete source coverage.
+From Woods 2.2 each explained edge, and each `path` hop, carries `evidence`: `reflected` (Rails reported it),
+`verified` (source resolved against the running app), `static` (a source-text match) or `unknown`.
+Read the source behind a `static` edge before relying on it; no class means the code runs
+([edge evidence](MCP_SERVERS.md#edge-evidence)). Supporting text
 responses label this `witness types unambiguous` (included in Woods `2.0.0`). See the
 [explanation contract](MCP_SERVERS.md#traversal-explanations).
 

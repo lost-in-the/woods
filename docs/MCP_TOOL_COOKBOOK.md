@@ -296,7 +296,9 @@ To explain why a row is affected, check the connected schema and add
 `"explain": true`. The response preserves source-to-target labels even while
 walking dependents. Its predecessor witnesses distinguish direct relationships
 from transitive inferred reachability, retain ancestor context across pages, and
-mark ambiguous types explicitly. See the
+mark ambiguous types explicitly. Each edge also carries `evidence` (Woods 2.2): `reflected`, `verified`,
+`static` or `unknown`, by the type of the edge's own source unit ([edge evidence](MCP_SERVERS.md#edge-evidence)).
+See the
 [explanation contract](MCP_SERVERS.md#traversal-explanations); these witnesses are
 not proof of observed execution.
 
@@ -468,10 +470,16 @@ This traces through the dependency graph: `CheckoutService` calls `Order#save!`,
 ## Path from OrdersController to PaymentGateway
 
 2 hops, forward: OrdersController (controller) reaches PaymentGateway (service).
+Evidence: weakest hop is at least static (hop 1). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
 
-1. OrdersController (controller) -[code_reference]-> CheckoutService (service)
-2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)
+1. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
+2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)  [static]
 ```
+
+The `Evidence:` line says how well the chain is supported.
+Both hops here were found by matching source text, so read the two call sites before relying on the path.
+A hop with no marker is `reflected`: Rails reported it.
+No class means the code runs; see [edge evidence](MCP_SERVERS.md#edge-evidence).
 
 Use it for "is X connected to Y" and "what is between X and Y" too.
 The same question asked the other way round has a different answer, because edges are directed.

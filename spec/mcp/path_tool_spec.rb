@@ -73,10 +73,11 @@ RSpec.describe 'MCP path tool' do
         ## Path from OrdersController to Post
 
         3 hops, forward: OrdersController (controller) reaches Post (model).
+        Evidence: weakest hop is at least static (hop 1). #{Woods::EdgeEvidence::LEGEND}
 
-        1. OrdersController (controller) -[code_reference]-> CheckoutService (service)
-        2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)
-        3. PaymentGateway (service) -[code_reference]-> Post (model)
+        1. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
+        2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)  [static]
+        3. PaymentGateway (service) -[code_reference]-> Post (model)  [at least static]
 
         #{coverage_notice}
       TEXT
@@ -90,7 +91,9 @@ RSpec.describe 'MCP path tool' do
                               'to' => { 'identifier' => 'Post', 'type' => 'model' })
       expect(data['hops'][1]).to eq('source' => 'CheckoutService', 'source_type' => 'service',
                                     'target' => 'PaymentGateway', 'target_type' => 'service',
-                                    'via' => %w[code_reference job_enqueue])
+                                    'via' => %w[code_reference job_enqueue], 'evidence' => 'static')
+      expect(data['hops'][0]).to include('evidence' => 'static', 'evidence_mixed' => true)
+      expect(data).to include('evidence' => 'static', 'weakest_hop' => 1, 'evidence_mixed' => true)
       expect(data['graph_coverage']).to include('scope' => 'published_relationships')
       expect(data).not_to have_key('hint')
     end
@@ -101,7 +104,10 @@ RSpec.describe 'MCP path tool' do
 
       expect(parsed).to include('found' => true, 'hop_count' => 1)
       expect(parsed['hops']).to eq([{ 'source' => 'Comment', 'source_type' => 'model', 'target' => 'Post',
-                                      'target_type' => 'model', 'via' => ['belongs_to'] }])
+                                      'target_type' => 'model', 'via' => ['belongs_to'],
+                                      'evidence' => 'reflected' }])
+      expect(parsed).to include('evidence' => 'reflected')
+      expect(parsed).not_to have_key('weakest_hop')
       expect(parsed).to eq(result.dig('structuredContent', 'data'))
     end
 
@@ -116,12 +122,34 @@ RSpec.describe 'MCP path tool' do
       expect(claude).to include('1. Comment (model) -[belongs_to]-> Post (model)')
     end
 
+    it 'says a path Rails reported end to end is reflected, and marks no hop' do
+      %i[markdown plain claude].each do |format|
+        answer = text(rpc(build(format), 'from' => 'Comment', 'to' => 'Post'))
+
+        expect(answer).to include('Evidence: every hop is reflected (reported by Rails).')
+        expect(answer).to match(/1\. Comment \(model\) -\[belongs_to\]-> Post \(model\)$/)
+        expect(answer).not_to include(Woods::EdgeEvidence::LEGEND)
+      end
+    end
+
+    it 'marks only the hops weaker than reflected, in every text format' do
+      %i[markdown plain claude].each do |format|
+        answer = text(rpc(build(format), 'from' => 'reports', 'from_type' => 'factory', 'to' => 'Post'))
+
+        expect(answer).to include('Evidence: weakest hop is unknown (hop 1): this build has no classification ' \
+                                  "for that relationship. #{Woods::EdgeEvidence::LEGEND}")
+        expect(answer).to include('1. reports (factory) -[code_reference]-> Comment (model)  [unknown]')
+        expect(answer).to match(/2\. Comment \(model\) -\[belongs_to\]-> Post \(model\)$/)
+      end
+    end
+
     it 'answers the same unit as zero hops, not an error' do
       result = rpc(build, 'from' => 'Post', 'to' => 'Post')
 
       expect(result['isError']).to be(false)
       expect(text(result)).to include('0 hops: `from` and `to` are the same unit, Post (model).')
       expect(result.dig('structuredContent', 'data')).to include('found' => true, 'hop_count' => 0, 'hops' => [])
+      expect(text(result)).not_to include('Evidence:')
     end
 
     it 'finds the reverse path with direction either and says which way it runs' do
@@ -131,7 +159,8 @@ RSpec.describe 'MCP path tool' do
       expect(text(result)).to include('1 hop, reverse: Comment (model) reaches Post (model). ' \
                                       'No published path leads forward from Post.')
       expect(text(result)).to include('1. Comment (model) -[belongs_to]-> Post (model)')
-      expect(result.dig('structuredContent', 'data')).to include('direction' => 'reverse')
+      expect(text(result)).to include('Evidence: every hop is reflected')
+      expect(result.dig('structuredContent', 'data')).to include('direction' => 'reverse', 'evidence' => 'reflected')
     end
   end
 
