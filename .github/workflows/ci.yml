@@ -12,6 +12,9 @@ on:
   # Run the full matrix on any branch on request: a PR run skips the older
   # Ruby/Rails rows (`pr: false`), and a change those rows guard (booted
   # extraction on Rails 6.0 to 7.1) needs them before merge, not after.
+  # A pull request labeled `full-matrix` runs every row too: full-matrix.yml
+  # dispatches this workflow when the label is added, and WOODS_CI_ROW_ACTIVE
+  # keeps every row active on the labeled PR's later pushes.
   workflow_dispatch:
 
 # Keep only the newest automatic main/PR run. Release refs and reruns need
@@ -37,9 +40,15 @@ jobs:
   # (previously only verified by hand). tokenizers is install-gated off 4.0 in
   # the Gemfile; the suite falls back to the chars/token ratio there. Pull
   # requests run the security-maintained Rubies (`pr: true`); main and version
-  # tags run every row.
+  # tags run every row. WOODS_CI_ROW_ACTIVE decides whether a row runs, and the
+  # job name repeats its condition: a row a pull request skips is named
+  # "... (not run on PRs)", so its seconds-long green check does not read as
+  # tested. On main and tags the suffix is empty and the names are unchanged.
   test:
-    name: Unit specs (Ruby ${{ matrix.ruby-version }})
+    name: >-
+      Unit specs (Ruby ${{ matrix.ruby-version }})${{ !(github.event_name != 'pull_request' ||
+      matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
+      ' (not run on PRs)' || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: ${{ github.event_name == 'pull_request' }}
@@ -52,11 +61,15 @@ jobs:
           - { ruby-version: '4.0', puma: '~> 8.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
-      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
+      WOODS_CI_ROW_ACTIVE: >-
+        ${{ github.event_name != 'pull_request' || matrix.pr ||
+        contains(github.event.pull_request.labels.*.name, 'full-matrix') }}
     steps: &unit-steps
-      - name: Skipped on pull requests (a line without security support; runs on main and version tags)
+      - name: Skipped on pull requests (a line without security support; label full-matrix to run it)
         if: env.WOODS_CI_ROW_ACTIVE != 'true'
-        run: echo 'This row tests a Ruby or Rails line without security support. It runs on main and version tags.'
+        run: >-
+          echo 'This row tests a Ruby or Rails line without security support.
+          It runs on main, version tags, manual dispatches and pull requests labeled full-matrix.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
       - name: Set up Ruby ${{ matrix.ruby-version }}
@@ -111,7 +124,10 @@ jobs:
 
   # Coverage and retrieval quality must finish even if another Ruby row fails.
   test-required:
-    name: Unit specs (Ruby ${{ matrix.ruby-version }})
+    name: >-
+      Unit specs (Ruby ${{ matrix.ruby-version }})${{ !(github.event_name != 'pull_request' ||
+      matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
+      ' (not run on PRs)' || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -120,7 +136,9 @@ jobs:
           - { ruby-version: '3.3', puma: '~> 8.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
-      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
+      WOODS_CI_ROW_ACTIVE: >-
+        ${{ github.event_name != 'pull_request' || matrix.pr ||
+        contains(github.event.pull_request.labels.*.name, 'full-matrix') }}
     steps: *unit-steps
 
   # Exact advertised direct runtime floors, without the development Gemfile.
@@ -165,7 +183,10 @@ jobs:
   # 60-operation/3-seed profile, preserving the release evidence at the exact
   # candidate commit. spec/ci/pull_request_tier_spec.rb holds this contract.
   rails-matrix:
-    name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
+    name: >-
+      Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})${{ !(github.event_name !=
+      'pull_request' || matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
+      ' (not run on PRs)' || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: ${{ github.event_name == 'pull_request' }}
@@ -182,11 +203,15 @@ jobs:
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
-      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
+      WOODS_CI_ROW_ACTIVE: >-
+        ${{ github.event_name != 'pull_request' || matrix.pr ||
+        contains(github.event.pull_request.labels.*.name, 'full-matrix') }}
     steps: &rails-steps
-      - name: Skipped on pull requests (a line without security support; runs on main and version tags)
+      - name: Skipped on pull requests (a line without security support; label full-matrix to run it)
         if: env.WOODS_CI_ROW_ACTIVE != 'true'
-        run: echo 'This row tests a Ruby or Rails line without security support. It runs on main and version tags.'
+        run: >-
+          echo 'This row tests a Ruby or Rails line without security support.
+          It runs on main, version tags, manual dispatches and pull requests labeled full-matrix.'
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' }}
       - name: Set up Ruby ${{ matrix.ruby }} (Rails ${{ matrix.rails }})
@@ -317,7 +342,10 @@ jobs:
 
   # Optional fixture bundles must finish even if another Rails row fails.
   rails-required:
-    name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
+    name: >-
+      Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})${{ !(github.event_name !=
+      'pull_request' || matrix.pr || contains(github.event.pull_request.labels.*.name, 'full-matrix')) &&
+      ' (not run on PRs)' || '' }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -327,7 +355,9 @@ jobs:
     env:
       BUNDLE_GEMFILE: gemfiles/rails_${{ matrix.rails }}.gemfile
       WOODS_RUN_BOOTED_APP: '1'
-      WOODS_CI_ROW_ACTIVE: ${{ github.event_name != 'pull_request' || matrix.pr }}
+      WOODS_CI_ROW_ACTIVE: >-
+        ${{ github.event_name != 'pull_request' || matrix.pr ||
+        contains(github.event.pull_request.labels.*.name, 'full-matrix') }}
     steps: *rails-steps
 
   # Storage adapters against real servers (#220), plus the session tracer

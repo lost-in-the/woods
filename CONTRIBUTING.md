@@ -156,6 +156,15 @@ The gem supports Ruby 3.0 or later and Rails 6.0 through 8.x. CI separates fast 
 - the base test job runs unit specs across supported Ruby versions;
 - the `rails-matrix` job boots `spec/dummy` and performs extraction for each supported Rails line using `gemfiles/rails_*.gemfile`.
 
+A pull request runs only the rows of Ruby and Rails lines that still receive security releases.
+It skips unit specs on Ruby 3.0, 3.1 and 3.2, and booted extraction on Rails 6.0, 6.1, 7.0 and 7.1.
+Those checks still report, finish green in seconds, and are named `... (not run on PRs)`.
+`main` and version tags run every row under the unsuffixed names.
+To run every row on a pull request, add the `full-matrix` label.
+Adding it dispatches CI on the branch at full depth (`.github/workflows/full-matrix.yml`).
+Later pushes to the labeled pull request run every row at smoke depth.
+A pull request from a fork gets no dispatch, only the later pushes.
+
 Run one Rails row locally:
 
 ```bash

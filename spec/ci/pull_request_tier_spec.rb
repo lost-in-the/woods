@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'yaml'
+require_relative '../../script/release_profile'
 
 # Pull requests run the Ruby and Rails lines that still receive security
 # releases, each at its newest patch (the gemfiles pin `~> X.Y.0` with no
@@ -9,7 +10,8 @@ require 'yaml'
 # End-of-life lines run on main and version tags, which keep the full matrix
 # and the full incremental-equivalence depth. Every row still reports a
 # result on a pull request, so a required check never waits on a row that
-# was not scheduled.
+# was not scheduled; a skipped row's name ends in " (not run on PRs)".
+# The `full-matrix` label runs every row on a pull request.
 #
 # Security support, as of 2026-10-28 (rubyonrails.org/maintenance,
 # ruby-lang.org/en/downloads/branches): Rails 8.1 (to 2027-10-10) and 8.0
@@ -19,7 +21,15 @@ RSpec.describe 'CI pull request tier' do
   let(:jobs) do
     YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true).fetch('jobs')
   end
-  let(:active) { "${{ github.event_name != 'pull_request' || matrix.pr }}" }
+  # One condition decides whether a row runs, and the same text names the row:
+  # a pull request without the `full-matrix` label skips the `pr: false` rows,
+  # and their check names say so.
+  let(:condition) do
+    "github.event_name != 'pull_request' || matrix.pr || " \
+      "contains(github.event.pull_request.labels.*.name, 'full-matrix')"
+  end
+  let(:active) { "${{ #{condition} }}" }
+  let(:suffix) { "${{ !(#{condition}) && ' (not run on PRs)' || '' }}" }
 
   def rows(*ids)
     ids.flat_map { |id| jobs.fetch(id).dig('strategy', 'matrix', 'include') }
@@ -53,7 +63,50 @@ RSpec.describe 'CI pull request tier' do
     expect(active).to start_with("${{ github.event_name != 'pull_request'")
   end
 
+  # A run with the `full-matrix` label starts as soon as the label is added.
+  # A separate workflow dispatches CI for that one label, so other label
+  # events neither start nor cancel a CI run.
+  it 'dispatches the full matrix when the full-matrix label is added' do
+    workflow = YAML.safe_load_file(File.expand_path('../../.github/workflows/full-matrix.yml', __dir__))
+    triggers = workflow['on'] || workflow[true]
+    ci = YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true)
+    ci_triggers = ci['on'] || ci[true]
+
+    expect(triggers).to eq('pull_request' => { 'types' => ['labeled'] })
+    expect(ci_triggers.fetch('pull_request')).not_to have_key('types')
+    expect(workflow.fetch('jobs').size).to eq(1)
+    job = workflow.fetch('jobs').values.first
+    expect(job.fetch('if')).to include("github.event.label.name == 'full-matrix'",
+                                       'github.event.pull_request.head.repo.full_name == github.repository')
+    expect(job.fetch('permissions')).to eq('actions' => 'write')
+    expect(job.fetch('steps').map { |step| step.fetch('run') }.join).to include('gh workflow run ci.yml')
+  end
+
+  # On main and tags the condition is true, so the suffix renders empty and the
+  # check names stay the ones script/validate-release-run and the release
+  # profile match.
+  it 'keeps the check names of main and tag runs unchanged' do
+    names = %w[test test-required rails-matrix rails-required].flat_map do |id|
+      job = jobs.fetch(id)
+      job.dig('strategy', 'matrix', 'include').map do |row|
+        job.fetch('name').delete_suffix(suffix).gsub(/\$\{\{ matrix\.([\w-]+) \}\}/) { row.fetch(Regexp.last_match(1)) }
+      end
+    end
+
+    expect(names).to contain_exactly(
+      *%w[3.0 3.1 3.2 3.3 3.4 4.0].map { |ruby| "Unit specs (Ruby #{ruby})" },
+      *[%w[3.0 6.0], %w[3.0 6.1], %w[3.1 7.0], %w[3.2 7.1], %w[3.3 7.2], %w[3.3 8.0], %w[3.4 8.1], %w[4.0 8.0],
+        %w[4.0 8.1]].map { |ruby, rails| "Booted extraction (Ruby #{ruby} / Rails #{rails})" }
+    )
+    expect(ReleaseProfile::MAINTENANCE_JOBS.grep(/\A(Unit specs|Booted extraction) /) - names).to be_empty
+  end
+
   %w[test test-required rails-matrix rails-required].each do |id|
+    it "names #{id} rows that a pull request skips with the same condition that gates them" do
+      job = jobs.fetch(id)
+      expect(job.fetch('name')).to end_with(")#{suffix}")
+    end
+
     it "gates every step of #{id} on whether its row runs for this event" do
       job = jobs.fetch(id)
       expect(job.fetch('env')).to include('WOODS_CI_ROW_ACTIVE' => active)
