@@ -144,12 +144,17 @@ module Woods
 
         # The unit's own definitions of the member, latest first.
         def own_candidates(unit, level)
-          class_methods = ConcernClassMethods.own_lines(unit['source_code'], unit['identifier'])
+          name = written_name(unit)
+          class_methods = ConcernClassMethods.own_lines(unit['source_code'], name)
           entries = LookupMember.methods_of(unit).select do |entry|
-            entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == unit['identifier'] &&
+            entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
               @reference.kind?(entry) && !class_methods.include?(entry['line'])
           end
           candidates(entries, unit, level, :own, nil)
+        end
+
+        def written_name(unit)
+          (@written_names ||= {})[unit['identifier']] ||= WrittenName.call(unit['source_code'], unit['identifier'])
         end
 
         # An inlined concern's definitions of the member, latest first, read
@@ -183,7 +188,7 @@ module Woods
         # The inlined concerns the unit's own body prepends, nearest first,
         # and the prepended constants whose source is not inlined at this level.
         def prepends(unit, inlined)
-          written = Prepends.names(unit['source_code'], unit['identifier'])
+          written = Prepends.names(unit['source_code'], written_name(unit))
           matched = written.map do |name|
             found = inlined.select { |concern| concern == name || concern.end_with?("::#{name}") }
             found.size == 1 ? found.first : nil
@@ -273,6 +278,49 @@ module Woods
                 end
           @caveats << "The superclass chain of #{@unit['identifier']} was read only up to #{last}: #{why}, so " \
                       'a definition in a superclass Woods did not read could come before this inlined concern.'
+        end
+
+        # The name a unit's own class or module declaration has in its
+        # published source, which is the name its method table records as
+        # the owner. That is the identifier, except for a class an extractor
+        # publishes as its own lexical range out of an enclosing class's body
+        # (a nested job or PORO): the range opens `class Preview`, so its
+        # definitions are owned by `Preview`, not by `Outer::Preview`.
+        module WrittenName
+          module_function
+
+          # @param source [String, nil] the unit's published source
+          # @param identifier [String] the unit's identifier
+          # @return [String] the identifier when a declaration in the source
+          #   qualifies to it; else the longest top-level declaration that
+          #   names the identifier's trailing constants; else the identifier
+          def call(source, identifier)
+            return identifier unless source.is_a?(String)
+
+            parsed = Woods::ParseCache.parse(source)
+            return identifier if parsed.errors.any?
+
+            top = declarations(parsed.value.statements, nil, [])
+            return identifier if top.any? { |(_, inner)| inner.include?(identifier) }
+
+            suffixes = top.map(&:first).select { |name| identifier.end_with?("::#{name}") }
+            suffixes.max_by(&:length) || identifier
+          end
+
+          # [top-level declaration name, every qualified name declared in it]
+          def declarations(node, owner, found)
+            ConcernClassMethods.statements(node).each do |statement|
+              next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
+
+              inner = MethodTable::Names.qualified(owner, statement.constant_path)
+              next unless inner
+
+              found << [inner, []] if owner.nil?
+              found.last[1] << inner
+              declarations(statement.body, inner, found)
+            end
+            found
+          end
         end
 
         # `prepend` calls written directly in a unit's own class or module

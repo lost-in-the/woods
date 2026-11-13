@@ -11,6 +11,7 @@ require 'woods/file_lines'
 require 'woods/source_line_map'
 require 'woods/extractors/model_extractor'
 require 'woods/extractors/controller_extractor'
+require 'woods/extractors/job_extractor'
 require 'woods/mcp/lookup_member'
 
 # Fixture classes and modules for the lookup member runtime oracle.
@@ -324,7 +325,7 @@ LookupMemberOracle::FIXTURES = {
       end
     end
   RUBY
-  'app/controllers/lookup_oracle/leaf_controller.rb' => <<~RUBY
+  'app/controllers/lookup_oracle/leaf_controller.rb' => <<~RUBY,
     module LookupOracle
       class LeafController < MidController
         include Stamping
@@ -334,6 +335,39 @@ LookupMemberOracle::FIXTURES = {
 
         def index
           :leaf
+        end
+      end
+    end
+  RUBY
+  'app/jobs/lookup_oracle/report_job.rb' => <<~RUBY
+    module LookupOracle
+      class ReportJob
+        def perform
+          :outer
+        end
+
+        def self.queue_label
+          :outer
+        end
+
+        def render_page
+          :outer
+        end
+
+        class Preview < ReportJob
+          def perform
+            :preview
+          end
+
+          def self.queue_label
+            :preview
+          end
+
+          class Draft < Preview
+            def perform
+              :draft
+            end
+          end
         end
       end
     end
@@ -354,7 +388,9 @@ LookupMemberOracle::UNITS = [
   %w[LookupOracle::BaseController controller], %w[LookupOracle::MidController controller],
   %w[LookupOracle::LeafController controller],
   %w[LookupOracle::Stamping concern], %w[LookupOracle::Tagging concern], %w[LookupOracle::Grouping concern],
-  %w[LookupOracle::Helpers lib]
+  %w[LookupOracle::Helpers lib],
+  %w[LookupOracle::ReportJob job], %w[LookupOracle::ReportJob::Preview job],
+  %w[LookupOracle::ReportJob::Preview::Draft job]
 ].freeze
 
 # Every method name the fixtures define, asked of every unit as `#` and `.`.
@@ -411,7 +447,11 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     klass = Object.const_get(identifier)
     path = path_of(identifier)
     original = LookupMemberOracle::FIXTURES.fetch(path)
-    source = %w[model controller].include?(type) ? inlined(klass, type, original) : original
+    source = case type
+             when 'model', 'controller' then inlined(klass, type, original)
+             when 'job' then job_source(identifier, original)
+             else original
+             end
     locator = Woods::FileLines::Locator.new(source, Woods::SourceLineMap.build(original, source),
                                             identity_lines: Woods::SourceLineMap.identity_lines(original, source))
     metadata = { 'methods' => Woods::MethodTable.call(source).map { |entry| locator.annotate(entry) } }
@@ -430,6 +470,13 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     extractor = (model ? Woods::Extractors::ModelExtractor : Woods::Extractors::ControllerExtractor).allocate
     sources = modules.map { |mod| [mod.name, LookupMemberOracle::FIXTURES.fetch(path_of(mod.name))] }
     extractor.send(:insert_concern_block, klass, original, extractor.send(:build_concern_block, sources))
+  end
+
+  # A job's source as the job extractor publishes it: a class nested in
+  # another class's body is its own lexical range, under the job banner.
+  def job_source(identifier, original)
+    extractor = Woods::Extractors::JobExtractor.allocate
+    extractor.send(:annotate_source, extractor.send(:lexical_source, original, identifier), identifier)
   end
 
   # The `:inheritance` edge extraction records to a published parent.
@@ -462,11 +509,21 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     { 'file' => file, 'line' => line, 'visibility' => visibility }
   end
 
-  # The definition a resolved answer names, as file and line.
+  # The definition a resolved answer names, as file and line. A unit
+  # published as a slice of its file has no mapped file lines; its definition
+  # is then placed where its published text occurs in the file, once.
   def named(data)
     file = data.dig('inherited_from', 'file_path') || data.dig('defined_in', 'file_path') ||
            data.dig('member_of', 'file_path')
-    { 'file' => file, 'line' => data.dig('member', 'file_line'), 'visibility' => data.dig('member', 'visibility') }
+    line = data.dig('member', 'file_line') || placed(file, data['source_code'])
+    { 'file' => file, 'line' => line, 'visibility' => data.dig('member', 'visibility') }
+  end
+
+  def placed(file, text)
+    lines = LookupMemberOracle::FIXTURES.fetch(file, '').lines
+    wanted = text.to_s.lines
+    starts = (0..(lines.size - wanted.size)).select { |index| lines[index, wanted.size] == wanted }
+    starts.first + 1 if starts.size == 1 && !wanted.empty?
   end
 
   def candidate_sites(data)
@@ -604,6 +661,57 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       data = answer('LookupOracle::OrphanRecord#tag_label')
 
       expect(data['caveats']).to include(a_string_including('LookupOracle::HiddenBase is not a published unit'))
+    end
+  end
+
+  # A class nested in the body of its own superclass is published as its
+  # own lexical range, where its declaration reads `class Preview`, not the
+  # identifier.
+  describe 'a class nested inside its own superclass (N1)' do
+    it 'publishes the nested class as its own slice, as the job extractor does' do
+      source = units['LookupOracle::ReportJob::Preview']['source_code']
+
+      expect(source).to include('class Preview < ReportJob').and include(':draft')
+      expect(source).not_to include(':outer')
+    end
+
+    it "answers the nested class's own instance and class methods from its own body" do
+      instance = answer('LookupOracle::ReportJob::Preview#perform')
+      singleton = answer('LookupOracle::ReportJob::Preview.queue_label')
+
+      expect(instance).not_to have_key('inherited_from')
+      expect(instance['source_code']).to eq("      def perform\n        :preview\n      end\n")
+      expect(instance['other_definitions'].map { |entry| entry['unit'] }).to eq(%w[LookupOracle::ReportJob])
+      expect(singleton).not_to have_key('inherited_from')
+      expect(singleton['member']).to include('kind' => 'singleton')
+      expect(singleton['source_code']).to include(':preview')
+    end
+
+    it 'reports no file line for a definition in a slice, which carries no source_line_map' do
+      expect(answer('LookupOracle::ReportJob::Preview#perform')['member']).to include('file_line' => nil)
+    end
+
+    it 'answers a class nested two levels down from its own body' do
+      data = answer('LookupOracle::ReportJob::Preview::Draft#perform')
+
+      expect(data).not_to have_key('inherited_from')
+      expect(data['source_code']).to include(':draft')
+      expect(data['other_definitions'].map { |entry| entry['unit'] })
+        .to eq(%w[LookupOracle::ReportJob::Preview LookupOracle::ReportJob])
+    end
+
+    it 'answers a name the nested class does not define as inherited from the nearest level that does' do
+      expect(answer('LookupOracle::ReportJob::Preview::Draft.queue_label')['inherited_from'])
+        .to include('identifier' => 'LookupOracle::ReportJob::Preview')
+      expect(answer('LookupOracle::ReportJob::Preview#render_page')['inherited_from'])
+        .to include('identifier' => 'LookupOracle::ReportJob')
+    end
+
+    it 'keeps answering the enclosing class from its own definitions, not the nested ones' do
+      data = answer('LookupOracle::ReportJob#perform')
+
+      expect(data['member']).to include('owner' => 'LookupOracle::ReportJob', 'file_line' => 3)
+      expect(data).not_to have_key('other_definitions')
     end
   end
 end

@@ -497,6 +497,9 @@ inlined from a concern (and through which superclass), or from a module the owne
 An answer from a superclass's own body names that unit in `inherited_from`; `member_of` stays the asked owner, and
 the entry's `unit` names the published source its `line` counts in.
 `other_definitions` lists the definitions the answer overrides.
+A class nested in the body of another class (its own superclass, for example) and published as its own lexical
+range, as a nested job or PORO is, answers from the definitions in that range, not the enclosing class's.
+Such a range carries no `source_line_map`, so its file lines are reported as not mapped.
 
 What the index cannot settle is said, never guessed:
 

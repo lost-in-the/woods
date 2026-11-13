@@ -62,4 +62,26 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
 
     expect(resolve(units, 'Child#call').chosen.unit['identifier']).to eq('Parent')
   end
+
+  describe Woods::MCP::LookupMember::Resolution::WrittenName do
+    it 'is the identifier when a declaration in the source qualifies to it' do
+      source = "class Outer\n  class Inner < Outer\n  end\nend\n"
+
+      expect(described_class.call(source, 'Outer::Inner')).to eq('Outer::Inner')
+    end
+
+    it "is the slice's own declaration for a class published as its own lexical range" do
+      expect(described_class.call("  class Inner < Outer\n  end\n", 'App::Outer::Inner')).to eq('Inner')
+    end
+
+    it 'does not take a top-level class of the same short name when the identifier is declared in full' do
+      source = "class Inner\nend\nmodule App\n  class Inner\n  end\nend\n"
+
+      expect(described_class.call(source, 'App::Inner')).to eq('App::Inner')
+    end
+
+    it 'is the identifier when the source does not parse' do
+      expect(described_class.call("class Inner\n", 'App::Inner')).to eq('App::Inner')
+    end
+  end
 end

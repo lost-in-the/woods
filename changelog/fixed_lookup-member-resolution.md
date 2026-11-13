@@ -9,3 +9,5 @@
   inlined-concern answer, adds a `caveats` entry. A concern unit no longer answers `Concern.x` for a definition in
   its own `class_methods do` block; the not-found answer says it is a class method the concern gives to its
   includers. The `statement` now says how the answer was established (own body, inherited, inlined, prepended).
+  A class nested in its own superclass's body, published as its own lexical range (a nested job or PORO), answered
+  the enclosing class's definition of the name; it now answers its own, and inherits only what it does not define.
