@@ -16,6 +16,9 @@ require 'woods/extractors/controller_extractor'
 require 'woods/extractors/job_extractor'
 require 'woods/extractors/service_extractor'
 require 'woods/mcp/lookup_member'
+require 'woods/mcp/tool_response_renderer'
+require 'woods/mcp/renderers/plain_renderer'
+require 'woods/mcp/renderers/markdown_renderer'
 
 # Fixture classes and modules for the lookup member runtime oracle.
 module LookupMemberOracle
@@ -192,6 +195,80 @@ LookupMemberOracle::FIXTURES = {
 
         def seal
           :own
+        end
+      end
+    end
+  RUBY
+  'app/models/concerns/lookup_oracle/bundling.rb' => <<~RUBY,
+    module LookupOracle
+      module Bundling
+        extend ActiveSupport::Concern
+        include Sorting
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/abstract_base.rb' => <<~RUBY,
+    module LookupOracle
+      class AbstractBase
+        include Linking
+
+        def link_target
+          :abstract
+        end
+
+        def tag_label
+          :abstract
+        end
+
+        def shared_name
+          :abstract
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/direct_record.rb' => <<~RUBY,
+    module LookupOracle
+      class DirectRecord < AbstractBase
+        include Tagging
+        include Bundling
+      end
+    end
+  RUBY
+  'app/models/concerns/lookup_oracle/wrapping.rb' => <<~RUBY,
+    module LookupOracle
+      module Wrapping
+        def wrap_call
+          :wrapping
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/wrap_base.rb' => <<~RUBY,
+    module LookupOracle
+      class WrapBase
+        prepend Wrapping
+
+        def wrap_call
+          :wrap_base
+        end
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/rewrapped_reader.rb' => <<~RUBY,
+    module LookupOracle
+      class RewrappedReader < WrapBase
+        prepend Wrapping
+        attr_reader :wrap_call, :wrap_label
+      end
+    end
+  RUBY
+  'app/models/lookup_oracle/rewrapped_record.rb' => <<~RUBY,
+    module LookupOracle
+      class RewrappedRecord < WrapBase
+        prepend Wrapping
+
+        def wrap_call
+          :rewrapped
         end
       end
     end
@@ -402,6 +479,10 @@ LookupMemberOracle::FIXTURES = {
           nil
         end
 
+        def self.some_dsl(*names)
+          names.each { |name| define_method(name) { :dsl } }
+        end
+
         def self.build
           :base
         end
@@ -493,6 +574,26 @@ LookupMemberOracle::FIXTURES = {
         def checked
           :base
         end
+
+        def secondary
+          :base
+        end
+
+        def guardian
+          :base
+        end
+
+        def second_item
+          :base
+        end
+
+        def alpha_name
+          :base
+        end
+
+        def beta_name
+          :base
+        end
       end
     end
   RUBY
@@ -550,6 +651,16 @@ LookupMemberOracle::FIXTURES = {
         private_class_method :quiet
         helper_method :exposed
         validates :checked
+        attr_reader :primary, :secondary
+        protected
+
+        attr_reader :guardian
+        public
+
+        delegate :first_item,
+                 :second_item,
+                 to: :helper
+        some_dsl :alpha_name, :beta_name
       end
     end
   RUBY
@@ -580,15 +691,19 @@ LookupMemberOracle::LOCATED_ELSEWHERE = %w[alias alias_method def_delegator def_
 
 # Modules the extractors would treat as application concerns. The top-level
 # tracing module is application code but not a concern, so it is not inlined.
-LookupMemberOracle::CONCERNS = %w[Linking Stamping Tagging Sorting Grouping Auditing Signing Sealing Helpers]
-                               .map { |name| "LookupOracle::#{name}" }.freeze
+LookupMemberOracle::CONCERNS = %w[
+  Linking Stamping Tagging Sorting Grouping Auditing Signing Sealing Bundling Wrapping Helpers
+].map { |name| "LookupOracle::#{name}" }.freeze
 
-# [identifier, type]; HiddenBase is deliberately not published.
+# [identifier, type]; HiddenBase and AbstractBase are deliberately not published (as an abstract
+# `ApplicationRecord` is not).
 LookupMemberOracle::UNITS = [
   %w[LookupOracle::BaseRecord model], %w[LookupOracle::MidRecord model], %w[LookupOracle::LeafRecord model],
   %w[LookupOracle::PrependedRecord model], %w[LookupOracle::TracedRecord model],
   %w[LookupOracle::OrphanRecord model], %w[LookupOracle::SealedRecord model],
   %w[LookupOracle::CoSealedRecord model], %w[LookupOracle::TwiceSealedRecord model],
+  %w[LookupOracle::DirectRecord model], %w[LookupOracle::WrapBase model], %w[LookupOracle::RewrappedRecord model],
+  %w[LookupOracle::RewrappedReader model],
   %w[LookupOracle::BaseController controller], %w[LookupOracle::MidController controller],
   %w[LookupOracle::LeafController controller],
   %w[LookupOracle::Stamping concern], %w[LookupOracle::Tagging concern], %w[LookupOracle::Grouping concern],
@@ -743,7 +858,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
   def candidate_sites(data)
     data['candidates'].map do |candidate|
-      file = candidate.dig('inherited_from', 'file_path') || candidate.dig('defined_in', 'file_path')
+      file = candidate.dig('inherited_from', 'file_path') || candidate.dig('defined_in', 'file_path') ||
+             data.dig('member_of', 'file_path')
       { 'file' => file, 'line' => candidate.dig('member', 'file_line') }
     end
   end
@@ -756,8 +872,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     data = answer(identifier)
     return unanswered_verdict(identifier, truth) unless data
     return macro_verdict(identifier, reference, data, truth) if data.dig('member', 'defined_by')
+    return candidates_verdict(identifier, reference, data, truth) if data['candidates']
     return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
-    return candidates_verdict(identifier, data, truth) if data['candidates']
     return :exact if named(data) == truth
     return :stated if Array(data['caveats']).any?
 
@@ -769,7 +885,6 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
   # line Ruby reports where that is the call, with its visibility where the
   # answer states one.
   def macro_verdict(identifier, reference, data, truth)
-    return :stated if data['statement'].include?('cannot tell')
     return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
 
     wrong_owner = owner_violation(identifier, reference, data)
@@ -779,6 +894,24 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     site = named(data)
     site.delete('visibility') unless data['member'].key?('visibility')
     site == truth.slice(*site.keys) ? :exact : "#{identifier}: answered #{site}, Ruby calls #{truth}"
+  end
+
+  # A cannot-tell answer whose first candidate is a call Woods does not know.
+  def possible_macro?(data)
+    data['candidates']&.first&.dig('member', 'defined_by')
+  end
+
+  # Right when it says it cannot tell and Ruby does not respond (the call
+  # only may define it), calls one of the candidates, or calls a method the
+  # macro's level owns (the call defined it).
+  def possible_macro_verdict(identifier, reference, data, truth)
+    return "#{identifier}: a macro candidate without cannot tell" unless data['statement'].include?('cannot tell')
+    return :stated if truth.nil? || candidate_sites(data).include?(truth.slice('file', 'line'))
+
+    level = data.merge('inherited_from' => data['candidates'].first['inherited_from'])
+    return :stated unless owner_violation(identifier, reference, level)
+
+    "#{identifier}: candidates #{candidate_sites(data)} miss #{truth}"
   end
 
   # A violation String unless Ruby's owner of the method is the answer's
@@ -794,13 +927,16 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
   # Not answered: right when Ruby does not respond, or calls a definition no
   # published unit holds.
   def unanswered_verdict(identifier, truth)
-    hidden = path_of('LookupOracle::HiddenBase')
-    return :exact unless truth && LookupMemberOracle::FIXTURES.key?(truth['file']) && truth['file'] != hidden
+    hidden = %w[LookupOracle::HiddenBase LookupOracle::AbstractBase].map { |name| path_of(name) }
+    return :exact unless truth && LookupMemberOracle::FIXTURES.key?(truth['file']) && !hidden.include?(truth['file'])
 
     "#{identifier}: not answered, Ruby calls #{truth}"
   end
 
-  def candidates_verdict(identifier, data, truth)
+  def candidates_verdict(identifier, reference, data, truth)
+    return possible_macro_verdict(identifier, reference, data, truth) if possible_macro?(data)
+    return "#{identifier}: candidates #{candidate_sites(data)}, Ruby does not respond" unless truth
+
     sites = candidate_sites(data)
     return :stated if sites.include?(truth.slice('file', 'line')) && data['statement'].include?('cannot tell')
 
@@ -820,9 +956,28 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     # macro it does not know, on either side.
     expect(verdicts.select { |_, verdict| verdict == :stated }.keys).to contain_exactly(
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
+      'LookupOracle::DirectRecord#link_target',
       'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for',
-      *%w[MacroRecord MacroChild].product(%w[#refresh #archive .refresh .archive])
-                                 .map { |owner, name| "LookupOracle::#{owner}#{name}" }
+      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name], %w[# .])
+                                 .map { |owner, name, side| "LookupOracle::#{owner}#{side}#{name}" }
+    )
+  end
+
+  it 'states a caveat only where the published source cannot place the answer' do
+    identifiers = LookupMemberOracle::UNITS.flat_map do |(owner, _)|
+      LookupMemberOracle::NAMES.flat_map { |name| ["#{owner}##{name}", "#{owner}.#{name}"] }
+    end
+
+    # A prepend of a module the index does not publish (every TracedRecord
+    # answer), a concern that reaches the unit only through an unread
+    # superclass (OrphanRecord's Tagging, DirectRecord's Linking). A macro
+    # Woods does not know lists what it may override as candidates instead.
+    expect(identifiers.select { |identifier| answer(identifier)&.key?('caveats') }).to contain_exactly(
+      'LookupOracle::TracedRecord#tag_label', 'LookupOracle::TracedRecord#shared_name',
+      'LookupOracle::TracedRecord.finder_for', 'LookupOracle::TracedRecord#trace_call',
+      'LookupOracle::OrphanRecord#tag_label', 'LookupOracle::OrphanRecord#shared_name',
+      'LookupOracle::OrphanRecord.finder_for',
+      'LookupOracle::DirectRecord#link_target', 'LookupOracle::DirectRecord.link_scope'
     )
   end
 
@@ -908,6 +1063,43 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
       expect(data['caveats']).to include(a_string_including('LookupOracle::HiddenBase is not a published unit'))
     end
+
+    it 'needs no caveat for a concern the unit itself includes, under an unpublished parent' do
+      data = answer('LookupOracle::DirectRecord#tag_label')
+
+      expect(data['defined_in']).to include('identifier' => 'LookupOracle::Tagging')
+      expect(data).not_to have_key('caveats')
+    end
+
+    it 'places a concern an included concern depends on at the level that includes it' do
+      data = answer('LookupOracle::DirectRecord#shared_name')
+
+      expect(data['defined_in']).to include('identifier' => 'LookupOracle::Sorting')
+      expect(data).not_to have_key('caveats')
+    end
+
+    it 'says why when the concern reaches the unit only through the unpublished parent' do
+      expect(answer('LookupOracle::DirectRecord#link_target')['caveats']).to eq(
+        ['No unit Woods read (LookupOracle::DirectRecord) includes LookupOracle::Linking in its own body, so ' \
+         'LookupOracle::DirectRecord includes it through a superclass Woods did not read (its parent ' \
+         'LookupOracle::AbstractBase is not a published unit); that superclass\'s own definition of link_target ' \
+         'could come first.']
+      )
+    end
+
+    it 'puts a re-prepended plain module before an attr_reader of the same name, and reads the macro otherwise' do
+      data = answer('LookupOracle::RewrappedReader#wrap_call')
+
+      expect(data['defined_in']).to include('identifier' => 'LookupOracle::Wrapping', 'prepended' => true)
+      expect(data['other_definitions']).to include(include('defined_by' => 'attr_reader', 'file_line' => 4))
+      expect(answer('LookupOracle::RewrappedReader#wrap_label')['member']).to include('defined_by' => 'attr_reader')
+    end
+
+    it 'prepends a plain module again where a subclass prepends it, but not a concern' do
+      expect(answer('LookupOracle::RewrappedRecord#wrap_call')['defined_in'])
+        .to include('identifier' => 'LookupOracle::Wrapping', 'prepended' => true)
+      expect(answer('LookupOracle::CoSealedRecord#seal')).not_to have_key('caveats')
+    end
   end
 
   # A class nested in the body of its own superclass is published as its
@@ -979,7 +1171,10 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       'LookupOracle::MacroRecord.build' => ['attr_reader', 32],
       'LookupOracle::MacroRecord.label' => ['define_singleton_method', 35],
       'LookupOracle::ForwardedRecord#perform' => ['def_delegator', 5],
-      'LookupOracle::ForwardedRecord#runner' => ['def_delegators', 6]
+      'LookupOracle::ForwardedRecord#runner' => ['def_delegators', 6],
+      'LookupOracle::MacroRecord#secondary' => ['attr_reader', 54],
+      'LookupOracle::MacroRecord#guardian' => ['attr_reader', 57],
+      'LookupOracle::MacroRecord#second_item' => ['delegate', 60]
     }.each do |identifier, (macro, line)|
       it "answers #{identifier} as defined in its own body by #{macro}" do
         data = answer(identifier)
@@ -1033,18 +1228,55 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     it 'says it cannot tell for a macro it does not know, without presenting the superclass def as the answer' do
       %w[LookupOracle::MacroRecord#refresh LookupOracle::MacroRecord#archive].each do |identifier|
         data = answer(identifier)
+        macro, fallback, *rest = data['candidates']
 
-        expect(data['member']).to include('defined_by' => a_string_matching(/\A(field|column)\z/))
+        expect(data.keys).not_to include('member', 'source_code', 'other_definitions', 'caveats')
+        expect(macro['member']).to include('defined_by' => a_string_matching(/\A(field|column)\z/))
+        expect(macro['note']).to start_with("may define #{identifier[/\w+\z/]}")
+        expect(macro).not_to include('inherited_from', 'defined_in')
+        expect(macro['source_code']).to match(/\A    (field|column) :/)
+        expect(fallback).to include('inherited_from' => include('identifier' => 'LookupOracle::MacroBase'))
+        expect(rest).to be_empty
         expect(data['statement']).to include('may define').and include('cannot tell')
-        expect(data).not_to have_key('other_definitions')
-        expect(data['caveats']).to include(a_string_including('LookupOracle::MacroBase also defines'))
+      end
+    end
+
+    it 'labels each cannot-tell candidate with the unit that holds it in the text renderers' do
+      data = answer('LookupOracle::MacroRecord#refresh')
+      plain = Woods::MCP::Renderers::PlainRenderer.new.render(:lookup_member, data)
+      markdown = Woods::MCP::Renderers::MarkdownRenderer.new.render(:lookup_member, data)
+
+      expect(plain).to include('Candidate 1: LookupOracle::MacroRecord (may define refresh')
+        .and include('Candidate 2: LookupOracle::MacroBase')
+      expect(markdown).to include('### Candidate 1: LookupOracle::MacroRecord (may define refresh')
+        .and include('### Candidate 2: LookupOracle::MacroBase')
+    end
+
+    it 'reads attr_reader under a bare protected as protected' do
+      expect(answer('LookupOracle::MacroRecord#guardian')['member']).to include('visibility' => 'protected')
+    end
+
+    it 'answers a multi-line delegate from the whole call' do
+      data = answer('LookupOracle::MacroRecord#second_item')
+
+      expect(data['member']).to include('line' => data['member']['end_line'] - 2)
+      expect(data['source_code']).to include(':second_item,').and include('to: :helper')
+    end
+
+    it 'stops at an unknown macro for every literal it carries, and says it cannot tell' do
+      %w[alpha_name beta_name].each do |name|
+        data = answer("LookupOracle::MacroRecord##{name}")
+
+        expect(data.keys).not_to include('member', 'other_definitions')
+        expect(data['candidates'].first['member']).to include('defined_by' => 'some_dsl', 'file_line' => 63)
+        expect(data['statement']).to include('may define').and include('cannot tell')
       end
     end
 
     it 'says it cannot tell through a superclass level whose macro it does not know' do
       data = answer('LookupOracle::MacroChild#refresh')
 
-      expect(data['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
+      expect(data['candidates'].first['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
       expect(data['statement']).to include('cannot tell')
     end
 

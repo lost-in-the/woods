@@ -15,10 +15,12 @@ module Woods
         def render_lookup_member(data, **)
           owner = data['member_of'] || {}
           lines = ["#{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", DIVIDER,
-                   data['statement'], '', *member_location_lines(data)]
+                   data['statement']]
+          location = member_location_lines(data)
+          lines.push('', *location) unless location.empty?
           lines.push('', data['source_code'].chomp) if data['source_code']
           Array(data['candidates']).each_with_index do |candidate, index|
-            lines.push('', "Candidate #{index + 1}: #{candidate.dig('defined_in', 'identifier')}",
+            lines.push('', "Candidate #{index + 1}: #{candidate_label(candidate, data)}",
                        *definition_location_lines(candidate, data))
             lines.push('', candidate['source_code'].chomp) if candidate['source_code']
           end

@@ -11,6 +11,12 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
       'source_code' => "class #{identifier} < #{parent}\n#{body}end\n", 'metadata' => { 'parent_class' => parent } }
   end
 
+  # An inlined Tagging concern block, as the extractors frame it.
+  def tagging_block
+    ['# ┌─┐', "# │ Included from: Tagging#{' ' * 47}│", '# └─┘', '  # module Tagging', '  #   def label; end',
+     '  # end', '# ─────── End Tagging ───────'].map { |line| "#{line}\n" }.join
+  end
+
   def resolve(units, identifier)
     reference = Woods::MCP::LookupMember.parse(identifier)
     find = ->(name, _type) { units[name] }
@@ -42,17 +48,40 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
   end
 
   it "stops an inlining unit's walk at a parent published as a type that does not inline concerns" do
-    block = "# ┌─┐\n# │ Included from: Tagging                                               │\n# └─┘\n  " \
-            "# module Tagging\n  #   def label; end\n  # end\n# ─────── End Tagging ───────\n"
+    block = tagging_block
     units = { 'Post' => unit('Post', 'Record', block, type: 'model'),
               'Record' => unit('Record', 'Object', "  def label; end\n", type: 'poro') }
 
     resolution = resolve(units, 'Post#label')
     expect(resolution.chosen.concern).to eq('Tagging')
-    expect(resolution.caveats).to eq(['The superclass chain of Post was read only up to Post: its parent Record is ' \
-                                      'published as a poro unit, which does not inline its concerns, so a ' \
-                                      'definition in a superclass Woods did not read could come before this ' \
-                                      'inlined concern.'])
+    expect(resolution.caveats).to eq(['No unit Woods read (Post) includes Tagging in its own body, so Post ' \
+                                      'includes it through a superclass Woods did not read (its parent Record is ' \
+                                      'published as a poro unit, which does not inline its concerns); that ' \
+                                      "superclass's own definition of label could come first."])
+  end
+
+  it 'needs no caveat when the unit writes the include itself, under an unread parent' do
+    block = tagging_block
+    units = { 'Post' => unit('Post', 'ApplicationRecord', "  include ::Tagging\n#{block}", type: 'model') }
+
+    expect(resolve(units, 'Post#label').caveats).to eq([])
+  end
+
+  it 'keeps the caveat when the written include is dynamic or names another constant' do
+    block = tagging_block
+    %w[include(tagging_module) include(Other::Tagging)].each do |call|
+      units = { 'Post' => unit('Post', 'ApplicationRecord', "  #{call}\n#{block}", type: 'model') }
+
+      expect(resolve(units, 'Post#label').caveats.size).to eq(1), call
+    end
+  end
+
+  it 'resolves a short name written in the unit namespace to the namespaced concern only' do
+    resolve = Woods::MCP::LookupMember::Resolution::Mixins.method(:resolve)
+
+    expect(resolve.call('Tagging', %w[Shop::Post Shop], %w[Shop::Tagging Tagging])).to eq('Shop::Tagging')
+    expect(resolve.call('::Tagging', %w[Shop::Post Shop], %w[Shop::Tagging Tagging])).to eq('Tagging')
+    expect(resolve.call('Tagging', %w[Shop::Post Shop], %w[Admin::Tagging])).to be_nil
   end
 
   it 'reads a parent from the :inheritance edge before parent_class' do

@@ -86,7 +86,7 @@ module Woods
         lines = data['member'] ? definition_location_lines(data, data) : []
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
-          lines << "Also defined at #{published_source_name(other, data)} " \
+          lines << "Also defined in the published source of #{other['unit'] || data.dig('member_of', 'identifier')}, " \
                    "#{member_lines(other['line'], other['end_line'])}#{from}; the definition above overrides it."
         end
         Array(data['caveats']).each { |caveat| lines << "Caveat: #{caveat}" }
@@ -116,6 +116,17 @@ module Woods
         first = member['file_line']
         where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
         [where, "#{published_source_name(member, data)}: #{member_lines(member['line'], member['end_line'])}"]
+      end
+
+      # The unit a candidate's definition is in (its concern, its superclass,
+      # or the owner itself), with the candidate's note when it has one.
+      #
+      # @param candidate [Hash] one of a member answer's `candidates`
+      # @param data [Hash] the whole answer
+      # @return [String]
+      def candidate_label(candidate, data)
+        name = (candidate['defined_in'] || candidate['inherited_from'] || data['member_of'] || {})['identifier']
+        candidate['note'] ? "#{name} (#{candidate['note']})" : name.to_s
       end
 
       # @return [String] "Published source of X", the unit whose published

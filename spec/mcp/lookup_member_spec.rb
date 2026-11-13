@@ -433,7 +433,7 @@ RSpec.describe 'MCP lookup of a unit member' do
                                                                                      'line' => 6, 'end_line' => 8)])
       expect(data['statement']).to include('defined in its own body. It overrides 1 other definition of destroy.')
       expect(member('PostsController#destroy', format: :markdown))
-        .to include('Also defined at Published source of ApplicationController lines 6-8; ' \
+        .to include('Also defined in the published source of ApplicationController, lines 6-8; ' \
                     'the definition above overrides it.')
     end
 
@@ -450,10 +450,11 @@ RSpec.describe 'MCP lookup of a unit member' do
     it 'says the chain was not fully read when a concern answers and the owner records no parent' do
       data = member('Post#archive')
 
-      expect(data['caveats']).to eq(['The superclass chain of Post was read only up to Post: Post records no ' \
-                                     'parent class, so a definition in a superclass Woods did not read could ' \
-                                     'come before this inlined concern.'])
-      expect(member('Post#archive', format: :plain)).to include('Caveat: The superclass chain of Post')
+      expect(data['caveats']).to eq(['No unit Woods read (Post) includes Publishable in its own body, so Post ' \
+                                     'includes it through a superclass Woods did not read (Post records no ' \
+                                     "parent class); that superclass's own definition of archive could come " \
+                                     'first.'])
+      expect(member('Post#archive', format: :plain)).to include('Caveat: No unit Woods read (Post)')
     end
   end
 
@@ -486,6 +487,30 @@ RSpec.describe 'MCP lookup of a unit member' do
         expect(answer).to include(':exportable').and include(':printable')
         expect(answer).to include('cannot tell which one Ruby calls')
       end
+    end
+  end
+
+  describe 'the member-answer contract' do
+    it 'keeps member_of, member, source_code and _meta.member_of on an answer with caveats' do
+      response = call(build(:json), identifier: 'Post#archive')
+      data = JSON.parse(text(response))
+
+      expect(data['caveats']).not_to be_empty
+      expect(data.keys).to include('member_of', 'member', 'source_code', 'statement')
+      expect(response.meta).to include(member_of: { identifier: 'Post', type: 'model' })
+    end
+
+    # No single definition can be named, so the answer has no top-level
+    # `member` or `source_code`: naming one would be the guess the rule
+    # forbids. Each candidate carries both instead.
+    it 'keeps member_of and _meta.member_of on a candidates answer, with member and source_code per candidate' do
+      response = call(build(:json), identifier: 'ReportsController#render_pdf')
+      data = JSON.parse(text(response))
+
+      expect(data.keys).to include('member_of', 'statement', 'candidates')
+      expect(data.keys).not_to include('member', 'source_code')
+      expect(data['candidates']).to all(include('member', 'source_code', 'defined_in'))
+      expect(response.meta).to include(member_of: { identifier: 'ReportsController', type: 'controller' })
     end
   end
 

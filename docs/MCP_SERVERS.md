@@ -513,9 +513,12 @@ every `def` that carries the name as a literal positional argument:
   and for any of these calls that a later `private :name` (`private_class_method :name` for a class method) names.
 - For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
   instance-side call in the plain body does not.
-- Any other call carrying the name (a base class's DSL, `field :perform`) may define it, on either side: the answer
-  names that call as `defined_by`, says Woods cannot tell which definition Ruby calls, lists no
-  `other_definitions`, and gives each definition it might not override as a caveat.
+- Any other call carrying the name (a base class's DSL, `field :perform`) may define it, on either side.
+  The answer has the shape of every answer that cannot tell: no `member`, a statement that Woods cannot tell
+  which definition Ruby calls, and `candidates`.
+  The first candidate is the call (its `member` names it as `defined_by`, its `note` says it may define the name);
+  then each definition it may override, nearest first, the first of which Ruby calls if the call does not define
+  the name.
   Calls that only refer to a method are not read as definitions: `private`, `protected`, `public`,
   `module_function`, `private_class_method`, `public_class_method`, `helper_method`, `validate`, `validates`,
   `validates_*`, and calls named `before_*`, `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
@@ -532,15 +535,26 @@ What the index cannot settle is said, never guessed:
   not record the include order, so Woods cannot tell which one Ruby calls.
 - A `prepend` of a module whose source is not inlined adds a `caveats` entry: that module may define the name and
   would run first.
-- When the walk stops at a parent that is not a published unit (an abstract `ApplicationRecord`, for example), an
-  answer from an inlined concern of the last unit read carries a caveat that the chain was not fully read: a
-  definition in that parent could come first.
-  The walk also stops at a cycle, after 16 superclasses, and, from a model or controller, at a parent published
-  as a type that does not inline concerns.
+- The walk stops at a parent that is not a published unit (an abstract `ApplicationRecord`, for example), at a
+  cycle, after 16 superclasses, and, from a model or controller, at a parent published as a type that does not
+  inline concerns.
+  A model inlines every concern of its ancestry, so an answer from a concern of the last unit read is in doubt only
+  when that concern may have come through the unread parent, whose own definition would then come first.
+  Woods states that caveat only when it cannot show the concern is mixed in at a level it read: an `include` or
+  `prepend` of it written directly in the body of a unit of the chain, or in the body of an inlined concern that
+  is itself shown, read by a Prism walk.
+  The written constant is resolved lexically against the inlined concerns' full names (a short name written inside
+  the unit's namespace matches the namespaced concern); a dynamic or unresolved name does not show it.
+  A chain that ends at a framework root (`ActiveRecord::Base`, `ActionController::Base` and the like) needs no
+  caveat: a framework class holds no application definition.
+- A `prepend` of a concern a superclass already has is a no-op for an `ActiveSupport::Concern` and puts a plain
+  module first again; Woods reads which one the inlined module is from its `extend ActiveSupport::Concern`.
 
 Known limits: `prepend` is read only where the unit's own body writes it (not in a concern's `included` block, not
 on `singleton_class`), and on Rails 6.0 a prepended `ActiveSupport::Concern` does not extend its `class_methods`
 while Woods still answers them.
+A unit that writes `include C` while an unread superclass already includes C keeps C at that superclass's level in
+Ruby; Woods treats the written include as showing C at the unit's level.
 Monkey patches, reopened classes and methods defined by metaprogramming other than the class-body calls above
 (in a method, a loop, or from a computed name) are not in the published source.
 `type` selects the owner's type.
