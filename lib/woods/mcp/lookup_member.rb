@@ -101,25 +101,26 @@ module Woods
 
         owner = { 'identifier' => unit['identifier'], 'type' => unit['type'], 'file_path' => unit['file_path'] }
         result = { 'identifier' => reference.identifier, 'member_of' => owner }
+        possible = resolution.chosen&.origin == :possible_macro
         if resolution.ambiguous
           result['statement'] = ambiguous_statement(reference, unit, resolution)
           result['candidates'] = resolution.ambiguous.map do |candidate|
             definition(candidate, resolution, concern_file)
           end
+        elsif possible
+          result['statement'] = statement(reference, unit, resolution)
+          result['candidates'] = possible_macro_candidates(reference, resolution, concern_file)
         else
           shown = definition(resolution.chosen, resolution, concern_file)
           result['member'] = shown.delete('member')
           result['statement'] = statement(reference, unit, resolution)
           result.merge!(shown.except('source_code'))
         end
-        caveats = resolution.caveats
-        if resolution.chosen&.origin == :possible_macro
-          caveats = possible_macro_caveats(reference, resolution) + caveats
-        else
+        unless possible
           others = resolution.overridden.map { |candidate| located(candidate, resolution) }
           result['other_definitions'] = others unless others.empty?
         end
-        result['caveats'] = caveats unless caveats.empty?
+        result['caveats'] = resolution.caveats unless resolution.caveats.empty?
         result['source_code'] = shown['source_code'] if shown
         result
       end
@@ -205,7 +206,8 @@ module Woods
           return "#{reference.identifier}: #{where} calls #{call} in its own body with #{reference.name} as an " \
                  "argument, so it may define the #{reference.kind_label} #{reference.name} there. Woods does not " \
                  "know what `#{entry['defined_by']}` does, so it cannot tell which definition Ruby calls. " \
-                 "#{not_a_unit(unit)}"
+                 'Each definition is listed under candidates, the call first; if it does not define ' \
+                 "#{reference.name}, Ruby calls the next one. #{not_a_unit(unit)}"
         end
         how = "defined in its own body by #{call}#{", as an alias of #{entry['alias_of']}" if entry['alias_of']}"
         visibility = "#{entry['visibility']} " if entry['visibility']
@@ -218,17 +220,17 @@ module Woods
         "#{head}#{origin}#{overrides(reference, resolution)} #{not_a_unit(unit)}"
       end
 
-      # What an answer that cannot tell says of the definitions it may
-      # override: each one runs only if the call does not define the name.
-      def possible_macro_caveats(reference, resolution)
-        chosen = resolution.chosen
-        level = resolution.chain[chosen.level]['identifier']
-        resolution.overridden.map do |candidate|
-          "#{candidate.concern || candidate.unit['identifier']} also defines #{reference.name} " \
-            "(line #{candidate.entry['line']} of the published source of #{candidate.unit['identifier']}); " \
-            "Ruby calls that definition only if `#{chosen.entry['defined_by']}` does not " \
-            "define #{reference.name} in #{level}."
+      # The candidates of an answer from a call Woods does not know: the
+      # call, with a note that it may define the name, then each definition
+      # it may override, nearest first (the first runs if the call does not
+      # define the name).
+      def possible_macro_candidates(reference, resolution, concern_file)
+        macro, *others = [resolution.chosen, *resolution.overridden].map do |candidate|
+          definition(candidate, resolution, concern_file)
         end
+        defined_by = resolution.chosen.entry['defined_by']
+        macro['note'] = "may define #{reference.name}: Woods does not know what `#{defined_by}` does"
+        [macro, *others]
       end
 
       # @return [String] the statement of an answer the index cannot rank

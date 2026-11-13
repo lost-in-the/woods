@@ -118,6 +118,17 @@ module Woods
         [where, "#{published_source_name(member, data)}: #{member_lines(member['line'], member['end_line'])}"]
       end
 
+      # The unit a candidate's definition is in (its concern, its superclass,
+      # or the owner itself), with the candidate's note when it has one.
+      #
+      # @param candidate [Hash] one of a member answer's `candidates`
+      # @param data [Hash] the whole answer
+      # @return [String]
+      def candidate_label(candidate, data)
+        name = (candidate['defined_in'] || candidate['inherited_from'] || data['member_of'] || {})['identifier']
+        candidate['note'] ? "#{name} (#{candidate['note']})" : name.to_s
+      end
+
       # @return [String] "Published source of X", the unit whose published
       #   source an entry's `line` counts in
       def published_source_name(entry, data)

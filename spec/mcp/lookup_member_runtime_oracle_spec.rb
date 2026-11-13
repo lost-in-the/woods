@@ -16,6 +16,9 @@ require 'woods/extractors/controller_extractor'
 require 'woods/extractors/job_extractor'
 require 'woods/extractors/service_extractor'
 require 'woods/mcp/lookup_member'
+require 'woods/mcp/tool_response_renderer'
+require 'woods/mcp/renderers/plain_renderer'
+require 'woods/mcp/renderers/markdown_renderer'
 
 # Fixture classes and modules for the lookup member runtime oracle.
 module LookupMemberOracle
@@ -855,7 +858,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
   def candidate_sites(data)
     data['candidates'].map do |candidate|
-      file = candidate.dig('inherited_from', 'file_path') || candidate.dig('defined_in', 'file_path')
+      file = candidate.dig('inherited_from', 'file_path') || candidate.dig('defined_in', 'file_path') ||
+             data.dig('member_of', 'file_path')
       { 'file' => file, 'line' => candidate.dig('member', 'file_line') }
     end
   end
@@ -868,8 +872,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     data = answer(identifier)
     return unanswered_verdict(identifier, truth) unless data
     return macro_verdict(identifier, reference, data, truth) if data.dig('member', 'defined_by')
+    return candidates_verdict(identifier, reference, data, truth) if data['candidates']
     return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
-    return candidates_verdict(identifier, data, truth) if data['candidates']
     return :exact if named(data) == truth
     return :stated if Array(data['caveats']).any?
 
@@ -881,7 +885,6 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
   # line Ruby reports where that is the call, with its visibility where the
   # answer states one.
   def macro_verdict(identifier, reference, data, truth)
-    return :stated if data['statement'].include?('cannot tell')
     return "#{identifier}: answered #{named(data)}, Ruby does not respond" unless truth
 
     wrong_owner = owner_violation(identifier, reference, data)
@@ -891,6 +894,24 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     site = named(data)
     site.delete('visibility') unless data['member'].key?('visibility')
     site == truth.slice(*site.keys) ? :exact : "#{identifier}: answered #{site}, Ruby calls #{truth}"
+  end
+
+  # A cannot-tell answer whose first candidate is a call Woods does not know.
+  def possible_macro?(data)
+    data['candidates']&.first&.dig('member', 'defined_by')
+  end
+
+  # Right when it says it cannot tell and Ruby does not respond (the call
+  # only may define it), calls one of the candidates, or calls a method the
+  # macro's level owns (the call defined it).
+  def possible_macro_verdict(identifier, reference, data, truth)
+    return "#{identifier}: a macro candidate without cannot tell" unless data['statement'].include?('cannot tell')
+    return :stated if truth.nil? || candidate_sites(data).include?(truth.slice('file', 'line'))
+
+    level = data.merge('inherited_from' => data['candidates'].first['inherited_from'])
+    return :stated unless owner_violation(identifier, reference, level)
+
+    "#{identifier}: candidates #{candidate_sites(data)} miss #{truth}"
   end
 
   # A violation String unless Ruby's owner of the method is the answer's
@@ -912,7 +933,10 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     "#{identifier}: not answered, Ruby calls #{truth}"
   end
 
-  def candidates_verdict(identifier, data, truth)
+  def candidates_verdict(identifier, reference, data, truth)
+    return possible_macro_verdict(identifier, reference, data, truth) if possible_macro?(data)
+    return "#{identifier}: candidates #{candidate_sites(data)}, Ruby does not respond" unless truth
+
     sites = candidate_sites(data)
     return :stated if sites.include?(truth.slice('file', 'line')) && data['statement'].include?('cannot tell')
 
@@ -946,17 +970,14 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
 
     # A prepend of a module the index does not publish (every TracedRecord
     # answer), a concern that reaches the unit only through an unread
-    # superclass (OrphanRecord's Tagging, DirectRecord's Linking), and a
-    # macro Woods does not know, whose answer names the superclass def it may
-    # not override.
+    # superclass (OrphanRecord's Tagging, DirectRecord's Linking). A macro
+    # Woods does not know lists what it may override as candidates instead.
     expect(identifiers.select { |identifier| answer(identifier)&.key?('caveats') }).to contain_exactly(
       'LookupOracle::TracedRecord#tag_label', 'LookupOracle::TracedRecord#shared_name',
       'LookupOracle::TracedRecord.finder_for', 'LookupOracle::TracedRecord#trace_call',
       'LookupOracle::OrphanRecord#tag_label', 'LookupOracle::OrphanRecord#shared_name',
       'LookupOracle::OrphanRecord.finder_for',
-      'LookupOracle::DirectRecord#link_target', 'LookupOracle::DirectRecord.link_scope',
-      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name])
-                                 .map { |owner, name| "LookupOracle::#{owner}##{name}" }
+      'LookupOracle::DirectRecord#link_target', 'LookupOracle::DirectRecord.link_scope'
     )
   end
 
@@ -1207,12 +1228,28 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     it 'says it cannot tell for a macro it does not know, without presenting the superclass def as the answer' do
       %w[LookupOracle::MacroRecord#refresh LookupOracle::MacroRecord#archive].each do |identifier|
         data = answer(identifier)
+        macro, fallback, *rest = data['candidates']
 
-        expect(data['member']).to include('defined_by' => a_string_matching(/\A(field|column)\z/))
+        expect(data.keys).not_to include('member', 'source_code', 'other_definitions', 'caveats')
+        expect(macro['member']).to include('defined_by' => a_string_matching(/\A(field|column)\z/))
+        expect(macro['note']).to start_with("may define #{identifier[/\w+\z/]}")
+        expect(macro).not_to include('inherited_from', 'defined_in')
+        expect(macro['source_code']).to match(/\A    (field|column) :/)
+        expect(fallback).to include('inherited_from' => include('identifier' => 'LookupOracle::MacroBase'))
+        expect(rest).to be_empty
         expect(data['statement']).to include('may define').and include('cannot tell')
-        expect(data).not_to have_key('other_definitions')
-        expect(data['caveats']).to include(a_string_including('LookupOracle::MacroBase also defines'))
       end
+    end
+
+    it 'labels each cannot-tell candidate with the unit that holds it in the text renderers' do
+      data = answer('LookupOracle::MacroRecord#refresh')
+      plain = Woods::MCP::Renderers::PlainRenderer.new.render(:lookup_member, data)
+      markdown = Woods::MCP::Renderers::MarkdownRenderer.new.render(:lookup_member, data)
+
+      expect(plain).to include('Candidate 1: LookupOracle::MacroRecord (may define refresh')
+        .and include('Candidate 2: LookupOracle::MacroBase')
+      expect(markdown).to include('### Candidate 1: LookupOracle::MacroRecord (may define refresh')
+        .and include('### Candidate 2: LookupOracle::MacroBase')
     end
 
     it 'reads attr_reader under a bare protected as protected' do
@@ -1230,16 +1267,16 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       %w[alpha_name beta_name].each do |name|
         data = answer("LookupOracle::MacroRecord##{name}")
 
-        expect(data['member']).to include('defined_by' => 'some_dsl', 'file_line' => 63)
+        expect(data.keys).not_to include('member', 'other_definitions')
+        expect(data['candidates'].first['member']).to include('defined_by' => 'some_dsl', 'file_line' => 63)
         expect(data['statement']).to include('may define').and include('cannot tell')
-        expect(data).not_to have_key('other_definitions')
       end
     end
 
     it 'says it cannot tell through a superclass level whose macro it does not know' do
       data = answer('LookupOracle::MacroChild#refresh')
 
-      expect(data['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
+      expect(data['candidates'].first['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord')
       expect(data['statement']).to include('cannot tell')
     end
 
