@@ -30,6 +30,25 @@ RSpec.describe Woods::EdgeEvidence do
       expect(described_class.for('test_mapping', 'test_coverage')).to eq('static')
     end
 
+    # The rule: a class is never stronger than the mechanism that made the
+    # edge. A runtime check that the target exists does not make a named
+    # relationship verified when nothing checked the relationship itself.
+    it 'calls a polymorphic interface edge static: the target is the association name, camelized' do
+      expect(described_class.for('model', 'polymorphic_interface')).to eq('static')
+      expect(described_class.mixed?('model', 'polymorphic_interface')).to be(false)
+    end
+
+    it 'calls an external consumer table edge static: an operator declared it, nothing observed it' do
+      expect(described_class.for('external_consumer', 'reads_table')).to eq('static')
+      expect(described_class.for('external_consumer', 'writes_table')).to eq('static')
+    end
+
+    it 'keeps the edges reflection and the live schema do report' do
+      expect(described_class.for('model', 'has_many')).to eq('reflected')
+      expect(described_class.for('model', 'table')).to eq('reflected')
+      expect(described_class.for('migration', 'table_name')).to eq('verified')
+    end
+
     it 'accepts symbols as the graph holds them' do
       expect(described_class.for(:model, :has_many)).to eq('reflected')
     end
