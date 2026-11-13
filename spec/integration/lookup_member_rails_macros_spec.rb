@@ -94,6 +94,12 @@ RailsMacroOracle::FIXTURES = {
         attribute :score, :integer
         alias_attribute :nickname, :title
         store_accessor :settings, :theme, :color
+        store_accessor :settings, :tone, prefix: true
+        store_accessor :settings, :shade, suffix: :pref
+        store_accessor :settings, :hue, prefix: 'paint'
+        GLOW_PREFIX = :lamp
+        store_accessor :settings, :glow, prefix: GLOW_PREFIX
+        class_attribute :alpha_flag, :beta_flag
         scope :recent, -> { all }
         class_attribute :config_flag
         class_attribute :quiet_flag, instance_accessor: false
@@ -325,6 +331,15 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     'RailsMacroOracle::Widget.flagged' => ['scope', 'RailsMacroOracle::BaseRecord'],
     'RailsMacroOracle::Widget#flagged' => [nil, 'RailsMacroOracle::BaseRecord'],
     'RailsMacroOracle::Widget.sealed' => ['scope', 'RailsMacroOracle::Widget'],
+    # The names an option renames, and every name a call carries.
+    'RailsMacroOracle::Widget#settings_tone' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#settings_tone=' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#shade_pref' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#shade_pref=' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#paint_hue' => ['store_accessor', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#alpha_flag' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget.beta_flag=' => ['class_attribute', 'RailsMacroOracle::Widget'],
+    'RailsMacroOracle::Widget#beta_flag?' => ['class_attribute', 'RailsMacroOracle::Widget'],
     # Under a bare `private` in the body.
     'RailsMacroOracle::Widget#hidden_notes' => ['has_many', 'RailsMacroOracle::Widget'],
     'RailsMacroOracle::Widget#hidden_notes=' => ['has_many', 'RailsMacroOracle::Widget'],
@@ -407,6 +422,35 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
   # The reader Ruby calls is the column's, which the published source does
   # not hold, so the member is not found; neither call is named as one that
   # may define it.
+  # A literal a call carries that is not a method name: an attribute's type,
+  # a store key an option renames, the store column, an alias's target.
+  {
+    'RailsMacroOracle::Widget#integer' => false, 'RailsMacroOracle::Widget#integer=' => false,
+    'RailsMacroOracle::Widget#tone' => false, 'RailsMacroOracle::Widget#tone=' => false,
+    'RailsMacroOracle::Widget#shade' => false, 'RailsMacroOracle::Widget#shade=' => false,
+    'RailsMacroOracle::Widget#hue' => false, 'RailsMacroOracle::Widget#pref' => false,
+    'RailsMacroOracle::Widget#settings' => true, 'RailsMacroOracle::Widget#title' => true
+  }.each do |identifier, column|
+    it "does not answer #{identifier} as defined by the call that carries it" do
+      truth = runtime(identifier)
+
+      if column
+        expect(truth[:method].owner.name).to eq('RailsMacroOracle::Widget::GeneratedAttributeMethods')
+      else
+        expect(truth).to be_nil
+      end
+      expect(answer(identifier)).to be_nil
+      expect(missing(identifier)).not_to include('may define it')
+    end
+  end
+
+  it 'reads a store key under a prefix that is not a literal as one the call may define' do
+    expect(runtime('RailsMacroOracle::Widget#glow')).to be_nil
+    expect(runtime('RailsMacroOracle::Widget#lamp_glow')).not_to be_nil
+    expect(answer('RailsMacroOracle::Widget#glow')).to be_nil
+    expect(missing('RailsMacroOracle::Widget#glow')).to include('`store_accessor` at line').and include('may define it')
+  end
+
   it 'does not read serialize or has_secure_token as a definition of the column they name' do
     %w[RailsMacroOracle::Widget#prefs RailsMacroOracle::Widget#token].each do |identifier|
       expect(runtime(identifier)[:method].owner.name).to eq('RailsMacroOracle::Widget::GeneratedAttributeMethods')

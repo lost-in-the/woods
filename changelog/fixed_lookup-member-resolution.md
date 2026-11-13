@@ -29,3 +29,5 @@
   Ruby makes it, not as public or as the aliased method's visibility.
   An answer from `scope` now states its visibility (public, unless a later `private_class_method` names it), as the
   other Rails calls' answers do, in the owner's own body and in a superclass.
+  A Rails call names only the methods it defines: an association, `attribute` or `alias_attribute` its first
+  argument (not `attribute`'s type), and `store_accessor` each key under its `prefix:` and `suffix:`.
