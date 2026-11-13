@@ -73,7 +73,7 @@ RSpec.describe 'MCP path tool' do
         ## Path from OrdersController to Post
 
         3 hops, forward: OrdersController (controller) reaches Post (model).
-        Evidence: weakest hop is at least static (hop 1). #{Woods::EdgeEvidence::LEGEND}
+        Evidence: weakest hop is static (hop 2). #{Woods::EdgeEvidence::LEGEND}
 
         1. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
         2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)  [static]
@@ -93,7 +93,8 @@ RSpec.describe 'MCP path tool' do
                                     'target' => 'PaymentGateway', 'target_type' => 'service',
                                     'via' => %w[code_reference job_enqueue], 'evidence' => 'static')
       expect(data['hops'][0]).to include('evidence' => 'static', 'evidence_mixed' => true)
-      expect(data).to include('evidence' => 'static', 'weakest_hop' => 1, 'evidence_mixed' => true)
+      expect(data).to include('evidence' => 'static', 'weakest_hop' => 2)
+      expect(data).not_to have_key('evidence_mixed')
       expect(data['graph_coverage']).to include('scope' => 'published_relationships')
       expect(data).not_to have_key('hint')
     end
