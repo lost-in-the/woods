@@ -13,6 +13,7 @@ require_relative 'helper_call_scan'
 require_relative 'template_extensions'
 require_relative 'action_fact_resolution'
 require_relative 'filter_applicability'
+require_relative 'mixin_calls'
 
 module Woods
   module Extractors
@@ -230,9 +231,7 @@ module Woods
           helpers << helper[0]
         end
 
-        source.scan(/include\s+(\w+Helper)/) do |helper|
-          helpers << helper[0]
-        end
+        helpers.concat(MixinCalls.helper_includes(source))
 
         helpers.uniq
       end

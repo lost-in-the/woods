@@ -11,6 +11,7 @@ require_relative 'config_source_guard'
 require_relative 'comment_blanking'
 require_relative 'concern_classification'
 require_relative 'concern_source'
+require_relative 'mixin_calls'
 
 module Woods
   module Extractors
@@ -394,39 +395,36 @@ module Woods
 
       # Detect other modules included or extended by this concern (for metadata display).
       #
-      # Returns all module names found in include/extend calls, excluding
-      # ActiveSupport::Concern itself.
+      # Returns every constant passed to a real include/extend call
+      # ({MixinCalls}), excluding ActiveSupport::Concern itself.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Module names
       def detect_included_modules(source)
-        source.scan(/(?:include|extend)\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+        mixin_names(source, %i[include extend])
       end
 
       # Detect modules explicitly included by this concern.
       #
-      # Scans for bare +include ModuleName+ calls, excluding ActiveSupport::Concern.
-      #
       # @param source [String] Ruby source code
       # @return [Array<String>] Included module names
       def detect_includes(source)
-        source.scan(/\binclude\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+        mixin_names(source, %i[include])
       end
 
       # Detect modules explicitly extended by this concern.
       #
-      # Scans for bare +extend ModuleName+ calls, excluding ActiveSupport::Concern.
-      #
       # @param source [String] Ruby source code
       # @return [Array<String>] Extended module names
       def detect_extends(source)
-        source.scan(/\bextend\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+        mixin_names(source, %i[extend])
+      end
+
+      # @return [Array<String>] normalized constants of the +kinds+ calls,
+      #   without ActiveSupport::Concern
+      def mixin_names(source, kinds)
+        MixinCalls.call(source, kinds).map { |_kind, name| ConstantPaths.normalize(name) }
+                  .reject { |name| name == 'ActiveSupport::Concern' }
       end
 
       # Detect callback declarations.
