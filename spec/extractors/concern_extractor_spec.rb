@@ -778,21 +778,42 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
     it 'maps an extended ClassMethods module to the module that owns it' do
       path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
         module Stackable
-          def self.included(base)
-            base.extend ClassMethods
-            base.extend Stackable::ClassMethods
-            base.extend Depot::Countable::ClassMethods
-          end
-
           module ClassMethods
             def stack_all; end
           end
+
+          extend ClassMethods
+          extend Stackable::ClassMethods
+          extend Depot::Countable::ClassMethods
         end
       RUBY
 
       unit = described_class.new.extract_concern_file(path)
 
       expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
+    end
+
+    it 'declares no mixin for an include, extend or prepend sent to the including class from a hook' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          def self.included(base)
+            base.extend(ClassMethods)
+            base.include(Depot::Weighable)
+            base.send(:include, Depot::Sortable)
+          end
+
+          def self.prepended(klass)
+            klass.prepend Depot::Countable::ClassMethods
+          end
+
+          module ClassMethods; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq([])
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq([])
     end
 
     it 'excludes ActiveSupport::Concern from extend dependencies' do

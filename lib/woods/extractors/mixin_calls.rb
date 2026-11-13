@@ -9,9 +9,10 @@ module Woods
     # `prepend` call and each constant written as its argument, read from the
     # Prism tree. Only a real call declares a mixin; a comment, string,
     # heredoc or method name that contains the word does not, and neither
-    # does an argument that is not a constant (`extend self`). The receiver
-    # is not checked, so `base.extend ClassMethods` inside `self.included`
-    # counts, as it did when this was a text scan.
+    # does an argument that is not a constant (`extend self`). A call counts
+    # only without a receiver or on `self`, outside any method body: a call
+    # on another receiver acts on that receiver, so `base.extend ClassMethods`
+    # inside `self.included` is no mixin of this source's module.
     module MixinCalls
       KINDS = %i[include extend prepend].freeze
       HELPER_NAME = /\A\w+Helper\z/
@@ -52,7 +53,7 @@ module Woods
 
         # @param node [Prism::CallNode]
         def visit_call_node(node)
-          if @kinds.include?(node.name)
+          if @kinds.include?(node.name) && (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
             node.arguments&.arguments.to_a.each do |argument|
               next unless CONSTANTS.any? { |type| argument.is_a?(type) }
 
@@ -61,6 +62,9 @@ module Woods
           end
           super
         end
+
+        # @param _node [Prism::DefNode]
+        def visit_def_node(_node); end
       end
     end
   end

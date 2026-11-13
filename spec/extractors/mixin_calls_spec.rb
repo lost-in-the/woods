@@ -21,16 +21,41 @@ RSpec.describe Woods::Extractors::MixinCalls do
         included do
           include Inner
         end
-        def self.included(base)
-          base.extend ClassMethods
-        end
+        self.extend Selfish
+        self.include Theta, Iota
       end
     RUBY
     expect(calls(source)).to eq(
       [[:include, 'Alpha'], [:include, 'Beta'], [:include, 'Gamma'], [:include, '::Depot::Weighable'],
        [:extend, 'Depot::Countable'], [:prepend, 'Wrapping'], [:include, 'Delta'], [:include, 'Epsilon::Zeta'],
-       [:include, 'Inner'], [:extend, 'ClassMethods']]
+       [:include, 'Inner'], [:extend, 'Selfish'], [:include, 'Theta'], [:include, 'Iota']]
     )
+  end
+
+  it 'ignores calls sent to another receiver and calls inside a method, which act on something else' do
+    source = <<~RUBY
+      module Trackable
+        def self.included(base)
+          base.extend(ClassMethods)
+          base.include(Helpers)
+          base.send(:include, Sending)
+        end
+
+        def self.extended(base)
+          base.extend Extending
+          extend Inside
+        end
+
+        def self.prepended(klass)
+          klass.prepend Prepending
+        end
+
+        Registry.include Elsewhere
+
+        module ClassMethods; end
+      end
+    RUBY
+    expect(calls(source)).to eq([])
   end
 
   it 'ignores comments, strings, heredocs, method names and non-constant arguments' do
