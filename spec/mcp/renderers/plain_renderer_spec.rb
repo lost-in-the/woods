@@ -8,6 +8,26 @@ require 'woods/mcp/renderers/plain_renderer'
 RSpec.describe Woods::MCP::Renderers::PlainRenderer do
   subject(:renderer) { described_class.new }
 
+  describe '#render_lookup_member' do
+    # An answer with candidates selects no definition, so the definitions
+    # they override are not overridden by one "above".
+    it 'says the candidates override a farther definition in an answer without a member' do
+      data = { 'identifier' => 'ReportsController#render_pdf',
+               'member_of' => { 'identifier' => 'ReportsController', 'type' => 'controller',
+                                'file_path' => 'app/controllers/reports_controller.rb' },
+               'statement' => 'ReportsController#render_pdf: Woods cannot tell which one Ruby calls.',
+               'candidates' => [{ 'member' => { 'line' => 4, 'end_line' => 6, 'file_line' => 2, 'file_end_line' => 4 },
+                                  'defined_in' => { 'identifier' => 'Exportable', 'file_path' => 'app/x.rb' } }],
+               'other_definitions' => [{ 'line' => 9, 'end_line' => 11, 'unit' => 'ApplicationController' }] }
+
+      text = renderer.render(:lookup_member, data)
+
+      expect(text).to include('Also defined in the published source of ApplicationController, lines 9-11; ' \
+                              'each of the candidates overrides it.')
+      expect(text).not_to include('the definition above')
+    end
+  end
+
   describe '#render_lookup' do
     it 'renders unit identifier and file' do
       out = renderer.render(:lookup, {

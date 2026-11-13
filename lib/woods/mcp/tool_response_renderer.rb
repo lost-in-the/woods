@@ -84,10 +84,11 @@ module Woods
       # @return [Array<String>]
       def member_location_lines(data)
         lines = data['member'] ? definition_location_lines(data, data) : []
+        overrider = data['member'] ? 'the definition above overrides it' : 'each of the candidates overrides it'
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
           lines << "Also defined in the published source of #{other['unit'] || data.dig('member_of', 'identifier')}, " \
-                   "#{member_lines(other['line'], other['end_line'])}#{from}; the definition above overrides it."
+                   "#{member_lines(other['line'], other['end_line'])}#{from}; #{overrider}."
         end
         Array(data['caveats']).each { |caveat| lines << "Caveat: #{caveat}" }
         lines
