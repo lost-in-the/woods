@@ -394,6 +394,14 @@ LookupMemberOracle::FIXTURES = {
           nil
         end
 
+        def self.validates(*)
+          nil
+        end
+
+        def self.helper_method(*)
+          nil
+        end
+
         def self.build
           :base
         end
@@ -469,6 +477,22 @@ LookupMemberOracle::FIXTURES = {
         def concealed
           :base
         end
+
+        def hush
+          :base
+        end
+
+        def self.quiet
+          :base
+        end
+
+        def exposed
+          :base
+        end
+
+        def checked
+          :base
+        end
       end
     end
   RUBY
@@ -514,6 +538,18 @@ LookupMemberOracle::FIXTURES = {
         private
 
         attr_reader :secret
+
+        public
+
+        attr_reader :hush
+        private :hush
+
+        class << self
+          attr_reader :quiet
+        end
+        private_class_method :quiet
+        helper_method :exposed
+        validates :checked
       end
     end
   RUBY
@@ -988,6 +1024,12 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       expect(answer('LookupOracle::MacroRecord#perform')['member']).to include('visibility' => 'public')
     end
 
+    it 'reads a later `private :name` or `private_class_method :name` into the visibility of a macro' do
+      %w[LookupOracle::MacroRecord#hush LookupOracle::MacroRecord.quiet].each do |identifier|
+        expect(answer(identifier)['member']).to include('defined_by' => 'attr_reader', 'visibility' => 'private')
+      end
+    end
+
     it 'says it cannot tell for a macro it does not know, without presenting the superclass def as the answer' do
       %w[LookupOracle::MacroRecord#refresh LookupOracle::MacroRecord#archive].each do |identifier|
         data = answer(identifier)
@@ -1007,7 +1049,7 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
     end
 
     it 'does not take a name a macro only refers to as a definition of it' do
-      %w[prepare guarded summary helper notify].each do |name|
+      %w[prepare guarded summary helper notify exposed checked].each do |name|
         expect(answer("LookupOracle::MacroRecord##{name}")['inherited_from'])
           .to include('identifier' => 'LookupOracle::MacroBase'), name
       end

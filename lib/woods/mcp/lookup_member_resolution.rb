@@ -367,6 +367,7 @@ module Woods
           SCOPED = %w[attr attr_reader attr_writer attr_accessor define_method].freeze
           SINGLETON_DEFINER = 'define_singleton_method'
           VISIBILITY = %w[private protected public].freeze
+          CLASS_VISIBILITY = %w[private_class_method public_class_method].freeze
           # Calls that name a method without defining it.
           REFERENCES = %w[private protected public module_function private_class_method public_class_method
                           private_constant public_constant helper_method validate validates].freeze
@@ -387,17 +388,43 @@ module Woods
             parsed = Woods::ParseCache.parse(source)
             return [] if parsed.errors.any?
 
-            body = Prepends.body_of(parsed.value.statements, nil, written_name)
-            statements = ConcernClassMethods.statements(body)
-            found = scan(statements, reference, reference.separator == '#' ? :instance : :class_body)
-            if reference.separator == '.'
-              statements.each do |node|
-                next unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
-
-                found.concat(scan(ConcernClassMethods.statements(node.body), reference, :singleton_body))
-              end
+            statements = ConcernClassMethods.statements(Prepends.body_of(parsed.value.statements, nil, written_name))
+            if reference.separator == '#'
+              return marked(scan(statements, reference, :instance), marks(statements, reference.name, VISIBILITY),
+                            written_name)
             end
-            found.map { |entry, known| [entry.merge('owner' => written_name), known] }
+
+            found = scan(statements, reference, :class_body)
+            later = marks(statements, reference.name, CLASS_VISIBILITY)
+            statements.each do |node|
+              next unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
+
+              inner = ConcernClassMethods.statements(node.body)
+              found.concat(scan(inner, reference, :singleton_body))
+              later.concat(marks(inner, reference.name, VISIBILITY))
+            end
+            marked(found, later, written_name)
+          end
+
+          # A visibility call naming the method after its definition sets
+          # its visibility (`private :name`, `private_class_method :name`).
+          def marked(found, marks, written_name)
+            found.map do |entry, known|
+              mark = marks.select { |line, _| line > entry['line'] }.max_by(&:first)
+              entry = entry.merge('visibility' => mark.last) if known && mark
+              [entry.merge('owner' => written_name), known]
+            end
+          end
+
+          # [line, visibility] of each call among +statements+ named in
+          # +calls+ that names +name+ as a literal argument.
+          def marks(statements, name, calls)
+            statements.filter_map do |node|
+              next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && calls.include?(node.name.to_s)
+              next unless names(positional(node)).include?(name)
+
+              [node.location.start_line, node.name.to_s.delete_suffix('_class_method')]
+            end
           end
 
           # The calls among one body's statements, with the default
