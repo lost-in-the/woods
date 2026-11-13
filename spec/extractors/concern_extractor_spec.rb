@@ -750,6 +750,31 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable])
     end
 
+    it 'declares mixins only from real include and extend calls with constant arguments' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          extend ActiveSupport::Concern
+          # The include of this module is optional, extend as needed.
+          include Depot::Weighable, Depot::Countable
+          include(
+            Depot::Sortable
+          )
+          NOTE = "include Quoted"
+
+          def include_of(other); end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :include },
+         { type: :concern, target: 'Depot::Sortable', via: :include }]
+      )
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable Depot::Sortable])
+    end
+
     it 'maps an extended ClassMethods module to the module that owns it' do
       path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
         module Stackable
@@ -768,6 +793,139 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       unit = described_class.new.extract_concern_file(path)
 
       expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
+    end
+
+    it 'maps a body-level extended ClassMethods module to the module that owns it' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          module ClassMethods
+            def stack_all; end
+          end
+
+          extend ClassMethods
+          extend Stackable::ClassMethods
+          extend Depot::Countable::ClassMethods
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Countable::ClassMethods])
+    end
+
+    it 'lists what a hook brings to the includer in included_modules, and keeps the edges of hook-form calls' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          include Depot::Weighable
+
+          def self.included(base)
+            base.extend(ClassMethods)
+            base.extend(Depot::Countable::ClassMethods)
+            base.include(Depot::Sortable)
+          end
+
+          module ClassMethods; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable::ClassMethods Depot::Sortable])
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Sortable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :extend }]
+      )
+    end
+
+    it 'lists a module an included block or a class_eval in a hook includes' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            include Depot::Weighable
+          end
+
+          def self.included(base)
+            base.class_eval { include Depot::Sortable }
+            base.send(:include, Depot::Taggable)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Sortable])
+    end
+
+    it 'does not list a module the concern declares in its own body, however the call names it' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module ClassMethods; end
+          module Helpers; end
+
+          include Helpers
+          include ::Helpers
+          extend self::ClassMethods
+
+          def self.included(base)
+            base.extend ClassMethods
+            base.extend(self::ClassMethods)
+            base.extend(Trackable::ClassMethods)
+            base.extend(Depot::Countable::ClassMethods)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Helpers Depot::Countable::ClassMethods])
+    end
+
+    it 'reads self:: in a mixin call as the concern itself, so its own ClassMethods gives no edge' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          module ClassMethods; end
+          module Helpers; end
+
+          extend self::ClassMethods
+          include self::Helpers
+
+          def self.included(base)
+            base.extend(self::ClassMethods)
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Trackable::Helpers', via: :include }]
+      )
+    end
+
+    it 'names no module for self:: where self is the including class' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          extend ActiveSupport::Concern
+
+          included do
+            include self::Helpers
+          end
+
+          def self.included(base)
+            super
+            base.class_eval { include self::Finders }
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq([])
+      expect(unit.metadata[:included_modules]).to eq([])
     end
 
     it 'excludes ActiveSupport::Concern from extend dependencies' do

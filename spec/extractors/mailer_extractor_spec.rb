@@ -733,9 +733,10 @@ RSpec.describe Woods::Extractors::MailerExtractor do
       source = <<~RUBY
         class UserMailer < ApplicationMailer
           include UrlHelper
+          # include LegacyHelper once the old layout is gone
 
           def welcome
-            mail(to: 'user@example.com')
+            mail(to: 'user@example.com', subject: "include QuotedHelper")
           end
         end
       RUBY
@@ -745,7 +746,7 @@ RSpec.describe Woods::Extractors::MailerExtractor do
 
       unit = described_class.new.extract_mailer(mailer)
 
-      expect(unit.metadata[:helpers]).to include('UrlHelper')
+      expect(unit.metadata[:helpers]).to eq(['UrlHelper'])
     end
   end
 

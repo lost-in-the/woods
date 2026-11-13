@@ -11,6 +11,7 @@ require_relative 'config_source_guard'
 require_relative 'comment_blanking'
 require_relative 'concern_classification'
 require_relative 'concern_source'
+require_relative 'mixin_calls'
 
 module Woods
   module Extractors
@@ -101,7 +102,7 @@ module Woods
         unit.namespace = extract_namespace(module_name)
         unit.source_code = annotate_source(published_source(file_path, published), module_name,
                                            active_support_concern?(code, module_name), method_source: source)
-        unit.metadata = extract_metadata(source, file_path, active_support_concern?(code, module_name))
+        unit.metadata = extract_metadata(source, file_path, active_support_concern?(code, module_name), module_name)
         unit.dependencies = extract_dependencies(source, module_name)
 
         unit
@@ -344,15 +345,16 @@ module Woods
       # @param source [String] Ruby source code
       # @param file_path [String] Path to the concern file
       # @param active_support [Boolean] whether the module extends ActiveSupport::Concern
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Hash] Concern metadata
-      def extract_metadata(source, file_path, active_support)
+      def extract_metadata(source, file_path, active_support, module_name = nil)
         {
           concern_type: detect_concern_type(active_support),
           concern_scope: detect_concern_scope(file_path),
           uses_active_support: active_support,
           has_included_block: source.match?(/included\s+do/) || false,
           has_class_methods_block: source.match?(/class_methods\s+do/) || false,
-          included_modules: detect_included_modules(source),
+          included_modules: detect_included_modules(source, module_name),
           instance_methods: extract_instance_method_names(source),
           class_methods: (extract_class_methods(source) + ConcernSource.new(source).class_methods).uniq,
           public_methods: extract_public_methods(source),
@@ -394,39 +396,43 @@ module Woods
 
       # Detect other modules included or extended by this concern (for metadata display).
       #
-      # Returns all module names found in include/extend calls, excluding
-      # ActiveSupport::Concern itself.
+      # Returns every constant passed to a real include/extend call
+      # ({MixinCalls}), wherever the call applies it, excluding
+      # ActiveSupport::Concern and the modules the concern declares in its own
+      # body (its `ClassMethods`, however the call names it).
       #
       # @param source [String] Ruby source code
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Array<String>] Module names
-      def detect_included_modules(source)
-        source.scan(/(?:include|extend)\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+      def detect_included_modules(source, module_name = nil)
+        MixinCalls.outside_owner(source, module_name.to_s, %i[include extend])
+                  .map { |_kind, name| ConstantPaths.normalize(name) }
+                  .reject { |name| name == 'ActiveSupport::Concern' }
       end
 
-      # Detect modules explicitly included by this concern.
-      #
-      # Scans for bare +include ModuleName+ calls, excluding ActiveSupport::Concern.
+      # Detect modules this concern's include calls reference, including a
+      # hook's `base.include` that applies them to the including class.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Included module names
       def detect_includes(source)
-        source.scan(/\binclude\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+        mixin_names(source, %i[include])
       end
 
-      # Detect modules explicitly extended by this concern.
-      #
-      # Scans for bare +extend ModuleName+ calls, excluding ActiveSupport::Concern.
+      # Detect modules this concern's extend calls reference, including a
+      # hook's `base.extend` that applies them to the including class.
       #
       # @param source [String] Ruby source code
       # @return [Array<String>] Extended module names
       def detect_extends(source)
-        source.scan(/\bextend\s+([\w:]+)/).flatten
-              .map { |m| ConstantPaths.normalize(m) }
-              .reject { |m| m == 'ActiveSupport::Concern' }
+        mixin_names(source, %i[extend])
+      end
+
+      # @return [Array<String>] normalized constants of every +kinds+ call,
+      #   without ActiveSupport::Concern
+      def mixin_names(source, kinds)
+        MixinCalls.call(source, kinds, own_only: false).map { |_kind, name| ConstantPaths.normalize(name) }
+                  .reject { |name| name == 'ActiveSupport::Concern' }
       end
 
       # Detect callback declarations.

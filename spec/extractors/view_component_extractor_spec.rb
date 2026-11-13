@@ -378,6 +378,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
             renders_one :header, HeaderComponent
             renders_many :cards, CardComponent
             include ApplicationHelper
+            # include LegacyHelper once the old layout is gone
 
             def call
               render(FooterComponent.new)
@@ -464,7 +465,7 @@ RSpec.describe Woods::Extractors::ViewComponentExtractor do
       unit = extractor.extract_all.first
 
       helper_deps = unit.dependencies.select { |d| d[:type] == :helper }
-      expect(helper_deps).to include(a_hash_including(target: 'ApplicationHelper', via: :include))
+      expect(helper_deps).to eq([{ type: :helper, target: 'ApplicationHelper', via: :include }])
     end
 
     context 'with route helpers' do

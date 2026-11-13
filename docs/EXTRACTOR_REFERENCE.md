@@ -143,12 +143,30 @@ mailers, concerns, POROs, libs and the other constant-owned types) publish
 published `source_code` coordinates, sorted by line.
 - `kind` is `instance`, `singleton` (`def self.`, `class << self`, a concern's
   `class_methods do`) or `module_function`.
-- `visibility` follows the literal `private`, `protected` and `public` forms,
-  including `private def`, `private :name` after the definition and
-  `private_class_method`.
+- `kind` and `visibility` are what Ruby reports for the definition, read from the literal forms without running them.
+  - `private`, `protected` and `public`: bare, before a `def`, or after it with symbol, string or array arguments.
+  - `private_class_method` and `public_class_method`: before a `def self.` or after it with names.
+  - `module_function`: bare, before a `def`, or after the definitions with symbol or string names.
+  - A `def` written as the argument of one of these calls is read as a plain `def` at that point, under the
+    body's bare `module_function` too, and the call then receives its name and acts on whatever method of that
+    name is held: `private_class_method def a` beside an earlier `def self.a` makes `self.a` private and leaves
+    the new instance method public.
+    Under a bare `module_function`, `private_class_method def x` makes both sides private and `private def x` keeps
+    the public singleton copy.
+  - `initialize`, `initialize_copy`, `initialize_dup`, `initialize_clone` and `respond_to_missing?` are private
+    instance methods even under a bare `public`, as in Ruby; a later `public :initialize` makes one public.
+- A `module_function` entry stands for a private instance method and a singleton copy; its `visibility` is the copy's.
+  A later `public :name` or `protected :name` splits it into an `instance` and a `singleton` entry.
+- A name passed before its definition (Ruby raises) leaves the entry as its definition reads.
+- The table holds the methods Ruby holds once the body has run, one entry per method and side.
+  A later definition replaces an earlier one on the same side (`def a` twice keeps the later, with the visibility in
+  force where it is written), so a superseded definition has no entry.
+  `module_function :a` replaces an earlier `def self.a`; a later `def self.a` or `def a` replaces one side of a
+  module function and leaves the other as its own entry.
 - `owner` is the lexical class or module, so a concern inlined as a commented
   display block owns its methods at their lines inside the block.
-- Methods defined by metaprogramming or on another receiver are absent.
+- Methods defined by metaprogramming or on another receiver are absent, and so is a `def self.x` inside
+  `class << self`, which Ruby defines on the singleton class's own singleton class.
 
 **Callback declarations (#817).** Each model callback entry whose method is
 declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with
@@ -897,6 +915,20 @@ excluded). They never decide the unit type.
 **Key details:**
 - Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
+- `include` and `extend` edges and `metadata.included_modules` come from real calls with constant arguments,
+  read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, `self.extend A` and a multi-line
+  argument list.
+  A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
+  Calls on another receiver and calls inside a method count too, so a hook's `base.include A`,
+  `base.class_eval { include A }` and an `included do` block's `include A` all list `A` and give its edge.
+  `metadata.included_modules` leaves out a module the concern declares in its own body, however the call names it
+  (`ClassMethods`, `self::ClassMethods`, `Trackable::ClassMethods` inside `Trackable`), resolved by lexical lookup
+  over the modules the file declares.
+  `self::X` names the enclosing module's `X` only where Ruby evaluates `self` as that module: in its body and in its
+  `def self.` methods.
+  Inside a block (`included do`, `base.class_eval { }`) or an instance method it names nothing: no edge, no listing.
+  The `*Helper` includes of Phlex, ViewComponent and mailer units count only calls without a receiver or on
+  `self`, outside a method body.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked
@@ -1732,7 +1764,7 @@ Git history is required.
 
 | Value | Meaning |
 |-------|---------|
-| `:new` | The commit that created the file is inside the window, and the file has at most two commits |
+| `:new` | The file's content first appeared inside the window, and the file has at most two commits |
 | `:hot` | Ten or more commits in the last 90 days |
 | `:active` | Three or more commits in the last 90 days |
 | `:stable` | At least one commit in the last 90 days |
@@ -1740,6 +1772,15 @@ Git history is required.
 
 A file written before the window and not touched since has `commit_count: 0`, no contributors and `:dormant`.
 That is a quiet file, not an uncommitted one: the window holds none of its history.
+
+A file renamed into place inside the window is not `:new` when its content is older.
+The history walk reads renames as a deletion and an addition, so a commit that creates a file and also deletes a path
+is read again with git's rename detection (`-M`, default similarity).
+A rename is followed back through the window to the commit that created its source.
+A source older than the window means the content is too: the file is classified by its counts.
+A source created inside the window keeps the file `:new`.
+`commit_count` still counts only the commits at the current name.
+The commit table (`git_commits.json`) still lists a renamed path as `added`.
 
 ### Full example JSON
 
