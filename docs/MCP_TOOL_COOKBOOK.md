@@ -470,7 +470,7 @@ This traces through the dependency graph: `CheckoutService` calls `Order#save!`,
 ## Path from OrdersController to PaymentGateway
 
 2 hops, forward: OrdersController (controller) reaches PaymentGateway (service).
-Evidence: weakest hop is at least static (hop 1). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
+Evidence: weakest hop is static (hop 2). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
 
 1. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
 2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)  [static]

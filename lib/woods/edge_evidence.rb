@@ -96,8 +96,10 @@ module Woods
     CATALOG = {
       'model' => scans.merge(
         'belongs_to' => r, 'has_many' => r, 'has_one' => r, 'has_and_belongs_to_many' => r,
-        'polymorphic_interface' => r, 'through_chain' => r, 'table' => r, 'inheritance' => r,
-        'include' => v, 'extend' => v
+        'through_chain' => r, 'table' => r, 'inheritance' => r, 'include' => v, 'extend' => v,
+        # The association name camelized; Rails never resolves an interface,
+        # and the existence check proves only that a constant has the name.
+        'polymorphic_interface' => s
       ),
       'controller' => scans.merge(helpers, 'include' => v, 'extend' => v, 'render' => v, 'redirect_to' => v,
                                            'action_source' => r, 'inheritance' => r),
@@ -128,7 +130,9 @@ module Woods
       'database_table' => { 'foreign_key' => r },
       'database_view' => { 'view_source' => v, 'table_name' => v },
       'migration' => scans.merge('migrates' => v, 'table_name' => v, 'reference' => v),
-      'external_consumer' => { 'reads_table' => v, 'writes_table' => v },
+      # An operator's declaration about another application; the live schema
+      # only confirms that the declared table exists.
+      'external_consumer' => { 'reads_table' => s, 'writes_table' => s },
       'view_template' => { 'render' => s, 'view_render' => v }.merge(navigation, helpers, frontend),
       'graphql_operation' => { 'root_field' => v, 'type_reference' => v, 'fragment_spread' => s },
       'factory' => { 'factory_for' => s, 'factory_parent' => s, 'factory_association' => s },
@@ -246,22 +250,28 @@ module Woods
         fields
       end
 
-      # A path is as well supported as its weakest hop.
+      # A path is as well supported as its weakest hop. The answer depends on
+      # the set of hops, not their order: when one hop of the weakest class
+      # is exactly that class, so is the path, and the path is a floor ("at
+      # least") only when every hop of that class is one.
       #
       # @param hops [Array<Hash>] hops carrying `:evidence`, and
       #   `:evidence_mixed` when that class is a floor
       # @return [Hash] `evidence:`, plus `weakest_hop:` (counted from 1) unless
-      #   every hop is reflected, and `evidence_mixed: true` when that hop's
-      #   class is a floor; empty for a path with no hops
+      #   every hop is reflected, and `evidence_mixed: true` when the path's
+      #   class is a floor; empty for a path with no hops. `weakest_hop` is the
+      #   first exact hop of the weakest class, or the first floor when there
+      #   is none.
       def path(hops)
         weakest = weakest(hops.map { |hop| hop[:evidence] })
         return {} unless weakest
         return { evidence: weakest } if weakest == REFLECTED
 
-        index = hops.index { |hop| hop[:evidence] == weakest }
-        summary = { evidence: weakest, weakest_hop: index + 1 }
-        summary[:evidence_mixed] = true if hops[index][:evidence_mixed]
-        summary
+        candidates = hops.each_index.select { |index| hops[index][:evidence] == weakest }
+        exact = candidates.find { |index| !hops[index][:evidence_mixed] }
+        return { evidence: weakest, weakest_hop: exact + 1 } if exact
+
+        { evidence: weakest, weakest_hop: candidates.first + 1, evidence_mixed: true }
       end
 
       # @param evidence [String] one of {CLASSES}
