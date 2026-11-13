@@ -778,6 +778,9 @@ The additive `explanation` object contains:
   `via`, `through`, `through_db`, and `disable_joins` preserve recorded values;
   absent legacy attributes are null (shown as unknown in text), including an
   unrecorded `disable_joins` rather than an invented false value.
+  `evidence` says how Woods knows the edge ([edge evidence](#edge-evidence), Woods 2.2), read by the type of
+  the edge's own source unit, so a `dependents` row is classified by the dependent, not by the unit asked about.
+  `evidence_mixed: true` marks a class that is a floor; the text writes it `evidence=at least static`.
 - `witnesses`: one shortest breadth-first predecessor per admitted identifier,
   keyed by identifier. Each has `parent`, `edge_id`, `impact` (`root`, `direct`,
   or `transitive`), and `typed_path_complete`. Follow parent references to the
@@ -816,6 +819,100 @@ O(nodes + variants) ownership/type preparation are outside the walk budget;
 explanation mode never flattens all forward edges as per-request preparation.
 Partial traversal and pagination metadata retain the budget contract above.
 
+### Edge evidence
+
+`path` and `explain: true` say how Woods knows each edge (Woods 2.2).
+The class is read from a catalog in the gem (`Woods::EdgeEvidence`), keyed by the edge's source unit type and
+its `via`.
+Nothing is stored on the edge: the graph file and `graph_sha` are unchanged, and an older index is classified
+the same way.
+
+| Class | Meaning |
+|---|---|
+| `reflected` | Rails, or the runtime it booted, reported the relationship: an association from reflection, a route in the route table, a loaded class's `superclass`, a foreign key from the schema. No source text was read to find the target. |
+| `verified` | Woods read source text and resolved what it names against live runtime tables: a constant the reference pass resolved, a `_path` helper found in `named_routes`, a rendered component constant, a table name found in the live schema. |
+| `static` | A source-text match nothing checked against the runtime: a naming pattern such as `FooJob.perform_later`, a name inferred from a class or file name, a declaration parsed from a file, a name resolved only against files on disk. |
+| `unknown` | This build has no classification for the pair. An unlisted pair, an unlabelled edge and an unknown unit type are `unknown`, never a default class. |
+
+None of the classes means the code path executes.
+`reflected` says the relationship is declared to the framework, not that a request reaches it.
+
+`verified` here is wider than the `verified` confidence of a `metadata.references` span
+([index layout](INDEX_LAYOUT.md)).
+That one means typed constant resolution by the reference pass.
+Every edge it produces is `verified` here, and so are the route-helper, component and schema resolutions, which
+never were spans.
+Likewise a span's `static` confidence adds no graph edge at all, while a `static` edge is a published edge.
+
+A model name the extractor scan finds in source is `static`, although the scan only looks for the names of live
+models: nothing resolves the spelling in its lexical scope, so `Report` inside `module Admin` may be another class.
+
+**Two mechanisms, one label.**
+Some pairs are produced by two mechanisms that the stored edge does not tell apart.
+Such a pair takes the weaker class and is marked `*` below; output says `at least`.
+`code_reference` from a controller is the common case: the extractor's name scan and the reference pass's
+verified resolution both write it.
+A later release will store the class on these edges.
+
+The order is `static`, then `verified`, then `reflected`.
+An edge with several labels takes its strongest, and a path takes its weakest hop.
+
+The catalog, one row per source unit type (`spec/edge_evidence_spec.rb` keeps this table equal to the code, and
+the booted extraction spec fails on an extracted pair the catalog does not list):
+
+<!-- edge-evidence-catalog:start -->
+| Source type | `reflected` | `verified` | `static` |
+|---|---|---|---|
+| `action_cable_channel` | `inheritance` | `extend`, `include` | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
+| `caching` |  |  | `code_reference`, `job_enqueue`, `reads_config`, `service_call` |
+| `component` | `inheritance` | `code_reference`, `extend`, `form_action`, `helper_method`, `link_to`, `render`, `slot` | `alpine_data`, `call`, `custom_element`, `data_dependency`, `helper_call`*, `include`*, `reads_config`, `stimulus_controller` |
+| `concern` |  |  | `code_reference`*, `extend`*, `include`*, `job_enqueue`, `reads_config`, `service_call` |
+| `configuration` | `behavioral_profile` |  | `code_reference`, `configuration`, `job_enqueue`, `reads_config`, `service_call` |
+| `controller` | `action_source`, `inheritance` | `extend`, `helper_method`, `include`*, `redirect_to`, `render` | `code_reference`*, `helper_call`*, `job_enqueue`, `reads_config`, `service_call` |
+| `database_table` | `foreign_key` |  |  |
+| `database_view` |  | `table_name`, `view_source` |  |
+| `decorator` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `decoration`, `job_enqueue`, `reads_config`, `service_call` |
+| `doc` |  |  | `doc_link`, `documents` |
+| `engine` | `engine_route` |  |  |
+| `event` |  |  | `published_by`, `subscribed_by` |
+| `external_consumer` |  | `reads_table`, `writes_table` |  |
+| `factory` |  |  | `factory_association`, `factory_for`, `factory_parent` |
+| `graphql_mutation` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `field_resolver`*, `job_enqueue`, `reads_config`, `service_call`, `type_reference`* |
+| `graphql_operation` |  | `root_field`, `type_reference` | `fragment_spread` |
+| `graphql_query` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `field_resolver`*, `job_enqueue`, `reads_config`, `service_call`, `type_reference`* |
+| `graphql_resolver` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `field_resolver`*, `job_enqueue`, `reads_config`, `service_call`, `type_reference`* |
+| `graphql_type` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `field_resolver`*, `job_enqueue`, `reads_config`, `service_call`, `type_reference`* |
+| `job` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `external_call`, `job_enqueue`, `reads_config`, `service_call` |
+| `js_module` |  |  | `import` |
+| `lib` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
+| `mailer` | `inheritance` | `extend`, `form_action`, `helper_method`, `include`, `link_to` | `code_reference`*, `helper_call`*, `reads_config`, `service_call` |
+| `manager` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `delegation`, `job_enqueue`, `reads_config`, `service_call` |
+| `migration` |  | `migrates`, `reference`, `table_name` | `code_reference`, `job_enqueue`, `reads_config`, `service_call` |
+| `model` | `belongs_to`, `has_and_belongs_to_many`, `has_many`, `has_one`, `inheritance`, `polymorphic_interface`, `table`, `through_chain` | `extend`*, `include`* | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
+| `package` |  |  | `package_dependency` |
+| `policy` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `job_enqueue`, `policy_evaluation`, `reads_config`, `service_call` |
+| `poro` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
+| `pundit_policy` |  | `extend`, `include`, `inheritance`* | `authorization`, `code_reference`*, `reads_config`, `service_call` |
+| `rake_task` |  |  | `code_reference`, `job_enqueue`, `method_call`, `reads_config`, `service_call`, `task_dependency`*, `task_invoke` |
+| `route` | `drawn_in`, `mount`, `route_dispatch` |  |  |
+| `route_file` |  |  | `draw` |
+| `ruby_class` |  |  | `definition_of`, `extend`, `include`, `inheritance` |
+| `ruby_file` |  |  | `definition_of`, `method_call`, `reference`, `require` |
+| `ruby_method` |  |  | `method_call` |
+| `ruby_module` |  |  | `definition_of`, `extend`, `include`, `inheritance` |
+| `scheduled_job` |  |  | `scheduled` |
+| `serializer` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `reads_config`, `serialization`, `service_call` |
+| `service` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `external_call`, `job_enqueue`, `reads_config`, `service_call` |
+| `state_machine` |  |  | `job_enqueue`, `service_call`, `state_machine`, `state_machine_callback` |
+| `test_mapping` |  | `exercises_route` | `behaves_like`, `includes_context`, `includes_helper`, `test_coverage`, `uses_matcher` |
+| `test_support` |  |  | `behaves_like`, `includes_context`, `includes_helper`, `uses_matcher` |
+| `validator` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `reads_config`, `service_call`, `validation` |
+| `view_component` | `inheritance` | `code_reference`, `extend`, `form_action`, `helper_method`, `link_to`, `render`, `slot` | `alpine_data`, `custom_element`, `data_dependency`, `helper_call`*, `include`*, `reads_config`, `stimulus_controller` |
+| `view_template` |  | `form_action`, `helper_method`, `link_to`, `view_render` | `alpine_data`, `custom_element`, `helper_call`*, `render`*, `stimulus_controller` |
+<!-- edge-evidence-catalog:end -->
+
+The `ruby_*` rows are the static self-map (`woods:self_map`), which never boots an application.
+
 ### Paths between units
 
 `path` answers "how does A reach B" with the shortest chain of published edges from `from` to `to` (Woods 2.2).
@@ -833,16 +930,27 @@ It replaces assembling the chain from several `dependencies` and `dependents` ca
 The text is one line per hop, in the order the edges run:
 
 ```text
-## Path from OrdersController to PaymentGateway
+## Path from GET /orders to PaymentGateway
 
-2 hops, forward: OrdersController (controller) reaches PaymentGateway (service).
+3 hops, forward: GET /orders (route) reaches PaymentGateway (service).
+Evidence: weakest hop is at least static (hop 2). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
 
-1. OrdersController (controller) -[code_reference]-> CheckoutService (service)
-2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)
+1. GET /orders (route) -[route_dispatch]-> OrdersController (controller)
+2. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
+3. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)  [static]
 ```
 
-The structured data carries `found`, `direction` (`forward` or `reverse`), `hop_count`, `hops` and `searches`.
+The `Evidence:` line names the weakest hop, and a hop is marked only when its evidence is weaker than `reflected`.
+A path Rails reported end to end reads `Evidence: every hop is reflected (reported by Rails).` and marks nothing.
+A hop this build cannot classify is `[unknown]`, and it makes the whole path `unknown`.
+
+The structured data carries `found`, `direction` (`forward` or `reverse`), `hop_count`, `hops`, `evidence` and
+`searches`.
 Each hop has `source`, `source_type`, `target`, `target_type` and `via`, every label on that edge, sorted.
+A hop's `evidence` is the strongest class among its labels, because one strong reason is enough to believe an edge.
+`evidence_mixed: true` marks a class that is a floor.
+The path's `evidence` is its weakest hop's, with `weakest_hop` (counted from 1) unless every hop is `reflected`.
+See [edge evidence](#edge-evidence) for the classes.
 `searches` records each search run with its bounds and the units it reached.
 With `direction: "either"` a reverse path still lists its hops as the edges run, from `to` toward `from`.
 

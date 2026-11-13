@@ -39,6 +39,9 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
 - **How one unit reaches another** (Woods `2.2.0` and later; check the connected server's tool list):
   `path` with `from` and `to` returns the shortest chain of published edges, one hop per line with its `via` labels.
+  An `Evidence:` line (Woods `2.2.0`) names the weakest hop: `reflected` (Rails reported the edge), `verified`
+  (source resolved against the running app), `static` (a source-text match) or `unknown`.
+  Read the source behind a `static` hop before relying on the path; no class means the code runs.
   An answer of no path says whether the search was exhaustive or stopped by `max_depth` or `max_nodes`.
   Only an exhaustive one shows there is no published path; retry with the larger bound, or `direction: "either"`.
   On an older server, assemble the chain from `dependencies` and `dependents`.

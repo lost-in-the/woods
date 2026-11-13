@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../dependency_graph'
+require_relative '../edge_evidence'
 require_relative 'identifier_suggestions'
 require_relative 'tool_contract'
 require_relative 'traversal_response'
@@ -16,7 +17,9 @@ module Woods
       NAME = 'path'
 
       DESCRIPTION = 'How does unit A reach unit B? Returns the shortest chain of published dependency edges from ' \
-                    '`from` to `to`, one hop per line with every `via` label on that edge. Use it for "how does X ' \
+                    '`from` to `to`, one hop per line with every `via` label on that edge, and how Woods knows ' \
+                    'each hop (evidence: reflected, verified, static or unknown; none means the code runs). ' \
+                    'Use it for "how does X ' \
                     'reach Y", "is X connected to Y" and "what is between X and Y" instead of assembling the chain ' \
                     'from several dependencies/dependents calls. direction "forward" (default) follows edges from ' \
                     '`from`; "either" also tries `to` reaching `from` and says which direction the path runs. ' \
@@ -111,15 +114,39 @@ module Woods
         end
 
         # @param hop [Hash] one hop of an answer
-        # @return [String] e.g. `OrdersController (controller) -[code_reference]-> CheckoutService (service)`
+        # @return [String] e.g. `OrdersController (controller) -[code_reference]-> CheckoutService (service)`,
+        #   followed by its evidence (`  [static]`) when that is weaker than `reflected`
         def hop_line(hop)
           others = Array(hop[:target_types]) - [hop[:target_type]]
           target = "#{hop[:target]} (#{hop[:target_type]}#{"; also #{others.join(', ')}" if others.any?})"
           via = hop[:via].empty? ? 'unlabelled' : hop[:via].join(', ')
-          "#{hop[:source]} (#{hop[:source_type]}) -[#{via}]-> #{target}"
+          "#{hop[:source]} (#{hop[:source_type]}) -[#{via}]-> #{target}#{evidence_marker(hop)}"
+        end
+
+        # How well the path is supported, in one line ({Woods::EdgeEvidence}).
+        #
+        # @param result [Hash] an answer of {.call}
+        # @return [String, nil] nil for an answer with no hops
+        def evidence_line(result)
+          evidence = result[:evidence]
+          return nil unless evidence
+          return 'Evidence: every hop is reflected (reported by Rails).' if evidence == EdgeEvidence::REFLECTED
+
+          weakest = "Evidence: weakest hop is #{EdgeEvidence.label(evidence, result[:evidence_mixed])} " \
+                    "(hop #{result[:weakest_hop]})"
+          unknown = ': this build has no classification for that relationship' if evidence == EdgeEvidence::UNKNOWN
+          "#{weakest}#{unknown}. #{EdgeEvidence::LEGEND}"
         end
 
         private
+
+        # @return [String, nil]
+        def evidence_marker(hop)
+          evidence = hop[:evidence]
+          return nil if evidence.nil? || evidence == EdgeEvidence::REFLECTED
+
+          "  [#{EdgeEvidence.label(evidence, hop[:evidence_mixed])}]"
+        end
 
         # @return [Integer] the wire contract's upper bound for an integer argument
         def maximum(argument)
