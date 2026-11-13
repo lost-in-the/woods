@@ -152,6 +152,101 @@ RSpec.describe Woods::MCP::LookupPages, 'page size bound' do
     end
   end
 
+  # The rule: every refusal of a page too small, on every path, names a size
+  # S at or above the smallest page (1,000) that serves the same call, while
+  # S - 1 is refused; and every path says it in the same words.
+  describe 'refusals of a page too small' do
+    def self.refused_units
+      random = Random.new(42)
+      escapes = ->(count) { Array.new(count) { |i| "  s#{i} = \"\\\\\"\t\u0001#{'"' * random.rand(1..5)}\"\n" }.join }
+      nested = (1..9).reduce({ 'leaf' => [{ 'q' => '\\' * 1300 }] }) do |inner, depth|
+        { "level_#{depth}" => inner, "s#{depth}" => 'y' * 50 }
+      end
+      {
+        'several uncuttable items' => {
+          'identifier' => 'Gear', 'type' => 'model', 'source_code' => escapes.call(300),
+          'metadata' => { 'items' => [{ 'a' => 'x' * 1500 }, { 'b' => '"' * 1100 }, { 'c' => "\\\n" * 900 }] }
+        },
+        'an item deep in objects' => { 'identifier' => 'Cog', 'type' => 'service', 'metadata' => nested },
+        'escape-heavy source and items' => {
+          'identifier' => 'Sprocket', 'type' => 'controller', 'source_code' => escapes.call(800),
+          'metadata' => { 'big' => [{ 'blob' => "\u0002" * 600 }, { 'blob' => 'z' * 2700 }] }
+        }
+      }
+    end
+
+    def refused_size(unit, size)
+      described_class.json_pages(unit, size)
+      nil
+    rescue Woods::MCP::LookupPages::PageTooSmall => e
+      e
+    end
+
+    def sentence(required)
+      "pages of at least #{required} characters hold it. Pass max_chars: #{required} or more"
+    end
+
+    refused_units.each do |name, unit|
+      it "names from .json_pages the smallest size for #{name}, in the shared words" do
+        [1_000, 1_500, 2_000].each do |size|
+          error = refused_size(unit, size)
+          next unless error
+
+          expect(refused_size(unit, error.required)).to be_nil
+          expect(refused_size(unit, error.required - 1)&.required).to eq(error.required)
+          (1..25).each { |more| expect(refused_size(unit, error.required + more)).to be_nil }
+          expect(error.message).to include(sentence(error.required))
+        end
+      end
+    end
+
+    it 'names from .text_pieces the smallest page a lookup accepts' do
+      error = begin
+        described_class.text_pieces("short\n" * 50, 100)
+      rescue Woods::MCP::LookupPages::PageTooSmall => e
+        e
+      end
+
+      expect(error.required).to eq(Woods::MCP::LookupPages::MIN_MAX_CHARS)
+      expect(error.message).to include(sentence(Woods::MCP::LookupPages::MIN_MAX_CHARS))
+    end
+
+    describe 'through the lookup tool' do
+      let(:index_dir) { Dir.mktmpdir('woods-lookup-refusal') }
+
+      after { FileUtils.rm_rf(index_dir) }
+
+      def publish(unit)
+        FileUtils.cp_r(File.join(File.expand_path('../fixtures/woods', __dir__), '.'), index_dir)
+        path = Dir[File.join(index_dir, 'models', 'Post*.json')].first
+        File.write(path, JSON.generate(unit.merge('identifier' => 'Post', 'type' => 'model')))
+      end
+
+      def lookup(format, **arguments)
+        server = Woods::MCP::Server.build(index_dir: index_dir, response_format: format, warmup: false)
+        server.instance_variable_get(:@tools).fetch('lookup').call(identifier: 'Post', **arguments, server_context: {})
+      end
+
+      refused_units.each do |name, unit|
+        it "names a size that serves #{name} and one below that is refused, from every starting size" do
+          publish(unit)
+          refusals = %i[json markdown].product([1_000, 1_500, 2_000]).filter_map do |format, size|
+            response = lookup(format, max_chars: size)
+            [format, response] if response.error?
+          end
+
+          expect(refusals).not_to be_empty
+          refusals.each do |format, response|
+            required = response.meta.fetch(:required_max_chars)
+            expect(response.content.first[:text]).to include(sentence(required))
+            expect(lookup(format, max_chars: required).error?).to be(false)
+            expect(lookup(format, max_chars: required - 1).meta[:required_max_chars]).to eq(required)
+          end
+        end
+      end
+    end
+  end
+
   it 'still answers a unit that fits whole on one page' do
     unit = { 'identifier' => 'Widget', 'metadata' => { 'items' => [{ 'name' => 'a' }] } }
 
