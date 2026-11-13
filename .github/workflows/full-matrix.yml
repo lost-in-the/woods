@@ -1,0 +1,34 @@
+name: Full matrix on label
+
+# Adding the `full-matrix` label to a pull request runs every CI row on its
+# branch at once. ci.yml does not trigger on `labeled` itself: every label
+# event would start a run that cancels the PR's current one (one concurrency
+# group per PR), and skipping that run's jobs would post skipped checks under
+# the real check names. This workflow posts no CI check names; for any other
+# label its one job is skipped. Later pushes to a labeled pull request run
+# every row in ci.yml's own pull_request run (`WOODS_CI_ROW_ACTIVE`).
+# A dispatch from GITHUB_TOKEN is the one event that token may start. A fork's
+# branch is not in this repository and its token is read-only, so a fork's
+# pull request gets the full matrix on its next push instead.
+on:
+  pull_request:
+    types: [labeled]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch the full CI matrix
+    if: >-
+      github.event.label.name == 'full-matrix' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Run CI on the pull request branch with every row active
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+        run: gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$HEAD_REF"
