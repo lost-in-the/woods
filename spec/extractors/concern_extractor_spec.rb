@@ -795,6 +795,50 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
     end
 
+    it 'maps a body-level extended ClassMethods module to the module that owns it' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          module ClassMethods
+            def stack_all; end
+          end
+
+          extend ClassMethods
+          extend Stackable::ClassMethods
+          extend Depot::Countable::ClassMethods
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies).to eq([{ type: :concern, target: 'Depot::Countable', via: :extend }])
+      expect(unit.metadata[:included_modules]).to eq(%w[ClassMethods Stackable::ClassMethods Depot::Countable::ClassMethods])
+    end
+
+    it 'lists only its own mixins in included_modules but keeps the edges of hook-form calls' do
+      path = create_file('app/models/concerns/trackable.rb', <<~RUBY)
+        module Trackable
+          include Depot::Weighable
+
+          def self.included(base)
+            base.extend(ClassMethods)
+            base.extend(Depot::Countable::ClassMethods)
+            base.include(Depot::Sortable)
+          end
+
+          module ClassMethods; end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable])
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Sortable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :extend }]
+      )
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable

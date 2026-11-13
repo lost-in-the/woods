@@ -147,6 +147,10 @@ published `source_code` coordinates, sorted by line.
   - `private`, `protected` and `public`: bare, before a `def`, or after it with symbol, string or array arguments.
   - `private_class_method` and `public_class_method`: before a `def self.` or after it with names.
   - `module_function`: bare, before a `def`, or after the definitions with symbol or string names.
+  - A `def` written as the argument of one of these calls is read as a plain `def` at that point, under the
+    body's bare `module_function` too, and the call then changes that entry.
+    Under a bare `module_function`, `private_class_method def x` makes both sides private and `private def x` keeps
+    the public singleton copy.
   - `initialize`, `initialize_copy`, `initialize_dup`, `initialize_clone` and `respond_to_missing?` are private
     instance methods even under a bare `public`, as in Ruby; a later `public :initialize` makes one public.
 - A `module_function` entry stands for a private instance method and a singleton copy; its `visibility` is the copy's.
@@ -905,9 +909,13 @@ excluded). They never decide the unit type.
 - Scans: every `app/**/concerns` directory (the directory rule), and for the runtime rule each module declared in `app/` and `lib/` Ruby
 - Extracts included hooks, `ClassMethods` block, instance methods, and class methods added by the concern
 - `include` and `extend` edges and `metadata.included_modules` come from real calls with constant arguments,
-  read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, a multi-line argument list,
-  and `base.extend ClassMethods` in `self.included`.
+  read from the Prism tree: `include A, B`, `include(A)`, `include ::A::B`, `self.extend A` and a multi-line
+  argument list.
   A comment, string, heredoc or method name that contains the word declares nothing, and neither does `extend self`.
+  `metadata.included_modules` lists only the concern's own mixins: calls without a receiver or on `self`,
+  outside a method body (a call inside an `included do` block still counts).
+  `base.extend ClassMethods` or `base.include A` in `self.included` acts on the including class, so it is not
+  listed there, but its constant still gives an `include` or `extend` edge.
 - For promoted runtime modules, metadata and dependencies use only that module’s declarations, excluding sibling and nested helper owners. Full redacted file source remains available as context.
 - Class-method names include both `class_methods do` and the conventional `module ClassMethods` form.
 - Dependencies on models and other concerns are tracked

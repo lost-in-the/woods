@@ -117,6 +117,49 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
+    'private_class_method def under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+
+        private_class_method def helper
+          1
+        end
+      end
+    RUBY
+    'public_class_method def under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+        public_class_method def helper; end
+      end
+    RUBY
+    'private def under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+        private def helper; end
+      end
+    RUBY
+    'protected and public def under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+        protected def guard; end
+        public def shown; end
+        public def initialize; end
+      end
+    RUBY
+    'def self. forms under a bare module_function' => <<~RUBY,
+      module Tools
+        module_function
+        def self.plain; end
+        private_class_method def self.hidden; end
+        public_class_method def self.shown; end
+      end
+    RUBY
+    'module_function def under a bare private' => <<~RUBY,
+      module Tools
+        private
+        module_function def helper; end
+      end
+    RUBY
     'nested owners' => <<~RUBY
       module Outer
         def self.a; end
@@ -149,6 +192,10 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
   def runtime_facts(source, owners)
     namespace = Module.new
     namespace.module_eval(source)
+    defined_facts(namespace, owners)
+  end
+
+  def defined_facts(namespace, owners)
     owners.each_with_object({}) do |owner, facts|
       constant = namespace.const_get(owner)
       { instance: constant, singleton: constant.singleton_class }.each do |side, target|
@@ -166,6 +213,19 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       table = table_facts(source)
       owners = table.keys.map(&:first).uniq
       expect(table).to eq(runtime_facts(source, owners))
+    end
+  end
+
+  # Without `module_function` there is no singleton `helper` to change, so
+  # Ruby raises after defining the public instance method.
+  {
+    'private_class_method def' => "module Tools\n  private_class_method def helper\n    1\n  end\nend\n",
+    'public_class_method def' => "module Tools\n  public_class_method def helper; end\nend\n"
+  }.each do |label, source|
+    it "agrees with what Ruby defined before #{label} without a singleton method raised" do
+      namespace = Module.new
+      expect { namespace.module_eval(source) }.to raise_error(NameError, /helper/)
+      expect(table_facts(source)).to eq(defined_facts(namespace, %w[Tools]))
     end
   end
 end
