@@ -749,9 +749,11 @@ module Woods
               reference = LookupMember.parse(identifier)
               owners = reference ? member_owners.call(reader, reference.owner, type) : []
               concern_file = ->(concern) { reader.find_unit(concern, type: 'concern')&.fetch('file_path', nil) }
+              # A superclass, by its `:inheritance` edge's type when there is one.
+              ancestor = ->(name, kind) { (kind && reader.find_unit(name, type: kind)) || reader.find_unit(name) }
               answer = nil
               owner = owners.find do |candidate|
-                answer = LookupMember.answer(candidate, reference, concern_file: concern_file)
+                answer = LookupMember.answer(candidate, reference, concern_file: concern_file, find_unit: ancestor)
               end
               if answer
                 member_of = { identifier: owner['identifier'], type: owner['type'] }
@@ -768,7 +770,7 @@ module Woods
                                         'retrieve fresh evidence before verification.',
                                         code: :stale_index, tool: 'lookup', argument: 'source_sha256')
                 end
-                answer = answer.except('source_code') if include_source == false
+                answer = LookupMember.without_source(answer) if include_source == false
                 next respond.call(renderer.render(:lookup_member, answer), meta: { member_of: member_of })
               end
 

@@ -124,6 +124,10 @@ RSpec.describe 'MCP lookup of a unit member' do
         def create
           @post = Post.create!(params[:post])
         end
+
+        def destroy
+          head :no_content
+        end
       end
     RUBY
   end
@@ -156,6 +160,29 @@ RSpec.describe 'MCP lookup of a unit member' do
     end
   end
 
+  let(:application_source) do
+    <<~RUBY
+      class ApplicationController
+        def current_author
+          @author
+        end
+
+        def destroy
+          head :gone
+        end
+      end
+    RUBY
+  end
+
+  # A controller's inlined concerns are sorted by name, so the index does not
+  # record which of two concerns defining one name Ruby calls.
+  let(:reports_source) do
+    exportable = "module Exportable\n  def render_pdf\n    :exportable\n  end\nend\n"
+    printable = "module Printable\n  def render_pdf\n    :printable\n  end\nend\n"
+    "class ReportsController < ApplicationController\n\n#{concern_block('Exportable', exportable)}\n" \
+      "#{concern_block('Printable', printable)}end\n"
+  end
+
   let(:util_source) do
     <<~RUBY
       module Canopy
@@ -177,7 +204,13 @@ RSpec.describe 'MCP lookup of a unit member' do
       ['concerns', 'concern', 'Formatting', 'app/models/concerns/formatting.rb', formatting_code,
        { 'methods' => published_methods(formatting_code, identity_lines: 14) }],
       ['controllers', 'controller', 'PostsController', 'app/controllers/posts_controller.rb', controller_source,
-       { 'methods' => published_methods(controller_source, shift: 10) }],
+       { 'methods' => published_methods(controller_source, shift: 10), 'parent_class' => 'ApplicationController' }],
+      ['controllers', 'controller', 'ApplicationController', 'app/controllers/application_controller.rb',
+       application_source, { 'methods' => published_methods(application_source, identity_lines: 9),
+                             'parent_class' => 'ActionController::Base' }],
+      ['controllers', 'controller', 'ReportsController', 'app/controllers/reports_controller.rb', reports_source,
+       { 'methods' => published_methods(reports_source, identity_lines: 2),
+         'parent_class' => 'ApplicationController' }],
       # An index that predates the published method table.
       ['controllers', 'controller', 'Admin::PostsController', 'app/controllers/admin/posts_controller.rb',
        admin_source, {}],
@@ -237,8 +270,8 @@ RSpec.describe 'MCP lookup of a unit member' do
       expect(data['member']).to include('name' => 'create', 'kind' => 'instance', 'visibility' => 'public',
                                         'line' => 6, 'end_line' => 8, 'file_line' => 16, 'file_end_line' => 18)
       expect(data['statement']).to eq('PostsController#create is a public instance method of controller unit ' \
-                                      'PostsController, not a unit of its own. ' \
-                                      'Look up PostsController for the whole unit.')
+                                      'PostsController, defined in its own body. It is not a unit of its own; ' \
+                                      'look up PostsController for the whole unit.')
     end
 
     it 'answers a class method named with a dot' do
@@ -328,7 +361,7 @@ RSpec.describe 'MCP lookup of a unit member' do
         answer = member('PostsController#create', format: format)
 
         expect(answer).to include('PostsController#create is a public instance method of controller unit ' \
-                                  'PostsController, not a unit of its own.')
+                                  'PostsController, defined in its own body.')
         expect(answer).to include('app/controllers/posts_controller.rb').and include('16-18')
         expect(answer).to include('@post = Post.create!(params[:post])')
         expect(answer).not_to include('@posts = Post.all')
@@ -375,6 +408,84 @@ RSpec.describe 'MCP lookup of a unit member' do
 
       expect(data['member']).to include('kind' => 'instance', 'visibility' => 'private')
       expect(data['statement']).to start_with('Canopy::Util#tool is a private instance method of lib unit')
+    end
+  end
+
+  describe 'the superclass chain' do
+    it 'answers a method the owner inherits from a published superclass' do
+      data = member('PostsController#current_author')
+
+      expect(data['member_of']).to include('identifier' => 'PostsController')
+      expect(data['inherited_from']).to eq('identifier' => 'ApplicationController', 'type' => 'controller',
+                                           'file_path' => 'app/controllers/application_controller.rb')
+      expect(data['member']).to include('unit' => 'ApplicationController', 'file_line' => 2, 'file_end_line' => 4)
+      expect(data['statement']).to start_with('PostsController#current_author is a public instance method that ' \
+                                              'controller unit PostsController inherits from controller unit ' \
+                                              'ApplicationController, defined in its own body.')
+      expect(data['source_code']).to eq("  def current_author\n    @author\n  end\n")
+    end
+
+    it "lists a superclass definition the owner's own body overrides" do
+      data = member('PostsController#destroy')
+
+      expect(data['member']).to include('line' => 10, 'end_line' => 12)
+      expect(data['other_definitions']).to eq([data['other_definitions'].first.merge('unit' => 'ApplicationController',
+                                                                                     'line' => 6, 'end_line' => 8)])
+      expect(data['statement']).to include('defined in its own body. It overrides 1 other definition of destroy.')
+      expect(member('PostsController#destroy', format: :markdown))
+        .to include('Also defined at Published source of ApplicationController lines 6-8; ' \
+                    'the definition above overrides it.')
+    end
+
+    %i[markdown plain claude].each do |format|
+      it "names the ancestor's file and published source in the #{format} format" do
+        answer = member('PostsController#current_author', format: format)
+
+        expect(answer).to include('File: app/controllers/application_controller.rb (ApplicationController, ' \
+                                  'inherited by PostsController), lines 2-4')
+        expect(answer).to include('Published source of ApplicationController: lines 2-4')
+      end
+    end
+
+    it 'says the chain was not fully read when a concern answers and the owner records no parent' do
+      data = member('Post#archive')
+
+      expect(data['caveats']).to eq(['The superclass chain of Post was read only up to Post: Post records no ' \
+                                     'parent class, so a definition in a superclass Woods did not read could ' \
+                                     'come before this inlined concern.'])
+      expect(member('Post#archive', format: :plain)).to include('Caveat: The superclass chain of Post')
+    end
+  end
+
+  describe 'concerns whose include order is not published' do
+    it 'lists each candidate and says Woods cannot tell which one Ruby calls' do
+      data = member('ReportsController#render_pdf')
+
+      expect(data).not_to have_key('member')
+      expect(data['statement']).to start_with('ReportsController#render_pdf: 2 concerns inlined into controller ' \
+                                              'unit ReportsController define the instance method render_pdf ' \
+                                              '(Exportable, Printable), and the index does not record the order')
+      expect(data['statement']).to include('so Woods cannot tell which one Ruby calls')
+      expect(data['candidates'].map { |candidate| candidate['defined_in']['identifier'] })
+        .to eq(%w[Exportable Printable])
+      expect(data['candidates'].map { |candidate| candidate['source_code'] })
+        .to eq(["  def render_pdf\n    :exportable\n  end\n", "  def render_pdf\n    :printable\n  end\n"])
+    end
+
+    it 'leaves every candidate source out with include_source: false' do
+      data = member('ReportsController#render_pdf', include_source: false)
+
+      expect(data['candidates']).to all(satisfy { |candidate| !candidate.key?('source_code') })
+    end
+
+    %i[markdown plain claude].each do |format|
+      it "renders each candidate in the #{format} format" do
+        answer = member('ReportsController#render_pdf', format: format)
+
+        expect(answer).to include('Candidate 1: Exportable').and include('Candidate 2: Printable')
+        expect(answer).to include(':exportable').and include(':printable')
+        expect(answer).to include('cannot tell which one Ruby calls')
+      end
     end
   end
 
