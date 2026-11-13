@@ -84,19 +84,7 @@ module Woods
     # @return [Hash]
     def reached(search)
       { direction: search[:direction], hop_count: search[:hops].size, hops: search[:hops] }
-        .merge(path_evidence(search[:hops]))
-    end
-
-    # @return [Hash] the weakest hop's evidence, and which hop that is
-    def path_evidence(hops)
-      weakest = EdgeEvidence.weakest(hops.map { |hop| hop[:evidence] })
-      return {} unless weakest
-      return { evidence: weakest } if weakest == EdgeEvidence::REFLECTED
-
-      index = hops.index { |hop| hop[:evidence] == weakest }
-      evidence = { evidence: weakest, weakest_hop: index + 1 }
-      evidence[:evidence_mixed] = true if hops[index][:evidence_mixed]
-      evidence
+        .merge(EdgeEvidence.path(search[:hops]))
     end
 
     # @return [Hash] whether every search ran to its end, and what stopped the first that did not
@@ -195,10 +183,7 @@ module Woods
       hop = { source: source.first, source_type: source.last.to_s, target: target.first,
               target_type: target.last.to_s, via: labels.compact.uniq.sort }
       hop[:target_types] = target_types.map(&:to_s) if target_types.size > 1
-      evidence = EdgeEvidence.edge(hop[:source_type], hop[:via])
-      hop[:evidence] = evidence[:evidence]
-      hop[:evidence_mixed] = true if evidence[:mixed]
-      hop
+      hop.merge(EdgeEvidence.hop(hop[:source_type], hop[:via]))
     end
 
     # @return [Array<Hash>] the hops from the start to +goal+, in order

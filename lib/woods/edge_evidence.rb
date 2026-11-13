@@ -234,6 +234,36 @@ module Woods
         { evidence: evidence, mixed: decisive.any? && decisive.all? { |via| mixed?(source_type, via) } }
       end
 
+      # The fields a hop carries for its edge.
+      #
+      # @param source_type [String, Symbol] type of the unit the edge leaves
+      # @param vias [Array<String>] every via on the edge
+      # @return [Hash] `evidence:`, plus `evidence_mixed: true` when that class is a floor
+      def hop(source_type, vias)
+        found = edge(source_type, vias)
+        fields = { evidence: found[:evidence] }
+        fields[:evidence_mixed] = true if found[:mixed]
+        fields
+      end
+
+      # A path is as well supported as its weakest hop.
+      #
+      # @param hops [Array<Hash>] hops carrying `:evidence`, and
+      #   `:evidence_mixed` when that class is a floor
+      # @return [Hash] `evidence:`, plus `weakest_hop:` (counted from 1) unless
+      #   every hop is reflected, and `evidence_mixed: true` when that hop's
+      #   class is a floor; empty for a path with no hops
+      def path(hops)
+        weakest = weakest(hops.map { |hop| hop[:evidence] })
+        return {} unless weakest
+        return { evidence: weakest } if weakest == REFLECTED
+
+        index = hops.index { |hop| hop[:evidence] == weakest }
+        summary = { evidence: weakest, weakest_hop: index + 1 }
+        summary[:evidence_mixed] = true if hops[index][:evidence_mixed]
+        summary
+      end
+
       # @param evidence [String] one of {CLASSES}
       # @param mixed [Boolean] whether the class is a floor
       # @return [String] e.g. `static`, or `at least static`
