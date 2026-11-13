@@ -43,7 +43,9 @@ bin/rails woods:stats
 
 This skill describes the Woods 2.x line; the authoritative minimum version lives in the marketplace entry. Operate only against capabilities the recorded installed version provides. Detect the MCP client, app root, host vs Docker Rails process, the filesystem context that contains the application bundle and index, and whether live-data access is actually required.
 
-Default to Index-only. It reads generated code context and exposes 15 tools. Console MCP boots Rails and reads live data; ask before enabling it.
+Default to Index-only.
+It reads generated code context and exposes 16 tools (15 before Woods `2.2.0`, which adds `path`).
+Console MCP boots Rails and reads live data; ask before enabling it.
 
 Initialization guidance (#402) is available in Woods `2.0.0.beta3`; check the
 installed gem before expecting MCP `instructions`. Supporting servers provide

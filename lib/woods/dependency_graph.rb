@@ -3,6 +3,7 @@
 require 'set'
 require 'json'
 require_relative 'source_contributors'
+require_relative 'shortest_path'
 
 module Woods
   # DependencyGraph tracks relationships between code units for:
@@ -709,6 +710,41 @@ module Woods
       end
       entries.sort_by { |entry| [entry[:identifier], entry[:type].to_s, entry[:via].to_s] }
     end
+
+    # A shortest chain of forward edges from one unit to another: how +from+
+    # reaches +to+. See {ShortestPath} for the search, its ordering and its
+    # bounds. Nothing is precomputed; the walk reads the graph as it stands.
+    #
+    # An identifier registered under several types resolves to its primary
+    # node, as {#node} does, unless the type is named.
+    #
+    # @param from [String] identifier of the unit the path starts at
+    # @param to [String] identifier of the unit the path ends at
+    # @param from_type [Symbol, String, nil] the start's unit type
+    # @param to_type [Symbol, String, nil] the target's unit type
+    # @param max_depth [Integer] most hops a path may have
+    # @param max_nodes [Integer] most units one search may reach
+    # @param direction [String] `forward`, or `either` to also try +to+ reaching +from+
+    # @return [Hash] see {ShortestPath#call}
+    # @raise [ArgumentError] when an endpoint is not registered, or not under the type named
+    def shortest_path(from, to, from_type: nil, to_type: nil, max_depth: ShortestPath::DEFAULT_MAX_DEPTH,
+                      max_nodes: ShortestPath::DEFAULT_MAX_NODES, direction: 'forward')
+      ShortestPath.new(self, max_depth: max_depth, max_nodes: max_nodes)
+                  .call(typed_node(from, from_type), typed_node(to, to_type), direction: direction)
+    end
+
+    # @param identifier [String]
+    # @param type [Symbol, String, nil] nil for the primary node
+    # @return [Array(String, Symbol)] `[identifier, type]` of a registered node
+    # @raise [ArgumentError] when there is none
+    def typed_node(identifier, type)
+      types = node_types(identifier)
+      found = type ? types.find { |candidate| candidate.to_s == type.to_s } : types.first
+      return [identifier, found] if type ? found : types.any?
+
+      raise ArgumentError, "No unit registered as #{identifier}#{" (type #{type})" if type}"
+    end
+    private :typed_node
 
     # Get all units of a specific type
     #

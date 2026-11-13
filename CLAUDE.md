@@ -1,6 +1,16 @@
 # Woods
 
-Ruby gem that extracts structured data from Rails applications for AI-assisted development. Uses runtime introspection (not static parsing) to produce version-accurate representations: inlined concerns, resolved callback chains, schema-aware associations, dependency graphs. Implemented layers include: extraction (one extractor per `lib/woods/extractors/*_extractor.rb`, counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities), retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters), embedding (OpenAI, Ollama), two MCP servers (31-tool index server, 15 always-on + 16 wiring-conditional; 31-tool console server), AST analysis, flow extraction, temporal snapshots, Markdown export (plain or Obsidian flavor) and deprecated Notion + Unblocked sync, and evaluation harness.
+Ruby gem that extracts structured data from Rails applications for AI-assisted development.
+Uses runtime introspection (not static parsing) to produce version-accurate representations:
+inlined concerns, resolved callback chains, schema-aware associations, dependency graphs.
+Implemented layers include:
+extraction (one extractor per `lib/woods/extractors/*_extractor.rb`,
+counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities),
+retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters),
+embedding (OpenAI, Ollama),
+two MCP servers (32-tool index server, 16 always-on + 16 wiring-conditional; 31-tool console server),
+AST analysis, flow extraction, temporal snapshots, Markdown export (plain or Obsidian flavor)
+and deprecated Notion + Unblocked sync, and evaluation harness.
 
 ## Commands
 
@@ -161,6 +171,7 @@ lib/
 │   ├── generation.rb                    # Monotonic "which version of the index is on disk"
 │   ├── extracted_unit.rb                # Core value object
 │   ├── dependency_graph.rb              # Directed graph + PageRank scoring
+│   ├── shortest_path.rb                 # Shortest chain of edges between two units (DependencyGraph#shortest_path, MCP `path`)
 │   ├── graph_analyzer.rb               # Structural analysis (orphans, hubs, cycles, bridges)
 │   ├── published_index.rb              # Read-only reader over one published generation (RuboCop cops, gate scripts)
 │   ├── model_name_cache.rb             # Precomputed regex for dependency scanning
@@ -190,7 +201,7 @@ lib/
 │   ├── export/                          # Shared export fact extraction (UnitFacts) over unit metadata
 │   ├── notion/                          # Notion export (Client, Exporter, RateLimiter, Mappers)
 │   ├── obsidian/                        # Obsidian vault export (VaultExporter, NoteBuilder, NameMapper, VaultAssets)
-│   ├── mcp/                             # MCP Index Server (31 tools, 15 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
+│   ├── mcp/                             # MCP Index Server (32 tools, 16 always-on + 16 wiring-conditional: 5 operator / 4 feedback / 5 snapshot-impact / 1 session_trace / 1 notion; 2 resources, 2 templates)
 │   ├── console/                         # Console MCP Server (31 tool schemas across 4 tiers: 9 read-only / 9 domain-aware / 10 analytics / 3 guarded; only Tier 1 plus the two read tools register)
 │   ├── coordination/                    # Multi-agent pipeline locking
 │   ├── feedback/                        # Agent self-service (FeedbackStore, GapDetector)

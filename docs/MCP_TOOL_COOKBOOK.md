@@ -15,6 +15,7 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 - ["Find all controllers that handle payments"](#find-all-controllers-that-handle-payments)
 - ["Which controller handles POST /checkout?"](#which-controller-handles-post-checkout)
 - ["What jobs does CheckoutService trigger?"](#what-jobs-does-checkoutservice-trigger)
+- ["How does OrdersController reach PaymentGateway?"](#how-does-orderscontroller-reach-paymentgateway)
 - ["Where does UsersController redirect to?"](#where-does-userscontroller-redirect-to)
 - ["What methods does Rails generate on Order at runtime?"](#what-methods-does-rails-generate-on-order-at-runtime)
 - ["What changed recently?"](#what-changed-recently)
@@ -56,11 +57,13 @@ Scenario-based examples showing which tool to use, what parameters to pass, and 
 
 ## Conditional Tools & Wiring
 
-The Index Server defines **31 schemas**: the packaged executable registers **15**, while **16** require specialized collaborators or configuration. A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
+The Index Server defines **32 schemas**: the packaged executable registers **16**,
+while **16** require specialized collaborators or configuration.
+A tool that is not registered is absent from `tools/list`; clients see “tool not found,” not a runtime failure.
 
 | Tool group | Count | Wiring condition |
 |------------|-------|------------------|
-| Always-on | 15 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `diagram`, `woods_status` |
+| Always-on | 16 | Always registered, `lookup`, `search`, `dependencies`, `dependents`, `path`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `reload`, `codebase_retrieve`, `trace_flow`, `diagram`, `woods_status` |
 | `session_trace` | 1 | Custom/embedded Index process has a configured `session_store` supporting `read` and `sessions`; the packaged executable does not load Rails initializer configuration |
 | Operator (5) | 5 | Custom embedded server wires an operator: `pipeline_extract`, `pipeline_embed`, `pipeline_status`, `pipeline_diagnose`, `pipeline_repair` |
 | Feedback (4) | 4 | Custom embedded server wires a feedback store: `retrieval_rate`, `retrieval_report_gap`, `retrieval_explain`, `retrieval_suggest` |
@@ -444,6 +447,53 @@ see the [search contract](MCP_SERVERS.md#search-completeness).
 ```
 
 This traces through the dependency graph: `CheckoutService` calls `Order#save!`, which triggers `after_commit :send_confirmation`, which enqueues `OrderConfirmationJob`. Without the graph, you'd need to manually follow callbacks across multiple files.
+
+---
+
+### "How does OrdersController reach PaymentGateway?"
+
+**Tool:** `path` (Index Server, Woods 2.2)
+
+```json
+{
+  "from": "OrdersController",
+  "to": "PaymentGateway"
+}
+```
+
+**What you'll get:** the shortest chain of published edges between the two units, one hop per line with every
+`via` label on that edge:
+
+```text
+## Path from OrdersController to PaymentGateway
+
+2 hops, forward: OrdersController (controller) reaches PaymentGateway (service).
+
+1. OrdersController (controller) -[code_reference]-> CheckoutService (service)
+2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)
+```
+
+Use it for "is X connected to Y" and "what is between X and Y" too.
+The same question asked the other way round has a different answer, because edges are directed.
+Pass `direction: "either"` to try both; the answer says which way the path runs.
+
+**When there is no path.** The call succeeds and says how far the search went:
+
+```text
+## Path from Post to Comment
+
+No path: no chain of published edges leads from Post (model) to Comment (model). The search was exhaustive.
+Pass direction: "either" to also search from Comment toward Post.
+```
+
+An answer that begins `No path within 6 hops` was stopped by `max_depth`, and one that names the node budget was
+stopped by `max_nodes`.
+Neither shows that the units are unconnected: retry with the larger bound the answer suggests.
+In the structured data, `exhaustive` is `true` only for a search that ran to its end.
+
+**Errors.** An unknown `from` or `to` is `not_found` with near matches.
+An identifier registered under several unit types is `ambiguous_identity` until `from_type` or `to_type` names one.
+See [paths between units](MCP_SERVERS.md#paths-between-units) for the arguments and the search rules.
 
 ---
 

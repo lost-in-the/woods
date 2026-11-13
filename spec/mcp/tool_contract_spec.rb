@@ -111,6 +111,16 @@ RSpec.describe 'Index MCP tool contracts' do
                                  'limit' => integer_contract(1, 1_000),
                                  'offset' => integer_contract(0, 1_000_000)
                                }),
+      'path' => contract(:always, { 'from' => 'Comment', 'to' => 'Post' }, exact_data(expected_path),
+                         required: %w[from to], properties: {
+                           'from' => string_contract(1, 10_000),
+                           'to' => string_contract(1, 10_000),
+                           'from_type' => string_contract(nil, 10_000),
+                           'to_type' => string_contract(nil, 10_000),
+                           'max_depth' => integer_contract(1, 20),
+                           'max_nodes' => integer_contract(1, 10_000),
+                           'direction' => enum_contract(%w[forward either], nil, 10_000)
+                         }),
       'domain_clusters' => contract(:always, {}, exact_data({
                                                               'clusters' => [{ 'name' => 'Billing', 'member_count' => 2,
                                                                                'hub' => 'PaymentService',
@@ -560,6 +570,34 @@ RSpec.describe 'Index MCP tool contracts' do
     { paths: paths, key_sets: key_sets, types: types }
   end
 
+  # The fixture graph records Comment -> Post as a bare target, so the hop has no via.
+  def expected_path(max_depth: 10, max_nodes: 10_000)
+    {
+      'from' => { 'identifier' => 'Comment', 'type' => 'model' },
+      'to' => { 'identifier' => 'Post', 'type' => 'model' },
+      'found' => true, 'direction' => 'forward', 'hop_count' => 1,
+      'hops' => [{ 'source' => 'Comment', 'source_type' => 'model', 'target' => 'Post', 'target_type' => 'model',
+                   'via' => [] }],
+      'searches' => [{ 'direction' => 'forward', 'exhaustive' => true, 'max_depth' => max_depth,
+                       'max_nodes' => max_nodes, 'visited_nodes' => 2 }],
+      'graph_coverage' => expected_graph_coverage
+    }
+  end
+
+  # The forward search finds the hop, so `either` runs no second search.
+  def assert_path_enum(_value, result)
+    expect(result.dig('structuredContent', 'data')).to eq(expected_path)
+  end
+
+  def assert_path_max_depth(data, value, _name)
+    expect(data).to eq(expected_path(max_depth: value))
+  end
+
+  # The target is admitted whatever the budget, so one hop is found at max_nodes 1.
+  def assert_path_max_nodes(data, value, _name)
+    expect(data).to eq(expected_path(max_nodes: value))
+  end
+
   def expected_graph_coverage
     {
       'scope' => 'published_relationships',
@@ -670,7 +708,7 @@ RSpec.describe 'Index MCP tool contracts' do
   # The read tools that accept a worktree `root` (docs/MCP_WORKTREE_SETUP.md).
   def root_tools
     %w[lookup search dependencies dependents structure graph_analysis domain_clusters pagerank framework
-       recent_changes trace_flow diagram woods_status]
+       recent_changes trace_flow diagram woods_status path]
   end
 
   def string_contract(minimum_length, maximum_length)
@@ -888,16 +926,18 @@ RSpec.describe 'Index MCP tool contracts' do
     expect(data['clusters'].first['members']).to eq(%w[Invoice PaymentService].first(value))
   end
 
-  def domain_clusters_boundary_assertions
+  def table_boundary_assertions
     {
       %w[domain_clusters limit] => :assert_domain_clusters_limit,
       %w[domain_clusters offset] => :assert_domain_clusters_offset,
-      %w[domain_clusters member_limit] => :assert_domain_clusters_member_limit
+      %w[domain_clusters member_limit] => :assert_domain_clusters_member_limit,
+      %w[path max_depth] => :assert_path_max_depth,
+      %w[path max_nodes] => :assert_path_max_nodes
     }
   end
 
   def boundary_assertions
-    domain_clusters_boundary_assertions.merge(
+    table_boundary_assertions.merge(
       %w[dependencies max_nodes] => :assert_traversal_node_budget,
       %w[dependents max_nodes] => :assert_traversal_node_budget,
       %w[dependencies max_edges] => :assert_traversal_edge_budget,
@@ -1026,7 +1066,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   def assert_enum_semantics(name, value, result)
-    return send("assert_#{name}_enum", value, result) if %w[change_impact woods_status diagram].include?(name)
+    return send("assert_#{name}_enum", value, result) if %w[change_impact woods_status diagram path].include?(name)
 
     data = result.dig('structuredContent', 'data')
     case name
@@ -1172,7 +1212,7 @@ RSpec.describe 'Index MCP tool contracts' do
   end
 
   it 'keeps code-derived inventory as a separate drift input to the independent oracle' do
-    expect(inventory_rows.size).to eq(31)
+    expect(inventory_rows.size).to eq(32)
     expect(inventory_rows.map { |row| row.fetch('name') }).to contain_exactly(*contract_oracle.keys)
     expect(listed_tools(full_server).map { |tool| tool.fetch('name') })
       .to contain_exactly(*contract_oracle.keys)

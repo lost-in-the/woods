@@ -33,11 +33,20 @@ Identifiers are namespaced and typed; never invent one from a filename when `sea
 - **Audit / architecture assessment**: `graph_analysis` for orphans, dead ends, hubs, cycles, bridges, cross-database edges, volatile dependencies, and undeclared package edges; `domain_clusters` for architectural domains; `pagerank` for high-impact units worth reading first.
 - **Investigating behavior / debugging**: find the exact indexed unit with `search` and `lookup`, then use `trace_flow` with `UnitIdentifier` or `UnitIdentifier#method` (for example, `CheckoutService#order`). Bare `order` names a unit, potentially a factory, rather than locating an application method. Receiverless local calls may remain unexpanded; inspect their source or trace the owning unit's method explicitly. Flow output is not proof of runtime execution or exhaustive call coverage. See the [flow workflow](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/AGENT_GUIDE.md#trace-a-feature-flow).
 - **Onboarding**: `structure` for the codebase overview, `lookup` and `dependencies`/`dependents` for a unit's neighborhood, and `domain_clusters` for the domain map, then the default loop on the units that matter.
+- **How one unit reaches another** (Woods `2.2.0` and later; check the connected server's tool list):
+  `path` with `from` and `to` returns the shortest chain of published edges, one hop per line with its `via` labels.
+  An answer of no path says whether the search was exhaustive or stopped by `max_depth` or `max_nodes`.
+  Only an exhaustive one shows there is no published path; retry with the larger bound, or `direction: "either"`.
+  On an older server, assemble the chain from `dependencies` and `dependents`.
 - **Conceptual questions**: check retrieval mode and data before `codebase_retrieve`; structural `ready` alone does not establish semantic availability. On readers supporting #549, inspect `retriever.corpus`; missing or unknown counts require checking embedding artifacts. Govern with `budget` (never `limit`), then verify key units with `lookup`.
 
 ## Boundaries
 
-The normal packaged Index Server registers 15 tools; conditional schemas register only when their wiring is configured — use the connected server's own tool list, never the source inventory. Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure. Never work around a block, validation error, or redaction.
+The normal packaged Index Server registers 16 tools (15 before Woods `2.2.0`, which adds `path`).
+Conditional schemas register only when their wiring is configured:
+use the connected server's own tool list, never the source inventory.
+Console MCP is authorized live-data access, not another code-search mode; use Index tools for structure.
+Never work around a block, validation error, or redaction.
 
 ## Partial search answers
 

@@ -90,6 +90,7 @@ return a smaller answer in one call.
 | Find a class, route, callback, or phrase | `search` | `lookup` |
 | Understand one exact unit | `lookup` | `dependencies` or `dependents` |
 | Find what a change may break | `dependents` | `trace_flow`, then tests/source |
+| Find how one unit reaches another | `path` (Woods 2.2) | `lookup` on the hops, then source |
 | Understand what a unit calls or includes | `dependencies` | `lookup` on important nodes |
 | Follow request-to-model-to-view/job behavior | `trace_flow` | `lookup` at ambiguous steps |
 | Understand a unit's neighborhood | `structure` | targeted traversal |
@@ -271,9 +272,11 @@ If retrieval is disabled, use `search`, `lookup`, and graph tools. Do not reques
 
 ## Index Server boundaries
 
-The normal packaged server registers 15 tools:
+The normal packaged server registers 16 tools:
 
-`woods_status`, `search`, `lookup`, `dependencies`, `dependents`, `structure`, `trace_flow`, `diagram`, `framework`, `recent_changes`, `graph_analysis`, `domain_clusters`, `pagerank`, `reload`, and `codebase_retrieve`.
+`woods_status`, `search`, `lookup`, `dependencies`, `dependents`, `path`, `structure`, `trace_flow`, `diagram`,
+`framework`, `recent_changes`, `graph_analysis`, `domain_clusters`, `pagerank`, `reload`, and `codebase_retrieve`.
+`path` is available from Woods 2.2.
 
 Source inventory contains conditional tools for sessions, pipeline operation, feedback, snapshots, and Notion. Do not call or promise them unless they appear in the connected server's tool list and their backing collaborator is configured.
 

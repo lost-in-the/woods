@@ -9,7 +9,7 @@ Woods provides two MCP servers with different purposes and trust boundaries. Use
 | What does it answer? | Code structure, resolved Rails behavior, dependencies, flows, and graph questions | Live model, schema, count, aggregate, sample, and optional read-only query questions |
 | What does it read? | A generated Woods index | A booted Rails app and its database |
 | Does it boot Rails? | No | Yes |
-| Packaged default | 15 tools | 9 tools |
+| Packaged default | 16 tools | 9 tools |
 | Normal setup | Recommended | Disabled |
 | Main risk | Generated index may contain source and schema details | Responses may contain live application data |
 
@@ -297,9 +297,11 @@ launch that finds a built map answers `initialize` at once too. A first
 launch still builds the map before the server starts: the Index Server
 cannot boot against a directory that holds no published generation yet.
 
-### Tools (31 — 15 registered in the packaged default)
+### Tools (32 — 16 registered in the packaged default)
 
-The Index Server defines 31 schemas across core and conditional capabilities. The normal packaged executable registers the 15 tools below; the remaining schemas require the specialized wiring described afterward.
+The Index Server defines 32 schemas across core and conditional capabilities.
+The normal packaged executable registers the 16 tools below.
+The remaining schemas require the specialized wiring described afterward.
 
 | Tool | Use it for |
 |---|---|
@@ -308,6 +310,7 @@ The Index Server defines 31 schemas across core and conditional capabilities. Th
 | `lookup` | Fetch one exact unit with source, metadata, and relationships |
 | `dependencies` | Traverse what a unit depends on (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
 | `dependents` | Traverse what depends on a unit (`depth`, `types`, `via` narrow; `max_nodes`, `max_edges` budget work; `limit`, `offset` page) |
+| `path` | How one unit reaches another: the shortest chain of published edges from `from` to `to`, one hop per line with its `via` labels ([paths](#paths-between-units)) |
 | `structure` | Summarize structural relationships around a unit |
 | `trace_flow` | Follow a request, job, mail, or other execution flow |
 | `diagram` | Mermaid text of one unit for a pull request or a review: `neighbourhood`, `schema`, `lifecycle` or `impact`, each with its own `depth`; refused over its budget, never truncated ([diagrams](MCP_TOOL_COOKBOOK.md#diagrams)) |
@@ -783,6 +786,70 @@ nodes and inspected edges. Per-generation JSON loading and the cached
 O(nodes + variants) ownership/type preparation are outside the walk budget;
 explanation mode never flattens all forward edges as per-request preparation.
 Partial traversal and pagination metadata retain the budget contract above.
+
+### Paths between units
+
+`path` answers "how does A reach B" with the shortest chain of published edges from `from` to `to` (Woods 2.2).
+It replaces assembling the chain from several `dependencies` and `dependents` calls.
+
+| Argument | Meaning |
+|---|---|
+| `from`, `to` | Exact identifiers. Both are required. |
+| `from_type`, `to_type` | The unit type of that end, for an identifier registered under several types. |
+| `max_depth` | Most hops a path may have: 1 to 20, default 10. |
+| `max_nodes` | Most units one search may reach: 1 to 10000, default 10000. |
+| `direction` | `forward` (default) follows edges from `from` toward `to`. `either` also searches from `to` toward `from` when the forward search finds nothing. |
+| `root` | A linked worktree whose index answers the call ([worktree setup](MCP_WORKTREE_SETUP.md)). |
+
+The text is one line per hop, in the order the edges run:
+
+```text
+## Path from OrdersController to PaymentGateway
+
+2 hops, forward: OrdersController (controller) reaches PaymentGateway (service).
+
+1. OrdersController (controller) -[code_reference]-> CheckoutService (service)
+2. CheckoutService (service) -[code_reference, job_enqueue]-> PaymentGateway (service)
+```
+
+The structured data carries `found`, `direction` (`forward` or `reverse`), `hop_count`, `hops` and `searches`.
+Each hop has `source`, `source_type`, `target`, `target_type` and `via`, every label on that edge, sorted.
+`searches` records each search run with its bounds and the units it reached.
+With `direction: "either"` a reverse path still lists its hops as the edges run, from `to` toward `from`.
+
+**The search.**
+It is breadth-first over the published forward edges of the pinned generation, so the path returned is a shortest one.
+Neighbours are visited sorted by identifier, then unit type.
+Of several shortest paths the same one is returned every time, whatever order the units were extracted in.
+Nothing is computed at extraction.
+
+- A path never passes through a documentation unit (`doc`).
+  One may still be `from` or `to`.
+- A schema unit such as a `database_table` has no forward edges, so it can only end a path.
+- An edge names its target by identifier alone.
+  When that identifier is registered under several unit types the edge reaches each of them, and the hop lists
+  them under `target_types`.
+
+**No path is an answer, not an error.**
+Read `exhaustive` before concluding anything from it:
+
+| `exhaustive` | `partial_reason` | Meaning |
+|---|---|---|
+| `true` | absent | Every unit reachable over published edges was visited. No published path exists. |
+| `false` | `max_depth` | Units lie beyond `max_depth` hops. A longer path may exist; retry with a larger `max_depth`. |
+| `false` | `node_budget` | The search reached `max_nodes` units. A path may exist; retry with a larger `max_nodes`. |
+
+The text says the same in words and suggests `direction: "either"` when only the forward search ran.
+Even an exhaustive answer covers published relationships only ([graph coverage](#dependency-graph-coverage)).
+It does not prove that no code path connects the two units.
+
+**Refusals.**
+
+- An unknown `from` or `to` is `not_found`, with near matches in `_meta.suggestions` and `_meta.argument` naming
+  the end.
+- An identifier registered under several types, with no type given, is `ambiguous_identity`.
+  `_meta.types` lists the candidates and `_meta.argument` names `from_type` or `to_type`.
+- `from` equal to `to` is a zero-hop answer.
 
 ### Conditional Index capabilities
 

@@ -108,8 +108,8 @@ RSpec.describe 'Advertised tool input schemas across every Woods MCP server mode
     index_names = modes.select { |mode, _| mode.start_with?('index') }.values.flatten.map { |t| t['name'] }.uniq
     console_names = modes.select { |mode, _| mode.start_with?('console') }.values.flatten.map { |t| t['name'] }.uniq
 
-    # 31 index tools: 15 always-on plus 16 wiring-conditional.
-    expect(index_names.size).to eq(31)
+    # 32 index tools: 16 always-on plus 16 wiring-conditional.
+    expect(index_names.size).to eq(32)
     executable = Woods::Console::Server::EXECUTABLE_MODES.values.flatten.uniq
     expect(console_names).to match_array(executable)
   end

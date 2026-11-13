@@ -13,6 +13,7 @@ module Woods
       INTEGER_BOUNDS = {
         'max_nodes' => [1, 10_000],
         'max_edges' => [1, 100_000],
+        'max_depth' => [1, 20],
         'max_flow_documents' => [1, 1_000],
         'max_flow_steps' => [1, 100_000],
         'max_flow_operations' => [1, 100_000],
