@@ -539,8 +539,9 @@ every `def` that carries the name as a literal positional argument:
     A `prefix:` or `suffix:` that is not a literal leaves each key one the call may define.
     The association and alias methods live in a module the model includes when it is created, so the model's own
     `def`s and its concerns come first; `store_accessor`'s module comes after the model's own `def`s.
-  - `attribute` defines the instance method and its writer for its first argument (the second is its type), but Active Record skips one that a class between the
-    model and `ActiveRecord::Base` already implements, so every application definition in the chain comes first.
+  - `attribute` defines the instance method and its writer for its first argument (the second is its type).
+    Active Record skips one that a class between the model and `ActiveRecord::Base` already implements, so every
+    application definition in the chain comes first.
   - `scope` defines the class method only, ranked by line with the class's own `def self.` methods.
   - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
     `instance_reader`, `instance_writer`, `instance_accessor` and `instance_predicate` options allow (none of
