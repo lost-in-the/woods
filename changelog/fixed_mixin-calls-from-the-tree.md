@@ -12,3 +12,5 @@
   `self`, outside a method body.
   A constant's name comes from its parsed path, so a comment inside a multi-line `Depot::` + `Weighable` path no
   longer ends up in the name.
+  A qualified declaration such as `module Outer::Trackable` inside `module Outer` is read as `Outer::Trackable`, so
+  its own `ClassMethods` stays out of `metadata.included_modules`.

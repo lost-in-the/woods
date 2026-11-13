@@ -139,15 +139,26 @@ module Woods
         private
 
         def within(node)
-          path = constant_name(node.constant_path) || node.constant_path.slice
-          qualified = if path.start_with?('::') || @nesting.empty? then path.delete_prefix('::')
-                      else "#{@nesting.last}::#{path}"
-                      end
+          qualified = declared_name(constant_name(node.constant_path) || node.constant_path.slice)
           @declared << qualified
           @nesting.push(qualified)
           yield
         ensure
           @nesting.pop if qualified
+        end
+
+        # The qualified name of a module or class declared at +path+ here. A
+        # qualified path's first constant is looked up lexically among the
+        # modules already declared (`module Outer::Trackable` inside `Outer`
+        # is `Outer::Trackable`); an unknown one is taken as nested.
+        def declared_name(path)
+          return path.delete_prefix('::') if path.start_with?('::') || @nesting.empty?
+
+          first, rest = path.split('::', 2)
+          scope = rest && (@nesting.reverse.map { |outer| "#{outer}::#{first}" } << first).find do |candidate|
+            @declared.include?(candidate)
+          end
+          scope ? "#{scope}::#{rest}" : "#{@nesting.last}::#{path}"
         end
 
         # The constant a node names, built from its path (`A::B`, `::A::B`,

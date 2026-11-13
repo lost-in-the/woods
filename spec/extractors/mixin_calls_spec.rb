@@ -125,6 +125,19 @@ RSpec.describe Woods::Extractors::MixinCalls do
     expect(calls("module M\n=begin\ninclude Hidden\n=end\n  include Shown\nend\n")).to eq([[:include, 'Shown']])
   end
 
+  it 'resolves a qualified declaration against the modules that enclose it' do
+    source = <<~RUBY
+      module Outer
+        module Outer::Trackable
+          module ClassMethods; end
+          extend ClassMethods
+          include Depot::Weighable
+        end
+      end
+    RUBY
+    expect(described_class.outside_owner(source, 'Outer::Trackable')).to eq([[:include, 'Depot::Weighable']])
+  end
+
   it 'names a constant from its path, not its text, keeping a leading ::' do
     source = <<~RUBY
       module Stackable
