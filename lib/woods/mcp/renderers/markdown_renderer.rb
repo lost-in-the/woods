@@ -503,7 +503,7 @@ module Woods
                          end
               end
             when Hash
-              lines << "**#{key}:** #{value.map { |k, v| "#{k}=#{v}" }.join(', ')}"
+              lines << "**#{key}:** #{value.map { |k, v| "#{entry_label(metadata, key, k)}=#{v}" }.join(', ')}"
             else
               lines << "**#{key}:** #{value}"
             end

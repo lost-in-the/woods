@@ -34,6 +34,7 @@ require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
 require_relative 'lookup_pages'
 require_relative 'protocol_policy'
+require_relative 'routes_without_action'
 require_relative 'tasks/extension'
 require_relative 'tasks/request_capture'
 require_relative 'tasks/store'
@@ -634,6 +635,9 @@ module Woods
             end
             unit = type ? reader.find_unit(identifier, type: type) : reader.find_unit(identifier)
             if unit
+              # A controller's routed actions that nothing answers, from this
+              # generation's graph analysis (never stored on the unit).
+              unit = RoutesWithoutAction.annotate_from(unit, reader)
               # An untyped lookup of an identifier published under several
               # types returns one unit (the type directory that sorts last);
               # say so rather than let the caller mistake it for the only one.

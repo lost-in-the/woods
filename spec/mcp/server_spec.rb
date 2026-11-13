@@ -160,6 +160,41 @@ RSpec.describe Woods::MCP::Server do
   end
 
   describe 'tool: lookup' do
+    # The fixture's graph analysis reports `DELETE /posts/:id` as a
+    # `missing_action` route of PostsController.
+    it 'flags the routed actions of a controller that nothing answers' do
+      data = parse_response(call_tool(server, 'lookup', identifier: 'PostsController'))
+
+      expect(data['metadata']['routes_without_action']).to eq(['destroy'])
+      expect(data['metadata']['actions']).to eq(%w[index show])
+    end
+
+    it 'flags them on a typed lookup and with selected sections' do
+      data = parse_response(call_tool(server, 'lookup', identifier: 'PostsController', type: 'controller',
+                                                        sections: ['metadata']))
+
+      expect(data['metadata']['routes_without_action']).to eq(['destroy'])
+    end
+
+    it 'adds no routes_without_action to a unit that is not a controller' do
+      data = parse_response(call_tool(server, 'lookup', identifier: 'Post'))
+
+      expect(data['metadata']).not_to have_key('routes_without_action')
+    end
+
+    it 'looks a controller up, unflagged, when the generation has no graph analysis' do
+      Dir.mktmpdir do |dir|
+        FileUtils.cp_r("#{fixture_dir}/.", dir)
+        FileUtils.rm(File.join(dir, 'graph_analysis.json'))
+        bare = described_class.build(index_dir: dir, response_format: :json)
+
+        data = parse_response(call_tool(bare, 'lookup', identifier: 'PostsController'))
+
+        expect(data['identifier']).to eq('PostsController')
+        expect(data['metadata']).not_to have_key('routes_without_action')
+      end
+    end
+
     it 'returns unit data for a valid identifier' do
       response = call_tool(server, 'lookup', identifier: 'Post')
       data = parse_response(response)

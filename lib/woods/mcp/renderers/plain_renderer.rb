@@ -32,7 +32,8 @@ module Woods
                   lines << "    - #{item.is_a?(Hash) ? item.map { |k, v| "#{k}: #{v}" }.join(', ') : item}"
                 end
               when Hash
-                lines << "  #{key}: #{value.map { |k, v| "#{k}=#{v}" }.join(', ')}"
+                pairs = value.map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{v}" }
+                lines << "  #{key}: #{pairs.join(', ')}"
               else
                 lines << "  #{key}: #{value}"
               end
