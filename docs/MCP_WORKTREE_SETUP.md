@@ -48,7 +48,11 @@ Keep a separate output directory for each checkout when you need checkout-specif
 
 ## One server, several worktrees (`root`)
 
-A session whose subagents each edit a different worktree cannot give each one its own server: subagents inherit the parent's Woods tools. Instead, pass `root` on the call. These tools accept it: `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`, `domain_clusters`, `pagerank`, `framework`, `recent_changes`, `trace_flow`, `diagram` and `woods_status`.
+A session whose subagents each edit a different worktree cannot give each one its own server:
+subagents inherit the parent's Woods tools.
+Instead, pass `root` on the call.
+These tools accept it: `lookup`, `search`, `dependencies`, `dependents`, `structure`, `graph_analysis`,
+`domain_clusters`, `pagerank`, `framework`, `recent_changes`, `trace_flow`, `diagram`, `path` and `woods_status`.
 
 ```json
 { "name": "lookup", "arguments": { "identifier": "Post", "root": "/absolute/path/to/worktree" } }

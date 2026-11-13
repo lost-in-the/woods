@@ -35,7 +35,7 @@ module Woods
       # feedback, snapshot and retrieval tools are bound to the launch index.
       ROOT_TOOLS = %w[
         lookup search dependencies dependents structure graph_analysis domain_clusters pagerank framework
-        recent_changes trace_flow diagram woods_status
+        recent_changes trace_flow diagram woods_status path
       ].freeze
 
       # Thread-local key holding the {Router::Route} of the in-flight call. Set

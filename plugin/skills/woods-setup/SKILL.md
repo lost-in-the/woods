@@ -151,7 +151,10 @@ worktree-specific directory when using the installed version's `WOODS_GIT_DIR`
 override; the shared root selects the primary checkout's HEAD. Follow the
 [worktree mount guide](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/TROUBLESHOOTING.md#git-directory-mounts-for-linked-worktrees).
 
-Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class. The normal Index Server has 15 tools. `codebase_retrieve` requires configured embeddings in semantic mode; see the lexical capability check below for the opt-in provider-free mode.
+Reconnect and call `woods_status`, then `search`, `lookup`, and `dependents` for a known class.
+The normal Index Server has 16 tools (15 before Woods `2.2.0`, which adds `path`).
+`codebase_retrieve` requires configured embeddings in semantic mode.
+See the lexical capability check below for the opt-in provider-free mode.
 
 Structural readiness alone does not verify semantic retrieval. If that mode is
 requested, confirm an embedding run and a useful retrieval result. Readers with

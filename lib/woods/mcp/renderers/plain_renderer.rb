@@ -95,6 +95,17 @@ module Woods
           render_plain_traversal('Dependents', data)
         end
 
+        # @param data [Hash] an answer of {PathTool.call}
+        # @return [String] the answer in a sentence, then one numbered line per hop
+        def render_path(data, **)
+          lines = ["Path from #{data.dig(:from, :identifier)} to #{data.dig(:to, :identifier)}", DIVIDER,
+                   PathTool.summary(data)]
+          lines << data[:hint] if data[:hint]
+          data[:hops].each_with_index { |hop, index| lines << "  #{index + 1}. #{PathTool.hop_line(hop)}" }
+          lines.concat(traversal_coverage_lines(data))
+          lines.join("\n").rstrip
+        end
+
         def render_structure(data, **)
           manifest = fetch_key(data, :manifest, {})
           lines = []

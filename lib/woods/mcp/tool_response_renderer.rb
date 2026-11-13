@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'dependent_families'
+require_relative 'path_tool'
 require_relative 'routes_without_action'
 require_relative 'traversal_evidence_index'
 require_relative 'traversal_evidence_text'

@@ -37,6 +37,10 @@ module Woods
           wrap_xml('dependents', content, root: root)
         end
 
+        def render_path(data, **)
+          wrap_xml('path', super, from: data.dig(:from, :identifier), to: data.dig(:to, :identifier))
+        end
+
         def render_structure(data, **)
           wrap_xml('structure', super)
         end

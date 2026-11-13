@@ -33,6 +33,7 @@ require_relative 'index_reader'
 require_relative 'index_reader_pinning'
 require_relative 'initialization_guidance'
 require_relative 'lookup_pages'
+require_relative 'path_tool'
 require_relative 'protocol_policy'
 require_relative 'routes_without_action'
 require_relative 'tasks/extension'
@@ -238,6 +239,7 @@ module Woods
                                              'and bounded witnesses; ambiguous types remain explicit.',
                                 reader_method: :traverse_dependents,
                                 render_key: :dependents)
+          define_path_tool(server, reader, respond, respond_err, renderer)
           define_structure_tool(server, reader, respond, renderer)
           define_graph_analysis_tool(server, reader, respond, renderer)
           define_domain_clusters_tool(server, reader, respond, renderer)
@@ -966,6 +968,35 @@ module Woods
                          'agent_instructions, other. Applied before limit/offset; dependent_counts still cover ' \
                          'every traversed row, selection.counts the selected ones.'
           }
+        end
+
+        def define_path_tool(server, reader, respond, respond_err, renderer)
+          coerce_int = method(:coerce_integer)
+          server.define_tool(
+            name: 'path',
+            description: PathTool::DESCRIPTION,
+            input_schema: PathTool.schema
+          ) do |from:, to:, server_context:, from_type: nil, to_type: nil, max_depth: nil, max_nodes: nil,
+                direction: nil|
+            # Both endpoints and the walk read one generation.
+            result = reader.with_pinned_generation do
+              PathTool.call(reader, from: from, to: to, from_type: from_type, to_type: to_type,
+                                    max_depth: coerce_int.call(max_depth), max_nodes: coerce_int.call(max_nodes),
+                                    direction: direction)
+            end
+            # No path is an answer, not an error: the text and `exhaustive`
+            # say whether a bound stopped the search.
+            respond.call(renderer.render(:path, result), data: result)
+          rescue PathTool::Refusal => e
+            respond_err.call(e.message, code: e.code, tool: PathTool::NAME, **e.meta)
+          rescue ArgumentError => e
+            respond_err.call(e.message, code: :invalid_params, tool: PathTool::NAME)
+          rescue StandardError => e
+            raise unless ToolContract.artifact_error?(e)
+
+            respond_err.call('path could not read a required Index artifact.', code: :corrupt_artifact,
+                                                                               tool: PathTool::NAME)
+          end
         end
 
         def define_structure_tool(server, reader, respond, renderer)

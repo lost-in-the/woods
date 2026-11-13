@@ -108,6 +108,21 @@ module Woods
           render_traversal('Dependents', data)
         end
 
+        # ── path ────────────────────────────────────────────────────
+
+        # @param data [Hash] an answer of {PathTool.call}
+        # @return [String] Markdown: the answer in a sentence, then one numbered line per hop
+        def render_path(data, **)
+          lines = ["## Path from #{data.dig(:from, :identifier)} to #{data.dig(:to, :identifier)}", '',
+                   PathTool.summary(data)]
+          lines << data[:hint] if data[:hint]
+          lines << '' if data[:hops].any?
+          data[:hops].each_with_index { |hop, index| lines << "#{index + 1}. #{PathTool.hop_line(hop)}" }
+          lines << ''
+          lines.concat(traversal_coverage_lines(data))
+          lines.join("\n").rstrip
+        end
+
         # ── structure ───────────────────────────────────────────────
 
         # @param data [Hash] Structure data with :manifest and optional :summary
