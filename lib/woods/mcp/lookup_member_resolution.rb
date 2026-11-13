@@ -463,6 +463,9 @@ module Woods
           # Definers whose method takes the visibility in force where it is
           # called (or of a `private` the call is the argument of).
           SCOPED = %w[attr attr_reader attr_writer attr_accessor define_method].freeze
+          # Definers that return the names they define, so a visibility call
+          # they are passed to (`private delegate :x, to: :y`) applies to them.
+          RETURNS_NAMES = [*SCOPED, 'delegate', 'alias_method'].freeze
           SINGLETON_DEFINER = 'define_singleton_method'
           VISIBILITY = %w[private protected public].freeze
           CLASS_VISIBILITY = %w[private_class_method public_class_method].freeze
@@ -551,13 +554,14 @@ module Woods
               if node.is_a?(Prism::CallNode) && node.receiver.nil? && VISIBILITY.include?(node.name.to_s)
                 arguments = node.arguments&.arguments.to_a
                 visibility = node.name.to_s if arguments.empty?
-                next arguments.flat_map { |argument| site(argument, reference, side, node.name.to_s) }
+                next arguments.flat_map { |argument| site(argument, reference, side, visibility, node.name.to_s) }
               end
               site(node, reference, side, visibility)
             end
           end
 
-          def site(node, reference, side, visibility)
+          # +wrapped+ names the visibility call the node is the argument of.
+          def site(node, reference, side, visibility, wrapped = nil)
             if node.is_a?(Prism::AliasMethodNode)
               return [] unless side != :class_body && literals(node.new_name) == [reference.name]
 
@@ -569,8 +573,10 @@ module Woods
             verdict = defines(macro, node, reference.name, side)
             return [] unless verdict
 
-            visibility = known_visibility(macro, node, visibility) if verdict == :known
-            visibility = nil unless verdict == :known
+            visibility = if verdict != :known then nil
+                         elsif wrapped && RETURNS_NAMES.include?(macro) then wrapped
+                         else known_visibility(macro, node, wrapped || visibility)
+                         end
             alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
             [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known,
               RANKS.fetch(macro, :own)]]

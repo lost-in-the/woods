@@ -680,6 +680,11 @@ LookupMemberOracle::FIXTURES = {
           :own
         end
         alias_method :muted_alias, :muted
+
+        public
+
+        private delegate :wrapped, to: :helper
+        private alias_method :wrapped_alias, :summary
       end
     end
   RUBY
@@ -738,7 +743,7 @@ LookupMemberOracle::UNITS = [
 # with the names only a macro defines.
 LookupMemberOracle::NAMES = LookupMemberOracle::FIXTURES.values.flat_map do |source|
   source.scan(/def (?:self\.)?(\w+)/).flatten
-end.push('setter=', 'total=', 'helper_notify', 'fresh_only', 'ghost').uniq.freeze
+end.push('setter=', 'total=', 'helper_notify', 'fresh_only', 'ghost', 'wrapped', 'wrapped_alias').uniq.freeze
 
 # The rule `lookup` holds for `Owner#name` and `Owner.name`: a member answer
 # names the method the owner really responds to, and where the published
@@ -1363,6 +1368,26 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       expect(answer('LookupOracle::MacroRecord#whisper')['member']).to include('visibility' => 'private')
       expect(answer('LookupOracle::MacroRecord#muted_alias')['member']).to include('visibility' => 'private')
       expect(answer('LookupOracle::MacroRecord#label')['member']).not_to have_key('visibility')
+    end
+
+    it 'states the same visibility for a known macro a subclass inherits, as Ruby gives it' do
+      { 'runner' => 'public', 'whisper' => 'private', 'secret' => 'private' }.each do |name, visibility|
+        data = answer("LookupOracle::MacroChild##{name}")
+        target = LookupOracle::MacroChild
+
+        expect(data['inherited_from']).to include('identifier' => 'LookupOracle::MacroRecord'), name
+        expect(data['member']).to include('visibility' => visibility), name
+        expect(target.private_method_defined?(name)).to eq(visibility == 'private'), name
+        expect(data['statement']).to include("is a #{visibility} instance method"), name
+      end
+    end
+
+    it 'states private for a delegate or alias_method passed to private, as Ruby gives it' do
+      %w[wrapped wrapped_alias].each do |name|
+        expect(LookupOracle::MacroRecord.private_method_defined?(name)).to be(true), name
+        expect(answer("LookupOracle::MacroRecord##{name}")['member']).to include('visibility' => 'private'), name
+        expect(answer("LookupOracle::MacroChild##{name}")['member']).to include('visibility' => 'private'), name
+      end
     end
 
     it 'keeps a plain-body instance macro off the class side' do
