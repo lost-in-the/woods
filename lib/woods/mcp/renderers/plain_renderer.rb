@@ -39,10 +39,14 @@ module Woods
 
                 lines << "  #{key}:"
                 value.each do |item|
-                  lines << "    - #{item.is_a?(Hash) ? item.map { |k, v| "#{k}: #{v}" }.join(', ') : item}"
+                  shown = item.is_a?(Hash) ? item.map { |k, v| "#{k}: #{inline_value(v)}" }.join(', ') : item
+                  shown = inline_value(shown)
+                  lines << "    - #{shown}"
                 end
               when Hash
-                pairs = value.map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{v}" }
+                next if value.empty?
+
+                pairs = value.map { |k, v| "#{entry_label(data['metadata'], key, k)}=#{inline_value(v)}" }
                 lines << "  #{key}: #{pairs.join(', ')}"
               else
                 lines << "  #{key}: #{value}"
@@ -164,7 +168,7 @@ module Woods
 
           stats = fetch_key(data, :stats)
           if stats.is_a?(Hash)
-            stats.each { |k, v| lines << "  #{k}: #{v}" }
+            stats.each { |k, v| lines << "  #{k}: #{inline_value(v)}" }
             lines << ''
           end
 
@@ -181,7 +185,7 @@ module Woods
                        elsif item.is_a?(Hash)
                          "  #{item['identifier']} (#{item['type']}) - #{item['dependent_count']} dependents"
                        else
-                         "  #{item}"
+                         "  #{inline_value(item)}"
                        end
             end
 
@@ -289,9 +293,9 @@ module Woods
         def render_default(data)
           case data
           when Hash
-            data.map { |k, v| "#{k}: #{v}" }.join("\n")
+            data.map { |k, v| "#{k}: #{inline_value(v)}" }.join("\n")
           when Array
-            data.map { |item| "  #{item}" }.join("\n")
+            data.map { |item| "  #{inline_value(item)}" }.join("\n")
           else
             data.to_s
           end
@@ -321,7 +325,7 @@ module Woods
         #   as plain text instead of printing Ruby's `Array#inspect` syntax.
         # @return [Object]
         def edge_value(value)
-          value.is_a?(Array) ? value.join(', ') : value
+          value.is_a?(Array) ? value.map { |item| inline_value(item) }.join(', ') : inline_value(value)
         end
 
         def render_plain_traversal(label, data)
