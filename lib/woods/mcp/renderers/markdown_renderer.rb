@@ -18,8 +18,9 @@ module Woods
         def render_lookup_member(data, **)
           owner = data['member_of'] || {}
           lines = ["## #{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", '',
-                   data['statement'], '']
-          member_location_lines(data).each { |line| lines << "- #{line}" }
+                   data['statement']]
+          location = member_location_lines(data)
+          lines.push('', *location.map { |line| "- #{line}" }) unless location.empty?
           lines.push('', '```ruby', data['source_code'].chomp, '```') if data['source_code']
           Array(data['candidates']).each_with_index do |candidate, index|
             lines.push('', "### Candidate #{index + 1}: #{candidate.dig('defined_in', 'identifier')}", '')

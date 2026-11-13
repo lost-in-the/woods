@@ -210,13 +210,50 @@ module Woods
 
         # The inlined concerns the unit's own body prepends, nearest first,
         # and the prepended constants whose source is not inlined at this level.
-        def prepends(unit, inlined)
-          written = Prepends.names(unit['source_code'], written_name(unit))
-          matched = written.map do |name|
-            found = inlined.select { |concern| concern == name || concern.end_with?("::#{name}") }
-            found.size == 1 ? found.first : nil
+        # A written `prepend` of a concern first inlined at this level puts it
+        # before the body. One a superclass already has is a no-op for an
+        # `ActiveSupport::Concern` (`prepend_features` returns early) and is
+        # prepended again for a plain module.
+        def prepends(unit, here)
+          known = blocks_of(unit)
+          written = Mixins.calls(unit['source_code'], written_name(unit), :prepend)
+          matched = written.map { |name, scopes| Mixins.resolve(name, scopes, known) }
+          prepended = matched.compact.uniq.select { |concern| here.include?(concern) || !active_concern?(concern) }
+          [prepended, written.reject.with_index { |_, index| matched[index] }.map(&:first)]
+        end
+
+        # Whether the inlined module's own body extends ActiveSupport::Concern.
+        def active_concern?(concern)
+          text = concern_sources.to_h[concern]
+          Mixins.calls(text, concern, :extend).any? { |name, _| name.delete_prefix('::') == 'ActiveSupport::Concern' }
+        end
+
+        # Whether +concern+ is shown to be mixed in at a level Woods read: an
+        # `include` or `prepend` of it written directly in the body of a unit
+        # of the chain, or in the module body of an inlined concern that is
+        # itself shown (an `ActiveSupport::Concern` dependency, or a module
+        # including another). The written constant is resolved lexically
+        # against the concerns the owner inlines ({Mixins.resolve}).
+        def shown?(concern, seen = Set.new)
+          return false unless seen.add?(concern)
+
+          known = blocks_of(@unit)
+          return true if @chain.any? { |unit| mixes_in?(unit['source_code'], written_name(unit), concern, known) }
+
+          concern_sources.any? do |name, text|
+            name != concern && mixes_in?(text, name, concern, known) && shown?(name, seen)
           end
-          [matched.compact.uniq, written.reject.with_index { |_, index| matched[index] }]
+        end
+
+        def mixes_in?(source, identifier, concern, known)
+          Mixins.calls(source, identifier, :include, :prepend).any? do |name, scopes|
+            Mixins.resolve(name, scopes, known) == concern
+          end
+        end
+
+        # [concern name, decoded source] of each block the owner inlines.
+        def concern_sources
+          @concern_sources ||= MethodTable.named_blocks(lines_of(@unit)).map { |_, text, name| [name, text] }
         end
 
         # The superclass chain, nearest first, as far as published units go.
@@ -289,18 +326,28 @@ module Woods
           chain_caveat(answer_level)
         end
 
+        # A concern answer from the last unit read, when the chain stops short
+        # of a framework root, is in doubt only if the concern may have come
+        # through the unread superclass: then that superclass's own definition
+        # comes first in Ruby. A concern mixed in at a level Woods read sits
+        # before every unread superclass, so it needs no caveat. A chain that
+        # ends at a framework root needs none either: a framework class holds
+        # no application definition.
         def chain_caveat(answer_level)
           answered = chosen ? [chosen] : ambiguous
           return unless @stop && answer_level == @chain.size - 1 && answered.all? { |found| found.origin == :concern }
 
-          last = @chain.last['identifier']
-          why = if @stop == :unrecorded
-                  "#{last} records no parent class"
-                else
-                  @stop_reason
-                end
-          @caveats << "The superclass chain of #{@unit['identifier']} was read only up to #{last}: #{why}, so " \
-                      'a definition in a superclass Woods did not read could come before this inlined concern.'
+          unshown = answered.map(&:concern).uniq.reject { |concern| shown?(concern) }
+          return if unshown.empty?
+
+          @caveats << "No unit Woods read (#{@chain.map { |unit| unit['identifier'] }.join(', ')}) includes " \
+                      "#{unshown.join(', ')} in its own body, so #{@unit['identifier']} includes " \
+                      "#{unshown.size == 1 ? 'it' : 'them'} through a superclass Woods did not read " \
+                      "(#{stop_why}); that superclass's own definition of #{@reference.name} could come first."
+        end
+
+        def stop_why
+          @stop == :unrecorded ? "#{@chain.last['identifier']} records no parent class" : @stop_reason
         end
 
         # The name a unit's own class or module declaration has in its
@@ -388,7 +435,8 @@ module Woods
             parsed = Woods::ParseCache.parse(source)
             return [] if parsed.errors.any?
 
-            statements = ConcernClassMethods.statements(Prepends.body_of(parsed.value.statements, nil, written_name))
+            body, = Mixins.body_of(parsed.value.statements, [], written_name)
+            statements = ConcernClassMethods.statements(body)
             if reference.separator == '#'
               return marked(scan(statements, reference, :instance), marks(statements, reference.name, VISIBILITY),
                             written_name)
@@ -550,48 +598,70 @@ module Woods
           end
         end
 
-        # `prepend` calls written directly in a unit's own class or module
-        # body, read by a Prism walk.
-        module Prepends
+        # `include` and `prepend` calls written directly in a class or module
+        # body, read by a Prism walk, and the lexical resolution of the
+        # constants they name.
+        module Mixins
           module_function
 
-          # @param source [String, nil] the unit's published source
-          # @param identifier [String] the unit's identifier
-          # @return [Array<String>] the prepended constants as written,
-          #   nearest first (Ruby puts the last `prepend` call first, and the
-          #   arguments of one call in their written order)
-          def names(source, identifier)
+          # @param source [String, nil] published source, or a concern's
+          #   decoded block
+          # @param identifier [String] the class or module whose body is read
+          # @param kinds [Array<Symbol>] the call names to read
+          # @return [Array<Array(String, Array<String>)>] each mixed-in
+          #   constant as written, with the lexical scopes it is written in
+          #   (innermost first), nearest first in Ruby's order: the last call
+          #   first, and the arguments of one call in their written order
+          def calls(source, identifier, *kinds)
             return [] unless source.is_a?(String)
 
             parsed = Woods::ParseCache.parse(source)
             return [] if parsed.errors.any?
 
-            body = body_of(parsed.value.statements, nil, identifier)
-            calls = ConcernClassMethods.statements(body).select { |node| prepend_call?(node) }
-            calls.reverse.flat_map do |call|
+            body, scopes = body_of(parsed.value.statements, [], identifier)
+            found = ConcernClassMethods.statements(body).select { |node| mixin_call?(node, kinds) }
+            found.reverse.flat_map do |call|
               call.arguments.arguments.filter_map do |argument|
-                MethodTable::Names.constant_name(argument)&.delete_prefix('::')
+                name = MethodTable::Names.constant_name(argument)
+                [name, scopes] if name
               end
             end
           end
 
-          def prepend_call?(node)
-            node.is_a?(Prism::CallNode) && node.name == :prepend && node.arguments &&
+          # The concern a written constant names, the way Ruby resolves it:
+          # each enclosing lexical scope, innermost first, then the top level.
+          # A name that resolves to no known concern, or that the scopes leave
+          # open, is not resolved.
+          #
+          # @param name [String] the constant as written (`Foo`, `A::Foo`, `::Foo`)
+          # @param scopes [Array<String>] qualified lexical scopes, innermost first
+          # @param known [Array<String>] full names of the inlined concerns
+          # @return [String, nil]
+          def resolve(name, scopes, known)
+            return (known.include?(name.delete_prefix('::')) ? name.delete_prefix('::') : nil) if name.start_with?('::')
+
+            (scopes.map { |scope| "#{scope}::#{name}" } + [name]).find { |candidate| known.include?(candidate) }
+          end
+
+          def mixin_call?(node, kinds)
+            node.is_a?(Prism::CallNode) && kinds.include?(node.name) && node.arguments &&
               (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
           end
 
-          def body_of(node, owner, identifier)
+          # The body of the class or module named +identifier+, and the
+          # qualified names of the lexical scopes around and including it.
+          def body_of(node, scopes, identifier)
             ConcernClassMethods.statements(node).each do |statement|
               next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
 
-              inner = MethodTable::Names.qualified(owner, statement.constant_path)
+              inner = MethodTable::Names.qualified(scopes.first, statement.constant_path)
               next unless inner
-              return statement.body if inner == identifier
+              return [statement.body, [inner, *scopes]] if inner == identifier
 
-              found = body_of(statement.body, inner, identifier)
-              return found if found
+              found = body_of(statement.body, [inner, *scopes], identifier)
+              return found if found.first
             end
-            nil
+            [nil, scopes]
           end
         end
       end
