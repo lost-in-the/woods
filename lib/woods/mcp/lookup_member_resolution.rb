@@ -96,7 +96,7 @@ module Woods
         # @return [Resolution, nil] nil when no definition was found
         def call
           read_chain
-          groups = levels.flat_map(&:last)
+          groups = levels.flat_map(&:last) + @fallbacks
           index = groups.index { |group| group.candidates.any? }
           return nil unless index
 
@@ -151,13 +151,18 @@ module Woods
         def levels
           names = @chain.map { |unit| MethodTable.named_blocks(lines_of(unit)).map(&:last) }
           @unpublished_prepends = []
+          @fallbacks = []
           @chain.each_with_index.map do |unit, level|
             here = level + 1 < @chain.size ? names[level] - names[level + 1] : names[level]
             prepended, unmatched = prepends(unit, here)
             @unpublished_prepends << [level, unit, unmatched] unless unmatched.empty?
+            macros = macro_candidates(unit, level, written_name(unit))
             groups = prepended.map { |concern| ordered_group(concern_candidates(concern, level, :prepended)) }
-            groups << ordered_group(own_candidates(unit, level))
+            groups << ordered_group(own_candidates(unit, level, macros[:own]))
+            groups << ordered_group(macros[:store])
             groups.concat(included_groups(here - prepended, level, names.first))
+            groups << ordered_group(macros[:generated])
+            @fallbacks << ordered_group(macros[:fallback])
             [level, groups]
           end
         end
@@ -179,28 +184,34 @@ module Woods
         # and the class-body macros that define the name (:macro) or may
         # (:possible_macro). Both define on the class itself, so the later
         # line is the one Ruby keeps.
-        def own_candidates(unit, level)
+        def own_candidates(unit, level, macros)
           name = written_name(unit)
           class_methods = ConcernClassMethods.own_lines(unit['source_code'], name)
           entries = LookupMember.methods_of(unit).select do |entry|
             entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
               @reference.kind?(entry) && !class_methods.include?(entry['line'])
           end
-          found = candidates(entries, unit, level, :own, nil) + macro_candidates(unit, level, name)
+          found = candidates(entries, unit, level, :own, nil) + macros
           found.sort_by { |candidate| -candidate.entry['line'].to_i }
         end
 
+        # The class-body calls that define the member at this level, by
+        # where Ruby ranks what they define ({Macros::RANKS}): :own with the
+        # unit's own `def`s, :store after them, :generated after this level's
+        # concerns, :fallback after every level of the chain.
         def macro_candidates(unit, level, name)
+          found = { own: [], store: [], generated: [], fallback: [] }
           sites = Macros.sites(unit['source_code'], name, @reference)
-          return [] if sites.empty?
+          return found if sites.empty?
 
           metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
           locator = FileLines::Locator.new(unit['source_code'], metadata['source_line_map'])
-          sites.map do |entry, known|
+          sites.each do |entry, known, rank|
             entry = with_aliased_visibility(unit, name, entry)
-            Candidate.new(entry: locator.annotate(entry), unit: unit, level: level,
-                          origin: known ? :macro : :possible_macro, concern: nil)
+            found[rank] << Candidate.new(entry: locator.annotate(entry), unit: unit, level: level,
+                                         origin: known ? :macro : :possible_macro, concern: nil)
           end
+          found
         end
 
         # An alias takes the visibility of the method it copies: the latest
@@ -455,9 +466,26 @@ module Woods
           SINGLETON_DEFINER = 'define_singleton_method'
           VISIBILITY = %w[private protected public].freeze
           CLASS_VISIBILITY = %w[private_class_method public_class_method].freeze
+          # Rails calls that define instance methods (each name and `name=`) in a
+          # module the model includes when it is created, so its own body and
+          # its concerns come before them: associations and attribute aliases.
+          GENERATED = %w[has_one has_many belongs_to has_and_belongs_to_many alias_attribute].freeze
+          # `attribute` defines the same way, but Active Record skips a method
+          # a superclass below it already implements, so every application
+          # definition in the chain comes first.
+          ATTRIBUTE = 'attribute'
+          # `store_accessor` defines its accessors (the names after the store's)
+          # in a module included at its first call, after the model's body.
+          STORE = 'store_accessor'
+          # Where Ruby ranks what a call defines; any other call defines on the
+          # class itself, ranked by line with its `def`s.
+          RANKS = GENERATED.to_h { |macro| [macro, :generated] }.merge(STORE => :store, ATTRIBUTE => :fallback).freeze
+          # Calls whose methods are public wherever they are written.
+          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, 'class_attribute'].freeze
           # Calls that name a method without defining it.
           REFERENCES = %w[private protected public module_function private_class_method public_class_method
-                          private_constant public_constant helper_method validate validates].freeze
+                          private_constant public_constant helper_method validate validates serialize
+                          has_secure_token layout helper rescue_from].freeze
           REFERENCE_PREFIX = /\A(?:(?:before|after|around|skip|prepend|append)_|validates_)/
 
           module_function
@@ -497,10 +525,10 @@ module Woods
           # A visibility call naming the method after its definition sets
           # its visibility (`private :name`, `private_class_method :name`).
           def marked(found, marks, written_name)
-            found.map do |entry, known|
+            found.map do |entry, known, rank|
               mark = marks.select { |line, _| line > entry['line'] }.max_by(&:first)
               entry = entry.merge('visibility' => mark.last) if known && mark
-              [entry.merge('owner' => written_name), known]
+              [entry.merge('owner' => written_name), known, rank]
             end
           end
 
@@ -533,7 +561,7 @@ module Woods
             if node.is_a?(Prism::AliasMethodNode)
               return [] unless side != :class_body && literals(node.new_name) == [reference.name]
 
-              return [[entry(node, 'alias', reference, alias_of: literals(node.old_name).first), true]]
+              return [[entry(node, 'alias', reference, alias_of: literals(node.old_name).first), true, :own]]
             end
             return [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
 
@@ -544,14 +572,17 @@ module Woods
             visibility = known_visibility(macro, node, visibility) if verdict == :known
             visibility = nil unless verdict == :known
             alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
-            [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known]]
+            [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known,
+              RANKS.fetch(macro, :own)]]
           end
 
           # The visibility Ruby gives the method a known call defines, where it
           # is fixed: the one in force for `attr*` and `define_method`;
-          # public for `delegate` unless `private: true`. Nil otherwise.
+          # public for `delegate` unless `private: true`, and for the Rails
+          # calls in {PUBLIC}. Nil otherwise.
           def known_visibility(macro, node, in_force)
             return in_force if SCOPED.include?(macro)
+            return 'public' if PUBLIC.include?(macro)
             return nil unless macro == 'delegate'
 
             case keywords(node)['private']
@@ -564,6 +595,10 @@ module Woods
           # when Woods does not know the call, nil otherwise.
           def defines(macro, node, name, side)
             arguments = positional(node)
+            return rails_instance(macro, arguments, name, side) if RANKS.key?(macro)
+            return class_attribute(keywords(node), names(arguments), name, side) if macro == 'class_attribute'
+            return side == :class_body && literals(arguments.first) == [name] ? :known : nil if macro == 'scope'
+
             if DEFINERS.include?(macro)
               return nil if side == :class_body
 
@@ -575,6 +610,48 @@ module Woods
             return nil if REFERENCES.include?(macro) || macro.match?(REFERENCE_PREFIX)
 
             :possible if arguments.flat_map { |argument| literals(argument) }.include?(name)
+          end
+
+          # An association, attribute or store accessor defines the instance
+          # side only: `name` and `name=`.
+          def rails_instance(macro, arguments, name, side)
+            return nil unless side == :instance
+
+            named = case macro
+                    when 'alias_attribute' then literals(arguments.first)
+                    when STORE then names(arguments.drop(1))
+                    else names(arguments)
+                    end
+            named.flat_map { |each| [each, "#{each}="] }.include?(name) ? :known : nil
+          end
+
+          # `class_attribute :x` defines `x`, `x=` and `x?` on the class side,
+          # and on the instance side as its `instance_*` options allow (an
+          # option that is not a literal leaves it possible).
+          def class_attribute(options, named, name, side)
+            base = name.sub(/[=?]\z/, '')
+            return nil if side == :singleton_body || !named.include?(base)
+
+            accessor = flag(options['instance_accessor'], true)
+            reader = side == :class_body || flag(options['instance_reader'], accessor)
+            writer = side == :class_body || flag(options['instance_writer'], accessor)
+            predicate = both(reader, flag(options['instance_predicate'], true))
+            { true => :known, unknown: :possible }[{ '=' => writer, '?' => predicate }.fetch(name[-1], reader)]
+          end
+
+          def flag(node, default)
+            case node
+            when nil then default
+            when Prism::TrueNode then true
+            when Prism::FalseNode then false
+            else :unknown
+            end
+          end
+
+          def both(first, second)
+            return false if first == false || second == false
+
+            first == true && second == true ? true : :unknown
           end
 
           def defined_names(macro, node, arguments)
