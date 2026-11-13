@@ -110,6 +110,45 @@ RSpec.describe Woods::GitHistory do
     expect(read('new.rb').fetch('new.rb')[:commits].map { |entry| entry[:message] }).to eq(['rename'])
   end
 
+  describe 'whether the window holds the commit that created a file' do
+    it 'marks a file created inside the window' do
+      commit('create', { 'fresh.rb' => 'one' }, days_ago: 20)
+      commit('edit', { 'fresh.rb' => 'two' })
+
+      expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true, commit_count: 2)
+    end
+
+    it 'leaves an older file edited inside the window unmarked' do
+      commit('create', { 'old.rb' => 'one' }, days_ago: 800)
+      commit('edit', { 'old.rb' => 'two' }, days_ago: 3)
+
+      facts = read('old.rb').fetch('old.rb')
+
+      expect(facts).to include(commit_count: 1)
+      expect(facts).not_to have_key(:added)
+    end
+
+    it 'reports nothing for an older file the window never touches' do
+      commit('create', { 'quiet.rb' => 'one' }, days_ago: 800)
+      commit('other', { 'other.rb' => 'x' })
+
+      expect(read('quiet.rb').fetch('quiet.rb')).to eq({})
+    end
+
+    it 'marks a file recreated or renamed into place inside the window' do
+      commit('create', { 'gone.rb' => 'one', 'before.rb' => 'same' }, days_ago: 800)
+      git('rm', '-q', 'gone.rb')
+      git('mv', 'before.rb', 'after.rb')
+      git('commit', '-qm', 'remove and rename')
+      commit('recreate', { 'gone.rb' => 'two' })
+
+      facts = read('gone.rb', 'after.rb')
+
+      expect(facts.fetch('gone.rb')).to include(added: true)
+      expect(facts.fetch('after.rb')).to include(added: true)
+    end
+  end
+
   it 'counts deletion and recreation at the same exact name' do
     commit('original', { 'sample.rb' => 'old' })
     git('rm', '-q', 'sample.rb')

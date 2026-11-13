@@ -1726,7 +1726,20 @@ Git history is required.
 | `commit_count` | Total commit count for this file (past 365 days) |
 | `contributors` | Top 5 contributors by commit count: `[{ name:, commits: }]` |
 | `recent_commits` | Last 5 commits (`config.git_recent_commits`): `[{ sha:, message:, date:, author: }]`; `sha` is shortened to 8 characters. The complete window, with files and descriptions, is the generation's [commit table](INDEX_LAYOUT.md#commit-table) |
-| `change_frequency` | `:new`, `:hot`, `:active`, `:stable`, or `:dormant` |
+| `change_frequency` | `:new`, `:hot`, `:active`, `:stable`, or `:dormant` (see below) |
+
+`change_frequency` is read from the same 365-day window as `commit_count`:
+
+| Value | Meaning |
+|-------|---------|
+| `:new` | The commit that created the file is inside the window, and the file has at most two commits |
+| `:hot` | Ten or more commits in the last 90 days |
+| `:active` | Three or more commits in the last 90 days |
+| `:stable` | At least one commit in the last 90 days |
+| `:dormant` | No commit in the last 90 days |
+
+A file written before the window and not touched since has `commit_count: 0`, no contributors and `:dormant`.
+That is a quiet file, not an uncommitted one: the window holds none of its history.
 
 ### Full example JSON
 

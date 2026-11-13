@@ -334,7 +334,7 @@ module Woods
           commit_count: total_count,
           contributors: top_contributors(data[:contributors] || {}),
           recent_commits: commits.first(@recent_limit).map { |commit| recent_commit(commit) },
-          change_frequency: change_frequency(total_count, recent_count)
+          change_frequency: change_frequency(total_count, recent_count, added: data[:added] == true)
         }
       end
 
@@ -350,9 +350,20 @@ module Woods
         { sha: commit[:sha]&.first(8), message: commit[:message], date: commit[:date], author: commit[:author] }
       end
 
-      # @return [Symbol] how often a file changes, from its commit counts
-      def change_frequency(total_count, recent_count)
-        if total_count <= 2
+      # How often a file changes, from its commits inside the history window.
+      #
+      # `:new` means the commit that created the file is inside the window.
+      # Few commits alone do not: a file written years ago and untouched for
+      # the whole window has none, and was published as `:new` with a
+      # `commit_count` of 0, which read as a file that was never committed.
+      # It is `:dormant`.
+      #
+      # @param total_count [Integer] commits touching the file in the window
+      # @param recent_count [Integer] those inside the recent window
+      # @param added [Boolean] whether the window holds the commit that created the file
+      # @return [Symbol]
+      def change_frequency(total_count, recent_count, added: false)
+        if added && total_count <= 2
           :new
         elsif recent_count >= 10
           :hot

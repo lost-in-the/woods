@@ -58,7 +58,7 @@ module Woods
         if field.match?(GitLog::SHA)
           commit = read_commit(io, field, recent_after)
         elsif field.match?(GitLog::RAW)
-          record_path(io, requested, result, commit)
+          record_path(io, requested, result, commit, added: field.end_with?('A'))
         else
           raise ReadError, 'unexpected history record'
         end
@@ -73,12 +73,18 @@ module Woods
         date: date, message: message.force_encoding(Encoding::UTF_8), recent: Time.iso8601(date) > recent_after }
     end
 
-    def record_path(io, requested, result, commit)
+    def record_path(io, requested, result, commit, added:)
       path = token(io)
       raise ReadError, 'incomplete path record' unless commit && path
 
       relative = requested[path]
-      record(result[relative], commit) if relative
+      return unless relative
+
+      record(result[relative], commit)
+      # The commit that created the file is inside the window: the file is
+      # new, not merely quiet. Without it, a file with few commits in the
+      # window is indistinguishable from one written years ago.
+      result[relative][:added] = true if added
     end
 
     def record(data, commit)
