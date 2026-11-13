@@ -21,10 +21,15 @@ RSpec.describe 'lookup text of a unit with nested and empty values' do
   end
   let(:metadata) do
     {
-      'routes' => { 'show' => [{ 'verb' => 'GET', 'path' => '/widgets/:id' }], 'empty_route' => [] },
+      'routes' => {
+        'show' => [{ 'verb' => 'GET', 'path' => '/widgets/:id', 'blank_name' => '', 'empty_constraints' => {},
+                     'blank_as' => nil, 'blank_defaults' => { 'format' => nil } }, {}],
+        'empty_route' => [], 'empty_routes' => [{}, { 'blank_verb' => '' }]
+      },
       'filters' => [
         { 'name' => 'require_login', 'only' => %w[show], 'note' => 'maps key => value',
-          'options' => { 'if' => 'signed_in?', 'blank_option' => nil } }, {}
+          'options' => { 'if' => 'signed_in?', 'blank_option' => nil },
+          'conditions' => [{ 'kind' => 'if', 'blank_source' => '' }, { 'empty_args' => [] }] }, {}
       ],
       'actions' => %w[index show],
       'pattern' => 'a => b',
@@ -79,6 +84,13 @@ RSpec.describe 'lookup text of a unit with nested and empty values' do
 
         expect_readable(text)
         expect_no_bare_keys(text)
+      end
+
+      it 'prints no metadata heading when no metadata value says anything' do
+        empty = unit.merge('metadata' => metadata.slice('blank_text', 'empty_items', 'empty_nested'))
+        text = Woods::MCP::ToolResponseRenderer.for(format).render(:lookup, empty)
+
+        expect(text).not_to match(/metadata/i)
       end
     end
   end

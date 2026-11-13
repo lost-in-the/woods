@@ -30,7 +30,7 @@ module Woods
           lines << "Namespace: #{data['namespace']}" if data['namespace']
           lines << ''
 
-          if data['metadata'].is_a?(Hash) && data['metadata'].any?
+          if data['metadata'].is_a?(Hash) && !uninformative?(data['metadata'])
             lines << 'Metadata:'
             data['metadata'].each do |key, value|
               next if uninformative?(value)
@@ -38,8 +38,6 @@ module Woods
               case value
               when Array
                 items = value.reject { |item| uninformative?(item) }
-                next if items.empty?
-
                 lines << "  #{key}:"
                 items.each { |item| lines << "    - #{list_item(item)}" }
               when Hash
@@ -311,7 +309,13 @@ module Woods
         end
 
         def entry_value(value)
-          value.is_a?(Hash) ? "(#{list_item(value)})" : inline_value(value)
+          case value
+          when Hash then "(#{list_item(value)})"
+          when Array
+            shown = value.reject { |item| uninformative?(item) }.map { |item| entry_value(item) }
+            "[#{shown.join(', ')}]"
+          else inline_value(value)
+          end
         end
 
         # @param item [Hash] string-keyed edge-shaped report item

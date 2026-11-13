@@ -69,7 +69,9 @@ A full `lookup` longer than the page limit (40,000 characters unless the server
 sets `WOODS_MCP_LOOKUP_MAX_CHARS`) is answered in pages. Nothing is dropped.
 The limit bounds the whole text of each page as sent, in characters: its position lines, or in JSON its
 `lookup_page` object, indentation and escapes, are counted.
-A `max_chars` below 1,000 is refused with `invalid_params` and `_meta.required_max_chars`.
+A `max_chars` below 1,000 is refused by the tool's input schema.
+A server limit (`WOODS_MCP_LOOKUP_MAX_CHARS`) below 1,000 is refused with `invalid_params` and
+`_meta.required_max_chars`.
 So is, in the JSON format, a size at which one list item does not fit on a page (items are never cut).
 `required_max_chars` is the smallest page size that serves the unit in that format: retry once with it.
 

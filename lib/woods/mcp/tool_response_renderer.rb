@@ -123,7 +123,7 @@ module Woods
       end
 
       # Whether a lookup value says nothing, so its key is not printed: nil,
-      # an empty string or list, or a Hash holding only such values. `false`
+      # an empty string, or a list or Hash holding only such values. `false`
       # and `0` are answers.
       #
       # @param value [Object]
@@ -131,7 +131,8 @@ module Woods
       def uninformative?(value)
         case value
         when nil then true
-        when String, Array then value.empty?
+        when String then value.empty?
+        when Array then value.all? { |item| uninformative?(item) }
         when Hash then value.all? { |_, nested| uninformative?(nested) }
         else false
         end

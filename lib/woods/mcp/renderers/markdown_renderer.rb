@@ -40,7 +40,8 @@ module Woods
           lines << "**Namespace:** #{data['namespace']}" if data['namespace']
           lines << ''
 
-          lines << render_metadata_section(data['metadata']) if data['metadata'].is_a?(Hash) && data['metadata'].any?
+          metadata = data['metadata']
+          lines << render_metadata_section(metadata) if metadata.is_a?(Hash) && !uninformative?(metadata)
 
           if data['source_code']
             lines << '### Source'
@@ -521,8 +522,6 @@ module Woods
             case value
             when Array
               items = value.reject { |item| uninformative?(item) }
-              next if items.empty?
-
               lines << "**#{key}:**"
               items.each { |item| lines << "  - #{list_item(item)}" }
             when Hash
@@ -572,7 +571,13 @@ module Woods
         end
 
         def metadata_value(value)
-          value.is_a?(Hash) ? "(#{metadata_item_summary(value)})" : inline_value(value)
+          case value
+          when Hash then "(#{metadata_item_summary(value)})"
+          when Array
+            shown = value.reject { |item| uninformative?(item) }.map { |item| metadata_value(item) }
+            "[#{shown.join(', ')}]"
+          else inline_value(value)
+          end
         end
 
         def file_lines(entry)
