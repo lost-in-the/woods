@@ -509,8 +509,11 @@ every `def` that carries the name as a literal positional argument:
   source: `attr`, `attr_reader`, `attr_writer` (`name=`), `attr_accessor` (both), `alias_method` and `alias` (the new
   name; `alias_of` names the old one), `define_method`, `delegate` (with `prefix: true` it defines `target_name`,
   with `prefix: :p` `p_name`), `def_delegator` (its alias argument, else its method) and `def_delegators`.
-  `visibility` is stated for `attr*` and `define_method`, which take the visibility in force where they are called,
-  and for any of these calls that a later `private :name` (`private_class_method :name` for a class method) names.
+  `visibility` is stated where Ruby fixes it: for `attr*` and `define_method`, the visibility in force where they
+  are called; for `delegate`, public unless `private: true`; for `alias_method` and `alias`, that of the method
+  they copy when its `def` comes earlier in the same body; and for any of these calls that a later `private :name`
+  (`private_class_method :name` for a class method) names.
+  Elsewhere the statement names no visibility.
 - For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
   instance-side call in the plain body does not.
 - Any other call carrying the name as a literal (a base class's DSL, `field :perform`) may define it, on either

@@ -197,9 +197,23 @@ module Woods
           metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
           locator = FileLines::Locator.new(unit['source_code'], metadata['source_line_map'])
           sites.map do |entry, known|
+            entry = with_aliased_visibility(unit, name, entry)
             Candidate.new(entry: locator.annotate(entry), unit: unit, level: level,
                           origin: known ? :macro : :possible_macro, concern: nil)
           end
+        end
+
+        # An alias takes the visibility of the method it copies: the latest
+        # `def` of that name before it in the same body, when there is one.
+        def with_aliased_visibility(unit, name, entry)
+          return entry unless entry['alias_of'] && !entry.key?('visibility')
+
+          earlier = LookupMember.methods_of(unit).select do |found|
+            found['name'] == entry['alias_of'] && !found['file_unit'] && found['owner'] == name &&
+              @reference.kind?(found) && found['line'] < entry['line']
+          end
+          aliased = earlier.max_by { |found| found['line'] }
+          aliased ? entry.merge('visibility' => @reference.as_named(aliased)['visibility']) : entry
         end
 
         def written_name(unit)
@@ -527,9 +541,23 @@ module Woods
             verdict = defines(macro, node, reference.name, side)
             return [] unless verdict
 
-            visibility = nil unless verdict == :known && SCOPED.include?(macro)
+            visibility = known_visibility(macro, node, visibility) if verdict == :known
+            visibility = nil unless verdict == :known
             alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
             [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known]]
+          end
+
+          # The visibility Ruby gives the method a known call defines, where it
+          # is fixed: the one in force for `attr*` and `define_method`;
+          # public for `delegate` unless `private: true`. Nil otherwise.
+          def known_visibility(macro, node, in_force)
+            return in_force if SCOPED.include?(macro)
+            return nil unless macro == 'delegate'
+
+            case keywords(node)['private']
+            when nil, Prism::FalseNode then 'public'
+            when Prism::TrueNode then 'private'
+            end
           end
 
           # :known when the call defines +name+ on this side, :possible

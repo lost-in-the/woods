@@ -1353,6 +1353,18 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
         .to eq([nil, 'LookupOracle::MacroRecord', 'LookupOracle::MacroBase'])
     end
 
+    it 'says an instance method with the right article when Ruby fixes no visibility Woods reads' do
+      expect(answer('LookupOracle::ForwardedRecord#perform')['statement'])
+        .to start_with('LookupOracle::ForwardedRecord#perform is an instance method of')
+    end
+
+    it 'states the visibility delegate and alias_method give' do
+      expect(answer('LookupOracle::MacroRecord#runner')['member']).to include('visibility' => 'public')
+      expect(answer('LookupOracle::MacroRecord#whisper')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#muted_alias')['member']).to include('visibility' => 'private')
+      expect(answer('LookupOracle::MacroRecord#label')['member']).not_to have_key('visibility')
+    end
+
     it 'keeps a plain-body instance macro off the class side' do
       expect(answer('LookupOracle::MacroRecord.perform')).to be_nil
       expect(answer('LookupOracle::MacroRecord#build')).to be_nil

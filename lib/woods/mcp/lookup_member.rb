@@ -210,8 +210,9 @@ module Woods
                  "#{reference.name}, Ruby calls the next one. #{not_a_unit(unit)}"
         end
         how = "defined in its own body by #{call}#{", as an alias of #{entry['alias_of']}" if entry['alias_of']}"
-        visibility = "#{entry['visibility']} " if entry['visibility']
-        head = "#{reference.identifier} is a #{visibility}#{KIND_LABELS.fetch(entry['kind'], reference.kind_label)}"
+        label = KIND_LABELS.fetch(entry['kind'], reference.kind_label)
+        kind = entry['visibility'] ? "#{entry['visibility']} #{label}" : label
+        head = "#{reference.identifier} is #{kind.match?(/\A[aeiou]/) ? 'an' : 'a'} #{kind}"
         origin = if chosen.level.zero?
                    " of #{owner}, #{how}."
                  else
