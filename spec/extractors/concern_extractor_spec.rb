@@ -750,6 +750,31 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable])
     end
 
+    it 'declares mixins only from real include and extend calls with constant arguments' do
+      path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
+        module Stackable
+          extend ActiveSupport::Concern
+          # The include of this module is optional, extend as needed.
+          include Depot::Weighable, Depot::Countable
+          include(
+            Depot::Sortable
+          )
+          NOTE = "include Quoted"
+
+          def include_of(other); end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Weighable', via: :include },
+         { type: :concern, target: 'Depot::Countable', via: :include },
+         { type: :concern, target: 'Depot::Sortable', via: :include }]
+      )
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Weighable Depot::Countable Depot::Sortable])
+    end
+
     it 'maps an extended ClassMethods module to the module that owns it' do
       path = create_file('app/models/concerns/stackable.rb', <<~RUBY)
         module Stackable
