@@ -269,19 +269,25 @@ module Woods
                      "#{unit['identifier']} itself. Look it up as a class method of a class that includes " \
                      "#{unit['identifier']}."
         end
-        hint = macro_hint(reference, unit, find_unit)
-        hint ? "#{sentence} #{hint}" : sentence
+        resolution = Resolution.new(unit, reference, find_unit: find_unit)
+        return sentence if resolution.call
+
+        [sentence, macro_hint(resolution), chain_hint(resolution)].compact.join(' ')
       end
 
       # A call Woods does not know that names the member, where nothing else
       # on that side defines it.
-      def macro_hint(reference, unit, find_unit)
-        resolution = Resolution.new(unit, reference, find_unit: find_unit)
-        return nil if resolution.call
-
+      def macro_hint(resolution)
         site = resolution.unresolved_macro
         site && "`#{site.entry['defined_by']}` at line #{site.entry['line']} of the published source of " \
                 "#{site.unit['identifier']} names it and may define it."
+      end
+
+      # Where the chain stopped at a parent its typed `:inheritance` edge
+      # names, published only as another type's unit.
+      def chain_hint(resolution)
+        reason = resolution.mismatched_parent
+        reason && "Woods read its superclass chain only up to #{resolution.chain.last['identifier']}: #{reason}."
       end
 
       # Whether +reference+ names a class method the unit's own

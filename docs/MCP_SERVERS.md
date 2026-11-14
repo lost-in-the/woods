@@ -582,6 +582,10 @@ What the index cannot settle is said, never guessed:
 - The walk stops at a parent that is not a published unit (an abstract `ApplicationRecord`, for example), at a
   cycle, after 16 superclasses, and, from a model or controller, at a parent published as a type that does not
   inline concerns.
+  An `:inheritance` edge that names its parent's type is read only as a unit of that type: when only another
+  type's unit is published under that identifier, the parent counts as not published, and the caveat (or, with no
+  answer, the not-found message) names both types.
+  An edge without a type, and a `parent_class` without an edge, read whatever unit is published under the name.
   A model inlines every concern of its ancestry, so an answer from a concern of the last unit read is in doubt only
   when that concern may have come through the unread parent, whose own definition would then come first.
   Woods states that caveat only when it cannot show the concern is mixed in at a level it read: an `include` or

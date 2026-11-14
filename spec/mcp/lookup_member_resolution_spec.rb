@@ -84,6 +84,18 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
     expect(resolve.call('Tagging', %w[Shop::Post Shop], %w[Admin::Tagging])).to be_nil
   end
 
+  it 'stops at a parent its typed edge names when only another type is published, naming both types' do
+    child = unit('PostsController', 'Ignored', tagging_block, type: 'controller')
+            .merge('dependencies' => [{ 'type' => 'controller', 'target' => 'Shared', 'via' => 'inheritance' }])
+    units = { 'PostsController' => child, 'Shared' => unit('Shared', 'Object', "  def label; end\n", type: 'model') }
+
+    resolution = resolve(units, 'PostsController#label')
+    expect(resolution.chain.map { |found| found['identifier'] }).to eq(%w[PostsController])
+    expect(resolution.chosen.concern).to eq('Tagging')
+    expect(resolution.caveats.join).to include('its parent Shared is not a published controller unit; the unit ' \
+                                               'published as Shared is a model unit')
+  end
+
   it 'reads a parent from the :inheritance edge before parent_class' do
     child = unit('Child', 'Ignored').merge('dependencies' => [{ 'type' => 'service', 'target' => 'Parent',
                                                                 'via' => 'inheritance' }])

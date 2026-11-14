@@ -82,6 +82,13 @@ module Woods
         #   then not found)
         attr_reader :unresolved_macro
 
+        # @return [String, nil] why the chain stopped at a parent its typed
+        #   `:inheritance` edge names when only another type's unit is
+        #   published under that identifier
+        def mismatched_parent
+          @stop_reason if @other_type
+        end
+
         # @param unit [Hash] the owner's published unit
         # @param reference [Reference]
         # @param find_unit [#call, nil] (identifier, type) => published unit or nil
@@ -316,13 +323,13 @@ module Woods
           @stop = nil
           seen = Set[@unit['identifier']]
           loop do
-            name, type = parent_of(@chain.last)
+            name, type, exact = parent_of(@chain.last)
             break @stop = :unrecorded unless name
             break if FRAMEWORK_ROOTS.include?(name)
 
             @stop_reason = unread_reason(name, seen)
-            parent = @stop_reason ? nil : find(name, type)
-            @stop_reason ||= parent_reason(name, parent)
+            parent = @stop_reason ? nil : find_parent(name, type, exact)
+            @stop_reason ||= parent_reason(name, parent, type)
             break @stop = name if @stop_reason
 
             @chain << parent
@@ -336,7 +343,11 @@ module Woods
           "Woods reads at most #{MAX_DEPTH} superclasses" if @chain.size >= MAX_DEPTH
         end
 
-        def parent_reason(name, parent)
+        def parent_reason(name, parent, type)
+          if @other_type
+            return "its parent #{name} is not a published #{type} unit; the unit published as #{name} is a " \
+                   "#{@other_type} unit"
+          end
           return "its parent #{name} is not a published unit" unless parent
           return nil if comparable?(parent)
 
@@ -353,15 +364,30 @@ module Woods
           @find_unit.call(name, type)
         end
 
-        # [parent identifier, its unit type], from the `:inheritance` edge or
-        # the unit's `parent_class`.
+        # The parent's published unit. An edge that names a type is read only
+        # as a unit of that type: another type's unit under the same
+        # identifier is not the parent (@other_type names it for the caveat).
+        # A type guessed from the child (`parent_class`) is only preferred.
+        def find_parent(name, type, exact)
+          found = find(name, type)
+          return found if found && (!exact || found['type'] == type)
+          return find(name, nil) unless exact || type.nil?
+
+          other = found || find(name, nil)
+          @other_type = other['type'] if other && other['type'] != type
+          nil
+        end
+
+        # @return [Array(String, String, Boolean), nil] the parent identifier,
+        #   its unit type and whether an `:inheritance` edge names that type
+        #   (`parent_class` carries none: the child's type is a guess)
         def parent_of(unit)
           edge = Array(unit['dependencies']).find { |dep| dep.is_a?(Hash) && dep['via'].to_s == 'inheritance' }
-          return [edge['target'], edge['type']] if edge && edge['target']
+          return [edge['target'], edge['type'], !edge['type'].nil?] if edge && edge['target']
 
           metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
           parent = metadata['parent_class']
-          parent.is_a?(String) && !parent.empty? ? [parent.delete_prefix('::'), unit['type']] : nil
+          parent.is_a?(String) && !parent.empty? ? [parent.delete_prefix('::'), unit['type'], false] : nil
         end
 
         def state_caveats

@@ -196,7 +196,7 @@ RSpec.describe 'MCP lookup of a unit member' do
     RUBY
   end
 
-  # [directory, type, identifier, file_path, source, metadata]
+  # [directory, type, identifier, file_path, source, metadata, dependencies (optional)]
   let(:units) do
     [
       ['models', 'model', 'Post', 'app/models/post.rb', post_source,
@@ -227,9 +227,10 @@ RSpec.describe 'MCP lookup of a unit member' do
     units.group_by(&:first).each do |directory, rows|
       path = File.join(index_dir, directory)
       FileUtils.mkdir_p(path)
-      entries = rows.map do |(_, type, identifier, file_path, source, metadata)|
+      entries = rows.map do |(_, type, identifier, file_path, source, metadata, dependencies)|
         unit = { 'type' => type, 'identifier' => identifier, 'file_path' => file_path,
                  'source_code' => source, 'metadata' => metadata }
+        unit['dependencies'] = dependencies if dependencies
         File.write(File.join(path, collision_safe_filename(identifier)), JSON.generate(unit))
         { 'identifier' => identifier, 'type' => type, 'file_path' => file_path }
       end
@@ -548,6 +549,47 @@ RSpec.describe 'MCP lookup of a unit member' do
                                    'Did you mean: Post (model)?')
       expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Post', type: 'model' },
                                        suggestions: [{ identifier: 'Post', type: 'model' }])
+    end
+  end
+
+  # An `:inheritance` edge that names its parent's type is read only as a
+  # unit of that type: a unit of another type published under the same
+  # identifier is not the parent's definition.
+  describe 'a parent read by the type its inheritance edge names' do
+    let(:base_source) { "class Billing::Base\n  def total\n    :base\n  end\nend\n" }
+
+    def child(identifier, edge)
+      ['services', 'service', identifier, "app/services/#{identifier.underscore}.rb",
+       "class #{identifier} < Billing::Base\nend\n", { 'methods' => [] }, [edge]]
+    end
+
+    let(:units) do
+      super() + [
+        ['poros', 'poro', 'Billing::Base', 'app/models/billing/base.rb', base_source,
+         { 'methods' => published_methods(base_source, identity_lines: 5) }],
+        child('Billing::Invoice', { 'type' => 'service', 'target' => 'Billing::Base', 'via' => 'inheritance' }),
+        child('Billing::Credit', { 'target' => 'Billing::Base', 'via' => 'inheritance' }),
+        child('Billing::Refund', { 'type' => 'poro', 'target' => 'Billing::Base', 'via' => 'inheritance' })
+      ]
+    end
+
+    it 'does not answer from a unit of another type, and says the chain stops at that parent' do
+      response = call(build, identifier: 'Billing::Invoice#total')
+
+      expect(response.meta).to include(error_code: :not_found)
+      expect(text(response)).to include('Woods read its superclass chain only up to Billing::Invoice: its parent ' \
+                                        'Billing::Base is not a published service unit; the unit published as ' \
+                                        'Billing::Base is a poro unit.')
+    end
+
+    it 'reads the parent of an edge without a type as whatever unit is published under that identifier' do
+      expect(member('Billing::Credit#total')['inherited_from']).to include('identifier' => 'Billing::Base',
+                                                                           'type' => 'poro')
+    end
+
+    it 'reads the parent of a typed edge whose unit is published with that type' do
+      expect(member('Billing::Refund#total')['inherited_from']).to include('identifier' => 'Billing::Base',
+                                                                           'type' => 'poro')
     end
   end
 

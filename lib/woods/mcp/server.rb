@@ -768,8 +768,17 @@ module Woods
               reference = LookupMember.parse(identifier)
               owners = reference ? member_owners.call(reader, reference.owner, type) : []
               concern_file = ->(concern) { reader.find_unit(concern, type: 'concern')&.fetch('file_path', nil) }
-              # A superclass, by its `:inheritance` edge's type when there is one.
-              ancestor = ->(name, kind) { (kind && reader.find_unit(name, type: kind)) || reader.find_unit(name) }
+              # A superclass, by its `:inheritance` edge's type when there is one: then only a unit of that
+              # type, never another type's unit published under the same identifier.
+              ancestor = lambda do |name, kind|
+                return reader.find_unit(name) unless kind
+
+                typed = reader.find_unit(name, type: kind)
+                next typed if typed
+
+                untyped = reader.find_unit(name)
+                untyped if untyped && untyped['type'] == kind
+              end
               answer = nil
               owner = owners.find do |candidate|
                 answer = LookupMember.answer(candidate, reference, concern_file: concern_file, find_unit: ancestor)

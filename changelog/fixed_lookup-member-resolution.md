@@ -40,3 +40,5 @@
   A candidates answer no longer says "the definition above overrides" a farther definition.
   A `delegate` whose prefix is not a literal no longer leaves a superclass's prefixed method as the confident
   answer, and a plain-text lookup again says a method's file line is not mapped where it is not.
+  A parent named with a type by its `:inheritance` edge is no longer read from another type's unit published under
+  the same identifier: the chain stops there and says so, naming both types.
