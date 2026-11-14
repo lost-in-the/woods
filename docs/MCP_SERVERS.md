@@ -966,6 +966,25 @@ Likewise a span's `static` confidence adds no graph edge at all, while a `static
 A model name the extractor scan finds in source is `static`, although the scan only looks for the names of live
 models: nothing resolves the spelling in its lexical scope, so `Report` inside `module Admin` may be another class.
 
+A runtime check that a target exists does not make the relationship `verified`.
+A model's `polymorphic_interface` edge points at the association name camelized (`commentable` to `Commentable`),
+emitted only when the application defines a constant of that name.
+Rails never resolves a polymorphic interface to a constant, so the edge is `static`.
+An `external_consumer` edge (`reads_table`, `writes_table`) is an operator's declaration about another
+application.
+The live schema confirms only that the table exists, so the edge is `static`.
+
+`verified` resolutions have known false positives.
+A route-helper edge (`link_to`, `form_action`, `redirect_to`) comes from any `_path` or `_url` name in the source
+that matches a live named route.
+In Ruby source, comments, keyword labels and helper-shaped methods the same file defines are skipped; a template
+is scanned whole.
+A local variable, a string, or a method defined elsewhere that happens to carry a route helper's name still
+produces an edge.
+A template's `view_render` edge comes from Rails' naming rule: the template's directory, camelized, names a live
+controller or mailer.
+A controller that overrides `controller_path` or its view prefixes renders from somewhere else.
+
 **Two mechanisms, one label.**
 Some pairs are produced by two mechanisms that the stored edge does not tell apart.
 Such a pair takes the weaker class and is marked `*` below; output says `at least`.
@@ -994,7 +1013,7 @@ the booted extraction spec fails on an extracted pair the catalog does not list)
 | `doc` |  |  | `doc_link`, `documents` |
 | `engine` | `engine_route` |  |  |
 | `event` |  |  | `published_by`, `subscribed_by` |
-| `external_consumer` |  | `reads_table`, `writes_table` |  |
+| `external_consumer` |  |  | `reads_table`, `writes_table` |
 | `factory` |  |  | `factory_association`, `factory_for`, `factory_parent` |
 | `graphql_mutation` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `field_resolver`*, `job_enqueue`, `reads_config`, `service_call`, `type_reference`* |
 | `graphql_operation` |  | `root_field`, `type_reference` | `fragment_spread` |
@@ -1007,7 +1026,7 @@ the booted extraction spec fails on an extracted pair the catalog does not list)
 | `mailer` | `inheritance` | `extend`, `form_action`, `helper_method`, `include`, `link_to` | `code_reference`*, `helper_call`*, `reads_config`, `service_call` |
 | `manager` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `delegation`, `job_enqueue`, `reads_config`, `service_call` |
 | `migration` |  | `migrates`, `reference`, `table_name` | `code_reference`, `job_enqueue`, `reads_config`, `service_call` |
-| `model` | `belongs_to`, `has_and_belongs_to_many`, `has_many`, `has_one`, `inheritance`, `polymorphic_interface`, `table`, `through_chain` | `extend`*, `include`* | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
+| `model` | `belongs_to`, `has_and_belongs_to_many`, `has_many`, `has_one`, `inheritance`, `table`, `through_chain` | `extend`*, `include`* | `code_reference`*, `job_enqueue`, `polymorphic_interface`, `reads_config`, `service_call` |
 | `package` |  |  | `package_dependency` |
 | `policy` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `job_enqueue`, `policy_evaluation`, `reads_config`, `service_call` |
 | `poro` |  | `extend`, `include`, `inheritance`* | `code_reference`*, `job_enqueue`, `reads_config`, `service_call` |
@@ -1052,7 +1071,7 @@ The text is one line per hop, in the order the edges run:
 ## Path from GET /orders to PaymentGateway
 
 3 hops, forward: GET /orders (route) reaches PaymentGateway (service).
-Evidence: weakest hop is at least static (hop 2). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
+Evidence: weakest hop is static (hop 3). reflected = reported by Rails; verified = source resolved against the running app; static = source-text match only.
 
 1. GET /orders (route) -[route_dispatch]-> OrdersController (controller)
 2. OrdersController (controller) -[code_reference]-> CheckoutService (service)  [at least static]
@@ -1069,6 +1088,9 @@ Each hop has `source`, `source_type`, `target`, `target_type` and `via`, every l
 A hop's `evidence` is the strongest class among its labels, because one strong reason is enough to believe an edge.
 `evidence_mixed: true` marks a class that is a floor.
 The path's `evidence` is its weakest hop's, with `weakest_hop` (counted from 1) unless every hop is `reflected`.
+The answer depends on which hops the path has, not their order.
+The path is `at least` its class only when every hop of that class is.
+One exact hop of the weakest class makes the path exactly that class, and `weakest_hop` names that hop.
 See [edge evidence](#edge-evidence) for the classes.
 `searches` records each search run with its bounds and the units it reached.
 With `direction: "either"` a reverse path still lists its hops as the edges run, from `to` toward `from`.
