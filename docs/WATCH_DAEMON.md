@@ -206,11 +206,43 @@ bundle exec woods-watch --recover-claim /app/tmp/woods --claim-token TOKEN_FROM_
 
 Run this inside the environment that can access that index and its sidecars.
 Recovery does not boot Rails or start a watcher. It holds both the startup
-coordination lock and lifetime lease, checks the token and lease inode, and
+coordination lock and lifetime lease, checks the token and the lease identity, and
 removes only the selected abandoned claim. Restart the normal Foreman/Puma/external
 owner afterward and verify startup reconciliation. Tokens select a claim; they
 are not credentials. A changed token means another owner claimed the index:
 inspect it rather than repeatedly substituting tokens.
+Every refusal names its next step, and no message prints a token.
+
+**Included in Woods 2.2 ([#1078](https://github.com/lost-in-the/woods/issues/1078)):**
+the lease identity survives a bind mount.
+Claims now record `lease_version: 2` and a `lease_id`: a random id written inside the lease file when a daemon first
+holds it, before any claim names it.
+Recovery and same-host takeover read that id through the descriptor that holds the lock and compare it with the claim.
+A deleted and recreated lease holds another id or none, so it is refused as before.
+Earlier releases recorded `lease_version: 1` with the lease's device and inode instead.
+A bind mount numbers one file differently in each container and on the host, so only the writing process could
+ever match them: recovery from a replacement container refused with `owner lease inode changed`.
+A version 1 claim is now recovered with its exact token and a free lease, whatever device and inode it recorded.
+Its limit: a recreated version 1 lease looks the same as a changed mount view, so before recovering one, confirm
+that no process anywhere still runs the old owner.
+
+#### When the owner was a removed container
+
+A replacement container never takes over a claim recorded by another host: a lock on a shared mount is weaker
+evidence than a pid on one host.
+Its launcher parks with reason `owner_on_other_host` in its supervision record, and prints the owner host and pid
+with the exact command, for example (one line, wrapped here):
+
+```text
+[woods-watch] /app/tmp/woods is owned by host 3f2a9c1d (pid 43), which cannot be verified from here; ...
+First confirm that host or container no longer exists, then run:
+woods-watch --recover-claim /app/tmp/woods --claim-token <token from /app/tmp/woods/watch_claim.json>
+```
+
+Check `docker ps -a` (or the host list) for the recorded host first: a container's hostname is its id by default.
+When it is gone, run the command inside the replacement container, then restart the normal owner.
+The old `watch_status.json` stays as the removed container wrote it: readers report it as `unverified` while it
+is fresh and `stale` after 15 minutes, both with `alive: false`.
 
 Recovery preserves the old status record. Keep the reader-only
 `WOODS_WATCH_TRUST_FOREIGN_HOST` override unset in the owner startup environment;
@@ -219,7 +251,7 @@ heartbeat until the normal 15-minute freshness bound expires. Lifetime lease
 protection remains active without that override.
 
 A live local or foreign owner keeps its lease even if its claim is old. Recovery
-refuses a held lock, unknown protocol, missing/replaced lease, malformed record,
+refuses a held lock, unknown protocol, missing lease, a version 2 claim whose lease id differs, malformed record,
 or unavailable locking. Claim age, heartbeat age and a PID in a different container
 never prove abandonment. The filesystem must support cooperative `flock` across
 every process sharing the index; this is not a distributed lease service. Do not
