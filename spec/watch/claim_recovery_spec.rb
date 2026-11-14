@@ -51,9 +51,25 @@ RSpec.describe 'Explicit managed watch claim recovery' do
     cli.run(['--recover-claim', @index, '--claim-token', token])
   end
 
+  def lease_path
+    "#{@claim}.lease"
+  end
+
+  # A claim written by a release that bound ownership to the lease's device and
+  # inode, as that writer's mount view numbered them.
+  def write_v1_claim(token: 'c' * 64, device: 7, inode: 9)
+    File.write(lease_path, '')
+    File.chmod(0o600, lease_path)
+    @record = { 'pid' => 43, 'host' => 'retired-container', 'lease_version' => 1, 'token' => token,
+                'lease_device' => device, 'lease_inode' => inode }
+    File.write(@claim, JSON.generate(@record))
+  end
+
   it 'publishes a token only while the actual foreign child holds its lifetime lease' do
     start_child
-    expect(@record).to include('lease_version' => 1)
+    expect(@record).to include('lease_version' => 2)
+    expect(@record['lease_id']).to match(/\A[a-f0-9]{32}\z/)
+    expect(@record).not_to include('lease_device', 'lease_inode')
     expect(@record['token']).to match(/\A[a-f0-9]{64}\z/)
     File.utime(Time.at(0), Time.at(0), @claim)
     bytes = File.binread(@claim)
@@ -150,6 +166,160 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       Timeout.timeout(2) { expect(recover).to eq(2) }
       expect(File.binread(@claim)).to eq(bytes)
       expect(File.exist?(lease)).to be(false) if damage == :missing
+      expect(messages.string).to include('confirm every watcher writing this index has stopped')
+      expect(messages.string).to include('legacy recovery procedure')
+      expect(messages.string).not_to include(@record.fetch('token'))
+    end
+  end
+
+  describe 'a claim recorded through another mount view (#1078)' do
+    it 'recovers a v1 claim whose recorded device and inode differ, with the exact token and a free lease' do
+      write_v1_claim
+
+      expect(recover).to eq(0)
+      expect(File.exist?(@claim)).to be(false)
+      expect(File.exist?(lease_path)).to be(true)
+    end
+
+    it 'recovers a v1 claim whose recorded numbers still match' do
+      write_v1_claim
+      stat = File.stat(lease_path)
+      File.write(@claim, JSON.generate(@record.merge('lease_device' => stat.dev, 'lease_inode' => stat.ino)))
+
+      expect(recover).to eq(0)
+      expect(File.exist?(@claim)).to be(false)
+    end
+
+    it 'refuses a v1 claim with any other token' do
+      write_v1_claim
+      bytes = File.binread(@claim)
+
+      expect(recover('b' * 64)).to eq(2)
+      expect(messages.string).to include('claim token changed')
+      expect(File.binread(@claim)).to eq(bytes)
+    end
+
+    it 'refuses a v1 claim while a live process holds its lease' do
+      write_v1_claim
+      holder = File.open(lease_path, File::RDWR) # rubocop:disable Style/FileOpen -- the open descriptor is the lock
+      holder.flock(File::LOCK_EX)
+      bytes = File.binread(@claim)
+
+      expect(recover).to eq(2)
+      expect(messages.string).to include('owner lease is held')
+      expect(File.binread(@claim)).to eq(bytes)
+    ensure
+      holder&.close
+    end
+
+    it 'cannot tell a recreated v1 lease from a changed mount view, so the token and free lease decide' do
+      write_v1_claim
+      File.rename(lease_path, "#{lease_path}.original")
+      File.write(lease_path, '')
+
+      expect(recover).to eq(0)
+    end
+
+    it 'verifies a v2 lease id from a process that numbers the lease differently' do
+      start_child
+      stop_child
+      allow_any_instance_of(File::Stat).to receive(:dev).and_return(4242)
+      allow_any_instance_of(File::Stat).to receive(:ino).and_return(31_337)
+
+      expect(recover).to eq(0)
+      expect(File.exist?(@claim)).to be(false)
+    end
+
+    it 'refuses a v2 claim whose lease holds another complete id' do
+      start_child
+      stop_child
+      File.write(lease_path, "#{'e' * 32}\n")
+      bytes = File.binread(@claim)
+
+      expect(recover).to eq(2)
+      expect(messages.string).to include('owner lease was replaced')
+      expect(File.binread(@claim)).to eq(bytes)
+      expect(File.binread(lease_path)).to eq("#{'e' * 32}\n")
+    end
+
+    it 'never writes a lease id while recovering' do
+      start_child
+      stop_child
+      File.write(lease_path, '')
+
+      expect(recover).to eq(2)
+      expect(File.binread(lease_path)).to eq('')
+    end
+
+    it 'refuses an unknown claim version' do
+      start_child
+      stop_child
+      File.write(@claim, JSON.generate(@record.merge('lease_version' => 3)))
+
+      expect(recover).to eq(2)
+      expect(messages.string).to include('legacy or unverifiable')
+    end
+  end
+
+  describe 'recovery messages (#1078)' do
+    let(:token) { 'c' * 64 }
+
+    {
+      'a held lease' => [:hold_lease, 'stop that owner through its supervisor'],
+      'a changed token' => [:retoken, 'another owner claimed this index'],
+      'a legacy claim' => [:legacy_claim, 'legacy recovery procedure'],
+      'a missing claim' => [:remove_claim, 'nothing to recover'],
+      'a missing lease' => [:remove_lease, 'legacy recovery procedure']
+    }.each do |refusal, (damage, next_step)|
+      it "names the next step and never prints the token for #{refusal}" do
+        write_v1_claim(token: token)
+        send(damage)
+
+        expect(recover(token)).to eq(2)
+        expect(messages.string).to include(next_step)
+        expect(messages.string).not_to include(token)
+      ensure
+        @holder&.close
+      end
+    end
+
+    it 'names where to run recovery when the sidecars cannot be opened' do
+      write_v1_claim(token: token)
+      allow(File).to receive(:open).and_call_original
+      allow(File).to receive(:open).with(lease_path, anything, anything).and_raise(Errno::EACCES)
+
+      expect(recover(token)).to eq(2)
+      expect(messages.string).to include('run recovery inside the environment that writes this index')
+      expect(messages.string).not_to include(token)
+      expect(File.exist?(@claim)).to be(true)
+    end
+
+    it 'names where the token lives when the token is malformed' do
+      write_v1_claim(token: token)
+
+      expect(recover('not-a-token')).to eq(2)
+      expect(messages.string).to include("copy \"token\" from #{@claim}")
+    end
+
+    def remove_claim
+      File.unlink(@claim)
+    end
+
+    def remove_lease
+      File.unlink(lease_path)
+    end
+
+    def hold_lease
+      @holder = File.open(lease_path, File::RDWR)
+      @holder.flock(File::LOCK_EX)
+    end
+
+    def retoken
+      File.write(@claim, JSON.generate(@record.merge('token' => 'd' * 64)))
+    end
+
+    def legacy_claim
+      File.write(@claim, JSON.generate(pid: 12, host: 'retired-container'))
     end
   end
 
