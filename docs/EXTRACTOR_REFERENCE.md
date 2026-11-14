@@ -1781,6 +1781,7 @@ That is a quiet file, not an uncommitted one: the window holds none of its histo
 A file renamed into place inside the window is not `:new` when its content is older.
 The history walk reads renames as a deletion and an addition, and reads each commit against its first parent.
 A file's creation is the newest commit on `HEAD`'s first-parent chain that adds it.
+A file that no commit on that chain adds is not `:new`, whatever a side branch added.
 When that commit also deletes a path, it is read again with git's rename detection (`-M`, default similarity).
 A rename is followed to the commit that created its source on the rename's own first-parent chain.
 When that commit is a merge and not a rename, the file is followed into the merge's other parents.

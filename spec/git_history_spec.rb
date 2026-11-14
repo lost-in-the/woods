@@ -302,6 +302,34 @@ RSpec.describe Woods::GitHistory do
         end
       end
 
+      describe "a file's creation is read on HEAD's first-parent chain" do
+        it 'leaves an older file unmarked when a side branch merged with ours recreated it' do
+          commit('create', { 'kept.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          git('rm', '-q', 'kept.rb')
+          commit('delete on side', {}, days_ago: 50)
+          commit('recreate on side', { 'kept.rb' => 'other' }, days_ago: 40)
+          git('checkout', '-q', 'main')
+          git('merge', '-s', 'ours', '--no-ff', '-qm', 'discard side', 'side')
+
+          expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+        end
+
+        it 'leaves an older file unmarked when a side branch merges it in and is merged back' do
+          commit('root', { 'other.rb' => 'x' }, days_ago: 900)
+          git('checkout', '-qb', 'side')
+          git('checkout', '-q', 'main')
+          commit('create', { 'kept.rb' => body }, days_ago: 800)
+          git('checkout', '-q', 'side')
+          commit('side change', { 'side.rb' => 'y' }, days_ago: 30)
+          git('merge', '--no-ff', '-qm', 'take main', 'main')
+          git('checkout', '-q', 'main')
+          git('merge', '--no-ff', '-qm', 'introduce side', 'side')
+
+          expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+        end
+      end
+
       describe 'a history whose older commits are missing' do
         def build
           commit('create', { 'first.rb' => body }, days_ago: 800)
