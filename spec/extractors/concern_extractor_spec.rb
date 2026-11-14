@@ -956,6 +956,25 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.metadata[:included_modules]).to eq(%w[Depot::Trackable::Helpers Depot::Trackable::Finders])
     end
 
+    it 'gives no edge for the own ClassMethods of a concern named like its namespace' do
+      path = create_file('app/models/concerns/depot/depot.rb', <<~RUBY)
+        module Depot
+          module Depot
+            extend ActiveSupport::Concern
+            module ClassMethods; end
+
+            extend self::ClassMethods
+          end
+        end
+      RUBY
+
+      unit = described_class.new.extract_concern_file(path)
+
+      expect(unit.identifier).to eq('Depot::Depot')
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq([])
+      expect(unit.metadata[:included_modules]).to eq([])
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable

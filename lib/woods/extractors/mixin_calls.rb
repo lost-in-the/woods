@@ -56,13 +56,20 @@ module Woods
         end
       end
 
-      # @return [Visitor, nil] the visitor after its walk, nil for no source
+      # The visitor after its walk, nil for no source. A source that already
+      # declares +owner+ by its full name is read as written; only one whose
+      # namespace modules were blanked out is rooted at +owner+.
+      #
+      # @return [Visitor, nil]
       def visit(source, kinds, own_only, owner = nil)
         return nil unless source.is_a?(String) && !source.empty?
 
-        visitor = Visitor.new(kinds, own_only, owner)
-        Woods::ParseCache.parse(source).value.accept(visitor)
-        visitor
+        tree = Woods::ParseCache.parse(source).value
+        visitor = Visitor.new(kinds, own_only)
+        tree.accept(visitor)
+        return visitor if owner.nil? || visitor.declares?(owner)
+
+        Visitor.new(kinds, own_only, owner).tap { |rooted| tree.accept(rooted) }
       end
 
       # The `*Helper` modules a source includes by bare name, as the helper
@@ -92,6 +99,12 @@ module Woods
           @nesting = []
           @declared = Set.new
           @self_is = :other
+        end
+
+        # @param name [String] a qualified module or class name
+        # @return [Boolean] whether this source declares it
+        def declares?(name)
+          @declared.include?(name)
         end
 
         # The declared module or class a constant names, by lexical lookup
