@@ -220,8 +220,8 @@ holds it, before any claim names it.
 Recovery and same-host takeover read that id through the descriptor that holds the lock and compare it with the claim.
 A deleted and recreated lease holds another id or none, so it is refused as before.
 Earlier releases recorded `lease_version: 1` with the lease's device and inode instead.
-A bind mount numbers one file differently in each container and on the host, so only the writing process could
-ever match them: recovery from a replacement container refused with `owner lease inode changed`.
+Those numbers are not stable across mount sessions (a restarted Docker VM renumbers a virtiofs share) or between
+a container and the host, so a later session could not match them: recovery refused with `owner lease inode changed`.
 A version 1 claim is now recovered with its exact token and a free lease, whatever device and inode it recorded.
 Its limit: a recreated version 1 lease looks the same as a changed mount view, so before recovering one, confirm
 that no process anywhere still runs the old owner.
@@ -260,13 +260,25 @@ replace or recreate the `.lease` or `.lock` sidecars while writers may exist.
 `woods:clean` preserves these sidecars and the claim, including during forced
 cleanup; it does not reset watcher ownership.
 
-Legacy claims have no lifetime-lease proof and cannot use this command. Stop
-their original owner through its process manager. If the original namespace is
-gone and ownership cannot be verified, choose a new empty output directory,
-configure exactly one writer and its readers to use it, and run a fresh full
-extraction. Keep the old index until the replacement is verified. This recovery
-does not require deleting the unverifiable claim or guessing whether its PID is
-dead. Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
+#### Manual claim recovery
+
+`--recover-claim` refuses when it cannot prove which lease the claim names.
+That covers a legacy claim (no `lease_version`, written before lifetime leases), a version 2 claim whose lease was
+replaced (its `lease_id` differs or is gone), a missing lease, and a sidecar that is not a regular file.
+Each of those refusals sends you here. Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
+
+1. Confirm that every watcher writing this index has stopped, on every host and in every container that mounts it.
+   Stop each one through its process manager.
+   Claim age, heartbeat age and a PID read from another container prove nothing.
+2. Move the claim aside, for example `mv watch_claim.json watch_claim.json.retired`.
+   Leave `watch_claim.json.lease` and `watch_claim.json.lock` where they are.
+   Never unlink, replace or recreate those sidecars.
+3. Restart the normal Foreman/Puma/external owner and verify startup reconciliation.
+
+If you cannot confirm step 1, do not move the claim.
+Instead choose a new empty output directory, configure exactly one writer and its readers to use it, and run a fresh
+full extraction.
+Keep the old index until the replacement is verified.
 
 Daemon liveness, completed startup reconciliation, and source freshness remain
 different facts. Managed supervision records under `watch_supervisors/` expose

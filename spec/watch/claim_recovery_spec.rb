@@ -57,6 +57,16 @@ RSpec.describe 'Explicit managed watch claim recovery' do
 
   # A claim written by a release that bound ownership to the lease's device and
   # inode, as that writer's mount view numbered them.
+  # Every refusal that sends the reader to the watch guide names a heading it really has.
+  def expect_existing_doc_section(message)
+    sections = message.scan(%r{follow "([^"]+)" in docs/WATCH_DAEMON\.md}).flatten
+    guide = File.readlines(File.join(root, 'docs/WATCH_DAEMON.md'), encoding: 'UTF-8')
+    headings = guide.grep(/\A#+ /).map { |line| line.sub(/\A#+ /, '').strip }
+
+    expect(sections).not_to be_empty
+    expect(headings).to include(*sections)
+  end
+
   def write_v1_claim(token: 'c' * 64, device: 7, inode: 9)
     File.write(lease_path, '')
     File.chmod(0o600, lease_path)
@@ -167,7 +177,7 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       expect(File.binread(@claim)).to eq(bytes)
       expect(File.exist?(lease)).to be(false) if damage == :missing
       expect(messages.string).to include('confirm every watcher writing this index has stopped')
-      expect(messages.string).to include('legacy recovery procedure')
+      expect_existing_doc_section(messages.string)
       expect(messages.string).not_to include(@record.fetch('token'))
     end
   end
@@ -238,6 +248,7 @@ RSpec.describe 'Explicit managed watch claim recovery' do
 
       expect(recover).to eq(2)
       expect(messages.string).to include('owner lease was replaced')
+      expect_existing_doc_section(messages.string)
       expect(File.binread(@claim)).to eq(bytes)
       expect(File.binread(lease_path)).to eq("#{'e' * 32}\n")
     end
@@ -267,16 +278,20 @@ RSpec.describe 'Explicit managed watch claim recovery' do
     {
       'a held lease' => [:hold_lease, 'stop that owner through its supervisor'],
       'a changed token' => [:retoken, 'another owner claimed this index'],
-      'a legacy claim' => [:legacy_claim, 'legacy recovery procedure'],
+      'a legacy claim' => %i[legacy_claim manual_recovery],
       'a missing claim' => [:remove_claim, 'nothing to recover'],
-      'a missing lease' => [:remove_lease, 'legacy recovery procedure']
+      'a missing lease' => %i[remove_lease manual_recovery]
     }.each do |refusal, (damage, next_step)|
       it "names the next step and never prints the token for #{refusal}" do
         write_v1_claim(token: token)
         send(damage)
 
         expect(recover(token)).to eq(2)
-        expect(messages.string).to include(next_step)
+        if next_step == :manual_recovery
+          expect_existing_doc_section(messages.string)
+        else
+          expect(messages.string).to include(next_step)
+        end
         expect(messages.string).not_to include(token)
       ensure
         @holder&.close

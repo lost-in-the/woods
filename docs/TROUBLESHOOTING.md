@@ -81,7 +81,8 @@ the first boot resolves the application's output directory.
 For an abandoned foreign-container claim, follow
 [ownership-verified claim recovery](WATCH_DAEMON.md#recovering-an-abandoned-managed-claim).
 The Woods 2.1 command requires the exact token and a free lifetime
-lease; old claims require the documented legacy recovery. Age is not proof of
+lease; legacy claims and replaced leases need
+[manual claim recovery](WATCH_DAEMON.md#manual-claim-recovery). Age is not proof of
 abandonment. `woods:clean` preserves ownership sidecars and does not reset them.
 
 Unset `WOODS_WATCH_IDLE_TIMEOUT` in managed modes. If the boot deadline is reached,

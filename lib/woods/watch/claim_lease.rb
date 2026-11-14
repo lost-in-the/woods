@@ -9,17 +9,19 @@ module Woods
     # Sidecar inodes are permanent: unlinking a locked file defeats flock.
     #
     # A claim names its lease by the random id written inside the lease file,
-    # never by device and inode: a bind mount numbers one file differently in
-    # each container and on the host. A recreated lease carries another id or
-    # none, so a lock taken on it cannot pass for the owner's.
+    # never by device and inode: on a bind mount those numbers are not stable
+    # across mount sessions or between a container and the host. A recreated
+    # lease carries another id or none, so a lock taken on it cannot pass for
+    # the owner's.
     class ClaimLease # rubocop:disable Metrics/ClassLength -- one lease's lock, id and recovery refusals stay together
       class Unavailable < StandardError; end
       CLAIM = 'watch_claim.json'
       MAX_BYTES = 4096
       LEASE_ID = /\A([a-f0-9]{32})\n\z/
       LEASE_ID_BYTES = 33
-      LEGACY_STEP = 'confirm every watcher writing this index has stopped (check each host and container), ' \
-                    'then follow the legacy recovery procedure in docs/WATCH_DAEMON.md'
+      MANUAL_RECOVERY = 'Manual claim recovery'
+      MANUAL_STEP = 'confirm every watcher writing this index has stopped (check each host and container), ' \
+                    "then follow \"#{MANUAL_RECOVERY}\" in docs/WATCH_DAEMON.md".freeze
 
       attr_reader :token
 
@@ -154,7 +156,7 @@ module Woods
         current = File.lstat(path)
         return if opened.file? && current.file? && [opened.dev, opened.ino] == [current.dev, current.ino]
 
-        raise Unavailable, "claim sidecar must be an unchanged regular file; #{LEGACY_STEP}"
+        raise Unavailable, "claim sidecar must be an unchanged regular file; #{MANUAL_STEP}"
       end
 
       # @return [String, nil] the complete id read through the locked descriptor
@@ -175,7 +177,7 @@ module Woods
       def acquire_recovery_lease
         acquire(create: false)
       rescue Errno::ENOENT, Errno::ELOOP
-        raise Unavailable, "owner lease is missing or not a regular file; #{LEGACY_STEP}"
+        raise Unavailable, "owner lease is missing or not a regular file; #{MANUAL_STEP}"
       end
 
       def read_selected_claim
@@ -183,7 +185,7 @@ module Woods
       rescue Errno::ENOENT
         raise Unavailable, "no claim at #{File.join(@index, CLAIM)}; nothing to recover: start the normal owner"
       rescue Errno::ELOOP
-        raise Unavailable, "claim must be a regular file; #{LEGACY_STEP}"
+        raise Unavailable, "claim must be a regular file; #{MANUAL_STEP}"
       end
 
       def read_claim
@@ -193,7 +195,7 @@ module Woods
         File.open(path, flags) do |file|
           verify_regular_path(file, path)
           bytes = file.read(MAX_BYTES + 1)
-          raise Unavailable, "claim exceeds the recovery size limit; #{LEGACY_STEP}" if bytes.bytesize > MAX_BYTES
+          raise Unavailable, "claim exceeds the recovery size limit; #{MANUAL_STEP}" if bytes.bytesize > MAX_BYTES
 
           bytes
         end
@@ -201,7 +203,7 @@ module Woods
 
       def validate_claim(snapshot, token)
         record = JSON.parse(snapshot)
-        raise Unavailable, "legacy or unverifiable claim; #{LEGACY_STEP}" unless valid_record?(record)
+        raise Unavailable, "legacy or unverifiable claim; #{MANUAL_STEP}" unless valid_record?(record)
         unless record['token'] == token
           raise Unavailable, 'claim token changed; another owner claimed this index since that token was copied: ' \
                              "inspect the host and pid in #{File.join(@index, CLAIM)} before retrying"
@@ -209,7 +211,7 @@ module Woods
 
         record
       rescue JSON::ParserError
-        raise Unavailable, "legacy or unverifiable claim; #{LEGACY_STEP}"
+        raise Unavailable, "legacy or unverifiable claim; #{MANUAL_STEP}"
       end
 
       def valid_record?(record)
@@ -229,7 +231,7 @@ module Woods
         return if names_this_lease?(record)
 
         raise Unavailable, 'owner lease was replaced since this claim was written, ' \
-                           "so ownership cannot be verified; #{LEGACY_STEP}"
+                           "so ownership cannot be verified; #{MANUAL_STEP}"
       end
 
       def valid_lease_id?(value)
