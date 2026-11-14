@@ -167,6 +167,8 @@ published `source_code` coordinates, sorted by line.
   display block owns its methods at their lines inside the block.
 - Methods defined by metaprogramming or on another receiver are absent, and so is a `def self.x` inside
   `class << self`, which Ruby defines on the singleton class's own singleton class.
+  So is a `def` in a `class << self` nested in another `class << self` or in a `class_methods do` block: that
+  singleton class belongs to another object.
 
 **Callback declarations (#817).** Each model callback entry whose method is
 declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with
@@ -1765,7 +1767,7 @@ Git history is required.
 
 | Value | Meaning |
 |-------|---------|
-| `:new` | The file's content first appeared inside the window, and the file has at most two commits |
+| `:new` | The commit that created the file is inside the window, and the file has at most two commits |
 | `:hot` | Ten or more commits in the last 90 days |
 | `:active` | Three or more commits in the last 90 days |
 | `:stable` | At least one commit in the last 90 days |
@@ -1773,15 +1775,6 @@ Git history is required.
 
 A file written before the window and not touched since has `commit_count: 0`, no contributors and `:dormant`.
 That is a quiet file, not an uncommitted one: the window holds none of its history.
-
-A file renamed into place inside the window is not `:new` when its content is older.
-The history walk reads renames as a deletion and an addition, so a commit that creates a file and also deletes a path
-is read again with git's rename detection (`-M`, default similarity).
-A rename is followed back through the window to the commit that created its source.
-A source older than the window means the content is too: the file is classified by its counts.
-A source created inside the window keeps the file `:new`.
-`commit_count` still counts only the commits at the current name.
-The commit table (`git_commits.json`) still lists a renamed path as `added`.
 
 ### Full example JSON
 

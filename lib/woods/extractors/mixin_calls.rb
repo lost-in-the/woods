@@ -27,10 +27,13 @@ module Woods
       # @param kinds [Array<Symbol>] which of {KINDS} to read
       # @param own_only [Boolean] only the calls that mix into the module or
       #   class being read (no receiver or `self`, outside a method body)
+      # @param owner [String, nil] qualified name of the module being read,
+      #   for a source whose enclosing namespace modules were blanked out: a
+      #   top-level declaration whose name ends +owner+ is read as +owner+
       # @return [Array<Array(Symbol, String)>] the call and the constant as
       #   written (a leading `::` kept), in source order
-      def call(source, kinds = KINDS, own_only: true)
-        visitor = visit(source, kinds, own_only)
+      def call(source, kinds = KINDS, own_only: true, owner: nil)
+        visitor = visit(source, kinds, own_only, owner)
         visitor ? visitor.found.map { |kind, name, _nesting| [kind, name] } : []
       end
 
@@ -44,7 +47,7 @@ module Woods
       # @param kinds [Array<Symbol>] which of {KINDS} to read
       # @return [Array<Array(Symbol, String)>] as {call}
       def outside_owner(source, owner, kinds = KINDS)
-        visitor = visit(source, kinds, false)
+        visitor = visit(source, kinds, false, owner)
         return [] unless visitor
 
         visitor.found.filter_map do |kind, name, nesting|
@@ -54,10 +57,10 @@ module Woods
       end
 
       # @return [Visitor, nil] the visitor after its walk, nil for no source
-      def visit(source, kinds, own_only)
+      def visit(source, kinds, own_only, owner = nil)
         return nil unless source.is_a?(String) && !source.empty?
 
-        visitor = Visitor.new(kinds, own_only)
+        visitor = Visitor.new(kinds, own_only, owner)
         Woods::ParseCache.parse(source).value.accept(visitor)
         visitor
       end
@@ -79,8 +82,9 @@ module Woods
         #   as written, enclosing qualified names (innermost last)
         attr_reader :found
 
-        def initialize(kinds, own_only)
+        def initialize(kinds, own_only, owner = nil)
           super()
+          @owner = owner
           @kinds = kinds
           @found = []
           @own_only = own_only
@@ -158,12 +162,20 @@ module Woods
         private
 
         def within(node, &block)
-          qualified = declared_name(constant_name(node.constant_path) || node.constant_path.slice)
+          qualified = rooted(declared_name(constant_name(node.constant_path) || node.constant_path.slice))
           @declared << qualified
           @nesting.push(qualified)
           self_is(:module, &block)
         ensure
           @nesting.pop if qualified
+        end
+
+        # A top-level declaration of the owner's last name segments is the
+        # owner, written inside namespace modules the source no longer holds.
+        def rooted(qualified)
+          return qualified unless @owner && @nesting.empty? && @owner.end_with?("::#{qualified}")
+
+          @owner
         end
 
         def self_is(state)

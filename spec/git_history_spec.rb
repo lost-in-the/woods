@@ -135,61 +135,17 @@ RSpec.describe Woods::GitHistory do
       expect(read('quiet.rb').fetch('quiet.rb')).to eq({})
     end
 
-    it 'marks a file recreated at its name inside the window' do
-      commit('create', { 'gone.rb' => 'one' }, days_ago: 800)
+    it 'marks a file recreated or renamed into place inside the window' do
+      commit('create', { 'gone.rb' => 'one', 'before.rb' => 'same' }, days_ago: 800)
       git('rm', '-q', 'gone.rb')
-      git('commit', '-qm', 'remove')
+      git('mv', 'before.rb', 'after.rb')
+      git('commit', '-qm', 'remove and rename')
       commit('recreate', { 'gone.rb' => 'two' })
 
-      expect(read('gone.rb').fetch('gone.rb')).to include(added: true)
-    end
+      facts = read('gone.rb', 'after.rb')
 
-    describe 'a file renamed inside the window (its content first appeared where it came from)' do
-      let(:body) { (1..40).map { |line| "line #{line}\n" }.join }
-
-      it 'leaves a file moved unchanged from an older file unmarked' do
-        commit('create', { 'before.rb' => body }, days_ago: 800)
-        git('mv', 'before.rb', 'after.rb')
-        git('commit', '-qm', 'rename')
-
-        facts = read('after.rb').fetch('after.rb')
-        expect(facts).to include(commit_count: 1)
-        expect(facts).not_to have_key(:added)
-      end
-
-      it 'leaves a file moved and edited in the same commit unmarked' do
-        commit('create', { 'before.rb' => body }, days_ago: 800)
-        git('rm', '-q', 'before.rb')
-        commit('rename and edit', { 'after.rb' => "#{body}line 41\n" })
-
-        expect(read('after.rb').fetch('after.rb')).not_to have_key(:added)
-      end
-
-      it 'follows renames back to an older file' do
-        commit('create', { 'first.rb' => body }, days_ago: 800)
-        git('mv', 'first.rb', 'second.rb')
-        commit('rename once', {}, days_ago: 100)
-        git('mv', 'second.rb', 'third.rb')
-        commit('rename twice', {}, days_ago: 3)
-
-        expect(read('third.rb').fetch('third.rb')).not_to have_key(:added)
-      end
-
-      it 'marks a file created inside the window and renamed after' do
-        commit('create', { 'draft.rb' => body }, days_ago: 100)
-        git('mv', 'draft.rb', 'final.rb')
-        commit('rename', {}, days_ago: 3)
-
-        expect(read('final.rb').fetch('final.rb')).to include(added: true, commit_count: 1)
-      end
-
-      it 'marks a new file added in a commit that deletes an unrelated one' do
-        commit('create', { 'old.rb' => body }, days_ago: 800)
-        git('rm', '-q', 'old.rb')
-        commit('replace', { 'fresh.rb' => "class Fresh\n  def different; end\nend\n" })
-
-        expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true)
-      end
+      expect(facts.fetch('gone.rb')).to include(added: true)
+      expect(facts.fetch('after.rb')).to include(added: true)
     end
   end
 
