@@ -20,3 +20,5 @@
   an instance method), a `self::` constant gives no edge and is not listed in `metadata.included_modules`.
   A module found at runtime and written inside its namespace (`module Depot` around `module Trackable`) resolves
   `self::` and its own nested modules against its full name, `Depot::Trackable`.
+  A source that already declares that full name is read as written, so a `Depot::Depot` concern's own
+  `ClassMethods` gives no edge.

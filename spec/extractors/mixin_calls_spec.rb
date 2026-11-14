@@ -196,6 +196,31 @@ RSpec.describe Woods::Extractors::MixinCalls do
     end
   end
 
+  describe 'owner:' do
+    def every_call(source, owner)
+      described_class.call(source, %i[extend], own_only: false, owner: owner)
+    end
+
+    it 'roots a namespace-stripped source at the owner' do
+      sliced = "  module Trackable\n    extend self::ClassMethods\n  end\n"
+      expect(every_call(sliced, 'Depot::Trackable')).to eq([[:extend, '::Depot::Trackable::ClassMethods']])
+    end
+
+    it 'leaves a source that already declares the owner by its full name as written' do
+      {
+        "module Depot\n  module Depot\n    module ClassMethods; end\n    extend self::ClassMethods\n  end\nend\n" =>
+          ['Depot::Depot', '::Depot::Depot::ClassMethods'],
+        "module Depot\n  module Trackable\n    extend self::ClassMethods\n  end\nend\n" =>
+          ['Depot::Trackable', '::Depot::Trackable::ClassMethods'],
+        "module Depot::Trackable\n  extend self::ClassMethods\nend\n" =>
+          ['Depot::Trackable', '::Depot::Trackable::ClassMethods']
+      }.each do |source, (owner, name)|
+        expect(every_call(source, owner)).to eq([[:extend, name]])
+        expect(described_class.outside_owner(source, owner, %i[extend])).to eq([]) if source.include?('ClassMethods;')
+      end
+    end
+  end
+
   it 'names a constant from its path, not its text, keeping a leading ::' do
     source = <<~RUBY
       module Stackable
