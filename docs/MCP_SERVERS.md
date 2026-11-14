@@ -477,16 +477,139 @@ A concern's `module_function` method answers `Owner#method` as a private instanc
 class receives; its public singleton copy stays on the concern.
 The concern's own `def self.x` and `class << self` methods stay on the concern and are not members of the unit;
 look them up on the concern.
+On a concern unit itself, `Concern.method` does not answer a definition inside its own `class_methods do` block:
+the concern module does not respond to it.
+The not-found answer says it is a class method the concern gives to the classes that include it.
 In a unit's own body, `Mod.method` answers a `module_function` as a public module function and `Mod#method` as a
 private instance method.
 Known limit: methods of a `module ClassMethods` inside a concern are not answered as class methods of the unit.
-When a name is defined more than once, the answer is the definition Ruby calls (the unit's own over a concern's,
-the later of two in one body), and `other_definitions` lists the rest.
+
+The rule: a member answer is the method the owner responds to, and where the published index cannot establish
+that, the answer says so instead of guessing.
+Woods reads the definitions in Ruby's method resolution order, as far as the index records it.
+For the owner, then each superclass unit (by its `:inheritance` edge, else `metadata.parent_class`), nearest first:
+a concern the unit's own body prepends (a `prepend` call read by a Prism walk, whose source is inlined), the unit's
+own body, then the concerns first inlined at that level.
+A concern's level is the furthest unit of the chain that inlines it, since Ruby does not include a module a
+superclass already includes.
+The `statement` says how the answer was established: defined in the owner's own body, inherited from an ancestor,
+inlined from a concern (and through which superclass), or from a module the owner prepends.
+An answer from a superclass's own body names that unit in `inherited_from`; `member_of` stays the asked owner, and
+the entry's `unit` names the published source its `line` counts in.
+`other_definitions` lists the definitions the answer overrides.
+A class nested in the body of another class (its own superclass, for example) and published as its own lexical
+range, as a nested job or PORO is, answers from the definitions in that range, not the enclosing class's.
+Such a range carries no `source_line_map`, so its file lines are reported as not mapped.
+
+A class body can define the name by a call instead of a `def`, which the method table does not record.
+At each level, the unit's own body is read (a Prism walk of its published source) for a receiver-less call outside
+every `def` that carries the name as a literal positional argument:
+
+- A call Woods knows defines the name is the answer at that level, with `defined_by` naming it and the call as the
+  source: `attr`, `attr_reader`, `attr_writer` (`name=`), `attr_accessor` (both), `alias_method` and `alias` (the new
+  name; `alias_of` names the old one), `define_method`, `delegate` (with `prefix: true` it defines `target_name`,
+  with `prefix: :p` `p_name`), `def_delegator` (its alias argument, else its method) and `def_delegators`.
+  A `delegate` whose prefix is not a literal (a constant, or `true` with a `to:` that is not one) may define the
+  name itself or any name ending in `_name`.
+  `visibility` is stated where Ruby fixes it: for `attr*` and `define_method`, the visibility in force where they
+  are called; for `delegate`, public unless `private: true`; for `alias_method` and `alias`, that of the method
+  they copy when its `def` comes earlier in the same body; for `attr*`, `define_method`, `delegate` and
+  `alias_method` passed to `private` (`private delegate :x, to: :y`), which return the names they define, that
+  visibility; and for any of these calls that a later `private :name` (`private_class_method :name` for a class
+  method) names.
+  The visibility is the same whether the answer is the owner's own body or a superclass's.
+  Elsewhere the statement names no visibility.
+- For `Owner.method`, `define_singleton_method` in the body and those calls in a `class << self` body count; an
+  instance-side call in the plain body does not.
+- Any other call carrying the name as a literal (a base class's DSL, `field :perform`) may define it, on either
+  side.
+  It matters only when another definition of the name on that side lies further along the walk (a `def`, a call
+  Woods knows, a concern): then the answer has the shape of every answer that cannot tell: no `member`, a
+  statement that Woods cannot tell which definition Ruby calls, and `candidates`.
+  The first candidate is the call (its `member` names it as `defined_by`, its `note` says it may define the name);
+  then every definition the walk finds past it, further calls Woods does not know included, nearest first.
+  With no other definition on that side, the answer stays `not_found`, and its message names the call:
+  "`field` at line N of the published source of X names it and may define it."
+  Calls that only refer to a method are not read as definitions: `private`, `protected`, `public`,
+  `module_function`, `private_class_method`, `public_class_method`, `helper_method`, `validate`, `validates`,
+  `validates_*` (`validates_with` among them), `serialize`, `has_secure_token`, `layout`, `helper`, `rescue_from`,
+  `delegate_missing_to`, `attr_readonly`, `normalizes`, `encrypts`, `default_scope`, `queue_as`, `retry_on`,
+  `discard_on`, and calls named `before_*`, `after_*`, `around_*`, `skip_*`, `prepend_*` or `append_*`.
+  An assignment such as `self.table_name = 'x'` has a receiver and is never read.
+- Rails calls are read by the side they define, as checked against booted Rails 8.0 and 6.0:
+  - `has_one`, `has_many`, `belongs_to`, `has_and_belongs_to_many` and `alias_attribute` (each for its first
+    argument only) and `store_accessor` (each key after the store's, renamed by a literal `prefix:` or `suffix:` as
+    Active Record names it) define the instance method and its writer (`name=`), never a class method.
+    A `prefix:` that is not a literal makes any name equal to the key or ending in `_key` one the call may define,
+    and a `suffix:` likewise any name starting with `key_`; a literal affix on the other side stays exact.
+  - `accepts_nested_attributes_for` defines `name_attributes=` for each name it carries, in the association
+    module, and never `name`.
+  - `composed_of` defines `name` and `name=` (its first argument) on the class itself, ranked by line.
+  - `enum` defines, for each literal value, the scopes `value` and `not_value` (class side, ranked by line) and
+    `value?` and `value!` (instance side, in a module the model includes at its first `enum`), renamed by
+    `prefix:` and `suffix:` (`_prefix:` and `_suffix:` in the hash form) and left out by `scopes: false` and
+    `instance_methods: false`; an option that is not a literal leaves them possible, still named by the affixes
+    that are literals.
+    The enum's own name is its attribute's, which the call does not define.
+    Both the positional form (`enum :status, [...]`, Rails 7.0 on) and the hash form (`enum status: [...]`, up to
+    Rails 7.2) are read.
+    The association and alias methods live in a module the model includes when it is created, so the model's own
+    `def`s and its concerns come first; `store_accessor`'s module comes after the model's own `def`s.
+  - `attribute` defines the instance method and its writer for its first argument (the second is its type).
+    Active Record skips one that a class between the model and `ActiveRecord::Base` already implements, so every
+    application definition in the chain comes first.
+  - `scope` defines the class method only, ranked by line with the class's own `def self.` methods.
+  - `class_attribute` defines `name`, `name=` and `name?` as class methods, and as instance methods as far as its
+    `instance_reader`, `instance_writer`, `instance_accessor` and `instance_predicate` options allow (none of
+    `name?` with `instance_predicate: false`); a non-literal option leaves the method possible.
+  `has_one_attached`, `has_many_attached`, `has_rich_text` and `has_secure_password` are not in the table: their
+  frameworks could not be checked in a booted Rails here, so they are calls Woods does not know.
+  These methods are public wherever they are written, `scope` included, unless a later `private :name`
+  (`private_class_method :name` for a class method) names them; the answer states it at every level.
+- A `def` and a call in one body: the later line is the one Ruby keeps.
+- Known limits: only calls written directly in the body are read, not inside a conditional, an `included do` block
+  or an inlined concern; Forwardable's hash form (`delegate [:a] => :b`) is not read.
+
+What the index cannot settle is said, never guessed:
+
+- A model's inlined concerns are written nearest first (`included_modules`), so the first one that defines the name
+  is the one Ruby calls.
+  A controller's are sorted by name, so when two of its concerns at one level define the name, the answer has no
+  `member`: `candidates` lists each definition with its concern and lines, and the statement says the index does
+  not record the include order, so Woods cannot tell which one Ruby calls.
+- A `prepend` of a module whose source is not inlined adds a `caveats` entry: that module may define the name and
+  would run first.
+- The walk stops at a parent that is not a published unit (an abstract `ApplicationRecord`, for example), at a
+  cycle, after 16 superclasses, and, from a model or controller, at a parent published as a type that does not
+  inline concerns.
+  An `:inheritance` edge that names its parent's type is read only as a unit of that type: when only another
+  type's unit is published under that identifier, the parent counts as not published, and the caveat (or, with no
+  answer, the not-found message) names both types.
+  An edge without a type, and a `parent_class` without an edge, read whatever unit is published under the name.
+  A model inlines every concern of its ancestry, so an answer from a concern of the last unit read is in doubt only
+  when that concern may have come through the unread parent, whose own definition would then come first.
+  Woods states that caveat only when it cannot show the concern is mixed in at a level it read: an `include` or
+  `prepend` of it written directly in the body of a unit of the chain, or in the body of an inlined concern that
+  is itself shown, read by a Prism walk.
+  The written constant is resolved lexically against the inlined concerns' full names (a short name written inside
+  the unit's namespace matches the namespaced concern); a dynamic or unresolved name does not show it.
+  A chain that ends at a framework root (`ActiveRecord::Base`, `ActionController::Base` and the like) needs no
+  caveat: a framework class holds no application definition.
+- A `prepend` of a concern a superclass already has is a no-op for an `ActiveSupport::Concern` and puts a plain
+  module first again; Woods reads which one the inlined module is from its `extend ActiveSupport::Concern`.
+
+Known limits: `prepend` is read only where the unit's own body writes it (not in a concern's `included` block, not
+on `singleton_class`), and on Rails 6.0 a prepended `ActiveSupport::Concern` does not extend its `class_methods`
+while Woods still answers them.
+A unit that writes `include C` while an unread superclass already includes C keeps C at that superclass's level in
+Ruby; Woods treats the written include as showing C at the unit's level.
+Monkey patches, reopened classes and methods defined by metaprogramming other than the class-body calls above
+(in a method, a loop, or from a computed name) are not in the published source.
 `type` selects the owner's type.
 An identifier that is itself a published unit (a route, for example) still returns that unit.
-When the owner exists but the method is not in its published source (defined by metaprogramming or inherited from
-a parent), the answer stays `not_found` and says so, keeps the suggestion of the owner, and names it in
-`_meta.member_of`.
+When neither the owner's published source nor its published superclasses hold the method or a class-body call
+that names it (defined by other metaprogramming, or in a parent that is not published), the answer stays
+`not_found` and says so, keeps the suggestion of the owner, and names it in `_meta.member_of`.
 A member answer is the whole method on one page: `evidence` other than `full`, `sections` and `page` are refused
 with `unsupported_argument`; look up the owner to use them.
 

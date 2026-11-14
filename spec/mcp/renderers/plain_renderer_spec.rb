@@ -8,6 +8,41 @@ require 'woods/mcp/renderers/plain_renderer'
 RSpec.describe Woods::MCP::Renderers::PlainRenderer do
   subject(:renderer) { described_class.new }
 
+  describe '#render_lookup_member' do
+    # An answer with candidates selects no definition, so the definitions
+    # they override are not overridden by one "above".
+    it 'says the candidates override a farther definition in an answer without a member' do
+      data = { 'identifier' => 'ReportsController#render_pdf',
+               'member_of' => { 'identifier' => 'ReportsController', 'type' => 'controller',
+                                'file_path' => 'app/controllers/reports_controller.rb' },
+               'statement' => 'ReportsController#render_pdf: Woods cannot tell which one Ruby calls.',
+               'candidates' => [{ 'member' => { 'line' => 4, 'end_line' => 6, 'file_line' => 2, 'file_end_line' => 4 },
+                                  'defined_in' => { 'identifier' => 'Exportable', 'file_path' => 'app/x.rb' } }],
+               'other_definitions' => [{ 'line' => 9, 'end_line' => 11, 'unit' => 'ApplicationController' }] }
+
+      text = renderer.render(:lookup_member, data)
+
+      expect(text).to include('Also defined in the published source of ApplicationController, lines 9-11; ' \
+                              'each of the candidates overrides it.')
+      expect(text).not_to include('the definition above')
+    end
+  end
+
+  describe '#render_lookup with file coordinates' do
+    # A null file line is an answer: the line is not mapped to the file.
+    it 'labels a line with no file line as not mapped and the published line as published' do
+      metadata = { 'methods' => [{ 'name' => 'from_second', 'line' => 50, 'end_line' => 52, 'file_line' => nil,
+                                   'file_end_line' => nil },
+                                 { 'name' => 'activate', 'line' => 276, 'end_line' => 280, 'file_line' => 271,
+                                   'file_end_line' => 275 }] }
+
+      out = renderer.render(:lookup, { 'identifier' => 'Account', 'type' => 'model', 'metadata' => metadata })
+
+      expect(out).to include('file line: not mapped, published source lines: 50-52, name: from_second')
+      expect(out).to include('file lines: 271-275, published source lines: 276-280, name: activate')
+    end
+  end
+
   describe '#render_lookup' do
     it 'renders unit identifier and file' do
       out = renderer.render(:lookup, {

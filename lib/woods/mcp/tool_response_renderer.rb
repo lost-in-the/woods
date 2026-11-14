@@ -72,31 +72,91 @@ module Woods
         raise NotImplementedError, "#{self.class}#render_default must be implemented"
       end
 
+      # Metadata entry keys that hold line coordinates.
+      COORDINATE_KEYS = %w[line end_line file_line file_end_line file_unit].freeze
+
       private
 
       # Where a member answer's method is: the file a reader opens and its
-      # lines, then the lines in the owner's published source. Shared by the
-      # text renderers' `render_lookup_member`.
+      # lines, then the lines in the published source that holds it, the
+      # definitions it overrides and what the index could not establish.
+      # An answer the index cannot rank lists each candidate's place instead.
+      # Shared by the text renderers' `render_lookup_member`.
       #
       # @param data [Hash] a {LookupMember.answer}
       # @return [Array<String>]
       def member_location_lines(data)
-        member = data['member'] || {}
-        owner = data['member_of'] || {}
-        concern = data['defined_in']
-        file = concern ? concern['file_path'] : owner['file_path']
-        where = file ? "File: #{file}" : 'File: unknown'
-        where += " (#{concern['identifier']}, inlined into #{owner['identifier']})" if concern
-        first = member['file_line']
-        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
-        lines = [where, "Published source of #{owner['identifier']}: " \
-                        "#{member_lines(member['line'], member['end_line'])}"]
+        lines = data['member'] ? definition_location_lines(data, data) : []
+        overrider = data['member'] ? 'the definition above overrides it' : 'each of the candidates overrides it'
         Array(data['other_definitions']).each do |other|
           from = other['file_unit'] ? " (from #{other['file_unit']})" : ''
-          lines << "Also defined at published source #{member_lines(other['line'], other['end_line'])}" \
-                   "#{from}; the definition above is the one Ruby calls."
+          lines << "Also defined in the published source of #{other['unit'] || data.dig('member_of', 'identifier')}, " \
+                   "#{member_lines(other['line'], other['end_line'])}#{from}; #{overrider}."
         end
+        Array(data['caveats']).each { |caveat| lines << "Caveat: #{caveat}" }
         lines
+      end
+
+      # The file and lines of one definition: the answer's own, or one of its
+      # `candidates`.
+      #
+      # @param definition [Hash] holds `member` and optionally `defined_in`
+      #   and `inherited_from`
+      # @param data [Hash] the whole answer
+      # @return [Array<String>]
+      def definition_location_lines(definition, data)
+        member = definition['member'] || {}
+        owner = data['member_of'] || {}
+        concern = definition['defined_in']
+        ancestor = definition['inherited_from']
+        file = (concern || ancestor || owner)['file_path']
+        where = file ? "File: #{file}" : 'File: unknown'
+        if concern
+          role = concern['prepended'] ? 'prepended' : 'inlined'
+          where += " (#{concern['identifier']}, #{role} into #{concern['included_by'] || owner['identifier']})"
+        elsif ancestor
+          where += " (#{ancestor['identifier']}, inherited by #{owner['identifier']})"
+        end
+        first = member['file_line']
+        where += first.is_a?(Integer) ? ", #{member_lines(first, member['file_end_line'])}" : ', lines not mapped'
+        [where, "#{published_source_name(member, data)}: #{member_lines(member['line'], member['end_line'])}"]
+      end
+
+      # The unit a candidate's definition is in (its concern, its superclass,
+      # or the owner itself), with the candidate's note when it has one.
+      #
+      # @param candidate [Hash] one of a member answer's `candidates`
+      # @param data [Hash] the whole answer
+      # @return [String]
+      def candidate_label(candidate, data)
+        name = (candidate['defined_in'] || candidate['inherited_from'] || data['member_of'] || {})['identifier']
+        candidate['note'] ? "#{name} (#{candidate['note']})" : name.to_s
+      end
+
+      # The file lines of an entry, or that they are not mapped: a null file
+      # line is an answer, not an empty value.
+      def file_lines(entry)
+        first = entry['file_line']
+        # Null covers both a line Woods added and real code it cannot map
+        # (a library unit's secondary contributor file), so claim neither.
+        return 'file line: not mapped' unless first.is_a?(Integer)
+
+        range = line_range(first, entry['file_end_line'])
+        entry['file_unit'] ? "file lines: #{range} in #{entry['file_unit']}" : "file lines: #{range}"
+      end
+
+      def published_lines(entry)
+        "published source lines: #{line_range(entry['line'], entry['end_line'])}"
+      end
+
+      def line_range(first, last)
+        last.is_a?(Integer) && last != first ? "#{first}-#{last}" : first.to_s
+      end
+
+      # @return [String] "Published source of X", the unit whose published
+      #   source an entry's `line` counts in
+      def published_source_name(entry, data)
+        "Published source of #{entry['unit'] || data.dig('member_of', 'identifier')}"
       end
 
       def member_lines(first, last)

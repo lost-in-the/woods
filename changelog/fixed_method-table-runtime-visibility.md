@@ -22,3 +22,5 @@
   side, and `module_function :a` replaces an earlier `def self.a`, so no superseded definition is left beside the
   live one for a member lookup to choose.
   A spec evaluates each covered form and compares the table, visibility and definition line, with Ruby's own answer.
+  A `def self.x` inside `class_methods do` is left out too: it defines a method of the ClassMethods module, which an
+  includer never receives, and its entry sat beside the sibling `def x` as a second `singleton` entry.

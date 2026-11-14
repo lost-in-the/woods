@@ -1,0 +1,1023 @@
+# frozen_string_literal: true
+
+require 'prism'
+require 'set'
+require_relative '../method_table'
+require_relative '../file_lines'
+require_relative '../parse_cache'
+
+module Woods
+  module MCP
+    module LookupMember
+      # Which definition of a member its owner responds to, read in Ruby's
+      # method resolution order as far as the published index records it.
+      #
+      # The order, nearest first, for each unit of the owner's superclass
+      # chain (the owner, then the parent its `:inheritance` edge or
+      # `parent_class` names, and so on):
+      #
+      # 1. modules the unit's own body prepends (`prepend P` read by a Prism
+      #    walk), when P's source is inlined;
+      # 2. the unit's own body: its `def`s and the class-body macros that
+      #    define the name ({Macros}), the later line first;
+      # 3. the concerns inlined at this level: the inlined concerns of the
+      #    unit that its parent's unit does not also inline (Ruby skips a
+      #    module a superclass already includes).
+      #
+      # Within one level, the order of the inlined concerns is Ruby's only
+      # where the extractor writes them in `included_modules` order (a model,
+      # nearest first). A controller's are sorted by name, so two of its
+      # concerns that define the name are reported as candidates, not ranked.
+      #
+      # A call Woods does not know that may define the name is an answer
+      # that says it cannot tell, not a step past that level.
+      #
+      # What the index cannot settle is stated as a caveat: a prepended
+      # module whose source is not inlined, and a chain that stops at a parent
+      # that is not a published unit when the answer is an inlined concern
+      # of the last unit read.
+      class Resolution
+        # Superclass levels read at most (cycle-safe besides).
+        MAX_DEPTH = 16
+
+        # Parents that end an application chain: framework roots that hold no
+        # application definition.
+        FRAMEWORK_ROOTS = %w[Object BasicObject ActiveRecord::Base ActionController::Base ActionController::API
+                             ActionController::Metal ActionMailer::Base ActiveJob::Base].freeze
+
+        # Unit types whose inlined concern blocks are written in
+        # `included_modules` order (ModelExtractor#extract_included_modules).
+        # ControllerExtractor#detect_included_concerns sorts them by name.
+        ORDERED_TYPES = %w[model].freeze
+
+        # Unit types whose extractor inlines concerns, every concern of the
+        # whole ancestry (`included_modules`). The level of an inlined concern
+        # is read off which units of the chain inline it, so the walk from
+        # such a unit continues only through units of these types.
+        INLINING_TYPES = %w[model controller].freeze
+
+        # One definition of the member. +unit+ is the published unit whose
+        # source holds the entry's lines; +level+ indexes the superclass chain;
+        # +origin+ is :own, :concern or :prepended, or :macro / :possible_macro
+        # for a class-body call that defines the name / may define it.
+        Candidate = Struct.new(:entry, :unit, :level, :origin, :concern, keyword_init: true)
+
+        # Definitions of equal standing. An unordered group with several
+        # candidates cannot be ranked; +extras+ are the definitions each
+        # candidate's own body overrides.
+        Group = Struct.new(:candidates, :ordered, :extras)
+
+        # @return [Array<Hash>] the owner's unit, then each superclass unit read
+        attr_reader :chain
+        # @return [Candidate, nil] the definition Ruby calls, when established
+        attr_reader :chosen
+        # @return [Array<Candidate>, nil] definitions the index cannot rank
+        attr_reader :ambiguous
+        # @return [Array<Candidate>] definitions the answer overrides
+        attr_reader :overridden
+        # @return [Array<String>] what the index could not establish
+        attr_reader :caveats
+        # @return [Candidate, nil] a call Woods does not know that names the
+        #   member when nothing else on that side defines it (the answer is
+        #   then not found)
+        attr_reader :unresolved_macro
+
+        # @return [String, nil] why the chain stopped at a parent its typed
+        #   `:inheritance` edge names when only another type's unit is
+        #   published under that identifier
+        def mismatched_parent
+          @stop_reason if @other_type
+        end
+
+        # @param unit [Hash] the owner's published unit
+        # @param reference [Reference]
+        # @param find_unit [#call, nil] (identifier, type) => published unit or nil
+        def initialize(unit, reference, find_unit: nil)
+          @unit = unit
+          @reference = reference
+          @find_unit = find_unit
+          @caveats = []
+          @overridden = []
+        end
+
+        # @return [Resolution, nil] nil when no definition was found
+        def call
+          read_chain
+          groups = levels.flat_map(&:last) + @fallbacks
+          index = groups.index { |group| group.candidates.any? }
+          return nil unless index
+
+          settled?(groups, index) ? self : nil
+        end
+
+        # @return [Integer] the chain level of the answer
+        def level
+          (chosen || ambiguous.first).level
+        end
+
+        private
+
+        # @return [Boolean] false when the walk leaves no answer
+        def settled?(groups, index)
+          group = groups[index]
+          later = groups.drop(index + 1).flat_map { |other| other.candidates + other.extras }
+          if !group.ordered && group.candidates.size > 1
+            @ambiguous = group.candidates
+            @overridden = definite(group.extras + later)
+          else
+            @chosen = group.candidates.first
+            rest = group.candidates.drop(1) + group.extras + later
+            return answers_past_macro?(rest) if @chosen.origin == :possible_macro
+
+            @overridden = definite(rest)
+          end
+          state_caveats
+          true
+        end
+
+        # A call Woods does not know answers only in front of another
+        # definition on that side, the one walking past it would answer
+        # confidently; it then lists every definition past it, further calls
+        # Woods does not know included. Alone, it leaves the member not found.
+        def answers_past_macro?(rest)
+          if definite(rest).empty?
+            @unresolved_macro = @chosen
+            @chosen = nil
+            return false
+          end
+          @overridden = rest
+          state_caveats
+          true
+        end
+
+        def definite(candidates)
+          candidates.reject { |candidate| candidate.origin == :possible_macro }
+        end
+
+        # [level, groups] for each unit of the chain, nearest first.
+        def levels
+          names = @chain.map { |unit| MethodTable.named_blocks(lines_of(unit)).map(&:last) }
+          @unpublished_prepends = []
+          @fallbacks = []
+          @chain.each_with_index.map do |unit, level|
+            here = level + 1 < @chain.size ? names[level] - names[level + 1] : names[level]
+            prepended, unmatched = prepends(unit, here)
+            @unpublished_prepends << [level, unit, unmatched] unless unmatched.empty?
+            macros = macro_candidates(unit, level, written_name(unit))
+            groups = prepended.map { |concern| ordered_group(concern_candidates(concern, level, :prepended)) }
+            groups << ordered_group(own_candidates(unit, level, macros[:own]))
+            groups << ordered_group(macros[:store])
+            groups.concat(included_groups(here - prepended, level, names.first))
+            groups << ordered_group(macros[:generated])
+            @fallbacks << ordered_group(macros[:fallback])
+            [level, groups]
+          end
+        end
+
+        def ordered_group(candidates)
+          Group.new(candidates, true, [])
+        end
+
+        def included_groups(concerns, level, order)
+          concerns = concerns.sort_by { |concern| order.index(concern) || order.size }
+          per_concern = concerns.map { |concern| concern_candidates(concern, level, :concern) }
+          return per_concern.map { |candidates| ordered_group(candidates) } if ORDERED_TYPES.include?(@unit['type'])
+
+          found = per_concern.reject(&:empty?)
+          [Group.new(found.map(&:first), false, found.flat_map { |candidates| candidates.drop(1) })]
+        end
+
+        # The unit's own definitions of the member, latest first: its `def`s
+        # and the class-body macros that define the name (:macro) or may
+        # (:possible_macro). Both define on the class itself, so the later
+        # line is the one Ruby keeps.
+        def own_candidates(unit, level, macros)
+          name = written_name(unit)
+          class_methods = ConcernClassMethods.own_lines(unit['source_code'], name)
+          entries = LookupMember.methods_of(unit).select do |entry|
+            entry['name'] == @reference.name && !entry['file_unit'] && entry['owner'] == name &&
+              @reference.kind?(entry) && !class_methods.include?(entry['line'])
+          end
+          found = candidates(entries, unit, level, :own, nil) + macros
+          found.sort_by { |candidate| -candidate.entry['line'].to_i }
+        end
+
+        # The class-body calls that define the member at this level, by
+        # where Ruby ranks what they define ({Macros::RANKS}): :own with the
+        # unit's own `def`s, :store after them, :generated after this level's
+        # concerns, :fallback after every level of the chain.
+        def macro_candidates(unit, level, name)
+          found = { own: [], store: [], generated: [], fallback: [] }
+          sites = Macros.sites(unit['source_code'], name, @reference)
+          return found if sites.empty?
+
+          metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
+          locator = FileLines::Locator.new(unit['source_code'], metadata['source_line_map'])
+          sites.each do |entry, known, rank|
+            entry = with_aliased_visibility(unit, name, entry)
+            found[rank] << Candidate.new(entry: locator.annotate(entry), unit: unit, level: level,
+                                         origin: known ? :macro : :possible_macro, concern: nil)
+          end
+          found
+        end
+
+        # An alias takes the visibility of the method it copies: the latest
+        # `def` of that name before it in the same body, when there is one.
+        def with_aliased_visibility(unit, name, entry)
+          return entry unless entry['alias_of'] && !entry.key?('visibility')
+
+          earlier = LookupMember.methods_of(unit).select do |found|
+            found['name'] == entry['alias_of'] && !found['file_unit'] && found['owner'] == name &&
+              @reference.kind?(found) && found['line'] < entry['line']
+          end
+          aliased = earlier.max_by { |found| found['line'] }
+          aliased ? entry.merge('visibility' => @reference.as_named(aliased)['visibility']) : entry
+        end
+
+        def written_name(unit)
+          (@written_names ||= {})[unit['identifier']] ||= WrittenName.call(unit['source_code'], unit['identifier'])
+        end
+
+        # An inlined concern's definitions of the member, latest first, read
+        # from the owner's own source where it inlines the concern.
+        def concern_candidates(concern, level, origin)
+          unit = blocks_of(@unit).include?(concern) ? @unit : @chain[level]
+          class_methods = ConcernClassMethods.lines(unit['source_code'])
+          entries = LookupMember.methods_of(unit).select do |entry|
+            entry['name'] == @reference.name && entry['file_unit'] == concern && entry['owner'] == concern &&
+              @reference.concern_kind?(entry, class_methods)
+          end
+          candidates(entries, unit, level, origin, concern)
+        end
+
+        def candidates(entries, unit, level, origin, concern)
+          entries.sort_by { |entry| -entry['line'].to_i }.map do |entry|
+            Candidate.new(entry: @reference.as_named(entry), unit: unit, level: level, origin: origin,
+                          concern: concern)
+          end
+        end
+
+        def blocks_of(unit)
+          (@blocks ||= {})[unit['identifier']] ||= MethodTable.named_blocks(lines_of(unit)).map(&:last)
+        end
+
+        def lines_of(unit)
+          source = unit['source_code']
+          source.is_a?(String) ? source.lines(chomp: true) : []
+        end
+
+        # The inlined concerns the unit's own body prepends, nearest first,
+        # and the prepended constants whose source is not inlined at this level.
+        # A written `prepend` of a concern first inlined at this level puts it
+        # before the body. One a superclass already has is a no-op for an
+        # `ActiveSupport::Concern` (`prepend_features` returns early) and is
+        # prepended again for a plain module.
+        def prepends(unit, here)
+          known = blocks_of(unit)
+          written = Mixins.calls(unit['source_code'], written_name(unit), :prepend)
+          matched = written.map { |name, scopes| Mixins.resolve(name, scopes, known) }
+          prepended = matched.compact.uniq.select { |concern| here.include?(concern) || !active_concern?(concern) }
+          [prepended, written.reject.with_index { |_, index| matched[index] }.map(&:first)]
+        end
+
+        # Whether the inlined module's own body extends ActiveSupport::Concern.
+        def active_concern?(concern)
+          text = concern_sources.to_h[concern]
+          Mixins.calls(text, concern, :extend).any? { |name, _| name.delete_prefix('::') == 'ActiveSupport::Concern' }
+        end
+
+        # Whether +concern+ is shown to be mixed in at a level Woods read: an
+        # `include` or `prepend` of it written directly in the body of a unit
+        # of the chain, or in the module body of an inlined concern that is
+        # itself shown (an `ActiveSupport::Concern` dependency, or a module
+        # including another). The written constant is resolved lexically
+        # against the concerns the owner inlines ({Mixins.resolve}).
+        def shown?(concern, seen = Set.new)
+          return false unless seen.add?(concern)
+
+          known = blocks_of(@unit)
+          return true if @chain.any? { |unit| mixes_in?(unit['source_code'], written_name(unit), concern, known) }
+
+          concern_sources.any? do |name, text|
+            name != concern && mixes_in?(text, name, concern, known) && shown?(name, seen)
+          end
+        end
+
+        def mixes_in?(source, identifier, concern, known)
+          Mixins.calls(source, identifier, :include, :prepend).any? do |name, scopes|
+            Mixins.resolve(name, scopes, known) == concern
+          end
+        end
+
+        # [concern name, decoded source] of each block the owner inlines.
+        def concern_sources
+          @concern_sources ||= MethodTable.named_blocks(lines_of(@unit)).map { |_, text, name| [name, text] }
+        end
+
+        # The superclass chain, nearest first, as far as published units go.
+        # @stop names the parent the walk did not read, or is :unrecorded
+        # when the last unit names no parent; nil when the chain ends at a
+        # framework root. @stop_reason says why the parent was not read.
+        def read_chain
+          @chain = [@unit]
+          @stop = nil
+          seen = Set[@unit['identifier']]
+          loop do
+            name, type, exact = parent_of(@chain.last)
+            break @stop = :unrecorded unless name
+            break if FRAMEWORK_ROOTS.include?(name)
+
+            @stop_reason = unread_reason(name, seen)
+            parent = @stop_reason ? nil : find_parent(name, type, exact)
+            @stop_reason ||= parent_reason(name, parent, type)
+            break @stop = name if @stop_reason
+
+            @chain << parent
+            seen << name
+          end
+        end
+
+        def unread_reason(name, seen)
+          return "the chain names #{name} twice" if seen.include?(name)
+
+          "Woods reads at most #{MAX_DEPTH} superclasses" if @chain.size >= MAX_DEPTH
+        end
+
+        def parent_reason(name, parent, type)
+          if @other_type
+            return "its parent #{name} is not a published #{type} unit; the unit published as #{name} is a " \
+                   "#{@other_type} unit"
+          end
+          return "its parent #{name} is not a published unit" unless parent
+          return nil if comparable?(parent)
+
+          "its parent #{name} is published as a #{parent['type']} unit, which does not inline its concerns"
+        end
+
+        def comparable?(parent)
+          !INLINING_TYPES.include?(@unit['type']) || INLINING_TYPES.include?(parent['type'])
+        end
+
+        def find(name, type)
+          return nil unless @find_unit
+
+          @find_unit.call(name, type)
+        end
+
+        # The parent's published unit. An edge that names a type is read only
+        # as a unit of that type: another type's unit under the same
+        # identifier is not the parent (@other_type names it for the caveat).
+        # A type guessed from the child (`parent_class`) is only preferred.
+        def find_parent(name, type, exact)
+          found = find(name, type)
+          return found if found && (!exact || found['type'] == type)
+          return find(name, nil) unless exact || type.nil?
+
+          other = found || find(name, nil)
+          @other_type = other['type'] if other && other['type'] != type
+          nil
+        end
+
+        # @return [Array(String, String, Boolean), nil] the parent identifier,
+        #   its unit type and whether an `:inheritance` edge names that type
+        #   (`parent_class` carries none: the child's type is a guess)
+        def parent_of(unit)
+          edge = Array(unit['dependencies']).find { |dep| dep.is_a?(Hash) && dep['via'].to_s == 'inheritance' }
+          return [edge['target'], edge['type'], !edge['type'].nil?] if edge && edge['target']
+
+          metadata = unit['metadata'].is_a?(Hash) ? unit['metadata'] : {}
+          parent = metadata['parent_class']
+          parent.is_a?(String) && !parent.empty? ? [parent.delete_prefix('::'), unit['type'], false] : nil
+        end
+
+        def state_caveats
+          answer_level = level
+          @unpublished_prepends.each do |prepend_level, unit, names|
+            next if prepend_level > answer_level
+
+            names.each do |name|
+              @caveats << "#{unit['identifier']} calls `prepend #{name}`, and the index does not publish the " \
+                          "methods of #{name}: if it defines #{@reference.name}, Ruby calls that definition first."
+            end
+          end
+          chain_caveat(answer_level)
+        end
+
+        # A concern answer from the last unit read, when the chain stops short
+        # of a framework root, is in doubt only if the concern may have come
+        # through the unread superclass: then that superclass's own definition
+        # comes first in Ruby. A concern mixed in at a level Woods read sits
+        # before every unread superclass, so it needs no caveat. A chain that
+        # ends at a framework root needs none either: a framework class holds
+        # no application definition.
+        def chain_caveat(answer_level)
+          answered = chosen ? [chosen] : ambiguous
+          return unless @stop && answer_level == @chain.size - 1 && answered.all? { |found| found.origin == :concern }
+
+          unshown = answered.map(&:concern).uniq.reject { |concern| shown?(concern) }
+          return if unshown.empty?
+
+          @caveats << "No unit Woods read (#{@chain.map { |unit| unit['identifier'] }.join(', ')}) includes " \
+                      "#{unshown.join(', ')} in its own body, so #{@unit['identifier']} includes " \
+                      "#{unshown.size == 1 ? 'it' : 'them'} through a superclass Woods did not read " \
+                      "(#{stop_why}); that superclass's own definition of #{@reference.name} could come first."
+        end
+
+        def stop_why
+          @stop == :unrecorded ? "#{@chain.last['identifier']} records no parent class" : @stop_reason
+        end
+
+        # The name a unit's own class or module declaration has in its
+        # published source, which is the name its method table records as
+        # the owner. That is the identifier, except for a class an extractor
+        # publishes as its own lexical range out of an enclosing class's body
+        # (a nested job or PORO): the range opens `class Preview`, so its
+        # definitions are owned by `Preview`, not by `Outer::Preview`.
+        module WrittenName
+          module_function
+
+          # @param source [String, nil] the unit's published source
+          # @param identifier [String] the unit's identifier
+          # @return [String] the identifier when a declaration in the source
+          #   qualifies to it; else the longest top-level declaration that
+          #   names the identifier's trailing constants; else the identifier
+          def call(source, identifier)
+            return identifier unless source.is_a?(String)
+
+            parsed = Woods::ParseCache.parse(source)
+            return identifier if parsed.errors.any?
+
+            top = declarations(parsed.value.statements, nil, [])
+            return identifier if top.any? { |(_, inner)| inner.include?(identifier) }
+
+            suffixes = top.map(&:first).select { |name| identifier.end_with?("::#{name}") }
+            suffixes.max_by(&:length) || identifier
+          end
+
+          # [top-level declaration name, every qualified name declared in it]
+          def declarations(node, owner, found)
+            ConcernClassMethods.statements(node).each do |statement|
+              next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
+
+              inner = MethodTable::Names.qualified(owner, statement.constant_path)
+              next unless inner
+
+              found << [inner, []] if owner.nil?
+              found.last[1] << inner
+              declarations(statement.body, inner, found)
+            end
+            found
+          end
+        end
+
+        # Receiver-less calls written directly in a unit's own class or module
+        # body, outside every `def`, that carry the member's name as a
+        # literal positional argument: definitions the method table cannot
+        # see, read by a Prism walk. A call Woods knows defines the name
+        # (`attr_reader`, `alias_method`, `delegate`, ...) is a definition; any
+        # other call but a name reference (visibility, callbacks, validations,
+        # `helper_method`) may define it.
+        #
+        # An instance member is read from the body itself; a class member
+        # from `define_singleton_method` in the body, from every call in its
+        # `class << self` bodies, and from a call in the body Woods does not
+        # know, which may define either side.
+        module Macros
+          # Calls that define the instance methods they name.
+          DEFINERS = %w[attr attr_reader attr_writer attr_accessor alias_method define_method delegate
+                        def_delegator def_instance_delegator def_delegators def_instance_delegators].freeze
+          # Definers whose method takes the visibility in force where it is
+          # called (or of a `private` the call is the argument of).
+          SCOPED = %w[attr attr_reader attr_writer attr_accessor define_method].freeze
+          # Definers that return the names they define, so a visibility call
+          # they are passed to (`private delegate :x, to: :y`) applies to them.
+          RETURNS_NAMES = [*SCOPED, 'delegate', 'alias_method'].freeze
+          SINGLETON_DEFINER = 'define_singleton_method'
+          VISIBILITY = %w[private protected public].freeze
+          CLASS_VISIBILITY = %w[private_class_method public_class_method].freeze
+          # Rails calls that define instance methods (each name and `name=`) in a
+          # module the model includes when it is created, so its own body and
+          # its concerns come before them: associations and attribute aliases,
+          # and `accepts_nested_attributes_for` (`name_attributes=` only).
+          GENERATED = %w[has_one has_many belongs_to has_and_belongs_to_many alias_attribute
+                         accepts_nested_attributes_for].freeze
+          # `composed_of` defines `name` and `name=` on the class itself.
+          COMPOSED = 'composed_of'
+          # `attribute` defines the same way, but Active Record skips a method
+          # a superclass below it already implements, so every application
+          # definition in the chain comes first.
+          ATTRIBUTE = 'attribute'
+          # `store_accessor` defines its accessors (the names after the store's)
+          # in a module included at its first call, after the model's body.
+          STORE = 'store_accessor'
+          # Where Ruby ranks what a call defines; any other call defines on the
+          # class itself, ranked by line with its `def`s.
+          RANKS = GENERATED.to_h { |macro| [macro, :generated] }
+                           .merge(STORE => :store, ATTRIBUTE => :fallback, COMPOSED => :own).freeze
+          # `enum` options, besides its values: in the hash form each is
+          # written with a leading underscore.
+          ENUM_OPTIONS = %w[prefix suffix scopes default validate instance_methods].freeze
+          # Calls whose methods are public wherever they are written.
+          PUBLIC = [*GENERATED, STORE, ATTRIBUTE, COMPOSED, 'class_attribute', 'scope', 'enum'].freeze
+          # Calls that name a method, a column, an association or a queue
+          # without defining a method of that name.
+          REFERENCES = %w[private protected public module_function private_class_method public_class_method
+                          private_constant public_constant helper_method validate validates serialize
+                          has_secure_token layout helper rescue_from delegate_missing_to attr_readonly normalizes
+                          encrypts default_scope queue_as retry_on discard_on].freeze
+          REFERENCE_PREFIX = /\A(?:(?:before|after|around|skip|prepend|append)_|validates_)/
+
+          module_function
+
+          # @param source [String, nil] the unit's published source
+          # @param written_name [String] the unit's declaration name in it
+          # @param reference [Reference]
+          # @return [Array<Array(Hash, Boolean)>] a method table style entry
+          #   (`defined_by`, `line`, `end_line`, and `visibility` or
+          #   `alias_of` where they are known) for each call, and whether
+          #   Woods knows that call defines the name
+          def sites(source, written_name, reference)
+            return [] unless source.is_a?(String)
+
+            parsed = Woods::ParseCache.parse(source)
+            return [] if parsed.errors.any?
+
+            body, = Mixins.body_of(parsed.value.statements, [], written_name)
+            statements = ConcernClassMethods.statements(body)
+            if reference.separator == '#'
+              return marked(scan(statements, reference, :instance), marks(statements, reference.name, VISIBILITY),
+                            written_name)
+            end
+
+            found = scan(statements, reference, :class_body)
+            later = marks(statements, reference.name, CLASS_VISIBILITY)
+            statements.each do |node|
+              next unless node.is_a?(Prism::SingletonClassNode) && node.expression.is_a?(Prism::SelfNode)
+
+              inner = ConcernClassMethods.statements(node.body)
+              found.concat(scan(inner, reference, :singleton_body))
+              later.concat(marks(inner, reference.name, VISIBILITY))
+            end
+            marked(found, later, written_name)
+          end
+
+          # A visibility call naming the method after its definition sets
+          # its visibility (`private :name`, `private_class_method :name`).
+          def marked(found, marks, written_name)
+            found.map do |entry, known, rank|
+              mark = marks.select { |line, _| line > entry['line'] }.max_by(&:first)
+              entry = entry.merge('visibility' => mark.last) if known && mark
+              [entry.merge('owner' => written_name), known, rank]
+            end
+          end
+
+          # [line, visibility] of each call among +statements+ named in
+          # +calls+ that names +name+ as a literal argument.
+          def marks(statements, name, calls)
+            statements.filter_map do |node|
+              next unless node.is_a?(Prism::CallNode) && node.receiver.nil? && calls.include?(node.name.to_s)
+              next unless names(positional(node)).include?(name)
+
+              [node.location.start_line, node.name.to_s.delete_suffix('_class_method')]
+            end
+          end
+
+          # The calls among one body's statements, with the default
+          # visibility each is written under.
+          def scan(statements, reference, side)
+            visibility = 'public'
+            statements.flat_map do |node|
+              if node.is_a?(Prism::CallNode) && node.receiver.nil? && VISIBILITY.include?(node.name.to_s)
+                arguments = node.arguments&.arguments.to_a
+                visibility = node.name.to_s if arguments.empty?
+                next arguments.flat_map { |argument| site(argument, reference, side, visibility, node.name.to_s) }
+              end
+              site(node, reference, side, visibility)
+            end
+          end
+
+          # +wrapped+ names the visibility call the node is the argument of.
+          def site(node, reference, side, visibility, wrapped = nil)
+            if node.is_a?(Prism::AliasMethodNode)
+              return [] unless side != :class_body && literals(node.new_name) == [reference.name]
+
+              return [[entry(node, 'alias', reference, alias_of: literals(node.old_name).first), true, :own]]
+            end
+            return [] unless node.is_a?(Prism::CallNode) && node.receiver.nil?
+
+            macro = node.name.to_s
+            verdict = defines(macro, node, reference.name, side)
+            return [] unless verdict
+
+            visibility = if verdict != :known then nil
+                         elsif wrapped && RETURNS_NAMES.include?(macro) then wrapped
+                         else known_visibility(macro, node, wrapped || visibility)
+                         end
+            alias_of = literals(positional(node)[1]).first if macro == 'alias_method'
+            [[entry(node, macro, reference, visibility: visibility, alias_of: alias_of), verdict == :known,
+              rank(macro, side)]]
+          end
+
+          # The visibility Ruby gives the method a known call defines, where it
+          # is fixed: the one in force for `attr*` and `define_method`;
+          # public for `delegate` unless `private: true`, and for the Rails
+          # calls in {PUBLIC}. Nil otherwise.
+          def known_visibility(macro, node, in_force)
+            return in_force if SCOPED.include?(macro)
+            return 'public' if PUBLIC.include?(macro)
+            return nil unless macro == 'delegate'
+
+            case keywords(node)['private']
+            when nil, Prism::FalseNode then 'public'
+            when Prism::TrueNode then 'private'
+            end
+          end
+
+          # :known when the call defines +name+ on this side, :possible
+          # when Woods does not know the call, nil otherwise.
+          def defines(macro, node, name, side)
+            arguments = positional(node)
+            return rails_instance(macro, node, arguments, name, side) if RANKS.key?(macro)
+            return class_attribute(keywords(node), names(arguments), name, side) if macro == 'class_attribute'
+            return enum(node, arguments, name, side) if macro == 'enum'
+            return side == :class_body && literals(arguments.first) == [name] ? :known : nil if macro == 'scope'
+
+            if DEFINERS.include?(macro)
+              return nil if side == :class_body
+
+              return defined_names(macro, node, arguments).include?(name) ? :known : delegate_unknown(macro, node, name)
+            end
+            if macro == SINGLETON_DEFINER
+              return side == :class_body && literals(arguments.first) == [name] ? :known : nil
+            end
+            return nil if REFERENCES.include?(macro) || macro.match?(REFERENCE_PREFIX)
+
+            :possible if arguments.flat_map { |argument| literals(argument) }.include?(name)
+          end
+
+          # An enum's value methods on the instance side are in a module the
+          # model includes at its first `enum` call; its scopes are defined on
+          # the class itself.
+          def rank(macro, side)
+            macro == 'enum' && side == :instance ? :store : RANKS.fetch(macro, :own)
+          end
+
+          # `enum` defines, for each literal value, the scopes `value` and
+          # `not_value` on the class side and `value?` and `value!` on the
+          # instance side, renamed by `prefix:` and `suffix:` and left out by
+          # `scopes: false` and `instance_methods: false`; an option that is
+          # not a literal leaves them possible. The enum's own name is its
+          # attribute's, which the call does not define. Positional
+          # (`enum :status, [...]`) and hash (`enum status: [...]`) forms.
+          def enum(node, arguments, name, side)
+            return nil if side == :singleton_body
+
+            verdicts = enum_definitions(node, arguments).map do |enum_name, values, options|
+              enum_verdict(enum_name, values, options, name, side)
+            end
+            (%i[known possible] & verdicts).first
+          end
+
+          # [enum name, its literal values or nil, its options] for each enum
+          # the call declares.
+          def enum_definitions(node, arguments)
+            options = keywords(node)
+            enum_name = literals(arguments.first).first
+            if enum_name
+              values = arguments[1] ? enum_values(arguments[1]) : options.keys - ENUM_OPTIONS
+              return [[enum_name, values, options.slice(*ENUM_OPTIONS)]]
+            end
+            settings = options.select { |key, _| key.start_with?('_') }.transform_keys { |key| key.delete_prefix('_') }
+            options.reject { |key, _| key.start_with?('_') }.map { |key, value| [key, enum_values(value), settings] }
+          end
+
+          def enum_values(node)
+            case node
+            when Prism::ArrayNode then names([node])
+            when Prism::HashNode, Prism::KeywordHashNode
+              node.elements.filter_map { |element| element.is_a?(Prism::AssocNode) && literals(element.key).first }
+            end
+          end
+
+          def enum_verdict(enum_name, values, options, name, side)
+            switch = flag(options[side == :instance ? 'instance_methods' : 'scopes'], true)
+            return nil if values.nil? || switch == false
+
+            prefix = affix(options['prefix'], enum_name) { |value| "#{value}_" }
+            suffix = affix(options['suffix'], enum_name) { |value| "_#{value}" }
+            targets = if side == :instance
+                        [name[/\A(.+)[?!]\z/, 1]].compact
+                      else
+                        [name, (name.delete_prefix('not_') if name.start_with?('not_'))].compact
+                      end
+            hit = values.product(targets).any? { |value, target| affixed?(target, value, prefix, suffix) }
+            return nil unless hit
+
+            [prefix, suffix, switch].include?(:unknown) ? :possible : :known
+          end
+
+          # An association, attribute or store accessor defines the instance
+          # side only, a method and its writer: an association, `attribute`
+          # and `alias_attribute` for their first argument only (the rest is a
+          # scope, a type or the aliased attribute).
+          def rails_instance(macro, node, arguments, name, side)
+            return nil unless side == :instance
+            return store_accessor(keywords(node), arguments, name) if macro == STORE
+            if macro == 'accepts_nested_attributes_for'
+              return names(arguments).map { |each| "#{each}_attributes=" }.include?(name) ? :known : nil
+            end
+
+            accessors(literals(arguments.first)).include?(name) ? :known : nil
+          end
+
+          # `store_accessor :store, :key, prefix:, suffix:` defines
+          # `<prefix>key<suffix>` for each key after the store, as Active Record
+          # names it; a prefix or suffix that is not a literal makes every name
+          # it could give possible ({#affixed?}).
+          def store_accessor(options, arguments, name)
+            store = literals(arguments.first).first
+            prefix = affix(options['prefix'], store) { |value| "#{value}_" }
+            suffix = affix(options['suffix'], store) { |value| "_#{value}" }
+            target = name.delete_suffix('=')
+            return nil unless names(arguments.drop(1)).any? { |key| affixed?(target, key, prefix, suffix) }
+
+            [prefix, suffix].include?(:unknown) ? :possible : :known
+          end
+
+          # Whether +name+ is +base+ under +prefix+ and +suffix+. An :unknown
+          # prefix matches none or any one ending in `_` (the name equals the
+          # base or ends with `_base`); an :unknown suffix likewise at the end.
+          # Plain string comparison: +name+ is the caller's, so no pattern is
+          # built from it or run over it.
+          #
+          # A literal affix fixes where the base can be, so it is checked once.
+          # With both affixes unknown every occurrence of the base is a
+          # candidate; {#occurrence?} finds them in one pass over the name.
+          def affixed?(name, base, prefix, suffix)
+            return false if base.empty?
+            return false unless prefix == :unknown || name.start_with?(prefix)
+            return false unless suffix == :unknown || name.end_with?(suffix)
+            return base_at?(name, base, prefix.length, prefix, suffix) unless prefix == :unknown
+            return base_at?(name, base, name.length - suffix.length - base.length, prefix, suffix) unless
+              suffix == :unknown
+
+            occurrence?(name.codepoints, base.codepoints) do |at, finish, text|
+              (at.zero? || (at > 1 && text[at - 1] == JOINT)) &&
+                (finish == text.length || (text.length - finish > 1 && text[finish] == JOINT))
+            end
+          end
+
+          JOINT = '_'.ord
+
+          # Whether the block accepts any occurrence of +pattern+ in +text+
+          # (both codepoint arrays). Knuth-Morris-Pratt: each character of the
+          # name is read once however the base overlaps itself, and nothing is
+          # copied per occurrence. +name+ is the caller's, of any length.
+          #
+          # @yieldparam at [Integer] index of the occurrence's first character
+          # @yieldparam finish [Integer] index after its last character
+          # @yieldparam text [Array<Integer>]
+          def occurrence?(text, pattern)
+            fallback = fallbacks(pattern)
+            matched = 0
+            text.each_with_index do |char, index|
+              matched = fallback[matched - 1] while matched.positive? && char != pattern[matched]
+              matched += 1 if char == pattern[matched]
+              next unless matched == pattern.length
+              return true if yield(index - matched + 1, index + 1, text)
+
+              matched = fallback[matched - 1]
+            end
+            false
+          end
+
+          # For each prefix of +pattern+, the length of its longest proper
+          # prefix that is also its suffix: where the match resumes after a
+          # mismatch.
+          def fallbacks(pattern)
+            table = Array.new(pattern.length, 0)
+            matched = 0
+            (1...pattern.length).each do |index|
+              matched = table[matched - 1] while matched.positive? && pattern[index] != pattern[matched]
+              matched += 1 if pattern[index] == pattern[matched]
+              table[index] = matched
+            end
+            table
+          end
+
+          # Whether +base+ stands at the one place +at+ a literal affix leaves it.
+          def base_at?(name, base, at, prefix, suffix)
+            return false if at.negative? || name[at, base.length] != base
+
+            head_fits?(name, at, prefix) && tail_fits?(name, at + base.length, suffix)
+          end
+
+          # A literal prefix ends exactly at +at+; an :unknown one is nothing,
+          # or one or more characters then `_`.
+          def head_fits?(name, at, prefix)
+            return at == prefix.length unless prefix == :unknown
+
+            at.zero? || (at > 1 && name[at - 1] == '_')
+          end
+
+          # A literal suffix starts exactly at +finish+; an :unknown one is
+          # nothing, or `_` then one or more characters.
+          def tail_fits?(name, finish, suffix)
+            rest = name.length - finish
+            return rest == suffix.length unless suffix == :unknown
+
+            rest.zero? || (rest > 1 && name[finish] == '_')
+          end
+
+          # '' for no affix; the store's name for `true`; the literal's;
+          # :unknown for any other value.
+          def affix(node, store)
+            case node
+            when nil, Prism::FalseNode, Prism::NilNode then ''
+            when Prism::TrueNode then store ? yield(store) : :unknown
+            else
+              value = literals(node).first
+              value ? yield(value) : :unknown
+            end
+          end
+
+          def accessors(named)
+            named.flat_map { |each| [each, "#{each}="] }
+          end
+
+          # `class_attribute :x` defines `x`, `x=` and `x?` on the class side,
+          # and on the instance side as its `instance_*` options allow (an
+          # option that is not a literal leaves it possible).
+          def class_attribute(options, named, name, side)
+            base = name.sub(/[=?]\z/, '')
+            return nil if side == :singleton_body || !named.include?(base)
+
+            accessor = flag(options['instance_accessor'], true)
+            reader = side == :class_body || flag(options['instance_reader'], accessor)
+            writer = side == :class_body || flag(options['instance_writer'], accessor)
+            predicate = both(reader, flag(options['instance_predicate'], true))
+            { true => :known, unknown: :possible }[{ '=' => writer, '?' => predicate }.fetch(name[-1], reader)]
+          end
+
+          def flag(node, default)
+            case node
+            when nil then default
+            when Prism::TrueNode then true
+            when Prism::FalseNode then false
+            else :unknown
+            end
+          end
+
+          def both(first, second)
+            return false if first == false || second == false
+
+            first == true && second == true ? true : :unknown
+          end
+
+          def defined_names(macro, node, arguments)
+            case macro
+            when 'attr_writer' then names(arguments).map { |name| "#{name}=" }
+            when 'attr_accessor' then names(arguments).flat_map { |name| [name, "#{name}="] }
+            when 'alias_method', 'define_method' then literals(arguments.first)
+            when 'delegate' then delegated(node, arguments)
+            when 'def_delegator', 'def_instance_delegator' then literals(arguments[2] || arguments[1])
+            when 'def_delegators', 'def_instance_delegators' then names(arguments.drop(1))
+            else names(arguments)
+            end
+          end
+
+          # `delegate :x, to: :y` defines x; with `prefix: true` it defines
+          # y_x, and with `prefix: :p` p_x.
+          def delegated(node, arguments)
+            prefix = delegate_prefix(node)
+            return [] if prefix == :unknown
+
+            names(arguments).map { |name| prefix ? "#{prefix}_#{name}" : name }
+          end
+
+          # A `delegate` whose prefix is not a literal (a constant, or `true`
+          # with a `to:` that is not one) may define each name as itself or
+          # under any prefix ({#affixed?}).
+          def delegate_unknown(macro, node, name)
+            return nil unless macro == 'delegate' && delegate_prefix(node) == :unknown
+
+            names(positional(node)).any? { |key| affixed?(name, key, :unknown, '') } ? :possible : nil
+          end
+
+          # @return [String, nil, :unknown] the prefix a `delegate` call adds
+          def delegate_prefix(node)
+            options = keywords(node)
+            prefix = options['prefix']
+            case prefix
+            when nil, Prism::FalseNode, Prism::NilNode then nil
+            when Prism::TrueNode
+              target = literals(options['to']).first
+              target ? target.delete_prefix('@') : :unknown
+            else literals(prefix).first || :unknown
+            end
+          end
+
+          def keywords(node)
+            hash = node.arguments&.arguments.to_a.find { |argument| argument.is_a?(Prism::KeywordHashNode) }
+            (hash ? hash.elements : []).each_with_object({}) do |element, found|
+              next unless element.is_a?(Prism::AssocNode)
+
+              key = literals(element.key).first
+              found[key] = element.value if key
+            end
+          end
+
+          def positional(node)
+            node.arguments&.arguments.to_a.reject do |argument|
+              argument.is_a?(Prism::KeywordHashNode) || argument.is_a?(Prism::BlockArgumentNode)
+            end
+          end
+
+          def names(arguments)
+            arguments.flat_map { |argument| literals(argument) }
+          end
+
+          def literals(node)
+            MethodTable::Names.symbol_names(node)
+          end
+
+          def entry(node, macro, reference, visibility: nil, alias_of: nil)
+            found = { 'name' => reference.name, 'kind' => reference.separator == '#' ? 'instance' : 'singleton',
+                      'line' => node.location.start_line, 'end_line' => node.location.end_line,
+                      'defined_by' => macro }
+            found['visibility'] = visibility if visibility
+            found['alias_of'] = alias_of if alias_of
+            found
+          end
+        end
+
+        # `include` and `prepend` calls written directly in a class or module
+        # body, read by a Prism walk, and the lexical resolution of the
+        # constants they name.
+        module Mixins
+          module_function
+
+          # @param source [String, nil] published source, or a concern's
+          #   decoded block
+          # @param identifier [String] the class or module whose body is read
+          # @param kinds [Array<Symbol>] the call names to read
+          # @return [Array<Array(String, Array<String>)>] each mixed-in
+          #   constant as written, with the lexical scopes it is written in
+          #   (innermost first), nearest first in Ruby's order: the last call
+          #   first, and the arguments of one call in their written order
+          def calls(source, identifier, *kinds)
+            return [] unless source.is_a?(String)
+
+            parsed = Woods::ParseCache.parse(source)
+            return [] if parsed.errors.any?
+
+            body, scopes = body_of(parsed.value.statements, [], identifier)
+            found = ConcernClassMethods.statements(body).select { |node| mixin_call?(node, kinds) }
+            found.reverse.flat_map do |call|
+              call.arguments.arguments.filter_map do |argument|
+                name = MethodTable::Names.constant_name(argument)
+                [name, scopes] if name
+              end
+            end
+          end
+
+          # The concern a written constant names, the way Ruby resolves it:
+          # each enclosing lexical scope, innermost first, then the top level.
+          # A name that resolves to no known concern, or that the scopes leave
+          # open, is not resolved.
+          #
+          # @param name [String] the constant as written (`Foo`, `A::Foo`, `::Foo`)
+          # @param scopes [Array<String>] qualified lexical scopes, innermost first
+          # @param known [Array<String>] full names of the inlined concerns
+          # @return [String, nil]
+          def resolve(name, scopes, known)
+            return (known.include?(name.delete_prefix('::')) ? name.delete_prefix('::') : nil) if name.start_with?('::')
+
+            (scopes.map { |scope| "#{scope}::#{name}" } + [name]).find { |candidate| known.include?(candidate) }
+          end
+
+          def mixin_call?(node, kinds)
+            node.is_a?(Prism::CallNode) && kinds.include?(node.name) && node.arguments &&
+              (node.receiver.nil? || node.receiver.is_a?(Prism::SelfNode))
+          end
+
+          # The body of the class or module named +identifier+, and the
+          # qualified names of the lexical scopes around and including it.
+          def body_of(node, scopes, identifier)
+            ConcernClassMethods.statements(node).each do |statement|
+              next unless statement.is_a?(Prism::ModuleNode) || statement.is_a?(Prism::ClassNode)
+
+              inner = MethodTable::Names.qualified(scopes.first, statement.constant_path)
+              next unless inner
+              return [statement.body, [inner, *scopes]] if inner == identifier
+
+              found = body_of(statement.body, [inner, *scopes], identifier)
+              return found if found.first
+            end
+            [nil, scopes]
+          end
+        end
+      end
+    end
+  end
+end

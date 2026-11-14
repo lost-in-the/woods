@@ -70,6 +70,8 @@ RSpec.describe 'MCP lookup of a unit member' do
 
           private def hidden; end
         end
+
+        def self.registry; end
       end
     RUBY
   end
@@ -122,6 +124,10 @@ RSpec.describe 'MCP lookup of a unit member' do
         def create
           @post = Post.create!(params[:post])
         end
+
+        def destroy
+          head :no_content
+        end
       end
     RUBY
   end
@@ -154,6 +160,30 @@ RSpec.describe 'MCP lookup of a unit member' do
     end
   end
 
+  let(:application_source) do
+    <<~RUBY
+      class ApplicationController
+        def current_author
+          @author
+        end
+
+        def destroy
+          head :gone
+        end
+        track_action :audit_trail
+      end
+    RUBY
+  end
+
+  # A controller's inlined concerns are sorted by name, so the index does not
+  # record which of two concerns defining one name Ruby calls.
+  let(:reports_source) do
+    exportable = "module Exportable\n  def render_pdf\n    :exportable\n  end\nend\n"
+    printable = "module Printable\n  def render_pdf\n    :printable\n  end\nend\n"
+    "class ReportsController < ApplicationController\n\n#{concern_block('Exportable', exportable)}\n" \
+      "#{concern_block('Printable', printable)}end\n"
+  end
+
   let(:util_source) do
     <<~RUBY
       module Canopy
@@ -166,14 +196,22 @@ RSpec.describe 'MCP lookup of a unit member' do
     RUBY
   end
 
-  # [directory, type, identifier, file_path, source, metadata]
+  # [directory, type, identifier, file_path, source, metadata, dependencies (optional)]
   let(:units) do
     [
       ['models', 'model', 'Post', 'app/models/post.rb', post_source,
        { 'methods' => published_methods(post_source, identity_lines: 17) }],
       ['concerns', 'concern', 'Publishable', 'app/models/concerns/publishable.rb', 'module Publishable; end', {}],
+      ['concerns', 'concern', 'Formatting', 'app/models/concerns/formatting.rb', formatting_code,
+       { 'methods' => published_methods(formatting_code, identity_lines: 14) }],
       ['controllers', 'controller', 'PostsController', 'app/controllers/posts_controller.rb', controller_source,
-       { 'methods' => published_methods(controller_source, shift: 10) }],
+       { 'methods' => published_methods(controller_source, shift: 10), 'parent_class' => 'ApplicationController' }],
+      ['controllers', 'controller', 'ApplicationController', 'app/controllers/application_controller.rb',
+       application_source, { 'methods' => published_methods(application_source, identity_lines: 9),
+                             'parent_class' => 'ActionController::Base' }],
+      ['controllers', 'controller', 'ReportsController', 'app/controllers/reports_controller.rb', reports_source,
+       { 'methods' => published_methods(reports_source, identity_lines: 2),
+         'parent_class' => 'ApplicationController' }],
       # An index that predates the published method table.
       ['controllers', 'controller', 'Admin::PostsController', 'app/controllers/admin/posts_controller.rb',
        admin_source, {}],
@@ -189,9 +227,10 @@ RSpec.describe 'MCP lookup of a unit member' do
     units.group_by(&:first).each do |directory, rows|
       path = File.join(index_dir, directory)
       FileUtils.mkdir_p(path)
-      entries = rows.map do |(_, type, identifier, file_path, source, metadata)|
+      entries = rows.map do |(_, type, identifier, file_path, source, metadata, dependencies)|
         unit = { 'type' => type, 'identifier' => identifier, 'file_path' => file_path,
                  'source_code' => source, 'metadata' => metadata }
+        unit['dependencies'] = dependencies if dependencies
         File.write(File.join(path, collision_safe_filename(identifier)), JSON.generate(unit))
         { 'identifier' => identifier, 'type' => type, 'file_path' => file_path }
       end
@@ -233,8 +272,8 @@ RSpec.describe 'MCP lookup of a unit member' do
       expect(data['member']).to include('name' => 'create', 'kind' => 'instance', 'visibility' => 'public',
                                         'line' => 6, 'end_line' => 8, 'file_line' => 16, 'file_end_line' => 18)
       expect(data['statement']).to eq('PostsController#create is a public instance method of controller unit ' \
-                                      'PostsController, not a unit of its own. ' \
-                                      'Look up PostsController for the whole unit.')
+                                      'PostsController, defined in its own body. It is not a unit of its own; ' \
+                                      'look up PostsController for the whole unit.')
     end
 
     it 'answers a class method named with a dot' do
@@ -324,7 +363,7 @@ RSpec.describe 'MCP lookup of a unit member' do
         answer = member('PostsController#create', format: format)
 
         expect(answer).to include('PostsController#create is a public instance method of controller unit ' \
-                                  'PostsController, not a unit of its own.')
+                                  'PostsController, defined in its own body.')
         expect(answer).to include('app/controllers/posts_controller.rb').and include('16-18')
         expect(answer).to include('@post = Post.create!(params[:post])')
         expect(answer).not_to include('@posts = Post.all')
@@ -374,6 +413,132 @@ RSpec.describe 'MCP lookup of a unit member' do
     end
   end
 
+  describe 'the superclass chain' do
+    it 'answers a method the owner inherits from a published superclass' do
+      data = member('PostsController#current_author')
+
+      expect(data['member_of']).to include('identifier' => 'PostsController')
+      expect(data['inherited_from']).to eq('identifier' => 'ApplicationController', 'type' => 'controller',
+                                           'file_path' => 'app/controllers/application_controller.rb')
+      expect(data['member']).to include('unit' => 'ApplicationController', 'file_line' => 2, 'file_end_line' => 4)
+      expect(data['statement']).to start_with('PostsController#current_author is a public instance method that ' \
+                                              'controller unit PostsController inherits from controller unit ' \
+                                              'ApplicationController, defined in its own body.')
+      expect(data['source_code']).to eq("  def current_author\n    @author\n  end\n")
+    end
+
+    it "lists a superclass definition the owner's own body overrides" do
+      data = member('PostsController#destroy')
+
+      expect(data['member']).to include('line' => 10, 'end_line' => 12)
+      expect(data['other_definitions']).to eq([data['other_definitions'].first.merge('unit' => 'ApplicationController',
+                                                                                     'line' => 6, 'end_line' => 8)])
+      expect(data['statement']).to include('defined in its own body. It overrides 1 other definition of destroy.')
+      expect(member('PostsController#destroy', format: :markdown))
+        .to include('Also defined in the published source of ApplicationController, lines 6-8; ' \
+                    'the definition above overrides it.')
+    end
+
+    %i[markdown plain claude].each do |format|
+      it "names the ancestor's file and published source in the #{format} format" do
+        answer = member('PostsController#current_author', format: format)
+
+        expect(answer).to include('File: app/controllers/application_controller.rb (ApplicationController, ' \
+                                  'inherited by PostsController), lines 2-4')
+        expect(answer).to include('Published source of ApplicationController: lines 2-4')
+      end
+    end
+
+    it 'says the chain was not fully read when a concern answers and the owner records no parent' do
+      data = member('Post#archive')
+
+      expect(data['caveats']).to eq(['No unit Woods read (Post) includes Publishable in its own body, so Post ' \
+                                     'includes it through a superclass Woods did not read (Post records no ' \
+                                     "parent class); that superclass's own definition of archive could come " \
+                                     'first.'])
+      expect(member('Post#archive', format: :plain)).to include('Caveat: No unit Woods read (Post)')
+    end
+  end
+
+  describe 'concerns whose include order is not published' do
+    it 'lists each candidate and says Woods cannot tell which one Ruby calls' do
+      data = member('ReportsController#render_pdf')
+
+      expect(data).not_to have_key('member')
+      expect(data['statement']).to start_with('ReportsController#render_pdf: 2 concerns inlined into controller ' \
+                                              'unit ReportsController define the instance method render_pdf ' \
+                                              '(Exportable, Printable), and the index does not record the order')
+      expect(data['statement']).to include('so Woods cannot tell which one Ruby calls')
+      expect(data['candidates'].map { |candidate| candidate['defined_in']['identifier'] })
+        .to eq(%w[Exportable Printable])
+      expect(data['candidates'].map { |candidate| candidate['source_code'] })
+        .to eq(["  def render_pdf\n    :exportable\n  end\n", "  def render_pdf\n    :printable\n  end\n"])
+    end
+
+    it 'leaves every candidate source out with include_source: false' do
+      data = member('ReportsController#render_pdf', include_source: false)
+
+      expect(data['candidates']).to all(satisfy { |candidate| !candidate.key?('source_code') })
+    end
+
+    %i[markdown plain claude].each do |format|
+      it "renders each candidate in the #{format} format" do
+        answer = member('ReportsController#render_pdf', format: format)
+
+        expect(answer).to include('Candidate 1: Exportable').and include('Candidate 2: Printable')
+        expect(answer).to include(':exportable').and include(':printable')
+        expect(answer).to include('cannot tell which one Ruby calls')
+      end
+    end
+  end
+
+  describe 'the member-answer contract' do
+    it 'keeps member_of, member, source_code and _meta.member_of on an answer with caveats' do
+      response = call(build(:json), identifier: 'Post#archive')
+      data = JSON.parse(text(response))
+
+      expect(data['caveats']).not_to be_empty
+      expect(data.keys).to include('member_of', 'member', 'source_code', 'statement')
+      expect(response.meta).to include(member_of: { identifier: 'Post', type: 'model' })
+    end
+
+    # No single definition can be named, so the answer has no top-level
+    # `member` or `source_code`: naming one would be the guess the rule
+    # forbids. Each candidate carries both instead.
+    it 'keeps member_of and _meta.member_of on a candidates answer, with member and source_code per candidate' do
+      response = call(build(:json), identifier: 'ReportsController#render_pdf')
+      data = JSON.parse(text(response))
+
+      expect(data.keys).to include('member_of', 'statement', 'candidates')
+      expect(data.keys).not_to include('member', 'source_code')
+      expect(data['candidates']).to all(include('member', 'source_code', 'defined_in'))
+      expect(response.meta).to include(member_of: { identifier: 'ReportsController', type: 'controller' })
+    end
+  end
+
+  describe "a concern's own class methods" do
+    # `class_methods do` extends the classes that include the concern; the
+    # concern module itself does not respond to those methods.
+    it 'does not answer a class_methods definition as a class method of the concern' do
+      response = call(build, identifier: 'Formatting.format')
+
+      expect(response.error?).to be(true)
+      expect(text(response)).to include('Formatting (concern) is a published unit, but format (class method) was ' \
+                                        'not found in its published source. format is defined in its ' \
+                                        '`class_methods do` block: a class method Formatting gives to the ' \
+                                        'classes that include it, not a method of Formatting itself.')
+      expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Formatting', type: 'concern' })
+    end
+
+    it 'does not answer a private class_methods definition either' do
+      expect(call(build, identifier: 'Formatting.hidden').error?).to be(true)
+    end
+
+    it "keeps answering the concern's own def self.x" do
+      expect(member('Formatting.registry')['member']).to include('name' => 'registry', 'kind' => 'singleton')
+    end
+  end
+
   describe 'an owner without the member' do
     it 'says the owner exists and the member is not in its published source' do
       response = call(build, identifier: 'Post#destroy_all')
@@ -384,6 +549,57 @@ RSpec.describe 'MCP lookup of a unit member' do
                                    'Did you mean: Post (model)?')
       expect(response.meta).to include(error_code: :not_found, member_of: { identifier: 'Post', type: 'model' },
                                        suggestions: [{ identifier: 'Post', type: 'model' }])
+    end
+  end
+
+  # An `:inheritance` edge that names its parent's type is read only as a
+  # unit of that type: a unit of another type published under the same
+  # identifier is not the parent's definition.
+  describe 'a parent read by the type its inheritance edge names' do
+    let(:base_source) { "class Billing::Base\n  def total\n    :base\n  end\nend\n" }
+
+    def child(identifier, edge)
+      ['services', 'service', identifier, "app/services/#{identifier.underscore}.rb",
+       "class #{identifier} < Billing::Base\nend\n", { 'methods' => [] }, [edge]]
+    end
+
+    let(:units) do
+      super() + [
+        ['poros', 'poro', 'Billing::Base', 'app/models/billing/base.rb', base_source,
+         { 'methods' => published_methods(base_source, identity_lines: 5) }],
+        child('Billing::Invoice', { 'type' => 'service', 'target' => 'Billing::Base', 'via' => 'inheritance' }),
+        child('Billing::Credit', { 'target' => 'Billing::Base', 'via' => 'inheritance' }),
+        child('Billing::Refund', { 'type' => 'poro', 'target' => 'Billing::Base', 'via' => 'inheritance' })
+      ]
+    end
+
+    it 'does not answer from a unit of another type, and says the chain stops at that parent' do
+      response = call(build, identifier: 'Billing::Invoice#total')
+
+      expect(response.meta).to include(error_code: :not_found)
+      expect(text(response)).to include('Woods read its superclass chain only up to Billing::Invoice: its parent ' \
+                                        'Billing::Base is not a published service unit; the unit published as ' \
+                                        'Billing::Base is a poro unit.')
+    end
+
+    it 'reads the parent of an edge without a type as whatever unit is published under that identifier' do
+      expect(member('Billing::Credit#total')['inherited_from']).to include('identifier' => 'Billing::Base',
+                                                                           'type' => 'poro')
+    end
+
+    it 'reads the parent of a typed edge whose unit is published with that type' do
+      expect(member('Billing::Refund#total')['inherited_from']).to include('identifier' => 'Billing::Base',
+                                                                           'type' => 'poro')
+    end
+  end
+
+  describe 'an owner whose chain names the member only in a macro Woods does not know' do
+    it 'answers not found and names the macro' do
+      response = call(build, identifier: 'PostsController#audit_trail')
+
+      expect(response.meta).to include(error_code: :not_found)
+      expect(text(response)).to include('`track_action` at line 9 of the published source of ApplicationController ' \
+                                        'names it and may define it.')
     end
   end
 

@@ -15,8 +15,15 @@ module Woods
         def render_lookup_member(data, **)
           owner = data['member_of'] || {}
           lines = ["#{data['identifier']} (member of #{owner['type']} #{owner['identifier']})", DIVIDER,
-                   data['statement'], '', *member_location_lines(data)]
+                   data['statement']]
+          location = member_location_lines(data)
+          lines.push('', *location) unless location.empty?
           lines.push('', data['source_code'].chomp) if data['source_code']
+          Array(data['candidates']).each_with_index do |candidate, index|
+            lines.push('', "Candidate #{index + 1}: #{candidate_label(candidate, data)}",
+                       *definition_location_lines(candidate, data))
+            lines.push('', candidate['source_code'].chomp) if candidate['source_code']
+          end
           lines.join("\n")
         end
 
@@ -302,10 +309,20 @@ module Woods
         # One entry of a list in a lookup (a metadata list, dependencies,
         # dependents): a Hash as its informative `key: value` pairs, anything
         # else as text.
+        #
+        # An entry carrying file coordinates leads with its file lines (or
+        # that they are not mapped) and its published-source lines, as the
+        # Markdown renderer does.
         def list_item(item)
           return inline_value(item) unless item.is_a?(Hash)
 
-          item.reject { |_, v| uninformative?(v) }.map { |k, v| "#{k}: #{entry_value(v)}" }.join(', ')
+          entry = item.transform_keys(&:to_s)
+          shown = entry.reject { |_, v| uninformative?(v) }
+          return shown.map { |k, v| "#{k}: #{entry_value(v)}" }.join(', ') unless entry.key?('file_line')
+
+          pairs = shown.except(*COORDINATE_KEYS).map { |k, v| "#{k}: #{entry_value(v)}" }
+          pairs.unshift(published_lines(entry)) if entry['line']
+          pairs.unshift(file_lines(entry)).join(', ')
         end
 
         def entry_value(value)
