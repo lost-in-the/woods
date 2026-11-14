@@ -157,6 +157,52 @@ RSpec.describe 'Managed watch daemon lifecycle' do
     end
   end
 
+  describe 'same-host takeover of a dead owner with a lease record (#1078)' do
+    let(:claim) { File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME) }
+    let(:lease) { "#{claim}.lease" }
+    let(:dead_pid) do
+      pid = Process.spawn(RbConfig.ruby, '-e', 'exit 0')
+      Process.wait(pid)
+      pid
+    end
+
+    def write_claim(**lease_fields)
+      File.write(claim, JSON.generate(pid: dead_pid, host: Woods::Watch::Status.host_identity, token: 'c' * 64,
+                                      **lease_fields))
+    end
+
+    it 'reclaims a v1 claim whose recorded device and inode differ from this view' do
+      File.write(lease, '')
+      write_claim(lease_version: 1, lease_device: 7, lease_inode: 9)
+
+      start_daemon
+      watcher.ready!
+      expect(next_event.first).to eq(:backend_ready)
+      expect(JSON.parse(File.read(claim))).to include('pid' => Process.pid, 'lease_version' => 2)
+    end
+
+    it 'reclaims a v2 claim whose lease id matches' do
+      File.write(lease, "#{'e' * 32}\n")
+      write_claim(lease_version: 2, lease_id: 'e' * 32)
+
+      start_daemon
+      watcher.ready!
+      expect(next_event.first).to eq(:backend_ready)
+      expect(JSON.parse(File.read(claim))).to include('pid' => Process.pid, 'lease_id' => 'e' * 32)
+    end
+
+    { 'another id' => "#{'f' * 32}\n", 'no id' => '' }.each do |recreated, body|
+      it "refuses a v2 claim whose lease was recreated with #{recreated}" do
+        File.write(lease, body)
+        write_claim(lease_version: 2, lease_id: 'e' * 32)
+        bytes = File.binread(claim)
+
+        expect(daemon.run).to eq(:already_running)
+        expect(File.binread(claim)).to eq(bytes)
+      end
+    end
+  end
+
   it 'reclaims a verified dead same-host owner without weakening the foreign guard' do
     pid = Process.spawn(RbConfig.ruby, '-e', 'exit 0')
     Process.wait(pid)

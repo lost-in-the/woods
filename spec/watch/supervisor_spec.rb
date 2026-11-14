@@ -93,6 +93,48 @@ RSpec.describe Woods::Watch::Supervisor do
     expect(@supervisor.attempts).to eq(1)
   end
 
+  describe 'parking behind a claim (#1078)' do
+    let(:token) { 'c' * 64 }
+
+    def park_behind(host)
+      claim = JSON.generate(pid: 57, host: host, lease_version: 2, token: token, lease_id: 'e' * 32)
+      launch(<<~RUBY)
+        #{handshake}
+        Dir.mkdir('index') unless Dir.exist?('index')
+        File.write(File.join('index', 'watch_claim.json'), #{claim.inspect})
+        child.call(:terminal, reason: 'already_running')
+        exit 0
+      RUBY
+      # The advice follows the parked record, so its line means both are written.
+      eventually { @log.string.include?('--recover-claim') }
+      File.join(File.realpath(@root), 'index')
+    end
+
+    def supervision_record
+      JSON.parse(File.read(Dir[File.join(@root, 'index/watch_supervisors/*.json')].first))
+    end
+
+    it 'names the owner host and the exact recovery command for a claim from another host' do
+      index = park_behind('retired-container')
+
+      expect(@log.string).to include('owned by host retired-container (pid 57)')
+      expect(@log.string).to include('confirm that host or container no longer exists')
+      expect(@log.string)
+        .to include("woods-watch --recover-claim #{index} --claim-token <token from #{index}/watch_claim.json>")
+      expect(@log.string).not_to include(token)
+      expect(supervision_record).to include('state' => 'parked', 'reason' => 'owner_on_other_host')
+    end
+
+    it 'tells a same-host duplicate to stop its owner before recovering' do
+      index = park_behind(Woods::Watch::Status.host_identity)
+
+      expect(@log.string).to include('owned by pid 57 on this host')
+      expect(@log.string).to include("woods-watch --recover-claim #{index}")
+      expect(@log.string).not_to include(token)
+      expect(supervision_record).to include('state' => 'parked', 'reason' => 'already_running')
+    end
+  end
+
   it 'bounds an initializer hang and retries after its boot deadline' do
     launch("child.call(:task_loaded, woods_version: '2.0.0.beta4'); sleep 30", boot_timeout: 0.1)
     eventually { @supervisor.attempts >= 2 }
