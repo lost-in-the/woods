@@ -4,6 +4,8 @@ require_relative 'managed_process'
 require_relative 'lifecycle'
 require_relative 'supervision_status'
 require_relative 'supervisor_reporting'
+require_relative 'claim_lease'
+require_relative 'status'
 
 module Woods
   module Watch
@@ -13,6 +15,7 @@ module Woods
       include SupervisorReporting
 
       RETRY_DELAYS = [1, 2, 4, 8, 16, 30].freeze
+      PARKED_ADVICE = '[woods-watch] restart the owner after correcting configuration; no automatic takeover'
 
       # @param command [Array<String>] fresh application invocation on each attempt
       # @param root [String] application root
@@ -141,9 +144,23 @@ module Woods
       end
 
       def park(reason)
-        publish('parked', reason)
-        @logger.puts('[woods-watch] restart the owner after correcting configuration; no automatic takeover')
+        owner = reason == 'already_running' && @protocol.index ? ClaimLease.owner(@protocol.index) : nil
+        foreign = owner && owner['host'] != Status.host_identity
+        publish('parked', foreign ? 'owner_on_other_host' : reason)
+        @logger.puts(owner ? claim_advice(owner, foreign) : PARKED_ADVICE)
         wait_until(Float::INFINITY)
+      end
+
+      def claim_advice(owner, foreign)
+        command = ClaimLease.recovery_command(@protocol.index)
+        if foreign
+          "[woods-watch] #{@protocol.index} is owned by host #{owner['host']} (pid #{owner['pid']}), " \
+            'which cannot be verified from here; no automatic takeover. ' \
+            "First confirm that host or container no longer exists, then run: #{command}"
+        else
+          "[woods-watch] #{@protocol.index} is owned by pid #{owner['pid']} on this host; no automatic takeover. " \
+            "Stop that owner through its supervisor; if it no longer exists, run: #{command}"
+        end
       end
 
       def wait_until(deadline)

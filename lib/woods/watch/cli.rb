@@ -69,9 +69,16 @@ module Woods
         end
 
         index = File.expand_path(@recovery_index, options[:root])
-        ClaimLease.new(index).recover(token: @claim_token)
+        recovery_lease(index).recover(token: @claim_token)
         @output.puts("[woods-watch] recovered the selected abandoned claim at #{index}; restart its normal owner")
         0
+      end
+
+      def recovery_lease(index)
+        ClaimLease.new(index)
+      rescue Errno::ENOENT, Errno::ENOTDIR
+        raise ClaimLease::Unavailable, "no index directory at #{index}; pass the exact index the application uses " \
+                                       '(its WOODS_OUTPUT, default tmp/woods) as seen from this environment'
       end
 
       def positive_seconds(value)

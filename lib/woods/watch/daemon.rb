@@ -1549,6 +1549,7 @@ module Woods
       def stale_claim?
         record = JSON.parse(claim_bytes)
         return false if @conservative_claims && !verifiable_managed_claim?(record)
+        return false if @claim_lease && !@claim_lease.names_this_lease?(record)
         return true unless same_claim_host?(record['host'])
 
         !claim_pid_alive?(record['pid'])
