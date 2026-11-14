@@ -128,6 +128,11 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
       ['paint_hue', 'hue', 'paint_', :unknown] => true,
       ['x_paint_hue', 'hue', 'paint_', :unknown] => false,
       ['hue_paint', 'hue', :unknown, '_paint'] => true,
+      ['xglow_glow', 'glow', :unknown, ''] => true,
+      ['aglow_b_glow_c', 'glow', :unknown, :unknown] => true,
+      ['a_glowb_glow', 'glow', :unknown, :unknown] => true,
+      ['a_b_a_b_c', 'a_b', :unknown, :unknown] => true,
+      ['xa_ba_bx', 'a_b', :unknown, :unknown] => false,
       ['lamp_glow', '', :unknown, ''] => false
     }.each do |(name, base, prefix, suffix), expected|
       it "is #{expected} for #{name.inspect} as #{prefix.inspect} + #{base.inspect} + #{suffix.inspect}" do
@@ -148,6 +153,21 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
       elapsed = Process.clock_gettime(clock) - started
 
       expect(results).to eq([false, false, false, false])
+      expect(elapsed).to be < 0.1
+    end
+
+    it 'stays linear on a long base that overlaps itself all along the name' do
+      base = 'a' * 20_000
+      name = 'a' * 60_000
+      joined = "#{'a_' * 30_000}a"
+      clock = Process::CLOCK_THREAD_CPUTIME_ID
+      started = Process.clock_gettime(clock)
+      results = [described_class::Macros.affixed?(name, base, :unknown, :unknown),
+                 described_class::Macros.affixed?("#{name}x", base, :unknown, ''),
+                 described_class::Macros.affixed?(joined, 'a_' * 10_000, :unknown, :unknown)]
+      elapsed = Process.clock_gettime(clock) - started
+
+      expect(results).to eq([false, false, false])
       expect(elapsed).to be < 0.1
     end
   end

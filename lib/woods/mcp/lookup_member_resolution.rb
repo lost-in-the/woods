@@ -750,9 +750,9 @@ module Woods
           # Plain string comparison: +name+ is the caller's, so no pattern is
           # built from it or run over it.
           #
-          # A literal affix fixes where the base can be, so it is checked once;
-          # only with both affixes unknown is each occurrence of the base read,
-          # by its boundary characters, without copying what stands around it.
+          # A literal affix fixes where the base can be, so it is checked once.
+          # With both affixes unknown every occurrence of the base is a
+          # candidate; {#occurrence?} finds them in one pass over the name.
           def affixed?(name, base, prefix, suffix)
             return false if base.empty?
             return false unless prefix == :unknown || name.start_with?(prefix)
@@ -761,16 +761,51 @@ module Woods
             return base_at?(name, base, name.length - suffix.length - base.length, prefix, suffix) unless
               suffix == :unknown
 
-            from = 0
-            while (at = name.index(base, from))
-              return true if base_at?(name, base, at, prefix, suffix)
+            occurrence?(name.codepoints, base.codepoints) do |at, finish, text|
+              (at.zero? || (at > 1 && text[at - 1] == JOINT)) &&
+                (finish == text.length || (text.length - finish > 1 && text[finish] == JOINT))
+            end
+          end
 
-              from = at + 1
+          JOINT = '_'.ord
+
+          # Whether the block accepts any occurrence of +pattern+ in +text+
+          # (both codepoint arrays). Knuth-Morris-Pratt: each character of the
+          # name is read once however the base overlaps itself, and nothing is
+          # copied per occurrence. +name+ is the caller's, of any length.
+          #
+          # @yieldparam at [Integer] index of the occurrence's first character
+          # @yieldparam finish [Integer] index after its last character
+          # @yieldparam text [Array<Integer>]
+          def occurrence?(text, pattern)
+            fallback = fallbacks(pattern)
+            matched = 0
+            text.each_with_index do |char, index|
+              matched = fallback[matched - 1] while matched.positive? && char != pattern[matched]
+              matched += 1 if char == pattern[matched]
+              next unless matched == pattern.length
+              return true if yield(index - matched + 1, index + 1, text)
+
+              matched = fallback[matched - 1]
             end
             false
           end
 
-          # Whether +base+ stands at +at+ in +name+ with the affixes around it.
+          # For each prefix of +pattern+, the length of its longest proper
+          # prefix that is also its suffix: where the match resumes after a
+          # mismatch.
+          def fallbacks(pattern)
+            table = Array.new(pattern.length, 0)
+            matched = 0
+            (1...pattern.length).each do |index|
+              matched = table[matched - 1] while matched.positive? && pattern[index] != pattern[matched]
+              matched += 1 if pattern[index] == pattern[matched]
+              table[index] = matched
+            end
+            table
+          end
+
+          # Whether +base+ stands at the one place +at+ a literal affix leaves it.
           def base_at?(name, base, at, prefix, suffix)
             return false if at.negative? || name[at, base.length] != base
 
