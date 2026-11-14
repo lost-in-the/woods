@@ -167,6 +167,8 @@ published `source_code` coordinates, sorted by line.
   display block owns its methods at their lines inside the block.
 - Methods defined by metaprogramming or on another receiver are absent, and so is a `def self.x` inside
   `class << self`, which Ruby defines on the singleton class's own singleton class.
+  So is a `def` in a `class << self` nested in another `class << self` or in a `class_methods do` block: that
+  singleton class belongs to another object.
 
 **Callback declarations (#817).** Each model callback entry whose method is
 declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with

@@ -255,7 +255,7 @@ module Woods
         when Prism::DefNode
           [plain_definition(node, owner, scope, state)].compact
         when Prism::ClassNode, Prism::ModuleNode, Prism::SingletonClassNode
-          nested_body(node, owner)
+          nested_body(node, owner, scope)
         when Prism::CallNode
           call_entries(node, owner, scope, state)
         else
@@ -263,9 +263,13 @@ module Woods
         end
       end
 
-      def nested_body(node, owner)
+      # A `class << self` is the owner's singleton class only in the owner's
+      # own body; in a singleton or `class_methods do` body it is another
+      # object's, so its definitions have no entry.
+      def nested_body(node, owner, scope)
         if node.is_a?(Prism::SingletonClassNode)
-          visit_body(node.body, owner, scope: 'singleton') if node.expression.is_a?(Prism::SelfNode)
+          own = node.expression.is_a?(Prism::SelfNode) && scope == 'instance'
+          visit_body(node.body, owner, scope: 'singleton') if own
         else
           inner = Names.qualified(owner, node.constant_path)
           visit_body(node.body, inner, scope: 'instance') if inner

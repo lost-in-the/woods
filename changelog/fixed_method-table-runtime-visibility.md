@@ -15,6 +15,7 @@
   instance method `b`.
   A `def self.x` inside `class << self` is left out instead of replacing the owner's own `self.x`: Ruby defines it
   on the singleton class's singleton class.
+  The same holds for a `def` in a `class << self` nested in another `class << self` or in a `class_methods do` block.
   A `def self.x` under a bare `module_function` is a `singleton` entry, not a `module_function` one: Ruby defines
   no instance method for it.
   The table now applies the body's statements in order: a later definition replaces the earlier one on the same

@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'spec_helper'
+require 'active_support/concern'
 require 'woods/method_table'
 
 # The method table read without evaluation, compared with what Ruby reports
@@ -265,6 +266,16 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
+    'class << self inside class << self' => <<~RUBY,
+      class Report
+        def self.a; end
+        class << self
+          class << self
+            def a; end
+          end
+        end
+      end
+    RUBY
     'class-method visibility around module functions' => <<~RUBY
       module Util
         module_function
@@ -337,6 +348,29 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       expect(runtime).not_to be_empty
       expect(table_facts(source)).to eq(runtime)
     end
+  end
+
+  # A `class_methods do` body becomes the concern's ClassMethods module, which
+  # the including class extends; its `class << self` belongs to that module.
+  it 'agrees with Ruby that class << self inside class_methods defines nothing on the including class' do
+    source = <<~RUBY
+      module Trackable
+        extend ActiveSupport::Concern
+        class_methods do
+          def shown; end
+          class << self
+            def hidden; end
+          end
+        end
+      end
+    RUBY
+    namespace = Module.new
+    namespace.module_eval(source)
+    includer = Class.new.include(namespace::Trackable)
+    table = described_class.call(source).map { |entry| entry.values_at('kind', 'name') }
+
+    expect([includer.respond_to?(:shown), includer.respond_to?(:hidden)]).to eq([true, false])
+    expect(table).to eq([%w[singleton shown]])
   end
 
   # Without `module_function` there is no singleton `helper` to change, so
