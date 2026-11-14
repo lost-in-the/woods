@@ -18,3 +18,5 @@
   concern named `self`, and `include self::Helpers` there targets the concern's own `Helpers`.
   Where `self` is the including class or cannot be told (`base.class_eval { }`, `included do`, any other block,
   an instance method), a `self::` constant gives no edge and is not listed in `metadata.included_modules`.
+  A module found at runtime and written inside its namespace (`module Depot` around `module Trackable`) resolves
+  `self::` and its own nested modules against its full name, `Depot::Trackable`.

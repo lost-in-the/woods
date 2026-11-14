@@ -414,24 +414,27 @@ module Woods
       # hook's `base.include` that applies them to the including class.
       #
       # @param source [String] Ruby source code
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Array<String>] Included module names
-      def detect_includes(source)
-        mixin_names(source, %i[include])
+      def detect_includes(source, module_name = nil)
+        mixin_names(source, %i[include], module_name)
       end
 
       # Detect modules this concern's extend calls reference, including a
       # hook's `base.extend` that applies them to the including class.
       #
       # @param source [String] Ruby source code
+      # @param module_name [String, nil] The concern's own identifier
       # @return [Array<String>] Extended module names
-      def detect_extends(source)
-        mixin_names(source, %i[extend])
+      def detect_extends(source, module_name = nil)
+        mixin_names(source, %i[extend], module_name)
       end
 
       # @return [Array<String>] normalized constants of every +kinds+ call,
       #   without ActiveSupport::Concern
-      def mixin_names(source, kinds)
-        MixinCalls.call(source, kinds, own_only: false).map { |_kind, name| ConstantPaths.normalize(name) }
+      def mixin_names(source, kinds, module_name = nil)
+        MixinCalls.call(source, kinds, own_only: false, owner: module_name)
+                  .map { |_kind, name| ConstantPaths.normalize(name) }
                   .reject { |name| name == 'ActiveSupport::Concern' }
       end
 
@@ -468,14 +471,14 @@ module Woods
       # @return [Array<Hash>] Dependency hashes
       def extract_dependencies(source, module_name = nil)
         # Concerns included by this concern (add instance-level behavior)
-        deps = detect_includes(source).map do |mod|
+        deps = detect_includes(source, module_name).map do |mod|
           { type: :concern, target: mod, via: :include }
         end
 
         # Concerns extended by this concern (add class-level behavior). A
         # `ClassMethods` module belongs to the mixin that declares it, and the
         # concern's own is no dependency at all.
-        detect_extends(source).each do |mod|
+        detect_extends(source, module_name).each do |mod|
           owner = mod == 'ClassMethods' ? module_name : ConstantPaths.mixin_owner(mod)
           deps << { type: :concern, target: owner, via: :extend } unless owner == module_name
         end

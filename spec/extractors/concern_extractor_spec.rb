@@ -928,6 +928,34 @@ RSpec.describe Woods::Extractors::ConcernExtractor do
       expect(unit.metadata[:included_modules]).to eq([])
     end
 
+    it 'resolves self:: and its own modules against a promoted module written inside its namespace' do
+      path = create_file('app/models/depot/trackable.rb', <<~RUBY)
+        module Depot
+          module Trackable
+            extend ActiveSupport::Concern
+            module ClassMethods; end
+
+            extend ClassMethods
+            include self::Helpers
+
+            def self.included(base)
+              super
+              base.extend(self::Finders)
+            end
+          end
+        end
+      RUBY
+      stub_const('Depot::Trackable', Module.new)
+
+      unit = described_class.new.extract_concern_file(path, module_name: 'Depot::Trackable')
+
+      expect(unit.dependencies.select { |dep| dep[:type] == :concern }).to eq(
+        [{ type: :concern, target: 'Depot::Trackable::Helpers', via: :include },
+         { type: :concern, target: 'Depot::Trackable::Finders', via: :extend }]
+      )
+      expect(unit.metadata[:included_modules]).to eq(%w[Depot::Trackable::Helpers Depot::Trackable::Finders])
+    end
+
     it 'excludes ActiveSupport::Concern from extend dependencies' do
       path = create_file('app/models/concerns/searchable.rb', <<~RUBY)
         module Searchable
