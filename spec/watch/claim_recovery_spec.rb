@@ -60,7 +60,7 @@ RSpec.describe 'Explicit managed watch claim recovery' do
   def write_v1_claim(token: 'c' * 64, device: 7, inode: 9)
     File.write(lease_path, '')
     File.chmod(0o600, lease_path)
-    @record = { 'pid' => 43, 'host' => 'retired-container', 'lease_version' => 1, 'token' => token,
+    @record = { 'pid' => 57, 'host' => 'retired-container', 'lease_version' => 1, 'token' => token,
                 'lease_device' => device, 'lease_inode' => inode }
     File.write(@claim, JSON.generate(@record))
   end
@@ -292,6 +292,15 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       expect(messages.string).to include('run recovery inside the environment that writes this index')
       expect(messages.string).not_to include(token)
       expect(File.exist?(@claim)).to be(true)
+    end
+
+    it 'names the index to check when the index directory does not exist' do
+      missing = File.join(@index, 'no-such-index')
+
+      expect(cli.run(['--recover-claim', missing, '--claim-token', token])).to eq(2)
+      expect(messages.string).to include("no index directory at #{missing}")
+      expect(messages.string).to include('the exact index the application uses')
+      expect(messages.string).not_to include(token)
     end
 
     it 'names where the token lives when the token is malformed' do

@@ -234,7 +234,7 @@ Its launcher parks with reason `owner_on_other_host` in its supervision record, 
 with the exact command, for example (one line, wrapped here):
 
 ```text
-[woods-watch] /app/tmp/woods is owned by host 3f2a9c1d (pid 43), which cannot be verified from here; ...
+[woods-watch] /app/tmp/woods is owned by host 3f2a9c1d (pid 57), which cannot be verified from here; ...
 First confirm that host or container no longer exists, then run:
 woods-watch --recover-claim /app/tmp/woods --claim-token <token from /app/tmp/woods/watch_claim.json>
 ```

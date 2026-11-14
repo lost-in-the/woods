@@ -97,7 +97,7 @@ RSpec.describe Woods::Watch::Supervisor do
     let(:token) { 'c' * 64 }
 
     def park_behind(host)
-      claim = JSON.generate(pid: 43, host: host, lease_version: 2, token: token, lease_id: 'e' * 32)
+      claim = JSON.generate(pid: 57, host: host, lease_version: 2, token: token, lease_id: 'e' * 32)
       launch(<<~RUBY)
         #{handshake}
         Dir.mkdir('index') unless Dir.exist?('index')
@@ -117,7 +117,7 @@ RSpec.describe Woods::Watch::Supervisor do
     it 'names the owner host and the exact recovery command for a claim from another host' do
       index = park_behind('retired-container')
 
-      expect(@log.string).to include('owned by host retired-container (pid 43)')
+      expect(@log.string).to include('owned by host retired-container (pid 57)')
       expect(@log.string).to include('confirm that host or container no longer exists')
       expect(@log.string)
         .to include("woods-watch --recover-claim #{index} --claim-token <token from #{index}/watch_claim.json>")
@@ -128,7 +128,7 @@ RSpec.describe Woods::Watch::Supervisor do
     it 'tells a same-host duplicate to stop its owner before recovering' do
       index = park_behind(Woods::Watch::Status.host_identity)
 
-      expect(@log.string).to include('owned by pid 43 on this host')
+      expect(@log.string).to include('owned by pid 57 on this host')
       expect(@log.string).to include("woods-watch --recover-claim #{index}")
       expect(@log.string).not_to include(token)
       expect(supervision_record).to include('state' => 'parked', 'reason' => 'already_running')
