@@ -220,6 +220,14 @@ RSpec.describe Woods::GitHistory do
         expect(read(name).fetch(name)).to include(added: true, commit_count: 1)
       end
 
+      it 'keeps the mark on a file renamed from a copy of an older file (copies are not followed)' do
+        commit('create', { 'original.rb' => body }, days_ago: 800)
+        commit('copy', { 'copy.rb' => body }, days_ago: 100)
+        rename('copy.rb', 'destination.rb', days_ago: 3)
+
+        expect(read('destination.rb').fetch('destination.rb')).to include(added: true, commit_count: 1)
+      end
+
       describe 'the source is looked up only in the history of the rename (its first parent)' do
         it 'ignores a recreation of the source on a side branch merged with ours' do
           commit('create', { 'source.rb' => body }, days_ago: 800)

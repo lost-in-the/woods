@@ -1790,6 +1790,7 @@ Only history that reaches the rename counts: a branch that recreated the source 
 A source older than the window means the content is too: the file is classified by its counts.
 A source created inside the window keeps the file `:new`.
 At most eight steps back (renames and merges) are followed; a file reached through more keeps `:new`.
+Copies are not followed: a file copied from older content inside the window, then renamed, keeps `:new`.
 A commit with no parent in the walk (a shallow clone's oldest commit, or a graft) reads as creating its files.
 `commit_count` still counts only the commits at the current name.
 The commit table (`git_commits.json`) still lists a renamed path as `added`.
