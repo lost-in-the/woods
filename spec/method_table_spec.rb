@@ -105,6 +105,174 @@ RSpec.describe Woods::MethodTable do
     expect(table(source)).to eq([['call', 'module_function', 3, 3, 'public', 'Util']])
   end
 
+  def facts(source)
+    described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'visibility') }
+  end
+
+  describe 'methods Ruby always defines private' do
+    it 'keeps initialize, the copy hooks and respond_to_missing? private, even under a bare public' do
+      source = <<~RUBY
+        class Widget
+          public
+          def initialize; end
+          def initialize_copy(other); end
+          def initialize_dup(other); end
+          def initialize_clone(other, freeze: nil); end
+          def respond_to_missing?(name, include_all); end
+          def call; end
+        end
+      RUBY
+      expect(facts(source)).to eq([
+                                    %w[initialize instance private],
+                                    %w[initialize_copy instance private],
+                                    %w[initialize_dup instance private],
+                                    %w[initialize_clone instance private],
+                                    %w[respond_to_missing? instance private],
+                                    %w[call instance public]
+                                  ])
+    end
+
+    it 'follows a later explicit visibility call, as Ruby does' do
+      source = "class Widget\n  def initialize; end\n  public :initialize\n  " \
+               "public def initialize_copy(other); end\nend\n"
+      expect(facts(source)).to eq([%w[initialize instance public], %w[initialize_copy instance public]])
+    end
+
+    it 'does not apply to singleton definitions, but does to a class_methods block' do
+      source = <<~RUBY
+        module Sized
+          def self.initialize; end
+          class << self
+            def respond_to_missing?(name, include_all); end
+          end
+          class_methods do
+            def initialize; end
+          end
+          module_function
+          def initialize_dup(other); end
+        end
+      RUBY
+      expect(facts(source)).to eq([
+                                    %w[initialize singleton public],
+                                    %w[respond_to_missing? singleton public],
+                                    %w[initialize singleton private],
+                                    %w[initialize_dup module_function public]
+                                  ])
+    end
+  end
+
+  describe 'module_function' do
+    it 'makes the named methods module functions in every argument form' do
+      source = <<~RUBY
+        module Util
+          def a; end
+          def b; end
+          def c; end
+          def d; end
+          module_function :a
+          module_function :b, 'c'
+          module_function def e; end
+          module_function
+          def f; end
+          private
+          def g; end
+        end
+      RUBY
+      expect(facts(source)).to eq([
+                                    %w[a module_function public],
+                                    %w[b module_function public],
+                                    %w[c module_function public],
+                                    %w[d instance public],
+                                    %w[e module_function public],
+                                    %w[f module_function public],
+                                    %w[g instance private]
+                                  ])
+    end
+
+    it 'makes a private instance method a module function, and ignores a name defined later' do
+      source = "module Util\n  private def a; end\n  module_function :a, :later\n  def later; end\nend\n"
+      expect(facts(source)).to eq([%w[a module_function public], %w[later instance public]])
+    end
+
+    it 'splits a module function whose instance side a later call makes public or protected' do
+      source = <<~RUBY
+        module Util
+          module_function
+          def a; end
+          def b; end
+          def c; end
+          public :a
+          protected :b
+          private :c
+        end
+      RUBY
+      expect(facts(source)).to eq([
+                                    %w[a instance public], %w[a singleton public],
+                                    %w[b instance protected], %w[b singleton public],
+                                    %w[c module_function public]
+                                  ])
+    end
+  end
+
+  describe 'private_class_method and public_class_method' do
+    it 'set the singleton visibility in every argument form' do
+      source = <<~RUBY
+        class Report
+          private_class_method def self.a; end
+          def self.b; end
+          def self.c; end
+          def self.d; end
+          private_class_method :b, 'c'
+          private_class_method [:d]
+          public_class_method :d
+          public_class_method def self.e; end
+          def b; end
+        end
+      RUBY
+      expect(facts(source)).to eq([
+                                    %w[a singleton private],
+                                    %w[b singleton private],
+                                    %w[c singleton private],
+                                    %w[d singleton public],
+                                    %w[e singleton public],
+                                    %w[b instance public]
+                                  ])
+    end
+
+    it 'sets the singleton side of a module function' do
+      source = "module Util\n  module_function\n  def a; end\n  def b; end\n  private_class_method :a\n  " \
+               "class << self\n    private :b\n  end\nend\n"
+      expect(facts(source)).to eq([%w[a module_function private], %w[b module_function private]])
+    end
+  end
+
+  it 'applies private, protected and public with symbol, string and array arguments' do
+    source = <<~RUBY
+      class Account
+        def a; end
+        def b; end
+        def c; end
+        def d; end
+        private :a, 'b'
+        protected [:c]
+        private attr_reader :e
+        private :d
+        public :d
+        class << self
+          def f; end
+          private :f
+        end
+      end
+    RUBY
+    expect(facts(source)).to eq([
+                                  %w[a instance private],
+                                  %w[b instance private],
+                                  %w[c instance protected],
+                                  %w[d instance public],
+                                  %w[f singleton private]
+                                ])
+  end
+
   it 'keeps no table for source that does not parse, and an empty one for a body without methods' do
     expect(described_class.call("class Post\n  def broken(\nend\n")).to be_nil
     expect(described_class.call("class Post < ApplicationRecord\nend\n")).to eq([])

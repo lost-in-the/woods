@@ -11,6 +11,7 @@ require_relative 'helper_call_scan'
 require_relative 'template_extensions'
 require_relative 'template_ruby_fragments'
 require_relative 'frontend_references'
+require_relative 'mixin_calls'
 
 module Woods
   module Extractors
@@ -353,7 +354,7 @@ module Woods
         deps.concat(scan_config_dependencies(source))
 
         # Helper modules
-        source.scan(/include\s+(\w+Helper)/).flatten.uniq.each do |helper|
+        MixinCalls.helper_includes(source).each do |helper|
           deps << { type: :helper, target: helper, via: :include }
         end
 
