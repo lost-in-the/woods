@@ -1779,11 +1779,17 @@ A file written before the window and not touched since has `commit_count: 0`, no
 That is a quiet file, not an uncommitted one: the window holds none of its history.
 
 A file renamed into place inside the window is not `:new` when its content is older.
-The history walk reads renames as a deletion and an addition, so a commit that creates a file and also deletes a path
-is read again with git's rename detection (`-M`, default similarity).
-A rename is followed back through the window to the commit that created its source.
+The history walk reads renames as a deletion and an addition, and reads each commit against its first parent.
+A file's creation is the newest commit on `HEAD`'s first-parent chain that adds it.
+When that commit also deletes a path, it is read again with git's rename detection (`-M`, default similarity).
+A rename is followed to the commit that created its source on the rename's own first-parent chain.
+When that commit is a merge and not a rename, the file is followed into the merge's other parents.
+If none of them adds it inside the window, the merge may have made it, and the file keeps `:new`.
+Only history that reaches the rename counts: a branch that recreated the source elsewhere does not, even once merged.
 A source older than the window means the content is too: the file is classified by its counts.
 A source created inside the window keeps the file `:new`.
+At most eight steps back (renames and merges) are followed; a file reached through more keeps `:new`.
+A commit with no parent in the walk (a shallow clone's oldest commit, or a graft) reads as creating its files.
 `commit_count` still counts only the commits at the current name.
 The commit table (`git_commits.json`) still lists a renamed path as `added`.
 

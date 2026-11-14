@@ -1571,8 +1571,9 @@ events**, independent of which other paths are requested:
   from the first parent.
 - Renames are deletion/addition events at exact current names; Woods never follows
   previous names. Unmerged branches, remote-only refs, and checkpoint refs are excluded.
-  The one exception is the `:new` classification: a file whose creating commit also deletes a path is checked with
-  git's rename detection, so a file renamed from older content is not `:new`.
+  The one exception is the `:new` classification: a file's creating commit on HEAD's first-parent chain is checked
+  with git's rename detection when it also deletes a path, and a merge is followed into its other parents, so a
+  file renamed or merged from older content is not `:new`.
 - `change_frequency` uses total events and events newer than 90 days. Contributors
   and recent commits retain their existing top-five limit; recent commits and
   `last_modified` follow git's traversal order, not a separate global timestamp sort.
