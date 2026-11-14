@@ -9,8 +9,6 @@ module Woods
       # Headers, tables, code blocks, and bullet lists — no JSON structural markers.
       class MarkdownRenderer < ToolResponseRenderer
         # Coordinate keys {#metadata_item_summary} renders as labelled ranges.
-        COORDINATE_KEYS = %w[line end_line file_line file_end_line file_unit].freeze
-
         # ── lookup ──────────────────────────────────────────────────
 
         # @param data [Hash] a {LookupMember.answer}
@@ -584,24 +582,6 @@ module Woods
             "[#{shown.join(', ')}]"
           else inline_value(value)
           end
-        end
-
-        def file_lines(entry)
-          first = entry['file_line']
-          # Null covers both a line Woods added and real code it cannot map
-          # (a library unit's secondary contributor file), so claim neither.
-          return 'file line: not mapped' unless first.is_a?(Integer)
-
-          range = line_range(first, entry['file_end_line'])
-          entry['file_unit'] ? "file lines: #{range} in #{entry['file_unit']}" : "file lines: #{range}"
-        end
-
-        def published_lines(entry)
-          "published source lines: #{line_range(entry['line'], entry['end_line'])}"
-        end
-
-        def line_range(first, last)
-          last.is_a?(Integer) && last != first ? "#{first}-#{last}" : first.to_s
         end
 
         def render_hash_as_markdown(hash)

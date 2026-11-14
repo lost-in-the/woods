@@ -309,10 +309,20 @@ module Woods
         # One entry of a list in a lookup (a metadata list, dependencies,
         # dependents): a Hash as its informative `key: value` pairs, anything
         # else as text.
+        #
+        # An entry carrying file coordinates leads with its file lines (or
+        # that they are not mapped) and its published-source lines, as the
+        # Markdown renderer does.
         def list_item(item)
           return inline_value(item) unless item.is_a?(Hash)
 
-          item.reject { |_, v| uninformative?(v) }.map { |k, v| "#{k}: #{entry_value(v)}" }.join(', ')
+          entry = item.transform_keys(&:to_s)
+          shown = entry.reject { |_, v| uninformative?(v) }
+          return shown.map { |k, v| "#{k}: #{entry_value(v)}" }.join(', ') unless entry.key?('file_line')
+
+          pairs = shown.except(*COORDINATE_KEYS).map { |k, v| "#{k}: #{entry_value(v)}" }
+          pairs.unshift(published_lines(entry)) if entry['line']
+          pairs.unshift(file_lines(entry)).join(', ')
         end
 
         def entry_value(value)

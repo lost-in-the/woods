@@ -72,6 +72,9 @@ module Woods
         raise NotImplementedError, "#{self.class}#render_default must be implemented"
       end
 
+      # Metadata entry keys that hold line coordinates.
+      COORDINATE_KEYS = %w[line end_line file_line file_end_line file_unit].freeze
+
       private
 
       # Where a member answer's method is: the file a reader opens and its
@@ -128,6 +131,26 @@ module Woods
       def candidate_label(candidate, data)
         name = (candidate['defined_in'] || candidate['inherited_from'] || data['member_of'] || {})['identifier']
         candidate['note'] ? "#{name} (#{candidate['note']})" : name.to_s
+      end
+
+      # The file lines of an entry, or that they are not mapped: a null file
+      # line is an answer, not an empty value.
+      def file_lines(entry)
+        first = entry['file_line']
+        # Null covers both a line Woods added and real code it cannot map
+        # (a library unit's secondary contributor file), so claim neither.
+        return 'file line: not mapped' unless first.is_a?(Integer)
+
+        range = line_range(first, entry['file_end_line'])
+        entry['file_unit'] ? "file lines: #{range} in #{entry['file_unit']}" : "file lines: #{range}"
+      end
+
+      def published_lines(entry)
+        "published source lines: #{line_range(entry['line'], entry['end_line'])}"
+      end
+
+      def line_range(first, last)
+        last.is_a?(Integer) && last != first ? "#{first}-#{last}" : first.to_s
       end
 
       # @return [String] "Published source of X", the unit whose published

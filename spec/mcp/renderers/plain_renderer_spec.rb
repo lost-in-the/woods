@@ -28,6 +28,21 @@ RSpec.describe Woods::MCP::Renderers::PlainRenderer do
     end
   end
 
+  describe '#render_lookup with file coordinates' do
+    # A null file line is an answer: the line is not mapped to the file.
+    it 'labels a line with no file line as not mapped and the published line as published' do
+      metadata = { 'methods' => [{ 'name' => 'from_second', 'line' => 50, 'end_line' => 52, 'file_line' => nil,
+                                   'file_end_line' => nil },
+                                 { 'name' => 'activate', 'line' => 276, 'end_line' => 280, 'file_line' => 271,
+                                   'file_end_line' => 275 }] }
+
+      out = renderer.render(:lookup, { 'identifier' => 'Account', 'type' => 'model', 'metadata' => metadata })
+
+      expect(out).to include('file line: not mapped, published source lines: 50-52, name: from_second')
+      expect(out).to include('file lines: 271-275, published source lines: 276-280, name: activate')
+    end
+  end
+
   describe '#render_lookup' do
     it 'renders unit identifier and file' do
       out = renderer.render(:lookup, {
