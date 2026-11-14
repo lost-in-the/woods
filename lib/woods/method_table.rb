@@ -312,11 +312,9 @@ module Woods
       end
 
       # Where the definition lands: `def self.x` on the owner's singleton
-      # class (or, inside `class_methods do`, the module's own, kept apart).
+      # class.
       def definition_scope(receiver, scope)
-        return scope unless receiver
-
-        scope == 'extension' ? 'extension_singleton' : 'singleton'
+        receiver ? 'singleton' : scope
       end
 
       def definition_kind(landing, module_function)
@@ -329,7 +327,10 @@ module Woods
         return nil unless owner
 
         receiver = node.receiver
-        return nil if receiver && (!receiver.is_a?(Prism::SelfNode) || scope == 'singleton')
+        # In `class << self` and in `class_methods do`, `self` is the
+        # singleton class or the ClassMethods module: `def self.x` defines a
+        # method of that object, which neither the owner nor an includer has.
+        return nil if receiver && (!receiver.is_a?(Prism::SelfNode) || %w[singleton extension].include?(scope))
 
         visibility = 'public' if receiver # `private` does not apply to `def self.x`
         landing = definition_scope(receiver, scope)

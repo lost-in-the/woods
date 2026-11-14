@@ -351,13 +351,16 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
   end
 
   # A `class_methods do` body becomes the concern's ClassMethods module, which
-  # the including class extends; its `class << self` belongs to that module.
-  it 'agrees with Ruby that class << self inside class_methods defines nothing on the including class' do
+  # the including class extends; its `class << self` and its `def self.x`
+  # (`self` is that module while the block runs) belong to that module.
+  it 'agrees with Ruby that class << self and def self. inside class_methods define nothing on the includer' do
     source = <<~RUBY
       module Trackable
         extend ActiveSupport::Concern
         class_methods do
           def shown; end
+          def self.shown; end
+          def self.only_module; end
           class << self
             def hidden; end
           end
@@ -369,7 +372,9 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
     includer = Class.new.include(namespace::Trackable)
     table = described_class.call(source).map { |entry| entry.values_at('kind', 'name') }
 
-    expect([includer.respond_to?(:shown), includer.respond_to?(:hidden)]).to eq([true, false])
+    expect(%i[shown hidden only_module].map { |name| includer.respond_to?(name) }).to eq([true, false, false])
+    expect(namespace::Trackable::ClassMethods.singleton_methods).to contain_exactly(:shown, :only_module, :hidden)
+    expect(includer.method(:shown).owner).to eq(namespace::Trackable::ClassMethods)
     expect(table).to eq([%w[singleton shown]])
   end
 

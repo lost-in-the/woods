@@ -169,6 +169,8 @@ published `source_code` coordinates, sorted by line.
   `class << self`, which Ruby defines on the singleton class's own singleton class.
   So is a `def` in a `class << self` nested in another `class << self` or in a `class_methods do` block: that
   singleton class belongs to another object.
+  So is a `def self.x` inside `class_methods do`: the block runs with `self` as the ClassMethods module, so it
+  defines a method of that module, which an includer never receives.
 
 **Callback declarations (#817).** Each model callback entry whose method is
 declared by exactly one receiverless `before_*`/`after_*`/`around_*` call with
