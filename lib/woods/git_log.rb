@@ -22,6 +22,9 @@ module Woods
     SHA = /\A[0-9a-f]{40}(?:[0-9a-f]{24})?\z/
     # A raw diff record header (`:old_mode new_mode old new status`).
     RAW = /\A\n?:[0-7]{6} [0-7]{6} [0-9a-f]+ [0-9a-f]+ [A-Z]\z/
+    # A raw record with rename detection on: a rename or copy carries a
+    # similarity score and two paths.
+    SCORED_RAW = /\A\n?:[0-7]{6} [0-7]{6} [0-9a-f]+ [0-9a-f]+ ([A-Z])\d*\z/
 
     # @param root [String, Pathname] application root the walk is rooted at
     def initialize(root:)
@@ -82,24 +85,30 @@ module Woods
     # @yieldparam stdout [IO]
     # @return [void]
     # @raise [ReadError] when git exits unsuccessfully
-    def patch_stream(shas)
+    def patch_stream(shas, &block)
       argv = GitCommand.argv(@root, '-c', 'log.showSignature=false', '-c', 'core.quotePath=false', 'log',
                              '--no-walk=unsorted', '--stdin', '-p', '-U0', '--no-color', '--no-renames',
                              '--no-relative', '--no-ext-diff', '--no-textconv', '--diff-merges=first-parent',
                              '--src-prefix=a/', '--dst-prefix=b/', '--encoding=UTF-8', '--format=%x00%H')
-      Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
-        writer = Thread.new { stdin.write(shas.map { |sha| "#{sha}\n" }.join).then { stdin.close } }
-        stdout.binmode
-        drain = Thread.new { stderr.read(16_384) until stderr.eof? }
-        begin
-          yield stdout
-          raise ReadError, "patch command exited #{wait.value.exitstatus}" unless wait.value.success?
-        ensure
-          stdout.close
-          writer.join
-          drain.join
-        end
-      end
+      run(argv, input: shas.map { |sha| "#{sha}\n" }.join, label: 'patch', &block)
+    end
+
+    # The renames git detects (`-M`, its default similarity) in exactly
+    # +shas+, each against its first parent.
+    #
+    # @param shas [Array<String>] full commit names
+    # @return [Hash{String => Hash{String => String}}] per commit, the new
+    #   repository path (bytes) of each rename and the path it came from
+    # @raise [ReadError] when git exits unsuccessfully
+    def renames(shas)
+      found = Hash.new { |hash, sha| hash[sha] = {} }
+      return found if shas.empty?
+
+      argv = GitCommand.argv(@root, '-c', 'log.showSignature=false', 'log', '--no-walk=unsorted', '--stdin',
+                             '-M', '--raw', '-z', '--no-relative', '--no-ext-diff', '--diff-merges=first-parent',
+                             '--format=%x00%H%x00')
+      run(argv, input: shas.map { |sha| "#{sha}\n" }.join) { |stdout| read_renames(stdout, found) }
+      found
     end
 
     # Read one NUL-terminated field.
@@ -113,6 +122,50 @@ module Woods
       raise ReadError, 'unterminated history record' unless value.end_with?("\0")
 
       value.delete_suffix("\0")
+    end
+
+    private
+
+    def run(argv, input: nil, label: 'history')
+      Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
+        writer = Thread.new { stdin.write(input.to_s).then { stdin.close } }
+        stdout.binmode
+        drain = Thread.new { stderr.read(16_384) until stderr.eof? }
+        begin
+          yield stdout
+          raise ReadError, "#{label} command exited #{wait.value.exitstatus}" unless wait.value.success?
+        ensure
+          stdout.close
+          writer.join
+          drain.join
+        end
+      end
+    end
+
+    # Calls the block with each commit name and each raw record's status and
+    # paths.
+    def each_record(io)
+      commit = nil
+      while (field = self.class.token(io))
+        next if field.empty?
+        next commit = field if field.match?(SHA)
+
+        status = field[SCORED_RAW, 1]
+        raise ReadError, 'unexpected history record' unless status && commit
+
+        yield commit, status, record_paths(io, status)
+      end
+    end
+
+    def record_paths(io, status)
+      paths = Array.new(%w[R C].include?(status) ? 2 : 1) { self.class.token(io) }
+      raise ReadError, 'incomplete path record' if paths.any?(&:nil?)
+
+      paths
+    end
+
+    def read_renames(io, found)
+      each_record(io) { |commit, status, (from, to)| found[commit][to] = from if status == 'R' }
     end
   end
 end
