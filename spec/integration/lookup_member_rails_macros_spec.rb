@@ -83,6 +83,14 @@ RailsMacroOracle::FIXTURES = {
           :base
         end
 
+        def badge_caption
+          :base
+        end
+
+        def badge_subtitle
+          :base
+        end
+
         def self.notes
           :base
         end
@@ -167,6 +175,10 @@ RailsMacroOracle::FIXTURES = {
 
         scope :sealed, -> { all }
         private_class_method :sealed
+        DELEGATE_PREFIX = :badge
+        BADGE = :badge
+        delegate :caption, to: :badge, prefix: DELEGATE_PREFIX
+        delegate :subtitle, to: BADGE, prefix: true
       end
     end
   RUBY
@@ -578,6 +590,16 @@ RSpec.describe 'MCP lookup member answers for Rails macros', :booted_app do
     expect(data['statement']).to include('cannot tell')
     expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(['store_accessor', nil])
     expect(data['candidates'].last['inherited_from']).to include('identifier' => 'RailsMacroOracle::BaseRecord')
+  end
+
+  it 'cannot tell past a delegate whose prefix is not a literal, as Ruby calls the delegate' do
+    %w[badge_caption badge_subtitle].each do |name|
+      data = answer("RailsMacroOracle::Widget##{name}")
+
+      expect(runtime("RailsMacroOracle::Widget##{name}")[:method].owner).to eq(RailsMacroOracle::Widget)
+      expect(data['statement']).to include('cannot tell'), name
+      expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(['delegate', nil])
+    end
   end
 
   # `scopes:` is not a literal, so the scope may or may not exist; its name is

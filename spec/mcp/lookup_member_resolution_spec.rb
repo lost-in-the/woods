@@ -92,6 +92,54 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
     expect(resolve(units, 'Child#call').chosen.unit['identifier']).to eq('Parent')
   end
 
+  # A name under an affix: a literal one exactly; an :unknown prefix nothing,
+  # or one or more characters then `_`; an :unknown suffix nothing, or `_`
+  # then one or more characters.
+  describe 'Macros.affixed?' do
+    {
+      ['glow', 'glow', :unknown, ''] => true,
+      ['lamp_glow', 'glow', :unknown, ''] => true,
+      ['glow_glow', 'glow', :unknown, ''] => true,
+      ['xglow', 'glow', :unknown, ''] => false,
+      ['_glow', 'glow', :unknown, ''] => false,
+      ['glow_on', 'glow', '', :unknown] => true,
+      ['glowon', 'glow', '', :unknown] => false,
+      ['glow_', 'glow', '', :unknown] => false,
+      ['a_glow_b', 'glow', :unknown, :unknown] => true,
+      ['glow', 'glow', :unknown, :unknown] => true,
+      ['aglow_b', 'glow', :unknown, :unknown] => false,
+      ['a_glowb', 'glow', :unknown, :unknown] => false,
+      %w[settings_tone_x tone settings_ _x] => true,
+      %w[settings_tone tone settings_ _x] => false,
+      ['paint_hue', 'hue', 'paint_', ''] => true,
+      ['paint_hue_x', 'hue', 'paint_', ''] => false,
+      ['paint_hue', 'hue', 'paint_', :unknown] => true,
+      ['x_paint_hue', 'hue', 'paint_', :unknown] => false,
+      ['hue_paint', 'hue', :unknown, '_paint'] => true,
+      ['lamp_glow', '', :unknown, ''] => false
+    }.each do |(name, base, prefix, suffix), expected|
+      it "is #{expected} for #{name.inspect} as #{prefix.inspect} + #{base.inspect} + #{suffix.inspect}" do
+        expect(described_class::Macros.affixed?(name, base, prefix, suffix)).to be(expected)
+      end
+    end
+
+    # CPU time of this thread, not wall time, as the method-effects scan is
+    # bounded: the work is linear in the name, not in its repetitions squared.
+    it 'stays linear on a long name that repeats the base' do
+      name = "#{'glow' * 40_000}x"
+      clock = Process::CLOCK_THREAD_CPUTIME_ID
+      started = Process.clock_gettime(clock)
+      affixes = [%i[unknown unknown], [:unknown, ''], ['lamp_', :unknown], ['', '_x']]
+      results = affixes.map do |prefix, suffix|
+        described_class::Macros.affixed?(name, 'glow', prefix, suffix)
+      end
+      elapsed = Process.clock_gettime(clock) - started
+
+      expect(results).to eq([false, false, false, false])
+      expect(elapsed).to be < 0.1
+    end
+  end
+
   describe Woods::MCP::LookupMember::Resolution::WrittenName do
     it 'is the identifier when a declaration in the source qualifies to it' do
       source = "class Outer\n  class Inner < Outer\n  end\nend\n"

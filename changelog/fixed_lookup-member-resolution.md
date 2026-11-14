@@ -38,3 +38,5 @@
   A `store_accessor` or `enum` option that is not a literal no longer hides the names the call may define: a
   superclass method such as `lamp_glow` under `prefix: SOME_CONSTANT` is a cannot-tell answer, not a confident one.
   A candidates answer no longer says "the definition above overrides" a farther definition.
+  A `delegate` whose prefix is not a literal no longer leaves a superclass's prefixed method as the confident
+  answer, and a plain-text lookup again says a method's file line is not mapped where it is not.

@@ -723,26 +723,49 @@ module Woods
           # base or ends with `_base`); an :unknown suffix likewise at the end.
           # Plain string comparison: +name+ is the caller's, so no pattern is
           # built from it or run over it.
+          #
+          # A literal affix fixes where the base can be, so it is checked once;
+          # only with both affixes unknown is each occurrence of the base read,
+          # by its boundary characters, without copying what stands around it.
           def affixed?(name, base, prefix, suffix)
             return false if base.empty?
+            return false unless prefix == :unknown || name.start_with?(prefix)
+            return false unless suffix == :unknown || name.end_with?(suffix)
+            return base_at?(name, base, prefix.length, prefix, suffix) unless prefix == :unknown
+            return base_at?(name, base, name.length - suffix.length - base.length, prefix, suffix) unless
+              suffix == :unknown
 
             from = 0
             while (at = name.index(base, from))
-              return true if affix_fits?(name[0...at], prefix, :end_with?) &&
-                             affix_fits?(name[(at + base.length)..], suffix, :start_with?)
+              return true if base_at?(name, base, at, prefix, suffix)
 
               from = at + 1
             end
             false
           end
 
-          # Whether +part+ (what stands before or after the base) is the affix:
-          # the literal itself, or for an :unknown one nothing, or a word
-          # joined to the base by `_`.
-          def affix_fits?(part, affix, joined)
-            return part == affix unless affix == :unknown
+          # Whether +base+ stands at +at+ in +name+ with the affixes around it.
+          def base_at?(name, base, at, prefix, suffix)
+            return false if at.negative? || name[at, base.length] != base
 
-            part.empty? || (part.length > 1 && part.public_send(joined, '_'))
+            head_fits?(name, at, prefix) && tail_fits?(name, at + base.length, suffix)
+          end
+
+          # A literal prefix ends exactly at +at+; an :unknown one is nothing,
+          # or one or more characters then `_`.
+          def head_fits?(name, at, prefix)
+            return at == prefix.length unless prefix == :unknown
+
+            at.zero? || (at > 1 && name[at - 1] == '_')
+          end
+
+          # A literal suffix starts exactly at +finish+; an :unknown one is
+          # nothing, or `_` then one or more characters.
+          def tail_fits?(name, finish, suffix)
+            rest = name.length - finish
+            return rest == suffix.length unless suffix == :unknown
+
+            rest.zero? || (rest > 1 && name[finish] == '_')
           end
 
           # '' for no affix; the store's name for `true`; the literal's;
@@ -811,11 +834,13 @@ module Woods
             names(arguments).map { |name| prefix ? "#{prefix}_#{name}" : name }
           end
 
-          # A `delegate` whose prefix is not a literal may define the name.
+          # A `delegate` whose prefix is not a literal (a constant, or `true`
+          # with a `to:` that is not one) may define each name as itself or
+          # under any prefix ({#affixed?}).
           def delegate_unknown(macro, node, name)
             return nil unless macro == 'delegate' && delegate_prefix(node) == :unknown
 
-            names(positional(node)).include?(name) ? :possible : nil
+            names(positional(node)).any? { |key| affixed?(name, key, :unknown, '') } ? :possible : nil
           end
 
           # @return [String, nil, :unknown] the prefix a `delegate` call adds

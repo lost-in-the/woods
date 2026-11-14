@@ -509,6 +509,8 @@ every `def` that carries the name as a literal positional argument:
   source: `attr`, `attr_reader`, `attr_writer` (`name=`), `attr_accessor` (both), `alias_method` and `alias` (the new
   name; `alias_of` names the old one), `define_method`, `delegate` (with `prefix: true` it defines `target_name`,
   with `prefix: :p` `p_name`), `def_delegator` (its alias argument, else its method) and `def_delegators`.
+  A `delegate` whose prefix is not a literal (a constant, or `true` with a `to:` that is not one) may define the
+  name itself or any name ending in `_name`.
   `visibility` is stated where Ruby fixes it: for `attr*` and `define_method`, the visibility in force where they
   are called; for `delegate`, public unless `private: true`; for `alias_method` and `alias`, that of the method
   they copy when its `def` comes earlier in the same body; for `attr*`, `define_method`, `delegate` and

@@ -602,6 +602,14 @@ LookupMemberOracle::FIXTURES = {
         def whisper
           :base
         end
+
+        def helper_relay_note
+          :base
+        end
+
+        def helper_relay_tip
+          :base
+        end
       end
     end
   RUBY
@@ -685,6 +693,10 @@ LookupMemberOracle::FIXTURES = {
 
         private delegate :wrapped, to: :helper
         private alias_method :wrapped_alias, :summary
+        DELEGATE_PREFIX = :helper
+        HELPER_NAME = :helper
+        delegate :relay_note, to: :helper, prefix: DELEGATE_PREFIX
+        delegate :relay_tip, to: HELPER_NAME, prefix: true
       end
     end
   RUBY
@@ -1008,7 +1020,8 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
       'LookupOracle::TracedRecord#trace_call', 'LookupOracle::OrphanRecord#tag_label',
       'LookupOracle::DirectRecord#link_target',
       'LookupOracle::LeafController#shared_name', 'LookupOracle::LeafController.finder_for',
-      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name relay])
+      *%w[MacroRecord MacroChild].product(%w[refresh archive alpha_name beta_name relay helper_relay_note
+                                             helper_relay_tip])
                                  .map { |owner, name| "LookupOracle::#{owner}##{name}" },
       *%w[MacroRecord MacroChild].map { |owner| "LookupOracle::#{owner}#fresh_only" }
     )
@@ -1387,6 +1400,18 @@ RSpec.describe 'MCP lookup member answers against the Ruby runtime' do
         expect(LookupOracle::MacroRecord.private_method_defined?(name)).to be(true), name
         expect(answer("LookupOracle::MacroRecord##{name}")['member']).to include('visibility' => 'private'), name
         expect(answer("LookupOracle::MacroChild##{name}")['member']).to include('visibility' => 'private'), name
+      end
+    end
+
+    # The prefix is not a literal (a constant, or `true` with a `to:` that is
+    # not one), so the call may define any name ending in `_relay_note`.
+    it 'cannot tell past a delegate whose prefix is not a literal, as Ruby calls the delegate' do
+      %w[helper_relay_note helper_relay_tip].each do |name|
+        data = answer("LookupOracle::MacroRecord##{name}")
+
+        expect(LookupOracle::MacroRecord.instance_method(name).owner).to eq(LookupOracle::MacroRecord)
+        expect(data['statement']).to include('cannot tell'), name
+        expect(data['candidates'].map { |candidate| candidate.dig('member', 'defined_by') }).to eq(['delegate', nil])
       end
     end
 
