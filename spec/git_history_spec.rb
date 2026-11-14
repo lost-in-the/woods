@@ -289,6 +289,70 @@ RSpec.describe Woods::GitHistory do
           expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true, commit_count: 1)
         end
 
+        describe 'a merge is followed only into a parent that holds the file' do
+          let(:other_body) { (1..40).map { |line| "other #{line}\n" }.join }
+
+          def merge_with_conflict(branch)
+            _output, status = Open3.capture2e('git', '-C', root, 'merge', '--no-ff', branch)
+            expect(status.success?).to be(false)
+          end
+
+          it 'marks a file a merge creates where a side branch once renamed an older file and deleted it' do
+            commit('root', { 'old.rb' => body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            rename('old.rb', 'fresh.rb', days_ago: 40)
+            git('rm', '-q', 'fresh.rb')
+            commit('delete on side', {}, days_ago: 30)
+            git('checkout', '-q', 'main')
+            commit('unrelated', { 'other.rb' => 'x' }, days_ago: 10)
+            git('merge', '--no-ff', '--no-commit', '-q', 'side')
+            commit('merge with a new file', { 'fresh.rb' => "class Fresh\n  def different; end\nend\n" })
+
+            expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true)
+          end
+
+          it 'follows a side branch that deleted the file and added it again before the merge' do
+            commit('root', { 'old.rb' => body, 'older.rb' => other_body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            rename('old.rb', 'fresh.rb', days_ago: 40)
+            git('rm', '-q', 'fresh.rb')
+            commit('delete on side', {}, days_ago: 30)
+            rename('older.rb', 'fresh.rb', days_ago: 20)
+            git('checkout', '-q', 'main')
+            git('rm', '-q', 'older.rb')
+            commit('delete on main', {}, days_ago: 15)
+            merge_with_conflict('side')
+            git('add', 'fresh.rb')
+            git('commit', '-qm', 'keep the side file')
+
+            expect(read('fresh.rb').fetch('fresh.rb')).not_to have_key(:added)
+          end
+
+          it 'follows the side parent when the first-parent chain deleted the file and the merge restores it' do
+            commit('root', { 'kept.rb' => body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            commit('edit on side', { 'kept.rb' => "#{body}line 41\n" }, days_ago: 30)
+            git('checkout', '-q', 'main')
+            git('rm', '-q', 'kept.rb')
+            commit('delete on main', {}, days_ago: 20)
+            merge_with_conflict('side')
+            git('add', 'kept.rb')
+            git('commit', '-qm', 'keep the side edit')
+
+            expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+          end
+        end
+
+        it "resolves a source deleted and recreated on the rename's first-parent chain to the recreation" do
+          commit('create', { 'source.rb' => body }, days_ago: 800)
+          git('rm', '-q', 'source.rb')
+          commit('delete', {}, days_ago: 60)
+          commit('recreate', { 'source.rb' => "class Source\n  def fresh; end\nend\n" }, days_ago: 50)
+          rename('source.rb', 'destination.rb', days_ago: 20)
+
+          expect(read('destination.rb').fetch('destination.rb')).to include(added: true)
+        end
+
         it 'resolves two renames of one source on two branches by their own history' do
           commit('create', { 'source.rb' => body }, days_ago: 800)
           git('checkout', '-qb', 'side')

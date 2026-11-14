@@ -1784,8 +1784,9 @@ A file's creation is the newest commit on `HEAD`'s first-parent chain that adds 
 A file that no commit on that chain adds is not `:new`, whatever a side branch added.
 When that commit also deletes a path, it is read again with git's rename detection (`-M`, default similarity).
 A rename is followed to the commit that created its source on the rename's own first-parent chain.
-When that commit is a merge and not a rename, the file is followed into the merge's other parents.
-If none of them adds it inside the window, the merge may have made it, and the file keeps `:new`.
+When that commit is a merge and not a rename, the file is followed into another parent that holds it.
+A parent holds it when the nearest commit touching it on that parent's first-parent chain does not delete it.
+If no parent is shown to hold it, the merge may have made it, and the file keeps `:new`.
 Only history that reaches the rename counts: a branch that recreated the source elsewhere does not, even once merged.
 A source older than the window means the content is too: the file is classified by its counts.
 A source created inside the window keeps the file `:new`.

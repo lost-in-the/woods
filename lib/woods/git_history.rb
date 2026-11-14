@@ -37,7 +37,7 @@ module Woods
     def read(paths, recent_after:, revision: 'HEAD')
       requested = paths.to_h { |path| [@log.repository_prefix + path.b, path] }
       result = paths.to_h { |path| [path, {}] }
-      @walk = { parents: {}, deleting: Set.new, created: Hash.new { |hash, path| hash[path] = [] } }
+      @walk = { parents: {}, deleting: Set.new, events: Hash.new { |hash, path| hash[path] = {} } }
       @log.stream(format: FORMAT, since: '365 days ago', revision: revision) do |stdout|
         parse(stdout, requested, result, recent_after)
       end
@@ -65,7 +65,7 @@ module Woods
           commit = read_commit(io, field, recent_after)
         elsif field.match?(GitLog::RAW)
           @walk[:deleting] << commit[:sha] if commit && field.end_with?('D')
-          record_path(io, requested, result, commit, added: field.end_with?('A'))
+          record_path(io, requested, result, commit, status: field[-1])
         else
           raise ReadError, 'unexpected history record'
         end
@@ -82,13 +82,14 @@ module Woods
         date: date, message: message.force_encoding(Encoding::UTF_8), recent: Time.iso8601(date) > recent_after }
     end
 
-    def record_path(io, requested, result, commit, added:)
+    def record_path(io, requested, result, commit, status:)
       path = token(io)
       raise ReadError, 'incomplete path record' unless commit && path
 
-      # Every creation in the window, by repository path: where a file and a
-      # renamed file's source came from (see #unmark_renamed).
-      @walk[:created][path] << commit[:sha] if added
+      # Every event in the window, by repository path: where a file and a
+      # renamed file's source came from, and whether a merge's parent holds
+      # the file (see #unmark_renamed).
+      @walk[:events][path][commit[:sha]] = status
       relative = requested[path]
       return unless relative
 
@@ -96,7 +97,7 @@ module Woods
       # The commit that created the file is inside the window: the file is
       # new, not merely quiet. Without it, a file with few commits in the
       # window is indistinguishable from one written years ago.
-      result[relative][:added] = true if added
+      result[relative][:added] = true if status == 'A'
     end
 
     # `added` means the file's content first appeared inside the window. Each
@@ -110,7 +111,7 @@ module Woods
     def unmark_renamed(result, requested)
       head = @walk[:parents].each_key.first # git prints the walked revision first
       pending = requested.each_with_object({}) do |(path, relative), found|
-        step(result, relative, creation_on_chain(path, [head]), path, found) if result[relative][:added]
+        step(result, relative, chains.creation(path, head), path, found) if result[relative][:added]
       end
       RENAME_DEPTH.times do
         break if pending.empty?
@@ -127,13 +128,15 @@ module Woods
     def follow_back(pending, result)
       renames = @log.renames(pending.values.map(&:first).select { |sha| @walk[:deleting].include?(sha) }.uniq)
       pending.each_with_object({}) do |(relative, (sha, path)), following|
+        first, *others = @walk[:parents].fetch(sha)
         if (source = renames[sha][path])
-          step(result, relative, creation_on_chain(source, @walk[:parents].fetch(sha).first(1)), source, following)
-        # Only a rename's source is known to exist in its parent. A merge whose
-        # other parents add the file nowhere may have made it itself, and a
-        # commit with one parent did: both keep the mark.
-        elsif (creation = creation_on_chain(path, @walk[:parents].fetch(sha).drop(1)))
-          step(result, relative, creation, path, following)
+          step(result, relative, chains.creation(source, first), source, following)
+        # A rename's source is known to be in its first parent; a merge is
+        # followed only into a parent shown to hold the file. A merge with
+        # none may have made the file itself, and a commit with one parent
+        # did: both keep the mark.
+        elsif (holder = others.find { |parent| chains.holds?(path, parent) })
+          step(result, relative, chains.creation(path, holder), path, following)
         end
       end
     end
@@ -148,11 +151,8 @@ module Woods
       @walk[:deleting].include?(sha) || @walk[:parents].fetch(sha).size > 1
     end
 
-    # @return [String, nil] the newest commit inside the window that adds
-    #   +path+ on the first-parent chain of one of +heads+ (the head included)
-    def creation_on_chain(path, heads)
-      candidates = @walk[:created].fetch(path, nil)
-      candidates && (@walk[:chains] ||= Chains.new(@walk[:parents])).newest(candidates, heads)
+    def chains
+      @walk[:chains] ||= Chains.new(@walk[:parents], @walk[:events])
     end
 
     def record(data, commit)
@@ -165,7 +165,8 @@ module Woods
       (data[:contributors] ||= Hash.new(0))[commit[:author]] += 1
     end
 
-    # The first-parent chains of the walked commits, as entry and exit times
+    # The first-parent chains of the walked commits and the path events on
+    # them. Chains are kept as entry and exit times
     # of one depth-first pass over their first-parent forest. A commit is on
     # another's first-parent chain exactly when its span encloses the
     # other's, and the nearer of two such commits entered later, so no chain
@@ -173,28 +174,40 @@ module Woods
     # window, or cut off by a shallow clone or a graft) ends its chain.
     class Chains
       # @param parents [Hash{String => Array<String>}] each walked commit's parents
-      def initialize(parents)
+      # @param events [Hash{String => Hash{String => String}}] per repository
+      #   path, the status letter of each walked commit that touches it
+      def initialize(parents, events)
         children = Hash.new { |hash, sha| hash[sha] = [] }
         roots = []
         parents.each { |sha, (first, *)| (parents.key?(first) ? children[first] : roots) << sha }
         @spans = spans(roots, children)
+        @events = events
       end
 
-      # @param candidates [Array<String>] walked commits
-      # @param heads [Array<String>] tried in order
-      # @return [String, nil] the candidate nearest the first head whose
-      #   first-parent chain (the head included) holds one
-      def newest(candidates, heads)
-        heads.each do |head|
-          next unless (span = @spans[head])
+      # @return [String, nil] the newest commit that adds +path+ on the
+      #   first-parent chain of +head+ (the head included)
+      def creation(path, head)
+        nearest(path, head) { |status| status == 'A' }&.first
+      end
 
-          on_chain = candidates.select { |sha| encloses?(@spans.fetch(sha), span) }
-          return on_chain.max_by { |sha| @spans.fetch(sha).first } if on_chain.any?
-        end
-        nil
+      # Whether +path+ is in +head+'s tree: the nearest commit on its chain
+      # that touches the path does not delete it. A chain that never touches
+      # the path inside the window cannot tell, and answers false.
+      def holds?(path, head)
+        _sha, status = nearest(path, head) { true }
+        !status.nil? && status != 'D'
       end
 
       private
+
+      def nearest(path, head)
+        span = @spans[head]
+        touches = @events.fetch(path, nil)
+        return unless span && touches
+
+        on_chain = touches.select { |sha, status| yield(status) && encloses?(@spans.fetch(sha), span) }
+        on_chain.max_by { |sha, _status| @spans.fetch(sha).first }
+      end
 
       def encloses?(outer, inner)
         outer.first <= inner.first && inner.last <= outer.last
