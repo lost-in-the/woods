@@ -135,17 +135,299 @@ RSpec.describe Woods::GitHistory do
       expect(read('quiet.rb').fetch('quiet.rb')).to eq({})
     end
 
-    it 'marks a file recreated or renamed into place inside the window' do
-      commit('create', { 'gone.rb' => 'one', 'before.rb' => 'same' }, days_ago: 800)
+    it 'marks a file recreated at its name inside the window' do
+      commit('create', { 'gone.rb' => 'one' }, days_ago: 800)
       git('rm', '-q', 'gone.rb')
-      git('mv', 'before.rb', 'after.rb')
-      git('commit', '-qm', 'remove and rename')
+      git('commit', '-qm', 'remove')
       commit('recreate', { 'gone.rb' => 'two' })
 
-      facts = read('gone.rb', 'after.rb')
+      expect(read('gone.rb').fetch('gone.rb')).to include(added: true)
+    end
 
-      expect(facts.fetch('gone.rb')).to include(added: true)
-      expect(facts.fetch('after.rb')).to include(added: true)
+    describe 'a file renamed inside the window (its content first appeared where it came from)' do
+      let(:body) { (1..40).map { |line| "line #{line}\n" }.join }
+
+      it 'leaves a file moved unchanged from an older file unmarked' do
+        commit('create', { 'before.rb' => body }, days_ago: 800)
+        git('mv', 'before.rb', 'after.rb')
+        git('commit', '-qm', 'rename')
+
+        facts = read('after.rb').fetch('after.rb')
+        expect(facts).to include(commit_count: 1)
+        expect(facts).not_to have_key(:added)
+      end
+
+      it 'leaves a file moved and edited in the same commit unmarked' do
+        commit('create', { 'before.rb' => body }, days_ago: 800)
+        git('rm', '-q', 'before.rb')
+        commit('rename and edit', { 'after.rb' => "#{body}line 41\n" })
+
+        expect(read('after.rb').fetch('after.rb')).not_to have_key(:added)
+      end
+
+      it 'follows renames back to an older file' do
+        commit('create', { 'first.rb' => body }, days_ago: 800)
+        git('mv', 'first.rb', 'second.rb')
+        commit('rename once', {}, days_ago: 100)
+        git('mv', 'second.rb', 'third.rb')
+        commit('rename twice', {}, days_ago: 3)
+
+        expect(read('third.rb').fetch('third.rb')).not_to have_key(:added)
+      end
+
+      it 'marks a file created inside the window and renamed after' do
+        commit('create', { 'draft.rb' => body }, days_ago: 100)
+        git('mv', 'draft.rb', 'final.rb')
+        commit('rename', {}, days_ago: 3)
+
+        expect(read('final.rb').fetch('final.rb')).to include(added: true, commit_count: 1)
+      end
+
+      it 'marks a new file added in a commit that deletes an unrelated one' do
+        commit('create', { 'old.rb' => body }, days_ago: 800)
+        git('rm', '-q', 'old.rb')
+        commit('replace', { 'fresh.rb' => "class Fresh\n  def different; end\nend\n" })
+
+        expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true)
+      end
+
+      def rename(from, to, days_ago:)
+        git('mv', from, to)
+        commit("rename #{from}", {}, days_ago: days_ago)
+      end
+
+      def chain(length)
+        commit('create', { 'name_0.rb' => body }, days_ago: 800)
+        length.times { |step| rename("name_#{step}.rb", "name_#{step + 1}.rb", days_ago: 300 - step) }
+        "name_#{length}.rb"
+      end
+
+      it 'follows a chain of three renames back to an older file' do
+        name = chain(3)
+
+        expect(read(name).fetch(name)).not_to have_key(:added)
+      end
+
+      it 'follows as many renames as RENAME_DEPTH' do
+        name = chain(described_class::RENAME_DEPTH)
+
+        expect(read(name).fetch(name)).not_to have_key(:added)
+      end
+
+      it 'keeps the mark on a file renamed more times than RENAME_DEPTH' do
+        name = chain(described_class::RENAME_DEPTH + 1)
+
+        expect(read(name).fetch(name)).to include(added: true, commit_count: 1)
+      end
+
+      it 'keeps the mark on a file renamed from a copy of an older file (copies are not followed)' do
+        commit('create', { 'original.rb' => body }, days_ago: 800)
+        commit('copy', { 'copy.rb' => body }, days_ago: 100)
+        rename('copy.rb', 'destination.rb', days_ago: 3)
+
+        expect(read('destination.rb').fetch('destination.rb')).to include(added: true, commit_count: 1)
+      end
+
+      describe 'the source is looked up only in the history of the rename (its first parent)' do
+        it 'ignores a recreation of the source on a side branch merged with ours' do
+          commit('create', { 'source.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          git('rm', '-q', 'source.rb')
+          commit('delete on side', {}, days_ago: 200)
+          commit('recreate on side', { 'source.rb' => "class Source\n  def other; end\nend\n" }, days_ago: 150)
+          git('checkout', '-q', 'main')
+          rename('source.rb', 'destination.rb', days_ago: 100)
+          git('merge', '-s', 'ours', '--no-ff', '-qm', 'discard side', 'side')
+
+          expect(read('destination.rb').fetch('destination.rb')).not_to have_key(:added)
+        end
+
+        it 'ignores a creation of the destination on a side branch merged with ours' do
+          commit('create', { 'source.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          commit('create on side', { 'destination.rb' => "class Destination\nend\n" }, days_ago: 20)
+          git('rm', '-q', 'destination.rb')
+          commit('delete on side', {}, days_ago: 10)
+          git('checkout', '-q', 'main')
+          rename('source.rb', 'destination.rb', days_ago: 100)
+          git('merge', '-s', 'ours', '--no-ff', '-qm', 'discard side', 'side')
+
+          expect(read('destination.rb').fetch('destination.rb')).not_to have_key(:added)
+        end
+
+        it 'follows a rename a merge makes against its first parent' do
+          commit('create', { 'before.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          rename('before.rb', 'after.rb', days_ago: 30)
+          git('checkout', '-q', 'main')
+          commit('unrelated', { 'other.rb' => 'x' }, days_ago: 20)
+          git('merge', '--no-ff', '-qm', 'introduce side', 'side')
+
+          expect(read('after.rb').fetch('after.rb')).not_to have_key(:added)
+        end
+
+        it 'marks a file created on a side branch and merged' do
+          commit('root', { 'other.rb' => 'x' }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          commit('create on side', { 'fresh.rb' => body }, days_ago: 20)
+          git('checkout', '-q', 'main')
+          commit('unrelated', { 'other.rb' => 'y' }, days_ago: 10)
+          git('merge', '--no-ff', '-qm', 'introduce side', 'side')
+
+          expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true, commit_count: 2)
+        end
+
+        it 'marks a file a merge creates that neither parent holds' do
+          commit('root', { 'other.rb' => 'x' }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          commit('side change', { 'side.rb' => 'y' }, days_ago: 20)
+          git('checkout', '-q', 'main')
+          commit('unrelated', { 'other.rb' => 'y' }, days_ago: 10)
+          git('merge', '--no-ff', '--no-commit', '-q', 'side')
+          commit('merge with a new file', { 'fresh.rb' => body })
+
+          expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true, commit_count: 1)
+        end
+
+        describe 'a merge is followed only into a parent that holds the file' do
+          let(:other_body) { (1..40).map { |line| "other #{line}\n" }.join }
+
+          def merge_with_conflict(branch)
+            _output, status = Open3.capture2e('git', '-C', root, 'merge', '--no-ff', branch)
+            expect(status.success?).to be(false)
+          end
+
+          it 'marks a file a merge creates where a side branch once renamed an older file and deleted it' do
+            commit('root', { 'old.rb' => body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            rename('old.rb', 'fresh.rb', days_ago: 40)
+            git('rm', '-q', 'fresh.rb')
+            commit('delete on side', {}, days_ago: 30)
+            git('checkout', '-q', 'main')
+            commit('unrelated', { 'other.rb' => 'x' }, days_ago: 10)
+            git('merge', '--no-ff', '--no-commit', '-q', 'side')
+            commit('merge with a new file', { 'fresh.rb' => "class Fresh\n  def different; end\nend\n" })
+
+            expect(read('fresh.rb').fetch('fresh.rb')).to include(added: true)
+          end
+
+          it 'follows a side branch that deleted the file and added it again before the merge' do
+            commit('root', { 'old.rb' => body, 'older.rb' => other_body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            rename('old.rb', 'fresh.rb', days_ago: 40)
+            git('rm', '-q', 'fresh.rb')
+            commit('delete on side', {}, days_ago: 30)
+            rename('older.rb', 'fresh.rb', days_ago: 20)
+            git('checkout', '-q', 'main')
+            git('rm', '-q', 'older.rb')
+            commit('delete on main', {}, days_ago: 15)
+            merge_with_conflict('side')
+            git('add', 'fresh.rb')
+            git('commit', '-qm', 'keep the side file')
+
+            expect(read('fresh.rb').fetch('fresh.rb')).not_to have_key(:added)
+          end
+
+          it 'follows the side parent when the first-parent chain deleted the file and the merge restores it' do
+            commit('root', { 'kept.rb' => body }, days_ago: 800)
+            git('checkout', '-qb', 'side')
+            commit('edit on side', { 'kept.rb' => "#{body}line 41\n" }, days_ago: 30)
+            git('checkout', '-q', 'main')
+            git('rm', '-q', 'kept.rb')
+            commit('delete on main', {}, days_ago: 20)
+            merge_with_conflict('side')
+            git('add', 'kept.rb')
+            git('commit', '-qm', 'keep the side edit')
+
+            expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+          end
+        end
+
+        it "resolves a source deleted and recreated on the rename's first-parent chain to the recreation" do
+          commit('create', { 'source.rb' => body }, days_ago: 800)
+          git('rm', '-q', 'source.rb')
+          commit('delete', {}, days_ago: 60)
+          commit('recreate', { 'source.rb' => "class Source\n  def fresh; end\nend\n" }, days_ago: 50)
+          rename('source.rb', 'destination.rb', days_ago: 20)
+
+          expect(read('destination.rb').fetch('destination.rb')).to include(added: true)
+        end
+
+        it 'resolves two renames of one source on two branches by their own history' do
+          commit('create', { 'source.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          rename('source.rb', 'side.rb', days_ago: 30)
+          git('checkout', '-q', 'main')
+          git('rm', '-q', 'source.rb')
+          commit('delete', {}, days_ago: 60)
+          commit('recreate', { 'source.rb' => "class Source\n  def fresh; end\nend\n" }, days_ago: 50)
+          rename('source.rb', 'main.rb', days_ago: 20)
+          _output, status = Open3.capture2e('git', '-C', root, 'merge', '--no-ff', 'side')
+          expect(status.success?).to be(false)
+          git('add', 'side.rb')
+          git('commit', '-qm', 'keep both')
+
+          facts = read('side.rb', 'main.rb')
+          expect(facts.fetch('side.rb')).not_to have_key(:added)
+          expect(facts.fetch('main.rb')).to include(added: true)
+          expect(read('side.rb').fetch('side.rb')).to eq(facts.fetch('side.rb'))
+        end
+      end
+
+      describe "a file's creation is read on HEAD's first-parent chain" do
+        it 'leaves an older file unmarked when a side branch merged with ours recreated it' do
+          commit('create', { 'kept.rb' => body }, days_ago: 800)
+          git('checkout', '-qb', 'side')
+          git('rm', '-q', 'kept.rb')
+          commit('delete on side', {}, days_ago: 50)
+          commit('recreate on side', { 'kept.rb' => 'other' }, days_ago: 40)
+          git('checkout', '-q', 'main')
+          git('merge', '-s', 'ours', '--no-ff', '-qm', 'discard side', 'side')
+
+          expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+        end
+
+        it 'leaves an older file unmarked when a side branch merges it in and is merged back' do
+          commit('root', { 'other.rb' => 'x' }, days_ago: 900)
+          git('checkout', '-qb', 'side')
+          git('checkout', '-q', 'main')
+          commit('create', { 'kept.rb' => body }, days_ago: 800)
+          git('checkout', '-q', 'side')
+          commit('side change', { 'side.rb' => 'y' }, days_ago: 30)
+          git('merge', '--no-ff', '-qm', 'take main', 'main')
+          git('checkout', '-q', 'main')
+          git('merge', '--no-ff', '-qm', 'introduce side', 'side')
+
+          expect(read('kept.rb').fetch('kept.rb')).not_to have_key(:added)
+        end
+      end
+
+      describe 'a history whose older commits are missing' do
+        def build
+          commit('create', { 'first.rb' => body }, days_ago: 800)
+          rename('first.rb', 'second.rb', days_ago: 100)
+          rename('second.rb', 'third.rb', days_ago: 3)
+        end
+
+        it 'reads the oldest commit of a shallow clone as creating its files' do
+          build
+          shallow = Dir.mktmpdir('woods_git_shallow')
+          git('clone', '-q', '--depth', '2', "file://#{root}", shallow)
+
+          facts = described_class.new(root: shallow, logger: logger)
+                                 .read(['third.rb'], recent_after: Time.now - (90 * 86_400))
+          expect(facts.fetch('third.rb')).to include(added: true, commit_count: 1)
+        ensure
+          FileUtils.rm_rf(shallow) if shallow
+        end
+
+        it 'reads a commit grafted to have no parent as creating its files' do
+          build
+          git('replace', '--graft', git('rev-parse', 'HEAD~1'))
+
+          expect(read('third.rb').fetch('third.rb')).to include(added: true, commit_count: 1)
+        end
+      end
     end
   end
 
@@ -202,7 +484,7 @@ RSpec.describe Woods::GitHistory do
       commit('root', { 'sample.rb' => 'a' })
       allow(Open3).to receive(:capture3).and_return(["\n", '', double(success?: true)])
       stream = if partial
-                 "\0#{'a' * 40}\0Author\0#{Time.now.iso8601}\0subject\0\0" \
+                 "\0#{'a' * 40}\0#{'b' * 40}\0Author\0#{Time.now.iso8601}\0subject\0\0" \
                    "\n:100644 100644 a b M\0sample.rb\0"
                else
                  ''
