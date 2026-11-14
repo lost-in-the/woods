@@ -140,35 +140,48 @@ RSpec.describe Woods::MCP::LookupMember::Resolution do
       end
     end
 
-    # CPU time of this thread, not wall time, as the method-effects scan is
-    # bounded: the work is linear in the name, not in its repetitions squared.
-    it 'stays linear on a long name that repeats the base' do
-      name = "#{'glow' * 40_000}x"
+    # Growth, not a time limit: a slower runner, or coverage instrumentation,
+    # scales both sizes alike. A linear match takes about four times as long
+    # on four times the input; a quadratic one about sixteen times.
+    def cpu_seconds
       clock = Process::CLOCK_THREAD_CPUTIME_ID
-      started = Process.clock_gettime(clock)
-      affixes = [%i[unknown unknown], [:unknown, ''], ['lamp_', :unknown], ['', '_x']]
-      results = affixes.map do |prefix, suffix|
-        described_class::Macros.affixed?(name, 'glow', prefix, suffix)
-      end
-      elapsed = Process.clock_gettime(clock) - started
+      Array.new(3) do
+        started = Process.clock_gettime(clock)
+        yield
+        Process.clock_gettime(clock) - started
+      end.min
+    end
 
+    def expect_linear_growth(&work)
+      small = cpu_seconds { work.call(1) }
+      large = cpu_seconds { work.call(4) }
+
+      expect(large).to be < [small, 0.002].max * 10
+    end
+
+    it 'stays linear on a long name that repeats the base' do
+      affixes = [%i[unknown unknown], [:unknown, ''], ['lamp_', :unknown], ['', '_x']]
+      results = nil
+
+      expect_linear_growth do |scale|
+        name = "#{'glow' * (40_000 * scale)}x"
+        results = affixes.map { |prefix, suffix| described_class::Macros.affixed?(name, 'glow', prefix, suffix) }
+      end
       expect(results).to eq([false, false, false, false])
-      expect(elapsed).to be < 0.1
     end
 
     it 'stays linear on a long base that overlaps itself all along the name' do
-      base = 'a' * 20_000
-      name = 'a' * 60_000
-      joined = "#{'a_' * 30_000}a"
-      clock = Process::CLOCK_THREAD_CPUTIME_ID
-      started = Process.clock_gettime(clock)
-      results = [described_class::Macros.affixed?(name, base, :unknown, :unknown),
-                 described_class::Macros.affixed?("#{name}x", base, :unknown, ''),
-                 described_class::Macros.affixed?(joined, 'a_' * 10_000, :unknown, :unknown)]
-      elapsed = Process.clock_gettime(clock) - started
+      results = nil
 
+      expect_linear_growth do |scale|
+        base = 'a' * (20_000 * scale)
+        name = 'a' * (60_000 * scale)
+        joined = "#{'a_' * (30_000 * scale)}a"
+        results = [described_class::Macros.affixed?(name, base, :unknown, :unknown),
+                   described_class::Macros.affixed?("#{name}x", base, :unknown, ''),
+                   described_class::Macros.affixed?(joined, 'a_' * (10_000 * scale), :unknown, :unknown)]
+      end
       expect(results).to eq([false, false, false])
-      expect(elapsed).to be < 0.1
     end
   end
 
