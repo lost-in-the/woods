@@ -149,6 +149,8 @@ module Woods
         end
         verify_regular_path(file, path)
         file
+      rescue Errno::ELOOP, Errno::EISDIR
+        raise Unavailable, "#{name} is not a regular file; #{SIDECAR_STEP}"
       rescue StandardError
         file&.close
         raise
@@ -184,8 +186,6 @@ module Woods
         acquire(create: false)
       rescue Errno::ENOENT
         raise Unavailable, "owner lease is missing; #{MANUAL_STEP}"
-      rescue Errno::ELOOP, Errno::EISDIR
-        raise Unavailable, "owner lease is not a regular file; #{SIDECAR_STEP}"
       end
 
       def read_selected_claim

@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'tmpdir'
 require 'timeout'
 require 'stringio'
+require 'logger'
 require 'woods/watch/daemon'
 require 'woods/watch/cli'
 
@@ -187,6 +188,44 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       expect(messages.string).to include(%(follow "#{section}" in docs/WATCH_DAEMON.md))
       expect_existing_doc_section(messages.string)
       expect(messages.string).not_to include(@record.fetch('token'))
+    end
+  end
+
+  describe 'a sidecar that is not a regular file (#1078)' do
+    let(:section) { 'Starting over in a new output directory' }
+
+    def damage_sidecar(suffix, form)
+      path = "#{@claim}#{suffix}"
+      File.unlink(path) if File.file?(path)
+      form == :symlink ? File.symlink(File.join(@index, 'elsewhere'), path) : Dir.mkdir(path)
+    end
+
+    %i[symlink directory].each do |form|
+      it "sends recovery past a #{form} coordination lock to a new output directory" do
+        write_v1_claim
+        damage_sidecar('.lock', form)
+        bytes = File.binread(@claim)
+
+        expect(recover).to eq(2)
+        expect(messages.string).to include('never replace a sidecar while any writer may exist')
+        expect(messages.string).to include(%(follow "#{section}" in docs/WATCH_DAEMON.md))
+        expect_existing_doc_section(messages.string)
+        expect(File.binread(@claim)).to eq(bytes)
+      end
+
+      %w[.lock .lease].each do |suffix|
+        it "names the same section when a starting daemon meets a #{form} #{suffix}" do
+          damage_sidecar(suffix, form)
+          log = StringIO.new
+          daemon = Woods::Watch::Daemon.new(root: @index, output_dir: @index, conservative_claims: true,
+                                            logger: Logger.new(log))
+
+          expect(daemon.send(:claim_startup?)).to be(false)
+          expect(log.string).to include(%(follow "#{section}" in docs/WATCH_DAEMON.md))
+          expect_existing_doc_section(log.string)
+          expect(File.exist?(@claim)).to be(false)
+        end
+      end
     end
   end
 
