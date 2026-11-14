@@ -2,6 +2,7 @@
 
 require 'spec_helper'
 require 'tmpdir'
+require 'shellwords'
 require 'woods/watch/claim_lease'
 
 RSpec.describe Woods::Watch::ClaimLease do
@@ -73,6 +74,15 @@ RSpec.describe Woods::Watch::ClaimLease do
     id = acquired.fields[:lease_id]
 
     expect(File.binread(@lease_path)).to eq("#{id}\n")
+  end
+
+  it 'prints a recovery command that a shell splits back into the exact index' do
+    index = '/tmp/my app/woods'
+    command = described_class.recovery_command(index)
+
+    expect(command).to end_with("--claim-token <token from #{index}/watch_claim.json>")
+    pasted = Shellwords.split(command.sub(/<token from .*>\z/, 'c' * 64))
+    expect(pasted).to eq(['woods-watch', '--recover-claim', index, '--claim-token', 'c' * 64])
   end
 
   it 'reads the id through the descriptor that holds the lock' do

@@ -160,8 +160,14 @@ RSpec.describe 'Explicit managed watch claim recovery' do
     expect(JSON.parse(File.read(@claim))).to eq(successor)
   end
 
-  %i[missing symlink fifo replaced].each do |damage|
-    it "refuses a #{damage} lease without replacing the inode or clearing the claim" do
+  # Moving the claim aside lets startup recreate a missing lease or rewrite a
+  # replaced one's id; a lease that is not a regular file blocks startup too.
+  {
+    missing: 'Manual claim recovery', replaced: 'Manual claim recovery',
+    symlink: 'Starting over in a new output directory', fifo: 'Starting over in a new output directory',
+    directory: 'Starting over in a new output directory'
+  }.each do |damage, section|
+    it "refuses a #{damage} lease without replacing the inode or clearing the claim, pointing to #{section}" do
       start_child
       stop_child
       lease = "#{@claim}.lease"
@@ -170,6 +176,7 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       case damage
       when :symlink then File.symlink(saved, lease)
       when :fifo then File.mkfifo(lease, 0o600)
+      when :directory then Dir.mkdir(lease)
       when :replaced then File.write(lease, '')
       end
       bytes = File.binread(@claim)
@@ -177,6 +184,7 @@ RSpec.describe 'Explicit managed watch claim recovery' do
       expect(File.binread(@claim)).to eq(bytes)
       expect(File.exist?(lease)).to be(false) if damage == :missing
       expect(messages.string).to include('confirm every watcher writing this index has stopped')
+      expect(messages.string).to include(%(follow "#{section}" in docs/WATCH_DAEMON.md))
       expect_existing_doc_section(messages.string)
       expect(messages.string).not_to include(@record.fetch('token'))
     end

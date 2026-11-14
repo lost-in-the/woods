@@ -264,8 +264,12 @@ cleanup; it does not reset watcher ownership.
 
 `--recover-claim` refuses when it cannot prove which lease the claim names.
 That covers a legacy claim (no `lease_version`, written before lifetime leases), a version 2 claim whose lease was
-replaced (its `lease_id` differs or is gone), a missing lease, and a sidecar that is not a regular file.
-Each of those refusals sends you here. Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
+replaced (its `lease_id` differs or is gone), and a missing lease.
+Each of those refusals sends you here.
+A sidecar that is not a regular file (a symlink, directory or FIFO) also blocks every later start, so its refusal
+sends you to
+[Starting over in a new output directory](#starting-over-in-a-new-output-directory) instead.
+Upgrading Woods alone does not rewrite a live or abandoned legacy claim.
 
 1. Confirm that every watcher writing this index has stopped, on every host and in every container that mounts it.
    Stop each one through its process manager.
@@ -275,9 +279,19 @@ Each of those refusals sends you here. Upgrading Woods alone does not rewrite a 
    Never unlink, replace or recreate those sidecars.
 3. Restart the normal Foreman/Puma/external owner and verify startup reconciliation.
 
-If you cannot confirm step 1, do not move the claim.
-Instead choose a new empty output directory, configure exactly one writer and its readers to use it, and run a fresh
-full extraction.
+If you cannot confirm step 1, do not move the claim: start over in a new output directory instead.
+
+#### Starting over in a new output directory
+
+Use this when ownership cannot be confirmed, or when `watch_claim.json.lease` or `watch_claim.json.lock` is not a
+regular file.
+Never replace, unlink or recreate a sidecar while any writer may exist: a writer still holding the old one would
+keep its lock while a new watcher took a lock on the replacement.
+
+1. Choose a new empty output directory.
+2. Configure exactly one writer and its readers to use it (`WOODS_OUTPUT` where the default does not apply).
+3. Run a fresh full extraction, then restart the normal owner.
+
 Keep the old index until the replacement is verified.
 
 Daemon liveness, completed startup reconciliation, and source freshness remain

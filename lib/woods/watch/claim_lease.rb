@@ -2,6 +2,7 @@
 
 require 'json'
 require 'securerandom'
+require 'shellwords'
 
 module Woods
   module Watch
@@ -22,6 +23,10 @@ module Woods
       MANUAL_RECOVERY = 'Manual claim recovery'
       MANUAL_STEP = 'confirm every watcher writing this index has stopped (check each host and container), ' \
                     "then follow \"#{MANUAL_RECOVERY}\" in docs/WATCH_DAEMON.md".freeze
+      NEW_DIRECTORY = 'Starting over in a new output directory'
+      SIDECAR_STEP = 'confirm every watcher writing this index has stopped (check each host and container), ' \
+                     'never replace a sidecar while any writer may exist, ' \
+                     "then follow \"#{NEW_DIRECTORY}\" in docs/WATCH_DAEMON.md".freeze
 
       attr_reader :token
 
@@ -29,7 +34,7 @@ module Woods
       # @return [String] the recovery command, naming where the token lives without printing it
       def self.recovery_command(index)
         claim = File.join(index, CLAIM)
-        "woods-watch --recover-claim #{index} --claim-token <token from #{claim}>"
+        "woods-watch --recover-claim #{Shellwords.escape(index)} --claim-token <token from #{claim}>"
       end
 
       # @param index [String] index directory
@@ -151,12 +156,13 @@ module Woods
 
       # @param file [File] opened sidecar
       # @param path [String] unchanged regular path on disk
-      def verify_regular_path(file, path)
+      # @param step [String] where to send the reader: a bad sidecar blocks startup, a bad claim does not
+      def verify_regular_path(file, path, step: SIDECAR_STEP)
         opened = file.stat
         current = File.lstat(path)
         return if opened.file? && current.file? && [opened.dev, opened.ino] == [current.dev, current.ino]
 
-        raise Unavailable, "claim sidecar must be an unchanged regular file; #{MANUAL_STEP}"
+        raise Unavailable, "claim sidecar must be an unchanged regular file; #{step}"
       end
 
       # @return [String, nil] the complete id read through the locked descriptor
@@ -176,8 +182,10 @@ module Woods
 
       def acquire_recovery_lease
         acquire(create: false)
-      rescue Errno::ENOENT, Errno::ELOOP
-        raise Unavailable, "owner lease is missing or not a regular file; #{MANUAL_STEP}"
+      rescue Errno::ENOENT
+        raise Unavailable, "owner lease is missing; #{MANUAL_STEP}"
+      rescue Errno::ELOOP, Errno::EISDIR
+        raise Unavailable, "owner lease is not a regular file; #{SIDECAR_STEP}"
       end
 
       def read_selected_claim
@@ -193,7 +201,7 @@ module Woods
         flags = File::RDONLY | File::NONBLOCK
         flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
         File.open(path, flags) do |file|
-          verify_regular_path(file, path)
+          verify_regular_path(file, path, step: MANUAL_STEP)
           bytes = file.read(MAX_BYTES + 1)
           raise Unavailable, "claim exceeds the recovery size limit; #{MANUAL_STEP}" if bytes.bytesize > MAX_BYTES
 
