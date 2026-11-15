@@ -796,7 +796,7 @@ namespace :woods do
     end
   end
 
-  desc 'Start the embedded console MCP server (stdio transport)'
+  desc 'Deprecated, removed in Woods 3.0. Start the embedded console MCP server (stdio transport)'
   task :console do
     # Capture stdout before Rails boot to keep MCP protocol clean.
     # Rails boot emits OpenTelemetry, gem warnings, etc. to stdout —

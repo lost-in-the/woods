@@ -8,7 +8,8 @@ extraction (one extractor per `lib/woods/extractors/*_extractor.rb`,
 counted in `.Codex/release-v2/surface-inventory.json`, plus supporting utilities),
 retrieval (query classification, hybrid search, RRF ranking), storage (pgvector, Qdrant, SQLite adapters),
 embedding (OpenAI, Ollama),
-two MCP servers (32-tool index server, 16 always-on + 16 wiring-conditional; 31-tool console server),
+two MCP servers (32-tool index server, 16 always-on + 16 wiring-conditional;
+31-tool console server, deprecated in 2.2.0 and removed in 3.0),
 AST analysis, flow extraction, temporal snapshots, Markdown export (plain or Obsidian flavor)
 and deprecated Notion + Unblocked sync, and evaluation harness.
 
@@ -53,7 +54,7 @@ bundle exec rake woods:evaluate          # Score retrieval against a ground-trut
 bundle exec rake "woods:evaluate:baseline[grep]" # Score a naive baseline for comparison
 bundle exec rake "woods:flow[entry]"     # Execution flow document for an entry point
 bundle exec rake "woods:diagram[kind,id]" # Mermaid for one unit (neighbourhood, schema, lifecycle, impact)
-bundle exec rake woods:console           # Embedded Console MCP server (stdio)
+bundle exec rake woods:console           # Embedded Console MCP server (stdio); deprecated, removed in 3.0
 bundle exec rake woods:notion_sync       # Deprecated: sync models/columns to Notion (use woods:markdown)
 bundle exec rake woods:unblocked_sync    # Deprecated: sync to an Unblocked collection (use woods:markdown)
 bundle exec rake woods:markdown          # Export plain Markdown notes (WOODS_MARKDOWN_OBSIDIAN=1 for Obsidian flavor)
@@ -226,7 +227,7 @@ exe/
 ├── woods-mcp                            # MCP Index Server executable (stdio)
 ├── woods-mcp-start                      # Preflight wrapper: validates, then execs woods-mcp (no restart loop)
 ├── woods-mcp-http                       # MCP Index Server executable (HTTP/Rack)
-└── woods-console-mcp                    # Console MCP Server executable
+└── woods-console-mcp                    # Console MCP Server executable (deprecated)
 ```
 
 ## Key Design Decisions
@@ -419,6 +420,8 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
 
 ### Console server
 
+- The Console is deprecated in 2.2.0 and removed in 3.0 (#1098). Add no Console features; security fixes still land.
+  Every start path prints one notice per process through `Woods::Console.warn_deprecated`, on stderr only.
 - The console needs a booted Rails environment; it validates models against `ActiveRecord::Base.descendants` at startup.
 - `SafeContext` wraps every request in a rolled-back transaction. Writes are silently discarded. On MySQL the statement timeout is session-scoped and is restored in `ensure`.
 - `SqlValidator` rejects DML/DDL at the string level. Do not bypass it.

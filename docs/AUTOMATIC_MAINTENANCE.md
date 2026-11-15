@@ -54,7 +54,10 @@ flowchart LR
   Index -->|Read on subsequent calls| Reader
 ```
 
-Console MCP is a separate, optional live-data tool. Its HTTP transport can be
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+In an existing setup, Console MCP is a separate live-data tool.
+Its HTTP transport can be
 mounted in Rails when enabled, but that does not maintain the structural index.
 See [the server distinction](MCP_SERVERS.md#choose-a-server).
 

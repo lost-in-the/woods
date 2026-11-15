@@ -5,7 +5,13 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 
 # Woods setup
 
-Install a structural Index Server first. Embeddings and Console MCP are separate opt-ins.
+Install a structural Index Server first. Embeddings are a separate opt-in.
+Do not offer Console MCP for a new setup, even when the user needs live data.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+For a runtime observation, suggest `bin/rails runner` or a focused spec.
+For live data, suggest an agent owned by the application, with its own limited permissions.
+Keep an existing Console configuration working during an upgrade.
 
 For builds containing #590 (included in Woods 2.1), managed preflight retains
 intended bundle settings, project receipts omit the unused user config directory,
@@ -255,6 +261,7 @@ rebuilds. See the [source evidence limits](https://github.com/lost-in-the/woods/
 For pgvector, match the provider output and migration dimensions within 1–2,000. Default `text-embedding-3-large` output (3,072) needs an explicit smaller provider width or another backend; never silently truncate vectors. Early adapter/generator refusal is included in Woods `2.0.0`, so check the installed revision. See the [dimension contract](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/CONFIGURATION_REFERENCE.md#pgvector-postgresql).
 
 Require explicit approval before adding Ollama/OpenAI, pgvector/Qdrant, secrets, Console MCP/live-data access, HTTP transport, or purge overrides. The `:local` preset avoids cloud keys but requires the `sqlite3` gem, an installed/running Ollama service, and a pulled model (`ollama pull nomic-embed-text` by default); `:shared_filesystem` avoids sqlite3 but still uses Ollama. Do not claim that installing a tokenizer gem establishes exact counts for every model. Woods 2.1 splits complete prefixed inputs and requests Ollama `truncate: false`; consult the installed embedding guide and its model-specific limits.
+For Console MCP, approval covers changes to an existing setup only; never add the Console to a new setup.
 
 ## Handoff
 

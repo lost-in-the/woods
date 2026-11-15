@@ -199,6 +199,9 @@ There is no reliable application-independent estimate. Rails boot/eager load, fr
 ### What's the difference between the Index Server and the Console Server?
 
 The Index Server reads pre-extracted JSON from disk and does not require Rails.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 The Console Server connects to a live Rails application and registers 9
 read-only model/schema tools by default, with `console_sql` and `console_query`
 available through explicit read-tool configuration.
@@ -278,6 +281,10 @@ Verify the active v2 generation with `docker compose exec app bundle exec rake w
 ---
 
 ### How do I configure the Console Server with Docker?
+
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+This answer is for existing setups.
 
 First enable the master `console_mcp_enabled` switch after reviewing the
 live-data trust boundary. For stdio-only use, explicitly set

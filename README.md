@@ -168,11 +168,16 @@ Incremental cost depends on the affected code and relationships; broad changes c
 | Purpose | Inspect extracted code context | Query live Rails models and schema |
 | Reads | Published index files | A booted application and its database |
 | Packaged tools | 16; retrieval usable when configured | 9; 11 with embedded read tools enabled |
-| Setup | The workflow above | Optional, disabled by default |
+| Setup | The workflow above | Deprecated, removed in Woods 3.0; disabled by default |
 
 Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings sends the embedded content to that provider. MCP responses also contain application source, which your client may send to its model provider even when Woods uses lexical retrieval or local embeddings.
 
-The optional Console Server can access live data. Review its [setup and security model](docs/CONSOLE_MCP_SETUP.md) before enabling it. Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
+The Console Server is deprecated and will be removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](docs/CONSOLE_MCP_SETUP.md#what-to-use-instead).
+An existing Console setup can still access live data.
+Review its [setup and security model](docs/CONSOLE_MCP_SETUP.md) before you rely on it.
+Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 
 ## What the index can and cannot establish
 
