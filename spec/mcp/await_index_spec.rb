@@ -3,10 +3,12 @@
 require 'spec_helper'
 require 'fileutils'
 require 'json'
+require 'open3'
 require 'tmpdir'
 require 'mcp'
 require 'woods'
 require 'woods/mcp/server'
+require_relative '../support/quiet_git'
 
 # A server started with `await_index: true` before any index exists: it
 # completes the handshake, registers its tools, answers a retryable
@@ -175,6 +177,60 @@ RSpec.describe 'Index MCP server awaiting its first index' do
 
     expect(initialize_result(server).fetch('instructions')).not_to include('No index was published')
     expect(call(server, 'lookup', identifier: 'Post').dig('result', 'isError')).to be(false)
+  end
+
+  describe 'in a fresh linked worktree of an indexed repository' do
+    def git(dir, *args)
+      output, outcome = Open3.capture2e('git', '-C', dir, *args)
+      raise "git #{args.join(' ')} failed: #{output}" unless outcome.success?
+
+      output
+    end
+
+    before do
+      @main = File.join(@base, 'main')
+      @topic = File.join(@base, 'topic')
+      git(@base, 'init', '-q', '-b', 'main', @main)
+      QuietGit.configure(@main)
+      File.write(File.join(@main, 'README.md'), "hi\n")
+      git(@main, 'add', 'README.md')
+      git(@main, '-c', 'user.name=Spec', '-c', 'user.email=spec@example.com', '-c', 'commit.gpgsign=false',
+          'commit', '-q', '-m', 'init')
+      git(@main, 'worktree', 'add', '-q', '-b', 'topic', @topic)
+      main_index = File.join(@main, 'tmp', 'woods')
+      FileUtils.mkdir_p(File.join(main_index, 'payloads'))
+      FileUtils.cp_r(fixture_dir, File.join(main_index, 'payloads', 'gen-1'))
+      File.write(File.join(main_index, 'generation.json'),
+                 JSON.generate(number: 1, token: 't1', updated_at: '2026-11-01T10:00:00Z',
+                               payload: 'payloads/gen-1'))
+      @index = File.join(@topic, 'tmp', 'woods')
+    end
+
+    it 'explains the wait in woods_status with every worktrees mode' do
+      server = Dir.chdir(@topic) { build(await_index: true) }
+
+      %w[summary list none].each do |mode|
+        result = Dir.chdir(@topic) { call(server, 'woods_status', worktrees: mode).fetch('result') }
+
+        expect(result['isError']).to be(false), mode
+        report = JSON.parse(result.dig('content', 0, 'text'))
+        expect(report.dig('index', 'state')).to eq('awaiting_index'), mode
+        expect(report.dig('identity', 'client_matches')).to be(true), mode
+        expect(report.dig('identity', 'warnings')).to eq([]), mode
+      end
+    end
+
+    it 'refuses a routed root while the index directory does not exist, and routes once it does' do
+      server = Dir.chdir(@topic) { build(await_index: true) }
+
+      refused = Dir.chdir(@topic) { call(server, 'woods_status', root: @main) }
+      FileUtils.mkdir_p(@index)
+      routed = Dir.chdir(@topic) { call(server, 'woods_status', root: @main).fetch('result') }
+
+      expect(refused.dig('result', 'content', 0, 'text')).to include('Routing is unavailable (no_repository)')
+      expect(routed['isError']).to be(false), routed.dig('content', 0, 'text')
+      expect(JSON.parse(routed.dig('content', 0, 'text'))).to include('ready' => true)
+    end
   end
 
   describe 'the launcher-written .bootstrap.json' do
