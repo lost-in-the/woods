@@ -124,8 +124,10 @@ module Woods
       [revision, status.nil? ? nil : !status.empty?]
     end
 
+    # `--no-optional-locks`, as in {GitCommand}: a path gem's checkout is one
+    # a developer works in, and the status refresh must not take its index lock.
     def git(*args)
-      output, _errors, status = Open3.capture3(GIT_ENV, 'git', '-C', @root, *args)
+      output, _errors, status = Open3.capture3(GIT_ENV, 'git', '--no-optional-locks', '-C', @root, *args)
       status.success? ? output : nil
     rescue SystemCallError
       nil

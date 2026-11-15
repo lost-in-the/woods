@@ -148,7 +148,8 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     allow(Rails).to receive(:root).and_return(shallow)
     allow(Open3).to receive(:capture3).and_call_original
     expect(Open3).to receive(:capture3)
-      .with('git', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository').once.and_call_original
+      .with('git', '--no-optional-locks', '-C', shallow.to_s, 'rev-parse', '--is-shallow-repository')
+      .once.and_call_original
     logger = Rails.logger
     expect(logger).to receive(:warn).once.with(/shallow.*git fetch --unshallow.*fetch-depth: 0/)
     expect(Woods::GitHistory).not_to receive(:new)
@@ -167,7 +168,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
   it 'omits enrichment when repository depth cannot be verified' do
     allow(Open3).to receive(:capture3).and_call_original
     allow(Open3).to receive(:capture3)
-      .with('git', '-C', root.to_s, 'rev-parse', '--is-shallow-repository')
+      .with('git', '--no-optional-locks', '-C', root.to_s, 'rev-parse', '--is-shallow-repository')
       .and_return(['', 'repository inaccessible', double(success?: false)])
     expect(Rails.logger).to receive(:warn).once.with(/repository depth could not be verified/)
 
