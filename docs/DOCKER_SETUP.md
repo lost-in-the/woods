@@ -78,14 +78,26 @@ docker compose exec app bundle exec rake woods:extract
 # Incremental (changed files only)
 docker compose exec app bundle exec rake woods:incremental
 
-# Automatic structural updates while the container is running
+# Raw watcher task; run it under one owner, as described below
 docker compose exec app bundle exec rake woods:watch
 
 # Framework/gem sources only
 docker compose exec app bundle exec rake woods:extract_framework
 ```
 
-Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
+Run the watcher under one owner, not as a one-off terminal command.
+If the container runs `bin/rails server`,
+the Puma mode of the [watcher generator](WATCH_DAEMON.md#managed-development-startup) works inside it.
+Puma in the container then starts the watcher, and no separate service is needed.
+Otherwise run it as its own development service or process-manager entry.
+
+Docker Desktop bind mounts may not deliver reliable native filesystem events, so the watcher polls by default
+inside a container (it looks for `/.dockerenv` or `/run/.containerenv`) and whenever the `listen` gem is absent.
+Its startup log names the choice:
+`[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
+Set `WOODS_WATCH_POLL=1` when it chose native events and edits made on the host do not reach it.
+The watcher updates structural generations automatically.
+Semantic vectors still require `woods:embed_incremental`.
 
 Use the application's actual Rails task entrypoint. If its root `Rakefile` wraps
 Compose, the container may need `bundle exec rails woods:watch`. Keep the raw
