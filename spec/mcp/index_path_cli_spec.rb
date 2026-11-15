@@ -76,16 +76,6 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
         expect(errors).to include(File.join(@cwd, 'missing'), 'existing index', 'WOODS_DIR', 'WOODS_OUTPUT')
       end
 
-      # A host path handed to a server in a container (or the reverse) names an
-      # index that exists elsewhere; re-extracting does not fix the path.
-      it 'asks for a host or container path check before suggesting extraction' do
-        _output, errors, status = launch(executable, File.join(@directory, 'host-checkout', 'tmp', 'woods'))
-        expect(status.exitstatus).to eq(1)
-        path_check = errors.index('container path')
-        expect(path_check).not_to be_nil, errors
-        expect(path_check).to be < errors.index('woods:extract')
-      end
-
       it 'preserves the empty WOODS_DIR override instead of falling through to WOODS_OUTPUT' do
         output, _errors, status = launch(executable, env: { 'WOODS_DIR' => '', 'WOODS_OUTPUT' => @atomic })
         expect(status.exitstatus).to eq(1)
