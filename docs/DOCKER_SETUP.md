@@ -11,7 +11,7 @@ HOST                                    APPLICATION CONTAINER
 ─────────────────────────────           ───────────────────────────
 MCP client                              Rails App + Woods bundle
   docker compose exec -T ────────────▶    woods-mcp /app/tmp/woods
-                                          31 schemas; 15 registered
+                                          32 schemas; 16 registered
                                           reads the published index
 
 Extraction commands ─────────────────▶   bundle exec rake woods:extract
@@ -175,6 +175,9 @@ Replace `app` and `/app` with the Compose service and container path used by the
   }
 }
 ```
+
+`woods-mcp-start` also works in these commands in place of `woods-mcp`.
+It checks the index path and its published generation first, then starts `woods-mcp`.
 
 Two persistence gotchas:
 
