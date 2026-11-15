@@ -24,7 +24,29 @@ See Claude Code's [MCP installation scopes](https://code.claude.com/docs/en/mcp#
 
 First check `/mcp` in the session that needs Woods. If a suitable server is already connected, verify its index before adding a duplicate registration.
 
-For a host with the application's Ruby bundle installed, a project-root `.mcp.json` can select the bundle and index explicitly:
+**Prefer `--checkout`.** `woods-mcp-start --checkout` serves the index of the checkout it is started in,
+so in a linked worktree it serves that worktree's own `tmp/woods`, never the main checkout's.
+Add `--await-index` and a worktree with no index yet still connects:
+its tools answer a retryable `building` result until the index is published, then serve it with no restart.
+The configuration names no absolute path:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "bundle",
+      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+    }
+  }
+}
+```
+
+It still relies on the client starting the server in the worktree; that was not verified for any client.
+See [launch for the current checkout](MCP_SERVERS.md#launch-for-the-current-checkout---checkout)
+and, for a shared application container, [`--client-root`](MCP_SERVERS.md#docker-process-and-path-rule).
+
+Otherwise, for a host with the application's Ruby bundle installed,
+a project-root `.mcp.json` can select the bundle and index explicitly:
 
 ```json
 {
