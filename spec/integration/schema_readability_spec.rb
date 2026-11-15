@@ -59,9 +59,20 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
   let(:missing_database) { '/dev/null/woods-missing.sqlite3' }
 
   def connect(database, tables: [])
+    forget_columns
     ActiveRecord::Base.establish_connection(adapter: 'sqlite3', database: database)
     tables.each { |table| ActiveRecord::Base.connection.create_table(table, force: true) { |t| t.string :title } }
-    ActiveRecord::Base.descendants.each(&:reset_column_information)
+    forget_columns
+  end
+
+  # Before Rails 6.1, resetting column information opens a connection, which
+  # an unopenable database refuses; that model then keeps no cache to clear.
+  def forget_columns
+    ActiveRecord::Base.descendants.each do |model|
+      model.reset_column_information
+    rescue StandardError
+      nil
+    end
   end
 
   def fresh_database(name)
@@ -160,16 +171,21 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     ledger_base = Class.new(ActiveRecord::Base) { self.abstract_class = true }
     stub_const('SchemaProbeRecord', ledger_base)
     stub_const('SchemaProbeLedger', Class.new(SchemaProbeRecord) { self.table_name = 'ledgers' })
+    settings = { adapter: 'sqlite3', database: missing_database }
+    # Rails 6.0 pools name no configuration, so only 6.1+ can name the ledger database.
+    named = ActiveRecord::ConnectionAdapters::ConnectionPool.method_defined?(:db_config)
     SchemaProbeRecord.establish_connection(
-      ActiveRecord::DatabaseConfigurations::HashConfig.new('test', 'ledger', adapter: 'sqlite3',
-                                                                             database: missing_database)
+      named ? ActiveRecord::DatabaseConfigurations::HashConfig.new('test', 'ledger', settings) : settings
     )
 
     states = manifest(extract).fetch('schema_readability')
 
     expect(states['state']).to eq('unreadable')
-    expect(states['databases']).to contain_exactly(a_hash_including('name' => 'ledger', 'state' => 'unreachable'),
-                                                   a_hash_including('name' => 'primary', 'state' => 'readable'))
+    expect(states['databases'].map { |database| database['state'] }).to contain_exactly('unreachable', 'readable')
+    if named
+      expect(states['databases']).to contain_exactly(a_hash_including('name' => 'ledger', 'state' => 'unreachable'),
+                                                     a_hash_including('name' => 'primary', 'state' => 'readable'))
+    end
   ensure
     SchemaProbeRecord.remove_connection if defined?(SchemaProbeRecord)
     SchemaProbeLedger.table_name = nil if defined?(SchemaProbeLedger)
@@ -188,7 +204,7 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
       index = extract
       ActiveRecord::Base.connection.create_table(:posts, force: true) { |t| t.string :title }
       ActiveRecord::Base.connection.create_table(:comments, force: true) { |t| t.references :post }
-      ActiveRecord::Base.descendants.each(&:reset_column_information)
+      forget_columns
       published = Woods::Generation.new(output_dir: index).current.number
 
       expect { Woods::Extractor.new(output_dir: index).extract_changed([controller]) }
