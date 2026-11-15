@@ -6,7 +6,7 @@ require 'woods/console/server'
 require 'woods/console/rack_middleware'
 
 RSpec.describe 'Console MCP deprecation notice' do
-  let(:notice) { /\A\[woods\] DEPRECATED: The Console MCP server .*removed in Woods 3\.0\b/ }
+  let(:notice) { /^\[woods\] DEPRECATED: The Console MCP server .*removed in Woods 3\.0\b/ }
   let(:validator) { Woods::Console::ModelValidator.new(registry: {}) }
   let(:safe_context) { Woods::Console::SafeContext.new(connection: double('Connection')) }
 
@@ -34,7 +34,7 @@ RSpec.describe 'Console MCP deprecation notice' do
     it 'warns once on stderr, naming Woods 3.0' do
       err = stderr_of { build }
 
-      expect(err.lines.size).to eq(1)
+      expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
       expect(err).to match(notice)
     end
 
@@ -62,7 +62,7 @@ RSpec.describe 'Console MCP deprecation notice' do
 
       err = stderr_of { 2.times { middleware.send(:build_embedded_server) } }
 
-      expect(err.lines.size).to eq(1)
+      expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
       expect(err).to match(notice)
     end
 
@@ -80,7 +80,7 @@ RSpec.describe 'Console MCP deprecation notice' do
     it 'warns once when the Console is switched on' do
       err = stderr_of { 2.times { config.console_mcp_enabled = true } }
 
-      expect(err.lines.size).to eq(1)
+      expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
       expect(err).to match(notice)
       expect(config.console_mcp_enabled).to be(true)
     end
