@@ -189,22 +189,19 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
       expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
     end
 
-    # Woods never writes an empty pointer. Seeding resolves it to the output
-    # root itself, and the strict payload open refuses after the source-input
-    # key is written, so only the published state is pinned here.
-    it 'refuses a marker whose payload pointer is empty and publishes nothing' do
-      marker = publish_flat_generation(payload: '')
-      marker_bytes = output.join(Woods::Generation::FILENAME).binread
+    # Woods never writes an empty pointer; seeding would resolve it to the
+    # output root itself, so the preflight refuses before anything is written.
+    it 'refuses extract_changed over an empty payload pointer before anything is written' do
+      publish_flat_generation(payload: '')
       paths = changed_rake_file
 
-      expect { extractor.extract_changed(paths) }
-        .to raise_error(Woods::ExtractionError, /payload directory.*woods:extract/)
-      expect { extractor.refresh(:rake_tasks) }
-        .to raise_error(Woods::ExtractionError, /payload directory.*woods:extract/)
+      expect_refusal(/empty payload pointer.*woods:extract/) { extractor.extract_changed(paths) }
+    end
 
-      expect(output.join(Woods::Generation::FILENAME).binread).to eq(marker_bytes)
-      expect(Woods::Generation.new(output_dir: output).current.number).to eq(marker.number)
-      expect(Dir.children(output.join('payloads'))).to be_empty
+    it 'refuses refresh over an empty payload pointer before anything is written' do
+      publish_flat_generation(payload: '')
+
+      expect_refusal(/empty payload pointer.*woods:extract/) { extractor.refresh(:rake_tasks) }
     end
   end
 

@@ -1640,13 +1640,19 @@ module Woods
     # directory accepts one ({#ensure_incremental_baseline!}).
     #
     # @return [void]
-    # @raise [Woods::ExtractionError] when the payload directory is missing,
-    #   or the published baseline holds no dependency_graph.json
+    # @raise [Woods::ExtractionError] when the payload pointer is empty, the
+    #   payload directory is missing, or the published baseline holds no
+    #   dependency_graph.json
     def ensure_published_payload_readable!
       marker = Generation.new(output_dir: @output_dir).current
       name = marker.payload
       return ensure_flat_graph_readable!(marker.number) if name.nil?
-      return if name.empty?
+
+      if name.empty?
+        raise Woods::ExtractionError,
+              "Generation #{marker.number} under #{@output_dir} names an empty payload pointer, which an " \
+              'incremental run cannot build on. Run a full `woods:extract` to rebuild the index.'
+      end
 
       directory = @output_dir.join(name)
       unless directory.directory?
