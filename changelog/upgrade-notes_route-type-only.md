@@ -4,8 +4,10 @@
   (`types: ["route"]`), `recent_changes`, the `codebase://type/route` MCP resource,
   `Woods::MCP::IndexReader#list_units(type: 'route')`, `Woods::PublishedIndex#unit(type: 'route')` and
   `#units(type: 'route')`.
-  A caller that wanted route files as well should also pass `route_file`, or list with no type and filter on each
-  entry's `"type"`; `routes` is not accepted as a type.
+  A caller that wanted route files as well should also pass `route_file`; `routes` is not accepted as a type.
+  `Woods::PublishedIndex#units` with no type labels every entry with its type, so filtering on `"type"` works there.
+  `Woods::MCP::IndexReader#list_units` with no type returns index entries as written, and an older `routes/` entry
+  has no `"type"`: ask it for each type instead (`list_units(type: 'route')`, `list_units(type: 'route_file')`).
 - `recent_changes` now labels each result with its unit's own type (`route_file`, `gem_source`, `graphql_mutation`)
   instead of its directory name, and accepts those types as filters; `list_units(type:)` and
   `codebase://type/{type}` accept them too.

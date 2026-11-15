@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `lookup`, `domain_clusters` and `console_sql` return less by default; each answer says how to page or raise it.
   - `incremental_blast_radius_depth` defaults to `:structural`. Set it to `nil` for the previous closure.
   - A full extraction that cannot open a payload directory raises instead of writing a flat index.
-  - `Woods::PublishedIndex#unit` and `#units` raise `IOError` on a unit they cannot trust.
+  - `Woods::PublishedIndex#unit` raises `IOError` on a unit it cannot trust.
   - `recent_changes` labels each row with its unit's own type (`gem_source`, `graphql_mutation`), not its directory.
   - `Woods::MCP::Server.build` returns before the reader warm-up. Pass `warmup: :before_handshake` for the previous behaviour.
   - Lexical-mode metadata-store records are deeply frozen.
