@@ -5,4 +5,5 @@
   extractor no longer stands in for a published generation's missing graph file, including a baseline that
   disappears while the run seeds it. Earlier writers started from an
   empty or stale graph and published a generation without the units and edges the run did not touch. Run a full
-  `woods:extract` to rebuild the index.
+  `woods:extract` to rebuild the index; a full extraction now also recovers from an empty payload pointer, which
+  it used to copy into itself until a filesystem call failed.

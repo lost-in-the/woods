@@ -189,19 +189,46 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
       expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
     end
 
-    # Woods never writes an empty pointer; seeding would resolve it to the
-    # output root itself, so the preflight refuses before anything is written.
-    it 'refuses extract_changed over an empty payload pointer before anything is written' do
+    # Woods never writes an empty pointer. The preflight refuses it before
+    # anything is written, and a full extraction seeds over it from the flat
+    # root, as for a marker without a payload.
+    def expect_full_extraction_recovers_from_empty_pointer
+      extractor.extract_all
+
+      marker = Woods::Generation.new(output_dir: output).current
+      expect(marker.number).to eq(2)
+      expect(marker.payload).to eq(Woods::PayloadStore.name_for(2))
+      expect(output.join(marker.payload, 'dependency_graph.json')).to exist
+      expect(nested_payload_paths).to be_empty
+    end
+
+    def nested_payload_paths
+      Dir.glob(output.join('**/*').to_s).select { |path| path.scan(%r{/payloads(?=/|\z)}).size > 1 }
+    end
+
+    it 'refuses extract_changed over an empty payload pointer before anything is written, then recovers' do
       publish_flat_generation(payload: '')
       paths = changed_rake_file
 
       expect_refusal(/empty payload pointer.*woods:extract/) { extractor.extract_changed(paths) }
+      expect_full_extraction_recovers_from_empty_pointer
+      expect { extractor.extract_changed(paths) }.not_to raise_error
     end
 
-    it 'refuses refresh over an empty payload pointer before anything is written' do
+    it 'refuses refresh over an empty payload pointer before anything is written, then recovers' do
       publish_flat_generation(payload: '')
 
       expect_refusal(/empty payload pointer.*woods:extract/) { extractor.refresh(:rake_tasks) }
+      expect_full_extraction_recovers_from_empty_pointer
+      expect { extractor.refresh(:rake_tasks) }.not_to raise_error
+    end
+
+    it 'refuses a strict seed over an empty payload pointer' do
+      output.mkpath
+      marker = Woods::Generation::Marker.new(number: 1, payload: '')
+
+      expect { extractor.send(:seed_payload, marker, strict: true) }
+        .to raise_error(Woods::ExtractionError, /Generation 1 names payload .*woods:extract/)
     end
   end
 

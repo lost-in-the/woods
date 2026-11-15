@@ -1708,11 +1708,15 @@ module Woods
     #   anything else inside them (the non-JSON files and subdirectories the
     #   orphan sweep also never touches) still carries forward
     # @param strict [Boolean] refuse, rather than seed from the flat root,
-    #   when the marker names a payload directory that is missing: the root
-    #   can hold an older graph an incremental run would publish
-    # @raise [Woods::ExtractionError] when `strict` and the named payload is gone
+    #   when the marker names a payload directory that is missing, or an
+    #   empty pointer: the root can hold an older graph an incremental run
+    #   would publish
+    # @raise [Woods::ExtractionError] when `strict` and the named payload is
+    #   gone or the pointer is empty
     def seed_payload(marker, rewritten_dirs: [], strict: false)
-      if marker.payload && (source = @output_dir.join(marker.payload)).directory?
+      # An empty name joins to the output root itself, which holds payloads/.
+      named = marker.payload && !marker.payload.empty?
+      if named && (source = @output_dir.join(marker.payload)).directory?
         @payload_store.clone(source, @payload_dir, without_json: rewritten_dirs)
       elsif strict && marker.payload
         raise Woods::ExtractionError,
