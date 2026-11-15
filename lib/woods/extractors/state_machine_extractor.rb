@@ -711,7 +711,7 @@ module Woods
       # @param transitions [Array<Hash>] Flat list of all transitions
       # @param initial_state [String, nil] Initial state name
       # @param callbacks [Array<String>] Detected callbacks, one raw DSL line
-      #   each (deprecated: kept for one window beside transition_callbacks)
+      #   each (deprecated for transition_callbacks; removed no earlier than Woods 2.3)
       # @param transition_callbacks [Array<Hash>] structured callbacks from
       #   {TransitionCallbacks.read}, side effects not yet analysed
       # @return [ExtractedUnit]
