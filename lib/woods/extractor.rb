@@ -617,6 +617,7 @@ module Woods
 
       # Phase 1.6: Package membership. Runs before the graph is rebuilt so
       # registration copies metadata[:package] onto the node (#280).
+      Rails.logger.info '[Woods] Annotating units...'
       profile_phase('package annotation') { annotate_packages }
       # Container attribution (W-9) is a function of each unit's own type and
       # metadata, so the incremental path applies it per unit in
@@ -637,6 +638,7 @@ module Woods
       # full extraction has just registered every unit including duplicates,
       # and rebuilding from the deduped set is both cheaper and less
       # error-prone than unwinding registrations one at a time.
+      Rails.logger.info '[Woods] Rebuilding dependency graph...'
       profile_phase('graph rebuild') do
         @dependency_graph = DependencyGraph.new
         @results.each_value { |units| units.each { |u| @dependency_graph.register(u) } }
@@ -695,28 +697,32 @@ module Woods
         Rails.logger.info '[Woods] Precomputing request flows...'
         profile_phase('flows') { precompute_flows }
       else
-        withdraw_disabled_flows
+        profile_phase('flow withdrawal') { withdraw_disabled_flows }
       end
 
+      Rails.logger.info '[Woods] Writing dependency graph...'
       profile_phase('graph write') do
         write_dependency_graph
         write_graph_analysis
       end
+      Rails.logger.info '[Woods] Writing skipped files report...'
       profile_phase('skipped files') do
         write_skipped_files(@dependency_graph.registered_paths, flow_failures: Array(@flow_failures))
       end
+      Rails.logger.info '[Woods] Building git commit table...'
       profile_phase('commit table') { refresh_commit_table(full: true) }
+      Rails.logger.info '[Woods] Writing manifest...'
       profile_phase('manifest and summary') do
         write_manifest
         write_structural_summary
       end
-      @source_inputs.full_units(@results, consumers: @extractors)
+      profile_phase('source accounting') { @source_inputs.full_units(@results, consumers: @extractors) }
       published = publish_generation('full')
       # After the publish, and only when it succeeded: an obsolete writer
       # (lock taken over) never reaches the snapshot store.
       profile_phase('snapshot') { capture_published_snapshot } if published
 
-      log_summary
+      profile_phase('summary') { log_summary }
 
       @results
     ensure
@@ -1211,6 +1217,7 @@ module Woods
       # Resolve the generation number first, so the source manifest written
       # below names the generation the pointer will carry.
       payload = publishable_payload_name(generation)
+      Rails.logger.info '[Woods] Publishing generation...'
       profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
       PublicationSeam.reach(:before_promotion, @output_dir)
