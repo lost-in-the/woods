@@ -640,8 +640,10 @@ RSpec.describe Woods::Watch::Daemon do
     it 'stops the watcher and reports a restart when boot state changes' do
       fake_watcher.queue(['config/initializers/redis.rb'])
       fake_watcher.queue(['config/locales/en.yml'])
+      daemon = build(watcher: fake_watcher)
+      touch('config/initializers/redis.rb')
 
-      expect(build(watcher: fake_watcher).run).to eq(:restart_required)
+      expect(daemon.run).to eq(:restart_required)
       expect(fake_watcher.stopped).to be(true)
       # The second batch must not be processed after a restart is demanded.
       expect(extractor).not_to have_received(:extract_changed)

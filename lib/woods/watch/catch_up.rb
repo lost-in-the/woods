@@ -81,6 +81,19 @@ module Woods
         kept
       end
 
+      # Whether the published generation captured this file's current bytes,
+      # by the same test {#paths} drops a candidate with. Calls on one
+      # instance share one digest budget.
+      #
+      # @param path [String] absolute path
+      # @return [Boolean] false unless {#comparable?}
+      def captured?(path)
+        return false unless comparable?
+
+        @content ||= UnchangedContent.new(root: @root, key: @key, recorded: recorded_identities)
+        @content.unchanged?(path)
+      end
+
       # Absolute paths the published generation captured that are no longer
       # on disk. {#paths} walks the files that exist, so a deleted file is
       # never one of its candidates; git reports the deletion of a tracked

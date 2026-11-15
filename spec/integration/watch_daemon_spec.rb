@@ -226,6 +226,17 @@ RSpec.describe 'Watch daemon against a booted app', :booted_app do
       expect(result[:action]).to eq(:full)
       expect(differences(@index_dir, full_extraction)).to be_empty
     end
+
+    it 're-extracts a late batch the full run already captured incrementally, and still matches' do
+      paths = Array.new(8) do |i|
+        write_file("app/services/storm_#{i}_service.rb", "class Storm#{i}Service\n  def call = :ok\nend\n")
+      end
+      watch = daemon(full_extraction_threshold: 4)
+      expect(watch.process(paths)[:action]).to eq(:full)
+
+      expect(watch.process(paths)[:action]).to eq(:incremental)
+      expect(differences(@index_dir, full_extraction)).to be_empty
+    end
   end
 
   # #164 success criterion 3: "with a daemon running, no MCP response is ever

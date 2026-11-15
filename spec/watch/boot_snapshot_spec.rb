@@ -63,6 +63,48 @@ RSpec.describe Woods::Watch::BootSnapshot do
     expect(snapshot.changed_paths).to eq([helper])
   end
 
+  # `db:prepare` dumping an unchanged schema, or a stash round trip, writes
+  # the bytes the boot already read under a new inode and timestamps.
+  {
+    'a restart trigger' => 'db/schema.rb',
+    'an initializer' => 'config/initializers/widget.rb',
+    'a config Ruby helper' => 'config/time_zone.rb'
+  }.each do |kind, relative|
+    it "covers #{kind} rewritten with the bytes the boot read" do
+      path = File.join(@root, relative)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, "# boot bytes\n")
+      snapshot = described_class.new(root: @root)
+      File.unlink(path)
+      File.write(path, "# boot bytes\n")
+      File.utime(Time.now + 5, Time.now + 5, path)
+
+      expect(snapshot.covers?(relative)).to be(true)
+      expect(snapshot.changed_paths).to be_empty
+    end
+  end
+
+  it 'still reports a reload input rewritten with the same bytes' do
+    path = File.join(@root, 'app/models/widget.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "class Widget; end\n")
+    snapshot = described_class.new(root: @root)
+    File.unlink(path)
+    File.write(path, "class Widget; end\n")
+
+    expect(snapshot.changed_paths).to eq([path])
+  end
+
+  it 'reports a boot input created after the boot even when another one holds the same bytes' do
+    File.write(File.join(@root, 'Gemfile'), "source 'https://rubygems.org'\n")
+    snapshot = described_class.new(root: @root)
+    created = File.join(@root, 'Gemfile.lock')
+    File.write(created, "source 'https://rubygems.org'\n")
+
+    expect(snapshot.covers?(created)).to be(false)
+    expect(snapshot.changed_paths).to eq([created])
+  end
+
   it 'covers unchanged inputs and ignores files that do not require a reload' do
     path = File.join(@root, 'Gemfile.lock')
     File.write(path, '# unchanged')

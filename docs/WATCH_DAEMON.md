@@ -360,6 +360,19 @@ exit `75` over the same files. Live restart triggers still stop the daemon,
 including edits during startup extraction. Their paths survive shutdown even
 when the preceding extraction has advanced the generation watermark.
 
+One burst of changes costs one full extraction, however many batches the watcher delivers it in.
+Under polling, each batch arrives only after the previous cycle finished.
+Before any full extraction starts, the daemon compares the restart inputs on disk with its boot snapshot.
+If one changed since the boot, the daemon restarts at once and carries the batch.
+A full run there would only be repeated after the restart.
+
+A restart input rewritten with the bytes the boot read is not a change.
+Examples: `db:prepare` dumping an unchanged `db/schema.rb`, a stash round trip, a checkout of the same content.
+None of them restarts the daemon or causes an extraction on its own.
+The boot snapshot keeps a digest of each restart input and each `config/**/*.rb` file for this.
+Reload inputs, including `config/routes.rb`, are still judged by inode, size and timestamps.
+Their boot bytes say nothing about what the index last extracted.
+
 The same escalation happens when the app *can't* reload at all, a boot with
 `config.enable_reloading = false`. Extracting against constants that no longer
 match their source would be worse than saying so.
@@ -607,6 +620,12 @@ A branch switch or rebase touches hundreds of files at once. Above
 `WOODS_WATCH_FULL_THRESHOLD`, N incremental steps cost more than one full
 extraction and risk interleaving with a still-settling tree, so the daemon
 falls back to a full run and logs that it did.
+
+A path whose bytes the published generation already captured does not count towards the threshold.
+Under polling, the rest of a branch switch can arrive after the full run that already read it.
+That batch is re-extracted incrementally instead of starting a second full run.
+The check compares the published `source_inputs.json` digests within the 30-second startup budget.
+A path it cannot prove unchanged counts.
 
 ## Watcher backends
 
