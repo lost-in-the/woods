@@ -146,9 +146,10 @@ Incremental cost depends on the affected code and relationships; broad changes c
 
 Extraction itself boots and eager-loads your application, so its boot-time behavior still runs. Treat the generated index as confidential application source. Enabling hosted embeddings sends the embedded content to that provider. MCP responses also contain application source, which your client may send to its model provider even when Woods uses lexical retrieval or local embeddings.
 
-The Console Server is deprecated and will be removed in Woods 3.0; new setups should not enable it.
-The [Console guide](docs/CONSOLE_MCP_SETUP.md) says what to use instead.
-Existing setups keep working through 2.x, and the Console can still access live data.
+The Console Server is deprecated and will be removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](docs/CONSOLE_MCP_SETUP.md#what-to-use-instead).
+An existing Console setup can still access live data.
 Review its [setup and security model](docs/CONSOLE_MCP_SETUP.md) before you rely on it.
 Report vulnerabilities privately through [SECURITY.md](SECURITY.md).
 

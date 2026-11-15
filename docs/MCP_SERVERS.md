@@ -2,8 +2,9 @@
 
 Woods provides two MCP servers with different purposes and trust boundaries.
 Use the Index Server for codebase work.
-The Console Server is deprecated and will be removed in Woods 3.0; new setups should not enable it.
-See [the Console guide](CONSOLE_MCP_SETUP.md) for what to use instead.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 ## Choose a server
 
@@ -1189,8 +1190,9 @@ Use HTTP only for a deliberate shared or remote deployment. It expands the netwo
 
 ## Console Server
 
-> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
-> This section is for existing setups, which keep working through 2.x.
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+> Existing setups keep working; new setups should not enable it.
+> This section is for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 The Console Server launches a Rails process through direct, Docker, or SSH connection configuration. It reads live data and must be treated as a separate security decision.
 

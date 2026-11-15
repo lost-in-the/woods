@@ -17,7 +17,7 @@ MCP client                              Rails App + Woods bundle
 Extraction commands ─────────────────▶   bundle exec rake woods:extract
                                           writes /app/tmp/woods/
 
-Console Server, two launch paths:
+Console Server (deprecated, existing setups only), two launch paths:
 
   Embedded (9 tools)                    rake woods:console
   MCP client spawns via                   boots Rails, runs MCP in-process
@@ -218,8 +218,9 @@ shared volume for every worktree would mix their indexes. See
 
 ## Console Server Setup
 
-> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
-> This section is for existing setups; see [Console MCP setup](CONSOLE_MCP_SETUP.md) for what to use instead.
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+> Existing setups keep working; new setups should not enable it.
+> This section is for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 The Console Server queries live Rails state. There are two launch paths for the same embedded server.
 
@@ -343,7 +344,10 @@ The launcher reads `~/.woods/console.yml` by default. To use a different path:
 
 ## Complete `.mcp.json` Example
 
-Both servers configured together for a Docker environment, after `config.console_mcp_enabled = true` has been deliberately set:
+A new setup uses only the `woods` entry.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+An existing Console setup, with `config.console_mcp_enabled = true` already set, configures both servers together:
 
 ```json
 {

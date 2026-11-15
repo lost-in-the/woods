@@ -23,6 +23,20 @@ RSpec.describe 'Console MCP deprecation notices' do
     end
   end
 
+  it 'gives the Console guide a "What to use instead" section for other pages to link to' do
+    expect(read('docs/CONSOLE_MCP_SETUP.md')).to match(/^## What to use instead$/)
+  end
+
+  %w[docs/AGENT_SETUP.md docs/GETTING_STARTED.md docs/INTERNALS.md docs/MCP_SERVERS.md docs/DOCKER_SETUP.md
+     docs/FAQ.md docs/README.md README.md].each do |path|
+    it "limits the Console to existing setups in #{path} and links the alternatives" do
+      text = read(path)
+
+      expect(text).to include('Existing setups keep working; new setups should not enable it.')
+      expect(text).to match(%r{CONSOLE_MCP_SETUP\.md#what-to-use-instead})
+    end
+  end
+
   it 'marks the Console section of the install template deprecated and tells new setups to leave it off' do
     section = read('lib/generators/woods/templates/woods.rb.tt')[/# ── Console MCP.*?(?=# ── )/m]
 

@@ -45,9 +45,12 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 Default to Index-only.
 It reads generated code context and exposes 16 tools (15 before Woods `2.2.0`, which adds `path`).
-Do not offer Console MCP for a new setup: the Console is deprecated in Woods `2.2.0` and removed in 3.0.
-For a runtime observation, suggest `bin/rails runner` or a focused spec instead.
-An existing Console configuration keeps working through 2.x; Shapes 2 and 3 below maintain one.
+Do not offer Console MCP for a new setup, even when the user needs live data.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+For a runtime observation, suggest `bin/rails runner` or a focused spec.
+For live data, suggest an agent owned by the application, with its own limited permissions.
+Shapes 2 and 3 below maintain an existing Console configuration.
 Console MCP boots Rails and reads live data; ask before changing it.
 
 Initialization guidance (#402) is available in Woods `2.0.0.beta3`; check the
@@ -150,8 +153,10 @@ see [cross-host liveness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/
 
 ## Shape 2: Index plus an existing Console (deprecated)
 
-For an existing, authorized Console setup only; the Console is deprecated and removed in Woods 3.0.
-After explicit authorization, enable the live-data master switch in the Rails initializer. The process exits while it remains false:
+For an existing, authorized Console setup only.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+The live-data master switch stays on in the Rails initializer; the process exits while it is false:
 
 ```ruby
 Woods.configure do |config|

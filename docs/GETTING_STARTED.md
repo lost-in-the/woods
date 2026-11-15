@@ -174,12 +174,18 @@ On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it
 
 ### The Console Server (deprecated)
 
-The Console Server is deprecated and will be removed in Woods 3.0, so a new setup should leave it off.
-For a runtime observation in development, use `bin/rails runner` or a focused spec instead.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+For a runtime observation in development, use `bin/rails runner` or a focused spec.
+For live data, use an agent owned by the application, with its own limited permissions.
+See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
-The Console Server is separate from the Index Server. It boots Rails and can read live model data. Do not enable it merely to inspect code structure.
-
-If live-data queries are necessary, review its allowlists, blocked tables, credential scanning, redaction, SQL validation, and environment boundary in [Console MCP setup](CONSOLE_MCP_SETUP.md). The default surface is nine tools; `console_sql` and `console_query` require an explicit read-tools opt-in.
+The rest of this section is for an existing Console setup.
+The Console Server is separate from the Index Server.
+It boots Rails and can read live model data.
+Review its allowlists, blocked tables, credential scanning, redaction, SQL validation, and environment boundary
+in [Console MCP setup](CONSOLE_MCP_SETUP.md).
+The default surface is nine tools; `console_sql` and `console_query` require an explicit read-tools opt-in.
 
 ## First-run problems
 

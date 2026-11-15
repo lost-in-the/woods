@@ -366,8 +366,9 @@ The Index Server is safe to run anywhere, it has no database connection and make
 
 ### Console server (`woods-console-mcp`)
 
-> **Deprecated.** The Console server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
-> See [Console MCP setup](CONSOLE_MCP_SETUP.md) for what to use instead.
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+> Existing setups keep working; new setups should not enable it.
+> See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 **31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process, no separate bridge process.**
 
@@ -377,7 +378,7 @@ Starts via rake task inside the Rails app (or `docker compose exec`):
 bundle exec rake woods:console
 ```
 
-Use the Console Server for:
+In an existing Console setup, the Console Server covers:
 - Live database queries (`User.where(...)` with schema awareness). Tier 1, registered by default
 - Model diagnostics, job queue monitoring, cache inspection. Tier 2/3 schemas exist but are **not registered** in any supported mode today
 - SQL/query. Tier 4, opt-in via `console_embedded_read_tools`; `console_eval` is inventory-only and unavailable
@@ -387,15 +388,15 @@ When the connection is already inside an open transaction, the queries run in a 
 
 ### Which should I use?
 
-| Task | Server |
-|------|--------|
-| Find the User model source | Index |
-| What jobs does CheckoutService enqueue? | Index |
-| How many pending orders are in the database? | Console |
-| What does our middleware stack look like? | Index |
-| Run a query against the live database | Console |
-| Trigger a re-extraction | Index |
-| Check Sidekiq queue depth | Console |
+| Task | New setup | Existing Console setup |
+|------|-----------|------------------------|
+| Find the User model source | Index | Index |
+| What jobs does CheckoutService enqueue? | Index | Index |
+| How many pending orders are in the database? | `bin/rails runner` or a focused spec | Console |
+| What does our middleware stack look like? | Index | Index |
+| Run a query against the live database | An agent owned by the application, with limited permissions | Console |
+| Trigger a re-extraction | Index | Index |
+| Check Sidekiq queue depth | `bin/rails runner` | `bin/rails runner` (no registered Console tool covers it) |
 
 ---
 

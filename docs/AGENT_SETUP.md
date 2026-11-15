@@ -1,6 +1,10 @@
 # Agent setup runbook
 
-Use this runbook when a coding agent installs or configures Woods 2.0 in an existing Rails repository. The goal is a small, reviewable change and a working structural Index Server. Semantic retrieval and live-data access are separate opt-ins.
+Use this runbook when a coding agent installs or configures Woods 2.0 in an existing Rails repository.
+The goal is a small, reviewable change and a working structural Index Server.
+Semantic retrieval is a separate opt-in.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
 
 ## Default decision
 
@@ -10,7 +14,7 @@ Install the structural index only unless the user explicitly asks for another ca
 |---|---:|---|
 | Extract Rails code and schema structure | On | No |
 | Local or hosted embeddings | Off | Yes: adds a service, credentials, cost, or generated vectors |
-| Console MCP (deprecated, removed in Woods 3.0) | Off | Yes: boots Rails and can read live application data |
+| Console MCP (deprecated, removed in Woods 3.0) | Off; never enabled in a new setup | Existing setups only: changing one boots Rails and can read live application data |
 | HTTP MCP transport | Off | Yes: expands network exposure |
 | Purging or rebuilding durable stores | Off | Yes: can remove Woods-owned data |
 
@@ -44,7 +48,12 @@ If the user wants ranked discovery through `codebase_retrieve`, offer [explicit 
 
 For semantic matching, discuss local Ollama or hosted OpenAI and the appropriate vector store separately; adding a provider still requires authorization. See [Backend matrix](BACKEND_MATRIX.md).
 
-Do not infer permission to configure Console MCP from a request to “set up Woods” or “set up MCP.” The Index Server reads generated code context; the Console Server can read live data.
+Do not configure Console MCP in a new setup, even when the user needs live data.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
+For an existing Console configuration, do not infer permission to change it from “set up Woods” or “set up MCP.”
+The Index Server reads generated code context; the Console Server can read live data.
 
 ## 3. Install on a branch
 
@@ -258,7 +267,7 @@ Report these boundaries in the handoff:
 
 Get explicit user approval before:
 
-- enabling Console MCP or granting access to a live database;
+- changing an existing Console MCP configuration, or granting access to a live database;
 - enabling `console_embedded_read_tools`, `console_sql`, or `console_query`;
 - adding an API key, hosted embedding provider, Qdrant, pgvector, or Ollama service;
 - exposing MCP over HTTP, selecting bind addresses, or configuring bearer tokens;
@@ -291,7 +300,7 @@ Verified capabilities:
 - woods_status current: yes/no
 - search/lookup/dependents checked: yes/no
 - retrieval: disabled/lexical/semantic (provider when semantic)
-- Console MCP: disabled/enabled (authorization)
+- Console MCP: not configured / existing setup kept (authorization)
 - automatic structural updates: disabled/enabled (owner and actual startup command)
 - served root/index and completed startup catch-up:
 - edit and planned restart observed through existing MCP connection:
