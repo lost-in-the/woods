@@ -115,6 +115,14 @@ RSpec.describe Woods::Extractor, 'phase profiling' do
       )
     end
 
+    it 'leaves the full-extraction progress lines out of an incremental run' do
+      stub_incremental_run
+
+      extractor.extract_changed(['app/models/user.rb'])
+
+      expect(logged).not_to include('[Woods] Publishing generation...', '[Woods] Building git commit table...')
+    end
+
     it 'logs no phase or total timing lines during incremental extraction' do
       stub_incremental_run
 

@@ -717,6 +717,7 @@ module Woods
         write_structural_summary
       end
       profile_phase('source accounting') { @source_inputs.full_units(@results, consumers: @extractors) }
+      Rails.logger.info '[Woods] Publishing generation...'
       published = publish_generation('full')
       # After the publish, and only when it succeeded: an obsolete writer
       # (lock taken over) never reaches the snapshot store.
@@ -1217,7 +1218,6 @@ module Woods
       # Resolve the generation number first, so the source manifest written
       # below names the generation the pointer will carry.
       payload = publishable_payload_name(generation)
-      Rails.logger.info '[Woods] Publishing generation...'
       profile_phase('source verification') { write_source_inputs } if payload
       profile_phase('payload sync') { sync_payload }
       PublicationSeam.reach(:before_promotion, @output_dir)
