@@ -148,10 +148,121 @@ RSpec.describe 'Watch daemon: one full extraction per burst' do
   end
 
   before do
+    write('Gemfile.lock', "GEM\n  specs:\n")
     write('app/models/base.rb')
     write('config/initializers/widget.rb', "Widget.mode = :a\n")
     write('db/schema.rb', "ActiveRecord::Schema.define(version: 1) {}\n")
     publish(capture, 'seed')
+  end
+
+  # `bundle check` in a one-off container mounting the checkout: the lockfile's
+  # timestamps move, its bytes do not.
+  describe 'a touch of the lockfile' do
+    def touch_lockfile
+      path = File.join(root, 'Gemfile.lock')
+      File.utime(Time.now + 5, Time.now + 5, path)
+      path
+    end
+
+    it 'neither restarts nor extracts' do
+      daemon = build
+
+      live(daemon, [touch_lockfile])
+
+      expect(daemon.instance_variable_get(:@stop_reason)).to be_nil
+      expect(extractor).not_to have_received(:extract_all)
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'still indexes an ordinary edit delivered in the same batch, incrementally' do
+      daemon = build
+      model = write('app/models/base.rb', "class Base; end\n")
+
+      live(daemon, [touch_lockfile, model])
+
+      expect(daemon.instance_variable_get(:@stop_reason)).to be_nil
+      expect(extractor).not_to have_received(:extract_all)
+      expect(extractor).to have_received(:extract_changed).with(array_including(model))
+    end
+
+    {
+      'polling' => ->(root) { Woods::Watch::PollingWatcher.new(root: root, interval: 0.02) },
+      'listen' => :listen
+    }.each do |backend, factory|
+      it "costs nothing through the #{backend} backend" do
+        lockfile = File.join(root, 'Gemfile.lock')
+        watcher = factory == :listen ? fake_listen_watcher(lockfile) : factory.call(root)
+        daemon = build(watcher: watcher)
+        thread = Thread.new { daemon.run }
+        Timeout.timeout(5) { sleep(0.01) until daemon.instance_variable_get(:@lifecycle_started) }
+        touch_lockfile
+        @listen&.fire
+        sleep(0.3)
+        daemon.stop unless thread.join(0.3)
+
+        expect(Timeout.timeout(5) { thread.value }).to eq(:stopped)
+        expect(extractor).not_to have_received(:extract_all)
+        expect(extractor).not_to have_received(:extract_changed)
+      end
+    end
+
+    # A stand-in for the `listen` gem honouring `Listen.to(dir, ignore:)
+    # { |modified, added, removed| }`; #fire reports the lockfile as modified.
+    def fake_listen_watcher(lockfile)
+      listen = Class.new do
+        attr_reader :block
+
+        def to(_dir, ignore:, &block)
+          @ignore = ignore
+          @block = block
+          self
+        end
+
+        def start = nil
+        def stop = nil
+      end.new
+      @listen = Struct.new(:listen, :path) { def fire = listen.block.call([path], [], []) }.new(listen, lockfile)
+      Woods::Watch::ListenWatcher.new(root: root, listen_class: listen)
+    end
+
+    it 'does not restart a successor again when it was touched while the successor booted' do
+      lockfile = File.join(root, 'Gemfile.lock')
+      File.write(File.join(output_dir, 'watch_pending.json'), JSON.generate([lockfile]))
+      snapshot = Woods::Watch::BootSnapshot.new(root: root)
+      touch_lockfile
+
+      daemon = build(watcher: SerialWatcher.new, catch_up: true, boot_snapshot: snapshot)
+      thread = Thread.new { daemon.run }
+      daemon.stop unless thread.join(1)
+
+      expect(Timeout.timeout(5) { thread.value }).to eq(:stopped)
+    end
+  end
+
+  describe 'a real change to a restart input' do
+    it 'costs one restart and one full extraction' do
+      daemon = build
+      lockfile = write('Gemfile.lock', "GEM\n  specs:\n    rake (13.0.0)\n")
+
+      live(daemon, [lockfile])
+      expect(daemon.instance_variable_get(:@stop_reason)).to eq(:restart_required)
+      daemon.send(:persist_pending)
+
+      expect(successor).to eq(:stopped)
+      expect(extractor).to have_received(:extract_all).once
+      expect(extractor).not_to have_received(:extract_changed)
+    end
+
+    it 'costs nothing when it is reverted to the booted bytes before the debounce fires' do
+      daemon = build
+      initializer = write('config/initializers/widget.rb', "Widget.mode = :b\n")
+      write('config/initializers/widget.rb', "Widget.mode = :a\n")
+
+      live(daemon, [initializer])
+
+      expect(daemon.instance_variable_get(:@stop_reason)).to be_nil
+      expect(extractor).not_to have_received(:extract_changed)
+    end
   end
 
   describe 'a restart input rewritten with the bytes the boot read' do

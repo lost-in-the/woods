@@ -373,6 +373,9 @@ None of them restarts the daemon or causes an extraction on its own.
 The boot snapshot keeps a digest of each restart input and each `config/**/*.rb` file for this.
 An input that changed while the environment booted always requires a restart, even if its bytes were restored.
 The boot read it at an unknown moment in between.
+Files read before the snapshot existed are the exception, since nothing during the boot reads them again.
+These are the Gemfile, its lockfile and gemspecs, `.ruby-version`, and config Ruby already loaded.
+So `bundle check` in another container, which moves the lockfile's timestamps but not its bytes, costs nothing.
 Reload inputs, including `config/routes.rb`, are still judged by inode, size and timestamps.
 Their boot bytes say nothing about what the index last extracted.
 

@@ -23,6 +23,7 @@ module Woods
         @policy = policy
         @files = scan
         @digests = @files.keys.filter_map { |path| [path, digest(path)] if boot_input?(path) }.to_h
+        @read_before = read_before_snapshot
         @verified = Set.new
       end
 
@@ -36,12 +37,14 @@ module Woods
       # Record that the boot has finished. Bytes cover an input only when its
       # fingerprint was still the snapshot's at this moment: the boot read the
       # file at some point in between, so an input changed and restored while
-      # it ran is never covered by its bytes.
+      # it ran is never covered by its bytes. Inputs read before the snapshot
+      # existed (Bundler's files, the Ruby version, config Ruby already loaded)
+      # are the exception: nothing during the boot reads them again.
       #
       # @return [void]
       def boot_finished!
         current = scan
-        @verified = @files.keys.select { |path| @files[path] == current[path] }.to_set
+        @verified = @files.keys.select { |path| @files[path] == current[path] || @read_before.include?(path) }.to_set
       end
 
       # Includes additions and deletions, even if another writer has advanced
@@ -61,6 +64,35 @@ module Woods
           stamp = fingerprint(path)
           files[path] = stamp if stamp
         end
+      end
+
+      # Bundler evaluates the Gemfile, its gemspecs and the lockfile, and the
+      # Ruby version is chosen, before any task can take a snapshot.
+      READ_BEFORE_SNAPSHOT = [/\AGemfile(\.lock)?\z/, /\Agems\.(rb|locked)\z/, %r{\A[^/]+\.gemspec\z},
+                              /\A\.ruby-version\z/].freeze
+      private_constant :READ_BEFORE_SNAPSHOT
+
+      def read_before_snapshot
+        loaded = loaded_relative_features
+        @files.keys.select do |path|
+          relative = path.delete_prefix("#{@root}/")
+          READ_BEFORE_SNAPSHOT.any? { |pattern| pattern.match?(relative) } || loaded.include?(relative)
+        end.to_set
+      end
+
+      # `$LOADED_FEATURES` holds real paths, and the root may be a symlink.
+      def loaded_relative_features
+        roots = [@root, real_root].uniq.map { |root| "#{root}/" }
+        $LOADED_FEATURES.filter_map do |feature|
+          prefix = roots.find { |root| feature.start_with?(root) }
+          feature.delete_prefix(prefix) if prefix
+        end.to_set
+      end
+
+      def real_root
+        File.realpath(@root)
+      rescue SystemCallError
+        @root
       end
 
       def boot_input?(path)

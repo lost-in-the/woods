@@ -99,6 +99,47 @@ RSpec.describe Woods::Watch::BootSnapshot do
     expect(snapshot.changed_paths).to eq([path])
   end
 
+  # Bundler and the selected Ruby read these before the snapshot exists, so a
+  # change while the environment boots cannot reach what the process loaded.
+  # `bundle check` in another container touches the lockfile this way.
+  %w[Gemfile.lock Gemfile .ruby-version widget.gemspec].each do |relative|
+    it "covers #{relative}, read before the snapshot, when touched while the environment booted" do
+      path = File.join(@root, relative)
+      File.write(path, "# loaded before the snapshot\n")
+      snapshot = described_class.new(root: @root)
+      File.utime(Time.now + 5, Time.now + 5, path)
+      snapshot.boot_finished!
+
+      expect(snapshot.covers?(path)).to be(true)
+      expect(snapshot.changed_paths).to be_empty
+    end
+  end
+
+  it 'covers config Ruby this process loaded before the snapshot when touched while the environment booted' do
+    path = File.join(@root, 'config/application.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "# application\n")
+    $LOADED_FEATURES << path
+    snapshot = described_class.new(root: @root)
+    File.utime(Time.now + 5, Time.now + 5, path)
+    snapshot.boot_finished!
+
+    expect(snapshot.covers?(path)).to be(true)
+  ensure
+    $LOADED_FEATURES.delete(path)
+  end
+
+  it 'still reports a lockfile whose bytes changed while the environment booted' do
+    path = File.join(@root, 'Gemfile.lock')
+    File.write(path, "GEM\n")
+    snapshot = described_class.new(root: @root)
+    File.write(path, "GEM\n  specs:\n")
+    snapshot.boot_finished!
+
+    expect(snapshot.covers?(path)).to be(false)
+    expect(snapshot.changed_paths).to eq([path])
+  end
+
   it 'does not cover by bytes before the boot is known to have finished' do
     path = File.join(@root, 'db/schema.rb')
     FileUtils.mkdir_p(File.dirname(path))
