@@ -194,6 +194,30 @@ RSpec.describe Woods::Watch::PumaChild do
     expect(File.readlines(File.join(@root, 'attempts')).size).to eq(1)
   end
 
+  # One message covers a launcher that exits at once and one killed while it
+  # ran. Neither proves the setup is misconfigured; both need a Puma restart.
+  it 'names a Puma restart as the next step when the launcher exits on its own' do
+    write_wrapper('exit 1')
+    start_child
+    wait_until { messages.any? }
+    expect(messages.join).to include('stopped unexpectedly', 'Restart Puma', 'error above')
+    expect(messages.join).not_to match(/configuration/i)
+  end
+
+  it 'names a Puma restart as the next step when a running launcher is killed' do
+    write_wrapper(<<~RUBY)
+      File.write('launcher.pid.tmp', Process.pid)
+      File.rename('launcher.pid.tmp', 'launcher.pid')
+      sleep
+    RUBY
+    start_child
+    wait_until { File.exist?(File.join(@root, 'launcher.pid')) }
+    Process.kill('KILL', Integer(File.read(File.join(@root, 'launcher.pid'))))
+    wait_until { messages.any? }
+    expect(messages.join).to include('stopped unexpectedly', 'automatic maintenance is inactive', 'Restart Puma')
+    expect(messages.join).not_to match(/configuration/i)
+  end
+
   it 'bounds shutdown when the launcher ignores TERM and reaps it' do
     write_wrapper("Signal.trap('TERM') {}; File.write('started', Process.pid.to_s); sleep")
     pid = start_child

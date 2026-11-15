@@ -52,8 +52,9 @@ module Woods
         until @stopping
           unless @process.alive?
             @process.stop
-            @logger.log('[woods-watch] Puma launcher stopped unexpectedly; automatic maintenance is inactive. ' \
-                        'Fix the launcher configuration and restart Puma, or run bin/woods-watch separately.')
+            @logger.log('[woods-watch] Puma launcher stopped unexpectedly; automatic maintenance is inactive ' \
+                        'until Puma restarts. Restart Puma to resume it, or run bin/woods-watch separately. ' \
+                        'If the launcher printed an error above, fix that first.')
             return
           end
           sleep 0.1
