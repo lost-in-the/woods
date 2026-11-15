@@ -204,6 +204,9 @@ Pass the session's own directory with `--client-root`, so the server compares th
   A fixed value (`--client-root-as /app`) claims that every session is in the mounted checkout:
   the very case this check exists to catch.
 
+Run by hand inside a `docker run` container with a checkout mounted and no index yet:
+`woods-mcp-start --checkout --await-index --client-root <a host path>` answered `initialize` with the warning,
+`woods_status` with `awaiting_index` and `client_match_reason: "client_root_unresolved"`, and `lookup` with `building`.
 Not run: this `docker compose exec` command line, and how a given client expands `$PWD` in it.
 `spec/mcp/served_identity_spec.rb` covers the launcher in each case:
 a client root in another checkout, one not visible from the launcher, and one mapped with `--client-root-as`.
