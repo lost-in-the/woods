@@ -123,6 +123,8 @@ and what depends on it. Change `Auditable` and you can trace every model affecte
 packaged launch; it reads pre-extracted JSON without booting Rails. The Console Server
 has a 31-schema inventory but registers 9 tools by default, or 11 with explicit embedded
 read tools, and bridges to a live Rails process for bounded database queries.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
 
 ```bash
 # What you get after extraction

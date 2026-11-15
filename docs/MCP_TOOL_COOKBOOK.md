@@ -826,6 +826,10 @@ It is a sorted list of action names, present only when at least one of the contr
 
 ## Data Exploration (Console Server)
 
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+These recipes are for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
+
 ### Scope predicates
 
 Tools that accept a `scope` parameter (`console_count`, `console_sample`, `console_pluck`, `console_aggregate`, `console_association_count`, `console_recent`) support Ransack-style predicate suffixes on hash keys. Plain keys are treated as equality, suffixed keys build safe Arel predicates. Column names are validated against the model's schema, SQL injection via column names is not possible.

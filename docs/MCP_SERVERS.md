@@ -1,6 +1,10 @@
 # MCP servers
 
-Woods provides two MCP servers with different purposes and trust boundaries. Use the Index Server for codebase work. Enable the Console Server only when an agent must inspect live Rails data.
+Woods provides two MCP servers with different purposes and trust boundaries.
+Use the Index Server for codebase work.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+See [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 ## Choose a server
 
@@ -10,7 +14,7 @@ Woods provides two MCP servers with different purposes and trust boundaries. Use
 | What does it read? | A generated Woods index | A booted Rails app and its database |
 | Does it boot Rails? | No | Yes |
 | Packaged default | 16 tools | 9 tools |
-| Normal setup | Recommended | Disabled |
+| Normal setup | Recommended | Deprecated, removed in Woods 3.0; disabled |
 | Main risk | Generated index may contain source and schema details | Responses may contain live application data |
 
 Do not enable Console MCP to compensate for a stale or missing index. Extract or refresh the Index Server instead.
@@ -1185,6 +1189,10 @@ Use HTTP only for a deliberate shared or remote deployment. It expands the netwo
 
 
 ## Console Server
+
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+> Existing setups keep working; new setups should not enable it.
+> This section is for existing setups; see [what to use instead](CONSOLE_MCP_SETUP.md#what-to-use-instead).
 
 The Console Server launches a Rails process through direct, Docker, or SSH connection configuration. It reads live data and must be treated as a separate security decision.
 

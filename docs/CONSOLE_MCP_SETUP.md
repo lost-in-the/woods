@@ -1,5 +1,21 @@
 # Console MCP Server Setup
 
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+> Existing setups keep working; new setups should not enable it.
+> Live access to a Rails application is better served by a narrowly scoped agent inside it, with limited permissions.
+> The Index Server now answers the structural questions, so the Console adds only live row data.
+> Each Console start prints one deprecation line on stderr.
+> The notice comes from the Console process itself, so a custom launch command still shows it.
+> The Console gets no new features; vulnerabilities are still fixed under [SECURITY.md](../SECURITY.md).
+
+## What to use instead
+
+- **Structure** (associations, callbacks, dependents, routes): the [Index Server](MCP_SERVERS.md).
+- **A runtime observation in development**: `bin/rails runner` or a focused spec.
+- **Live data**: an agent owned by the application, with its own limited permissions.
+
+The rest of this guide is for existing setups.
+
 The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: database counts, record lookups, and schema inspection. It does not expose job-monitoring tools in supported modes. Database work on the request's current connection is rolled back, subject to the side-effect limits documented below.
 
 ## Transport options at a glance
@@ -836,7 +852,8 @@ transaction, host writes included. A lock wait timeout does the same when the
 server runs with `innodb_rollback_on_timeout` enabled; by default it rolls back
 only the statement that timed out. A statement that causes an implicit commit
 ends the host transaction. `console_sql` accepts only `SELECT`, `WITH` and plain
-`EXPLAIN` statements, which narrows the second case but does not rule it out.
+`EXPLAIN` statements, which narrows the implicit-commit case but does not rule it
+out.
 It is a final
 guard for ordinary database work, not a sandbox or a universal side-effect
 guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,

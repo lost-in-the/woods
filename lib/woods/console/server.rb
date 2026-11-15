@@ -3,6 +3,7 @@
 require 'mcp'
 require_relative '../mcp/protocol_policy'
 require_relative 'connection_manager'
+require_relative 'deprecation_notice'
 require_relative 'model_validator'
 require_relative 'safe_context'
 require_relative 'tools/tier1'
@@ -145,6 +146,7 @@ module Woods
                            unsafe_eval_audit_log_path: nil,
                            sql_default_limit: nil, sql_max_limit: nil)
           require_relative 'embedded_executor'
+          Console.warn_deprecated
           enforce_unsafe_eval_contract!(
             legacy_options_present: unsafe_eval_confirmation || unsafe_eval_audit_log_path
           )
