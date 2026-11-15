@@ -4,14 +4,16 @@
 
 | Version | Supported | Until |
 |---------|-----------|-------|
-| 2.0.x   | Yes, all fixes | Current release line |
-| 1.6.x   | Security fixes only | 2027-02-20 |
-| < 1.6   | No | n/a |
-| 0.x     | No | n/a |
+| 2.1.x   | Yes, all fixes | Current release line |
+| 1.6.x   | Vulnerability fixes only | 2027-02-20 |
+| < 2.1 (other than 1.6.x) | No | n/a |
 
 Only the newest patch release of a supported line receives fixes. A report
 against 1.6.x is assessed against `main` first; if the current release line is
 unaffected, the 1.6.x backport is still issued until the date above.
+A backport to 1.6.x is issued for a vulnerability, as defined under
+[What Counts as a Vulnerability](#what-counts-as-a-vulnerability).
+Console hardening is not backported.
 
 Upgrading from 1.x to 2.0 requires one clean re-index, see the Upgrade Notes in
 [CHANGELOG.md](CHANGELOG.md) and [docs/UPGRADING_TO_2.md](docs/UPGRADING_TO_2.md).
@@ -38,14 +40,45 @@ Either way, please include:
 4. The Woods version and Rails version you observed it on
 5. Any suggested fix (optional)
 
+## What Counts as a Vulnerability
+
+Woods treats a report as a vulnerability when it crosses a boundary Woods itself enforces.
+These get a private fix, a patch release and a published advisory:
+
+- Reaching an MCP server without the authentication it requires, or from a host it refuses to bind.
+- Reaching the Console when it is disabled, or a Console tool the operator did not opt in to.
+- A write, eval or shell capability reachable in a supported packaged mode.
+- Code execution, or a file read or write outside the configured output directory.
+- One client receiving another client's data.
+
+Gaps in the Console's best-effort protections are hardening, not vulnerabilities.
+They are fixed in public and ship in the next ordinary release:
+
+- Redaction, masking or the credential scanner missing a value, in a response or in a log.
+- The SQL policy admitting a read it was meant to refuse.
+- Rollback not undoing something, including inside a host's own transaction.
+- Missing limits on result size, time or memory.
+
+The reason is the trust model.
+The Console gives an agent live access to a Rails application, and only an operator can turn it on.
+Its protections reduce accidental disclosure.
+They do not make that access safe, as [Limits of the Console protections](#limits-of-the-console-protections) states.
+
+You may still report a hardening gap privately if you prefer.
+It is fixed the same way, and credited the same way.
+
+When a hardening fix changes what a configured redaction or table block hides,
+the release notes call it out under "Security hardening", so operators who rely on it know to upgrade.
+
 ## What to Expect
 
 - **Acknowledgment** within 48 hours of your report
-- **Assessment** within 1 week, we'll confirm whether it's a valid vulnerability and its severity
-- **Fix timeline** depends on severity:
-  - **Critical** (remote code execution, data exfiltration): Patch within 7 days
-  - **High** (privilege escalation, injection): Patch within 14 days
-  - **Medium/Low** (information disclosure, DoS): Patch in the next release
+- **Assessment** within 1 week, we'll confirm whether it is a vulnerability or hardening, and its severity
+- **Fix timeline** for a vulnerability depends on severity:
+  - **Critical** (remote code execution, authentication bypass): Patch within 7 days
+  - **High** (a write or eval capability, another client's data): Patch within 14 days
+  - **Medium/Low**: Patch in the next release
+- **Console hardening**: fixed on `main` in public, shipped in the next ordinary release
 
 ## Disclosure Timeline
 
