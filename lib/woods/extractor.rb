@@ -1069,8 +1069,10 @@ module Woods
     # sees {Woods::ExtractionError} and the generation is left unbumped.
     #
     # @return [void]
-    # @raise [Woods::ExtractionError] see {#begin_payload!}
+    # @raise [Woods::ExtractionError] see {#begin_payload!} and
+    #   {#ensure_published_payload_readable!}
     def prepare_incremental_run(operation: 'incremental')
+      ensure_published_payload_readable!
       reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
@@ -1452,7 +1454,7 @@ module Woods
       @payload_generation = marker.number + 1
       @writer_lock = index_writer_lock
       @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
-      seed_payload(marker, rewritten_dirs: rewritten_dirs)
+      seed_payload(marker, rewritten_dirs: rewritten_dirs, strict: strict)
       PublicationSeam.reach(:staged, @output_dir)
     rescue Coordination::LockLostError, Woods::ExtractionError
       raise
@@ -1584,12 +1586,29 @@ module Woods
     # compatibility check before seeding; a bare graph can still provide an
     # embedding caller's baseline without asserting a legacy writer version.
     #
+    # A published generation always has a graph:
+    # {#ensure_published_payload_readable!} checks before seeding. A seeded
+    # stage without one means the published baseline disappeared after that
+    # check, so the run refuses rather than publish whatever graph it holds
+    # in memory.
+    #
     # @param graph_path [Pathname] the seeded payload's dependency graph
     # @return [void]
-    # @raise [Woods::ExtractionError] when no baseline exists
+    # @raise [Woods::ExtractionError] when no baseline exists, or a published
+    #   generation's baseline was seeded without its graph
     def ensure_incremental_baseline!(graph_path)
       return if graph_path.exist?
-      return if Generation.new(output_dir: @output_dir).current.number.positive?
+
+      published = Generation.new(output_dir: @output_dir).current.number
+      if published.positive?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Generation #{published} under #{@output_dir} is published, but the
+          baseline seeded from it holds no dependency_graph.json
+          (#{graph_path}): its payload or graph disappeared during this run.
+          Publishing now would drop every unit and edge the run did not touch.
+          Run a full `woods:extract` to rebuild the index.
+        MSG
+      end
       # An embedding caller that already holds a populated graph (a prior
       # in-process run, or seeded registrations) IS the baseline —
       # {#prepare_incremental_run} keeps the in-memory graph whenever no
@@ -1603,6 +1622,73 @@ module Woods
         running it here would publish a near-empty index as the complete
         truth of the application. Run a full `woods:extract` first (or point
         WOODS_OUTPUT at the directory holding the existing index).
+      MSG
+    end
+
+    # Refuse an incremental run whose published generation names a payload
+    # this run cannot read. {Generation#payload_dir} resolves a missing
+    # payload to the output root, and {#seed_payload} then seeds from the flat
+    # root: an empty graph, or a stale one, which the run would publish as
+    # the new generation without the units it did not touch. Runs before
+    # anything is written, including the source-input key.
+    #
+    # A published flat generation (no payload pointer) reads its graph from
+    # the output root, and refuses the same way when none is there.
+    #
+    # A graph held in memory never stands in for a published generation's
+    # graph file: it may predate that generation. Only an unpublished
+    # directory accepts one ({#ensure_incremental_baseline!}).
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when the payload pointer is empty, the
+    #   payload directory is missing, or the published baseline holds no
+    #   dependency_graph.json
+    def ensure_published_payload_readable!
+      marker = Generation.new(output_dir: @output_dir).current
+      name = marker.payload
+      return ensure_flat_graph_readable!(marker.number) if name.nil?
+
+      if name.empty?
+        raise Woods::ExtractionError,
+              "Generation #{marker.number} under #{@output_dir} names an empty payload pointer, which an " \
+              'incremental run cannot build on. Run a full `woods:extract` to rebuild the index.'
+      end
+
+      directory = @output_dir.join(name)
+      unless directory.directory?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          The published generation names payload directory #{directory},
+          which is missing. An incremental run builds on that payload, so
+          running it here would publish an index without every unit it did
+          not touch. Run a full `woods:extract` to rebuild the index.
+        MSG
+      end
+      return if directory.join('dependency_graph.json').file?
+
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        The published payload directory #{directory} holds no
+        dependency_graph.json. An incremental run computes what changed from
+        that graph, so running it here would publish an index without the
+        edges and units it did not touch. Run a full `woods:extract` to
+        rebuild the index.
+      MSG
+    end
+
+    # @param published [Integer] the flat marker's generation number; 0
+    #   leaves an unpublished directory to {#ensure_incremental_baseline!}
+    # @return [void]
+    # @raise [Woods::ExtractionError] when a published flat generation has no
+    #   graph in the output root
+    def ensure_flat_graph_readable!(published)
+      return unless published.positive?
+      return if @output_dir.join('dependency_graph.json').file?
+
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        Generation #{published} under #{@output_dir} names no payload
+        directory, and no dependency_graph.json exists there. An incremental
+        run computes what changed from that graph, so running it here would
+        publish an index without every unit and edge it did not touch. Run a
+        full `woods:extract` to rebuild the index.
       MSG
     end
 
@@ -1621,9 +1707,21 @@ module Woods
     #   whose unit files this run writes in full, so they are not seeded;
     #   anything else inside them (the non-JSON files and subdirectories the
     #   orphan sweep also never touches) still carries forward
-    def seed_payload(marker, rewritten_dirs: [])
-      if marker.payload && (source = @output_dir.join(marker.payload)).directory?
+    # @param strict [Boolean] refuse, rather than seed from the flat root,
+    #   when the marker names a payload directory that is missing, or an
+    #   empty pointer: the root can hold an older graph an incremental run
+    #   would publish
+    # @raise [Woods::ExtractionError] when `strict` and the named payload is
+    #   gone or the pointer is empty
+    def seed_payload(marker, rewritten_dirs: [], strict: false)
+      # An empty name joins to the output root itself, which holds payloads/.
+      named = marker.payload && !marker.payload.empty?
+      if named && (source = @output_dir.join(marker.payload)).directory?
         @payload_store.clone(source, @payload_dir, without_json: rewritten_dirs)
+      elsif strict && marker.payload
+        raise Woods::ExtractionError,
+              "Generation #{marker.number} names payload #{marker.payload}, which went missing before this run " \
+              'could seed from it. Run a full `woods:extract` to rebuild the index.'
       else
         # A flat root is seeded once, on the first payload-publishing run.
         seed_payload_from_flat_root
