@@ -54,7 +54,33 @@ Woods 2's shipped structural index and storage backends do not read or write the
 
 The generated initializer defaults are enough for structural extraction. Do not choose a storage preset or configure an embedding provider unless you want semantic search.
 
-## 3. Extract the application
+<a id="3-extract-the-application"></a>
+
+## 3. Build the first index
+
+The recommended path is one watcher in the application's normal development startup.
+It builds the first index and keeps it current.
+Preview the setup, then run the same command without `--pretend`:
+
+```bash
+bin/rails generate woods:watch --mode puma --pretend
+```
+
+Choose the mode that matches how you start the application:
+
+- `puma`: you run `bin/rails server`, or a `bin/dev` that only starts Rails; Puma starts the watcher.
+- `procfile`: you run an existing Foreman Procfile; the generator adds a `woods` entry to it.
+- `external`: Docker Compose, Grove or another supervisor runs the watcher; the generator prints its command.
+
+The [managed startup guide](WATCH_DAEMON.md#managed-development-startup) gives the options for each mode.
+Then start the application as usual.
+When the watcher finds no index, it builds the first one in the background under `tmp/woods/`.
+In `puma` mode the application serves requests while it does.
+Its log shows `→ generation 1` when the first index is published.
+
+### Without a watcher, or in CI
+
+Build the index by hand:
 
 ```bash
 bin/rails woods:extract
@@ -156,13 +182,13 @@ Reconnect the MCP server and check `woods_status`. For OpenAI, pgvector, Qdrant,
 
 ### Keep the index current
 
-Enable one watcher through the application's normal development startup. The
-[managed startup guide](WATCH_DAEMON.md#managed-development-startup) covers
+Enable one watcher through the application's normal development startup, as in [step 3](#3-build-the-first-index).
+The [managed startup guide](WATCH_DAEMON.md#managed-development-startup) covers
 opt-in Puma integration for a simple Rails application, an owned Foreman entry
 for existing Procfile workflows, and external supervision for Docker/Grove.
-The managed launcher and generator are **included in Woods `2.0.0`**;
-check the installed commands before using them. Older packages can run the raw
-`bin/rails woods:watch` task under an external restart-capable supervisor.
+The managed launcher and generator are **included in Woods `2.0.0`**.
+If `bin/rails generate woods:watch --help` prints the generator's options, your installed Woods has them.
+Older packages can run the raw `bin/rails woods:watch` task under an external restart-capable supervisor.
 
 On startup it reconciles changes made since the last successful generation. While running it batches file events, reloads Rails code when safe, extracts affected units, and publishes atomically. The Index Server detects the new generation on its next call and reloads automatically. After the initial extraction, ordinary code edits need no manual extraction or MCP restart.
 
