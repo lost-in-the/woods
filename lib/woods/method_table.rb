@@ -79,7 +79,7 @@ module Woods
     # Definitions inside the commented concern blocks of composite sources.
     # A block whose decoded text does not parse contributes nothing.
     def concern_entries(source)
-      blocks(source.lines(chomp: true)).flat_map do |first_line, text|
+      source_blocks(source).flat_map do |first_line, text, _name|
         parsed = Woods::ParseCache.parse(text)
         next [] if parsed.errors.any?
 
@@ -99,7 +99,27 @@ module Woods
     #   last code line in the annotated source and the concern it was inlined
     #   from
     def block_ranges(lines)
-      named_blocks(lines).map { |first_line, text, name| [first_line, first_line + text.count("\n"), name] }
+      ranges(named_blocks(lines))
+    end
+
+    # {#named_blocks} of a whole source, decoded once per distinct source in
+    # an extraction run ({Woods::ParseCache.derive}): the method table, the
+    # callback sites and each of their file-line locators read the same
+    # blocks of one unit. The result is frozen and shared. Keyed by encoding
+    # as well as bytes: the decoded texts carry the source's encoding.
+    #
+    # @param source [String] published annotated source
+    # @return [Array<Array(Integer, String, String)>]
+    def source_blocks(source)
+      Woods::ParseCache.derive([:named_blocks, source.encoding], source) do
+        named_blocks(source.lines(chomp: true)).each { |block| block.each(&:freeze).freeze }.freeze
+      end
+    end
+
+    # @param blocks [Array<Array(Integer, String, String)>] from {#named_blocks}
+    # @return [Array<Array(Integer, Integer, String)>] as {#block_ranges}
+    def ranges(blocks)
+      blocks.map { |first_line, text, name| [first_line, first_line + text.count("\n"), name] }
     end
 
     # @return [Array<Array(Integer, String, String)>] first code line, decoded
