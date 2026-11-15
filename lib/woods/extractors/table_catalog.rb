@@ -22,6 +22,9 @@ module Woods
 
       IDENTIFIER_PREFIX = 'table:'
 
+      # Worst first: the state a database reports when its pools disagree.
+      SCHEMA_STATES = %w[unreachable empty readable].freeze
+
       # One live table.
       #
       # @!attribute name
@@ -84,7 +87,54 @@ module Woods
           nil
         end
 
+        # Whether each database a concrete model reads could be read. A
+        # database is `unreachable` when listing what it holds raises (it does
+        # not exist, refuses the connection, or the model has no pool), and
+        # `empty` when it answers but holds nothing beyond the Rails
+        # bookkeeping tables. One absent table beside others is the model's own
+        # `table_exists: false`, not an unreadable schema.
+        #
+        # @param connection_classes [Array<Class>, nil] Active Record classes;
+        #   defaults to `ActiveRecord::Base` and its descendants
+        # @return [Array<Hash>] one `{name:, state:, error:}` per database,
+        #   sorted by name; `error` names the failure for the log and is nil
+        #   unless the database is unreachable
+        def schema_readability(connection_classes: nil)
+          claims = (connection_classes || runtime_classes).filter_map { |klass| schema_claim(klass) }
+          databases = claims.group_by { |claim| claim[:database] }.map do |database, database_claims|
+            states = database_claims.map { |claim| claim[:pool] }.uniq.map { |pool| listing_state(pool) }
+            state, error = states.min_by { |(candidate, _)| SCHEMA_STATES.index(candidate) }
+            { name: database, state: state, error: error }
+          end
+          databases.sort_by { |database| database[:name].to_s }
+        end
+
         private
+
+        def schema_claim(klass)
+          name = klass.name
+          return nil if name.nil? || name.split('::').last.start_with?('HABTM_')
+          return nil if klass.respond_to?(:abstract_class?) && klass.abstract_class?
+          return nil if klass.table_name.nil?
+
+          pool = pool_of(klass)
+          return { database: nil, pool: nil } if pool.nil?
+          return nil if replica?(pool)
+
+          { database: database_name(pool), pool: pool }
+        rescue StandardError
+          nil
+        end
+
+        # @return [Array(String, String)] the state and, when unreachable, the error
+        def listing_state(pool)
+          return ['unreachable', 'no connection pool'] if pool.nil?
+
+          names = pool.with_connection(&:data_sources).map(&:to_s) - INTERNAL_TABLES
+          [names.empty? ? 'empty' : 'readable', nil]
+        rescue StandardError => e
+          ['unreachable', "#{e.class}: #{e.message}"]
+        end
 
         def runtime_classes
           return [] unless defined?(ActiveRecord::Base)

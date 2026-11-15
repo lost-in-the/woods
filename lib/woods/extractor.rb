@@ -28,6 +28,7 @@ require_relative 'git_provenance'
 require_relative 'git_history'
 require_relative 'git_commit_table'
 require_relative 'git_enrichment_summary'
+require_relative 'schema_readability'
 require_relative 'temporal/snapshot_unit_facts'
 require_relative 'extractors/model_extractor'
 require_relative 'extractors/controller_extractor'
@@ -598,6 +599,7 @@ module Woods
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
       profile_phase('component load') { load_runtime_discovery_files }
+      @schema_readability = profile_phase('schema readability') { read_schema_readability }
 
       # Phase 1: Extract all units
       profile_phase('extraction') do
@@ -1076,6 +1078,7 @@ module Woods
       reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
+      @baseline_schema_readability = baseline_manifest&.fetch(SchemaReadability::MANIFEST_KEY, nil)
       profile_phase('source capture') { begin_source_inputs(operation) }
       profile_phase('payload seed') { begin_payload!(strict: true) }
       graph_path = payload_dir.join('dependency_graph.json')
@@ -3331,6 +3334,23 @@ module Woods
       )
     end
 
+    # Whether every database a concrete model reads could be read, for the
+    # manifest. An unreadable one is warned about here, once per run, with
+    # the connection errors the manifest leaves out.
+    #
+    # @return [Hash] {SchemaReadability.build} for this run
+    def read_schema_readability
+      databases = Extractors::TableCatalog.schema_readability
+      summary = SchemaReadability.build(databases)
+      warning = SchemaReadability.warning(summary)
+      return summary unless warning
+
+      errors = databases.select { |database| database[:error] }
+                        .map { |database| "#{database[:name] || 'default'}: #{database[:error]}" }
+      Rails.logger.warn("[Woods] #{warning}#{" Connection errors: #{errors.join('; ')}." unless errors.empty?}")
+      summary
+    end
+
     def write_manifest(incremental: false)
       # Preserve the run capture and the existing fallback acquisition order.
       provenance = git_capture.provenance || GitProvenance.new(root: Rails.root).to_h
@@ -3352,6 +3372,7 @@ module Woods
       lock_digest = gemfile_lock_sha
       schema_digest = schema_sha
       extraction_config = incremental ? @baseline_extraction_config : Woods.configuration.extraction_fingerprint
+      schema_readability = incremental ? @baseline_schema_readability : @schema_readability
       enrichment = git_capture.enrichment_summary(graph: @dependency_graph, full: !incremental)
       filter_available = GitSourceFilter.new(root: Rails.root).available?
 
@@ -3361,7 +3382,7 @@ module Woods
         extracted_at: extracted_at, woods_version: woods_version, rails_version: rails_version,
         ruby_version: ruby_version, gemfile_lock_sha: lock_digest, schema_sha: schema_digest,
         extractor_timings: extractor_timings, woods_build: BuildIdentity.current.manifest_fields,
-        root: File.expand_path(Rails.root.to_s)
+        root: File.expand_path(Rails.root.to_s), schema_readability: schema_readability
       )
 
       AtomicFile.write(

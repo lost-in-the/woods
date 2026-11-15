@@ -6,6 +6,7 @@ require 'rubygems/version'
 require_relative '../atomic_file'
 require_relative '../build_identity'
 require_relative '../generation'
+require_relative '../schema_readability'
 require_relative '../source_references/cache'
 require_relative '../source_references/registry'
 require_relative '../source_references/runtime_lookup'
@@ -56,7 +57,8 @@ module Woods
       # Writer majors below this cannot be migrated by a partial writer.
       MINIMUM_WRITER_MAJOR = 2
 
-      # Check the layout and the manifest writer of the published generation.
+      # Check the layout, the manifest writer and the schema readability the
+      # published generation records.
       # This is the one definition shared with the extractor's refusal.
       #
       # @param generation [Woods::Generation]
@@ -71,9 +73,12 @@ module Woods
         manifest = JSON.parse(AtomicFile.read(manifest_path))
         writer = manifest.fetch('woods_version', nil)
         supported = writer.nil? || Gem::Version.new(writer).segments.first >= MINIMUM_WRITER_MAJOR
-        return WriterCheck.new(manifest: manifest) if supported
+        return WriterCheck.new(problem: "an index written by Woods #{writer}") unless supported
 
-        WriterCheck.new(problem: "an index written by Woods #{writer}")
+        # Units an incremental run does not touch keep the schema the baseline
+        # could not read; only a full extraction rereads every model.
+        WriterCheck.new(manifest: manifest,
+                        problem: SchemaReadability.incremental_problem(SchemaReadability.from_manifest(manifest)))
       rescue JSON::ParserError, ArgumentError, TypeError, NoMethodError => e
         WriterCheck.new(problem: "the baseline manifest writer cannot be verified (#{e.class})")
       end
