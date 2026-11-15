@@ -43,6 +43,8 @@ Either way, please include:
 ## What Counts as a Vulnerability
 
 Woods treats a report as a vulnerability when it crosses a boundary Woods itself enforces.
+The test is whether Woods let someone do or see something it promises to prevent.
+The lists below are examples of that test, not the whole of it.
 These get a private fix, a patch release and a published advisory:
 
 - Reaching an MCP server without the authentication it requires, or from a host it refuses to bind.
