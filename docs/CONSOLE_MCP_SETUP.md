@@ -839,7 +839,8 @@ It is a final
 guard for ordinary database work, not a sandbox or a universal side-effect
 guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
 threaded work, `after_rollback` callbacks, or writes through another connection
-or shard. The validator, table gate, credential defenses, and operator trust
+or shard. It also does not undo writes to nontransactional tables, such as
+MySQL MyISAM: a rollback never covers them. The validator, table gate, credential defenses, and operator trust
 boundary remain necessary.
 
 - Direct accidental mutation on the wrapped connection is rolled back.

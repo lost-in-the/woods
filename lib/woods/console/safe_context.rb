@@ -54,6 +54,8 @@ module Woods
     #   SafeContext was built with.
     # - `raw_connection.execute` on some adapters when the adapter's
     #   transaction bookkeeping is out-of-band.
+    # - Writes to nontransactional tables (MySQL MyISAM, for example): a
+    #   rollback never covers them.
     #
     # Treat SafeContext as "rolls back the database", not "prevents every
     # side effect" — operators must still apply the upstream defenses
