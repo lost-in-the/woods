@@ -9,7 +9,7 @@
 
 require_relative '../lib/woods/mcp/served_identity'
 
-USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--client-root PATH [--client-root-as PATH]] ' \
+USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--await-index] [--client-root PATH [--client-root-as PATH]] ' \
         '(--checkout | /path/to/index_dir)'
 
 def usage_error(message)
@@ -32,6 +32,12 @@ end
 # `--allow-mismatch` (or WOODS_MCP_ALLOW_MISMATCH=1) serves an index that
 # another checkout of the repository recorded; without it that is refused.
 allow_mismatch = !ARGV.delete('--allow-mismatch').nil?
+
+# `--await-index` (or WOODS_MCP_AWAIT_INDEX=1): a directory that holds no
+# published index yet, or does not exist, is not an error. woods-mcp starts,
+# answers `building` until an index is published there, then serves it.
+await_index_env = 'WOODS_MCP_AWAIT_INDEX'
+await_index = !ARGV.delete('--await-index').nil? || Woods::MCP::ServedIdentity.env_flag?(await_index_env)
 
 # `--client-root` (or WOODS_MCP_CLIENT_ROOT) is the directory the client
 # session runs in: the index is compared with that checkout instead of this
@@ -91,7 +97,7 @@ index_dir = File.expand_path(index_dir)
 path_remedy = 'Point at the existing index with an explicit path, WOODS_DIR, or WOODS_OUTPUT. ' \
               'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
 
-unless File.directory?(index_dir)
+unless await_index || File.directory?(index_dir)
   warn "Error: Index directory does not exist: #{index_dir}"
   warn path_remedy
   exit 1
@@ -126,7 +132,10 @@ rescue JSON::ParserError, SystemCallError, TypeError, NoMethodError
   false
 end
 
-unless manifest_present?(index_dir)
+if await_index
+  ENV[await_index_env] = '1'
+  warn "Note: no published Woods index in #{index_dir} yet; serving it once one is." unless manifest_present?(index_dir)
+elsif !manifest_present?(index_dir)
   warn "Error: Could not resolve a published Woods index in: #{index_dir}"
   warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
   warn path_remedy

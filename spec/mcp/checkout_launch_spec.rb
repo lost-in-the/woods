@@ -60,15 +60,17 @@ RSpec.describe 'woods-mcp-start --checkout' do
       wrapper, log, *argv = ARGV
       ARGV.replace(argv)
       Kernel.define_method(:exec) do |*command|
-        File.write(log, JSON.generate(command))
+        File.write(log, JSON.generate(command + [ENV.fetch('WOODS_MCP_AWAIT_INDEX', nil)]))
         exit 42
       end
       load wrapper
     RUBY
     env = { 'WOODS_DIR' => nil, 'WOODS_OUTPUT' => nil, 'WOODS_MCP_CHECKOUT' => nil, 'WOODS_MCP_ALLOW_MISMATCH' => nil,
-            'WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_AS' => nil }.merge(env)
+            'WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_AS' => nil,
+            'WOODS_MCP_AWAIT_INDEX' => nil }.merge(env)
     _out, errors, status = Open3.capture3(env, RbConfig.ruby, '-e', harness, wrapper, log, *args, chdir: cwd)
-    [status.exitstatus, errors, status.exitstatus == 42 ? JSON.parse(File.read(log)).last : nil]
+    exec_log = status.exitstatus == 42 ? JSON.parse(File.read(log)) : []
+    [status.exitstatus, errors, exec_log[-2], exec_log[-1]]
   end
 
   it "serves the checkout's own tmp/woods from any directory inside it" do
@@ -153,6 +155,43 @@ RSpec.describe 'woods-mcp-start --checkout' do
 
     expect(code).to eq(1)
     expect(errors).to include("#{outside} is not inside a git checkout", 'pass the index directory as a path')
+  end
+
+  describe 'with --await-index' do
+    it 'starts in a checkout whose index does not exist yet, and tells woods-mcp to wait for it' do
+      root = checkout(File.join(@base, 'fresh-worktree'), index: false)
+
+      code, errors, served, awaiting = launch(cwd: root, args: ['--checkout', '--await-index'])
+
+      expect(code).to eq(42), errors
+      expect([served, awaiting]).to eq([File.join(root, 'tmp', 'woods'), '1'])
+      expect(errors).to include("no published Woods index in #{File.join(root, 'tmp', 'woods')} yet")
+      expect(errors).not_to include('Warning', 'Error')
+    end
+
+    it 'takes WOODS_MCP_AWAIT_INDEX=1 with an explicit path, and an empty index directory' do
+      root = checkout(File.join(@base, 'shop'), index: false)
+      index = File.join(root, 'tmp', 'woods')
+      FileUtils.mkdir_p(index)
+
+      code, errors, served, awaiting = launch(cwd: root, args: [index], env: { 'WOODS_MCP_AWAIT_INDEX' => '1' })
+
+      expect(code).to eq(42), errors
+      expect([served, awaiting]).to eq([index, '1'])
+    end
+
+    it 'leaves an existing index as it is, and the default strict' do
+      root = checkout(File.join(@base, 'shop'))
+      fresh = checkout(File.join(@base, 'fresh'), index: false)
+
+      code, errors, = launch(cwd: root, args: ['--checkout', '--await-index'])
+      strict, strict_errors, = launch(cwd: fresh)
+
+      expect(code).to eq(42), errors
+      expect(errors).to be_empty
+      expect(strict).to eq(1)
+      expect(strict_errors).to include("Index directory does not exist: #{File.join(fresh, 'tmp', 'woods')}")
+    end
   end
 
   it 'refuses an index path as well, given as an argument or by WOODS_DIR' do

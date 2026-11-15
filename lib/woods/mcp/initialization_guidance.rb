@@ -24,10 +24,21 @@ module Woods
 
       # @param tool_names [Array<String>] actual names after conditional registration
       # @param identity [ServedIdentity, nil] the served index at startup
+      # @param awaiting [String, nil] the index directory, when the server
+      #   started before any index was published there
       # @return [String] instructions, without provider calls
-      def self.for(tool_names, identity: nil)
+      def self.for(tool_names, identity: nil, awaiting: nil)
         rest = "#{WORKFLOW}Registered tools: #{tool_names.sort.join(', ')}"
-        "#{fit(identity_lines(identity), MAX_BYTES - rest.bytesize)}#{rest}"
+        "#{fit(awaiting_line(awaiting) + identity_lines(identity), MAX_BYTES - rest.bytesize)}#{rest}"
+      end
+
+      # @param index_dir [String, nil]
+      # @return [String]
+      def self.awaiting_line(index_dir)
+        return '' unless index_dir
+
+        "No index was published in #{index_dir} when this server started. Until one is, every tool but " \
+          "woods_status answers a retryable `building` result; woods_status says what the server is waiting for.\n"
       end
 
       # Long paths and several warnings can outgrow the budget; the full

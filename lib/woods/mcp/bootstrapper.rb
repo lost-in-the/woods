@@ -27,9 +27,13 @@ module Woods
       # Resolve and validate the index directory from CLI args or environment.
       #
       # @param argv [Array<String>] Command-line arguments
+      # @param await_index [Boolean] accept a directory that holds no
+      #   published index yet, or does not exist ({IndexWait})
       # @return [String] Validated index directory path
-      def self.resolve_index_dir(argv)
+      def self.resolve_index_dir(argv, await_index: false)
         dir = argv[0] || ENV['WOODS_DIR'] || ENV['WOODS_OUTPUT'] || Dir.pwd
+        return dir if await_index && !dir.empty?
+
         examined = dir.empty? ? '(empty path)' : File.expand_path(dir)
 
         unless Dir.exist?(dir)
@@ -139,16 +143,18 @@ module Woods
       #
       # @param index_dir [String, nil] Path to the extraction output directory.
       #   When nil, uses Woods.configuration.output_dir.
+      # @param await_index [Boolean] the index may not be published yet
+      #   ({IndexWait}); a lexical retriever then reads it once it is
       # @return [Array(Woods::Retriever, Woods::MCP::BootstrapState)]
       # @raise [Woods::MCP::BootstrapError] on config-invalid (missing
       #   credentials, dimension mismatch, unsupported artifact, or a missing
       #   artifact under WOODS_REQUIRE_INDEX=1).
-      def self.build_retriever(index_dir: nil)
+      def self.build_retriever(index_dir: nil, await_index: false)
         mode = ENV.fetch('WOODS_RETRIEVAL_MODE', Woods.configuration.retrieval_mode.to_s)
         unless %w[semantic lexical].include?(mode)
           raise BootstrapError, "WOODS_RETRIEVAL_MODE must be semantic or lexical, got #{mode.inspect}"
         end
-        return build_lexical_retriever(index_dir) if mode == 'lexical'
+        return build_lexical_retriever(index_dir, await_index: await_index) if mode == 'lexical'
 
         state = BootstrapState.new
         state.mark(:hydrating)
@@ -196,10 +202,12 @@ module Woods
         [retriever, state]
       end
 
-      def self.build_lexical_retriever(index_dir)
+      def self.build_lexical_retriever(index_dir, await_index: false)
         state = BootstrapState.new
         state.mark(:hydrating)
-        retriever = PublishedLexicalRetriever.new(index_dir: index_dir || Woods.configuration.output_dir,
+        dir = index_dir || Woods.configuration.output_dir
+        reader = IndexReader.new(dir, require_index: false) if await_index
+        retriever = PublishedLexicalRetriever.new(index_dir: dir, reader: reader,
                                                   default_budget: Woods.configuration.max_context_tokens)
         # Not warmed here: {Server.build} binds its own reader, which clears
         # any snapshot built against this one, and warms the retriever once
