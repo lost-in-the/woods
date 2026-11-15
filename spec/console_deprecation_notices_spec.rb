@@ -33,7 +33,7 @@ RSpec.describe 'Console MCP deprecation notices' do
       text = read(path)
 
       expect(text).to include('Existing setups keep working; new setups should not enable it.')
-      expect(text).to match(%r{CONSOLE_MCP_SETUP\.md#what-to-use-instead})
+      expect(text).to match(/CONSOLE_MCP_SETUP\.md#what-to-use-instead/)
     end
   end
 
