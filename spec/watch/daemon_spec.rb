@@ -771,6 +771,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'reconciles changes that predate startup' do
+      publish_generation('full')
       touch('app/services/before_the_daemon.rb')
 
       build(watcher: fake_watcher, catch_up: true).run
@@ -1080,6 +1081,7 @@ RSpec.describe Woods::Watch::Daemon do
     end
 
     it 'processes a path the watcher delivers while catch-up is still running' do
+      publish_generation('full')
       touch('app/services/predates_daemon.rb')
       live_watcher = LiveWatcher.new
       catch_up_entered = Queue.new

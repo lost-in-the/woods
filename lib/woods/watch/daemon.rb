@@ -1153,8 +1153,8 @@ module Woods
 
       def run_extraction(change_set, started)
         full = full_extraction?(change_set)
-        outdated = restart_before_full(change_set, full)
-        return outdated if outdated
+        refused = refuse_before_full(change_set, full, started)
+        return refused if refused
 
         before = @generation.current.number
         announce_cycle(full, before)
@@ -1208,12 +1208,32 @@ module Woods
         run_extraction(change_set, started)
       end
 
-      # @return [Hash, nil] the restart outcome when a full run would be wasted
-      def restart_before_full(change_set, full)
+      # @return [Hash, nil] the outcome when a full run would be wasted or refused
+      def refuse_before_full(change_set, full, started)
         return unless full
+        return unwritable_marker(change_set, started) unless marker_readable?
 
         owed = restart_inputs_changed_since_boot
         require_restart(ChangeSet.new(paths: change_set.absolute_paths | owed, root: @root)) if owed.any?
+      end
+
+      def marker_readable?
+        @generation.current!
+        true
+      rescue Generation::InvalidMarker => e
+        @marker_error = e.message
+        false
+      end
+
+      # The writer refuses to publish over a marker it cannot read (numbering
+      # from 0 would replace a retained generation), so a full run here would
+      # do its source capture only to fail. Say so, and keep the paths.
+      def unwritable_marker(change_set, started)
+        carry_forward(change_set)
+        reason = "#{@marker_error} (#{File.join(@output_dir, Generation::FILENAME)}); not extracting over it. " \
+                 'Restore it to name the newest retained payloads/gen-<n>, then the next event or heartbeat retries'
+        @logger.error("[Woods] watch: #{reason}")
+        outcome(:extract, :degraded, reason: reason, count: change_set.size, duration_ms: elapsed_ms(started))
       end
 
       # Restart inputs changed on disk since this process booted, whether or

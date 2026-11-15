@@ -564,10 +564,17 @@ An older index without this capture boundary, or one with invalid/mismatched
 metadata or a dangling payload pointer, receives a full reconciliation under
 the same reload/restart rules. A successful full publication records the new
 boundary even when no incremental units would change, so the migration does
-not repeat on every startup. With no generation at all, every file is uncovered
-and the normal storm threshold applies. On older installed versions that still
+not repeat on every startup. On older installed versions that still
 use the marker mtime, recover by completing a full extraction against settled
 source before restarting watch.
+
+With no generation published at all, the startup run is one full extraction, whatever the file count.
+An incremental run refuses without a baseline, so before Woods 2.2 a small application never got a first index.
+Its watcher stayed `degraded` at generation 0.
+An application with nothing to extract still gets an empty, valid first generation, as `woods:extract` would publish.
+A `generation.json` that exists but cannot be read is not "no generation".
+The writer refuses to publish over it, so the watcher does not start a full extraction.
+It stays `degraded`, naming the file and asking for it to be restored to the newest retained `payloads/gen-<n>`.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after

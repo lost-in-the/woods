@@ -45,10 +45,13 @@ module Woods
 
       # A full run records the missing boundary even when incremental discovery
       # would find no units to change (and therefore publish no new generation).
+      # With no generation published at all there is no baseline either, and an
+      # incremental run refuses, so the first index is always a full run.
       #
-      # @return [Boolean] true when a published generation has no usable source manifest
+      # @return [Boolean] true when no generation is published, or the published
+      #   one has no usable source manifest
       def rebuild?
-        @marker.number.positive? && @manifest.nil?
+        @manifest.nil?
       end
 
       # Whether {#paths} compares against the published generation's
