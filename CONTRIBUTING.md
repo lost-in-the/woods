@@ -299,9 +299,9 @@ Bundles install under `${WOODS_CI_LOCAL_BUNDLE:-~/.cache/woods-ci-local/bundle}`
 Mise locates installed Rubies; commands then use absolute Ruby/Bundler paths and a controlled child environment.
 The runner does not edit global mise or Bundler settings.
 Fast mode allows working changes and uses the complete current checkout.
-Its lint and unit gates deliberately share the base Gemfile's default Puma declaration (`>= 6.0, < 8.1`),
+Its lint and unit gates deliberately share the base Gemfile's default Puma declaration (`>= 6.0, != 8.1.0`),
 allowing one frozen development lock.
-Hosted unit CI declares `~> 8.0.0`; matching that row requires its separate reference bundle.
+Hosted unit CI declares `~> 8.0, != 8.1.0`; matching that row requires its separate reference bundle.
 
 `--setup` provisions the selected fast-mode bundles, then checks them without running test gates. With no selection flags it provisions all three Gemfiles. Existing locks remain frozen and their bytes are checked after commands; an absent native lock may be resolved locally. Setup no longer runs a broad dependency update. If an existing lock is incompatible, retain it and use a separate task checkout for an explicit new resolution. An existing lock selects its exact `BUNDLED WITH` version; a missing installation fails rather than silently choosing another Bundler. Reference setup below can install the captured Bundler into task storage.
 
