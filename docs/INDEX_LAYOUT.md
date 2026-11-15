@@ -271,8 +271,8 @@ receiverless call that mixed it in:
 - Like `method`, it records syntax. It does not prove that the module exists at
   runtime or that the call ran.
 
-The generation-local internal reference cache is format 8 for this writer;
-format 7 and earlier require a full baseline rebuild before incremental writes.
+The generation-local internal reference cache is format 9 for this writer; Woods 2.1 wrote format 3.
+An incremental write or targeted refresh refuses format 8 and earlier and asks for one full `woods:extract`.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
