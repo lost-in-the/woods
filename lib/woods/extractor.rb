@@ -1586,12 +1586,29 @@ module Woods
     # compatibility check before seeding; a bare graph can still provide an
     # embedding caller's baseline without asserting a legacy writer version.
     #
+    # A published generation always has a graph:
+    # {#ensure_published_payload_readable!} checks before seeding. A seeded
+    # stage without one means the published baseline disappeared after that
+    # check, so the run refuses rather than publish whatever graph it holds
+    # in memory.
+    #
     # @param graph_path [Pathname] the seeded payload's dependency graph
     # @return [void]
-    # @raise [Woods::ExtractionError] when no baseline exists
+    # @raise [Woods::ExtractionError] when no baseline exists, or a published
+    #   generation's baseline was seeded without its graph
     def ensure_incremental_baseline!(graph_path)
       return if graph_path.exist?
-      return if Generation.new(output_dir: @output_dir).current.number.positive?
+
+      published = Generation.new(output_dir: @output_dir).current.number
+      if published.positive?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          Generation #{published} under #{@output_dir} is published, but the
+          baseline seeded from it holds no dependency_graph.json
+          (#{graph_path}): its payload or graph disappeared during this run.
+          Publishing now would drop every unit and edge the run did not touch.
+          Run a full `woods:extract` to rebuild the index.
+        MSG
+      end
       # An embedding caller that already holds a populated graph (a prior
       # in-process run, or seeded registrations) IS the baseline —
       # {#prepare_incremental_run} keeps the in-memory graph whenever no
