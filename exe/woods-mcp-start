@@ -7,14 +7,58 @@
 # same as when launched directly. RubyGems loads gem executables as Ruby, so
 # this wrapper must remain a Ruby program when packaged.
 
+require_relative '../lib/woods/mcp/served_identity'
+
+USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--client-root PATH [--client-root-as PATH]] ' \
+        '/path/to/index_dir'
+
+def usage_error(message)
+  warn "Error: #{message}"
+  warn USAGE
+  exit 1
+end
+
+# Removes `name VALUE` or `name=VALUE` from ARGV and returns the value.
+def take_option(name)
+  position = ARGV.index { |arg| arg == name || arg.start_with?("#{name}=") }
+  return unless position
+
+  argument = ARGV.delete_at(position)
+  value = argument == name ? ARGV.delete_at(position) : argument.delete_prefix("#{name}=")
+  usage_error("#{name} needs a path") if value.nil? || value.empty? || value.start_with?('--')
+  value
+end
+
 # `--allow-mismatch` (or WOODS_MCP_ALLOW_MISMATCH=1) serves an index that
 # another checkout of the repository recorded; without it that is refused.
 allow_mismatch = !ARGV.delete('--allow-mismatch').nil?
+
+# `--client-root` (or WOODS_MCP_CLIENT_ROOT) is the directory the client
+# session runs in: the index is compared with that checkout instead of this
+# launcher's own directory, which a launcher inside a shared container always
+# shares with the index it mounts. `--client-root-as` (or
+# WOODS_MCP_CLIENT_ROOT_AS) is where this process sees that directory. Both
+# reach woods-mcp through the environment, as the mismatch override does.
+client_root_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_ENV
+client_root_as_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_AS_ENV
+{ '--client-root-as' => client_root_as_env, '--client-root' => client_root_env }.each do |flag, variable|
+  value = take_option(flag)
+  ENV[variable] = value if value
+end
+declared_client_root = ENV.fetch(client_root_env, '').strip
+mapped_client_root = ENV.fetch(client_root_as_env, '').strip
+if declared_client_root.empty?
+  usage_error('--client-root-as needs --client-root (WOODS_MCP_CLIENT_ROOT)') unless mapped_client_root.empty?
+elsif !declared_client_root.start_with?('/')
+  usage_error("--client-root must be an absolute path as the client sees it, got #{declared_client_root}")
+end
+ENV[client_root_as_env] = File.expand_path(mapped_client_root) unless mapped_client_root.empty?
+
 index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
 
 if index_dir.nil? || index_dir.empty?
   warn 'Error: No index directory specified.'
-  warn 'Usage: woods-mcp-start [--allow-mismatch] /path/to/index_dir'
+  warn USAGE
   exit 1
 end
 
@@ -64,12 +108,12 @@ unless manifest_present?(index_dir)
   exit 1
 end
 
-# Which checkout the index describes, against the directory this launcher
-# runs in. Reads generation.json, the manifest and the checkout's HEAD file
-# only, so the handshake stays fast. A root mismatch is refused unless
-# allowed; a branch difference or a writer from another Woods build is a
-# warning (the server repeats both to the client at connect).
-require_relative '../lib/woods/mcp/served_identity'
+# Which checkout the index describes, against the client's checkout (the
+# declared client root, else the directory this launcher runs in). Reads
+# generation.json, the manifest and the checkout's HEAD file only, so the
+# handshake stays fast. A root mismatch is refused unless allowed; a branch
+# difference, a checkout that cannot be determined or a writer from another
+# Woods build is a warning (the server repeats each to the client at connect).
 identity = Woods::MCP::ServedIdentity.read(index_dir)
 allow_mismatch ||= Woods::MCP::ServedIdentity.allow_mismatch?
 if identity.client_matches == false

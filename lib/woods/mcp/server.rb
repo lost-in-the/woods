@@ -2927,8 +2927,9 @@ module Woods
         end
 
         # Which checkout, branch, generation and build the report describes,
-        # and whether that checkout is the client's: the launch directory, or
-        # the worktree a routed call named as `root`.
+        # and whether that checkout is the client's: the launch's client
+        # ({ServedIdentity.launch_client}), or the worktree a routed call
+        # named as `root`.
         #
         # With a pinned +reader+, the generation comes from the reader's loaded
         # marker beside the +manifest+ it read, so a publication landing after
@@ -2939,7 +2940,7 @@ module Woods
           return unless index_dir
 
           route = Thread.current[WorktreeRouting::THREAD_KEY]
-          cwd = route.respond_to?(:root) ? route.root.to_s : Dir.pwd
+          cwd = route.respond_to?(:root) ? route.root.to_s : nil
           if reader.respond_to?(:loaded_marker)
             ServedIdentity.pinned(index_dir, reader: reader, manifest: manifest, cwd: cwd).to_h
           else
