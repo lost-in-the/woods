@@ -89,19 +89,6 @@ module Woods
       end
     end
 
-    # @return [Array<Array(Integer, String)>] the first code line of each
-    #   block and its decoded Ruby; the frame's two closing lines follow the header
-    def blocks(lines)
-      named_blocks(lines).map { |first_line, text, _name| [first_line, text] }
-    end
-
-    # @return [Array<Array(Integer, Integer, String)>] each block's first and
-    #   last code line in the annotated source and the concern it was inlined
-    #   from
-    def block_ranges(lines)
-      ranges(named_blocks(lines))
-    end
-
     # {#named_blocks} of a whole source, decoded once per distinct source in
     # an extraction run ({Woods::ParseCache.derive}): the method table, the
     # callback sites and each of their file-line locators read the same
@@ -117,7 +104,9 @@ module Woods
     end
 
     # @param blocks [Array<Array(Integer, String, String)>] from {#named_blocks}
-    # @return [Array<Array(Integer, Integer, String)>] as {#block_ranges}
+    # @return [Array<Array(Integer, Integer, String)>] each block's first and
+    #   last code line in the annotated source and the concern it was inlined
+    #   from
     def ranges(blocks)
       blocks.map { |first_line, text, name| [first_line, first_line + text.count("\n"), name] }
     end
