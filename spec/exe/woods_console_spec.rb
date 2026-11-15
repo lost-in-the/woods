@@ -99,12 +99,19 @@ RSpec.describe 'exe/woods-console boot sequence' do
         end
       end
 
-      Woods.configuration.console_mcp_enabled = true
+      Woods.configuration.console_mcp_enabled = true unless ENV['FAKE_CONSOLE_DISABLED']
       Woods.configuration.console_credential_defense_enabled = false
       Woods.configuration.console_blocked_tables = [] if ENV['FAKE_BLOCKED_TABLES_EMPTY']
 
-      $woods_protocol_out = $stdout.dup
-      load File.expand_path('exe/woods-console', Dir.pwd)
+      if ENV['FAKE_VIA_RAKE']
+        require 'rake'
+        Rake::Task.define_task(:environment)
+        load File.expand_path('lib/tasks/woods.rake', Dir.pwd)
+        Rake::Task['woods:console'].invoke
+      else
+        $woods_protocol_out = $stdout.dup
+        load File.expand_path('exe/woods-console', Dir.pwd)
+      end
     RUBY
   end
 
@@ -153,6 +160,28 @@ RSpec.describe 'exe/woods-console boot sequence' do
     expect(status).to be_success
     expect(stderr).to include('[fake-boot] ActiveRecord::Base.connection_pool')
     expect(stderr.lines.grep(/ActiveRecord::Base\.connection$/)).to be_empty
+  end
+
+  describe 'deprecation notice' do
+    let(:notice) { /\A\[woods\] DEPRECATED: The Console MCP server .*removed in Woods 3\.0\b/ }
+
+    { 'exe/woods-console' => {}, 'rake woods:console' => { 'FAKE_VIA_RAKE' => '1' } }.each do |entry, env|
+      it "prints it once on stderr and never on the protocol stdout through #{entry}" do
+        stdout, stderr, status = run_fake_boot(env)
+
+        expect(status).to be_success, stderr
+        expect(stderr.lines.grep(/DEPRECATED/)).to contain_exactly(notice)
+        expect(stdout).not_to include('DEPRECATED')
+      end
+    end
+
+    it 'prints it before refusing to start a disabled Console' do
+      _stdout, stderr, status = run_fake_boot('FAKE_CONSOLE_DISABLED' => '1')
+
+      expect(status.exitstatus).to eq(1)
+      expect(stderr.lines.grep(/DEPRECATED/)).to contain_exactly(notice)
+      expect(stderr).to include('Woods Console MCP is disabled')
+    end
   end
 
   it 'raises instead of booting when console_blocked_tables is empty in production' do

@@ -111,7 +111,11 @@ The Woods setup/configuration skills help configure a server; their presence alo
 2. Call the Index Server's `woods_status`. Check `identity` first (`root_name`, `branch`, `generation`, `client_matches`), then `index_dir` and available freshness/provenance information against the intended extraction. A successful connection to the wrong index is still the wrong setup.
 3. Use `search` and typed `lookup` for a known unit from that checkout. When checking a subagent, verify that it can call the inherited tools and is using the same intended index.
 
-The optional Console Server is a separate connection to a booted Rails application. If deliberately enabled, check it with `console_status` and verify its application/container separately. Console access is not required to verify the Index Server.
+The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
+Existing setups keep working; new setups should not enable it.
+In an existing setup, the Console Server is a separate connection to a booted Rails application.
+Check it with `console_status` and verify its application/container separately.
+Console access is not required to verify the Index Server.
 
 ## Extraction Provenance in Worktrees (`git_branch` / `git_sha`)
 
