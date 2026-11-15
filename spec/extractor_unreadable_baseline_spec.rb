@@ -92,13 +92,6 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
           extractor.send(:prepare_incremental_run, operation: operation)
         end
       end
-
-      it 'proceeds when the caller holds a populated graph in memory' do
-        publish_generation(graph: false)
-        hold_graph_in_memory
-
-        expect { extractor.send(:prepare_incremental_run, operation: operation) }.not_to raise_error
-      end
     end
   end
 
@@ -213,14 +206,81 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
       expect(Woods::Generation.new(output_dir: output).current.number).to eq(marker.number)
       expect(Dir.children(output.join('payloads'))).to be_empty
     end
+  end
 
-    it 'proceeds when the caller holds a populated graph in memory' do
+  # An in-memory graph stands in for a graph file only before anything is
+  # published. Once a generation is published, a graph held in memory may
+  # predate it, so a published generation without its graph file refuses.
+  describe 'a published generation without its graph file, while a graph is held in memory' do
+    before do
+      stub_runnable_extractors
+      allow(extractor).to receive(:prepare_source_reference_baseline).and_call_original
+    end
+
+    let(:payload_without_graph) do
+      /#{Regexp.escape(output.join(payload_name).to_s)}.*dependency_graph\.json.*woods:extract/
+    end
+    let(:flat_without_graph) do
+      /Generation 1 under #{Regexp.escape(output.to_s)}.*dependency_graph\.json.*woods:extract/
+    end
+
+    def publish_flat_generation
+      output.mkpath
+      Woods::Generation.new(output_dir: output).bump!(reason: 'full')
+    end
+
+    it 'refuses extract_changed over a payload without its graph' do
+      publish_generation(graph: false)
+      hold_graph_in_memory
+      paths = changed_rake_file
+
+      expect_refusal(payload_without_graph) { extractor.extract_changed(paths) }
+    end
+
+    it 'refuses refresh over a payload without its graph' do
+      publish_generation(graph: false)
+      hold_graph_in_memory
+
+      expect_refusal(payload_without_graph) { extractor.refresh(:rake_tasks) }
+    end
+
+    it 'refuses extract_changed over a flat generation without its graph' do
+      publish_flat_generation
+      hold_graph_in_memory
+      paths = changed_rake_file
+
+      expect_refusal(flat_without_graph) { extractor.extract_changed(paths) }
+    end
+
+    it 'refuses refresh over a flat generation without its graph' do
       publish_flat_generation
       hold_graph_in_memory
 
-      extractor.refresh(:rake_tasks)
+      expect_refusal(flat_without_graph) { extractor.refresh(:rake_tasks) }
+    end
 
-      expect(Woods::Generation.new(output_dir: output).current.number).to eq(2)
+    it 'refuses a reused extractor whose graph predates the generation published since' do
+      extractor.extract_all
+      other = Woods::Extractor.new(output_dir: output)
+      allow(other).to receive_messages(safe_eager_load!: nil, git_available?: false)
+      lantern, beacon = %w[Lantern Beacon].map do |name|
+        Woods::ExtractedUnit.new(type: :model, identifier: name, file_path: "app/models/#{name.downcase}.rb")
+                            .tap { |unit| unit.source_code = name }
+      end
+      models = Class.new { define_method(:extract_all) { [lantern, beacon] } }
+      stub_const('Woods::Extractor::EXTRACTORS', Woods::Extractor::EXTRACTORS.merge(models: models))
+      other.extract_all
+      published = Woods::Generation.new(output_dir: output).current
+      published_graph = output.join(published.payload, 'dependency_graph.json')
+      expect(published_graph.read).to include('Beacon')
+      published_graph.delete
+      paths = changed_rake_file
+
+      expect(extractor.dependency_graph.node('Lantern', type: :model)).not_to be_nil
+      expect_refusal(/#{Regexp.escape(output.join(published.payload).to_s)}.*dependency_graph\.json/) do
+        extractor.extract_changed(paths)
+      end
+      expect(Woods::Generation.new(output_dir: output).current.number).to eq(published.number)
     end
   end
 

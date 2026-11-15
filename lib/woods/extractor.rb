@@ -1618,14 +1618,13 @@ module Woods
     # A published flat generation (no payload pointer) reads its graph from
     # the output root, and refuses the same way when none is there.
     #
-    # A populated in-memory graph stands in for a missing graph file, as in
-    # {#ensure_incremental_baseline!}, but not for a missing payload: the
-    # untouched units' files are gone either way.
+    # A graph held in memory never stands in for a published generation's
+    # graph file: it may predate that generation. Only an unpublished
+    # directory accepts one ({#ensure_incremental_baseline!}).
     #
     # @return [void]
     # @raise [Woods::ExtractionError] when the payload directory is missing,
-    #   or the baseline holds no dependency_graph.json and no graph is held
-    #   in memory
+    #   or the published baseline holds no dependency_graph.json
     def ensure_published_payload_readable!
       marker = Generation.new(output_dir: @output_dir).current
       name = marker.payload
@@ -1642,7 +1641,6 @@ module Woods
         MSG
       end
       return if directory.join('dependency_graph.json').file?
-      return unless @dependency_graph.nil? || @dependency_graph.empty?
 
       raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
         The published payload directory #{directory} holds no
@@ -1657,11 +1655,10 @@ module Woods
     #   leaves an unpublished directory to {#ensure_incremental_baseline!}
     # @return [void]
     # @raise [Woods::ExtractionError] when a published flat generation has no
-    #   graph in the output root and none is held in memory
+    #   graph in the output root
     def ensure_flat_graph_readable!(published)
       return unless published.positive?
       return if @output_dir.join('dependency_graph.json').file?
-      return unless @dependency_graph.nil? || @dependency_graph.empty?
 
       raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
         Generation #{published} under #{@output_dir} names no payload
