@@ -39,6 +39,12 @@ RSpec.describe 'Console SQLite read policy', :booted_app do
     expect(WoodsConsoleOutputPolicyContract.verify!(@connection)).to eq(:passed)
   end
 
+  describe 'rollback of Console work' do
+    let(:connection) { @connection }
+
+    it_behaves_like 'a Console transaction inside a host transaction'
+  end
+
   ['policy_blocked', '"policy_blocked"', '`policy_blocked`', '[policy_blocked]',
    "'policy_blocked'", '(policy_blocked)', "main.'policy_blocked'",
    'policy_allowed, (policy_blocked)',

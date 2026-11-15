@@ -14,6 +14,64 @@ RSpec.describe 'Console SQL against real database dialects', :live_backends do
     end
   end
 
+  {
+    'WOODS_PG_URL' => ->(connection) { connection.select_value('SHOW statement_timeout') },
+    'WOODS_MYSQL_URL' => ->(connection) { connection.select_value('SELECT @@SESSION.max_execution_time').to_i }
+  }.each do |variable, read_timeout|
+    context "with a host transaction on #{variable}" do
+      before do
+        require 'active_record'
+        require 'woods'
+        ActiveRecord::Base.establish_connection(ENV.fetch(variable))
+      end
+
+      after { ActiveRecord::Base.connection_pool.disconnect! }
+
+      let(:connection) { ActiveRecord::Base.connection }
+
+      it_behaves_like 'a Console transaction inside a host transaction'
+      it_behaves_like 'a Console statement timeout inside a host transaction', read_timeout
+    end
+  end
+
+  context 'with a host transaction that set its own PostgreSQL statement timeout' do
+    before do
+      require 'active_record'
+      require 'woods'
+      require 'woods/console/safe_context'
+      ActiveRecord::Base.establish_connection(ENV.fetch('WOODS_PG_URL'))
+      connection.create_table(:woods_console_tx_probe, force: true) { |table| table.string :label }
+    end
+
+    after do
+      connection.drop_table(:woods_console_tx_probe, if_exists: true)
+      ActiveRecord::Base.connection_pool.disconnect!
+    end
+
+    let(:connection) { ActiveRecord::Base.connection }
+
+    it 'keeps the host value after the Console block' do
+      context = Woods::Console::SafeContext.new(connection: connection, timeout_ms: 4321)
+      connection.transaction do
+        connection.execute("SET LOCAL statement_timeout = '9s'")
+        expect(context.execute { connection.select_value('SHOW statement_timeout') }).to eq('4321ms')
+        expect(connection.select_value('SHOW statement_timeout')).to eq('9s')
+      end
+    end
+
+    it 'cancels a statement past the Console timeout and the host transaction still commits' do
+      context = Woods::Console::SafeContext.new(connection: connection, timeout_ms: 50)
+      connection.transaction do
+        connection.execute("INSERT INTO woods_console_tx_probe (label) VALUES ('host before')")
+        expect { context.execute { connection.select_value('SELECT pg_sleep(2)') } }
+          .to raise_error(ActiveRecord::QueryCanceled)
+        connection.execute("INSERT INTO woods_console_tx_probe (label) VALUES ('host after')")
+      end
+      expect(connection.select_values('SELECT label FROM woods_console_tx_probe').sort)
+        .to eq(['host after', 'host before'])
+    end
+  end
+
   it 'refuses PostgreSQL column alias lists through the redaction identity policy' do
     require 'active_record'
     require 'woods'

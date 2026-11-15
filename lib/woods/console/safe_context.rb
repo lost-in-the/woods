@@ -14,11 +14,18 @@ module Woods
     # Wraps tool execution in a rolled-back transaction with statement timeout.
     #
     # Safety layers:
-    # - Every query runs inside a transaction that is always rolled back
-    # - Statement timeout cannot leak to the next pool consumer: PostgreSQL
-    #   uses `SET LOCAL`, which self-discards at transaction end; MySQL has
-    #   no LOCAL equivalent, so its session-scoped `max_execution_time` is
-    #   read before the override and restored in an `ensure` instead
+    # - Every query runs inside a transaction that is always rolled back.
+    #   When the leased connection is already inside an open host
+    #   transaction, the Console's work runs in a savepoint and is rolled
+    #   back to it: the Console's own writes are discarded, the host's are
+    #   left for the host to commit or roll back, and a failed Console
+    #   statement does not abort the host transaction
+    # - Statement timeout cannot leak to the next pool consumer or into an
+    #   open host transaction: PostgreSQL uses `SET LOCAL`, which
+    #   self-discards at transaction end and on rollback to the savepoint;
+    #   MySQL has no LOCAL equivalent, so its session-scoped
+    #   `max_execution_time` is read before the override and restored in an
+    #   `ensure` instead
     # - Column redaction replaces sensitive values with "[REDACTED]"
     #
     # == What SafeContext does NOT cover
@@ -142,8 +149,10 @@ module Woods
       # Execute a block within a rolled-back transaction with statement timeout.
       #
       # The transaction is always rolled back to ensure read-only behavior.
-      # A fresh connection is leased from the pool on every call via
-      # `pool.with_connection`. The leased connection is published as
+      # Inside an open transaction on the same connection it is a savepoint,
+      # so only the block's own work is rolled back. A fresh connection is
+      # leased from the pool on every call via `pool.with_connection`. The
+      # leased connection is published as
       # `Thread.current[LEASED_CONNECTION_KEY]` for the duration of the
       # block and cleared in `ensure` (even on exceptions) so dispatch
       # handlers can pick it up without re-leasing.
@@ -245,7 +254,7 @@ module Woods
         previous_lease = Thread.current[LEASED_CONNECTION_KEY]
         Thread.current[LEASED_CONNECTION_KEY] = connection
         result = nil
-        connection.transaction do
+        connection.transaction(requires_new: true) do
           restore_timeout = set_timeout(connection)
           begin
             result = yield(connection)
@@ -295,7 +304,8 @@ module Woods
       # discarded on rollback — without LOCAL the timeout would persist on
       # the pooled connection and bleed into the next consumer (host app
       # request, background job, etc.). Safe here because every #execute
-      # is wrapped in a transaction.
+      # is wrapped in a transaction or savepoint that is rolled back, and a
+      # rollback to a savepoint also reverts the `SET LOCAL` made after it.
       #
       # MySQL has no per-statement equivalent of `SET LOCAL`: `SET
       # max_execution_time` (applies to SELECT only — DDL and DML statements
