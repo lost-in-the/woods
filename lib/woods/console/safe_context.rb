@@ -19,10 +19,11 @@ module Woods
     #   transaction, the Console's work runs in a savepoint and is rolled
     #   back to it: the Console's own writes are discarded, the host's are
     #   left for the host to commit or roll back, and a failed Console
-    #   statement leaves the host transaction usable. Two MySQL cases are
+    #   statement leaves the host transaction usable. Three MySQL cases are
     #   outside this: an InnoDB deadlock victim has its whole transaction
-    #   rolled back, host writes included, and a statement that causes an
-    #   implicit commit ends the host transaction
+    #   rolled back, host writes included; a lock wait timeout does the same
+    #   when `innodb_rollback_on_timeout` is enabled; and a statement that
+    #   causes an implicit commit ends the host transaction
     # - Statement timeout cannot leak to the next pool consumer or into an
     #   open host transaction: PostgreSQL uses `SET LOCAL`, which
     #   self-discards at transaction end and on rollback to the savepoint;

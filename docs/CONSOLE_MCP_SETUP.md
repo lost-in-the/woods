@@ -830,9 +830,11 @@ connection is already inside an open transaction (a host middleware or test
 harness that wraps the request), the Console's work runs in a savepoint and is
 rolled back to it. The Console's own writes are discarded, the host's writes
 are left for the host to commit or roll back, and a failed Console statement
-leaves the host transaction usable. Two MySQL cases are outside this guarantee.
+leaves the host transaction usable. Three MySQL cases are outside this guarantee.
 When InnoDB picks the transaction as a deadlock victim, it rolls back the whole
-transaction, host writes included. A statement that causes an implicit commit
+transaction, host writes included. A lock wait timeout does the same when the
+server runs with `innodb_rollback_on_timeout` enabled; by default it rolls back
+only the statement that timed out. A statement that causes an implicit commit
 ends the host transaction. `console_sql` accepts only `SELECT`, `WITH` and plain
 `EXPLAIN` statements, which narrows the second case but does not rule it out.
 It is a final
