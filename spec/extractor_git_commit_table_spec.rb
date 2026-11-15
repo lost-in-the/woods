@@ -144,9 +144,12 @@ RSpec.describe Woods::Extractor, 'commit table' do
 
     def refresh_noting_walk
       walked = false
-      allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |original, *args, **kw|
+      # Ruby 3.0 and 3.1 splat the paths array into a block that names the
+      # original method beside a keyword parameter, so take them all as one.
+      allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |*arguments, **keywords|
         walked = true
-        original.call(*args, **kw)
+        original, *rest = arguments
+        original.call(*rest, **keywords)
       end
       result = refresh
       [walked, result]
