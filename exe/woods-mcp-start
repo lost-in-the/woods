@@ -10,7 +10,7 @@
 require_relative '../lib/woods/mcp/served_identity'
 
 USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--client-root PATH [--client-root-as PATH]] ' \
-        '/path/to/index_dir'
+        '(--checkout | /path/to/index_dir)'
 
 def usage_error(message)
   warn "Error: #{message}"
@@ -54,7 +54,32 @@ elsif !declared_client_root.start_with?('/')
 end
 ENV[client_root_as_env] = File.expand_path(mapped_client_root) unless mapped_client_root.empty?
 
-index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
+# `--checkout` (or WOODS_MCP_CHECKOUT=1) takes no index path: it serves the
+# index of the checkout this launcher runs in (the nearest directory holding
+# `.git`, so a linked worktree is its own checkout), at WOODS_OUTPUT resolved
+# against that checkout, else `tmp/woods`. It never serves another tree's.
+checkout_mode = !ARGV.delete('--checkout').nil? || Woods::MCP::ServedIdentity.env_flag?('WOODS_MCP_CHECKOUT')
+if checkout_mode
+  given = ARGV[0] || ENV.fetch('WOODS_DIR', nil)
+  usage_error("--checkout takes no index path, got #{given}") unless given.nil? || given.empty?
+
+  checkout = Woods::MCP::ServedIdentity.checkout_root(Dir.pwd)
+  unless checkout
+    warn "Error: --checkout serves the current checkout's index, but #{Dir.pwd} is not inside a git checkout."
+    warn 'Run the server from inside the checkout, or pass the index directory as a path instead of --checkout.'
+    exit 1
+  end
+
+  output = ENV.fetch('WOODS_OUTPUT', '').strip
+  index_dir = File.expand_path(output.empty? ? 'tmp/woods' : output, checkout)
+  # The checkout is a real path; compare the index's, when it exists.
+  index_dir = File.realpath(index_dir) if File.exist?(index_dir)
+  unless index_dir.start_with?("#{checkout}#{File::SEPARATOR}")
+    usage_error("--checkout serves the checkout's own index, but WOODS_OUTPUT names #{index_dir}, " \
+                "outside the checkout #{checkout}")
+  end
+end
+index_dir ||= ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
 
 if index_dir.nil? || index_dir.empty?
   warn 'Error: No index directory specified.'

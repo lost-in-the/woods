@@ -46,7 +46,14 @@ module Woods
         # @param env [Hash]
         # @return [Boolean]
         def allow_mismatch?(env = ENV)
-          %w[1 true yes].include?(env.fetch(ALLOW_ENV, '').to_s.strip.downcase)
+          env_flag?(ALLOW_ENV, env)
+        end
+
+        # @param name [String] a launch flag's environment variable
+        # @param env [Hash]
+        # @return [Boolean] true for 1, true or yes
+        def env_flag?(name, env = ENV)
+          %w[1 true yes].include?(env.fetch(name, '').to_s.strip.downcase)
         end
 
         # The client of this launch: the client root {CLIENT_ROOT_ENV}
