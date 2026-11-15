@@ -5,7 +5,9 @@ description: Install, upgrade, and first-run-configure the Woods Rails code-inte
 
 # Woods setup
 
-Install a structural Index Server first. Embeddings and Console MCP are separate opt-ins.
+Install a structural Index Server first. Embeddings are a separate opt-in.
+Do not offer Console MCP for a new setup: the Console is deprecated in Woods `2.2.0` and removed in 3.0.
+An existing Console configuration keeps working through 2.x; keep it working during an upgrade.
 
 For builds containing #590 (included in Woods 2.1), managed preflight retains
 intended bundle settings, project receipts omit the unused user config directory,

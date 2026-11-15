@@ -108,6 +108,10 @@ Woods.configure do |config|
 
   # ── Console MCP ─────────────────────────────────────────────────────────
   #
+  # DEPRECATED: the Console MCP server will be removed in Woods 3.0.
+  # New setups should leave it off and use the Index Server. The options below
+  # are for existing setups, which keep working through 2.x.
+  #
   # The Console MCP server lets AI tools query your live Rails app.
   # It is DISABLED by default. Enable only after reviewing the security
   # documentation:

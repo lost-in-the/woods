@@ -45,7 +45,10 @@ This skill describes the Woods 2.x line; the authoritative minimum version lives
 
 Default to Index-only.
 It reads generated code context and exposes 16 tools (15 before Woods `2.2.0`, which adds `path`).
-Console MCP boots Rails and reads live data; ask before enabling it.
+Do not offer Console MCP for a new setup: the Console is deprecated in Woods `2.2.0` and removed in 3.0.
+For a runtime observation, suggest `bin/rails runner` or a focused spec instead.
+An existing Console configuration keeps working through 2.x; Shapes 2 and 3 below maintain one.
+Console MCP boots Rails and reads live data; ask before changing it.
 
 Initialization guidance (#402) is available in Woods `2.0.0.beta3`; check the
 installed gem before expecting MCP `instructions`. Supporting servers provide
@@ -145,8 +148,9 @@ offering `WOODS_WATCH_TRUST_FOREIGN_HOST=1` in the MCP environment. It makes
 `woods_status.watch.alive` use the same bounded freshness policy as task readers;
 see [cross-host liveness](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/WATCH_DAEMON.md#cross-host-liveness).
 
-## Shape 2: Index plus authorized Console
+## Shape 2: Index plus an existing Console (deprecated)
 
+For an existing, authorized Console setup only; the Console is deprecated and removed in Woods 3.0.
 After explicit authorization, enable the live-data master switch in the Rails initializer. The process exits while it remains false:
 
 ```ruby
@@ -196,9 +200,9 @@ output as well.
 
 Console registers nine default tools. `config.console_embedded_read_tools = true` explicitly adds `console_sql` and `console_query` for eleven total. Tier 2, Tier 3, and `console_eval` are inventory-only in supported packaged modes.
 
-## Shape 3: Authenticated Console HTTP
+## Shape 3: Authenticated Console HTTP (deprecated)
 
-Use only after authorization and server-side setup:
+Use only for an existing Console setup, after authorization and server-side setup:
 
 ```json
 "woods-console": {
