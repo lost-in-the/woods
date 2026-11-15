@@ -147,6 +147,29 @@ RSpec.describe 'woods-mcp-start --checkout' do
     end
   end
 
+  it 'serves an index under a symlinked tmp directory as the path inside the checkout' do
+    root = checkout(File.join(@base, 'shop'), index: false)
+    elsewhere = File.join(@base, 'scratch-volume', 'tmp')
+    FileUtils.mkdir_p(elsewhere)
+    File.symlink(elsewhere, File.join(root, 'tmp'))
+    publish(File.join(root, 'tmp', 'woods'), root, 'main')
+
+    code, errors, served = launch(cwd: root)
+
+    expect(code).to eq(42), errors
+    expect(served).to eq(File.join(root, 'tmp', 'woods'))
+  end
+
+  it 'accepts an absolute WOODS_OUTPUT that names the checkout through a symlink' do
+    root = checkout(File.join(@base, 'shop'))
+    alias_root = File.join(@base, 'shop-alias')
+    File.symlink(root, alias_root)
+
+    code, errors, = launch(cwd: root, env: { 'WOODS_OUTPUT' => File.join(alias_root, 'tmp', 'woods') })
+
+    expect(code).to eq(42), errors
+  end
+
   it 'refuses to run outside any checkout, naming the alternative' do
     outside = File.join(@base, 'plain-directory')
     FileUtils.mkdir_p(outside)

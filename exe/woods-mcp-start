@@ -78,9 +78,11 @@ if checkout_mode
 
   output = ENV.fetch('WOODS_OUTPUT', '').strip
   index_dir = File.expand_path(output.empty? ? 'tmp/woods' : output, checkout)
-  # The checkout is a real path; compare the index's, when it exists.
-  index_dir = File.realpath(index_dir) if File.exist?(index_dir)
-  unless index_dir.start_with?("#{checkout}#{File::SEPARATOR}")
+  # The checkout is a real path. An index under a symlink inside it (a
+  # linked `tmp`) is inside it as written; an absolute WOODS_OUTPUT through
+  # another name for the checkout is inside it once resolved.
+  inside = ->(path) { path.start_with?("#{checkout}#{File::SEPARATOR}") }
+  unless inside.call(index_dir) || (File.exist?(index_dir) && inside.call(File.realpath(index_dir)))
     usage_error("--checkout serves the checkout's own index, but WOODS_OUTPUT names #{index_dir}, " \
                 "outside the checkout #{checkout}")
   end
