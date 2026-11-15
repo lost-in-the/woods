@@ -1210,6 +1210,9 @@ Format 9 publishes those mixins as `include` and `extend` edges instead of `code
 A format 8 or earlier cache, or one written under a different
 `source_reference_callers` value, is an incompatible baseline: run one full
 extraction after upgrading and after changing that option.
+The run refuses an older format only when the index holds a model, controller, service or other class-based unit
+whose Ruby file is under `app/` or `lib/`.
+An index without such a unit runs on with an empty cache baseline.
 Unchanged source identities otherwise reuse cached analysis; accepting an older format
 would leave those callers without mixin tags or edges. Missing optional fields in
 a format 9 record are valid but do not prove semantic completeness: bare reads

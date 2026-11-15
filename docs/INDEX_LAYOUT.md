@@ -272,7 +272,9 @@ receiverless call that mixed it in:
   runtime or that the call ran.
 
 The generation-local internal reference cache is format 9 for this writer; Woods 2.1 wrote format 3.
-An incremental write or targeted refresh refuses format 8 and earlier and asks for one full `woods:extract`.
+An incremental write or targeted refresh refuses format 8 and earlier and asks for one full `woods:extract`
+when the index holds a model, controller, service or other class-based unit whose Ruby file is under `app/` or `lib/`.
+An index without such a unit runs on with an empty cache baseline.
 Readers may continue to serve their original generation throughout a refused
 upgrade. Copy the complete selected payload, including its reference cache.
 See [extractor coverage](EXTRACTOR_REFERENCE.md#constant-source-references)
