@@ -376,6 +376,7 @@ module Woods
     def woods_changed_paths_for_range(range, root: Rails.root)
       require 'open3'
       output, error, status = Open3.capture3(
+        Woods::GitCommand::CHILD_ENV,
         *Woods::GitCommand.argv(
           root, '-c', 'core.quotePath=false',
           'diff', '--relative', '--name-status', '-z', '--no-renames', range, '--', '.'

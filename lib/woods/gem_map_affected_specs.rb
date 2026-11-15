@@ -34,11 +34,13 @@ module Woods
     # @param base [String] branch the change will merge into
     # @return [Array<String>]
     def self.changed_paths(root, base: 'origin/main')
-      merge_base, _error, status = Open3.capture3(*GitCommand.argv(root, 'merge-base', base, 'HEAD'))
+      merge_base, _error, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                                  *GitCommand.argv(root, 'merge-base', base, 'HEAD'))
       # Without the base fetched, the uncommitted work is all that is known.
       since = status.success? ? merge_base.strip : 'HEAD'
-      committed, = Open3.capture2(*GitCommand.argv(root, 'diff', '--name-only', '-z', since))
-      untracked, = Open3.capture2(*GitCommand.argv(root, 'ls-files', '-z', '--others', '--exclude-standard'))
+      committed, = Open3.capture2(GitCommand::CHILD_ENV, *GitCommand.argv(root, 'diff', '--name-only', '-z', since))
+      untracked, = Open3.capture2(GitCommand::CHILD_ENV,
+                                  *GitCommand.argv(root, 'ls-files', '-z', '--others', '--exclude-standard'))
       (committed.split("\0") + untracked.split("\0")).reject(&:empty?).uniq.sort
     end
 

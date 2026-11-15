@@ -229,9 +229,9 @@ RSpec.describe 'woods_status tool' do
       # leave it reporting a match while every answer describes the tree
       # before those edits.
       def stub_porcelain(stdout, stderr = '', success: true)
-        allow(Open3).to receive(:capture3).with('git', '--no-optional-locks', '-C', anything, 'status', '--porcelain')
-                                          .and_return([stdout, stderr,
-                                                       instance_double(Process::Status, success?: success)])
+        allow(Open3).to receive(:capture3)
+          .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'status', '--porcelain')
+          .and_return([stdout, stderr, instance_double(Process::Status, success?: success)])
       end
 
       it 'reports a clean working tree' do
@@ -404,14 +404,15 @@ RSpec.describe 'woods_status tool' do
 
     def stub_git_head(head:, status_ok: true, porcelain: '')
       process_status = instance_double(Process::Status, success?: status_ok)
-      allow(Open3).to receive(:capture3).with('git', '--no-optional-locks', '-C', anything, 'rev-parse', 'HEAD')
+      allow(Open3).to receive(:capture3).with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'rev-parse', 'HEAD')
                                         .and_return(["#{head}\n", '', process_status])
       # build_status also asks for the working-tree state; without a stub the
       # real git runs against whatever /tmp happens to be. Note capture3 —
       # that probe deliberately keeps stderr out of the porcelain output, and
       # stubbing capture2e here left the stub dead and the real git running.
-      allow(Open3).to receive(:capture3).with('git', '--no-optional-locks', '-C', anything, 'status', '--porcelain')
-                                        .and_return([porcelain, '', process_status])
+      allow(Open3).to receive(:capture3)
+        .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', anything, 'status', '--porcelain')
+        .and_return([porcelain, '', process_status])
     end
 
     it 'reports git_sha_matches_head=true when manifest.git_sha matches HEAD' do

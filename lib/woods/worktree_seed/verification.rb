@@ -77,7 +77,8 @@ module Woods
           raise Unverifiable, 'the seed records no commit (git_sha is missing or unknown)'
         end
 
-        _out, _err, status = Open3.capture3(*GitCommand.argv(@root, 'cat-file', '-e', "#{sha}^{commit}"))
+        _out, _err, status = Open3.capture3(GitCommand::CHILD_ENV,
+                                            *GitCommand.argv(@root, 'cat-file', '-e', "#{sha}^{commit}"))
         raise Unverifiable, "this repository does not have the seed's commit #{sha[0, 12]}" unless status.success?
       end
 
@@ -121,7 +122,7 @@ module Woods
       end
 
       def verify_clean(root)
-        porcelain, _err, status = Open3.capture3(*GitCommand.argv(root, 'status', '--porcelain'))
+        porcelain, _err, status = Open3.capture3(GitCommand::CHILD_ENV, *GitCommand.argv(root, 'status', '--porcelain'))
         raise Unverifiable, "the seed's checkout #{root} cannot be inspected" unless status.success?
         raise Unverifiable, "the seed's checkout #{root} has uncommitted changes" unless porcelain.strip.empty?
       end

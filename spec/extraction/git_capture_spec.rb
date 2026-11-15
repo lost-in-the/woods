@@ -95,7 +95,7 @@ RSpec.describe Woods::Extraction::GitCapture do
 
       2.times { expect(capture.available?).to be(true) }
       expect(Open3).to have_received(:capture3)
-        .with('git', '--no-optional-locks', '-C', root.to_s, 'rev-parse', 'HEAD').once
+        .with(Woods::GitCommand::CHILD_ENV, 'git', '-C', root.to_s, 'rev-parse', 'HEAD').once
     end
 
     it 'answers no_repository quietly for a source archive' do

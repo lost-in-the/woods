@@ -17,17 +17,19 @@ module Woods
   # per-unit enrichment (`Extractor`), manifest provenance (`GitProvenance`),
   # and the `woods:incremental` diff range (`lib/tasks/woods.rake`).
   #
-  # Every command also carries `--no-optional-locks`. Woods reads checkouts a
-  # developer is working in, and a `git status` that refreshes stat data
-  # writes the index back under `.git/index.lock`, failing the developer's
-  # own `git checkout` while it holds the lock. `git diff` does not honour the
-  # option: its index refresh still runs.
+  # Spawn every command with {CHILD_ENV} ahead of the argv. Woods reads
+  # checkouts a developer is working in, and a `git status` that refreshes
+  # stat data writes the index back under `.git/index.lock`, failing the
+  # developer's own `git checkout` while it holds the lock. The environment
+  # form, unlike `--no-optional-locks`, is ignored by Git before 2.15 rather
+  # than failing the command; there the lock avoidance does not apply.
+  # `git diff` refreshes the index regardless.
   module GitCommand
     # Environment variable naming the explicitly selected git directory.
     OVERRIDE_KEY = 'WOODS_GIT_DIR'
 
-    # Global option that skips the optional index write a read can make.
-    NO_OPTIONAL_LOCKS = '--no-optional-locks'
+    # Child environment that skips the optional index write a read can make.
+    CHILD_ENV = { 'GIT_OPTIONAL_LOCKS' => '0' }.freeze
 
     module_function
 
@@ -38,9 +40,9 @@ module Woods
     def argv(root, *args, env: ENV)
       root = root.to_s
       override = env[OVERRIDE_KEY]
-      return ['git', NO_OPTIONAL_LOCKS, '-C', root, *args] if override.nil? || override.empty?
+      return ['git', '-C', root, *args] if override.nil? || override.empty?
 
-      ['git', NO_OPTIONAL_LOCKS, '--git-dir', override, '--work-tree', root, '-C', root, *args]
+      ['git', '--git-dir', override, '--work-tree', root, '-C', root, *args]
     end
   end
 end
