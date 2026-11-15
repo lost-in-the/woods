@@ -202,7 +202,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
   %w[WOODS_GIT_DIR GIT_DIR].each do |variable|
     it "warns for a missing git executable when #{variable} selects a repository without a root .git" do
       FileUtils.rm_rf(root.join('.git'))
-      stub_const('ENV', ENV.to_h.merge(variable => root.join('external-git').to_s))
+      replace_env(ENV.to_h.merge(variable => root.join('external-git').to_s))
       allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
       expect(Rails.logger).to receive(:warn).once.with(/Git history unavailable: git executable/)
 
@@ -212,7 +212,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
 
   it 'keeps no-git source archives quiet and preserves their supplied provenance' do
     FileUtils.rm_rf(root.join('.git'))
-    stub_const('ENV', ENV.to_h.merge('WOODS_GIT_DIR' => '', 'GIT_DIR' => ''))
+    replace_env(ENV.to_h.merge('WOODS_GIT_DIR' => '', 'GIT_DIR' => ''))
     allow(Open3).to receive(:capture3).and_raise(Errno::ENOENT, 'git')
     expect(Rails.logger).not_to receive(:warn)
 
