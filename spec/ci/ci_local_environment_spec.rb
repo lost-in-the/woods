@@ -244,7 +244,7 @@ RSpec.describe CiLocalEnvironment do
     Dir.mktmpdir do |root|
       fixture(root)
       original = lock_fixture(root)
-      _, _, wrong = activation(root, puma: '~> 8.0')
+      _, _, wrong = activation(root, puma: '~> 8.0.0')
       expect(wrong.success?).to be(false)
       %w[lint unit].each do |row|
         actual = described_class.bundle_env(root, row, File.join(root, 'tmp/bundles'))
@@ -268,7 +268,7 @@ RSpec.describe CiLocalEnvironment do
         fixture(path)
       end
       lint_lock = lock_fixture(a)
-      unit_lock = lock_fixture(other, puma: '~> 8.0')
+      unit_lock = lock_fixture(other, puma: '~> 8.0.0')
       rails_lock = lock_fixture(a, gemfile: 'gemfiles/rails_6.0.gemfile')
       ref_lint = File.join(directory, 'lint.lock')
       ref_unit = File.join(directory, 'unit.lock')
@@ -300,7 +300,7 @@ RSpec.describe CiLocalEnvironment do
         described_class.verify_checkout!(a, lint, 'lint', storage)
       end.to raise_error(described_class::Error, /changes/)
       expect(described_class.verify_checkout!(b, lint, 'lint', storage)).to eq(source_b)
-      rows = [[source_b, lint_lock, nil, 'Gemfile'], [unit_b, unit_lock, '~> 8.0', 'Gemfile'],
+      rows = [[source_b, lint_lock, nil, 'Gemfile'], [unit_b, unit_lock, '~> 8.0.0', 'Gemfile'],
               [rails_b, rails_lock, nil, 'gemfiles/rails_6.0.gemfile']]
       rows.each do |source, lock, puma, gemfile|
         env = { 'BUNDLE_GEMFILE' => File.join(source, gemfile) }
@@ -681,7 +681,7 @@ RSpec.describe CiLocalEnvironment do
   it 'keeps gate selections and PR/full profiles aligned with the checked-in workflow' do
     jobs = YAML.safe_load_file(File.expand_path('../../.github/workflows/ci.yml', __dir__), aliases: true).fetch('jobs')
     expect(jobs.fetch('test-required').dig('strategy', 'matrix', 'include').first)
-      .to include('ruby-version' => '3.3', 'puma' => '~> 8.0', 'pr' => true)
+      .to include('ruby-version' => '3.3', 'puma' => '~> 8.0.0', 'pr' => true)
     rows = jobs.fetch('rails-matrix').dig('strategy', 'matrix', 'include')
     [%w[4.0 8.1], %w[3.0 6.0]].each do |ruby, rails|
       entry = rows.find { |item| item['ruby'] == ruby && item['rails'] == rails }
