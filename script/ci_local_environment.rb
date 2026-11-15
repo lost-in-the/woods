@@ -15,7 +15,7 @@ module CiLocalEnvironment
   HOSTED_EVENTS = %w[pull_request push workflow_dispatch].freeze
   ROWS = {
     'lint' => { ruby: '3.3', gemfile: 'Gemfile', job: 'lint', puma: nil, sqlite: nil },
-    'unit' => { ruby: '3.3', gemfile: 'Gemfile', job: 'test-required', puma: '~> 8.0', sqlite: nil },
+    'unit' => { ruby: '3.3', gemfile: 'Gemfile', job: 'test-required', puma: '~> 8.0.0', sqlite: nil },
     'rails-4.0-8.1' => { ruby: '4.0', gemfile: 'gemfiles/rails_8.1.gemfile', job: 'rails-matrix',
                          puma: nil, sqlite: nil },
     'rails-3.0-6.0' => { ruby: '3.0', gemfile: 'gemfiles/rails_6.0.gemfile', job: 'rails-matrix',

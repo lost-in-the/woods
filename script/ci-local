@@ -287,7 +287,7 @@ def preflight(steps, opts)
     puts "Changed command inputs: #{changed.empty? ? '(none)' : changed.join(', ')}"
   else
     puts '== fast local preflight (no hosted reference; hosted drift is unknown)'
-    puts 'Fast lint and unit share the base Puma >= 6.0 input; hosted unit uses ~> 8.0.'
+    puts 'Fast lint and unit share the base Puma >= 6.0, < 8.1 input; hosted unit uses ~> 8.0.0.'
     puts "Candidate commit #{CiLocalEnvironment.git(ROOT, 'rev-parse', 'HEAD').strip}"
     puts 'Working changes are allowed in fast mode.'
   end

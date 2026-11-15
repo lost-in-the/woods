@@ -53,8 +53,9 @@ jobs:
           - { ruby-version: '3.0', puma: '~> 6.0', pr: false }
           - { ruby-version: '3.1', puma: '~> 6.0', pr: false }
           - { ruby-version: '3.2', puma: '~> 7.0', pr: false }
-          - { ruby-version: '3.4', puma: '~> 8.0', pr: true }
-          - { ruby-version: '4.0', puma: '~> 8.0', pr: true }
+          # Puma 8.1 hangs a cluster stop with the Woods plugin (puma/puma#4001); see the Gemfile cap.
+          - { ruby-version: '3.4', puma: '~> 8.0.0', pr: true }
+          - { ruby-version: '4.0', puma: '~> 8.0.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
       WOODS_CI_ROW_ACTIVE: >-
@@ -126,7 +127,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { ruby-version: '3.3', puma: '~> 8.0', pr: true }
+          - { ruby-version: '3.3', puma: '~> 8.0.0', pr: true }
     env:
       WOODS_PUMA_REQ: ${{ matrix.puma }}
       WOODS_CI_ROW_ACTIVE: >-
