@@ -360,16 +360,19 @@ exit `75` over the same files. Live restart triggers still stop the daemon,
 including edits during startup extraction. Their paths survive shutdown even
 when the preceding extraction has advanced the generation watermark.
 
-One burst of changes costs one full extraction, however many batches the watcher delivers it in.
+Changes already on disk when a full extraction starts cost that one full extraction, however the watcher splits them.
 Under polling, each batch arrives only after the previous cycle finished.
 Before any full extraction starts, the daemon compares the restart inputs on disk with its boot snapshot.
 If one changed since the boot, the daemon restarts at once and carries the batch.
 A full run there would only be repeated after the restart.
+A restart input changed after a full extraction has started still costs a restart and a second full run.
 
-A restart input rewritten with the bytes the boot read is not a change.
+Once the boot has finished, a restart input rewritten with the bytes the boot read is not a change.
 Examples: `db:prepare` dumping an unchanged `db/schema.rb`, a stash round trip, a checkout of the same content.
 None of them restarts the daemon or causes an extraction on its own.
 The boot snapshot keeps a digest of each restart input and each `config/**/*.rb` file for this.
+An input that changed while the environment booted always requires a restart, even if its bytes were restored.
+The boot read it at an unknown moment in between.
 Reload inputs, including `config/routes.rb`, are still judged by inode, size and timestamps.
 Their boot bytes say nothing about what the index last extracted.
 

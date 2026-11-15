@@ -75,6 +75,7 @@ RSpec.describe Woods::Watch::BootSnapshot do
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, "# boot bytes\n")
       snapshot = described_class.new(root: @root)
+      snapshot.boot_finished!
       File.unlink(path)
       File.write(path, "# boot bytes\n")
       File.utime(Time.now + 5, Time.now + 5, path)
@@ -84,11 +85,37 @@ RSpec.describe Woods::Watch::BootSnapshot do
     end
   end
 
+  it 'never covers by bytes an input that changed and was restored before the boot finished' do
+    path = File.join(@root, 'config/initializers/widget.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "# boot bytes\n")
+    snapshot = described_class.new(root: @root)
+    File.write(path, "# read by the boot\n")
+    File.write(path, "# boot bytes\n")
+    File.utime(Time.now + 5, Time.now + 5, path)
+    snapshot.boot_finished!
+
+    expect(snapshot.covers?(path)).to be(false)
+    expect(snapshot.changed_paths).to eq([path])
+  end
+
+  it 'does not cover by bytes before the boot is known to have finished' do
+    path = File.join(@root, 'db/schema.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "# boot bytes\n")
+    snapshot = described_class.new(root: @root)
+    File.unlink(path)
+    File.write(path, "# boot bytes\n")
+
+    expect(snapshot.covers?(path)).to be(false)
+  end
+
   it 'still reports a reload input rewritten with the same bytes' do
     path = File.join(@root, 'app/models/widget.rb')
     FileUtils.mkdir_p(File.dirname(path))
     File.write(path, "class Widget; end\n")
     snapshot = described_class.new(root: @root)
+    snapshot.boot_finished!
     File.unlink(path)
     File.write(path, "class Widget; end\n")
 

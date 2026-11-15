@@ -345,6 +345,7 @@ module Woods
       def reconcile_startup
         await_watcher_ready
         @lifecycle&.call(:backend_ready)
+        @boot_snapshot&.boot_finished!
         catch_up unless @stop_reason
         drain_cycles
         @lifecycle_started = true

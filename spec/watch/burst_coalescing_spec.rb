@@ -30,9 +30,14 @@ RSpec.describe 'Watch daemon: one full extraction per burst' do
   def build(**overrides)
     Woods::Watch::Daemon.new(
       output_dir: output_dir, root: root, extractor_factory: -> { extractor }, reloader: reloader,
-      debounce: 0, catch_up: false, full_extraction_threshold: 3,
-      boot_snapshot: Woods::Watch::BootSnapshot.new(root: root), **overrides
+      debounce: 0, catch_up: false, full_extraction_threshold: 3, boot_snapshot: booted, **overrides
     )
+  end
+
+  # A snapshot whose boot has finished, as the resident loop records it before
+  # startup reconciliation. Only then can bytes cover a rewritten input.
+  def booted
+    Woods::Watch::BootSnapshot.new(root: root).tap(&:boot_finished!)
   end
 
   # The real extractor captures source bytes when it starts and publishes
@@ -228,20 +233,38 @@ RSpec.describe 'Watch daemon: one full extraction per burst' do
       expect(extractor).to have_received(:extract_changed).twice
     end
 
-    it 'reconciles a rewrite made during boot with the one startup full extraction' do
-      initializer = File.join(root, 'config/initializers/widget.rb')
-      write('config/initializers/widget.rb', "Widget.mode = :b\n")
+    # The boot read the file at some moment between the snapshot and the end
+    # of the boot, so equal bytes afterwards prove nothing about that moment:
+    # a rebase or stash round trip can be mid-flight while the daemon boots.
+    it 'restarts for an initializer changed and restored while the boot read it' do
       snapshot = Woods::Watch::BootSnapshot.new(root: root)
-      rewrite_unchanged(initializer)
-      File.write(File.join(output_dir, 'watch_pending.json'), JSON.generate([initializer]))
+      initializer = write('config/initializers/widget.rb', "Widget.mode = :b\n")
+      write('config/initializers/widget.rb', "Widget.mode = :a\n")
+      File.utime(Time.now + 5, Time.now + 5, initializer)
 
       daemon = build(watcher: SerialWatcher.new, catch_up: true, boot_snapshot: snapshot)
       thread = Thread.new { daemon.run }
-      Timeout.timeout(5) { sleep(0.01) until daemon.instance_variable_get(:@lifecycle_started) }
-      daemon.stop unless thread.join(0.3)
+      daemon.stop unless thread.join(2)
 
-      expect(Timeout.timeout(5) { thread.value }).to eq(:stopped)
-      expect(extractor).to have_received(:extract_all).once
+      expect(Timeout.timeout(5) { thread.value }).to eq(:restart_required)
+      expect(extractor).not_to have_received(:extract_all)
+      expect(pending_file).to include(initializer)
+    end
+
+    it 'restarts for that initializer without startup catch-up as well' do
+      snapshot = Woods::Watch::BootSnapshot.new(root: root)
+      initializer = write('config/initializers/widget.rb', "Widget.mode = :b\n")
+      write('config/initializers/widget.rb', "Widget.mode = :a\n")
+      File.utime(Time.now + 5, Time.now + 5, initializer)
+      watcher = CallbackWatcher.new
+      daemon = build(watcher: watcher, boot_snapshot: snapshot)
+      thread = Thread.new { daemon.run }
+      Timeout.timeout(5) { sleep(0.01) until daemon.instance_variable_get(:@lifecycle_started) }
+
+      watcher.on_change.call([initializer])
+      daemon.stop unless thread.join(2)
+
+      expect(Timeout.timeout(5) { thread.value }).to eq(:restart_required)
     end
 
     it 'keeps a restarted daemon up when the initializer is rewritten unchanged during its startup full run' do
