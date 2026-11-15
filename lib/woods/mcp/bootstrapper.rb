@@ -38,6 +38,8 @@ module Woods
 
         unless Dir.exist?(dir)
           warn "Error: Index directory does not exist: #{examined}"
+          warn 'This process sees nothing at that path. A server run inside a container needs the container path ' \
+               '(for example /app/tmp/woods); a server on the host needs the host path.'
           warn index_path_remedy
           exit 1
         end

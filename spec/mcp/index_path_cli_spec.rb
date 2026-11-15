@@ -68,6 +68,15 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
         expect(JSON.parse(output).dig('result', 'serverInfo', 'name')).to eq('woods')
       end
 
+      it 'asks whether a missing path is a host or a container path before the extract advice' do
+        output, errors, status = launch(executable, File.join(@directory, 'no-such-index'))
+
+        expect(status.exitstatus).to eq(1)
+        expect(output).to be_empty
+        expect(errors.index('container path')).not_to be_nil, errors
+        expect(errors.index('container path')).to be < errors.index('woods:extract')
+      end
+
       it 'does not fall through a bad explicit path to a valid environment path' do
         output, errors, status = launch(executable, 'missing',
                                         env: { 'WOODS_DIR' => @legacy, 'WOODS_OUTPUT' => @atomic })
