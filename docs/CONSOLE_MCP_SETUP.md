@@ -1,8 +1,7 @@
 # Console MCP Server Setup
 
 > **Deprecated.** The Console MCP server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
-> Live access to a Rails application is better served by a narrowly scoped agent built into the application,
-> with its own limited permissions.
+> Live access to a Rails application is better served by a narrowly scoped agent inside it, with limited permissions.
 > The Index Server now answers the structural questions, so the Console adds only live row data.
 >
 > Use instead:
