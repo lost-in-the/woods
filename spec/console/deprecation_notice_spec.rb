@@ -75,34 +75,17 @@ RSpec.describe 'Console MCP deprecation notice' do
   end
 
   describe 'Configuration#console_mcp_enabled=' do
-    let(:config) { Woods::Configuration.new }
-
-    it 'warns once when the Console is switched on' do
-      err = stderr_of { 2.times { config.console_mcp_enabled = true } }
-
-      expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
-      expect(err).to match(notice)
-      expect(config.console_mcp_enabled).to be(true)
+    it 'prints nothing when the Console is only switched on, so opted-in Rails processes stay quiet' do
+      expect { Woods::Configuration.new.console_mcp_enabled = true }.not_to output.to_stderr
     end
 
-    it 'shares one notice with the server start in the same process' do
+    it 'leaves the notice to the server start' do
       err = stderr_of do
-        config.console_mcp_enabled = true
+        Woods.configuration.console_mcp_enabled = true
         build
       end
 
-      expect(err.scan('DEPRECATED').size).to eq(1)
-    end
-
-    it 'stays silent for the default, for switching it off and for the other Console options' do
-      expect do
-        c = Woods::Configuration.new
-        c.console_mcp_enabled = false
-        c.console_mcp_enabled = nil
-        c.console_mcp_http_enabled = true
-        c.console_embedded_read_tools = true
-        c.console_blocked_tables = %w[secrets]
-      end.not_to output.to_stderr
+      expect(err.lines.grep(/DEPRECATED/).size).to eq(1)
     end
   end
 end

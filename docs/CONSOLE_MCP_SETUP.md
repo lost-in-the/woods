@@ -10,7 +10,8 @@
 > - **A runtime observation in development**: `bin/rails runner` or a focused spec.
 > - **Live data**: an agent owned by the application, with its own limited permissions.
 >
-> Existing setups keep working through 2.x and print one deprecation line per process.
+> Existing setups keep working through 2.x and print one deprecation line each time the Console starts.
+> The notice comes from the Console process itself, so a custom launch command still shows it.
 > The Console gets no new features; vulnerabilities are still fixed under [SECURITY.md](../SECURITY.md).
 
 The Console MCP Server gives MCP-capable coding tools and agents live access to your Rails application: database counts, record lookups, and schema inspection. It does not expose job-monitoring tools in supported modes. Database work on the request's current connection is rolled back, subject to the side-effect limits documented below.

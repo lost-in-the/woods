@@ -1334,7 +1334,7 @@ They keep working through 2.x; a new setup should leave `console_mcp_enabled` of
 
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. Setting it to a true value prints one deprecation line per process. |
+| `console_mcp_enabled` | Boolean | `false` | Master switch. When `false`, stdio exits and the mounted Console middleware passes requests through to Rails. Setting it prints nothing; each Console start prints one deprecation line. |
 | `console_mcp_http_enabled` | Boolean | `true` | HTTP transport switch; effective only while the master switch is on. Set `false` for stdio-only use without HTTP token validation or an active HTTP endpoint. Read at request time. |
 | `console_mcp_token` | String | `ENV['WOODS_CONSOLE_MCP_TOKEN']` or `nil` | Bearer token required on every enabled Console HTTP request. With both Console flags enabled, production boot raises on a missing token; other environments warn and requests fail closed with 401. A configured token shorter than 32 characters raises at boot while HTTP is enabled. Explicit stdio-only configurations skip HTTP token validation. Generate with `SecureRandom.hex(32)`. |
 | `console_mcp_allowed_origins` | Array\<String\> | `%w[http://localhost http://127.0.0.1 http://[::1]]` | Shared guard/SDK allowlist (included in Woods 2.1). Exact cross-origin entries include the port; portless entries also permit same-authority traffic. Include the actual browser origin and non-loopback endpoint authority. Restart after changes. |
