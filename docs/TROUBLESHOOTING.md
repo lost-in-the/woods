@@ -106,6 +106,21 @@ Both refuse to overwrite intervening edits. A Puma setup refusal for
 configuration would bypass the generated plugin; select an external/Foreman
 arrangement instead of installing an inactive directive.
 
+### Puma 8.1 does not exit after Ctrl-C
+
+**Symptom:** with the Woods plugin and `workers` above 0, Ctrl-C or a control-app `stop` prints
+"Gracefully shutting down workers..." and Puma never exits.
+
+**Cause:** Puma 8.1 waits for every child of the master before it runs `after_stopped` hooks
+([puma/puma#4001](https://github.com/puma/puma/pull/4001)).
+The Woods plugin stops its watcher in that hook, so the wait never ends.
+SIGTERM still exits.
+Single mode (`workers 0`) is not affected, and neither is Puma 8.0 or earlier.
+
+**Fix:** stop Puma with SIGTERM, use Puma below 8.1,
+or run the watcher outside Puma in `procfile` or `external` mode
+(see [managed development startup](WATCH_DAEMON.md#managed-development-startup)).
+
 ### Semantic graph validation errors
 
 In development versions containing #413, `woods:validate` rejects graphs that

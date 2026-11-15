@@ -79,6 +79,17 @@ path using `config/puma.rb`. If `config/puma/development.rb` exists, setup refus
 because Puma would choose it first. Custom `-C` configurations need an explicit
 external/Foreman arrangement; this generator does not discover or rewrite them.
 
+**Known limit on Puma 8.1.**
+With the Woods plugin and `workers` above 0, Ctrl-C or a control-app `stop` prints
+"Gracefully shutting down workers..." and Puma does not exit.
+Puma 8.1 waits for every child of the master before it runs `after_stopped` hooks
+([puma/puma#4001](https://github.com/puma/puma/pull/4001)).
+The plugin stops its watcher in that hook, so the wait never ends.
+SIGTERM still exits.
+Single mode (`workers 0`) is not affected, and neither is Puma 8.0 or earlier.
+Until the plugin is fixed, stop Puma with SIGTERM, use Puma below 8.1,
+or run the watcher outside Puma in `procfile` or `external` mode.
+
 For an existing Foreman arrangement, select the command you will actually use:
 
 ```bash
