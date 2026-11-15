@@ -456,7 +456,8 @@ Docker:  "args": ["exec", "-i", "container-name", ...]
 
 ### Path confusion between host and container
 
-**Symptom:** Index Server reports "No manifest.json" even though extraction succeeded.
+**Symptom:** The Index Server exits 1 with `Index directory does not exist: <path>` even though extraction succeeded.
+Woods 1.x reported this as "No manifest.json".
 
 **Fix:** Match the path to the server process:
 

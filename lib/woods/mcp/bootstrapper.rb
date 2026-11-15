@@ -34,6 +34,7 @@ module Woods
 
         unless Dir.exist?(dir)
           warn "Error: Index directory does not exist: #{examined}"
+          warn missing_path_hint
           warn index_path_remedy
           exit 1
         end
@@ -77,6 +78,12 @@ module Woods
           'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
       end
       private_class_method :index_path_remedy
+
+      def self.missing_path_hint
+        'This process sees nothing at that path. A server run inside a container needs the container path ' \
+          '(for example /app/tmp/woods); a server on the host needs the host path.'
+      end
+      private_class_method :missing_path_hint
 
       # Build a snapshot store for temporal tracking.
       #
