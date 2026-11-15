@@ -104,7 +104,8 @@ bin/rails woods:validate
 bin/rails woods:stats
 ```
 
-With a watcher, run them after its log shows `→ generation 1`, the first published index.
+With a watcher, run them once the first index is published.
+The watcher logs to the Rails log (`log/development.log` by default) and records `→ generation 1` then.
 Run these where your Rails application can boot. The default output is `tmp/woods/`; keep this generated directory out of source control.
 
 ### 4. Connect your MCP client

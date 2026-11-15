@@ -76,7 +76,8 @@ The [managed startup guide](WATCH_DAEMON.md#managed-development-startup) gives t
 Then start the application as usual.
 When the watcher finds no index, it builds the first one in the background under `tmp/woods/`.
 In `puma` mode the application serves requests while it does.
-Its log shows `→ generation 1` when the first index is published.
+The watcher logs to the Rails log (`log/development.log` by default),
+and records `→ generation 1` when the first index is published.
 
 ### Without a watcher, or in CI
 

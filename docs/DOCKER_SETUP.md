@@ -93,7 +93,7 @@ Otherwise run it as its own development service or process-manager entry.
 
 Docker Desktop bind mounts may not deliver reliable native filesystem events, so the watcher polls by default
 inside a container (it looks for `/.dockerenv` or `/run/.containerenv`) and whenever the `listen` gem is absent.
-Its startup log names the choice:
+Its startup line in the Rails log names the choice:
 `[Woods] watch: polling every 1.0s` or `[Woods] watch: using native FS events (listen)`.
 Set `WOODS_WATCH_POLL=1` when it chose native events and edits made on the host do not reach it.
 The watcher updates structural generations automatically.
