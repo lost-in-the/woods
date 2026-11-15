@@ -1,6 +1,6 @@
 ---
 name: woods-mcp-config
-description: Configure Woods MCP connections with the exact client JSON shapes and token rules — the Index Server over stdio or Docker, and the authorized Console server over stdio or authenticated HTTP. Use when wiring a Woods server into any MCP client configuration (.mcp.json, Claude Code, desktop clients), pointing an agent at a Rails app's index, or enabling live-data Console access.
+description: Connect MCP clients (.mcp.json, Claude Code) to a Rails app's Woods index, or keep a deprecated Console.
 ---
 
 # Woods MCP configuration
