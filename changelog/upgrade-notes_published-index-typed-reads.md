@@ -2,6 +2,9 @@
   A symlinked type directory or unit file, or a unit body naming another identifier, raises `IOError`.
   An indexed identifier whose unit file is missing raises `Errno::ENOENT`, a `SystemCallError`, not `IOError`.
   A unit file that will not parse raises `JSON::ParserError`.
+  The untyped `#unit(identifier)` reads through the identifier map without these checks.
+  It returns a unit file reached through a symlink, or a body naming another identifier, as it finds them,
+  and raises `Errno::ENOENT` or `JSON::ParserError` unchanged; pass `type:` for the checked read.
   `#units` returns index entries without opening unit files, so it raises only where it reads a unit body:
   an entry with no usable `type` in a directory that holds several types (`graphql/`, `rails_source/`, `routes/`).
   In 2.1 such a unit was served, or silently left out.
