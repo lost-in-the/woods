@@ -556,8 +556,9 @@ task selects a full run automatically for these inputs. See the
 ### Incremental extraction reports a missing payload directory
 
 The message starts `The published generation names payload directory <path>, which is missing`,
-or `The published payload directory <path> holds no dependency_graph.json`.
-`generation.json` points at a payload the run cannot read: it was deleted, its volume is not mounted,
+or `The published payload directory <path> holds no dependency_graph.json`,
+or `Generation <n> under <path> names no payload directory, and no dependency_graph.json exists there`.
+`generation.json` points at a baseline the run cannot read: it was deleted, its volume is not mounted,
 or a cleanup removed part of it.
 The run refuses before writing anything, and the marker and retained generations stay as they were.
 Run `bin/rails woods:extract` to publish a complete generation; incremental runs resume after it.

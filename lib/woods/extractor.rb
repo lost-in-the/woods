@@ -1615,16 +1615,22 @@ module Woods
     # the new generation without the units it did not touch. Runs before
     # anything is written, including the source-input key.
     #
+    # A published flat generation (no payload pointer) reads its graph from
+    # the output root, and refuses the same way when none is there.
+    #
     # A populated in-memory graph stands in for a missing graph file, as in
     # {#ensure_incremental_baseline!}, but not for a missing payload: the
     # untouched units' files are gone either way.
     #
     # @return [void]
     # @raise [Woods::ExtractionError] when the payload directory is missing,
-    #   or holds no dependency_graph.json and no graph is held in memory
+    #   or the baseline holds no dependency_graph.json and no graph is held
+    #   in memory
     def ensure_published_payload_readable!
-      name = Generation.new(output_dir: @output_dir).current.payload
-      return if name.nil? || name.empty?
+      marker = Generation.new(output_dir: @output_dir).current
+      name = marker.payload
+      return ensure_flat_graph_readable!(marker.number) if name.nil?
+      return if name.empty?
 
       directory = @output_dir.join(name)
       unless directory.directory?
@@ -1644,6 +1650,25 @@ module Woods
         that graph, so running it here would publish an index without the
         edges and units it did not touch. Run a full `woods:extract` to
         rebuild the index.
+      MSG
+    end
+
+    # @param published [Integer] the flat marker's generation number; 0
+    #   leaves an unpublished directory to {#ensure_incremental_baseline!}
+    # @return [void]
+    # @raise [Woods::ExtractionError] when a published flat generation has no
+    #   graph in the output root and none is held in memory
+    def ensure_flat_graph_readable!(published)
+      return unless published.positive?
+      return if @output_dir.join('dependency_graph.json').file?
+      return unless @dependency_graph.nil? || @dependency_graph.empty?
+
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        Generation #{published} under #{@output_dir} names no payload
+        directory, and no dependency_graph.json exists there. An incremental
+        run computes what changed from that graph, so running it here would
+        publish an index without every unit and edge it did not touch. Run a
+        full `woods:extract` to rebuild the index.
       MSG
     end
 

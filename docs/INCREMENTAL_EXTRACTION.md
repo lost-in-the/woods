@@ -103,6 +103,7 @@ The contract also assumes the run can read the baseline the published generation
 When `generation.json` names a payload directory that is missing (deleted, an unmounted volume, a partial cleanup),
 incremental extraction and targeted refresh refuse with `Woods::ExtractionError` before writing anything.
 They also refuse when that directory holds no `dependency_graph.json`,
+or when a published generation names no payload and the output root holds no `dependency_graph.json`,
 unless an embedding caller already holds a populated graph in memory.
 Earlier writers started such a run from an empty or stale graph and published the result as a new generation,
 without the units and edges the run did not touch.
