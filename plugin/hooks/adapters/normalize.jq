@@ -1,5 +1,5 @@
 def valid_string:
-  type == "string" and length > 0 and utf8bytelength <= 4096 and (contains("\u0000") | not);
+  type == "string" and length > 0 and utf8bytelength <= 4096 and (index("\u0000") | not);
 def invalid: error("Unsupported or malformed edit event; no refresh queued.");
 . as $input |
 if type != "object" then invalid
