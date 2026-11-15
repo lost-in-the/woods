@@ -287,6 +287,25 @@ namespace :woods do
       exit 75 # EX_TEMPFAIL
     end
 
+    if reason == :already_running && managed_child.nil?
+      # The daemon's stand-down warning goes to the Rails log, and a raw task
+      # has no launcher to explain it, so say who holds the index and what next.
+      lease = Woods::Watch::ClaimLease
+      owner = lease.owner(output_dir)
+      record = begin
+        JSON.parse(lease.new(output_dir).snapshot)
+      rescue StandardError
+        nil
+      end
+      holder = if owner
+                 "#{output_dir} is claimed by pid #{owner['pid']} on host #{owner['host']}"
+               else
+                 "another watch daemon already maintains #{output_dir}"
+               end
+      step = record.is_a?(Hash) && record['token'] ? "run: #{lease.recovery_command(output_dir)}" : lease::MANUAL_STEP
+      warn "[woods-watch] Standing down: #{holder}. If that watcher no longer exists, #{step}."
+    end
+
     puts 'Watcher stopped.'
   ensure
     managed_child&.close
