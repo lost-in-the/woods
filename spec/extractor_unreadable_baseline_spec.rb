@@ -306,11 +306,11 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
       Dir.glob(output.join('payloads', pattern).to_s)
     end
 
-    def expect_unpublished_refusal(&run)
+    def expect_unpublished_refusal(pattern = vanished, &run)
       marker_bytes = output.join(Woods::Generation::FILENAME).binread
       generations = payload_entries('gen-*')
 
-      expect(&run).to raise_error(Woods::ExtractionError, vanished)
+      expect(&run).to raise_error(Woods::ExtractionError, pattern)
       expect(output.join(Woods::Generation::FILENAME).binread).to eq(marker_bytes)
       expect(payload_entries('gen-*') - generations).to be_empty
       expect(payload_entries('.stage-*')).to be_empty
@@ -328,13 +328,14 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
       'its graph file' => ->(output, name) { output.join(name, 'dependency_graph.json') },
       'its whole payload directory' => ->(output, name) { output.join(name) }
     }.each do |what, target|
+      pattern = what.include?('directory') ? /Generation 1.*gen-1.*missing.*woods:extract/ : nil
       it "refuses extract_changed when the payload loses #{what}, and a full extraction recovers" do
         publish_generation
         hold_graph_in_memory
         paths = changed_rake_file
         remove_after_preflight(target.call(output, payload_name))
 
-        expect_unpublished_refusal { extractor.extract_changed(paths) }
+        expect_unpublished_refusal(pattern || vanished) { extractor.extract_changed(paths) }
         expect_full_extraction_recovers
       end
 
@@ -343,11 +344,23 @@ RSpec.describe 'Incremental runs over a baseline the published generation cannot
         hold_graph_in_memory
         remove_after_preflight(target.call(output, payload_name))
 
-        expect_unpublished_refusal { extractor.refresh(:rake_tasks) }
+        expect_unpublished_refusal(pattern || vanished) { extractor.refresh(:rake_tasks) }
       end
     end
 
     %w[extract_changed refresh].each do |entry|
+      it "refuses #{entry} rather than seed a stale root graph when the payload disappears" do
+        publish_generation
+        output.join('dependency_graph.json').write(empty_graph)
+        paths = changed_rake_file
+        remove_after_preflight(output.join(payload_name))
+
+        expect_unpublished_refusal(/Generation 1.*#{Regexp.escape(payload_name)}.*missing.*woods:extract/) do
+          entry == 'refresh' ? extractor.refresh(:rake_tasks) : extractor.extract_changed(paths)
+        end
+        expect_full_extraction_recovers
+      end
+
       it "refuses #{entry} when a flat generation loses its root graph, and a full extraction recovers" do
         output.mkpath
         output.join('dependency_graph.json').write(empty_graph)

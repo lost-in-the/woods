@@ -1454,7 +1454,7 @@ module Woods
       @payload_generation = marker.number + 1
       @writer_lock = index_writer_lock
       @payload_dir = @payload_store.create_stage(@payload_generation, stage_owner)
-      seed_payload(marker, rewritten_dirs: rewritten_dirs)
+      seed_payload(marker, rewritten_dirs: rewritten_dirs, strict: strict)
       PublicationSeam.reach(:staged, @output_dir)
     rescue Coordination::LockLostError, Woods::ExtractionError
       raise
@@ -1701,9 +1701,17 @@ module Woods
     #   whose unit files this run writes in full, so they are not seeded;
     #   anything else inside them (the non-JSON files and subdirectories the
     #   orphan sweep also never touches) still carries forward
-    def seed_payload(marker, rewritten_dirs: [])
+    # @param strict [Boolean] refuse, rather than seed from the flat root,
+    #   when the marker names a payload directory that is missing: the root
+    #   can hold an older graph an incremental run would publish
+    # @raise [Woods::ExtractionError] when `strict` and the named payload is gone
+    def seed_payload(marker, rewritten_dirs: [], strict: false)
       if marker.payload && (source = @output_dir.join(marker.payload)).directory?
         @payload_store.clone(source, @payload_dir, without_json: rewritten_dirs)
+      elsif strict && marker.payload
+        raise Woods::ExtractionError,
+              "Generation #{marker.number} names payload #{marker.payload}, which went missing before this run " \
+              'could seed from it. Run a full `woods:extract` to rebuild the index.'
       else
         # A flat root is seeded once, on the first payload-publishing run.
         seed_payload_from_flat_root
