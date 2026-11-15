@@ -6,6 +6,7 @@ require 'digest'
 require 'fileutils'
 require 'json'
 require 'open3'
+require 'shellwords'
 require 'woods/watch/installation'
 
 RSpec.describe Woods::Watch::Installation do
@@ -86,10 +87,20 @@ RSpec.describe Woods::Watch::Installation do
     expect(tree).to eq(before)
   end
 
-  it 'names the runnable generator command in the generated wrapper' do
-    installer.apply
+  # `--operation update` refuses without `--mode`, and procfile mode also needs
+  # its Procfile and Foreman command, so the comment must carry the selection.
+  [{}, { mode: 'puma' }].each do |options|
+    mode = options.fetch(:mode, 'procfile')
+    it "names a complete, runnable update command in the #{mode} wrapper" do
+      installer(**options).apply
+      command = read('bin/woods-watch')[%r{^#\s+(bin/rails generate woods:watch .*)$}, 1]
+      words = Shellwords.split(command)
+      flags = words.drop(3).each_slice(2).to_h { |flag, value| [flag.delete_prefix('--').tr('-', '_').to_sym, value] }
 
-    expect(read('bin/woods-watch')).to include('bin/rails generate woods:watch --operation update')
+      expect(words.first(5)).to eq(%w[bin/rails generate woods:watch --operation update])
+      expect(flags).to include(mode: mode)
+      expect { described_class.new(root: @root, probe: probe, **flags).plan }.not_to raise_error
+    end
   end
 
   it 'repeats, updates and removes a setup whose wrapper an older Woods generated' do

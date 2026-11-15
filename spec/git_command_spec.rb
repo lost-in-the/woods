@@ -91,7 +91,8 @@ RSpec.describe Woods::GitCommand do
     it 'is a fixture plain git status does rewrite, so the example above can fail' do
       before = index_digest
 
-      Open3.capture3(*described_class.argv(@root, 'status', '--porcelain', env: {}))
+      # Explicit, so an inherited GIT_OPTIONAL_LOCKS=0 cannot make the control pass.
+      Open3.capture3({ 'GIT_OPTIONAL_LOCKS' => '1' }, *described_class.argv(@root, 'status', '--porcelain', env: {}))
 
       expect(index_digest).not_to eq(before)
     end

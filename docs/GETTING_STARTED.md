@@ -60,6 +60,7 @@ The generated initializer defaults are enough for structural extraction. Do not 
 
 The recommended path is one watcher in the application's normal development startup.
 It builds the first index and keeps it current.
+Pick your mode from the list below and use it in place of `puma`.
 Preview the setup, then run the same command without `--pretend`:
 
 ```bash
@@ -73,6 +74,7 @@ Choose the mode that matches how you start the application:
 - `external`: Docker Compose, Grove or another supervisor runs the watcher; the generator prints its command.
 
 The [managed startup guide](WATCH_DAEMON.md#managed-development-startup) gives the options for each mode.
+In `external` mode, add the printed command to your supervisor before you start the application.
 Then start the application as usual.
 When the watcher finds no index, it builds the first one in the background under `tmp/woods/`.
 In `puma` mode the application serves requests while it does.

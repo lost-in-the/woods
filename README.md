@@ -77,6 +77,7 @@ The generator writes `config/initializers/woods.rb` and nothing else; its defaul
 
 Add one watcher to your normal development startup.
 It builds the first index and keeps it current.
+Pick your mode from the list below and use it in place of `puma`.
 Preview the setup, then run the same command without `--pretend`:
 
 ```bash
@@ -90,6 +91,7 @@ Choose the mode that matches how you start the app:
 - `external`: Docker Compose, Grove or another supervisor runs the watcher; the generator prints its command.
 
 The [startup guide](docs/WATCH_DAEMON.md#managed-development-startup) gives the options for each mode.
+In `external` mode, add the printed command to your supervisor before you start the app.
 Then start the app as usual.
 When the watcher finds no index, it builds the first one in the background under `tmp/woods/`.
 In `puma` mode the app serves requests while it does.
