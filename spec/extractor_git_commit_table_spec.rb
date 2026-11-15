@@ -206,6 +206,32 @@ RSpec.describe Woods::Extractor, 'commit table' do
       expect(table_path).not_to exist
     end
 
+    # A shallow repository has no table (GitCapture#available? is false), so
+    # deepening it can never leave a short table behind to reuse: the run
+    # after `--unshallow` finds none and walks.
+    it 'has no table to reuse while a clone is shallow, and walks once it is unshallowed' do
+      commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
+      commit('Edit post again', { 'app/models/post.rb' => 'class Post; def b; end; end' })
+      refresh
+      complete = File.binread(table_path)
+      origin = root.join('origin.git')
+      git('clone', '-q', '--bare', '--no-local', root.to_s, origin.to_s)
+      FileUtils.rm_rf(root.join('.git'))
+      shallow = root.join('shallow')
+      git('clone', '-q', '--depth', '1', "file://#{origin}", shallow.to_s)
+      FileUtils.mv(shallow.join('.git'), root.join('.git'))
+
+      expect(refresh).to eq(:withdrawn)
+      git('fetch', '-q', '--deepen', '1')
+      expect(git('rev-parse', '--is-shallow-repository')).to eq('true')
+      expect(refresh).to be_nil
+      expect(table_path).not_to exist
+
+      git('fetch', '-q', '--unshallow')
+      expect(refresh_noting_walk).to eq([true, :written])
+      expect(File.binread(table_path)).to eq(complete)
+    end
+
     it 'walks when the index was cleaned, so there is no published table' do
       FileUtils.rm_f(table_path)
 
