@@ -1,0 +1,1 @@
+- The plugin edit hook queues refreshes again on jq 1.6 (Debian 12, Ubuntu 22.04). Its NUL check used `contains("\u0000")`, which jq 1.6 answers `true` for every string, so every root and path was rejected as malformed and no refresh was ever queued. The check now uses `index("\u0000")`, which answers the same on jq 1.6 and 1.7.
