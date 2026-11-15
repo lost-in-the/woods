@@ -350,6 +350,7 @@ Update the canonical owner for any changed contract:
 | Agent query workflow | `docs/AGENT_GUIDE.md` |
 | Console security/transport | `docs/CONSOLE_MCP_SETUP.md` |
 | Major-version behavior | `docs/UPGRADING_TO_2.md` |
+| Compatibility or deprecation policy | `docs/COMPATIBILITY.md` |
 | Failure diagnosis | `docs/TROUBLESHOOTING.md` |
 
 If a rake task, executable, MCP tool/argument, config key, setup step, or diagnosis path changes, inspect all five distributed skills under `plugin/skills/`. Update affected skills in the same Woods PR and bump `plugin/.claude-plugin/plugin.json` when skill content changes.
@@ -418,6 +419,7 @@ Unreleased as well. Keep entry files directly inside a real `changelog/`
 directory; all nested directories and symlinks are refused before preparation,
 including ones whose names do not end in `.md`. Regular files with other
 extensions are left untouched.
+[Compatibility](docs/COMPATIBILITY.md) says which changes need an `upgrade-notes` entry.
 
 `release:prepare` appends entry files in filename order after inline Unreleased
 entries, folds them through the same heading merger, and deletes exactly the

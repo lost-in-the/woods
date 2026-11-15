@@ -56,6 +56,7 @@ and stdio or Streamable HTTP endpoints directly.
 - [Extractor reference](EXTRACTOR_REFERENCE.md): what each extractor produces and the edge cases it handles.
 - [Reading a published index from Ruby](PUBLISHED_INDEX.md): the `Woods::PublishedIndex` Ruby API for cops, gate scripts, and `woods:check:*` tasks (including the moved-message check).
 - [Published index layout](INDEX_LAYOUT.md): the filesystem contract for non-Ruby readers, with Bash/jq and Python examples, retention pins, and snapshot-copy rules.
+- [Compatibility](COMPATIBILITY.md): what a release keeps, what it may change, and how deprecations end.
 - [Evaluation](EVALUATION.md): retrieval scoring, baselines, and the agent-level index on/off ablation.
 - [Backend matrix](BACKEND_MATRIX.md): implemented provider/store combinations and their operational requirements.
 - [Token benchmark](TOKEN_BENCHMARK.md): evidence behind Woods token-estimation defaults.
@@ -108,6 +109,7 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Non-MCP Ruby access to a published index | [PUBLISHED_INDEX.md](PUBLISHED_INDEX.md) |
 | Generation-bound source evidence and fresh extraction | [SOURCE_FRESHNESS.md](SOURCE_FRESHNESS.md) |
 | Published filesystem layout for external readers | [INDEX_LAYOUT.md](INDEX_LAYOUT.md) |
+| Compatibility and deprecation policy | [COMPATIBILITY.md](COMPATIBILITY.md) |
 | Evaluation harnesses | [EVALUATION.md](EVALUATION.md) |
 
 The current public surface is generated from 42 extractors. Counts and capability claims must match `.Codex/release-v2/surface-inventory.json`, which is generated from the code and verified in CI.
