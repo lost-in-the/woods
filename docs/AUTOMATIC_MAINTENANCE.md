@@ -1,10 +1,11 @@
 # Woods with minimal manual maintenance
 
-**Recommended development setup:** create a baseline index, run one supervised
-watcher per active application/worktree index, and let your MCP client launch the
-Index Server. The watcher publishes changes; an already connected Index Server
-reads the new generation on its next call. Ordinary edits then need no manual
-extraction or MCP restart.
+**Recommended development setup:** run one supervised watcher per active application/worktree index,
+and let your MCP client launch the Index Server.
+The watcher builds the first index when none exists, then publishes changes.
+An already connected Index Server reads the new generation on its next call.
+Ordinary edits then need no manual extraction or MCP restart.
+Without a watcher, create the baseline index by hand with `bin/rails woods:extract`.
 
 This page maps that workflow to its canonical documentation. The raw watcher and
 hooks are available in Woods `2.0.0.beta4`; the managed launcher, installation
