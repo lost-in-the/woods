@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'timeout'
 require 'woods/watch/boot_snapshot'
 
 RSpec.describe Woods::Watch::BootSnapshot do
@@ -171,6 +172,76 @@ RSpec.describe Woods::Watch::BootSnapshot do
 
     expect(snapshot.covers?(created)).to be(false)
     expect(snapshot.changed_paths).to eq([created])
+  end
+
+  # Bundler read the old bytes before the snapshot; a digest of the new bytes
+  # under the old fingerprint would later cover them as what the boot read.
+  it 'records no digest for a boot input rewritten while the snapshot hashed it' do
+    path = File.join(@root, 'Gemfile.lock')
+    File.write(path, "GEM\n")
+    original = Digest::SHA256.method(:new)
+    rewritten = false
+    allow(Digest::SHA256).to receive(:new) do
+      unless rewritten
+        rewritten = true
+        File.write(path, "GEM\n  specs:\n")
+      end
+      original.call
+    end
+    snapshot = described_class.new(root: @root)
+    snapshot.boot_finished!
+
+    expect(rewritten).to be(true)
+    expect(snapshot.covers?(path)).to be(false)
+    expect(snapshot.changed_paths).to eq([path])
+  end
+
+  # A FIFO opened for reading blocks until a writer appears. Run the example on
+  # a thread and, if it is stuck, open the FIFO for writing so the reader
+  # returns and the example fails instead of hanging the suite.
+  def without_hanging_on(fifo, &block)
+    worker = Thread.new(&block)
+    return worker.value if worker.join(3)
+
+    File.open(fifo, File::WRONLY | File::NONBLOCK) { nil }
+    worker.join(3)
+    raise 'BootSnapshot blocked reading a FIFO'
+  end
+
+  it 'does not block on a FIFO among the config Ruby it digests' do
+    fifo = File.join(@root, 'config/pipe.rb')
+    FileUtils.mkdir_p(File.dirname(fifo))
+    File.mkfifo(fifo)
+
+    snapshot = without_hanging_on(fifo) { described_class.new(root: @root) }
+
+    expect(snapshot.covers?(fifo)).to be(true)
+  end
+
+  it 'does not block on, or cover by bytes, a boot input later replaced by a FIFO' do
+    path = File.join(@root, 'config/initializers/widget.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "# boot bytes\n")
+    snapshot = described_class.new(root: @root)
+    snapshot.boot_finished!
+    File.unlink(path)
+    File.mkfifo(path)
+
+    expect(without_hanging_on(path) { snapshot.changed_paths }).to eq([path])
+  end
+
+  it 'still covers a symlinked boot input by the bytes of its target' do
+    target = File.join(@root, 'shared_settings.rb')
+    File.write(target, "# shared\n")
+    path = File.join(@root, 'config/initializers/settings.rb')
+    FileUtils.mkdir_p(File.dirname(path))
+    File.symlink(target, path)
+    snapshot = described_class.new(root: @root)
+    snapshot.boot_finished!
+    File.unlink(target)
+    File.write(target, "# shared\n")
+
+    expect(snapshot.covers?(path)).to be(true)
   end
 
   it 'covers unchanged inputs and ignores files that do not require a reload' do

@@ -22,7 +22,7 @@ module Woods
         @root = File.expand_path(root.to_s)
         @policy = policy
         @files = scan
-        @digests = @files.keys.filter_map { |path| [path, digest(path)] if boot_input?(path) }.to_h
+        @digests = @files.filter_map { |path, stamp| [path, steady_digest(path, stamp)] if boot_input?(path) }.to_h
         @read_before = read_before_snapshot
         @verified = Set.new
       end
@@ -113,9 +113,28 @@ module Woods
         relative.match?(%r{\Aconfig/.+\.rb\z})
       end
 
+      # The digest of the fingerprinted bytes, or nil when the file changed
+      # while it was read: a digest of newer bytes under the older fingerprint
+      # would later cover them as what the boot read.
+      def steady_digest(path, stamp)
+        value = digest(path)
+        value if fingerprint(path) == stamp
+      end
+
+      # Regular files only, hashed through the descriptor that was checked.
+      # Opening a FIFO for reading would block until a writer appeared.
+      # Symlinks are followed: a symlinked config file is a legitimate input.
       def digest(path)
-        Digest::SHA256.file(path).hexdigest
-      rescue SystemCallError
+        File.open(path, File::RDONLY | File::NONBLOCK) do |file|
+          return nil unless file.stat.file?
+
+          sha = Digest::SHA256.new
+          while (chunk = file.read(64 * 1024))
+            sha << chunk
+          end
+          sha.hexdigest
+        end
+      rescue SystemCallError, IOError
         nil
       end
 
