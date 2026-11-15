@@ -10,8 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Upgrade Notes
 
 - **Read these before upgrading from 2.1.** Run one full `woods:extract` after upgrading: `woods:incremental` and `woods:refresh` refuse an index written by 2.1 until it has run. These changes can affect existing callers, and each is described in full below:
-  - `woods_status` returns `worktrees` as a summary object. Pass `worktrees: "list"` for the previous array.
-  - The `route` type selects route units only, no longer `route_file` units.
+  - Migration, database view, event, HTTP-call and mixin edges carry new `via` kinds.
+  - `lookup`, `domain_clusters` and `console_sql` return less by default; each answer says how to page or raise it.
+  - `incremental_blast_radius_depth` defaults to `:structural`. Set it to `nil` for the previous closure.
+  - A full extraction that cannot open a payload directory raises instead of writing a flat index.
+  - `Woods::PublishedIndex#unit` and `#units` raise `IOError` on a unit they cannot trust.
+  - `recent_changes` labels each row with its unit's own type (`gem_source`, `graphql_mutation`), not its directory.
   - `Woods::MCP::Server.build` returns before the reader warm-up. Pass `warmup: :before_handshake` for the previous behaviour.
   - Lexical-mode metadata-store records are deeply frozen.
   - `metadata.inlined_concerns` holds full concern names, and a module that extends `ActiveSupport::Concern` is a `concern` unit wherever it lives.
