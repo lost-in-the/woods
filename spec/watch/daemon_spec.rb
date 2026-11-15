@@ -1467,6 +1467,77 @@ RSpec.describe Woods::Watch::Daemon do
       expect(reason).not_to eq(:already_running)
     end
 
+    # A restarted container keeps its hostname, and its processes start from
+    # the same pid sequence, so the claim a killed watcher left behind can
+    # name the pid of the watcher now starting. That pid is alive because it
+    # is this process; no other live daemon can hold such a claim.
+    describe 'a claim recorded under this process own pid' do
+      let(:claim_path) { File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME) }
+      let(:host) { Woods::Watch::Status.host_identity }
+
+      def write_claim(**fields)
+        FileUtils.mkdir_p(output_dir)
+        File.write(claim_path, JSON.generate(fields))
+        File.binread(claim_path)
+      end
+
+      def managed_claim(pid:, host:)
+        File.write("#{claim_path}.lease", "#{'e' * 32}\n")
+        write_claim(pid: pid, host: host, token: 'c' * 64, lease_version: 2, lease_id: 'e' * 32)
+      end
+
+      it 'reclaims it on the same host and runs' do
+        write_claim(pid: Process.pid, host: host)
+
+        expect(Timeout.timeout(10) { build_racer.run }).to eq(:idle)
+      end
+
+      it 'reclaims it on the same host under managed ownership' do
+        stale = managed_claim(pid: Process.pid, host: host)
+        daemon = build(conservative_claims: true)
+
+        expect(daemon.send(:claim_startup?)).to be true
+        expect(File.binread(claim_path)).not_to eq(stale)
+      ensure
+        daemon&.send(:release_claim)
+      end
+
+      it 'leaves a foreign-host claim to the foreign-host rule under managed ownership' do
+        bytes = managed_claim(pid: Process.pid, host: 'another-container')
+
+        expect(build(conservative_claims: true).send(:claim_startup?)).to be false
+        expect(File.binread(claim_path)).to eq(bytes)
+      end
+
+      it 'still refuses a claim held by another live pid on the same host' do
+        bytes = write_claim(pid: Process.ppid, host: host)
+
+        expect(Timeout.timeout(10) { build_racer.run }).to eq(:already_running)
+        expect(File.binread(claim_path)).to eq(bytes)
+      end
+
+      it 'still refuses a second daemon in a process whose first daemon holds the claim' do
+        first = build_racer
+        expect(first.send(:claim_startup?)).to be true
+        held = File.binread(claim_path)
+
+        expect(Timeout.timeout(10) { build_racer.run }).to eq(:already_running)
+        expect(first.send(:claim_startup?)).to be false
+        expect(File.binread(claim_path)).to eq(held)
+      ensure
+        first&.send(:release_claim)
+      end
+
+      it 'reclaims it again once the daemon in this process has released the claim' do
+        first = build_racer
+        first.send(:claim_startup?)
+        first.send(:release_claim)
+        write_claim(pid: Process.pid, host: host)
+
+        expect(Timeout.timeout(10) { build_racer.run }).to eq(:idle)
+      end
+    end
+
     it 'preserves WOODS_IGNORE_WATCH even when a live claim is already on disk' do
       FileUtils.mkdir_p(output_dir)
       claim_path = File.join(output_dir, Woods::Watch::Daemon::CLAIM_FILENAME)
