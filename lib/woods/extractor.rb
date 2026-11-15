@@ -593,7 +593,7 @@ module Woods
       @symlinked_dirs = nil
       # A full run rewrites every unit file of every family it extracts and
       # sweeps the rest, so seeding those is work the run undoes.
-      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_type_dirs) }
+      profile_phase('payload seed') { begin_payload!(rewritten_dirs: replaced_payload_dirs) }
 
       # Eager load once — all extractors need loaded classes for introspection.
       profile_phase('eager load') { safe_eager_load! }
@@ -1735,17 +1735,22 @@ module Woods
       end
     end
 
-    # The per-type directories a full run writes in full and then sweeps
-    # ({#sweep_orphaned_unit_files}): every extractor family the configuration
-    # does not gate out. A gated family (`rails_source` with
-    # `include_framework_sources` off) keeps its seeded units, as before.
+    # The payload directories whose JSON a full run writes in full and then
+    # sweeps, so none of it is seeded:
+    #
+    # * every extractor family the configuration does not gate out
+    #   ({#sweep_orphaned_unit_files}). A gated family (`rails_source` with
+    #   `include_framework_sources` off) keeps its seeded units, as before.
+    # * `flows/`, in either mode: {#precompute_flows} writes every document
+    #   and the three indexes again and sweeps the rest, and
+    #   {#withdraw_disabled_flows} removes the directory.
     #
     # On the 11k-unit field app seeding was 3.4s of hardlinks that the run
     # then replaced one by one; the sweep then had nothing to find.
     #
     # @return [Array<String>]
-    def replaced_type_dirs
-      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s)
+    def replaced_payload_dirs
+      EXTRACTORS.keys.reject { |key| skip_by_configuration?(key) }.map(&:to_s) + PAYLOAD_DIRS
     end
 
     # Uses {PayloadStore#link_or_copy} rather than a bare +FileUtils.ln+ for
