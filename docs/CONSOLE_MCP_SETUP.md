@@ -836,7 +836,8 @@ transaction, host writes included. A lock wait timeout does the same when the
 server runs with `innodb_rollback_on_timeout` enabled; by default it rolls back
 only the statement that timed out. A statement that causes an implicit commit
 ends the host transaction. `console_sql` accepts only `SELECT`, `WITH` and plain
-`EXPLAIN` statements, which narrows the second case but does not rule it out.
+`EXPLAIN` statements, which narrows the implicit-commit case but does not rule it
+out.
 It is a final
 guard for ordinary database work, not a sandbox or a universal side-effect
 guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
