@@ -47,12 +47,11 @@ group :development, :test do
   # is optional and users pick their own server, but the suite needs one to
   # exercise the binary. Opt in with
   # WOODS_RUN_HTTP_SERVER=1 (see spec/mcp/http_server_e2e_spec.rb).
-  # WOODS_PUMA_REQ overrides the requirement, comma-separated ('>= 8.0, < 8.1').
-  # Puma 8.1 (puma/puma#4001) runs stop_blocked, whose Process.waitall waits on
-  # every child, before after_stopped, where the Woods plugin stops its guardian
-  # child, so a cluster stop never returns. The cap goes when the plugin no
-  # longer depends on that order.
-  gem 'puma', *ENV.fetch('WOODS_PUMA_REQ', '>= 6.0, < 8.1').split(',').map(&:strip)
+  # WOODS_PUMA_REQ overrides the requirement, comma-separated ('~> 8.0, != 8.1.0').
+  # Puma 8.1.0 runs stop_blocked, whose Process.waitall waits on every child,
+  # before after_stopped, where the Woods plugin stops its guardian child, so a
+  # cluster stop never returns. Fixed upstream in 8.1.1 (puma/puma#4135).
+  gem 'puma', *ENV.fetch('WOODS_PUMA_REQ', '>= 6.0, != 8.1.0').split(',').map(&:strip)
   # Optional: only needed for flow analysis (AST parsing)
   gem 'parser', '~> 3.3'
   gem 'prism', '>= 0.24'

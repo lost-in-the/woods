@@ -1,0 +1,422 @@
+# frozen_string_literal: true
+
+require 'spec_helper'
+require 'woods/extractor'
+
+RSpec.describe 'Incremental runs over a baseline the published generation cannot provide' do
+  include_context 'isolated Woods runtime'
+
+  around do |example|
+    Dir.mktmpdir('woods-unreadable-baseline') do |root|
+      @root = Pathname.new(root)
+      example.run
+    end
+  end
+
+  before do
+    require 'woods'
+    stub_const('Rails', double('Rails', root: @root, logger: double('Logger').as_null_object))
+    @original_config = Woods.configuration
+    Woods.configuration = Woods::Configuration.new
+    allow(extractor).to receive(:safe_eager_load!)
+    allow(extractor).to receive(:prepare_source_reference_baseline)
+  end
+
+  after { Woods.configuration = @original_config }
+
+  let(:output) { @root.join('index') }
+  let(:extractor) { Woods::Extractor.new(output_dir: output) }
+  let(:empty_graph) { JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}) }
+  let(:payload_name) { Woods::PayloadStore.name_for(1) }
+
+  def publish_generation(graph: true)
+    directory = Woods::PayloadStore.new(output).create(1)
+    directory.join('manifest.json').write(JSON.generate(woods_version: '2.0.0', total_units: 0, counts: {}))
+    directory.join('dependency_graph.json').write(empty_graph) if graph
+    Woods::Generation.new(output_dir: output).bump!(reason: 'full', payload: payload_name)
+    directory
+  end
+
+  def publish_generation_then_lose_payload
+    FileUtils.rm_rf(publish_generation)
+  end
+
+  def hold_graph_in_memory
+    extractor.dependency_graph.register(
+      Woods::ExtractedUnit.new(type: :model, identifier: 'Lantern', file_path: nil)
+    )
+  end
+
+  def artifacts
+    Dir.glob(output.join('**/*'), File::FNM_DOTMATCH).reject { |path| path.end_with?('/.') }.to_h do |path|
+      [path.delete_prefix("#{output}/"), File.directory?(path) ? :directory : File.binread(path)]
+    end
+  end
+
+  def expect_refusal(pattern, &run)
+    previous = artifacts
+    expect(&run).to raise_error(Woods::ExtractionError, pattern)
+    expect(artifacts).to eq(previous)
+  end
+
+  let(:missing_payload) { /#{Regexp.escape(output.join(payload_name).to_s)}.*missing.*woods:extract/ }
+
+  %w[incremental refresh].each do |operation|
+    context "when the marker names a payload directory that is gone (#{operation})" do
+      it 'refuses before anything is written' do
+        publish_generation_then_lose_payload
+
+        expect_refusal(missing_payload) { extractor.send(:prepare_incremental_run, operation: operation) }
+      end
+
+      it 'refuses rather than seed from a stale graph left in the flat root' do
+        publish_generation_then_lose_payload
+        output.join('dependency_graph.json').write(empty_graph)
+
+        expect_refusal(missing_payload) { extractor.send(:prepare_incremental_run, operation: operation) }
+      end
+
+      it 'refuses even when the caller holds a populated graph in memory' do
+        publish_generation_then_lose_payload
+        hold_graph_in_memory
+
+        expect_refusal(missing_payload) { extractor.send(:prepare_incremental_run, operation: operation) }
+      end
+    end
+
+    context "when the payload directory exists without dependency_graph.json (#{operation})" do
+      it 'refuses before anything is written' do
+        publish_generation(graph: false)
+
+        expect_refusal(/#{Regexp.escape(output.join(payload_name).to_s)}.*dependency_graph\.json.*woods:extract/) do
+          extractor.send(:prepare_incremental_run, operation: operation)
+        end
+      end
+    end
+  end
+
+  it 'refuses extract_changed and leaves the index exactly as it was' do
+    publish_generation_then_lose_payload
+
+    expect_refusal(missing_payload) { extractor.extract_changed([@root.join('app/models/lantern.rb').to_s]) }
+    expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
+  end
+
+  it 'refuses refresh and leaves the index exactly as it was' do
+    publish_generation_then_lose_payload
+
+    expect_refusal(missing_payload) { extractor.refresh(:routes) }
+    expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
+  end
+
+  it 'proceeds over a healthy payload generation' do
+    publish_generation
+
+    expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+  end
+
+  it 'proceeds over a flat generation whose graph sits in the output root' do
+    output.mkpath
+    output.join('dependency_graph.json').write(empty_graph)
+    Woods::Generation.new(output_dir: output).bump!(reason: 'full')
+
+    expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+  end
+
+  it 'proceeds with no published generation when the caller holds a populated graph in memory' do
+    hold_graph_in_memory
+
+    expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+  end
+
+  # Extractors a run can complete with: a whole-app rake_tasks family a
+  # changed rake file triggers, so a run that is not refused publishes.
+  def stub_runnable_extractors
+    require 'active_support'
+    require 'active_support/isolated_execution_state'
+    require 'active_support/core_ext/time'
+    require 'active_support/core_ext/string/inflections'
+    Woods.configuration.concurrent_extraction = false
+    allow(Time).to receive(:current).and_return(Time.now)
+    allow(Rails).to receive(:version).and_return('8.0.0')
+    allow(extractor).to receive_messages(git_available?: false)
+    stub_const('Woods::Extractor::EXTRACTORS',
+               { models: extractor_returning(:model, 'Lantern', 'app/models/lantern.rb'),
+                 rake_tasks: extractor_returning(:rake_task, 'lantern:light', 'lib/tasks/lantern.rake'),
+                 rails_source: Class.new { define_method(:extract_all) { [] } } })
+  end
+
+  def extractor_returning(type, identifier, file_path)
+    unit = Woods::ExtractedUnit.new(type: type, identifier: identifier, file_path: file_path)
+    unit.source_code = 'Lantern'
+    Class.new { define_method(:extract_all) { [unit] } }
+  end
+
+  def changed_rake_file
+    path = @root.join('lib/tasks/lantern.rake')
+    path.dirname.mkpath
+    path.write('task :light')
+    [path.to_s]
+  end
+
+  describe 'a flat generation with no dependency_graph.json' do
+    before do
+      stub_runnable_extractors
+      # The real source-reference preparation: over an empty graph it opens
+      # an empty baseline rather than refusing, so it does not stop the run.
+      allow(extractor).to receive(:prepare_source_reference_baseline).and_call_original
+    end
+
+    let(:no_flat_graph) { /Generation 1 under #{Regexp.escape(output.to_s)}.*dependency_graph\.json.*woods:extract/ }
+
+    def publish_flat_generation(payload: nil)
+      output.mkpath
+      Woods::Generation.new(output_dir: output).bump!(reason: 'full', payload: payload)
+    end
+
+    it 'refuses extract_changed and leaves the index exactly as it was' do
+      publish_flat_generation
+      paths = changed_rake_file
+
+      expect_refusal(no_flat_graph) { extractor.extract_changed(paths) }
+      expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
+    end
+
+    it 'refuses refresh and leaves the index exactly as it was' do
+      publish_flat_generation
+
+      expect_refusal(no_flat_graph) { extractor.refresh(:rake_tasks) }
+      expect(Woods::Generation.new(output_dir: output).current.number).to eq(1)
+    end
+
+    # Woods never writes an empty pointer. The preflight refuses it before
+    # anything is written, and a full extraction seeds over it from the flat
+    # root, as for a marker without a payload.
+    def expect_full_extraction_recovers_from_empty_pointer
+      extractor.extract_all
+
+      marker = Woods::Generation.new(output_dir: output).current
+      expect(marker.number).to eq(2)
+      expect(marker.payload).to eq(Woods::PayloadStore.name_for(2))
+      expect(output.join(marker.payload, 'dependency_graph.json')).to exist
+      expect(nested_payload_paths).to be_empty
+    end
+
+    def nested_payload_paths
+      Dir.glob(output.join('**/*').to_s).select { |path| path.scan(%r{/payloads(?=/|\z)}).size > 1 }
+    end
+
+    it 'refuses extract_changed over an empty payload pointer before anything is written, then recovers' do
+      publish_flat_generation(payload: '')
+      paths = changed_rake_file
+
+      expect_refusal(/empty payload pointer.*woods:extract/) { extractor.extract_changed(paths) }
+      expect_full_extraction_recovers_from_empty_pointer
+      expect { extractor.extract_changed(paths) }.not_to raise_error
+    end
+
+    it 'refuses refresh over an empty payload pointer before anything is written, then recovers' do
+      publish_flat_generation(payload: '')
+
+      expect_refusal(/empty payload pointer.*woods:extract/) { extractor.refresh(:rake_tasks) }
+      expect_full_extraction_recovers_from_empty_pointer
+      expect { extractor.refresh(:rake_tasks) }.not_to raise_error
+    end
+
+    it 'refuses a strict seed over an empty payload pointer' do
+      output.mkpath
+      marker = Woods::Generation::Marker.new(number: 1, payload: '')
+
+      expect { extractor.send(:seed_payload, marker, strict: true) }
+        .to raise_error(Woods::ExtractionError, /Generation 1 names payload .*woods:extract/)
+    end
+  end
+
+  # An in-memory graph stands in for a graph file only before anything is
+  # published. Once a generation is published, a graph held in memory may
+  # predate it, so a published generation without its graph file refuses.
+  describe 'a published generation without its graph file, while a graph is held in memory' do
+    before do
+      stub_runnable_extractors
+      allow(extractor).to receive(:prepare_source_reference_baseline).and_call_original
+    end
+
+    let(:payload_without_graph) do
+      /#{Regexp.escape(output.join(payload_name).to_s)}.*dependency_graph\.json.*woods:extract/
+    end
+    let(:flat_without_graph) do
+      /Generation 1 under #{Regexp.escape(output.to_s)}.*dependency_graph\.json.*woods:extract/
+    end
+
+    def publish_flat_generation
+      output.mkpath
+      Woods::Generation.new(output_dir: output).bump!(reason: 'full')
+    end
+
+    it 'refuses extract_changed over a payload without its graph' do
+      publish_generation(graph: false)
+      hold_graph_in_memory
+      paths = changed_rake_file
+
+      expect_refusal(payload_without_graph) { extractor.extract_changed(paths) }
+    end
+
+    it 'refuses refresh over a payload without its graph' do
+      publish_generation(graph: false)
+      hold_graph_in_memory
+
+      expect_refusal(payload_without_graph) { extractor.refresh(:rake_tasks) }
+    end
+
+    it 'refuses extract_changed over a flat generation without its graph' do
+      publish_flat_generation
+      hold_graph_in_memory
+      paths = changed_rake_file
+
+      expect_refusal(flat_without_graph) { extractor.extract_changed(paths) }
+    end
+
+    it 'refuses refresh over a flat generation without its graph' do
+      publish_flat_generation
+      hold_graph_in_memory
+
+      expect_refusal(flat_without_graph) { extractor.refresh(:rake_tasks) }
+    end
+
+    it 'refuses a reused extractor whose graph predates the generation published since' do
+      extractor.extract_all
+      other = Woods::Extractor.new(output_dir: output)
+      allow(other).to receive_messages(safe_eager_load!: nil, git_available?: false)
+      lantern, beacon = %w[Lantern Beacon].map do |name|
+        Woods::ExtractedUnit.new(type: :model, identifier: name, file_path: "app/models/#{name.downcase}.rb")
+                            .tap { |unit| unit.source_code = name }
+      end
+      models = Class.new { define_method(:extract_all) { [lantern, beacon] } }
+      stub_const('Woods::Extractor::EXTRACTORS', Woods::Extractor::EXTRACTORS.merge(models: models))
+      other.extract_all
+      published = Woods::Generation.new(output_dir: output).current
+      published_graph = output.join(published.payload, 'dependency_graph.json')
+      expect(published_graph.read).to include('Beacon')
+      published_graph.delete
+      paths = changed_rake_file
+
+      expect(extractor.dependency_graph.node('Lantern', type: :model)).not_to be_nil
+      expect_refusal(/#{Regexp.escape(output.join(published.payload).to_s)}.*dependency_graph\.json/) do
+        extractor.extract_changed(paths)
+      end
+      expect(Woods::Generation.new(output_dir: output).current.number).to eq(published.number)
+    end
+  end
+
+  # The preflight reads the published baseline before the stage is seeded.
+  # A baseline that disappears in between is caught by the check that reads
+  # the seeded stage.
+  describe 'a published baseline that disappears after the preflight' do
+    before do
+      stub_runnable_extractors
+      allow(extractor).to receive(:prepare_source_reference_baseline).and_call_original
+    end
+
+    let(:vanished) { /Generation 1 under #{Regexp.escape(output.to_s)}.*dependency_graph\.json.*woods:extract/ }
+
+    def remove_after_preflight(path)
+      allow(extractor).to receive(:ensure_published_payload_readable!).and_wrap_original do |original|
+        original.call
+        FileUtils.rm_rf(path)
+      end
+    end
+
+    def payload_entries(pattern)
+      Dir.glob(output.join('payloads', pattern).to_s)
+    end
+
+    def expect_unpublished_refusal(pattern = vanished, &run)
+      marker_bytes = output.join(Woods::Generation::FILENAME).binread
+      generations = payload_entries('gen-*')
+
+      expect(&run).to raise_error(Woods::ExtractionError, pattern)
+      expect(output.join(Woods::Generation::FILENAME).binread).to eq(marker_bytes)
+      expect(payload_entries('gen-*') - generations).to be_empty
+      expect(payload_entries('.stage-*')).to be_empty
+    end
+
+    def expect_full_extraction_recovers
+      extractor.extract_all
+
+      marker = Woods::Generation.new(output_dir: output).current
+      expect(marker.number).to eq(2)
+      expect(output.join(marker.payload, 'dependency_graph.json')).to exist
+    end
+
+    {
+      'its graph file' => ->(output, name) { output.join(name, 'dependency_graph.json') },
+      'its whole payload directory' => ->(output, name) { output.join(name) }
+    }.each do |what, target|
+      pattern = what.include?('directory') ? /Generation 1.*gen-1.*missing.*woods:extract/ : nil
+      it "refuses extract_changed when the payload loses #{what}, and a full extraction recovers" do
+        publish_generation
+        hold_graph_in_memory
+        paths = changed_rake_file
+        remove_after_preflight(target.call(output, payload_name))
+
+        expect_unpublished_refusal(pattern || vanished) { extractor.extract_changed(paths) }
+        expect_full_extraction_recovers
+      end
+
+      it "refuses refresh when the payload loses #{what}" do
+        publish_generation
+        hold_graph_in_memory
+        remove_after_preflight(target.call(output, payload_name))
+
+        expect_unpublished_refusal(pattern || vanished) { extractor.refresh(:rake_tasks) }
+      end
+    end
+
+    %w[extract_changed refresh].each do |entry|
+      it "refuses #{entry} rather than seed a stale root graph when the payload disappears" do
+        publish_generation
+        output.join('dependency_graph.json').write(empty_graph)
+        paths = changed_rake_file
+        remove_after_preflight(output.join(payload_name))
+
+        expect_unpublished_refusal(/Generation 1.*#{Regexp.escape(payload_name)}.*missing.*woods:extract/) do
+          entry == 'refresh' ? extractor.refresh(:rake_tasks) : extractor.extract_changed(paths)
+        end
+        expect_full_extraction_recovers
+      end
+
+      it "refuses #{entry} when a flat generation loses its root graph, and a full extraction recovers" do
+        output.mkpath
+        output.join('dependency_graph.json').write(empty_graph)
+        Woods::Generation.new(output_dir: output).bump!(reason: 'full')
+        hold_graph_in_memory
+        paths = changed_rake_file
+        remove_after_preflight(output.join('dependency_graph.json'))
+
+        expect_unpublished_refusal do
+          entry == 'refresh' ? extractor.refresh(:rake_tasks) : extractor.extract_changed(paths)
+        end
+        expect_full_extraction_recovers
+      end
+    end
+  end
+
+  describe 'recovery after a refusal' do
+    before { stub_runnable_extractors }
+
+    it 'refuses a second incremental run the same way, then a full extraction publishes a readable payload' do
+      publish_generation_then_lose_payload
+      changed = [@root.join('app/models/lantern.rb').to_s]
+
+      expect_refusal(missing_payload) { extractor.extract_changed(changed) }
+      expect_refusal(missing_payload) { extractor.extract_changed(changed) }
+
+      extractor.extract_all
+
+      marker = Woods::Generation.new(output_dir: output).current
+      expect(marker.number).to eq(2)
+      expect(output.join(marker.payload, 'dependency_graph.json')).to exist
+      expect { extractor.send(:prepare_incremental_run) }.not_to raise_error
+    end
+  end
+end

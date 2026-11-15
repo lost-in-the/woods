@@ -1949,9 +1949,8 @@ RSpec.describe Woods::Extractor do
       Woods::Generation.new(output_dir: output_dir)
                        .bump!(reason: 'full', payload: Woods::PayloadStore.name_for(1))
       # A current generation provides the baseline; legacy partial writes refuse.
-      extractor.dependency_graph.register(
-        Woods::ExtractedUnit.new(type: :model, identifier: 'BaselineAnchor', file_path: nil)
-      )
+      File.write(directory.join('dependency_graph.json'),
+                 JSON.generate(nodes: {}, edges: {}, reverse: {}, file_map: {}))
 
       expect(extractor).not_to receive(:sweep_orphaned_unit_files)
       expect(extractor.extract_changed([])).to be_empty

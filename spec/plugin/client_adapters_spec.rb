@@ -182,6 +182,34 @@ RSpec.describe 'explicit edit client adapters' do
     expect(normalized['events'].size).to eq(2)
   end
 
+  # jq 1.6 answers true for `"abc" | contains("\u0000")`, so a NUL test built on
+  # `contains` rejects every string; jq 1.7 answers false. Run against whichever
+  # jq is installed.
+  describe 'normalize.jq NUL check' do
+    def normalize_with_jq(root:, path:)
+      Open3.capture3('jq', '-c', '--arg', 'client', 'opencode', '-f', File.join(hooks, 'adapters/normalize.jq'),
+                     stdin_data: JSON.generate(envelope([{ path: path, operation: 'update' }]).merge(root: root)))
+    end
+
+    before { skip 'jq is not installed' unless system('jq --version', out: File::NULL, err: File::NULL) }
+
+    it 'accepts an ordinary root and path' do
+      out, err, status = normalize_with_jq(root: '/srv/app', path: 'app/services/pay.rb')
+      expect(status).to be_success, err
+      expect(JSON.parse(out)['events']).to eq([{ 'path' => 'app/services/pay.rb', 'operation' => 'update' }])
+    end
+
+    it 'rejects a NUL in the path or in the root' do
+      [{ root: '/srv/app', path: "app/services/a\0b.rb" },
+       { root: "/srv/a\0pp", path: 'app/services/pay.rb' }].each do |args|
+        out, err, status = normalize_with_jq(**args)
+        expect(status).not_to be_success
+        expect(out).to eq('')
+        expect(err).to include('no refresh queued')
+      end
+    end
+  end
+
   it 'keeps a malformed or unsupported event out of an already pending queue' do
     FileUtils.mkdir_p(File.join(@output, 'hook-pending'))
     pending = File.join(@output, 'hook-pending/existing.json')
