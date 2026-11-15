@@ -366,6 +366,9 @@ The Index Server is safe to run anywhere, it has no database connection and make
 
 ### Console server (`woods-console-mcp`)
 
+> **Deprecated.** The Console server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
+> See [Console MCP setup](CONSOLE_MCP_SETUP.md) for what to use instead.
+
 **31 tool schemas across 4 tiers, but only 9 are registered by default (11 with read tools enabled). Runs embedded inside the Rails process, no separate bridge process.**
 
 Starts via rake task inside the Rails app (or `docker compose exec`):

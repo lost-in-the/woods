@@ -10,7 +10,7 @@ Install the structural index only unless the user explicitly asks for another ca
 |---|---:|---|
 | Extract Rails code and schema structure | On | No |
 | Local or hosted embeddings | Off | Yes: adds a service, credentials, cost, or generated vectors |
-| Console MCP | Off | Yes: boots Rails and can read live application data |
+| Console MCP (deprecated, removed in Woods 3.0) | Off | Yes: boots Rails and can read live application data |
 | HTTP MCP transport | Off | Yes: expands network exposure |
 | Purging or rebuilding durable stores | Off | Yes: can remove Woods-owned data |
 

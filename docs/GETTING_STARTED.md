@@ -172,7 +172,10 @@ The watcher maintains the structural index. If semantic retrieval is enabled, al
 
 On Rails 8.1, `config/ci.rb` can refresh the index before any gate that reads it: `step "Woods: refresh", "bin/rails woods:incremental"`. With the Claude Code plugin installed, an opt-in `PostToolUse` hook refreshes the index after graph-changing edits and an opt-in `SessionStart` hook warns about source-content drift or unknown evidence; set `WOODS_HOOKS_ENABLED=1` to turn them on. See [Watch daemon](WATCH_DAEMON.md#hooks-for-agent-sessions).
 
-### Enable the Console Server
+### The Console Server (deprecated)
+
+The Console Server is deprecated and will be removed in Woods 3.0, so a new setup should leave it off.
+For a runtime observation in development, use `bin/rails runner` or a focused spec instead.
 
 The Console Server is separate from the Index Server. It boots Rails and can read live model data. Do not enable it merely to inspect code structure.
 

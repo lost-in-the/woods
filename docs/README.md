@@ -8,7 +8,7 @@ Woods extracts runtime-accurate Rails context and serves it to coding agents thr
 |---|---|---|
 | Install Woods in a Rails app | [Getting started](GETTING_STARTED.md) | A validated codebase index with the 16 packaged-default tools connected |
 | Ask an agent to install or configure Woods | [Agent setup runbook](AGENT_SETUP.md) | A safe, reviewable install with an agent handoff report |
-| Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server and, if authorized, an optional Console Server |
+| Configure an MCP client or Docker path | [MCP servers](MCP_SERVERS.md) | A working Index Server; the Console Server is deprecated and removed in Woods 3.0 |
 | Use Woods tools as an agent | [Agent guide](AGENT_GUIDE.md) | A repeatable query workflow for code context, flows, and blast radius |
 | Keep the index current automatically | [Automatic maintenance guide](AUTOMATIC_MAINTENANCE.md) | A setup with supervised indexing, automatic reader refresh, and clear hook ownership |
 | Upgrade from Woods 1.x | [Upgrade to Woods 2.0](UPGRADING_TO_2.md) | A backed-up, re-indexed, verified v2 installation |
@@ -34,7 +34,8 @@ and stdio or Streamable HTTP endpoints directly.
 - [MCP servers](MCP_SERVERS.md): choose the pre-extracted Index Server or live-data Console Server; configure clients; understand the callable 14 and 9/11 tool surfaces.
 - [Agent guide](AGENT_GUIDE.md): start with `woods_status`, discover with `search`, inspect with `lookup`, and follow dependencies or flows.
 - [MCP tool cookbook](MCP_TOOL_COOKBOOK.md): scenario-based calls with parameters and expected response shapes.
-- [Console MCP setup](CONSOLE_MCP_SETUP.md): Console transports, blocked tables, credential scanning, redaction, SQL validation, and production safeguards.
+- [Console MCP setup](CONSOLE_MCP_SETUP.md): the Console is deprecated and will be removed in Woods 3.0.
+  For existing setups: transports, blocked tables, credential scanning, redaction, SQL validation, and safeguards.
 - [MCP HTTP transport](MCP_HTTP_TRANSPORT.md): shared/remote Index Server transport, authentication, origins, and protocol details.
 - [Edit client adapters](CLIENT_HOOKS.md): opt-in Claude/OpenCode registration, complete path batches, and recovery.
 - [MCP worktree setup](MCP_WORKTREE_SETUP.md): register Woods correctly when agents work in linked git worktrees.
@@ -100,7 +101,7 @@ Use this map when changing behavior or documentation. Update the owner first; ot
 | Configuration keys and defaults | [CONFIGURATION_REFERENCE.md](CONFIGURATION_REFERENCE.md) |
 | MCP server setup and callable tool surface | [MCP_SERVERS.md](MCP_SERVERS.md) |
 | Agent tool-selection workflow | [AGENT_GUIDE.md](AGENT_GUIDE.md) |
-| Console security and transports | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) |
+| Console security and transports (deprecated, removed in 3.0) | [CONSOLE_MCP_SETUP.md](CONSOLE_MCP_SETUP.md) |
 | v1-to-v2 migration | [UPGRADING_TO_2.md](UPGRADING_TO_2.md) |
 | Failure diagnosis | [TROUBLESHOOTING.md](TROUBLESHOOTING.md) |
 | Contributor policy | [CONTRIBUTING.md](../CONTRIBUTING.md) |

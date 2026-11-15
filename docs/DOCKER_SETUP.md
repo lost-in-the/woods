@@ -218,6 +218,9 @@ shared volume for every worktree would mix their indexes. See
 
 ## Console Server Setup
 
+> **Deprecated.** The Console Server is deprecated in Woods 2.2.0 and will be removed in Woods 3.0.
+> This section is for existing setups; see [Console MCP setup](CONSOLE_MCP_SETUP.md) for what to use instead.
+
 The Console Server queries live Rails state. There are two launch paths for the same embedded server.
 
 Before either path can start, deliberately enable live-data access in the Rails initializer:
