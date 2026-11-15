@@ -710,7 +710,7 @@ module Woods
         write_skipped_files(@dependency_graph.registered_paths, flow_failures: Array(@flow_failures))
       end
       Rails.logger.info '[Woods] Building git commit table...'
-      profile_phase('commit table') { refresh_commit_table(full: true) }
+      profile_phase('commit table') { refresh_commit_table }
       Rails.logger.info '[Woods] Writing manifest...'
       profile_phase('manifest and summary') do
         write_manifest
@@ -1172,7 +1172,7 @@ module Woods
       skipped_changed = !published_skipped.nil? && skipped != published_skipped
       # HEAD can move while no indexed file does (a commit of files already
       # extracted), and the table must follow it like a full run would.
-      commits_changed = profile_phase('commit table') { refresh_commit_table(full: false) }
+      commits_changed = profile_phase('commit table') { refresh_commit_table }
 
       if touched.empty? && !withdrew_flows && !skipped_changed && !commits_changed
         Rails.logger.info '[Woods] Incremental run changed nothing — leaving manifest timestamp untouched'
@@ -3141,12 +3141,11 @@ module Woods
     # Runs after the graph is final, because the indexed path set is read
     # off it.
     #
-    # @param full [Boolean] whether this is a full extraction
     # @return [Symbol, nil] `:written` or `:withdrawn` when the payload's
     #   table changed, nil when it is unchanged
-    def refresh_commit_table(full:)
+    def refresh_commit_table
       published = published_commit_table
-      table = git_capture.commit_table(published, graph: @dependency_graph, full: full)
+      table = git_capture.commit_table(published, graph: @dependency_graph)
       return nil if table == published
 
       if table

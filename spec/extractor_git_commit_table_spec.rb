@@ -36,11 +36,12 @@ RSpec.describe Woods::Extractor, 'commit table' do
                                                                  file_path: path.to_s))
   end
 
-  def refresh(full:)
+  # Full and incremental runs decide the table the same way.
+  def refresh
     # Each call represents a new extraction run, whose entry point clears
     # the previous capture before resolving the table's inputs.
     extractor.send(:reset_git_capture)
-    extractor.send(:refresh_commit_table, full: full)
+    extractor.send(:refresh_commit_table)
   end
 
   before do
@@ -59,7 +60,7 @@ RSpec.describe Woods::Extractor, 'commit table' do
   after { FileUtils.rm_rf(root) }
 
   it 'publishes the indexed application paths of the final graph on a full run' do
-    expect(refresh(full: true)).to eq(:written)
+    expect(refresh).to eq(:written)
 
     table = Woods::GitCommitTable.read(output)
     expect(table['head']).to eq(git('rev-parse', 'HEAD'))
@@ -69,65 +70,147 @@ RSpec.describe Woods::Extractor, 'commit table' do
   end
 
   it 'keeps the seeded table on an incremental run whose inputs are unchanged, without walking history' do
-    refresh(full: true)
+    refresh
     before = File.binread(table_path)
     expect_any_instance_of(Woods::GitCommitTable).not_to receive(:build)
 
-    expect(refresh(full: false)).to be_nil
+    expect(refresh).to be_nil
     expect(File.binread(table_path)).to eq(before)
   end
 
   it 'rebuilds the whole table when HEAD moves or the indexed path set changes' do
-    refresh(full: true)
+    refresh
     moved = commit('Add comment', { 'app/models/comment.rb' => 'class Comment; end' })
 
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)).to include('head' => moved, 'paths' => { 'app/models/post.rb' => [
                                                             git('rev-parse', 'HEAD~1')
                                                           ] })
 
     register(:model, 'Comment', root.join('app/models/comment.rb'))
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)['paths'].keys).to eq(%w[app/models/comment.rb app/models/post.rb])
   end
 
   it 'matches the bytes a full run writes after an incremental rebuild' do
-    refresh(full: true)
+    refresh
     commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
-    refresh(full: false)
+    refresh
     incremental = File.binread(table_path)
 
     full = described_class.new(output_dir: root.join('oracle'))
     FileUtils.mkdir_p(root.join('oracle'))
     full.instance_variable_set(:@dependency_graph, extractor.dependency_graph)
-    full.send(:refresh_commit_table, full: true)
+    full.send(:refresh_commit_table)
 
     expect(File.binread(root.join('oracle', Woods::GitCommitTable::FILENAME))).to eq(incremental)
   end
 
   it 'withdraws a seeded table when the application has no readable history' do
-    refresh(full: true)
+    refresh
     FileUtils.rm_rf(root.join('.git'))
 
-    expect(refresh(full: false)).to eq(:withdrawn)
+    expect(refresh).to eq(:withdrawn)
     expect(table_path).not_to exist
-    expect(described_class.new(output_dir: output).send(:refresh_commit_table, full: false)).to be_nil
+    expect(described_class.new(output_dir: output).send(:refresh_commit_table)).to be_nil
   end
 
   it 'withdraws the table when the walk fails rather than publishing a partial one' do
-    refresh(full: true)
+    refresh
     commit('Edit post', { 'app/models/post.rb' => 'changed' })
     allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_return(nil)
 
-    expect(refresh(full: false)).to eq(:withdrawn)
+    expect(refresh).to eq(:withdrawn)
     expect(table_path).not_to exist
   end
 
   it 'rebuilds over an unreadable seeded copy' do
     File.write(table_path, '{')
 
-    expect(refresh(full: false)).to eq(:written)
+    expect(refresh).to eq(:written)
     expect(Woods::GitCommitTable.read(output)['head']).to eq(git('rev-parse', 'HEAD'))
+  end
+
+  describe 'on a full run over a published table' do
+    around do |example|
+      original = Woods.configuration
+      Woods.configuration = Woods::Configuration.new
+      example.run
+    ensure
+      Woods.configuration = original
+    end
+
+    before { refresh }
+
+    def refresh_noting_walk
+      walked = false
+      allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |original, *args, **kw|
+        walked = true
+        original.call(*args, **kw)
+      end
+      result = refresh
+      [walked, result]
+    end
+
+    it 'reuses the published table when every input matches, without walking history' do
+      before = File.binread(table_path)
+
+      expect(refresh_noting_walk).to eq([false, nil])
+      expect(File.binread(table_path)).to eq(before)
+    end
+
+    it 'walks again when HEAD moves' do
+      commit('Edit post', { 'app/models/post.rb' => 'class Post; def a; end; end' })
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    it 'walks again when the indexed path set changes' do
+      commit('Add comment', { 'app/models/comment.rb' => 'class Comment; end' })
+      refresh
+      register(:model, 'Comment', root.join('app/models/comment.rb'))
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    it "walks again when the window's first UTC day moves" do
+      tomorrow = Time.now + 86_400
+      allow(Time).to receive(:now).and_return(tomorrow)
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
+
+    {
+      git_commit_table_days: 30, git_commit_table_limit: 10, git_commit_table_files_limit: 3,
+      git_commit_table_line_stats: false, git_commit_table_hunk_budget: 7
+    }.each do |setting, value|
+      it "walks again when #{setting} changes" do
+        Woods.configuration.public_send(:"#{setting}=", value)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+      end
+    end
+
+    it 'walks again over an unreadable published table rather than trusting it' do
+      File.write(table_path, '{')
+
+      expect(refresh_noting_walk).to eq([true, :written])
+      expect(Woods::GitCommitTable.read(output)['head']).to eq(git('rev-parse', 'HEAD'))
+    end
+
+    it 'keeps a withdrawn table withdrawn when the history is still unreadable' do
+      FileUtils.rm_rf(root.join('.git'))
+      expect(refresh).to eq(:withdrawn)
+
+      expect(refresh).to be_nil
+      expect(table_path).not_to exist
+    end
+
+    it 'walks when the index was cleaned, so there is no published table' do
+      FileUtils.rm_f(table_path)
+
+      expect(refresh_noting_walk).to eq([true, :written])
+    end
   end
 
   it 'keeps the configured number of recent commits per unit' do

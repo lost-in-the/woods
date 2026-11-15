@@ -77,7 +77,7 @@ RSpec.describe Woods::Extractor, 'HEAD git enrichment' do
     allow(failed).to receive(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').and_return('')
 
     expect(facts(path)).to eq({})
-    expect(extractor.send(:refresh_commit_table, full: true)).to be_nil
+    expect(extractor.send(:refresh_commit_table)).to be_nil
     expect(failed).to have_received(:run_git).with('rev-parse', '--verify', 'HEAD^{commit}').once
     expect(failed.enrichment_summary(graph: extractor.dependency_graph, full: true))
       .to include('state' => 'unavailable', 'reason' => 'history_read_failed', 'head_sha' => nil)

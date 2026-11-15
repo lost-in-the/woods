@@ -132,15 +132,15 @@ module Woods
       # The `git_commits.json` table (W-3) this run publishes, nil for none.
       #
       # The table is a pure function of HEAD, the indexed path set and the
-      # bounds ({GitCommitTable}). A full run always walks; an incremental run
-      # keeps the seeded table when it records the same inputs, so both modes
-      # publish the same bytes. Without a readable history there is no table.
+      # bounds ({GitCommitTable}), all recorded in it. Every run, full or
+      # incremental, keeps the seeded table when it records the same inputs
+      # and otherwise walks the whole history again, so both modes publish the
+      # same bytes. Without a readable history there is no table.
       #
       # @param published [Hash, nil] the table the payload was seeded with
       # @param graph [DependencyGraph] the run's final graph
-      # @param full [Boolean] whether this is a full extraction
       # @return [Hash, nil]
-      def commit_table(published, graph:, full:)
+      def commit_table(published, graph:)
         return nil unless available?
 
         sha = head
@@ -148,7 +148,7 @@ module Woods
 
         paths = commit_table_paths(graph)
         builder = GitCommitTable.new(root: @root, logger: @logger, settings: GitCommitTable.settings)
-        return published if !full && GitCommitTable.current?(published, builder.key(paths, head: sha))
+        return published if GitCommitTable.current?(published, builder.key(paths, head: sha))
 
         builder.build(paths, head: sha)
       end

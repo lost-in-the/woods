@@ -361,7 +361,7 @@ worktree whose git directory is not reachable) or when the walk fails. An empty
 | `max_commits`, `truncated` | The commit bound (`config.git_commit_table_limit`); `truncated: true` when older commits inside the window were dropped by it. |
 | `max_files_per_commit` | The per-commit file bound (`config.git_commit_table_files_limit`). |
 | `line_stats`, `hunk_budget` | Whether files carry line counts and hunks (`config.git_commit_table_line_stats`, default true) and the table-wide hunk bound (`config.git_commit_table_hunk_budget`, default 50000). Both are part of what decides the table's content. |
-| `indexed_paths_sha256` | SHA-256 of the sorted, newline-joined indexed paths the table was built for. With `head`, `since` and the bounds it decides the content: an incremental run that finds them all unchanged keeps the file, and otherwise rebuilds it whole. |
+| `indexed_paths_sha256` | SHA-256 of the sorted, newline-joined indexed paths the table was built for. With `head`, `since` and the bounds it decides the content: any run, full or incremental, that finds them all unchanged keeps the file, and otherwise rebuilds it whole. |
 | `commits[].sha`, `parents` | Full object names. A merge lists every parent; its `files` are its diff against the first parent, as for `metadata.git`. |
 | `commits[].author`, `date` | The author name as git records it (no email) and the committer date, ISO 8601 with offset. |
 | `commits[].message`, `description` | The subject line, and the rest of the message trimmed (`""` when there is none). |
