@@ -1069,8 +1069,10 @@ module Woods
     # sees {Woods::ExtractionError} and the generation is left unbumped.
     #
     # @return [void]
-    # @raise [Woods::ExtractionError] see {#begin_payload!}
+    # @raise [Woods::ExtractionError] see {#begin_payload!} and
+    #   {#ensure_published_payload_readable!}
     def prepare_incremental_run(operation: 'incremental')
+      ensure_published_payload_readable!
       reset_git_capture
       baseline_manifest = ensure_supported_incremental_writer!
       @baseline_extraction_config = baseline_extraction_config(baseline_manifest)
@@ -1603,6 +1605,45 @@ module Woods
         running it here would publish a near-empty index as the complete
         truth of the application. Run a full `woods:extract` first (or point
         WOODS_OUTPUT at the directory holding the existing index).
+      MSG
+    end
+
+    # Refuse an incremental run whose published generation names a payload
+    # this run cannot read. {Generation#payload_dir} resolves a missing
+    # payload to the output root, and {#seed_payload} then seeds from the flat
+    # root: an empty graph, or a stale one, which the run would publish as
+    # the new generation without the units it did not touch. Runs before
+    # anything is written, including the source-input key.
+    #
+    # A populated in-memory graph stands in for a missing graph file, as in
+    # {#ensure_incremental_baseline!}, but not for a missing payload: the
+    # untouched units' files are gone either way.
+    #
+    # @return [void]
+    # @raise [Woods::ExtractionError] when the payload directory is missing,
+    #   or holds no dependency_graph.json and no graph is held in memory
+    def ensure_published_payload_readable!
+      name = Generation.new(output_dir: @output_dir).current.payload
+      return if name.nil? || name.empty?
+
+      directory = @output_dir.join(name)
+      unless directory.directory?
+        raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+          The published generation names payload directory #{directory},
+          which is missing. An incremental run builds on that payload, so
+          running it here would publish an index without every unit it did
+          not touch. Run a full `woods:extract` to rebuild the index.
+        MSG
+      end
+      return if directory.join('dependency_graph.json').file?
+      return unless @dependency_graph.nil? || @dependency_graph.empty?
+
+      raise Woods::ExtractionError, <<~MSG.tr("\n", ' ').strip
+        The published payload directory #{directory} holds no
+        dependency_graph.json. An incremental run computes what changed from
+        that graph, so running it here would publish an index without the
+        edges and units it did not touch. Run a full `woods:extract` to
+        rebuild the index.
       MSG
     end
 

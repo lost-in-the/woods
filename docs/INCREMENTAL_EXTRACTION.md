@@ -99,6 +99,15 @@ settings but never their values, when a digest differs. Run a full
 existed, or before a setting joined it, logs a warning and runs; its next full
 extraction records the digests.
 
+The contract also assumes the run can read the baseline the published generation names.
+When `generation.json` names a payload directory that is missing (deleted, an unmounted volume, a partial cleanup),
+incremental extraction and targeted refresh refuse with `Woods::ExtractionError` before writing anything.
+They also refuse when that directory holds no `dependency_graph.json`,
+unless an embedding caller already holds a populated graph in memory.
+Earlier writers started such a run from an empty or stale graph and published the result as a new generation,
+without the units and edges the run did not touch.
+Run a full `woods:extract` to rebuild the index.
+
 This matters most for **incremental CI chains**: restore the previous graph,
 run `woods:incremental` per merge. There, a unit that goes missing propagates
 forward run over run instead of being erased by the next full rebuild.
