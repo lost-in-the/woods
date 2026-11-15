@@ -29,6 +29,11 @@ RSpec.describe Woods::Console::SafeContext do
       ctx.execute { |_c| 'result' }
     end
 
+    it 'asks for its own transaction or savepoint rather than joining an open one' do
+      expect(connection).to receive(:transaction).with(requires_new: true)
+      ctx.execute { |_c| 'result' }
+    end
+
     it 'sets statement timeout using PostgreSQL transaction-scoped syntax' do
       expect(connection).to receive(:execute).with("SET LOCAL statement_timeout = '3000ms'")
       ctx.execute { |_c| nil }

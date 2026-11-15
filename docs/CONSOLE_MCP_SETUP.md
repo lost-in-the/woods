@@ -266,6 +266,8 @@ First HTTP request to /mcp/console
 ```
 
 Each request gets its own database connection from the connection pool. `SafeContext` wraps that connection in a rolled-back transaction.
+The pool can hand back a connection that is already inside an open transaction.
+`SafeContext` then uses a savepoint and rolls back to it, so the Console's own work is still discarded.
 
 ### Security note
 
@@ -815,7 +817,7 @@ runs inside a transaction that is **always rolled back**:
 
 ```ruby
 def with_rolled_back_transaction
-  @connection.transaction do
+  @connection.transaction(requires_new: true) do
     set_timeout                   # statement timeout before any query
     yield                         # run the tool
     raise ActiveRecord::Rollback  # always roll back
@@ -823,11 +825,24 @@ def with_rolled_back_transaction
 end
 ```
 
-This means direct mutations on that connection are discarded. It is a final
+This means direct mutations on that connection are discarded. When the
+connection is already inside an open transaction (a host middleware or test
+harness that wraps the request), the Console's work runs in a savepoint and is
+rolled back to it. The Console's own writes are discarded, the host's writes
+are left for the host to commit or roll back, and a failed Console statement
+leaves the host transaction usable. Three MySQL cases are outside this guarantee.
+When InnoDB picks the transaction as a deadlock victim, it rolls back the whole
+transaction, host writes included. A lock wait timeout does the same when the
+server runs with `innodb_rollback_on_timeout` enabled; by default it rolls back
+only the statement that timed out. A statement that causes an implicit commit
+ends the host transaction. `console_sql` accepts only `SELECT`, `WITH` and plain
+`EXPLAIN` statements, which narrows the second case but does not rule it out.
+It is a final
 guard for ordinary database work, not a sandbox or a universal side-effect
 guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
 threaded work, `after_rollback` callbacks, or writes through another connection
-or shard. The validator, table gate, credential defenses, and operator trust
+or shard. It also does not undo writes to nontransactional tables, such as
+MySQL MyISAM: a rollback never covers them. The validator, table gate, credential defenses, and operator trust
 boundary remain necessary.
 
 - Direct accidental mutation on the wrapped connection is rolled back.
@@ -845,6 +860,9 @@ logger is available.
 | MySQL | `SET max_execution_time = 5000` | SELECT only; previous session value restored in `ensure` |
 | MariaDB | `SET max_statement_time = 5.0` | Seconds; previous session value restored in `ensure` |
 | SQLite / unrecognized family | No supported per-statement timeout | Do not rely on a query time limit |
+
+Inside a host transaction, PostgreSQL's `SET LOCAL` is made after the savepoint.
+The rollback to the savepoint restores the host's own value; the MySQL value is restored in `ensure` as before.
 
 Rollback remains active when a timeout setting is unsupported. Recognition of a
 MySQL-family adapter alone does not establish that its server supports the

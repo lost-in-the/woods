@@ -380,6 +380,7 @@ Use the Console Server for:
 - SQL/query. Tier 4, opt-in via `console_embedded_read_tools`; `console_eval` is inventory-only and unavailable
 
 All Console Server queries run inside a **rolled-back transaction** (`SafeContext`). SQL is validated by `SqlValidator` (rejects DML/DDL at the string level) before any database interaction. Writes are silently discarded by the rollback, this is intentional defense-in-depth. See [MCP_SERVERS.md](MCP_SERVERS.md#console-server) for the full tool inventory and tier breakdown.
+When the connection is already inside an open transaction, the queries run in a savepoint that is rolled back instead.
 
 ### Which should I use?
 
