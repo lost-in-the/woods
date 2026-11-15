@@ -173,7 +173,7 @@ module Woods
                   :concurrent_extraction, :extract_navigation_edges, :enable_snapshots,
                   :session_tracer_enabled, :session_tracer_allow_production,
                   :session_store, :session_id_proc, :session_exclude_paths,
-                  :console_mcp_enabled, :console_mcp_http_enabled, :console_mcp_path, :console_mcp_token,
+                  :console_mcp_http_enabled, :console_mcp_path, :console_mcp_token,
                   :console_mcp_allowed_origins,
                   :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
@@ -199,7 +199,8 @@ module Woods
                 :javascript_paths, :documentation_paths, :documentation_exclude, :retrieve_documentation,
                 :reverse_includes_tests,
                 :git_recent_commits, :git_commit_table_days, :git_commit_table_limit,
-                :git_commit_table_files_limit, :git_commit_table_line_stats, :git_commit_table_hunk_budget
+                :git_commit_table_files_limit, :git_commit_table_line_stats, :git_commit_table_hunk_budget,
+                :console_mcp_enabled
 
     def initialize # rubocop:disable Metrics/MethodLength
       @output_dir = nil # Resolved lazily; Rails.root is nil at require time
@@ -394,6 +395,17 @@ module Woods
         'Remove the assignment from your Woods initializer; the option will be removed in Woods 3.0.'
       )
       @extractors = value
+    end
+
+    # Master switch for the deprecated Console MCP server (removed in Woods 3.0).
+    #
+    # @param value [Boolean]
+    def console_mcp_enabled=(value)
+      if value
+        require_relative 'woods/console/deprecation_notice'
+        Console.warn_deprecated
+      end
+      @console_mcp_enabled = value
     end
 
     # Force an fsync on every payload file as it is written, on top of the

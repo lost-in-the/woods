@@ -30,6 +30,8 @@ require 'woods'
 require 'woods/console/server'
 require 'woods/console/stdio_transport'
 
+Woods::Console.warn_deprecated
+
 unless Woods.configuration.console_mcp_enabled
   warn 'Woods Console MCP is disabled. Set ' \
        'Woods.configuration.console_mcp_enabled = true to enable. ' \

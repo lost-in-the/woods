@@ -164,6 +164,7 @@ RSpec.describe 'Console MCP stdio end to end', :booted_app do
       diagnostics = @stderr.read
       expect(diagnostics).to include('woods-stdio-boot-log', 'SELECT COUNT',
                                      'woods-stdio-runtime-puts', 'woods-stdio-runtime-fd')
+      expect(diagnostics.scan(/DEPRECATED: The Console MCP server .*Woods 3\.0/).size).to eq(1)
     end
   end
 end
