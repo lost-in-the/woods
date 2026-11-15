@@ -59,6 +59,12 @@ They are fixed in public and ship in the next ordinary release:
 - Rollback not undoing something, including inside a host's own transaction.
 - Missing limits on result size, time or memory.
 
+The vulnerability rule wins when a report fits both lists.
+A gap that also crosses one of the boundaries above is a vulnerability, even when it matches a hardening example.
+Report privately when you are not sure which it is.
+A report stays private while its impact is unclear, and is treated as public hardening
+only after the maintainer confirms that it crosses none of those boundaries.
+
 The reason is the trust model.
 The Console gives an agent live access to a Rails application, and only an operator can turn it on.
 Its protections reduce accidental disclosure.
