@@ -5,9 +5,10 @@
   it completes the handshake with the usual tools, `woods_status` reports `index.state: "awaiting_index"` (and the
   `started_at`, `command` and `state` of a `.bootstrap.json` a launcher wrote), every other tool answers a
   retryable `building` result, and the first published generation is served on the next call, with no restart.
-  `--client-root` (`WOODS_MCP_CLIENT_ROOT`), with an optional `--client-root-as` (`WOODS_MCP_CLIENT_ROOT_AS`),
-  compares the index with the client session's checkout instead of the launcher's directory, so a launcher inside a
-  shared container refuses, or warns about, a session in another worktree.
+  `--client-root` (`WOODS_MCP_CLIENT_ROOT`) compares the index with the client session's checkout instead of the
+  launcher's directory. `--client-root-map HOST=CONTAINER` (repeatable, `WOODS_MCP_CLIENT_ROOT_MAP`) describes a
+  bind mount, so a launcher inside a shared container reads the session's checkout through it and refuses a session
+  in another worktree, or in one no mount covers.
   When either checkout cannot be determined, the instructions and the new `woods_status.identity.warnings` now
   carry one `WARNING:` line; these launches used to start silently.
   Without the new flags, every launch starts or is refused exactly as before.

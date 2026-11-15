@@ -31,10 +31,18 @@ module Woods
       # checkout instead of the launcher's own directory.
       CLIENT_ROOT_ENV = 'WOODS_MCP_CLIENT_ROOT'
 
-      # Where this process sees the client root, equivalent to
-      # `--client-root-as`, for a client root on another file system (a host
-      # path read inside a container).
-      CLIENT_ROOT_AS_ENV = 'WOODS_MCP_CLIENT_ROOT_AS'
+      # Bind mounts between the client's file system and this process's,
+      # equivalent to repeated `--client-root-map HOST=CONTAINER`: entries of
+      # absolute `host_prefix=container_prefix`, separated by `:`. A client
+      # root is read here through the entry with the longest host prefix
+      # that contains it; under none, its checkout is not mounted here.
+      CLIENT_ROOT_MAP_ENV = 'WOODS_MCP_CLIENT_ROOT_MAP'
+
+      # Separates entries of {CLIENT_ROOT_MAP_ENV}.
+      MAP_SEPARATOR = ':'
+
+      # Raised for a client root map entry that is not two absolute prefixes.
+      class InvalidClientRootMap < ArgumentError; end
 
       # Manifest bytes read at most; a manifest is a few kilobytes.
       MAX_MANIFEST_BYTES = 1_048_576
@@ -57,20 +65,55 @@ module Woods
         end
 
         # The client of this launch: the client root {CLIENT_ROOT_ENV}
-        # declares, resolved at {CLIENT_ROOT_AS_ENV} when that is set, else
+        # declares, read through {CLIENT_ROOT_MAP_ENV} when a map is set, else
         # the launcher's own directory.
         #
         # @param env [Hash]
         # @param pwd [String]
-        # @return [Array(String, String, String)] the directory to resolve the
-        #   client checkout from, the declared client root (or nil) and the
-        #   path it was mapped to (or nil)
+        # @return [Hash] keywords for {#initialize}: `cwd:` and, for a declared
+        #   client root, `declared_client_root:` and `client_root_map:`
         def launch_client(env = ENV, pwd: Dir.pwd)
           declared = env[CLIENT_ROOT_ENV].to_s.strip
-          return [pwd, nil, nil] if declared.empty?
+          return { cwd: pwd } if declared.empty?
 
-          mapped = env[CLIENT_ROOT_AS_ENV].to_s.strip
-          mapped.empty? ? [declared, declared, nil] : [mapped, declared, mapped]
+          map = parse_client_root_map(env[CLIENT_ROOT_MAP_ENV])
+          { cwd: declared, declared_client_root: declared, client_root_map: map }
+        rescue InvalidClientRootMap => e
+          { cwd: nil, declared_client_root: declared, client_root_map_error: e.message }
+        end
+
+        # @param value [String, nil] {CLIENT_ROOT_MAP_ENV} entries
+        # @return [Array<Array(String, String)>] normalized host and container
+        #   prefixes, in the order given
+        # @raise [InvalidClientRootMap]
+        def parse_client_root_map(value)
+          value.to_s.split(MAP_SEPARATOR).reject { |entry| entry.strip.empty? }.map do |entry|
+            host, container, extra = entry.strip.split('=', 3)
+            unless extra.nil? && absolute?(host) && absolute?(container)
+              raise InvalidClientRootMap, "#{entry.strip.inspect} is not HOST_PREFIX=CONTAINER_PREFIX with two " \
+                                          'absolute paths'
+            end
+
+            [normalize_prefix(host), normalize_prefix(container)]
+          end
+        end
+
+        # The path this process reads +path+ at: the entry whose host prefix
+        # contains it in whole path segments, the longest when several do.
+        # The host side is never resolved on this file system.
+        #
+        # @param path [String] an absolute client path
+        # @param map [Array<Array(String, String)>]
+        # @return [Array(String, Array(String, String)), nil] the derived path
+        #   and the entry used, or nil under no host prefix
+        def map_client_root(path, map)
+          path = normalize_prefix(path)
+          entry = map.select { |host, _| within_prefix?(path, host) }.max_by { |host, _| host.length }
+          return unless entry
+
+          host, container = entry
+          rest = path.delete_prefix(host).delete_prefix('/')
+          [rest.empty? ? container : File.join(container, rest), entry]
         end
 
         # Read once: the marker, then the manifest of the payload that marker
@@ -164,10 +207,21 @@ module Woods
         private
 
         def client_for(cwd)
-          return { cwd: cwd } if cwd
+          cwd ? { cwd: cwd } : launch_client
+        end
 
-          directory, declared, mapped = launch_client
-          { cwd: directory, declared_client_root: declared, mapped_client_root: mapped }
+        def absolute?(path)
+          path.is_a?(String) && path.start_with?('/')
+        end
+
+        # Lexical only: collapses repeated and trailing slashes and dot
+        # segments, follows no symlink.
+        def normalize_prefix(path)
+          File.expand_path(path)
+        end
+
+        def within_prefix?(path, prefix)
+          prefix == '/' || path == prefix || path.start_with?("#{prefix}/")
         end
 
         # Git metadata bytes as stripped UTF-8, independent of the locale.
@@ -210,16 +264,23 @@ module Woods
       # @param build [BuildIdentity]
       # @param declared_client_root [String, nil] the client root a launch
       #   declared, as the client names it
-      # @param mapped_client_root [String, nil] where this process sees it
-      def initialize(index_dir:, marker:, manifest:, cwd:, build:, declared_client_root: nil,
-                     mapped_client_root: nil)
+      # @param client_root_map [Array<Array(String, String)>] bind mounts
+      #   between the client's file system and this one; empty when the client
+      #   root is read here as given
+      # @param client_root_map_error [String, nil] why the map was refused
+      def initialize(index_dir:, marker:, manifest:, cwd:, build:, declared_client_root: nil, client_root_map: [],
+                     client_root_map_error: nil)
         @index_dir = index_dir.to_s
         @marker = marker || Woods::Generation::UNPUBLISHED
         @manifest = manifest.is_a?(Hash) ? manifest : {}
-        @cwd = cwd
         @build = build
         @declared_client_root = declared_client_root
-        @mapped_client_root = mapped_client_root
+        @client_root_map_error = client_root_map_error
+        mapped = !declared_client_root.nil? && !client_root_map.empty?
+        @mapped_client_root, @client_root_map_entry =
+          (self.class.map_client_root(declared_client_root, client_root_map) if mapped)
+        @client_root_unmapped = mapped && @mapped_client_root.nil?
+        @cwd = @mapped_client_root || (@client_root_unmapped ? nil : cwd)
       end
 
       # @return [String, nil] the client root the launch declared
@@ -304,13 +365,13 @@ module Woods
       def client_matches
         case match_reason
         when 'same_checkout' then true
-        when 'different_checkout' then false
+        when 'different_checkout', 'client_root_unmapped' then false
         end
       end
 
-      # @return [String] same_checkout, different_checkout, root_not_recorded,
-      #   recorded_root_unreachable, client_outside_checkout or
-      #   client_root_unresolved
+      # @return [String] same_checkout, different_checkout, client_root_unmapped,
+      #   root_not_recorded, recorded_root_unreachable, client_outside_checkout
+      #   or client_root_unresolved
       def match_reason
         @match_reason ||= compute_match_reason
       end
@@ -332,7 +393,8 @@ module Woods
           woods_revision_dirty: compatibility.writer_dirty,
           client_matches: client_matches, client_match_reason: match_reason,
           client_root: client_root, client_root_declared: @declared_client_root,
-          client_root_mapped_to: @mapped_client_root, client_branch: client_branch, branch_matches: branch_matches,
+          client_root_map_entry: @client_root_map_entry&.join('='), client_root_mapped_to: @mapped_client_root,
+          client_branch: client_branch, branch_matches: branch_matches,
           mismatch_allowed: client_matches == false ? self.class.allow_mismatch? : nil,
           warnings: warnings, build: compatibility.to_h
         }
@@ -364,6 +426,13 @@ module Woods
 
       # @return [String] why `woods-mcp-start` refuses
       def refusal_message
+        if @client_root_unmapped
+          return "The client root #{@declared_client_root} is under no --client-root-map prefix " \
+                 "(#{CLIENT_ROOT_MAP_ENV}): no mount covers it, so the session's checkout is not visible to this " \
+                 'server and this index cannot be its own. Map the mount that holds it, or pass --allow-mismatch ' \
+                 "(#{ALLOW_ENV}=1) to serve this index anyway."
+        end
+
         "This index was written for the checkout at #{recorded_checkout}, but the server was launched in " \
           "#{client_root}. Point the server at this checkout's own index, or pass --allow-mismatch " \
           "(#{ALLOW_ENV}=1) to serve it anyway."
@@ -382,6 +451,11 @@ module Woods
       end
 
       def root_warning
+        if @client_root_unmapped
+          return "The client root #{@declared_client_root} is under no --client-root-map prefix; answers are for " \
+                 "#{recorded_checkout || @index_dir}, not the session's checkout."
+        end
+
         "This index describes #{recorded_checkout}, not the launch checkout #{client_root}; answers are for that " \
           'checkout.'
       end
@@ -410,12 +484,19 @@ module Woods
                  "(pass --client-root with the session's checkout)"
         end
 
+        if @client_root_map_error
+          return "the client's checkout is unknown: #{CLIENT_ROOT_MAP_ENV} is malformed (#{@client_root_map_error})"
+        end
+        if @mapped_client_root
+          return "the client's checkout is unknown: the client root #{@declared_client_root}, mapped to " \
+                 "#{@mapped_client_root} through #{@client_root_map_entry.join('=')}, is not inside a git checkout here"
+        end
+
         "the client's checkout is unknown: the client root #{@declared_client_root} does not resolve to a git " \
-          "checkout here#{" at #{@mapped_client_root}" if @mapped_client_root} " \
-          '(pass --client-root-as with the path where this process sees it)'
+          'checkout here (pass --client-root-map with the mount that makes it visible)'
       end
 
-      # A client root declared through --client-root-as that matched: the
+      # A client root read through a --client-root-map entry that matched: the
       # index's checkout is the one the client names by that host path.
       def mapped_match?
         @mapped_client_root && client_matches == true
@@ -443,6 +524,10 @@ module Woods
       end
 
       def compute_match_reason
+        # Before the index side: whatever this index is, it cannot be the
+        # session's when no mount covers the session's checkout.
+        return 'client_root_unmapped' if @client_root_unmapped
+
         unless recorded_checkout
           return recorded_root ? 'recorded_root_unreachable' : 'root_not_recorded'
         end

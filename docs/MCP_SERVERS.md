@@ -179,37 +179,58 @@ Compose resolves the project from `cwd`; `-T` disables its pseudo-TTY while stdi
 **A shared container serves the checkout it mounts.**
 Inside the container the launcher's directory and the index's recorded root are the same path,
 so the identity check passes for a session in any other worktree.
-Pass the session's own directory with `--client-root`, so the server compares the index with that checkout instead:
+Pass the session's own directory with `--client-root`, and describe the bind mount with `--client-root-map`.
+The server reads the client root through the mount and compares that checkout with the index:
 
 ```json
 {
   "mcpServers": {
     "woods": {
       "command": "sh",
-      "args": ["-c", "exec docker compose exec -T app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "exec docker compose exec -T app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-root-map /Users/you/src/shop-worktrees=/worktrees"]
     }
   }
 }
 ```
 
-- The client root must be an absolute path as the client sees it (`WOODS_MCP_CLIENT_ROOT` is the same setting).
-- `--checkout` needs the checkout's `.git` entry inside the container; without one, pass the index path instead.
-- A host path usually does not exist inside the container.
-  The server then cannot tell which checkout the session is in.
-  It starts, and the instructions and `woods_status` carry one warning that names the client root and says so.
-- When the container sees the session's checkout at another path, pass that path with `--client-root-as`
-  (or `WOODS_MCP_CLIENT_ROOT_AS`).
-  The server then refuses another checkout's index, as it does on the host.
-- Use `--client-root-as` only for a real mapping, such as a mount of the directory that holds every worktree.
-  A fixed value (`--client-root-as /app`) claims that every session is in the mounted checkout:
-  the very case this check exists to catch.
+**Recommended mount: the directory that holds every worktree.**
+Mount the worktrees' parent (here `/Users/you/src/shop-worktrees` at `/worktrees`),
+and run the container in its checkout under that mount (`working_dir: /worktrees/shop`).
+The map is a fact about the mount, so it is the same for every session:
+
+| Session directory | Read in the container as | Result |
+|---|---|---|
+| `/Users/you/src/shop-worktrees/shop` | `/worktrees/shop` | served, no warning |
+| `/Users/you/src/shop-worktrees/shop-topic` | `/worktrees/shop-topic` | refused: another checkout |
+| `/Users/you/elsewhere` | (no entry covers it) | refused: no mount covers it |
+
+**A single-checkout map is valid, and refuses other worktrees by design.**
+With `--client-root-map /Users/you/src/shop=/app`, a session in `shop` is served
+and a session in `shop-topic` is refused: no mount covers it, so its checkout is not visible here.
+
+How the map works:
+
+- `HOST_PREFIX=CONTAINER_PREFIX`, both absolute.
+  Repeat the flag, or separate entries with `:` in `WOODS_MCP_CLIENT_ROOT_MAP`.
+- Prefixes match whole path segments: `/host/wt-a` covers `/host/wt-a/app` but not `/host/wt-ab`.
+- The longest matching prefix wins, and trailing slashes are ignored.
+- The host side is never resolved on the container's file system: it does not exist there.
+- A malformed entry is a usage error at startup.
+- A refusal takes the same override as any other mismatch: `--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`).
+
+Without a map, the client root is read as given.
+`--client-root` alone suits a launcher on the same machine as the session.
+A client root that does not exist here, with no map, cannot be determined:
+the server starts, and the instructions and `woods_status` carry one warning that names it.
+`--client-root` must be an absolute path as the client sees it (`WOODS_MCP_CLIENT_ROOT` is the same setting).
+`--checkout` needs the checkout's `.git` entry inside the container; without one, pass the index path instead.
 
 Run by hand inside a `docker run` container with a checkout mounted and no index yet:
 `woods-mcp-start --checkout --await-index --client-root <a host path>` answered `initialize` with the warning,
 `woods_status` with `awaiting_index` and `client_match_reason: "client_root_unresolved"`, and `lookup` with `building`.
-Not run: this `docker compose exec` command line, and how a given client expands `$PWD` in it.
-`spec/mcp/served_identity_spec.rb` covers the launcher in each case:
-a client root in another checkout, one not visible from the launcher, and one mapped with `--client-root-as`.
+Not run: this `docker compose exec` command line, the compose mount itself, and how a given client expands `$PWD`.
+`spec/mcp/served_identity_spec.rb` covers the launcher for each row above, for the single-checkout map,
+and for segment boundaries, the longest prefix, trailing slashes and malformed entries.
 
 A host-side `bundle exec woods-mcp-start` is also valid, but only when the application bundle is installed on the host and the output is host-visible:
 
@@ -264,15 +285,18 @@ holding `.git`, so an application in a subdirectory belongs to the repository
 above it and a worktree nested inside another checkout is its own. The client
 is the checkout containing the launcher's working directory.
 A launcher given `--client-root` (or `WOODS_MCP_CLIENT_ROOT`) uses the checkout containing that directory instead,
-read at the `--client-root-as` path when one is given.
-`client_root_declared` and `client_root_mapped_to` echo both, and a matching mapped root names the checkout
-in the instructions by the declared path, for example `Serving the index of shop-topic (/host/shop-topic, mapped
-to /worktrees/shop-topic)`.
+read through the longest matching `--client-root-map` entry when a map is given.
+`client_root_declared`, `client_root_map_entry` and `client_root_mapped_to` report the host path, the entry used
+and the derived path. A matching mapped root names the checkout in the instructions by the host path, for example
+`Serving the index of shop-topic (/host/shop-topic, mapped to /worktrees/shop-topic)`.
+A client root under no entry of a map is a mismatch (`client_match_reason: "client_root_unmapped"`), refused like
+any other.
 See [the Docker process and path rule](#docker-process-and-path-rule) for why a shared container needs it.
 
 `client_matches` is `true` or `false` when both checkouts are known, and `null`
 when either is not (`client_match_reason` says which: `root_not_recorded`,
-`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`).
+`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped` is a
+mismatch, so `client_matches` is `false` there.
 
 **An unknown checkout warns.** When either checkout cannot be determined, the server starts,
 and the instructions and `woods_status.identity.warnings` carry one `WARNING:` line.

@@ -209,7 +209,8 @@ RSpec.describe 'Served index identity' do
         end
         load wrapper
       RUBY
-      env = { 'WOODS_MCP_ALLOW_MISMATCH' => nil }.merge(env)
+      env = { 'WOODS_MCP_ALLOW_MISMATCH' => nil, 'WOODS_MCP_CLIENT_ROOT' => nil,
+              'WOODS_MCP_CLIENT_ROOT_MAP' => nil }.merge(env)
       _out, errors, status = Open3.capture3(env, RbConfig.ruby, '-e', harness, wrapper, *args, index_dir, chdir: cwd)
       [status.exitstatus, errors]
     end
@@ -284,7 +285,7 @@ RSpec.describe 'Served index identity' do
         end
       end
 
-      it 'connects with one warning when the client root is not visible from the launcher' do
+      it 'connects with one warning when there is no map and the client root does not exist here' do
         alpha = checkout('checkout-alpha')
 
         code, errors = launch(index_of(alpha), cwd: alpha, args: ['--client-root', '/host-only/checkout-beta'])
@@ -292,22 +293,7 @@ RSpec.describe 'Served index identity' do
         expect(code).to eq(42), errors
         expect(errors.lines.grep(/Warning/).size).to eq(1)
         expect(errors).to include("the client's checkout is unknown", '/host-only/checkout-beta',
-                                  '--client-root-as')
-      end
-
-      it 'compares the checkout --client-root-as names, and labels the mapping' do
-        alpha = checkout('checkout-alpha')
-        beta = checkout('checkout-beta')
-        host = '/host-only/checkout-beta'
-
-        refused, refusal = launch(index_of(alpha), cwd: alpha, args: ['--client-root', host, '--client-root-as', beta])
-        served, warnings = launch(index_of(beta), cwd: alpha,
-                                                  args: ['--client-root', host, "--client-root-as=#{beta}"])
-
-        expect(refused).to eq(1), refusal
-        expect(refusal).to include("written for the checkout at #{alpha}", "launched in #{beta}")
-        expect(served).to eq(42), warnings
-        expect(warnings).not_to include('Warning', 'Error')
+                                  '--client-root-map')
       end
 
       it 'connects without a warning when the client root is the served checkout' do
@@ -318,18 +304,113 @@ RSpec.describe 'Served index identity' do
         expect(code).to eq(42), errors
         expect(errors).not_to include('Warning', 'Error')
       end
+    end
 
-      it 'refuses a relative client root and a --client-root-as without one' do
+    # A map describes a bind mount, which is the same for every session; the
+    # client root is the session's own directory on the client's side.
+    describe 'with a client root map' do
+      it 'translates a client root under a mapped prefix and serves its own checkout without a warning' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/checkout-alpha',
+                                                      '--client-root-map', "/host/wts=#{@base}"])
+
+        expect(code).to eq(42), errors
+        expect(errors).not_to include('Warning', 'Error')
+      end
+
+      it 'refuses the index of the mounted checkout for a session in another mapped worktree' do
+        alpha = checkout('checkout-alpha')
+        checkout('checkout-beta')
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/checkout-beta',
+                                                      "--client-root-map=/host/wts=#{@base}"])
+
+        expect(code).to eq(1), errors
+        expect(errors).to include("written for the checkout at #{alpha}",
+                                  "launched in #{File.join(@base, 'checkout-beta')}")
+      end
+
+      it 'refuses a client root under no mapped prefix, naming it, and serves it under --allow-mismatch' do
+        alpha = checkout('checkout-alpha')
+        args = ['--client-root', '/host/checkout-beta', '--client-root-map', "/host/checkout-alpha=#{alpha}"]
+
+        refused, refusal = launch(index_of(alpha), cwd: alpha, args: args)
+        allowed, warning = launch(index_of(alpha), cwd: alpha, args: ['--allow-mismatch', *args])
+
+        expect(refused).to eq(1), refusal
+        expect(refusal).to include('/host/checkout-beta', 'no --client-root-map prefix', 'no mount covers it',
+                                   '--allow-mismatch', 'WOODS_MCP_ALLOW_MISMATCH=1')
+        expect(allowed).to eq(42), warning
+        expect(warning).to include("Warning: serving another checkout's index", '/host/checkout-beta', 'ALLOW=1')
+      end
+
+      it 'matches whole path segments only: /host/wt-a does not cover /host/wt-ab' do
+        alpha = checkout('checkout-alpha')
+
+        args = ['--client-root', '/host/wt-ab', '--client-root-map', "/host/wt-a=#{alpha}"]
+        code, errors = launch(index_of(alpha), cwd: alpha, args: args)
+
+        expect(code).to eq(1), errors
+        expect(errors).to include('/host/wt-ab', 'no --client-root-map prefix')
+      end
+
+      it 'takes the longest prefix, ignores trailing slashes, and reads entries from the environment' do
+        alpha = checkout('checkout-alpha')
+        map = "/host=#{@base}/nowhere:/host/wts/=#{@base}/"
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               env: { 'WOODS_MCP_CLIENT_ROOT' => '/host/wts/checkout-alpha/',
+                                                      'WOODS_MCP_CLIENT_ROOT_MAP' => map })
+
+        expect(code).to eq(42), errors
+        expect(errors).not_to include('Warning', 'Error')
+      end
+
+      it 'refuses a malformed map entry at startup' do
+        alpha = checkout('checkout-alpha')
+
+        ['nope', 'relative=/app', '/host=relative', '/host=', '/host=/app=/srv'].each do |entry|
+          code, errors = launch(index_of(alpha), cwd: alpha,
+                                                 args: ['--client-root', '/host/x', "--client-root-map=#{entry}"])
+
+          expect(code).to eq(1), entry
+          expect(errors).to include('--client-root-map', 'HOST_PREFIX=CONTAINER_PREFIX'), entry
+        end
+      end
+
+      it 'refuses a relative client root and an empty one' do
         alpha = checkout('checkout-alpha')
 
         relative, relative_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root', 'checkout-beta'])
-        orphan, orphan_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root-as', alpha])
         empty, empty_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root='])
 
-        expect([relative, orphan, empty]).to eq([1, 1, 1])
+        expect([relative, empty]).to eq([1, 1])
         expect(relative_error).to include('--client-root must be an absolute path')
-        expect(orphan_error).to include('--client-root-as needs --client-root')
         expect(empty_error).to include('--client-root needs a path')
+      end
+    end
+
+    describe 'ServedIdentity.map_client_root' do
+      let(:map) { Woods::MCP::ServedIdentity.parse_client_root_map('/host=/a:/host/wts=/b:/=/root-mount') }
+
+      it 'derives the path through the longest whole-segment prefix, and the root prefix last' do
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wts/topic', map))
+          .to eq(['/b/topic', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wtsx', map)).to eq(['/a/wtsx', ['/host', '/a']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wts', map)).to eq(['/b', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/elsewhere/x', map))
+          .to eq(['/root-mount/elsewhere/x', ['/', '/root-mount']])
+      end
+
+      it 'answers nil under no prefix' do
+        single = Woods::MCP::ServedIdentity.parse_client_root_map('/host/wt-a=/app')
+
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wt-ab', single)).to be_nil
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wt-a/app/models', single))
+          .to eq(['/app/app/models', ['/host/wt-a', '/app']])
       end
     end
   end
@@ -347,7 +428,7 @@ RSpec.describe 'Served index identity' do
       alpha = checkout('checkout-alpha')
       host = '/host-only/checkout-beta'
 
-      text, report = with_env('WOODS_MCP_CLIENT_ROOT' => host, 'WOODS_MCP_CLIENT_ROOT_AS' => nil) do
+      text, report = with_env('WOODS_MCP_CLIENT_ROOT' => host, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
         Dir.chdir(alpha) { [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha)))] }
       end
 
@@ -364,7 +445,8 @@ RSpec.describe 'Served index identity' do
       alpha = checkout('checkout-alpha')
       host = '/host-only/checkout-alpha'
 
-      text, identity = with_env('WOODS_MCP_CLIENT_ROOT' => host, 'WOODS_MCP_CLIENT_ROOT_AS' => alpha) do
+      text, identity = with_env('WOODS_MCP_CLIENT_ROOT' => host,
+                                'WOODS_MCP_CLIENT_ROOT_MAP' => "/host-only=#{@base}") do
         Dir.chdir(@base) do
           [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha))).fetch('identity')]
         end
@@ -372,7 +454,34 @@ RSpec.describe 'Served index identity' do
 
       expect(text.lines.first).to start_with("Serving the index of checkout-alpha (#{host}, mapped to #{alpha}), ")
       expect(identity).to include('client_matches' => true, 'client_root' => alpha, 'client_root_declared' => host,
-                                  'client_root_mapped_to' => alpha, 'warnings' => [])
+                                  'client_root_map_entry' => "/host-only=#{@base}", 'client_root_mapped_to' => alpha,
+                                  'warnings' => [])
+    end
+
+    it 'reports a client root under no mapped prefix as a mismatch with a warning' do
+      alpha = checkout('checkout-alpha')
+
+      text, identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host/checkout-beta',
+                                'WOODS_MCP_CLIENT_ROOT_MAP' => "/host/checkout-alpha=#{alpha}") do
+        Dir.chdir(alpha) do
+          [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha))).fetch('identity')]
+        end
+      end
+
+      expect(text.lines.grep(/\AWARNING: /).first).to include('/host/checkout-beta', 'no --client-root-map prefix')
+      expect(identity).to include('client_matches' => false, 'client_match_reason' => 'client_root_unmapped',
+                                  'client_root' => nil, 'client_root_mapped_to' => nil)
+    end
+
+    it 'warns, naming the variable, when the map in the environment is malformed' do
+      alpha = checkout('checkout-alpha')
+
+      identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host/x', 'WOODS_MCP_CLIENT_ROOT_MAP' => 'nope') do
+        Woods::MCP::ServedIdentity.read(index_of(alpha))
+      end
+
+      expect(identity.client_matches).to be_nil
+      expect(identity.warnings.first).to include('WOODS_MCP_CLIENT_ROOT_MAP is malformed')
     end
 
     it 'warns for a launch outside any checkout and for an index whose checkout is unreachable' do
@@ -401,7 +510,7 @@ RSpec.describe 'Served index identity' do
     it 'keeps the first instructions line unchanged when no client root is declared' do
       alpha = checkout('checkout-alpha', branch: 'main', generation: 3)
 
-      text = with_env('WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_AS' => nil) do
+      text = with_env('WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
         Dir.chdir(alpha) { instructions(build_server(index_of(alpha))) }
       end
 
@@ -414,7 +523,7 @@ RSpec.describe 'Served index identity' do
     it 'describes a routed worktree by its root, never by the declared client root' do
       alpha = checkout('checkout-alpha')
 
-      identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/elsewhere', 'WOODS_MCP_CLIENT_ROOT_AS' => nil) do
+      identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/elsewhere', 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
         route = Struct.new(:root).new(alpha)
         Thread.current[Woods::MCP::WorktreeRouting::THREAD_KEY] = route
         Woods::MCP::Server.identity_section(index_of(alpha), nil)

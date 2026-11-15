@@ -66,7 +66,7 @@ RSpec.describe 'woods-mcp-start --checkout' do
       load wrapper
     RUBY
     env = { 'WOODS_DIR' => nil, 'WOODS_OUTPUT' => nil, 'WOODS_MCP_CHECKOUT' => nil, 'WOODS_MCP_ALLOW_MISMATCH' => nil,
-            'WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_AS' => nil,
+            'WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil,
             'WOODS_MCP_AWAIT_INDEX' => nil }.merge(env)
     _out, errors, status = Open3.capture3(env, RbConfig.ruby, '-e', harness, wrapper, log, *args, chdir: cwd)
     exec_log = status.exitstatus == 42 ? JSON.parse(File.read(log)) : []
