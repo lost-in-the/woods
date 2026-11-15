@@ -830,7 +830,12 @@ connection is already inside an open transaction (a host middleware or test
 harness that wraps the request), the Console's work runs in a savepoint and is
 rolled back to it. The Console's own writes are discarded, the host's writes
 are left for the host to commit or roll back, and a failed Console statement
-does not abort the host transaction. It is a final
+leaves the host transaction usable. Two MySQL cases are outside this guarantee.
+When InnoDB picks the transaction as a deadlock victim, it rolls back the whole
+transaction, host writes included. A statement that causes an implicit commit
+ends the host transaction. `console_sql` accepts only `SELECT`, `WITH` and plain
+`EXPLAIN` statements, which narrows the second case but does not rule it out.
+It is a final
 guard for ordinary database work, not a sandbox or a universal side-effect
 guarantee. It does **not** undo Active Job or mail delivery, HTTP/network calls,
 threaded work, `after_rollback` callbacks, or writes through another connection

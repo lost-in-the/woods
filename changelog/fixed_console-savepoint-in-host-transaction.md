@@ -3,4 +3,5 @@
   to it, so the Console's writes are discarded while the host's own writes are left for the host to commit or roll
   back. Before, the Console joined the open transaction and its rollback was ignored. The PostgreSQL statement
   timeout no longer stays set for the rest of the host transaction, and a failed Console statement no longer aborts
-  the host transaction.
+  the host transaction. Two MySQL cases are outside this: an InnoDB deadlock victim has its whole transaction rolled
+  back, host writes included, and a statement that causes an implicit commit ends the host transaction.
