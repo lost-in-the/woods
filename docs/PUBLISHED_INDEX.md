@@ -204,7 +204,13 @@ reaches the unit.
 
 `Woods::MCP::IndexReader#find_unit` keys its identifier map on identifier alone. If two type directories both list the same identifier (a model and a service both named `Foo`, for example), whichever type sorts last in `Woods::MCP::IndexReader::TYPE_DIRS` silently wins, and `unit(identifier)` returns that one. Pass `type:` to read a specific type's unit file directly and skip the collision entirely; `#table_database_map` always does this internally (`type: 'model'`), so a same-named non-model unit can never shadow a model's `table_name`/`database`.
 
-A typed read goes through the MCP reader's own guarded path (`Woods::MCP::IndexReader#find_unit(identifier, type:)`), not a second implementation: a type directory or unit file that is a symlink, or a unit body naming a different identifier, raises `IOError` instead of being served, and `_index.json` is validated against the manifest's `counts`. Treat `IOError`/`JSON::ParserError` from `#unit` or `#units` as a corrupt payload.
+A typed read goes through the MCP reader's own guarded path (`Woods::MCP::IndexReader#find_unit(identifier, type:)`),
+not a second implementation.
+A type directory or unit file that is a symlink, or a unit body naming a different identifier, raises `IOError`
+instead of being served, and `_index.json` is validated against the manifest's `counts`.
+A unit file the index lists but the payload lacks raises `Errno::ENOENT`, and one that will not parse raises
+`JSON::ParserError`.
+Treat `IOError`, `SystemCallError` and `JSON::ParserError` from `#unit` or `#units` as a corrupt payload.
 
 ### Actual unit types and directory families
 
