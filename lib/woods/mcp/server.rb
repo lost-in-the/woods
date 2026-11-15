@@ -2648,7 +2648,7 @@ module Woods
           ) do |server_context:|
             Woods::Deprecation.warn_once(
               :notion_sync_tool,
-              'The notion_sync MCP tool is deprecated and will be removed in the next minor release. ' \
+              'The notion_sync MCP tool is deprecated and will be removed in Woods 3.0. ' \
               'Use the Markdown export instead: woods:markdown (see docs/MARKDOWN_EXPORT.md).'
             )
             config = Woods.configuration

@@ -5,7 +5,7 @@ description: DEPRECATED (use the Markdown export, woods:markdown). Setup, operat
 
 # Unblocked Sync
 
-> **Deprecated.** Unblocked sync is deprecated and will be removed in the next minor release. Use the
+> **Deprecated.** Unblocked sync is deprecated and will be removed in Woods 3.0. Use the
 > Markdown export (`woods:markdown`, `docs/MARKDOWN_EXPORT.md`) and sync the folder wherever you need.
 > The sync tasks warn once per process. Keep this skill for maintaining the existing integration only.
 
