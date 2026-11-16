@@ -574,7 +574,8 @@ Its watcher stayed `degraded` at generation 0.
 An application with nothing to extract still gets an empty, valid first generation, as `woods:extract` would publish.
 A `generation.json` that exists but cannot be read is not "no generation".
 The writer refuses to publish over it, so the watcher does not start a full extraction.
-It stays `degraded`, naming the file and asking for it to be restored to the newest retained `payloads/gen-<n>`.
+It stays `degraded` and names the file.
+See [generation.json is unreadable](TROUBLESHOOTING.md#generationjson-is-unreadable) for how to restore it.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after

@@ -116,7 +116,21 @@ RSpec.describe 'Watch daemon: the first index' do
     expect(extractor).not_to have_received(:extract_all)
     expect(extractor).not_to have_received(:extract_changed)
     expect(status).to include('state' => 'degraded')
-    expect(status['reason']).to include('generation.json', 'Restore it to name the newest retained payloads/gen-<n>')
+    expect(status['reason']).to include('generation.json', Woods::Generation::RESTORE_ADVICE)
+  end
+
+  # Promotion moves the stage to gen-<n> before the marker is written, so a
+  # failed publish leaves the newest directory unpublished.
+  it 'does not send a corrupt marker back to the unpublished newest payload a failed publish left' do
+    write('app/models/model.rb')
+    %w[gen-1 gen-2 gen-3].each { |name| FileUtils.mkdir_p(File.join(output_dir, 'payloads', name)) }
+    File.write(File.join(output_dir, Woods::Generation::FILENAME), '{"number": ')
+    watch = daemon
+
+    watch.send(:catch_up)
+
+    expect(status['reason']).not_to include('newest retained')
+    expect(status['reason']).to include('except possibly the newest', 'name the second newest')
   end
 
   it 'retries a first full extraction that failed, as a full extraction' do

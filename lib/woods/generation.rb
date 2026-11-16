@@ -45,6 +45,16 @@ module Woods
     # Raised by strict readers instead of treating corruption as a legacy index.
     class InvalidMarker < IOError; end
 
+    # How to recover from an {InvalidMarker}, for every message that reports
+    # one. A writer promotes its stage to `gen-<n>` before it writes the
+    # marker, so the newest retained directory can be a generation that never
+    # published; every older one was published.
+    RESTORE_ADVICE = 'Restore it to name a generation known to have been published: every retained ' \
+                     'payloads/gen-<n> was, except possibly the newest, which a run that reported ' \
+                     '"Could not publish generation" leaves behind. When unsure, name the second newest. ' \
+                     'With only one retained directory, or no evidence, extract afresh into a new output ' \
+                     'directory (or woods:clean, then woods:extract) rather than guess.'
+
     # An immutable snapshot of the generation file.
     #
     # @!attribute number

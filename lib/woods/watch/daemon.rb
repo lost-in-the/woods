@@ -1231,7 +1231,7 @@ module Woods
       def unwritable_marker(change_set, started)
         carry_forward(change_set)
         reason = "#{@marker_error} (#{File.join(@output_dir, Generation::FILENAME)}); not extracting over it. " \
-                 'Restore it to name the newest retained payloads/gen-<n>, then the next event or heartbeat retries'
+                 "#{Generation::RESTORE_ADVICE} The next event or heartbeat retries."
         @logger.error("[Woods] watch: #{reason}")
         outcome(:extract, :degraded, reason: reason, count: change_set.size, duration_ms: elapsed_ms(started))
       end
