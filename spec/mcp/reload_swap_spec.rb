@@ -299,6 +299,38 @@ RSpec.describe 'Index MCP transactional store reload' do
     end
   end
 
+  describe 'recovery from a boot hydration failure' do
+    # The boot state is the bootstrapper's own: a vector dump that could not
+    # be read at boot recorded a hydration failure and degraded the status.
+    let(:booted) do
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty)
+        .and_raise(IOError, 'vectors.bin unreadable')
+      built = Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir)
+      allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_call_original
+      built
+    end
+    let(:retriever) { booted.first }
+    let(:state) { booted.last }
+
+    it 'serves codebase_retrieve again once a reload swaps in readable stores' do
+      server
+      expect(state.hydration_failed?).to be(true)
+      expect(state.status).to eq(:degraded)
+      expect(call_tool('codebase_retrieve', query: 'BetaUnit service').meta).to include(phase: 'boot')
+
+      write_artifact(identifier: 'BetaUnit', type: 'service', vector: [0.0, 1.0, 0.0, 0.0],
+                     file_path: 'app/services/beta_unit.rb')
+      expect(parse_response(call_tool('reload'))['reloaded']).to be(true)
+      expect(retriever.vector_store.search([0.0, 1.0, 0.0, 0.0], limit: 5).map(&:id)).to eq(%w[BetaUnit])
+
+      expect(state.hydration_failed?).to be(false)
+      expect(state.status).to eq(:hydrated)
+      retrieval = call_tool('codebase_retrieve', query: 'BetaUnit service')
+      expect(retrieval.error?).to be(false)
+      expect(parse_response(call_tool('woods_status'))['bootstrap']).not_to have_key('hydration_failures')
+    end
+  end
+
   describe 'old-or-new, never empty' do
     it 'lets an in-flight retrieve finish entirely on the old bundle while the swap lands' do
       server

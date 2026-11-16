@@ -238,4 +238,44 @@ RSpec.describe Woods::MCP::BootstrapState do
       expect(state.to_h).not_to have_key(:reload_failure)
     end
   end
+
+  describe '#clear_hydration_failures!' do
+    let(:vector_error) { IOError.new('vectors.bin unreadable') }
+    let(:graph_error) { IOError.new('graph.json unreadable') }
+
+    it 'returns a hydration-degraded boot to hydrated once every failed store is replaced' do
+      state.record_hydration_failure(:vector, vector_error)
+      state.mark(:degraded, reason: vector_error)
+
+      state.clear_hydration_failures!(%i[vector metadata])
+
+      expect(state.hydration_failed?).to be(false)
+      expect(state.status).to eq(:hydrated)
+      expect(state.reason).to be_nil
+    end
+
+    it 'keeps the failure of a store the reload did not replace, and stays degraded' do
+      state.record_hydration_failure(:vector, vector_error)
+      state.record_hydration_failure(:graph, graph_error)
+      state.mark(:degraded, reason: vector_error)
+
+      state.clear_hydration_failures!(%i[vector metadata])
+
+      expect(state.hydration_failures.keys).to eq(%i[graph])
+      expect(state.status).to eq(:degraded)
+      expect(state.reason).to be(graph_error)
+    end
+
+    it 'leaves a provider-unreachable degradation alone' do
+      provider_error = Woods::Error.new('provider unreachable')
+      state.record_hydration_failure(:vector, vector_error)
+      state.mark(:degraded, reason: provider_error)
+
+      state.clear_hydration_failures!(%i[vector metadata])
+
+      expect(state.hydration_failed?).to be(false)
+      expect(state.status).to eq(:degraded)
+      expect(state.reason).to be(provider_error)
+    end
+  end
 end
