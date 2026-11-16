@@ -103,22 +103,22 @@ RSpec.describe Woods::Console::RackMiddleware do
     before do
       allow(ar_base).to receive(:descendants).and_return([bad_model, good_model])
       middleware.instance_variable_set(:@structured_logger, logger)
-      allow(logger).to receive(:debug)
+      allow(logger).to receive(:warn)
     end
 
-    it 'logs a debug event when a model raises during introspection' do
+    it 'logs a warn event when a model raises during introspection' do
       middleware.send(:build_model_introspection)
 
-      expect(logger).to have_received(:debug).with(
+      expect(logger).to have_received(:warn).with(
         'console.model_introspection.skipped',
         hash_including(model: 'BadModel', error_class: 'StandardError')
       )
     end
 
-    it 'includes the error message in the debug payload' do
+    it 'includes the error message in the scanned warning payload' do
       middleware.send(:build_model_introspection)
 
-      expect(logger).to have_received(:debug).with(
+      expect(logger).to have_received(:warn).with(
         'console.model_introspection.skipped',
         hash_including(error_message: 'column boom')
       )
@@ -329,6 +329,7 @@ RSpec.describe Woods::Console::RackMiddleware do
       allow(Woods.configuration).to receive_messages(console_mcp_enabled: true, console_mcp_http_enabled: true,
                                                      console_mcp_token: token, console_mcp_allowed_origins: [])
       allow(rails_app).to receive(:eager_load!).and_raise(NameError, 'synthetic-private-load-detail')
+      allow(rails_app).to receive(:credentials).and_return(double('credentials', config: {}))
       logger = instance_double(Woods::Observability::StructuredLogger, error: nil)
       middleware.instance_variable_set(:@structured_logger, logger)
       expect(middleware).not_to receive(:build_embedded_server)

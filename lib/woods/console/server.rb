@@ -51,7 +51,8 @@ module Woods
 
       class << self # rubocop:disable Metrics/ClassLength
         # Rebuild the boot-time credential index from fresh Rails credentials
-        # and hot-swap it into every live scanner without restarting the process.
+        # and retain the immediately preceding set in every live scanner.
+        # Only a changed snapshot advances this process-local rotation window.
         #
         # Refresh failures propagate without replacing any live index.
         # Host rotation jobs should call this immediately after `rails credentials:edit`
@@ -73,6 +74,14 @@ module Woods
           return nil unless target_app
 
           SCANNERS.rebuild { CredentialIndex.refresh(rails_app: target_app) }
+        end
+
+        # Build a log scanner before introspection/response setup. Diagnostics
+        # retain pattern protection even when response scanning is disabled.
+        # @return [CredentialScanner] Registered for credential refresh.
+        def build_diagnostic_scanner
+          config = Woods.configuration if Woods.respond_to?(:configuration)
+          SCANNERS.register { CredentialScanner.new(secret_index: build_credential_index(config)) }
         end
 
         # True when Woods is configured and credential defense is on.
@@ -159,15 +168,16 @@ module Woods
           # PRE-execution against console_blocked_tables (previously TableGate
           # was only consulted on the render path, leaving the defense inert
           # for the sql and query tools).
+          diagnostic_scanner = build_diagnostic_scanner
           executor = EmbeddedExecutor.new(
             model_validator: model_validator, safe_context: safe_ctx,
             connection: connection, read_tools_enabled: read_tools_enabled,
-            table_gate: ctx&.table_gate,
+            table_gate: ctx&.table_gate, error_log_scanner: diagnostic_scanner,
             sql_default_limit: sql_default_limit, sql_max_limit: sql_max_limit
           )
 
           mode = read_tools_enabled ? :embedded_read : :embedded
-          build_server(executor, ctx, tool_names: executable_tool_names(mode))
+          build_server(executor, ctx, tool_names: executable_tool_names(mode), diagnostic_scanner: diagnostic_scanner)
         end
 
         # Resolve the exact tool list for a supported embedded mode from the
@@ -190,7 +200,7 @@ module Woods
         # @param ctx [ResponseContext, nil] Response context (table gate, scanner, safe_ctx)
         # @param renderer [ConsoleResponseRenderer, nil] Optional response renderer
         # @return [void]
-        def register(spec, server, conn_mgr, ctx, renderer: nil)
+        def register(spec, server, conn_mgr, ctx, renderer: nil, diagnostic_scanner: nil) # rubocop:disable Metrics/ParameterLists
           pipeline = DispatchPipeline.new(
             tool_name: spec.name,
             handler: spec.handler,
@@ -198,7 +208,7 @@ module Woods
             conn_mgr: conn_mgr,
             ctx: ctx || NullResponseContext.instance,
             renderer: renderer,
-            logger: structured_logger
+            logger: structured_logger, diagnostic_scanner: diagnostic_scanner
           )
 
           server.define_tool(name: spec.name, description: spec.description,
@@ -371,7 +381,7 @@ module Woods
         # @param ctx [ResponseContext, nil] Optional context bundling response-safety layers
         # @param tool_names [Array<String>] Exact executable tool names to advertise
         # @return [MCP::Server]
-        def build_server(conn_mgr, ctx, tool_names:)
+        def build_server(conn_mgr, ctx, tool_names:, diagnostic_scanner: nil)
           server = ::MCP::Server.new(
             name: 'woods-console',
             version: defined?(Woods::VERSION) ? Woods::VERSION : '0.1.0',
@@ -381,7 +391,7 @@ module Woods
           renderer = build_console_renderer
 
           TOOL_SPECS.select { |spec| tool_names.include?(spec.name) }.each do |spec|
-            register(spec, server, conn_mgr, ctx, renderer: renderer)
+            register(spec, server, conn_mgr, ctx, renderer: renderer, diagnostic_scanner: diagnostic_scanner)
           end
           Woods::MCP::ProtocolPolicy.sort_tools!(server)
         end
@@ -402,7 +412,7 @@ module Woods
 
           @observability_failure_reported = true
           warn '[woods-console] structured logger failed ' \
-               "(#{error.class}: #{error.message}); further failures will be silent."
+               "(#{error.class}); further failures will be silent."
         rescue StandardError
           nil
         end

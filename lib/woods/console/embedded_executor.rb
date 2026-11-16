@@ -6,7 +6,7 @@ require_relative '../mcp/search_results'
 require_relative 'audit_logger'
 require_relative 'bridge_protocol'
 require_relative 'confirmation'
-require_relative 'credential_scanner'
+require_relative 'diagnostic_sanitizer'
 require_relative 'eval_guard'
 require_relative 'input_contract'
 require_relative 'model_validator'
@@ -59,6 +59,7 @@ module Woods
       #   configured as blocked. Callers should pass the live gate from
       #   {Server#build_response_context} so embedded mode matches the bridge's
       #   defense-in-depth posture.
+      # @param error_log_scanner [CredentialScanner, nil] Registered diagnostic scanner.
       # @param eval_guard [#check!, nil] EvalGuard for the `console_eval` opt-in
       #   path. Required when `unsafe_eval_enabled` is true; nil otherwise.
       # @param confirmation [Confirmation, nil] Human-in-the-loop approval for
@@ -77,7 +78,7 @@ module Woods
       def initialize(model_validator:, safe_context:, connection: nil, read_tools_enabled: false, # rubocop:disable Metrics/ParameterLists
                      table_gate: nil, eval_guard: nil, confirmation: nil, audit_logger: nil,
                      unsafe_eval_enabled: false, sql_default_limit: nil,
-                     sql_max_limit: nil)
+                     sql_max_limit: nil, error_log_scanner: nil)
         @model_validator = model_validator
         @safe_context = safe_context
         @connection = connection
@@ -89,6 +90,7 @@ module Woods
         @unsafe_eval_enabled = unsafe_eval_enabled
         @sql_default_limit = sql_default_limit || DEFAULT_SQL_ROW_LIMIT
         @sql_max_limit = sql_max_limit || MAX_SQL_ROW_LIMIT
+        @diagnostics = DiagnosticSanitizer.new(scanner: error_log_scanner)
       end
 
       # Execute a tool request and return a response hash.
@@ -196,7 +198,7 @@ module Woods
         return unless defined?(Rails) && Rails.respond_to?(:logger) && Rails.logger
 
         Rails.logger.warn(
-          "[Woods::Console] execution error: #{error.class}: #{scan_log_text(error.message)}"
+          "[Woods::Console] execution error: #{scan_log_text(error.class.name)}: #{scan_log_text(error.message)}"
         )
       rescue StandardError
         # Never let logging break the request path.
@@ -210,14 +212,7 @@ module Woods
       # server log while the response path was scanned. Failure falls back to a
       # sentinel rather than raw text, mirroring {AuditLogger#redact}.
       def scan_log_text(text)
-        scanned, = error_log_scanner.scan(text.to_s)
-        scanned
-      rescue StandardError
-        '[REDACTION_FAILED]'
-      end
-
-      def error_log_scanner
-        @error_log_scanner ||= CredentialScanner.new
+        @diagnostics.text(text)
       end
 
       # Return a pre-dispatch refusal hash for tools the executor cannot or

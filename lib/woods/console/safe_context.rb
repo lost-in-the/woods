@@ -369,7 +369,7 @@ module Woods
         @warned_adapters[adapter] = true
         Rails.logger.warn(
           '[Woods::Console::SafeContext] statement timeout not supported on ' \
-          "adapter #{adapter.inspect}: #{error.class}: #{error.message}. " \
+          "adapter #{adapter.inspect}: #{error.class}. " \
           'Queries will run without a per-statement time limit.'
         )
       rescue StandardError

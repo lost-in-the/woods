@@ -118,6 +118,12 @@ The Console MCP Server provides live database access through a five-layer defens
 
 The Console can expose live data, including credentials, to the agent that uses it. Woods makes a best effort to reduce accidental disclosure (column and key/value redaction, a credential scanner, table blocking, SQL validation, and rolled-back transactions), but these are not guarantees. They cover known columns, known credential formats and the Rails credentials available at boot. Unknown, custom, shorter or transformed secrets may not be recognized, and rollback does not stop callbacks, other connections or external effects. Woods and its developers and contributors do not accept responsibility for data an agent reads because an operator enabled the Console and let it. Woods is provided "as is", without warranty of any kind, under the MIT License (see [LICENSE.txt](LICENSE.txt)). Use a least-privilege database role, enable the Console only where you are authorized to disclose the data it can reach, and prefer the Index Server for structural questions.
 
+Woods-owned Console diagnostic logs are scanned with the active credential index and the credential patterns,
+and each logged field is bounded in size.
+Host application, Active Record and database logs are outside that protection.
+A credential refresh keeps the current and the immediately preceding credential sets until the next changed snapshot.
+Older stored secrets need column or key/value redaction.
+
 ### MCP Transport
 
 The MCP Index Server supports both stdio and HTTP transports. stdio is the default and has no network exposure. The HTTP transport (`exe/woods-mcp-http`) refuses to bind a non-loopback host unless `WOODS_MCP_HTTP_TOKEN` is set and validates incoming `Authorization: Bearer …` headers. It also enforces a default `Origin` allow-list via `OriginGuard` to mitigate DNS-rebinding attacks. TLS is not terminated in-process, front the HTTP transport with a reverse proxy (nginx, caddy) when exposing it beyond loopback. See [docs/MCP_HTTP_TRANSPORT.md](docs/MCP_HTTP_TRANSPORT.md) for the full deployment guide.

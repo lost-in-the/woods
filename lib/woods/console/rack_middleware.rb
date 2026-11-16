@@ -4,6 +4,7 @@ require 'json'
 require 'woods/observability/structured_logger'
 require 'woods/mcp/bearer_auth'
 require 'woods/mcp/origin_guard'
+require_relative 'diagnostic_sanitizer'
 
 module Woods
   module Console
@@ -208,7 +209,7 @@ module Woods
       rescue NameError => e
         @eager_load_failed = true
         structured_logger.error(
-          'console.eager_load.failed', error_class: e.class.name,
+          'console.eager_load.failed', error_class: diagnostic_text(e.class.name),
                                        remediation: 'Run Rails.application.eager_load! in the application ' \
                                                     'environment; fix the error and restart.'
         )
@@ -282,8 +283,8 @@ module Woods
 
       # Walk ActiveRecord::Base.descendants once and collect the registry,
       # table map, and reflection map in a single pass. Models that raise
-      # during introspection are silently skipped — same semantics as the
-      # three separate methods this replaces.
+      # during introspection are logged with scanned diagnostics and skipped;
+      # other models remain available.
       #
       # Map every model to its association-name → target-table registry so
       # TableGate can resolve `joins:` / `association:` arguments before the
@@ -304,16 +305,32 @@ module Woods
           tables[model.name] = model.table_name
           reflections[model.name] = reflections_for(model)
         rescue StandardError => e
-          structured_logger.debug(
-            'console.model_introspection.skipped',
-            model: model.name,
-            error_class: e.class.name,
-            error_message: e.message
-          )
+          log_introspection_error(model, e)
           next
         end
 
         { registry: registry, tables: tables, reflections: reflections }.freeze
+      end
+
+      def log_introspection_error(model, error)
+        structured_logger.warn(
+          'console.model_introspection.skipped',
+          model: diagnostic_text(model.name),
+          error_class: diagnostic_text(error.class.name),
+          error_message: diagnostic_text(error.message)
+        )
+      rescue StandardError
+        # Diagnostics must not abort introspection or fall back to raw text.
+        nil
+      end
+
+      # Building the scanner reads credentials; a failure there must not end
+      # the request or let the raw value through.
+      def diagnostic_text(value)
+        @diagnostics ||= DiagnosticSanitizer.new(scanner: Server.build_diagnostic_scanner)
+        @diagnostics.text(value)
+      rescue StandardError
+        DiagnosticSanitizer::FAILED
       end
 
       def reflections_for(model)

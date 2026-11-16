@@ -3,6 +3,7 @@
 require 'json'
 require_relative 'response_context'
 require_relative 'input_contract'
+require_relative 'diagnostic_sanitizer'
 
 module Woods
   module Console
@@ -28,19 +29,20 @@ module Woods
     # into a first-class object collapses that wiring, removes the need for
     # the captures, and makes the pipeline directly testable without going
     # through the full server build path.
-    class DispatchPipeline
+    class DispatchPipeline # rubocop:disable Metrics/ClassLength
       # @param tool_name [String]
       # @param handler [#call] Maps a Hash of tool args to a bridge request Hash.
       # @param properties [Hash] ToolSpec JSON Schema properties.
       # @param conn_mgr [#send_request] ConnectionManager or EmbeddedExecutor.
       # @param ctx [ResponseContext] Bundles the three response-safety layers.
       #   Defaults to the Null context so tests can stub minimally.
+      # @param diagnostic_scanner [CredentialScanner, nil] Registered log-only scanner.
       # @param renderer [#render_default, nil] Optional response renderer.
       # @param logger [#warn, nil] Structured logger used for credential-scan
       #   and table-gate telemetry. Failures are swallowed so observability
       #   issues never break a tool response.
       def initialize(tool_name:, handler:, properties:, conn_mgr:, # rubocop:disable Metrics/ParameterLists
-                     ctx: NullResponseContext.instance, renderer: nil, logger: nil)
+                     ctx: NullResponseContext.instance, renderer: nil, logger: nil, diagnostic_scanner: nil)
         @tool_name = tool_name
         @handler = handler
         @properties = properties
@@ -48,6 +50,7 @@ module Woods
         @ctx = ctx
         @renderer = renderer
         @logger = logger
+        @diagnostics = DiagnosticSanitizer.new(scanner: diagnostic_scanner || ctx.credential_scanner)
       end
 
       # Run the full dispatch pipeline for a single tool call.
@@ -94,8 +97,8 @@ module Woods
         @logger.warn(
           'console.dispatch.unexpected_error',
           tool: @tool_name,
-          error_class: error.class.name,
-          message: error.message
+          error_class: @diagnostics.text(error.class.name),
+          message: @diagnostics.text(error.message)
         )
       rescue StandardError
         nil
@@ -157,10 +160,10 @@ module Woods
         @logger.warn(
           'console.table_gate.rejected',
           tool: @tool_name,
-          model: args[:model],
-          table: args[:table],
+          model: args[:model] && @diagnostics.text(args[:model]),
+          table: args[:table] && @diagnostics.text(args[:table]),
           has_sql: args[:sql] ? true : false,
-          message: error.message
+          message: @diagnostics.text(error.message)
         )
       rescue StandardError
         nil

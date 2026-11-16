@@ -49,7 +49,12 @@ end
 begin
   Rails.application.eager_load!
 rescue NameError => e
-  warn "[Woods Console] eager_load! hit NameError: #{e.message}. " \
+  message = begin
+    Woods::Console::DiagnosticSanitizer.new(scanner: Woods::Console::Server.build_diagnostic_scanner).text(e.message)
+  rescue StandardError
+    Woods::Console::DiagnosticSanitizer::FAILED
+  end
+  warn "[Woods Console] eager_load! hit NameError: #{message}. " \
        'Continuing with a possibly incomplete model registry.'
 end
 

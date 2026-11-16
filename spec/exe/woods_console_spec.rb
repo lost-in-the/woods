@@ -50,7 +50,9 @@ RSpec.describe 'exe/woods-console boot sequence' do
 
         class FakeApplication
           def eager_load!
-            raise NameError, 'uninitialized constant Foo (fake)' if ENV['FAKE_EAGER_LOAD_RAISES']
+            if ENV['FAKE_EAGER_LOAD_RAISES']
+              raise NameError, ENV.fetch('FAKE_EAGER_LOAD_MESSAGE', 'uninitialized constant Foo (fake)')
+            end
           end
         end
 
@@ -138,6 +140,16 @@ RSpec.describe 'exe/woods-console boot sequence' do
     expect(stderr).to include('Continuing with a possibly incomplete model registry')
     # The server still boots and opens the transport — it isn't a crash.
     expect(stderr).to include('transport opened')
+  end
+
+  it 'scans the eager_load! failure message before printing it' do
+    credential = 'sk_test_abcdefghijklmnopqrstuvwxyz'
+    _stdout, stderr, status = run_fake_boot('FAKE_EAGER_LOAD_RAISES' => '1',
+                                            'FAKE_EAGER_LOAD_MESSAGE' => "uninitialized constant #{credential}")
+
+    expect(status).to be_success
+    expect(stderr).to include('[Woods Console] eager_load! hit NameError: uninitialized constant [REDACTED]')
+    expect(stderr).not_to include(credential)
   end
 
   it 'warns when console_blocked_tables is empty outside production' do

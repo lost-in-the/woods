@@ -613,7 +613,12 @@ The scanner runs after Layer 3 redaction, so it catches credential shapes that c
 
 Scanner hits emit a `console.credential_scan.hits` warn-level structured log line with per-pattern counts, so you can audit how often the net fires in practice. Prefer fixing the upstream cause (moving the secret out of the leaking column) over disabling a rule, per-pattern opt-outs are an escape hatch, not a primary knob.
 
-Setting `console_disabled_scanner_patterns = %i[all]` disables the entire scanner. No layer-2 processing runs. Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire. Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the threat model; prefer a per-pattern opt-out otherwise.
+Setting `console_disabled_scanner_patterns = %i[all]` disables the response scanner.
+No layer-2 response processing runs.
+Layer 3 (column + EAV redaction) and Layer 4 (SqlValidator + SafeContext) continue to fire.
+Diagnostic logs keep their own scanning (see [Diagnostic log protection](#diagnostic-log-protection)).
+Use this only when the pattern scanner interferes with a legitimate workflow and the remaining layers cover the
+threat model; prefer a per-pattern opt-out otherwise.
 
 ### `console_credential_defense_enabled` (boot-time credential index)
 
@@ -632,7 +637,17 @@ Woods::Console::Server.rebuild_credential_index(rails_app: Rails.application)
 
 This reads a fresh encrypted-file and key snapshot, without changing Rails' cached application credentials, and replaces the index in every live embedded Console server in this process. Each response scan keeps one complete index; a rotation cannot change its index halfway through a response. Servers released by their transports are not retained by this registry. A later server construction also reads fresh credentials.
 
-A refresh failure (including missing files or keys, failed decryption, and invalid YAML) raises and leaves every existing index intact. Treat a failed rebuild as an operational failure: resolve the credentials deployment and retry, or restart after verification. A valid empty credential mapping intentionally clears the index. A successful rebuild replaces the old set rather than retaining removed secret values. Custom `rails_app:` collaborators that expose `credentials.config` remain supported; those collaborators own freshness of their returned config.
+A refresh failure (including missing files or keys, failed decryption, and invalid YAML) raises and leaves every
+existing index intact.
+Treat a failed rebuild as an operational failure: resolve the credentials deployment and retry, or restart after
+verification.
+A successful rebuild with a changed snapshot keeps the current and the immediately preceding credential sets.
+The preceding set is discarded on the next changed snapshot.
+Refreshing an unchanged snapshot does not advance that window.
+An empty mapping is a new current set, and the preceding set is kept for one rotation.
+A restarted process starts with only the credentials available then.
+Custom `rails_app:` collaborators that expose `credentials.config` remain supported; those collaborators own
+freshness of their returned config.
 
 The method is a no-op (returns `nil`) when no live scanner remains or when `console_credential_defense_enabled` is `false`. Normal server boot still permits unavailable credentials and falls back to the other configured defenses; this permissive boot behavior does not apply to an explicit rebuild.
 
@@ -647,6 +662,32 @@ config.console_credential_rotation_warning = false
 **Missing master key.** In environments without `config/master.key` (CI, fresh checkouts), the index build catches `MissingKeyError` / `InvalidMessage` by class name and returns an empty index. The server still boots and the configured table, scanner, and redaction layers remain in effect.
 
 Set the flag to `false` only when the host intentionally opts out of exact-value credential indexing and the remaining scanner/redaction layers cover its response data.
+
+### Diagnostic log protection
+
+Woods scans every field it writes to a Console diagnostic log before writing it.
+The scan uses the credential patterns and the active credential index.
+This covers executor errors, unexpected dispatch failures, table-gate refusals, skipped model introspection and a
+failed eager load, on stdio and HTTP.
+
+- A field over 8 KiB is replaced whole by `[DIAGNOSTIC_OMITTED: message exceeds 8192 bytes]`.
+  No unscanned prefix is logged.
+- A field that cannot be scanned (invalid encoding, or a scanner error) is logged as `[REDACTION_FAILED]`.
+- A scanning failure never ends the request. The client sees the same error wording as before.
+- A skipped model is logged at `warn`, and the other models stay available.
+- Timeout and structured-logger failure warnings name the error class only, not its message.
+
+`Server.rebuild_credential_index` refreshes the diagnostic scanners as well as the response scanners.
+A removed credential stays protected for one rotation, until the next changed credential snapshot.
+A scanner created after a refresh joins that window when its freshly read credential set matches the current set.
+A different set advances the shared window only through an explicit, successful rebuild.
+Values two rotations back are no longer held; use column or key/value redaction where old records keep them.
+
+Diagnostic pattern scanning stays on when response patterns are disabled.
+Turning off `console_credential_defense_enabled` also turns off the credential index for diagnostics.
+
+This protects the logs Woods writes, not application loggers, Active Record SQL logging, database logs or
+third-party middleware. Those need their own logging policy.
 
 ### `console_redacted_columns`
 
