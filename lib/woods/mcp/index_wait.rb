@@ -53,6 +53,11 @@ module Woods
       # The one tool that answers while waiting.
       STATUS_TOOL = 'woods_status'
 
+      # Tools whose handlers judge the generation they report themselves:
+      # `woods_status` reports a refusal, and `reload` judges the generation
+      # it adopted, inside its own lock ({#mismatch_in}).
+      SELF_JUDGING_TOOLS = [STATUS_TOOL, 'reload'].freeze
+
       # @param env [Hash]
       # @return [Boolean]
       def self.requested?(env = ENV)
@@ -98,11 +103,28 @@ module Woods
       #
       # @param reader [IndexReader] the server's launch reader
       # @return [String, nil] the refusal message, or nil to serve it
-      def mismatch_for(reader)
-        reader.with_pinned_generation do
-          identity = ServedIdentity.pinned(@index_dir, reader: reader, manifest: pinned_manifest(reader))
-          identity.refusal_message if identity.client_matches == false && !ServedIdentity.allow_mismatch?
-        end
+      def mismatch_for(reader = @reader)
+        reader.with_pinned_generation { mismatch_in(reader, pinned_manifest(reader)) }
+      end
+
+      # {#mismatch_for} for a caller that already holds the generation lock
+      # and the manifest it read under it.
+      #
+      # @param reader [IndexReader]
+      # @param manifest [Hash, nil]
+      # @return [String, nil]
+      def mismatch_in(reader, manifest)
+        identity = ServedIdentity.pinned(@index_dir, reader: reader, manifest: manifest)
+        identity.refusal_message if identity.client_matches == false && !ServedIdentity.allow_mismatch?
+      end
+
+      # Whether +reader+ reads the index this server waits on: a call routed
+      # with a `root` that resolves to the launch index reads it too.
+      #
+      # @param reader [Object]
+      # @return [Boolean]
+      def launch_reader?(reader)
+        reader.equal?(@reader)
       end
 
       # Capabilities startup could not wire that the index directory now
@@ -122,15 +144,22 @@ module Woods
       end
 
       # @param tool [String]
-      # @param message [String] from {#mismatch}
-      # @return [Hash] a serialized, non-retryable tool result
-      def mismatch_response(tool, message)
+      # @param message [String] from {#mismatch_for}
+      # @return [MCP::Tool::Response] non-retryable
+      def mismatch_tool_response(tool, message)
         ::MCP::Tool::Response.new(
           [{ type: 'text', text: message }], error: true,
                                              structured_content: { text: message },
                                              meta: { error_code: :index_checkout_mismatch, retryable: false,
                                                      tool: tool }
-        ).to_h
+        )
+      end
+
+      # @param tool [String]
+      # @param message [String]
+      # @return [Hash] {#mismatch_tool_response}, serialized
+      def mismatch_response(tool, message)
+        mismatch_tool_response(tool, message).to_h
       end
 
       # The `index` section of `woods_status` while waiting.
@@ -216,24 +245,27 @@ module Woods
       end
 
       # Prepended inside the generation pin (see {Server.build}), so a call
-      # is judged against the generation it reads. Routed calls describe
-      # another worktree and are not judged against this one.
+      # is judged against the generation it reads. The judgment follows the
+      # reader: a call routed with a `root` that resolves to the launch index
+      # is judged too; a route to another worktree's index is not.
       module Judge
         private
 
         def call_tool(request, **)
           wait = @woods_index_wait
           name = request[:name]
-          return super if wait.nil? || name == STATUS_TOOL || !tools.key?(name) ||
-                          Thread.current[WorktreeRouting::THREAD_KEY]
+          return super if wait.nil? || SELF_JUDGING_TOOLS.include?(name) || !tools.key?(name)
 
-          refusal = wait.mismatch_for(@woods_index_reader)
+          route = Thread.current[WorktreeRouting::THREAD_KEY]
+          return super if route && !wait.launch_reader?(route.reader)
+
+          refusal = wait.mismatch_for
           refusal ? wait.mismatch_response(name, refusal) : super
         end
 
         def read_resource_contents(request, **)
           wait = @woods_index_wait
-          refusal = wait&.mismatch_for(@woods_index_reader)
+          refusal = wait&.mismatch_for
           return super unless refusal
 
           IndexWait.refuse_resource(request, refusal, 'index_checkout_mismatch', retryable: false)

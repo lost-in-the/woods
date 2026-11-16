@@ -1372,6 +1372,9 @@ module Woods
                          'the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
+            # An awaiting server judges the generation the reload adopted
+            # before the answer describes it (see IndexWait).
+            index_wait = server.instance_variable_get(:@woods_index_wait)
             if retriever_reloader
               counts = begin
                 retriever_reloader.call(reader)
@@ -1411,17 +1414,26 @@ module Woods
                 )
               end
 
-              manifest = reader.manifest
-              payload = {
-                reloaded: true,
-                extracted_at: manifest['extracted_at'],
-                total_units: manifest['total_units'],
-                counts: manifest['counts'],
-                retriever: counts
-              }
-              respond.call(JSON.pretty_generate(payload))
+              # Pinned, so the generation judged is the one the answer describes.
+              reader.with_pinned_generation do
+                manifest = reader.manifest
+                refusal = index_wait&.mismatch_in(reader, manifest)
+                next index_wait.mismatch_tool_response('reload', refusal) if refusal
+
+                payload = {
+                  reloaded: true,
+                  extracted_at: manifest['extracted_at'],
+                  total_units: manifest['total_units'],
+                  counts: manifest['counts'],
+                  retriever: counts
+                }
+                respond.call(JSON.pretty_generate(payload))
+              end
             else
               reader.with_exclusive_reload do |manifest|
+                refusal = index_wait&.mismatch_in(reader, manifest)
+                next index_wait.mismatch_tool_response('reload', refusal) if refusal
+
                 payload = {
                   reloaded: true,
                   extracted_at: manifest['extracted_at'],
@@ -2803,7 +2815,8 @@ module Woods
             } }
           ) do |server_context:, source_check: 'quick', worktrees: 'summary'|
             _ = server_context
-            wait = index_wait unless Thread.current[WorktreeRouting::THREAD_KEY]
+            route = Thread.current[WorktreeRouting::THREAD_KEY]
+            wait = index_wait if index_wait && (route.nil? || index_wait.launch_reader?(route.reader))
             status = if wait&.phase == :building
                        Woods::MCP::Server.awaiting_status(wait, retriever, router.current_index_dir, bootstrap_state)
                      else

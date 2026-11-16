@@ -3,12 +3,14 @@
 require 'spec_helper'
 require 'fileutils'
 require 'json'
+require 'open3'
 require 'timeout'
 require 'tmpdir'
 require 'mcp'
 require 'woods'
 require 'woods/mcp/server'
 require 'woods/mcp/bootstrapper'
+require_relative '../support/quiet_git'
 
 # What an awaiting server does once something appears in the directory it
 # waits on: the checkout check a strict launch makes, a damaged marker, and
@@ -162,6 +164,108 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
       publish(2, root: @main)
 
       expect_refused(call(server, 'lookup', identifier: 'Post'))
+    end
+  end
+
+  describe 'the checkout check and reload' do
+    def expect_refused_without_manifest(result)
+      expect(result['isError']).to be(true)
+      expect(result.dig('_meta', 'error_code')).to eq('index_checkout_mismatch')
+      expect(result.dig('content', 0, 'text')).not_to include('extracted_at', 'total_units')
+    end
+
+    it 'judges the generation reload adopted, not the one checked before it ran' do
+      server = build
+      publish(8, root: @topic)
+      reader = server.instance_variable_get(:@woods_index_reader)
+      allow(reader).to receive(:with_exclusive_reload).and_wrap_original do |original, &block|
+        publish(9, root: @main)
+        original.call(&block)
+      end
+
+      expect_refused_without_manifest(call(server, 'reload'))
+    end
+
+    it 'judges what a store reloader left published' do
+      reloader = lambda do |_reader|
+        publish(9, root: @main)
+        {}
+      end
+      server = build(retriever_reloader: reloader)
+      publish(8, root: @topic)
+
+      expect_refused_without_manifest(call(server, 'reload'))
+    end
+
+    it 'still answers reload with the adopted generation when it records the client checkout' do
+      server = build
+      publish(8, root: @topic)
+
+      answer = call(server, 'reload')
+
+      expect(answer['isError']).to be(false)
+      expect(JSON.parse(answer.dig('content', 0, 'text'))).to include('reloaded' => true)
+    end
+  end
+
+  describe 'a routed root that resolves to the launch index' do
+    def git(dir, *args)
+      output, outcome = Open3.capture2e('git', '-C', dir, *args)
+      raise "git #{args.join(' ')} failed: #{output}" unless outcome.success?
+
+      output
+    end
+
+    def repository(topic_path)
+      @main = File.join(@base, 'repo-main')
+      git(@base, 'init', '-q', '-b', 'main', @main)
+      QuietGit.configure(@main)
+      File.write(File.join(@main, 'README.md'), "hi\n")
+      git(@main, 'add', 'README.md')
+      git(@main, '-c', 'user.name=Spec', '-c', 'user.email=spec@example.com', '-c', 'commit.gpgsign=false',
+          'commit', '-q', '-m', 'init')
+      @topic = topic_path.call(@main)
+      git(@main, 'worktree', 'add', '-q', '-b', 'topic', @topic)
+      @topic = File.realpath(@topic)
+      @index = File.join(@topic, 'tmp', 'woods')
+      publish(1, root: @main, index: File.join(@main, 'tmp', 'woods'))
+      publish(1, root: @main)
+    end
+
+    {
+      'a sibling worktree' => ->(main) { File.join(File.dirname(main), 'repo-topic') },
+      'a worktree nested under main' => ->(main) { File.join(main, 'worktrees', 'topic') }
+    }.each do |shape, topic_path|
+      it "refuses a call routed to the client's own checkout as it refuses it unrouted, in #{shape}" do
+        repository(topic_path)
+        server = build
+
+        unrouted = call(server, 'lookup', identifier: 'Post')
+        routed = call(server, 'lookup', identifier: 'Post', root: @topic)
+        report = status_for(server, root: @topic)
+
+        [unrouted, routed].each do |result|
+          expect(result['isError']).to be(true)
+          expect(result.dig('_meta', 'error_code')).to eq('index_checkout_mismatch')
+        end
+        expect(report.fetch('refusal')).to include('error_code' => 'index_checkout_mismatch')
+      end
+
+      it "still serves a call routed to main from main's own index, in #{shape}" do
+        repository(topic_path)
+        server = build
+
+        routed = call(server, 'lookup', identifier: 'Post', root: @main)
+        report = status_for(server, root: @main)
+
+        expect(routed['isError']).to be(false), routed.dig('content', 0, 'text')
+        expect(report).not_to have_key('refusal')
+        expect(report.dig('server', 'index_dir')).to eq(File.join(@main, 'tmp', 'woods'))
+      end
+    end
+
+    def status_for(server, root:)
+      JSON.parse(call(server, 'woods_status', worktrees: 'none', root: root).dig('content', 0, 'text'))
     end
   end
 
