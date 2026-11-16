@@ -71,6 +71,16 @@ module PendingPolicy
        'draw files need Rails 6.1',
        -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('6.1') }]
     end,
+    # Before Rails 7.2 Active Record's own schema reads lease the model's
+    # connection to the calling thread, so the 6.0 to 7.1 booted rows cannot
+    # show a one-connection pool going back after a models pass.
+    *['leaves no second-database connection leased to the thread that extracted its models',
+      'publishes the second database tables and foreign keys from a concurrent run on a one-connection pool']
+      .map do |description|
+      ['spec/integration/multi_database_extraction_spec.rb', "Booted multi-database extraction #{description}",
+       'Active Record before 7.2 leases connections in its own schema reads',
+       -> { (spec = Gem.loaded_specs['activerecord']) && spec.version < Gem::Version.new('7.2') }]
+    end,
     # The real-git example needs a machine whose git predates 2.31; CI images
     # carry a newer one, where the stubbed-version examples cover the notice.
     ['spec/integration/git_version_notice_spec.rb',
