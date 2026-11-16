@@ -282,6 +282,36 @@ RSpec.describe 'Concurrent extraction across database pools', :booted_app do
     expect(generation_state(dir)).to eq(before)
   end
 
+  # The model's schema header reads indexes and foreign keys through its own pool.
+  def refuses_models_when_billing(reader, error)
+    Woods.configuration.concurrent_extraction = false
+    dir = output_dir("model-#{reader}-fails")
+    Woods::Extractor.new(output_dir: dir).extract_all
+    before = generation_state(dir)
+    fail_on_invoices(reader, error)
+
+    expect { Woods::Extractor.new(output_dir: dir).extract_all }
+      .to raise_error(Woods::ExtractionError, /Database reads failed for .*\bmodels\b/)
+    expect(generation_state(dir)).to eq(before)
+  end
+
+  def fail_on_invoices(reader, error)
+    connection = BillingRecord.connection_pool.with_connection { |held| held }
+    allow(connection).to receive(reader).and_wrap_original do |original, name, *args|
+      raise error if name.to_s == 'invoices'
+
+      original.call(name, *args)
+    end
+  end
+
+  it "refuses a full run when the database refuses a model's index read" do
+    refuses_models_when_billing(:indexes, ActiveRecord::StatementInvalid.new('permission denied'))
+  end
+
+  it "refuses a full run when a model's foreign key read times out on a pool that answered" do
+    refuses_models_when_billing(:foreign_keys, ActiveRecord::ConnectionTimeoutError.new('no connection'))
+  end
+
   it 'refuses a full run when listing the second database raises' do
     dir = output_dir('listing-raises')
     Woods::Extractor.new(output_dir: dir).extract_all

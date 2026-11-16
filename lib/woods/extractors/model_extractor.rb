@@ -232,7 +232,7 @@ module Woods
 
       # @return [Array<String>, nil] nil when the indexes could not be read
       def format_indexes_comment(model)
-        read_table_schema(model, :indexes).map do |idx|
+        read_table_schema(model, :indexes)&.map do |idx|
           unique = idx.unique ? ' (unique)' : ''
           "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
         end
@@ -260,7 +260,8 @@ module Woods
         return [] unless model.table_exists?
 
         read_table_schema(model, :foreign_keys)
-      rescue StandardError
+      rescue StandardError => e
+        log_schema_read_failure(model, "Failed to check the table of #{model.name}: #{e.message}")
         nil
       end
 
@@ -273,9 +274,31 @@ module Woods
       #
       # @param model [Class]
       # @param kind [Symbol] +:indexes+ or +:foreign_keys+
-      # @return [Array] what the connection returns for the table
+      # @return [Array, nil] what the connection returns for the table; nil
+      #   when the read failed, which {#log_schema_read_failure} records
       def read_table_schema(model, kind)
         model.connection_pool.with_connection { |connection| connection.public_send(kind, model.table_name) }
+      rescue StandardError => e
+        log_schema_read_failure(model, "Failed to read #{kind} for #{model.name}: #{e.message}")
+        nil
+      end
+
+      # Record the schema read being rescued against the model's own pool,
+      # the one the read used, so a full run refuses a read that failed on
+      # a database it otherwise read ({SourceInputs::ConsumerErrors.schema_failed?}).
+      #
+      # @param model [Class]
+      # @param message [String]
+      # @return [void]
+      def log_schema_read_failure(model, message)
+        SourceInputs::ConsumerErrors.log(self, message, pool: model_pool(model))
+      end
+
+      # @return [Object, nil] the model's connection pool, nil when it has none
+      def model_pool(model)
+        model.connection_pool
+      rescue StandardError
+        nil
       end
 
       # Read model source and inline all included concerns.

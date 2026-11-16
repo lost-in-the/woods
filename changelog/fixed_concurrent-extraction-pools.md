@@ -6,6 +6,7 @@
   A full run now refuses when a schema read fails on a database the same run could otherwise read.
   That is a checkout timeout or a failed connection on a pool that answered another of the run's queries.
   A refused statement counts too.
+  So do the index and foreign key reads for a model's schema header, which still show as unknown.
   It raises `Woods::ExtractionError` naming the extractors, and the previous generation stays active.
   A database no read in the run reaches is published and warned about, as before.
   That covers no connection, no database, and a pool held elsewhere for the whole run.
