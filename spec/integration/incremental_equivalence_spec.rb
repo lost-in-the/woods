@@ -356,10 +356,59 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   # ── Index comparison ─────────────────────────────────────────────────────
   #
-  # {IndexComparison} owns the definition of "the two indexes agree", and
-  # documents the only three differences it tolerates.
+  # {IndexComparison} owns the definition of "the two indexes agree": every
+  # difference it tolerates is a row of IndexComparison::MASKS.
 
   include IndexComparison
+
+  # Every example below trusts the comparison. These prove, on a real index
+  # with Git facts and flows, that it reports a one-value change anywhere the
+  # mask table does not cover, and nothing inside a mask.
+  describe 'the comparison itself' do
+    around do |example|
+      Woods.configuration.precompute_flows = true
+      example.run
+    ensure
+      Woods.configuration.precompute_flows = false
+      FileUtils.rm_rf(app_path('.git'))
+    end
+
+    def reference_index
+      git = ->(*args) { Open3.capture2e({ 'GIT_CONFIG_GLOBAL' => File::NULL }, 'git', '-C', @app_root, *args) }
+      [%w[init], ['config', 'user.name', 'Woods test'], %w[config user.email woods-test@example.invalid],
+       %w[config commit.gpgsign false], %w[add .], %w[commit -m baseline]].each do |args|
+        output, status = git.call(*args)
+        raise "git #{args.first} failed: #{output}" unless status.success?
+      end
+      full_extraction
+    end
+
+    def self_check(reference)
+      scratch = Dir.mktmpdir('woods_diff_self_check')
+      (@scratch_dirs ||= []) << scratch
+      IndexComparison::SelfCheck.new(reference, scratch, seed: Integer(ENV.fetch('WOODS_DIFF_MASK_SEED', '1')))
+    end
+
+    it 'reports a one-value change in every compared artifact, and none inside a declared mask' do
+      check = self_check(reference_index)
+      warn("Comparison self-check probes:\n  #{check.probes.join("\n  ")}") if ENV['WOODS_DIFF_MASKS'] == '1'
+
+      expect(check.unclaimed_files).to be_empty
+      expect(check.uncovered_artifacts).to be_empty
+      expect(check.unexercised_masks).to be_empty
+      expect(check.failures).to be_empty, "#{check.failures.size} of #{check.probes.size} probes answered " \
+                                          "wrongly:\n  #{check.failures.join("\n  ")}"
+    end
+
+    it 'keeps every mask within its declared width' do
+      check = self_check(reference_index)
+      warn("Key mask shares: #{check.key_mask_shares.transform_values { |share| share.round(4) }}") if
+        ENV['WOODS_DIFF_MASKS'] == '1'
+
+      expect(check.key_mask_shares.values).to all(be > 0)
+      expect(check.budget_violations).to be_empty
+    end
+  end
 
   describe 'typed source collision publication (#561)' do
     before do
@@ -1366,9 +1415,9 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     def impact_tests(dir, **budget)
       report = Woods::Impact::Report.compare(dir, from: 'gen:1', to: 'now', depth: 1, **budget).to_h
-      [report.fetch('tests').map { |item| item.except('generation') },
+      [report.fetch('tests').map { |item| IndexComparison.mask(:impact_item_generation, item) },
        report.fetch('unknowns').select { |item| item['feature'] == 'related' || item['kind'].to_s.end_with?('budget') }
-             .map { |item| item.except('generation') }]
+             .map { |item| IndexComparison.mask(:impact_item_generation, item) }]
     end
 
     def mapped(view)
@@ -3578,6 +3627,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     it 'marks a cycle that lost Git as degraded, keeps the rest published, and is repaired by a full run' do
       index_dir = full_extraction
       healthy = summary(index_dir)
+      capture_masked = -> { mask(:manifest_git_capture, read_json(index_dir, 'manifest.json')).fetch('git_enrichment') }
+      healthy_masked = capture_masked.call
 
       make_git_unreachable
       path = write_file('app/services/ledger_service.rb', "#{service_source('LedgerService')}# edited\n")
@@ -3593,7 +3644,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
       restore_git
       Woods::Extractor.new(output_dir: index_dir).extract_all
-      expect(summary(index_dir)).to eq(healthy.merge('capture' => summary(index_dir)['capture']))
+      expect(capture_masked.call).to eq(healthy_masked)
       found = differences(index_dir, full_extraction)
       expect(found).to be_empty, found.join("\n")
 

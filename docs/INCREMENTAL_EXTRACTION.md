@@ -1015,8 +1015,9 @@ WOODS_RUN_BOOTED_APP=1 BUNDLE_GEMFILE=gemfiles/rails_8.0.gemfile \
 WOODS_DIFF_BRIEF=4000 ...
 ```
 
-Seeds are fixed, so a failure reproduces. `spec/support/index_comparison.rb`
-owns the definition of "the two indexes agree" and documents every exclusion.
+Seeds are fixed, so a failure reproduces.
+`IndexComparison::MASKS` declares every exclusion once with its reason; a self-check proves each is as wide as declared.
+`WOODS_DIFF_MASKS=1` prints the masks in effect on a green run too, and `WOODS_DIFF_MASK_SEED` reseeds the self-check.
 
 **Run it before and after any change to the incremental path.**
 
