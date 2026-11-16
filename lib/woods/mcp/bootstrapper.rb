@@ -823,7 +823,7 @@ module Woods
       rescue Woods::Error => e
         # One line: a PostgreSQL refusal carries a line per host it tried.
         raise BootstrapError.new(
-          "index stores could not be opened: #{e.message.gsub(/\s*\n\s*/, ' ').strip}",
+          "index stores could not be opened: #{e.message.split("\n").map(&:strip).reject(&:empty?).join(' ')}",
           details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
                                graph_store: config.graph_store } }
         ), cause: nil
