@@ -29,6 +29,17 @@ module Woods
       # Keys of an operation that hold the operations nested inside it.
       NESTED_KEYS = %i[nested then_ops else_ops].freeze
 
+      # Node types of a `super` call: explicit arguments, bare (Prism), and bare (parser gem).
+      SUPER_TYPES = %i[super forwarding_super zsuper].freeze
+
+      # @param super_calls [Boolean] mark each `super` call with a
+      #   `{ type: :super_call }` operation where Ruby makes it: after its
+      #   arguments, before its block, inside the branch or block that holds
+      #   it. Without it a `super` call is no operation.
+      def initialize(super_calls: false)
+        @super_calls = super_calls
+      end
+
       # Rewrite each operation's +line+, +statement_line+ and +file+, nested
       # operations included, from the lines its AST was parsed at.
       #
@@ -62,6 +73,7 @@ module Woods
       # Recursively walk the AST and extract operations.
       def walk(node, operations)
         return unless node.is_a?(Ast::Node)
+        return handle_super(node, nil, operations) if super_call?(node)
 
         case node.type
         when :block
@@ -98,11 +110,32 @@ module Woods
             **call_lines(send_child),
             nested: nested
           }
+        elsif super_call?(send_child)
+          # The parser gem wraps `super do ... end` the way it wraps a call.
+          handle_super(send_child, node.children.drop(1), operations)
         else
           # Non-transaction block: emit the send as a normal call, walk body
           handle_send(send_child, operations) if send_child.is_a?(Ast::Node) && send_child.type == :send
           node.children&.drop(1)&.each { |child| walk(child, operations) }
         end
+      end
+
+      def super_call?(node)
+        @super_calls && node.is_a?(Ast::Node) && SUPER_TYPES.include?(node.type)
+      end
+
+      # A `super` call evaluates its arguments, then calls the next
+      # definition, which runs any block it was given.
+      #
+      # @param node [Ast::Node] the `super` node
+      # @param block [Array<Ast::Node>, nil] the block body, when the parser
+      #   holds it outside +node+; otherwise read from +node+'s children
+      def handle_super(node, block, operations)
+        children = Array(node.children).grep(Ast::Node)
+        block ||= children.select { |child| child.type == :block_body }
+        (children - block).each { |child| walk(child, operations) }
+        operations << { type: :super_call, line: node.line }
+        block.each { |child| walk(child, operations) }
       end
 
       # Handle :send nodes - classify into operation types.

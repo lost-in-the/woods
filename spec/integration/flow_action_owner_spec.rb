@@ -16,6 +16,9 @@ require 'yaml'
 # `super` hop: past it (#index) it shows the call unresolved, never a guess.
 # Of two definitions on one line in one owner, the later is read (#summary,
 # #export); another owner's definition on that line is not (#preview).
+# Every super call continues where Ruby makes it: twice (#twice), before a
+# later statement on its line (#compact), and inside the branch or
+# transaction that holds it (#gated, #locked).
 RSpec.describe 'Request flow of the dispatched action body', :booted_app do
   actions = {
     'create' => { owner: 'ReplacedCreate', jobs: %w[ReplacedCreateJob] },
@@ -28,7 +31,11 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
                  flow_jobs: %w[OuterIndexJob InnerIndexJob], unfollowed_super: true },
     'summary' => { owner: 'ItemsController', jobs: %w[SecondSummaryJob] },
     'export' => { owner: 'ExportOverride', jobs: %w[SecondExportJob] },
-    'preview' => { owner: 'ItemsController', jobs: %w[LocalPreviewJob] }
+    'preview' => { owner: 'ItemsController', jobs: %w[LocalPreviewJob] },
+    'twice' => { owner: 'SuperCalls', jobs: %w[LocalTwiceJob BetweenJob LocalTwiceJob] },
+    'compact' => { owner: 'SuperCalls', jobs: %w[LocalCompactJob AfterCompactJob] },
+    'gated' => { owner: 'SuperCalls', jobs: %w[LocalGatedJob AfterGatedJob], held_by: 'conditional' },
+    'locked' => { owner: 'SuperCalls', jobs: %w[LocalLockedJob AfterLockedJob], held_by: 'transaction' }
   }
 
   before(:all) do
@@ -98,8 +105,21 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
     operations.any? { |op| op[:type] == :dynamic_dispatch && op[:method] == 'super' }
   end
 
+  # The jobs +operations+ enqueue, in order, nested operations included.
   def enqueued(operations)
-    operations.select { |op| (op['type'] || op[:type]).to_s == 'async' }.map { |op| op['target'] || op[:target] }
+    operations.flat_map do |op|
+      op = op.transform_keys(&:to_s)
+      next [op['target']] if op['type'].to_s == 'async'
+
+      enqueued(%w[nested then_ops else_ops].flat_map { |key| op[key] || [] })
+    end
+  end
+
+  # The type of the operation that holds every enqueued job, or nil when
+  # they are not all held by one operation.
+  def holder_type(operations)
+    holders = operations.reject { |op| enqueued([op]).empty? }
+    holders.one? ? holders.first.transform_keys(&:to_s)['type'].to_s : nil
   end
 
   actions.each do |action, expected|
@@ -115,6 +135,7 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
       expect(unfollowed_super?(operations)).to eq(expected.fetch(:unfollowed_super, false))
       expect(operations.first[:method]).to eq('load_item')
       expect(enqueued(entry_operations(precomputed_flow(action)))).to eq(enqueued(operations))
+      expect(holder_type(operations)).to eq(expected[:held_by]) if expected[:held_by]
     end
   end
 end

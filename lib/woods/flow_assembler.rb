@@ -34,9 +34,6 @@ module Woods
     # index in memory.
     MEMO_LIMIT = 1_000
 
-    # Node types of a `super` call: explicit arguments, bare (Prism), and bare (parser gem).
-    SUPER_TYPES = %i[super forwarding_super zsuper].freeze
-
     # A call target that can name a unit: a constant, or a `::`-joined
     # constant chain. A lowercase receiver is a local, a method, or an ivar;
     # resolving it by name matched FactoryBot factories (`widget`, `order`),
@@ -148,6 +145,7 @@ module Woods
       @top_level_constants = top_level_constants&.to_set(&:to_s)
       @parser = Ast::Parser.new
       @operation_extractor = FlowAnalysis::OperationExtractor.new
+      @body_extractor = FlowAnalysis::OperationExtractor.new(super_calls: true)
       @resolved_targets = {}
       @unit_cache = {}
       @ast_cache = {}
@@ -430,19 +428,29 @@ module Woods
       node && [node, holder]
     end
 
-    # A body's operations with, at its first `super` call, +continuation+
-    # (the next body's operations) or, without one, {#unfollowed_super}.
+    # A body's operations with, at each `super` call, +continuation+ (the
+    # next body's operations) or, without one, {#unfollowed_super}. Each
+    # call is replaced where the extractor met it, so the continuation sits
+    # inside the branch or transaction that holds the call, and in statement
+    # order among operations on the same line.
     #
     # @return [Array<Hash>] located operations
     def body_operations(node, holder, continuation)
-      operations = locate(@operation_extractor.extract(node), holder)
-      calls = SUPER_TYPES.flat_map { |type| node.find_all(type) }
-      return operations if calls.empty?
+      continue_at_super(locate(@body_extractor.extract(node), holder), continuation, holder)
+    end
 
-      first = calls.filter_map(&:line).min
-      line = first && SourceLineMap.translate((holder[:metadata] || {})[:source_line_map], first)
-      before, after = line ? operations.partition { |op| op[:line].nil? || op[:line] <= line } : [operations, []]
-      before + (continuation || [unfollowed_super(line, holder)]) + after
+    # @return [Array<Hash>] +operations+ with each `:super_call` marker replaced
+    def continue_at_super(operations, continuation, holder)
+      operations.flat_map do |operation|
+        if operation[:type] == :super_call
+          next continuation ? Marshal.load(Marshal.dump(continuation)) : [unfollowed_super(operation[:line], holder)]
+        end
+
+        FlowAnalysis::OperationExtractor::NESTED_KEYS.each do |key|
+          operation[key] = continue_at_super(operation[key], continuation, holder) if operation[key]
+        end
+        [operation]
+      end
     end
 
     # A `super` call the flow does not follow, in the vocabulary of a call it

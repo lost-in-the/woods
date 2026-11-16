@@ -6,5 +6,9 @@ Rails.application.routes.draw do
     get :summary, on: :collection
     get :export, on: :collection
     get :preview, on: :collection
+    get :twice, on: :collection
+    get :compact, on: :collection
+    get :gated, on: :collection
+    get :locked, on: :collection
   end
 end

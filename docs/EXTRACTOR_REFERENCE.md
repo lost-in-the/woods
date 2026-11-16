@@ -465,7 +465,9 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
   - A body is the last definition its recorded `owner` holds on the recorded `line`, so a later definition wins,
     even on the same line. A definition another owner (a nested module) holds on that line is not read.
   - An action whose body no indexed unit holds has no body in its flow, only its filters.
-  - A body that calls `super` continues there into the definition `super_source` names.
+  - Each `super` call in a body continues, where Ruby makes it, into the definition `super_source` names.
+    It sits in statement order, inside the branch or transaction that holds the call.
+    Operations of a block passed to `super` follow it, though they run only if that definition yields.
     That entry key records the next definition Ruby looks up (`super_method`, one hop): `owner`, `defined_in`,
     `file` and `line`, with `defined_in`, `file` and `line` nil when its body is not application source.
     The key is absent when Ruby has no next definition.

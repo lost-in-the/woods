@@ -429,6 +429,10 @@ RSpec.describe Woods::FlowAssembler do
             end
             def summary; FirstSummary.run!; end; def summary; SecondSummary.run!; end
             def preview; LocalPreview.run!; end; module Extra; def preview; ExtraPreview.run!; end; end
+            def twice; LocalTwice.run!; end
+            def compact; LocalCompact.run!; end
+            def gated; LocalGated.run!; end
+            def locked; LocalLocked.run!; end
           end
         RUBY
       end
@@ -471,6 +475,24 @@ RSpec.describe Woods::FlowAssembler do
               super
             end
             def export; FirstExport.run!; end; def export; SecondExport.run!; end
+            def twice
+              super
+              Between.run!
+              super
+            end
+            def compact; super; AfterCompact.run!; end
+            def gated
+              if Gate.open?
+                super
+                AfterGated.run!
+              end
+            end
+            def locked
+              Report.transaction do
+                super
+                AfterLocked.run!
+              end
+            end
           end
         RUBY
         write_unit('InnerReport', type: 'concern', source_code: <<~RUBY)
@@ -539,6 +561,60 @@ RSpec.describe Woods::FlowAssembler do
         write_receiver('archive' => source('ReplacedReport', 12, super_source: base))
 
         expect(targets_for('ReportsController#archive')).to eq(%w[load_report ReplacedArchive BaseArchive])
+      end
+
+      # Each operation as its target, and each container as its type with
+      # the shape of the operations it holds.
+      def shape_for(entry_point)
+        shape = lambda do |operations|
+          operations.map do |op|
+            held = Woods::FlowAnalysis::OperationExtractor::NESTED_KEYS.filter_map { |key| op[key] }
+            held.empty? ? op[:target] || op[:method] : [op[:type].to_s, *held.map(&shape)]
+          end
+        end
+        shape.call(described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                  .assemble(entry_point).steps[0][:operations])
+      end
+
+      # Ruby runs the next definition at every `super` call, in statement
+      # order, inside whatever branch or block holds the call.
+      it 'continues at each of two super calls, in order around the operation between them' do
+        write_receiver('twice' => source('ReplacedReport', 22, super_source: source('ReportsController', 26)))
+
+        expect(targets_for('ReportsController#twice')).to eq(%w[load_report LocalTwice Between LocalTwice])
+      end
+
+      it 'marks each of two super calls when the index records no next definition' do
+        write_receiver('twice' => source('ReplacedReport', 22))
+
+        expect(targets_for('ReportsController#twice')).to eq(%w[load_report super Between super])
+      end
+
+      it 'continues before an operation that follows super on the same line' do
+        write_receiver('compact' => source('ReplacedReport', 27, super_source: source('ReportsController', 27)))
+
+        expect(targets_for('ReportsController#compact')).to eq(%w[load_report LocalCompact AfterCompact])
+      end
+
+      it 'continues inside the branch that calls super' do
+        write_receiver('gated' => source('ReplacedReport', 28, super_source: source('ReportsController', 28)))
+
+        expect(shape_for('ReportsController#gated'))
+          .to eq(['load_report', 'Gate', ['conditional', %w[LocalGated AfterGated], []]])
+      end
+
+      it 'marks an unfollowed super inside the branch that calls it' do
+        write_receiver('gated' => source('ReplacedReport', 28))
+
+        expect(shape_for('ReportsController#gated'))
+          .to eq(['load_report', 'Gate', ['conditional', %w[super AfterGated], []]])
+      end
+
+      it 'continues inside the transaction block that calls super' do
+        write_receiver('locked' => source('ReplacedReport', 34, super_source: source('ReportsController', 29)))
+
+        expect(shape_for('ReportsController#locked'))
+          .to eq(['load_report', ['transaction', %w[LocalLocked AfterLocked]]])
       end
 
       it 'stops at super and marks it when the index records no next definition' do

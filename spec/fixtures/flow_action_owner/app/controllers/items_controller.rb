@@ -12,6 +12,7 @@ class ItemsController < ApplicationController
   prepend OuterIndex
   prepend PrependedArchive
   prepend ExportOverride
+  prepend SuperCalls
 
   before_action :load_item
 
@@ -55,7 +56,27 @@ class ItemsController < ApplicationController
   # rubocop:disable-next Style/SingleLineMethods, Style/Semicolon
   def preview; LocalPreviewJob.perform_later; end; module Extra; def preview; ExtraPreviewJob.perform_later; end; end
 
+  def twice
+    LocalTwiceJob.perform_later
+  end
+
+  def compact
+    LocalCompactJob.perform_later
+  end
+
+  def gated
+    LocalGatedJob.perform_later
+  end
+
+  def locked
+    LocalLockedJob.perform_later
+  end
+
   private
+
+  def gate_open?
+    true
+  end
 
   def load_item; end
 end
