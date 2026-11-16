@@ -11,11 +11,12 @@ module Woods
   # application. This summary says so, so readers can warn instead.
   #
   # State:
-  # - `readable`: every database a concrete model reads was listed and holds
-  #   at least one table or view.
+  # - `readable`: every writable database was listed, and each one a concrete
+  #   model reads holds at least one table or view.
   # - `unreadable`: at least one database is `unreachable` (listing raised) or
-  #   `empty` (it holds only the Rails bookkeeping tables).
-  # - `not_applicable`: no concrete model reads a database (no Active Record).
+  #   `empty` (a modeled database holding only the Rails bookkeeping tables).
+  # - `not_applicable`: there is no database to ask (no Active Record, or no
+  #   configured connection).
   # - `unknown`: the manifest predates the summary. Never warned about.
   #
   # Database configuration names and states only: a connection error can

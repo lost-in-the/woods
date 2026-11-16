@@ -45,6 +45,8 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     # shares the primary connection except inside that example.
     Object.const_set(:SchemaProbeRecord, Class.new(ActiveRecord::Base) { self.abstract_class = true })
     Object.const_set(:SchemaProbeLedger, Class.new(SchemaProbeRecord) { self.table_name = 'ledgers' })
+    # A connection that owns SQL-only tables and no model, as a reporting database does.
+    Object.const_set(:SchemaProbeReportingRecord, Class.new(ActiveRecord::Base) { self.abstract_class = true })
 
     require 'woods'
     require 'woods/extractor'
@@ -178,7 +180,7 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     expect(model_unit(index, 'Comment').dig('metadata', 'table_exists')).to be(false)
   end
 
-  it "asks no database on behalf of the framework's own models, so an app without models is not warned" do
+  it "asks only whether the database answers for the framework's own models, so an app without models is not warned" do
     connect(fresh_database('framework-only'))
     # Before Rails 7.1 the migration bookkeeping classes are Active Record models.
     bookkeeping_models = ActiveRecord::SchemaMigration < ActiveRecord::Base
@@ -187,8 +189,63 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     end
     expect(framework).to include(ActiveRecord::SchemaMigration) if bookkeeping_models
 
-    expect(Woods::Extractors::TableCatalog.schema_readability(connection_classes: [ActiveRecord::Base, *framework]))
-      .to eq([])
+    expect(Woods::Extractors::TableCatalog.schema_readability(connection_classes: [ActiveRecord::Base, *framework])
+                                          .map { |database| database[:state] }).to all(eq('readable'))
+  end
+
+  describe 'a database that owns SQL-only tables and no model' do
+    let(:named) { ActiveRecord::ConnectionAdapters::ConnectionPool.method_defined?(:db_config) }
+
+    after { SchemaProbeReportingRecord.remove_connection }
+
+    def connect_reporting(database, tables: [])
+      settings = { adapter: 'sqlite3', database: database }
+      SchemaProbeReportingRecord.establish_connection(
+        named ? ActiveRecord::DatabaseConfigurations::HashConfig.new('test', 'reporting', settings) : settings
+      )
+      tables.each { |table| SchemaProbeReportingRecord.connection.create_table(table, force: true) }
+    end
+
+    it 'is reported unreachable beside a healthy modeled database' do
+      connect(fresh_database('modeled'), tables: %i[posts comments])
+      connect_reporting(missing_database)
+
+      index = extract
+      summary = manifest(index).fetch('schema_readability')
+
+      expect(summary['state']).to eq('unreadable')
+      expect(summary['databases'].map { |database| database['state'] }).to contain_exactly('unreachable', 'readable')
+      if named
+        expect(summary['databases']).to contain_exactly(
+          a_hash_including('name' => 'reporting', 'state' => 'unreachable'),
+          a_hash_including('name' => 'primary', 'state' => 'readable')
+        )
+      end
+      expect(validation(index).warnings).to include(a_string_including('could not connect'))
+    end
+
+    it 'is readable without a warning when it answers and holds no tables' do
+      connect(fresh_database('modeled'), tables: %i[posts comments])
+      connect_reporting(fresh_database('reporting-empty'))
+
+      index = extract
+
+      expect(schema_states(index)).to eq(['readable', %w[readable readable]])
+      expect(validation(index).warnings.grep(/database schema/)).to be_empty
+    end
+
+    it 'stops a refresh of the table units once it stops answering' do
+      connect(fresh_database('modeled'), tables: %i[posts comments])
+      connect_reporting(fresh_database('reporting-live'), tables: %i[report_rows])
+      index = extract
+      marker = File.binread(File.join(index, Woods::Generation::FILENAME))
+      SchemaProbeReportingRecord.remove_connection
+      connect_reporting(missing_database)
+
+      expect { Woods::Extractor.new(output_dir: index).refresh(:database_tables) }
+        .to raise_error(Woods::ExtractionError, /cannot be read now \(.*could not connect\).*db:prepare/)
+      expect(File.binread(File.join(index, Woods::Generation::FILENAME))).to eq(marker)
+    end
   end
 
   it 'reports one unreachable database of two while reading the other' do

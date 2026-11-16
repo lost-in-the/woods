@@ -217,27 +217,40 @@ RSpec.describe Woods::Extractors::TableCatalog do
       expect(states(classes)).to eq([{ name: 'primary', state: 'unreachable' }])
     end
 
-    it 'never asks a database that no concrete model reads through a writable pool' do
-      unused = failing_pool('primary', StandardError.new('connection refused'))
+    it 'never asks a replica pool' do
       replica = failing_pool('primary_replica', StandardError.new('connection refused'))
       allow(replica.db_config).to receive(:replica?).and_return(true)
-      classes = [model_double('ApplicationRecord', 'application_records', unused, abstract: true),
-                 model_double('Widget::HABTM_Gadgets', 'gadgets_widgets', unused),
-                 model_double(nil, 'widgets', unused),
-                 model_double('Copy', 'widgets', replica)]
 
-      expect(states(classes)).to eq([])
-      expect(unused).not_to have_received(:with_connection)
+      expect(states([model_double('Copy', 'widgets', replica)])).to eq([])
+      expect(replica).not_to have_received(:with_connection)
     end
 
-    it "never asks a database that only the framework's own models read" do
-      unused = failing_pool('primary', StandardError.new('database not found'))
-      bookkeeping = model_double('ActiveRecord::SchemaMigration', 'schema_migrations', unused)
+    it 'reports a writable pool no concrete model reads as unreachable when its listing raises' do
+      primary = listing_pool('primary', %w[widgets])
+      reporting = failing_pool('reporting', StandardError.new('database not found'))
+      classes = [model_double('Widget', 'widgets', primary),
+                 model_double('ReportingRecord', 'reporting_records', reporting, abstract: true)]
+
+      expect(states(classes)).to eq([{ name: 'primary', state: 'readable' },
+                                     { name: 'reporting', state: 'unreachable' }])
+    end
+
+    it 'counts a reachable database no concrete model reads as readable, even with no tables' do
+      reporting = listing_pool('reporting', %w[schema_migrations])
+      classes = [model_double('ReportingRecord', 'reporting_records', reporting, abstract: true),
+                 model_double('Widget::HABTM_Gadgets', 'gadgets_widgets', reporting),
+                 model_double(nil, 'widgets', reporting)]
+
+      expect(states(classes)).to eq([{ name: 'reporting', state: 'readable' }])
+    end
+
+    it "asks only for reachability of a database that only the framework's own models read" do
+      empty = listing_pool('primary', %w[schema_migrations])
+      bookkeeping = model_double('ActiveRecord::SchemaMigration', 'schema_migrations', empty)
       allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).and_call_original
       allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).with(bookkeeping).and_return('framework')
 
-      expect(states([bookkeeping])).to eq([])
-      expect(unused).not_to have_received(:with_connection)
+      expect(states([bookkeeping])).to eq([{ name: 'primary', state: 'readable' }])
     end
 
     it 'records nothing without Active Record classes' do

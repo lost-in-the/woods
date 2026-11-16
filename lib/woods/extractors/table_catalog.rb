@@ -89,25 +89,35 @@ module Woods
           nil
         end
 
-        # Whether each database a concrete model reads could be read. A
-        # database is `unreachable` when listing what it holds raises (it does
-        # not exist, refuses the connection, or the model has no pool), and
-        # `empty` when it answers but holds nothing beyond the Rails
-        # bookkeeping tables. One absent table beside others is the model's own
+        # Whether each database the catalog lists tables from could be read.
+        # A database is `unreachable` when listing what it holds raises (it
+        # does not exist, refuses the connection, or a model has no pool). A
+        # database a concrete model reads is also `empty` when it answers but
+        # holds nothing beyond the Rails bookkeeping tables. A writable pool
+        # no concrete model reads (a connection class over SQL-only tables) is
+        # asked only whether it answers: holding no tables is its own choice.
+        # One absent table beside others is the model's own
         # `table_exists: false`, not an unreadable schema.
         #
         # @param connection_classes [Array<Class>, nil] Active Record classes;
-        #   defaults to the descendants of `ActiveRecord::Base`, which is never a model
+        #   defaults to `ActiveRecord::Base` (for its pool; it is never a model)
+        #   and its descendants
         # @return [Array<Hash>] one `{name:, state:, error:}` per database,
         #   sorted by name; `error` names the failure for the log and is nil
         #   unless the database is unreachable
         def schema_readability(connection_classes: nil)
-          classes = connection_classes || (defined?(ActiveRecord::Base) ? ActiveRecord::Base.descendants : [])
-          claims = classes.filter_map { |klass| schema_claim(klass) }
+          classes = connection_classes || runtime_classes
+          models = connection_classes || classes.reject { |klass| klass.equal?(ActiveRecord::Base) }
+          claims = models.filter_map { |klass| schema_claim(klass) }
           databases = claims.group_by { |claim| claim[:database] }.map do |database, database_claims|
             states = database_claims.map { |claim| claim[:pool] }.uniq.map { |pool| listing_state(pool) }
             state, error = states.min_by { |(candidate, _)| SCHEMA_STATES.index(candidate) }
             { name: database, state: state, error: error }
+          end
+          modeled = databases.map { |database| database[:name] }
+          databases += writable_pools(classes).except(*modeled).map do |database, pool|
+            state, error = listing_state(pool)
+            { name: database, state: state == 'empty' ? 'readable' : state, error: error }
           end
           databases.sort_by { |database| database[:name].to_s }
         end

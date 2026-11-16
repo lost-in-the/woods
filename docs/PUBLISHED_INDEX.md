@@ -124,9 +124,12 @@ so a slow field run can name the family to profile.
 ## Manifest schema readability
 
 A full extraction reads model columns, schema headers and table units from the live database.
-It records in `schema_readability` whether it could read the database each concrete model uses.
+It records in `schema_readability` whether it could read each database it lists tables from.
+That is every writable connection pool, whether or not a model reads it.
+A database that only connection classes use, such as one holding SQL-only reporting tables,
+is asked only whether it answers.
 Models Rails itself defines (the migration bookkeeping classes before Rails 7.1, Active Storage and the other engines)
-are not counted, so an app without models of its own records `not_applicable`.
+do not make a database count as modeled.
 
 ```json
 "schema_readability": {
@@ -141,14 +144,14 @@ are not counted, so an app without models of its own records `not_applicable`.
 
 | `state` | Meaning |
 |---|---|
-| `readable` | Every database a concrete model reads was listed and holds at least one table or view. |
+| `readable` | Every database was listed. Each one a concrete model reads holds at least one table or view. |
 | `unreadable` | At least one database is `unreachable` or `empty`. |
-| `not_applicable` | No concrete model reads a database, as in an app without Active Record. |
+| `not_applicable` | There is no database to ask, as in an app without Active Record or without a configured connection. |
 
 A database is `unreachable` when listing its tables raises.
 It does not exist, refuses the connection, or the model has no connection pool.
-Models on it are left out of the index.
-A database is `empty` when it holds only `schema_migrations` and `ar_internal_metadata`.
+Models on it are left out of the index, and so are its table units.
+A database a concrete model reads is `empty` when it holds only `schema_migrations` and `ar_internal_metadata`.
 That is a database that was created but never migrated.
 Its models are published with `table_exists: false` and no columns, and it has no table units.
 One missing table beside others is not unreadable: that model alone carries `table_exists: false`.
