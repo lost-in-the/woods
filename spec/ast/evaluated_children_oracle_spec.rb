@@ -3,10 +3,11 @@
 require 'spec_helper'
 require 'woods/ast/parser'
 require 'woods/ast/call_site_extractor'
+require 'woods/flow_analysis/operation_extractor'
 
 # Runs each fixture method for real, records every call it makes on a
-# constant, and checks that the parsed tree holds each of those calls.
-RSpec.describe 'Ast::Parser children against a real run' do
+# constant, and checks the parsed call sites and enqueue operations against it.
+RSpec.describe 'Parsed calls and enqueues against a real run' do
   # A stand-in for every constant the fixture names. Each call is logged as
   # written (`Receiver.method`, chains included) and returns a new recorder.
   let(:recorder_class) do
@@ -99,7 +100,10 @@ RSpec.describe 'Ast::Parser children against a real run' do
   def runtime_calls(source, invocations, with_block)
     log = []
     recorder = recorder_class
-    base = Class.new { def run(*_args, **_kwargs); end }
+    base = Class.new do
+      def run(*_args, **_kwargs); end
+      def render(*_args, **_kwargs); end
+    end
     base.define_singleton_method(:const_missing) { |name| recorder.new(name.to_s, log) }
     sandbox = Module.new
     sandbox.const_set(:Base, base)
@@ -110,12 +114,54 @@ RSpec.describe 'Ast::Parser children against a real run' do
     log.uniq
   end
 
-  def parsed_calls(source, prism)
+  def parsed_method(source, prism)
     parser = Woods::Ast::Parser.new
     allow(parser).to receive(:prism_available?).and_return(prism)
-    method_node = parser.parse(source).find_all(:def).find { |node| node.method_name == 'run' }
-    Woods::Ast::CallSiteExtractor.new.extract(method_node).map { |call| "#{call[:receiver]}.#{call[:method_name]}" }
+    parser.parse(source).find_all(:def).find { |node| node.method_name == 'run' }
   end
+
+  def parsed_calls(source, prism)
+    Woods::Ast::CallSiteExtractor.new.extract(parsed_method(source, prism))
+                                 .map { |call| "#{call[:receiver]}.#{call[:method_name]}" }
+  end
+
+  def parsed_enqueues(source, prism)
+    async = []
+    pending = Woods::FlowAnalysis::OperationExtractor.new.extract(parsed_method(source, prism))
+    while (operation = pending.shift)
+      async << "#{operation[:target]}.#{operation[:method]}" if operation[:type] == :async
+      Woods::FlowAnalysis::OperationExtractor::NESTED_KEYS.each { |key| pending.concat(operation[key] || []) }
+    end
+    async.sort
+  end
+
+  # A recorder ignores the block it is given, so a block body never runs
+  # here; those forms are left to the operation extractor's own spec.
+  enqueue_forms = {
+    'a keyword argument' => 'Audit.record(job: KwJob.perform_later)',
+    'an array in a keyword argument' => 'Audit.record(jobs: [KwArrJob.perform_later])',
+    'an array argument' => 'Audit.record([ArrJob.perform_later])',
+    'a parenthesized argument' => 'Audit.record((ParJob.perform_later))',
+    'a splatted array argument' => 'Audit.record(*[SplatJob.perform_later])',
+    'a ternary argument' => 'Audit.record(flag ? TernJob.perform_later : nil)',
+    'an || argument' => 'Audit.record(nil || OrJob.perform_later)',
+    'a hash-literal argument' => 'Audit.record({ job: HashJob.perform_later })',
+    'an interpolated argument' => "Audit.record(\"id \#{InterpJob.perform_later}\")",
+    'a render hash' => 'render json: { id: RenderJob.perform_later.job_id }',
+    'the receiver chain of an argument' => 'Audit.record(ChainJob.perform_later.job_id)',
+    'the receiver chain of a statement' => 'id = StmtJob.perform_later.job_id',
+    'a configured enqueue' => 'SetJob.set(wait: 1).perform_later',
+    'a call nested in an argument' => 'Audit.record(Wrap.build(NestJob.perform_later))',
+    'a lambda argument' => 'Audit.record(-> { LamJob.perform_later })',
+    'a lambda keyword argument' => 'Audit.record(callback: -> { LamJob.perform_later })',
+    'a lambda block-pass' => 'Audit.record(&-> { LamJob.perform_later })',
+    'a proc block-pass' => 'Audit.record(&proc { ProcJob.perform_later })',
+    'a Proc.new keyword argument' => 'Audit.record(callback: Proc.new { ProcJob.perform_later })',
+    'a lambda in a hash value' => 'x = { cb: -> { LamJob.perform_later } }',
+    'a stabby lambda' => 'cb = -> { LamJob.perform_later }',
+    'a proc' => 'cb = proc { ProcJob.perform_later }',
+    'a defined? operand' => 'x = defined?(DefJob.perform_later)'
+  }
 
   [true, false].each do |prism|
     context "with #{prism ? 'Prism' : 'the parser gem'}" do
@@ -126,6 +172,15 @@ RSpec.describe 'Ast::Parser children against a real run' do
 
           expect(ran).not_to be_empty
           expect(parsed_calls(source, prism)).to include(*ran)
+        end
+      end
+
+      enqueue_forms.each do |form, body|
+        it "lists exactly the enqueues a real run makes in #{form}" do
+          source = fixture_source(body, nil)
+          ran = runtime_calls(source, [[]], false).select { |call| call.end_with?('.perform_later') }
+
+          expect(parsed_enqueues(source, prism)).to eq(ran.sort)
         end
       end
     end

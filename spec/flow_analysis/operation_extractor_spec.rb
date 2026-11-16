@@ -72,7 +72,7 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
           'a defined? operand' => 'x = defined?(DefJob.perform_later)',
           'a lambda default parameter value' => ['Body.run', 'cb: -> { LamJob.perform_later }']
         }.each do |form, (body, params)|
-          it "extracts no enqueue from #{form}, which runs only when called" do
+          it "extracts no enqueue from #{form}, which does not run where it is written" do
             expect(async_ops(body, params: params)).to eq([])
           end
         end
@@ -85,6 +85,59 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
 
         it 'still extracts an enqueue in a block body' do
           expect(async_ops('items.each { EachJob.perform_later }')).to eq(['EachJob.perform_later'])
+        end
+
+        describe 'an enqueue in an expression a call evaluates' do
+          {
+            'a keyword argument' => 'Audit.record(job: KwJob.perform_later)',
+            'an array in a keyword argument' => 'Audit.record(jobs: [KwArrJob.perform_later])',
+            'an array argument' => 'Audit.record([ArrJob.perform_later])',
+            'a parenthesized argument' => 'Audit.record((ParJob.perform_later))',
+            'a splatted array argument' => 'Audit.record(*[SplatJob.perform_later])',
+            'a ternary argument' => 'Audit.record(flag ? TernJob.perform_later : nil)',
+            'an || argument' => 'Audit.record(nil || OrJob.perform_later)',
+            'a hash-literal argument' => 'Audit.record({ job: HashJob.perform_later })',
+            'an interpolated argument' => "Audit.record(\"id \#{InterpJob.perform_later}\")",
+            'a render hash' => 'render json: { id: RenderJob.perform_later.job_id }',
+            'the receiver chain of an argument' => 'Audit.record(ChainJob.perform_later.job_id)',
+            'the receiver chain of a statement' => 'id = StmtJob.perform_later.job_id',
+            'a block nested in an argument' => 'Audit.record(items.map { MapJob.perform_later })'
+          }.each do |form, body|
+            it "is an async operation in #{form}" do
+              expect(async_ops(body)).to eq(["#{body[/\w+Job/]}.perform_later"])
+            end
+          end
+
+          {
+            'a lambda argument' => 'Audit.record(-> { LamJob.perform_later })',
+            'a lambda keyword argument' => 'Audit.record(callback: -> { LamJob.perform_later })',
+            'a lambda block-pass' => 'Audit.record(&-> { LamJob.perform_later })',
+            'a lambda block argument' => 'Audit.record(lambda { LamJob.perform_later })',
+            'a lambda in an array argument' => 'Audit.record([-> { LamJob.perform_later }])',
+            'a proc argument' => 'Audit.record(proc { ProcJob.perform_later })',
+            'a Proc.new keyword argument' => 'Audit.record(callback: Proc.new { ProcJob.perform_later })',
+            'a proc block-pass' => 'Audit.record(&proc { ProcJob.perform_later })',
+            'a defined? argument' => 'Audit.record(defined?(DefJob.perform_later))'
+          }.each do |form, body|
+            it "is no operation in #{form}" do
+              expect(async_ops(body)).to eq([])
+            end
+          end
+
+          it 'counts an enqueue in the block the call is given once' do
+            expect(async_ops('Audit.record { BlockJob.perform_later }')).to eq(['BlockJob.perform_later'])
+          end
+
+          it 'counts a configured enqueue once' do
+            expect(async_ops('SetJob.set(wait: 1).perform_later(id)')).to eq(['SetJob.set.perform_later'])
+          end
+
+          it 'adds no operation for an ordinary call in a receiver chain or an argument' do
+            operations = extract_method_ops("def call\n  Ledger.where(id: Scope.ids).update_all(x: 1)\nend\n", 'call')
+
+            expect(operations.map { |op| [op[:type], op[:target], op[:method]] })
+              .to eq([[:call, 'Ledger.where', 'update_all']])
+          end
         end
       end
     end
