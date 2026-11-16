@@ -1579,12 +1579,35 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
   # ── Structured transition callbacks (#796) ───────────────────────────
 
   describe 'transition_callbacks' do
-    def callbacks_for(source, path: 'app/models/post.rb')
-      described_class.new.extract_model_file(create_file(path, source)).first.metadata[:transition_callbacks]
+    let(:record_base) { Class.new { def self.state_machine(*); end } }
+    let(:loaded) { [] }
+
+    before { stub_const('ApplicationRecord', record_base) }
+
+    after { loaded.each { |name| Object.send(:remove_const, name) if Object.const_defined?(name, false) } }
+
+    # With +load+, the file is loaded as extraction finds it, so Ruby says
+    # which body each callback runs. Every constant the file declares is
+    # hidden first, so a class another example left loaded is never read.
+    def callbacks_for(source, path: 'app/models/post.rb', load: false)
+      full = create_file(path, source)
+      load ? load_source(full) : hide_declared(source)
+      described_class.new.extract_model_file(full).first.metadata[:transition_callbacks]
+    end
+
+    def load_source(full)
+      hide_declared(File.read(full))
+      before = Object.constants
+      Kernel.load(full)
+      loaded.concat(Object.constants - before)
+    end
+
+    def hide_declared(source)
+      source.scan(/^(?:class|module)\s+([A-Z]\w*)/).flatten.uniq.each { |name| hide_const(name) }
     end
 
     it 'publishes the literal scope, the method and its side effects' do
-      entries = callbacks_for(<<~RUBY)
+      entries = callbacks_for(<<~RUBY, load: true)
         class Post < ApplicationRecord
           state_machine :status, initial: :draft do
             # after_transition on: :archive, do: :forget
@@ -1674,7 +1697,7 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
     end
 
     it 'says when the method is not defined in the model or its concerns' do
-      entries = callbacks_for(<<~RUBY)
+      entries = callbacks_for(<<~RUBY, load: true)
         class Post < ApplicationRecord
           state_machine :status do
             after_transition on: :publish, do: :inherited_hook
@@ -1685,15 +1708,51 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(entries.first).to include(side_effects: nil, unanalysed: 'not defined in the model or its concerns')
     end
 
+    it 'reads the later of two definitions, the one Ruby keeps' do
+      entries = callbacks_for(<<~RUBY, load: true)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish, do: :announce
+          end
+
+          def announce
+            FirstJob.perform_later(id)
+          end
+
+          def announce
+            SecondJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      expect(entries.first[:side_effects][:jobs_enqueued]).to eq(['SecondJob'])
+    end
+
+    it 'says when the class is not loaded, rather than read a definition by name' do
+      entries = callbacks_for(<<~RUBY)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish, do: :announce
+          end
+
+          def announce
+            FirstJob.perform_later(id)
+          end
+        end
+      RUBY
+
+      expect(entries.first).to include(side_effects: nil, unanalysed: 'class not loaded')
+    end
+
     it 'analyses a method an included app/models concern defines' do
-      create_file('app/models/concerns/announces.rb', <<~RUBY)
+      load_source(create_file('app/models/concerns/announces.rb', <<~RUBY))
         module Announces
           def announce
             AnnouncementMailer.published(self).deliver_later
           end
         end
       RUBY
-      entries = callbacks_for(<<~RUBY)
+      entries = callbacks_for(<<~RUBY, load: true)
         class Post < ApplicationRecord
           include Announces
 
@@ -1708,11 +1767,9 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
     end
 
     it 'reports columns written against the loaded model\'s columns' do
-      stub_const('Post', Class.new do
-        def self.column_names = %w[published_at status]
-        def self.table_exists? = true
-      end)
-      entries = callbacks_for(<<~RUBY)
+      record_base.define_singleton_method(:column_names) { %w[published_at status] }
+      record_base.define_singleton_method(:table_exists?) { true }
+      entries = callbacks_for(<<~RUBY, load: true)
         class Post < ApplicationRecord
           state_machine :status do
             after_transition to: :published, do: :stamp

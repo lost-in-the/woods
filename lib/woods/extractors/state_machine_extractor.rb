@@ -749,20 +749,34 @@ module Woods
       def analyze_transition_callbacks(entries, class_name, source, file_path)
         return entries if entries.empty?
 
+        model = loaded_class(class_name)
+        return TransitionCallbacks.analyze(entries, nil) unless model
+
         code, segments = TransitionCallbacks.analysis_source(source, file_path, Rails.root.to_s)
-        analyzer = CallbackAnalyzer.new(source_code: code, column_names: loaded_column_names(class_name),
-                                        segments: segments)
+        analyzer = CallbackAnalyzer.new(source_code: code, column_names: loaded_column_names(model),
+                                        segments: segments, model: model)
         TransitionCallbacks.analyze(entries, analyzer)
       end
 
-      # The columns of an already loaded model, read without autoloading;
-      # empty when the class is not loaded or has no table. A schema change
-      # re-runs this family (PathDispatcher), so the columns stay current.
+      # The class +class_name+ names, when it is already loaded; nothing is
+      # autoloaded.
       #
       # @param class_name [String]
+      # @return [Module, nil]
+      def loaded_class(class_name)
+        value = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
+        value.is_a?(Module) ? value : nil
+      rescue StandardError
+        nil
+      end
+
+      # The columns of a loaded model; empty when it has no table. A schema
+      # change re-runs this family (PathDispatcher), so the columns stay
+      # current.
+      #
+      # @param model [Module]
       # @return [Array<String>]
-      def loaded_column_names(class_name)
-        model = SourceReferences::RuntimeLookup.new.call("::#{class_name}", allow_private: true)[:value]
+      def loaded_column_names(model)
         return [] unless model.respond_to?(:column_names) && model.respond_to?(:table_exists?) && model.table_exists?
 
         Array(model.column_names).map(&:to_s)
