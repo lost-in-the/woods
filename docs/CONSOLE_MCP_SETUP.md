@@ -17,11 +17,14 @@
 ## Turning the Console off
 
 The `woods-console-disable` plugin skill makes these changes for you, and asks before each edit.
-Search first; `-o` prints key names only, never a token value:
+Search first; `-o` prints file names, line numbers and key names, never values:
 
 ```bash
 grep -rnoE "console_mcp_[a-z_]+|Woods::Console|woods:console|woods-console|WOODS_CONSOLE_[A-Z_]+" config lib .mcp.json
 ```
+
+Do not print `.env` files, `.mcp.json`, client configuration or `console.yml`: they can hold the token.
+Where a step below touches such a line, find it by its line number and key name.
 
 1. **Switch.** Remove `config.console_mcp_enabled = true` from `config/initializers/woods.rb`, or set it to `false`.
    Check `config/application.rb` and `config/environments/` too.
