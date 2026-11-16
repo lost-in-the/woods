@@ -378,13 +378,15 @@ module Woods
           lines.concat(traversal_coverage_lines(data))
           lines.concat(dependent_counts_lines(data))
 
-          nodes.each do |id, info|
-            depth = fetch_key(info, :depth) || 0
+          # Each row under a listed parent, not under the row printed before it (#1041).
+          TraversalTree.rows(nodes).each do |row|
+            info = row.info
             deps = fetch_key(info, :deps, [])
             # Set by the reader only in a graph spanning more than one database.
             database = fetch_key(info, :database)
-            indent = '  ' * (depth + 1)
-            lines << "#{indent}#{id}#{" [#{database}]" if database}#{mapped_test_suffix(info)}"
+            indent = '  ' * (row.level + 1)
+            detached = " (depth #{TraversalTree.depth(info)})" if row.detached
+            lines << "#{indent}#{row.id}#{" [#{database}]" if database}#{mapped_test_suffix(info)}#{detached}"
             deps.each { |d| lines << "#{indent}  -> #{d}" }
           end
 
