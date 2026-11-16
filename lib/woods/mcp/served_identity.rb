@@ -217,7 +217,7 @@ module Woods
         # Lexical only: collapses repeated and trailing slashes and dot
         # segments, follows no symlink.
         def normalize_prefix(path)
-          File.expand_path(path)
+          File.expand_path(path.sub(%r{\A/+}, '/'))
         end
 
         def within_prefix?(path, prefix)
@@ -280,6 +280,9 @@ module Woods
         @mapped_client_root, @client_root_map_entry =
           (self.class.map_client_root(declared_client_root, client_root_map) if mapped)
         @client_root_unmapped = mapped && @mapped_client_root.nil?
+        # A map entry claims the mount holds the session's checkout; a derived
+        # path missing here shows the claim does not hold for this session.
+        @client_root_mapped_missing = !@mapped_client_root.nil? && !File.exist?(@mapped_client_root)
         @cwd = @mapped_client_root || (@client_root_unmapped ? nil : cwd)
       end
 
@@ -365,13 +368,14 @@ module Woods
       def client_matches
         case match_reason
         when 'same_checkout' then true
-        when 'different_checkout', 'client_root_unmapped' then false
+        when 'different_checkout', 'client_root_unmapped', 'client_root_mapped_missing' then false
         end
       end
 
       # @return [String] same_checkout, different_checkout, client_root_unmapped,
-      #   root_not_recorded, recorded_root_unreachable, client_outside_checkout
-      #   or client_root_unresolved
+      #   client_root_mapped_missing, root_not_recorded,
+      #   recorded_root_unreachable, client_outside_checkout or
+      #   client_root_unresolved
       def match_reason
         @match_reason ||= compute_match_reason
       end
@@ -426,6 +430,12 @@ module Woods
 
       # @return [String] why `woods-mcp-start` refuses
       def refusal_message
+        if @client_root_mapped_missing
+          return "The client root #{@declared_client_root} maps to #{@mapped_client_root} through " \
+                 "#{@client_root_map_entry.join('=')}, but that path does not exist here: the mount does not hold " \
+                 "the session's checkout, so this index cannot be its own. Fix the map, or pass --allow-mismatch " \
+                 "(#{ALLOW_ENV}=1) to serve this index anyway."
+        end
         if @client_root_unmapped
           return "The client root #{@declared_client_root} is under no --client-root-map prefix " \
                  "(#{CLIENT_ROOT_MAP_ENV}): no mount covers it, so the session's checkout is not visible to this " \
@@ -451,8 +461,13 @@ module Woods
       end
 
       def root_warning
-        if @client_root_unmapped
-          return "The client root #{@declared_client_root} is under no --client-root-map prefix; answers are for " \
+        if @client_root_unmapped || @client_root_mapped_missing
+          why = if @client_root_unmapped
+                  'is under no --client-root-map prefix'
+                else
+                  "maps to #{@mapped_client_root}, which does not exist here"
+                end
+          return "The client root #{@declared_client_root} #{why}; answers are for " \
                  "#{recorded_checkout || @index_dir}, not the session's checkout."
         end
 
@@ -462,6 +477,11 @@ module Woods
 
       # One line for either side, or both, that cannot be determined.
       def unknown_checkout_warning
+        if recorded_checkout && !@declared_client_root
+          return "The launch directory #{@cwd} is not inside a git checkout, so this index was not compared with " \
+                 "the client's checkout (pass --client-root to compare them)."
+        end
+
         sides = []
         sides << unknown_index_side unless recorded_checkout
         sides << unknown_client_side unless client_root
@@ -503,13 +523,26 @@ module Woods
       end
 
       def served_name
-        mapped_match? ? File.basename(@declared_client_root) : root_name
+        mapped_match? ? File.basename(host_checkout) : root_name
       end
 
       def served_location
-        return "#{@declared_client_root}, mapped to #{recorded_checkout}" if mapped_match?
+        return "#{host_checkout}, mapped to #{recorded_checkout}" if mapped_match?
 
         recorded_checkout || recorded_root
+      end
+
+      # The client's checkout as the client names it: the declared client root
+      # less the path from the checkout down to the session's directory.
+      def host_checkout
+        below = Pathname.new(File.realpath(@mapped_client_root)).relative_path_from(Pathname.new(client_root)).to_s
+        return @declared_client_root if below == '.'
+
+        host = Pathname.new(self.class.send(:normalize_prefix, @declared_client_root))
+        below.split('/').size.times { host = host.dirname }
+        host.to_s
+      rescue SystemCallError, ArgumentError
+        @declared_client_root
       end
 
       # The index directory, or its nearest existing ancestor while no index
@@ -527,6 +560,7 @@ module Woods
         # Before the index side: whatever this index is, it cannot be the
         # session's when no mount covers the session's checkout.
         return 'client_root_unmapped' if @client_root_unmapped
+        return 'client_root_mapped_missing' if @client_root_mapped_missing
 
         unless recorded_checkout
           return recorded_root ? 'recorded_root_unreachable' : 'root_not_recorded'

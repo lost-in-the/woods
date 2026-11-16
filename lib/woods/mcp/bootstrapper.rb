@@ -32,9 +32,13 @@ module Woods
       # @return [String] Validated index directory path
       def self.resolve_index_dir(argv, await_index: false)
         dir = argv[0] || ENV['WOODS_DIR'] || ENV['WOODS_OUTPUT'] || Dir.pwd
-        return dir if await_index && !dir.empty?
-
         examined = dir.empty? ? '(empty path)' : File.expand_path(dir)
+        if File.exist?(dir) && !File.directory?(dir)
+          warn "Error: #{examined} is not a directory."
+          warn index_path_remedy
+          exit 1
+        end
+        return dir if await_index && !dir.empty?
 
         unless Dir.exist?(dir)
           warn "Error: Index directory does not exist: #{examined}"

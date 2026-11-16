@@ -46,6 +46,16 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
     [output, errors.force_encoding(Encoding::UTF_8).scrub, status]
   end
 
+  it 'awaits the current directory under woods-mcp --await-index with no path, as it serves it without the flag' do
+    _, strict_errors, strict_status = launch('woods-mcp')
+    output, errors, status = launch('woods-mcp', '--await-index')
+
+    expect(strict_status.exitstatus).to eq(1)
+    expect(strict_errors).to include("Could not resolve a published Woods index in: #{@cwd}")
+    expect(status).to be_success, errors
+    expect(JSON.parse(output).dig('result', 'instructions')).to include("No index was published in #{@cwd}")
+  end
+
   %w[woods-mcp woods-mcp-start].each do |executable|
     context executable do
       it 'boots an atomic index via WOODS_OUTPUT from an unrelated working directory' do
@@ -75,6 +85,17 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
         expect(output).to be_empty
         expect(errors.index('container path')).not_to be_nil, errors
         expect(errors.index('container path')).to be < errors.index('woods:extract')
+      end
+
+      it 'refuses a file given as the index directory under --await-index' do
+        file = File.join(@directory, 'a-file')
+        File.write(file, '')
+
+        output, errors, status = launch(executable, '--await-index', file)
+
+        expect(status.exitstatus).to eq(1)
+        expect(output).to be_empty
+        expect(errors).to include("#{file} is not a directory")
       end
 
       it 'does not fall through a bad explicit path to a valid environment path' do

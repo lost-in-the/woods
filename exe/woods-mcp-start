@@ -51,6 +51,9 @@ await_index = !ARGV.delete('--await-index').nil? || Woods::MCP::ServedIdentity.e
 # reach woods-mcp through the environment, as the mismatch override does.
 client_root_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_ENV
 client_root_map_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_MAP_ENV
+if ARGV.count { |arg| arg == '--client-root' || arg.start_with?('--client-root=') } > 1
+  usage_error('--client-root given more than once')
+end
 client_root = take_option('--client-root')
 ENV[client_root_env] = client_root if client_root
 map_entries = [ENV.fetch(client_root_map_env, nil)]
@@ -65,7 +68,9 @@ rescue Woods::MCP::ServedIdentity::InvalidClientRootMap => e
 end
 ENV[client_root_map_env] = map_value unless map_value.empty?
 declared_client_root = ENV.fetch(client_root_env, '').strip
-unless declared_client_root.empty? || declared_client_root.start_with?('/')
+if declared_client_root.empty?
+  usage_error("--client-root-map needs --client-root (#{client_root_env})") unless map_value.empty?
+elsif !declared_client_root.start_with?('/')
   usage_error("--client-root must be an absolute path as the client sees it, got #{declared_client_root}")
 end
 
@@ -107,6 +112,12 @@ end
 index_dir = File.expand_path(index_dir)
 path_remedy = 'Point at the existing index with an explicit path, WOODS_DIR, or WOODS_OUTPUT. ' \
               'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
+
+if File.exist?(index_dir) && !File.directory?(index_dir)
+  warn "Error: #{index_dir} is not a directory."
+  warn path_remedy
+  exit 1
+end
 
 unless await_index || File.directory?(index_dir)
   warn "Error: Index directory does not exist: #{index_dir}"

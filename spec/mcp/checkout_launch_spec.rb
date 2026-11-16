@@ -170,6 +170,33 @@ RSpec.describe 'woods-mcp-start --checkout' do
     expect(code).to eq(42), errors
   end
 
+  it 'compares the checkout it serves with a declared client root' do
+    root = checkout(File.join(@base, 'shop'))
+    other = checkout(File.join(@base, 'shop-topic'))
+
+    same, same_errors, served = launch(cwd: root, args: ['--checkout', '--client-root', root])
+    refused, refusal, = launch(cwd: root, args: ['--checkout', '--client-root', '/host/shop-topic',
+                                                 '--client-root-map', "/host=#{@base}"])
+
+    expect(same).to eq(42), same_errors
+    expect(served).to eq(File.join(root, 'tmp', 'woods'))
+    expect(refused).to eq(1), refusal
+    expect(refusal).to include("written for the checkout at #{root}", "launched in #{other}")
+  end
+
+  it 'refuses a file given as the index directory, with or without --await-index' do
+    root = checkout(File.join(@base, 'shop'), index: false)
+    file = File.join(root, 'not-a-directory')
+    File.write(file, '')
+
+    [[file], ['--await-index', file]].each do |args|
+      code, errors, = launch(cwd: root, args: args)
+
+      expect(code).to eq(1), args.inspect
+      expect(errors).to include("#{file} is not a directory")
+    end
+  end
+
   it 'refuses to run outside any checkout, naming the alternative' do
     outside = File.join(@base, 'plain-directory')
     FileUtils.mkdir_p(outside)

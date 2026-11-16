@@ -379,6 +379,46 @@ RSpec.describe 'Served index identity' do
         expect(errors).not_to include('Warning', 'Error')
       end
 
+      it 'refuses a mapped client root that does not exist here: the mount does not hold that session' do
+        alpha = checkout('checkout-alpha')
+        args = ['--client-root', '/host/wts/checkout-gone', '--client-root-map', "/host/wts=#{@base}"]
+
+        refused, refusal = launch(index_of(alpha), cwd: alpha, args: args)
+        allowed, warning = launch(index_of(alpha), cwd: alpha, args: ['--allow-mismatch', *args])
+
+        expect(refused).to eq(1), refusal
+        expect(refusal).to include('/host/wts/checkout-gone', File.join(@base, 'checkout-gone'), 'does not exist here',
+                                   '--allow-mismatch')
+        expect(allowed).to eq(42), warning
+      end
+
+      it 'warns once for a mapped client root that exists here outside any checkout' do
+        alpha = checkout('checkout-alpha')
+        FileUtils.mkdir_p(File.join(@base, 'plain'))
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/plain', '--client-root-map',
+                                                      "/host/wts=#{@base}"])
+
+        expect(code).to eq(42), errors
+        expect(errors.lines.grep(/Warning/).size).to eq(1)
+        expect(errors).to include('/host/wts/plain', 'is not inside a git checkout here')
+      end
+
+      it 'refuses a map without a client root, and a client root given twice' do
+        alpha = checkout('checkout-alpha')
+
+        map_only, map_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root-map', "/host=#{@base}"])
+        env_only, env_error = launch(index_of(alpha), cwd: alpha,
+                                                      env: { 'WOODS_MCP_CLIENT_ROOT_MAP' => "/host=#{@base}" })
+        twice, twice_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root', '/a', '--client-root=/b'])
+
+        expect([map_only, env_only, twice]).to eq([1, 1, 1])
+        expect(map_error).to include('--client-root-map needs --client-root')
+        expect(env_error).to include('--client-root-map needs --client-root')
+        expect(twice_error).to include('--client-root given more than once')
+      end
+
       it 'refuses a malformed map entry at startup' do
         alpha = checkout('checkout-alpha')
 
@@ -413,6 +453,14 @@ RSpec.describe 'Served index identity' do
         expect(Woods::MCP::ServedIdentity.map_client_root('/host/wts', map)).to eq(['/b', ['/host/wts', '/b']])
         expect(Woods::MCP::ServedIdentity.map_client_root('/elsewhere/x', map))
           .to eq(['/root-mount/elsewhere/x', ['/', '/root-mount']])
+      end
+
+      it 'collapses repeated leading slashes and compares case-sensitively' do
+        map = Woods::MCP::ServedIdentity.parse_client_root_map('//host/wts=/b')
+
+        expect(Woods::MCP::ServedIdentity.map_client_root('//host/wts/topic', map))
+          .to eq(['/b/topic', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/Host/wts/topic', map)).to be_nil
       end
 
       it 'answers nil under no prefix' do
@@ -468,6 +516,19 @@ RSpec.describe 'Served index identity' do
                                   'warnings' => [])
     end
 
+    it 'names a session in a subdirectory by its checkout, not by the subdirectory' do
+      alpha = checkout('checkout-alpha')
+      FileUtils.mkdir_p(File.join(alpha, 'app', 'models'))
+
+      text = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/checkout-alpha/app/models',
+                      'WOODS_MCP_CLIENT_ROOT_MAP' => "/host-only=#{@base}") do
+        Dir.chdir(@base) { instructions(build_server(index_of(alpha))) }
+      end
+
+      expect(text.lines.first)
+        .to start_with("Serving the index of checkout-alpha (/host-only/checkout-alpha, mapped to #{alpha}), ")
+    end
+
     it 'reports a client root under no mapped prefix as a mismatch with a warning' do
       alpha = checkout('checkout-alpha')
 
@@ -507,9 +568,9 @@ RSpec.describe 'Served index identity' do
                                                                     manifest: { 'root' => '/nonexistent-root/app' })
       unrecorded = Woods::MCP::ServedIdentity.read(detached_index, cwd: alpha, manifest: {})
 
-      expect(client.warnings).to eq(["Cannot tell whether this index belongs to the client's checkout: " \
-                                     "the client's checkout is unknown: the launch directory #{outside} is not " \
-                                     'inside a git checkout (pass --client-root with the session\'s checkout)'])
+      expect(client.warnings).to eq(["The launch directory #{outside} is not inside a git checkout, so this " \
+                                     "index was not compared with the client's checkout (pass --client-root " \
+                                     'to compare them).'])
       expect(unreachable.warnings.size).to eq(1)
       expect(unreachable.warnings.first).to include("the index's checkout is unknown", '/nonexistent-root/app')
       expect(unrecorded.warnings.size).to eq(1)
