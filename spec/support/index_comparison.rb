@@ -127,7 +127,9 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     Mask.new(name: :analysis_generated_at, artifact: :graph_analysis, width: :key, path: %w[generated_at],
              reason: 'Wall-clock stamp of the analysis. graph_sha beside it is compared.'),
     Mask.new(name: :flow_generated_at, artifact: :flow, width: :key, path: %w[generated_at],
-             reason: 'Wall-clock stamp at the top of each flow document (M3).'),
+             reason: 'Wall-clock stamp at the top of each flow document (M3).',
+             wide: 'One stamp, key included, per flow document: about a tenth of the small flow documents of ' \
+                   'the test app, and nothing but that one string in each.'),
     Mask.new(name: :commit_table_since, artifact: :commit_table, width: :key, path: %w[since],
              reason: "The history window's first UTC day: two runs either side of midnight UTC differ there " \
                      'and nowhere else unless a commit sits on the boundary.'),
@@ -159,7 +161,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     Mask.new(name: :source_inputs_runtime_scope, artifact: :source_inputs, width: :key, path: %w[scopes runtime],
              reason: 'A partial run keeps retained runtime evidence that still refers to the old source, and ' \
                      'boot inputs advance only on a full run (docs/SOURCE_FRESHNESS.md, "Boot inputs advance ' \
-                     'only on a full run").'),
+                     'only on a full run").',
+             wide: 'A whole scope, up to about a tenth of the manifest: every app/ and lib/ Ruby file.'),
     Mask.new(name: :source_inputs_errors_order, artifact: :source_inputs, width: :order, path: %w[errors],
              default: false,
              reason: 'Capture diagnostics in the order each run met them: an incremental run records its ' \
@@ -172,7 +175,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     Mask.new(name: :source_reference_identity, artifact: :source_references, width: :key,
              path: %w[files * identity],
              reason: "Each cached file's identity is a digest keyed by the output directory's private key, so " \
-                     'two indexes never share it. The cached analysis beside it is compared.'),
+                     'two indexes never share it. The cached analysis beside it is compared.',
+             wide: 'One 64-character digest, key included, per cached file: about a tenth of the cache.'),
     Mask.new(name: :source_reference_added_credit, artifact: :source_references, width: :key,
              path: %w[owners * added], default: false,
              reason: 'Which edges each owner credits to the source-reference pass. Opt-in for one fixture, where ' \
