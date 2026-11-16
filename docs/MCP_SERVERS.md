@@ -99,8 +99,12 @@ provided the client starts project servers in the project directory:
 
 `spec/mcp/await_index_cli_spec.rb` runs this launch (`bundle exec woods-mcp-start --checkout --await-index`)
 in a checkout with no index yet, then publishes an index while it runs.
-That a given client starts a project server in the project directory without a `cwd` was not verified.
-Check your client's documentation, or keep `cwd`.
+Checked with Claude Code 2.1.325: it starts a project server in the session's directory and sets
+`CLAUDE_PROJECT_DIR` in the server's environment, to the checkout root for a session in the main checkout,
+to the worktree's own root in a linked worktree, and to the subdirectory for a session opened in one
+(the root's `.mcp.json` is still found). `$NAME` reaches `sh` untouched; the client expands braced `${NAME}`
+from its own environment, where `CLAUDE_PROJECT_DIR` is not set.
+For another client, check its documentation, or keep `cwd`.
 `--await-index` is optional: see [starting before the index exists](#starting-before-the-index-exists---await-index).
 
 ### Starting before the index exists (`--await-index`)
@@ -230,7 +234,7 @@ The server reads the client root through the mount and compares that checkout wi
   "mcpServers": {
     "woods": {
       "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; id=\"$(test -f \"$(git rev-parse --show-toplevel 2>/dev/null)/.git\" && echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)\"; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-identity \"$id\""]
     }
   }
 }
@@ -273,17 +277,34 @@ How the map works:
 
 Without a map, the client root is read as given.
 `--client-root` alone suits a launcher on the same machine as the session.
-A client root that does not exist here, with no map, cannot be determined:
-the server starts, and the instructions and `woods_status` carry one warning that names it.
+A client root that does not exist here, with no map, cannot be read.
 `--client-root` must be an absolute path as the client sees it (`WOODS_MCP_CLIENT_ROOT` is the same setting).
 `--checkout` needs the checkout's `.git` entry inside the container; without one, pass the index path instead.
 
-Run by hand inside a `docker run` container with a checkout mounted and no index yet:
-`woods-mcp-start --checkout --await-index --client-root <a host path>` answered `initialize` with the warning,
-`woods_status` with `awaiting_index` and `client_match_reason: "client_root_unresolved"`, and `lookup` with `building`.
-Not run: this `docker compose exec` command line, the compose mount itself, and how a given client expands `$PWD`.
+**Without a map, the client says what its checkout is.**
+The container entry runs on the host, inside the session's checkout, and hands the server
+`--client-identity main|linked:HEAD:branch` (or `WOODS_MCP_CLIENT_IDENTITY`): whether it is the main checkout or a
+linked worktree (a linked worktree's `.git` is a file), its HEAD commit and its branch. No path is in it.
+When the client root cannot be read, the server compares that with the checkout it serves:
+
+- A different worktree kind, a different HEAD, or a different branch (each when both sides know it) is a mismatch,
+  `client_match_reason: "client_identity_differs"`. The launch is refused, naming `WOODS_MCP_CLIENT_ROOT_MAP` and
+  the override, `--allow-mismatch`.
+- Agreement serves as before, with the warning that the client's checkout cannot be read. Uncommitted changes and
+  a detached HEAD at the same commit agree.
+- Limits: two linked worktrees with no branch at the same commit look the same, and so do two clones on the same
+  branch and commit. A map tells them apart. A Woods version in the container without `--client-identity` refuses
+  the entry at startup rather than serving the wrong checkout. It reads the flag as an index path and exits with
+  `--checkout takes no index path, got --client-identity`: upgrade it, or use the explicit form.
+
+Checked with Claude Code 2.1.325 and Docker Compose:
+the main checkout with no map served, with the warning; with `WOODS_MCP_CLIENT_ROOT_MAP` naming the mount,
+`client_matches` was `true`; a linked worktree with the map was refused.
+Before `--client-identity`, a linked worktree with no map was served the main checkout's index with only the
+warning; `spec/integration/generated_mcp_entry_spec.rb` now refuses it through a stand-in `docker`, and covers
+the main checkout, a detached HEAD and a linked worktree with a map.
 `spec/mcp/served_identity_spec.rb` covers the launcher for each row above, for the single-checkout map,
-and for segment boundaries, the longest prefix, trailing slashes and malformed entries.
+for each client identity case, and for segment boundaries, the longest prefix, trailing slashes and malformed entries.
 
 A host-side `bundle exec woods-mcp-start` is also valid, but only when the application bundle is installed on the host and the output is host-visible:
 
@@ -326,7 +347,7 @@ index it serves. The Index Server says so itself:
   `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
   `woods_version`, `woods_revision`, `woods_revision_dirty`, then
   `client_matches`, `client_match_reason`, `client_root`, `client_root_declared`,
-  `client_root_mapped_to`, `client_branch`, `branch_matches`, `mismatch_allowed`,
+  `client_root_mapped_to`, `client_identity`, `client_branch`, `branch_matches`, `mismatch_allowed`,
   `warnings` (the same lines the instructions carry) and `build` (writer versus reader).
   For a call routed with [`root`](MCP_WORKTREE_SETUP.md#one-server-several-worktrees-root),
   the client is that worktree.
@@ -349,8 +370,8 @@ See [the Docker process and path rule](#docker-process-and-path-rule) for why a 
 
 `client_matches` is `true` or `false` when both checkouts are known, and `null`
 when either is not (`client_match_reason` says which: `root_not_recorded`,
-`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped` and
-`client_root_mapped_missing` are mismatches, so `client_matches` is `false` there.
+`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped`,
+`client_root_mapped_missing` and `client_identity_differs` are mismatches, so `client_matches` is `false` there.
 
 **An unknown checkout warns.** When either checkout cannot be determined, the server starts,
 and the instructions and `woods_status.identity.warnings` carry one `WARNING:` line.

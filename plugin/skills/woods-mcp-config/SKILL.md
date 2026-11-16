@@ -150,7 +150,7 @@ generator write the path-free container entry:
     "woods": {
       "type": "stdio",
       "command": "sh",
-      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; id=\"$(test -f \"$(git rev-parse --show-toplevel 2>/dev/null)/.git\" && echo linked || echo main):$(git rev-parse --verify -q HEAD 2>/dev/null):$(git branch --show-current 2>/dev/null)\"; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-identity \"$id\""]
     }
   }
 }

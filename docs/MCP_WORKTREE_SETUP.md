@@ -41,7 +41,8 @@ The configuration names no absolute path:
 }
 ```
 
-It still relies on the client starting the server in the worktree; that was not verified for any client.
+Claude Code 2.1.325 starts it in the worktree and sets `CLAUDE_PROJECT_DIR` to the worktree's own root;
+for another client, check its documentation.
 See [launch for the current checkout](MCP_SERVERS.md#launch-for-the-current-checkout---checkout)
 and, for a shared application container, [`--client-root`](MCP_SERVERS.md#docker-process-and-path-rule).
 
