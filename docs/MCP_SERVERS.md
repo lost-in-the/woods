@@ -130,6 +130,9 @@ An awaiting server cannot, since nothing is recorded yet.
 So it runs the same check on every call, with the same inputs and the same override.
 The check reads the generation the call is pinned to, so the generation judged is the one the call reads,
 even when another is published meanwhile.
+It follows the reader, not the `root` argument: a call routed with a `root` that resolves to the launch index
+is judged too, while a route to another worktree's own index is not.
+`reload` judges the generation it adopted before its answer describes it.
 When a generation records another checkout and the mismatch is not allowed:
 
 - every tool but `woods_status` answers a non-retryable error, `error_code: "index_checkout_mismatch"`,
