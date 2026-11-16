@@ -1019,6 +1019,14 @@ policy. Ordinary string literals remain supported. This restriction is part of
 needed. Confirm that the release is available before selecting it. The Rails-version
 integration lane checks these boundaries on real SQLite.
 
+On SQLite, `console_sql` refuses parameter tokens before any other check: `?`, `?NNN`, `:name`, `@name`, `#name`
+and `$name`.
+The tool passes no bind values, and SQLite binds `NULL` to an unbound parameter, so such a statement would run with
+`NULL` where the token stands.
+Write the value as a literal instead.
+These characters stay usable inside string literals, comments and quoted identifiers.
+Other adapters are unaffected: PostgreSQL `::type` casts, MySQL `@variables` and MySQL `#` comments work as before.
+
 The contributor live-backend lane exercises these boundaries
 through Console requests against PostgreSQL and MySQL. Keep read tools disabled
 unless live SQL access is needed, and retain the configured blocked-table and

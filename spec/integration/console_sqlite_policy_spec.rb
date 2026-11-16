@@ -90,4 +90,24 @@ RSpec.describe 'Console SQLite read policy', :booted_app do
       expect(executed).to be(false)
     end
   end
+
+  ['?', '?1', ':name', '@name', '#name', '$name'].each do |token|
+    it "refuses the SQLite parameter token #{token} that console_sql cannot bind" do
+      expect(@connection.select_all("SELECT #{token} IS NULL AS unbound").rows).to eq([[1]])
+      result = request("SELECT message FROM policy_allowed WHERE message = #{token} OR #{token} IS NULL")
+      expect(result.fetch('isError')).to be(true)
+      expect(result.to_json).to include('passes no bind values')
+      expect(result.to_json).not_to include('allowed fixture')
+    end
+  end
+
+  ["SELECT message FROM policy_allowed WHERE message <> ':name @name #name $name ?'",
+   'SELECT message FROM policy_allowed -- :name @name #name ?',
+   'SELECT message FROM policy_allowed /* :name @name #name ? */'].each do |sql|
+    it "keeps parameter characters inside a literal or comment readable: #{sql}" do
+      result = request(sql)
+      expect(result.fetch('isError')).to be(false)
+      expect(result.to_json).to include('allowed fixture')
+    end
+  end
 end

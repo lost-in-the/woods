@@ -997,6 +997,7 @@ module Woods
       # A row cap changes the statement. Check both the caller's complete
       # statement and the exact SQL sent to the adapter, including the cap.
       def validate_sql_policy!(sql)
+        SqliteReadGuard.refuse_parameters!(sql) if sql_dialect == :sqlite
         # Alias-list identity is its own policy, even when an alias also
         # looks like a function name to the SQL validator.
         sql_security_views(sql).each { |stripped| refuse_sql_column_alias_lists!(stripped) }

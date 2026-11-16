@@ -11,6 +11,25 @@ module Woods
       SIMPLE_IDENTIFIER = /\A[A-Za-z_][A-Za-z0-9_]*\z/
       UNSUPPORTED_SYNTAX = /[^\x00-\x7F]|\$|\[|''\s*\(|\b(?:FROM|JOIN)(?=['"`(])/i
       QUOTED_IDENTIFIER = /"(?:[^"]|"")*"|`(?:[^`]|``)*`/
+      # SQLite's tokenizer reads `?`, `?NNN`, `:name`, `@name`, `#name` and
+      # `$name` as parameters (Tcl-style `::` and `(...)` suffixes included).
+      # Every such token has `?`, a leading `$`, or one of `:@#` followed by an
+      # identifier character; `$` inside an identifier is ordinary.
+      PARAMETER_TOKEN = /\?|[:@#][A-Za-z0-9_$\u0080-\u{10ffff}]|(?<![A-Za-z0-9_$\u0080-\u{10ffff}])\$/u
+      PARAMETER_REFUSAL = 'Rejected: console_sql passes no bind values, so SQLite parameter tokens ' \
+                          '(?, ?NNN, :name, @name, #name, $name) are refused. Write the value as a literal.'
+
+      # console_sql executes without bind values, and SQLite binds NULL to an
+      # unbound parameter. Callers run this before any other SQL check.
+      #
+      # @param sql [String] SQL to execute on SQLite
+      # @raise [SqlValidationError] when a parameter token appears outside a
+      #   string literal, comment or quoted identifier
+      # @return [void]
+      def self.refuse_parameters!(sql)
+        view = SqlNoiseStripper.strip_noise(sql, dialect: :sqlite).gsub(QUOTED_IDENTIFIER, '""')
+        raise SqlValidationError, PARAMETER_REFUSAL if view.match?(PARAMETER_TOKEN)
+      end
 
       # @param sql [String] SQL to execute on SQLite
       # @raise [SqlValidationError] when an identifier or table factor cannot be checked

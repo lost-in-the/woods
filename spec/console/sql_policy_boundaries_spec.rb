@@ -181,7 +181,9 @@ RSpec.describe 'Console SQL policy boundaries' do
           sql = ['SELECT', items.join(', '), 'FROM users u'].join(' ')
           result = request(sql)
           expect(result).to include('ok' => false, 'error_type' => 'validation')
-          expect(result['error']).to include('whole-row')
+          # On SQLite, `::text` holds the parameter form `:text`, refused first.
+          refusal = adapter == 'SQLite' && sql.include?('::') ? 'bind values' : 'whole-row'
+          expect(result['error']).to include(refusal)
           expect(connection).not_to have_received(:select_all)
         end
       end
