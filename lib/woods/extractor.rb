@@ -1824,12 +1824,17 @@ module Woods
       PayloadStore.name_for(@payload_generation)
     end
 
-    # A name only this run may stage under: the lock token when this process
-    # holds the index writer lock, otherwise a random one.
+    # A name only this run may stage under: a random part unique to the run,
+    # after the lock token when this process holds the index writer lock.
+    #
+    # The token alone is not enough. It names an acquisition, and every run in
+    # the process finds the same held lock, so two runs staging the same
+    # generation would share one directory and {PayloadStore#create_stage}
+    # would empty the first run's work for the second.
     #
     # @return [String]
     def stage_owner
-      @writer_lock&.token || SecureRandom.hex(8)
+      [@writer_lock&.token, SecureRandom.hex(8)].compact.join('-')
     end
 
     # @param published [Integer] the generation just published

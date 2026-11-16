@@ -15,6 +15,9 @@ require 'woods/extractor'
 # | lock file unreadable (unknown) | no       | no     | no     | removed   |
 # | no lock held: takes it itself  | yes      | yes    | yes    | promoted  |
 # | no lock held, another holds it | no       | no     | no     | removed   |
+#
+# A stage belongs to one run, never to a lock: two runs that find the same
+# held lock still stage apart, and the one that publishes second is refused.
 RSpec.describe Woods::Extractor, 'writer fence' do
   let(:output) { Dir.mktmpdir('woods-writer-fence') }
   let(:store) { Woods::PayloadStore.new(output) }
@@ -67,7 +70,7 @@ RSpec.describe Woods::Extractor, 'writer fence' do
   it 'publishes from a private stage while this run holds the lock' do
     hold_lock
     extractor = staged_run
-    expect(extractor.payload_dir.basename.to_s).to eq(".stage-2-#{@lock.token}")
+    expect(extractor.payload_dir.basename.to_s).to start_with(".stage-2-#{@lock.token}-")
 
     expect(extractor.send(:publish_generation, 'full').number).to eq(2)
     expect(File.read(store.path_for(2).join('manifest.json'))).to eq('{"generation":2}')
@@ -256,5 +259,111 @@ RSpec.describe Woods::Extractor, 'writer fence' do
 
       expect(staged_run.send(:publish_generation, 'full').number).to eq(2)
     end
+  end
+
+  # Two runs in one process that both find the held writer lock: a direct
+  # library call beside a locked writer. Each stages apart; the first to
+  # publish wins with exactly its own files and the other is refused at the
+  # generation-number check, its stage removed.
+  describe 'two runs in one process under one held lock' do
+    def stage_files(extractor, owner)
+      Woods::AtomicFile.write(extractor.payload_dir.join('manifest.json'), JSON.generate(owner: owner))
+      Woods::AtomicFile.write(extractor.payload_dir.join("#{owner}.json"), '{}')
+    end
+
+    def live_files
+      dir = Woods::Generation.new(output_dir: output).payload_dir
+      Dir.children(dir.to_s).sort.to_h { |name| [name, File.read(dir.join(name))] }
+    end
+
+    let(:runs) do
+      hold_lock
+      first = described_class.new(output_dir: output)
+      first.send(:begin_payload!)
+      Woods::AtomicFile.write(first.payload_dir.join('early.json'), '{}')
+      second = described_class.new(output_dir: output)
+      second.send(:begin_payload!)
+      stage_files(first, 'first')
+      stage_files(second, 'second')
+      { 'first' => first, 'second' => second }
+    end
+
+    it 'gives each run its own stage, so neither empties the other' do
+      first, second = runs.values_at('first', 'second')
+
+      expect(first.payload_dir).not_to eq(second.payload_dir)
+      expect(first.payload_dir.join('early.json')).to exist
+      expect(stages.size).to eq(2)
+    end
+
+    {
+      'first' => %w[early.json first.json manifest.json],
+      'second' => %w[manifest.json second.json]
+    }.each do |winner, expected|
+      it "publishes only the #{winner} run's files and refuses the other when the #{winner} publishes first" do
+        loser = (runs.keys - [winner]).first
+
+        expect(runs.fetch(winner).send(:publish_generation, 'full').number).to eq(2)
+        published = live_files
+        expect(published.keys).to eq(expected)
+        expect(JSON.parse(published.fetch('manifest.json'))).to eq('owner' => winner)
+
+        expect(runs.fetch(loser).send(:publish_generation, 'full')).to be_nil
+        expect { runs.fetch(loser).raise_on_publication_failure! }
+          .to raise_error(Woods::ExtractionError, /generation moved to 2/)
+        expect(marker_number).to eq(2)
+        expect(live_files).to eq(published)
+        expect(stages).to be_empty
+      end
+    end
+
+    # The pipeline_extract handoff: the request thread takes the lock and a
+    # worker thread runs the extraction, which must publish under it.
+    it 'publishes under a lock another thread of this process acquired' do
+      hold_lock
+      original = ENV.fetch('WOODS_LOCK_WAIT', nil)
+      ENV['WOODS_LOCK_WAIT'] = '0.3'
+      published = Thread.new { staged_run.send(:publish_generation, 'full') }.value
+
+      expect(published.number).to eq(2)
+      expect(File.exist?(lock_path)).to be(true)
+    ensure
+      ENV['WOODS_LOCK_WAIT'] = original
+    end
+  end
+
+  # A child forked while the parent holds the lock inherits the registry entry
+  # but not the ownership: its run stages under its own name and takes the lock
+  # for itself, which the living parent still holds.
+  it 'refuses a forked child the parent\'s lock for staging or publishing', if: Process.respond_to?(:fork) do
+    hold_lock
+    reader, writer = IO.pipe
+    child = fork do
+      reader.close
+      writer.write(JSON.generate(child_run_outcome))
+    ensure
+      exit!(0)
+    end
+    writer.close
+    result = JSON.parse(reader.read)
+    Process.wait(child)
+
+    expect(result['stage']).to start_with('.stage-2-')
+    expect(result['stage']).not_to include(@lock.token)
+    expect(result['error']).to match(/Could not take the index writer lock/)
+    expect(marker_number).to eq(1)
+    expect(@lock.fenced { :ours }).to eq(:ours)
+  end
+
+  # @return [Hash] the stage a run in this process opened and why its publish failed
+  def child_run_outcome
+    ENV['WOODS_LOCK_WAIT'] = '0.3'
+    run = staged_run
+    stage = run.payload_dir.basename.to_s
+    run.send(:publish_generation, 'full')
+    run.raise_on_publication_failure!
+    { stage: stage, error: nil }
+  rescue Woods::ExtractionError => e
+    { stage: stage, error: e.message }
   end
 end
