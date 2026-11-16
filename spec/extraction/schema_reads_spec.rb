@@ -85,13 +85,19 @@ RSpec.describe Woods::Extraction::SchemaReads do
         [:fk]
       end
 
+      workers = []
       described_class.with do
-        first = Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
+        workers << Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
         started.pop
-        second = Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
-        sleep 0.05 until second.status == 'sleep'
-        release << true
-        expect([first.value, second.value]).to eq([[:fk], [:fk]])
+        workers << Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+        sleep 0.01 until workers[1].status == 'sleep' || Process.clock_gettime(Process::CLOCK_MONOTONIC) > deadline
+        # One release per worker, so a regression that queries twice fails on the count instead of hanging.
+        2.times { release << true }
+        expect(workers.map { |worker| worker.join(5)&.value }).to eq([[:fk], [:fk]])
+      ensure
+        2.times { release << true }
+        workers.each { |worker| worker.join(1) || worker.kill }
       end
 
       expect(calls).to eq(1)
