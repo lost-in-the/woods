@@ -48,7 +48,8 @@ module IndexComparison
       graph_analysis: /\Agraph_analysis\.json: /,
       flow: %r{\Aflow artifact flows/},
       summary: /\ASUMMARY\.md /,
-      source_references: /\Asource_references\.json: /
+      source_references: /\Asource_references\.json: /,
+      source_inputs: /\Asource_inputs\.json[: ]/
     }.freeze
 
     SINGLE_FILES = {
@@ -105,7 +106,7 @@ module IndexComparison
     #
     # @return [Hash{Symbol => Float}]
     def key_mask_shares
-      @masks.select { |mask| mask.width == :key }.to_h do |mask|
+      @masks.select { |mask| %i[key value].include?(mask.width) }.to_h do |mask|
         sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask.path) }
         [mask.name, sizes.sum(&:first).fdiv([sizes.sum(&:last), 1].max)]
       end
@@ -235,7 +236,8 @@ module IndexComparison
       return [] unless relative
 
       target = concrete_paths(document, mask.path).sample(random: @random)
-      leaves = leaf_paths(dig(document, target), target)
+      # A leaf another mask also hides would not show when only this one is lifted.
+      leaves = leaf_paths(dig(document, target), target).reject { |leaf| masked_path?(mask.artifact, leaf, mask) }
       path = leaves.empty? ? target : leaves.sample(random: @random)
       changed = mutate_at(document, path)
       masked_and_lifted(mask, relative, path) { write(relative, changed) }
@@ -276,14 +278,28 @@ module IndexComparison
       case mask.artifact
       when :summary then summary_body_probe(mask)
       when :outside_payload then outside_payload_probe(mask)
-      else
-        relative = SINGLE_FILES.key(mask.artifact)
-        return nil unless payload_files.include?(relative)
-
-        document = read(relative)
-        changed = mutate_at(document, leaf_paths(document, []).sample(random: @random))
-        probe(:masked, mask.artifact, relative, [], mask.name) { write(relative, changed) }
       end
+    end
+
+    # A value under the mask changed; its key stays.
+    def value_probes(mask)
+      relative, document, path = documents(mask.artifact).sort_by(&:first).flat_map do |name, parsed|
+        concrete_paths(parsed, mask.path).map { |found| [name, parsed, found] }
+      end.sample(random: @random)
+      return [] unless relative
+
+      changed = mutate_at(document, path)
+      masked_and_lifted(mask, relative, path) { write(relative, changed) }
+    end
+
+    # The masked element added to the array that may hold it.
+    def element_probes(mask)
+      relative, document = documents(mask.artifact).min_by(&:first)
+      array = mask.path[0...-1]
+      return [] unless relative && dig(document, array).is_a?(Array)
+
+      changed = replace_at(document, array, dig(document, array) + [mask.path.last])
+      masked_and_lifted(mask, relative, mask.path) { write(relative, changed) }
     end
 
     def summary_body_probe(mask)
@@ -366,9 +382,10 @@ module IndexComparison
       File.write(File.join(@payload, relative), JSON.generate(document))
     end
 
-    def masked_path?(artifact, path)
+    def masked_path?(artifact, path, except = nil)
       @masks.any? do |mask|
-        mask.artifact == artifact && mask.width == :key && within?(path, mask.path)
+        !mask.equal?(except) && mask.artifact == artifact && %i[key value].include?(mask.width) &&
+          within?(path, mask.path)
       end
     end
 

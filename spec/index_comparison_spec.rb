@@ -159,6 +159,60 @@ RSpec.describe IndexComparison do
       expect(described_class.mask(:source_reference_added_credit, owners)).to eq('owners' => [{ 'identifier' => 'A' }])
     end
 
+    describe 'the source-input manifest' do
+      def inputs(scopes, unverified: [])
+        { 'generation' => 1, 'key_id' => 'k', 'identities' => %w[d0 d1], 'scopes' => scopes,
+          'unverified_scopes' => unverified, 'complete' => true }
+      end
+
+      def pair(root, left, right)
+        dirs = %w[incremental full].map { |name| File.join(root, name) }
+        dirs.zip([left, right]).each do |dir, document|
+          write_index(dir, note: 'same')
+          File.write(File.join(dir, 'source_inputs.json'), JSON.generate(document))
+        end
+        dirs
+      end
+
+      it 'compares recorded paths and uncertainties, not keyed positions or the runtime case' do
+        Dir.mktmpdir('woods-index-comparison') do |root|
+          left = inputs({ 'file:services' => { 'a.rb' => 0 }, 'runtime' => { 'a.rb' => 0 } },
+                        unverified: ['runtime_consumption'])
+          right = inputs({ 'file:services' => { 'a.rb' => 1 }, 'runtime' => {} }).merge('generation' => 2)
+          expect(described_class.compare(*pair(root, left, right))).to eq([])
+        end
+        Dir.mktmpdir('woods-index-comparison') do |root|
+          left = inputs({ 'file:services' => { 'a.rb' => 0 } }, unverified: ['extractor:services'])
+          right = inputs({ 'file:services' => { 'a.rb' => 0, 'b.rb' => 1 } })
+          expect(described_class.compare(*pair(root, left, right))).to contain_exactly(
+            a_string_including('unverified_scopes'),
+            'source_inputs.json scope file:services: only incremental [], only full ["b.rb"]'
+          )
+        end
+      end
+
+      it 'tolerates only the known differences an example names' do
+        Dir.mktmpdir('woods-index-comparison') do |root|
+          dirs = pair(root, inputs({ 'whole:events' => {}, 'unit:poros' => { 'c.rb' => 0 } }),
+                      inputs({ 'whole:events' => { 'b.rb' => 1 }, 'unit:poros' => {} }))
+          missing = { unrun_family_scope: { 'whole:events' => :missing } }
+          exact = missing.merge(retained_unit_scope: { 'unit:poros' => %w[c.rb] })
+
+          expect(described_class.compare(*dirs, known: missing))
+            .to eq(['source_inputs.json scope unit:poros: only incremental ["c.rb"], only full []'])
+          expect(described_class.compare(*dirs, known: exact)).to eq([])
+          errors = [{ 'reason' => 'b' }, { 'reason' => 'a' }]
+          reordered = pair(File.join(root, 'order'), inputs({}).merge('errors' => errors),
+                           inputs({}).merge('errors' => errors.reverse))
+          expect(described_class.compare(*reordered)).to contain_exactly(a_string_including('errors'))
+          ordered = described_class::DEFAULT_MASKS + %i[source_inputs_errors_order]
+          expect(described_class.compare(*reordered, masks: ordered)).to eq([])
+          expect { described_class.compare(*dirs, known: { invented: {} }) }
+            .to raise_error(ArgumentError, /no known source-input difference named invented/)
+        end
+      end
+    end
+
     it 'prints the masks on success only when asked' do
       Dir.mktmpdir('woods-index-comparison') do |root|
         left = File.join(root, 'incremental')

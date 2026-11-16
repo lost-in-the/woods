@@ -37,6 +37,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   # Widths:
   # - `:key` drops one key (at `path`) from each document of the artifact.
   # - `:order` compares the array(s) at `path` as sorted lists.
+  # - `:value` compares the keys at `path` but not their values.
+  # - `:element` removes the string `path.last` from the array at the rest of `path`.
   # - `:artifact` leaves a whole file, or all of it but one checked span, uncompared.
   # - `:representation` covers byte layout: documents are compared as parsed values.
   #
@@ -44,7 +46,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   # artifact's bytes, or one that empties a document, is *wide* and must say
   # so with its own `wide:` reason.
   class Mask
-    WIDTHS = %i[key order artifact representation].freeze
+    WIDTHS = %i[key order value element artifact representation].freeze
 
     attr_reader :name, :artifact, :path, :width, :reason, :wide
 
@@ -136,13 +138,37 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
              reason: "Only the totals line is checked, against each index's own manifest (M4). The body " \
                      "carries a Generated: stamp, so the two runs' files never match byte for byte.",
              wide: 'Everything but one line of the file.'),
-    Mask.new(name: :source_inputs, artifact: :source_inputs, width: :artifact,
-             reason: 'Source provenance, not index content: identities are digests keyed by each output ' \
-                     "directory's private key. A partial run also lists other scope paths than a full run, " \
-                     'with or without a runtime_consumption uncertainty; docs/SOURCE_FRESHNESS.md describes ' \
-                     'the runtime and table-family cases, not every one measured.',
-             wide: 'The whole file. Its identities cannot be compared across output directories, and its ' \
-                   'scope lists are not held equal to a full run.'),
+    Mask.new(name: :source_inputs_generation, artifact: :source_inputs, width: :key, path: %w[generation],
+             reason: 'The generation the manifest was published with: an incremental index has published more ' \
+                     'of them than a fresh full extraction.'),
+    Mask.new(name: :source_inputs_captured_at, artifact: :source_inputs, width: :key, path: %w[captured_at],
+             reason: 'Wall-clock stamp of the source capture.'),
+    Mask.new(name: :source_inputs_key_id, artifact: :source_inputs, width: :key, path: %w[key_id],
+             reason: "Names the output directory's private key; each index has its own."),
+    Mask.new(name: :source_inputs_identities, artifact: :source_inputs, width: :key, path: %w[identities],
+             reason: "The table of source digests, keyed by the output directory's private key, so two " \
+                     'indexes never share one. Which paths each scope records is compared.',
+             wide: 'Most of the file: one keyed digest per captured file.'),
+    Mask.new(name: :source_inputs_scope_identities, artifact: :source_inputs, width: :value,
+             path: %w[scopes * *],
+             reason: 'Each recorded path points into the keyed identities table by position. The paths are ' \
+                     'compared; the positions are not.'),
+    Mask.new(name: :source_inputs_metrics, artifact: :source_inputs, width: :key, path: %w[metrics],
+             reason: 'Work accounting of the capture: files visited, hashed and reused from the baseline, bytes ' \
+                     'read and elapsed milliseconds. An incremental run reuses earlier digests.'),
+    Mask.new(name: :source_inputs_runtime_scope, artifact: :source_inputs, width: :key, path: %w[scopes runtime],
+             reason: 'A partial run keeps retained runtime evidence that still refers to the old source, and ' \
+                     'boot inputs advance only on a full run (docs/SOURCE_FRESHNESS.md, "Boot inputs advance ' \
+                     'only on a full run").'),
+    Mask.new(name: :source_inputs_errors_order, artifact: :source_inputs, width: :order, path: %w[errors],
+             default: false,
+             reason: 'Capture diagnostics in the order each run met them: an incremental run records its ' \
+                     "baseline's errors after its own. Opt-in for the fixture that shows it; the set is compared."),
+    Mask.new(name: :source_inputs_runtime_uncertainty, artifact: :source_inputs, width: :element,
+             path: %w[unverified_scopes runtime_consumption],
+             reason: 'A partial run records runtime_consumption when it cannot prove every retained reflected ' \
+                     'fact was serialized again (docs/SOURCE_FRESHNESS.md); a full run never does. Every other ' \
+                     'uncertainty is compared.'),
     Mask.new(name: :source_reference_identity, artifact: :source_references, width: :key,
              path: %w[files * identity],
              reason: "Each cached file's identity is a digest keyed by the output directory's private key, so " \
@@ -168,6 +194,33 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   DEFAULT_MASKS = MASKS.select(&:default?).map(&:name).freeze
 
+  OPEN_QUESTION = 'Not ruled legitimate: an open question for the maintainer, declared per example so it stays ' \
+                  'listed instead of hidden. The freshness verifier reports such a path as added or changed, ' \
+                  'so the index reads as drifted rather than silently current.'
+
+  # Source-input scope differences seen between an incremental and a full
+  # run, by cause. An example names the ones it shows in its
+  # `known_source_inputs:` metadata, as `{ cause => { scope => paths } }`, or
+  # `{ scope => :missing }` where the paths vary (the randomized sequences):
+  # paths only the full run lists are then tolerated in that scope, and no
+  # others. Nothing else uses them.
+  KNOWN_SOURCE_INPUT_DIFFERENCES = {
+    unrun_family_scope: 'A whole-app family the run did not re-execute keeps its baseline scope, so a path the ' \
+                        'tree gained since is missing from it (docs/SOURCE_FRESHNESS.md documents the table-family ' \
+                        "case). #{OPEN_QUESTION}",
+    refresh_family_scope: 'A targeted refresh replaces only the scopes of the families it names; another family ' \
+                          'whose rule also matches a new file (test mappings for a rake file, test support for a ' \
+                          "factory file) keeps its baseline scope without that file. #{OPEN_QUESTION}",
+    unconsumed_file_scope: 'A full run lists every path a family rule matches; an incremental run lists only the ' \
+                           'paths an extractor of that family read, so a file none produced a unit from is missing. ' \
+                           "#{OPEN_QUESTION}",
+    retained_unit_scope: 'A unit scope keeps a path the family no longer builds a unit from: per-file ' \
+                         're-extraction adds paths, and only a deletion or a re-run of the whole family removes ' \
+                         "them. #{OPEN_QUESTION}",
+    deleted_path_kept: 'A renamed-away path stays in the scopes of families the run did not re-execute. ' \
+                       "#{OPEN_QUESTION}"
+  }.freeze
+
   module_function
 
   # @param name [Symbol]
@@ -187,28 +240,40 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     raise ArgumentError, "#{name} is a #{selected.width} mask, not a key mask" unless selected.width == :key
     raise ArgumentError, "#{name} masks a Hash, not #{document.inspect[0, 80]}" unless document.is_a?(Hash)
 
-    drop_path(document, selected.path)
+    drop_keys(selected.artifact, document, [selected])
   end
 
   # @param incremental_dir [String] index maintained by extract_changed
   # @param full_dir [String] index from a cold extract_all of the same tree
   # @param masks [Array<Symbol>] names from {MASKS}; an example may narrow or extend the default set
   # @return [Array<String>] human-readable differences; empty means equivalent
-  def differences(incremental_dir, full_dir, masks: DEFAULT_MASKS)
+  # @param known [Hash] per-example known differences, see {KNOWN_SOURCE_INPUT_DIFFERENCES}
+  def differences(incremental_dir, full_dir, masks: DEFAULT_MASKS, known: {})
     active = active_masks(masks)
-    found = compare(incremental_dir, full_dir, masks: masks)
-    warn(mask_report(active)) if found.empty? && ENV['WOODS_DIFF_MASKS'] == '1'
+    found = compare(incremental_dir, full_dir, masks: masks, known: known)
+    report = mask_report(active) + known_report(known)
+    warn(report) if found.empty? && ENV['WOODS_DIFF_MASKS'] == '1'
     return found if found.empty?
 
-    warn("IndexComparison: #{incremental_dir} differs from #{full_dir}\n  #{found.join("\n  ")}\n" \
-         "#{mask_report(active)}")
-    found + ["not compared: #{active.map(&:name).join(', ')} (reasons on stderr and in IndexComparison::MASKS)"]
+    warn("IndexComparison: #{incremental_dir} differs from #{full_dir}\n  #{found.join("\n  ")}\n#{report}")
+    found + ["not compared: #{(active.map(&:name) + known.keys).join(', ')} " \
+             '(reasons on stderr and in IndexComparison::MASKS)']
+  end
+
+  # @return [String] the known differences an example declared, with their reasons
+  def known_report(known)
+    known.map do |cause, scopes|
+      "\nKnown source-input difference #{cause} #{scopes.inspect}: #{KNOWN_SOURCE_INPUT_DIFFERENCES.fetch(cause)}"
+    end.join
   end
 
   # {differences} without the report: the raw list, for a caller that expects some.
   #
   # @return [Array<String>]
-  def compare(incremental_dir, full_dir, masks: DEFAULT_MASKS)
+  def compare(incremental_dir, full_dir, masks: DEFAULT_MASKS, known: {}) # rubocop:disable Metrics/AbcSize
+    unknown = known.keys - KNOWN_SOURCE_INPUT_DIFFERENCES.keys
+    raise ArgumentError, "no known source-input difference named #{unknown.join(', ')}" if unknown.any?
+
     active = active_masks(masks)
     nothing_compared(incremental_dir, full_dir) +
       unit_differences(incremental_dir, full_dir, active) +
@@ -218,6 +283,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       skipped_files_differences(incremental_dir, full_dir) +
       source_reference_differences(incremental_dir, full_dir, active) +
       commit_table_differences(incremental_dir, full_dir, active) +
+      source_input_differences(incremental_dir, full_dir, active, known) +
       analysis_differences(incremental_dir, full_dir, active) +
       flow_differences(incremental_dir, full_dir, active) +
       summary_differences(incremental_dir) +
@@ -348,6 +414,45 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     ["git_commits.json: #{brief(hash_delta(incremental, full))}"]
   end
 
+  # The source-input manifest records which source each consumer scope
+  # proved; apart from its keys, stamps and the documented runtime case it
+  # must list what a full run lists.
+  def source_input_differences(incremental_dir, full_dir, active = default_masks, known = {})
+    incremental = drop_keys(:source_inputs, read_json(incremental_dir, 'source_inputs.json'), active)
+    full = drop_keys(:source_inputs, read_json(full_dir, 'source_inputs.json'), active)
+    return [] if incremental == full
+    return ["source_inputs.json: #{brief(hash_delta(incremental, full))}"] unless incremental && full
+
+    rest = hash_delta(incremental.except('scopes'), full.except('scopes'))
+    scopes = tolerate_known(incremental.fetch('scopes', {}), full.fetch('scopes', {}), known)
+    (rest.empty? ? [] : ["source_inputs.json: #{brief(rest)}"]) + scope_differences(*scopes)
+  end
+
+  # Both sides' scopes without the paths an example declared as known.
+  def tolerate_known(incremental, full, known)
+    known.each_value.reduce([incremental, full]) do |(left, right), scopes|
+      scopes.each_with_object([left.dup, right.dup]) do |(scope, paths), (kept_left, kept_right)|
+        mine = kept_left.fetch(scope, {})
+        theirs = kept_right.fetch(scope, {})
+        dropped = paths == :missing ? theirs.keys - mine.keys : Array(paths)
+        kept_left[scope] = mine.except(*dropped) if kept_left.key?(scope)
+        kept_right[scope] = theirs.except(*dropped) if kept_right.key?(scope)
+      end
+    end
+  end
+
+  # One line per consumer scope whose recorded paths differ.
+  def scope_differences(incremental, full)
+    (incremental.keys | full.keys).sort.filter_map do |scope|
+      left = incremental.fetch(scope, {})
+      right = full.fetch(scope, {})
+      next if left == right
+
+      "source_inputs.json scope #{scope}: only incremental #{brief((left.keys - right.keys).sort)}, " \
+        "only full #{brief((right.keys - left.keys).sort)}#{', values differ' if left.keys.sort == right.keys.sort}"
+    end
+  end
+
   # SUMMARY.md's totals against the manifest of the SAME index (M4).
   #
   # Compared per directory rather than incremental-vs-full (see the
@@ -471,10 +576,48 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     DEFAULT_MASKS.map { |name| mask_named(name) }
   end
 
-  # Remove every active `:key` mask of +artifact+ from +document+.
+  # Apply every active `:key`, `:value` and `:element` mask of +artifact+ to +document+.
   def drop_keys(artifact, document, active)
-    active.select { |mask| mask.artifact == artifact && mask.width == :key }
-          .reduce(document) { |masked, mask| drop_path(masked, mask.path) }
+    active.select { |mask| mask.artifact == artifact }.reduce(document) do |masked, mask|
+      case mask.width
+      when :key then drop_path(masked, mask.path)
+      when :value then blank_path(masked, mask.path)
+      when :order then sort_at(masked, mask.path)
+      when :element then drop_element(masked, mask.path[0...-1], mask.path.last)
+      else masked
+      end
+    end
+  end
+
+  # A copy of +document+ with the array at +path+ in a canonical order.
+  def sort_at(document, path)
+    return document if path.empty? || !document.is_a?(Hash) || !document.key?(path.first)
+
+    key, *rest = path
+    value = document[key]
+    document.merge(key => rest.empty? ? Array(value).sort_by { |member| JSON.generate(member) } : sort_at(value, rest))
+  end
+
+  # A copy of +document+ with the value at +path+ replaced by nil, its key kept.
+  def blank_path(document, path)
+    return document unless document.is_a?(Hash)
+
+    key, *rest = path
+    keys = key == '*' ? document.keys : [key] & document.keys
+    keys.reduce(document) do |copy, name|
+      copy.merge(name => rest.empty? ? nil : blank_path(copy[name], rest))
+    end
+  end
+
+  # A copy of +document+ whose array at +path+ no longer holds +element+.
+  def drop_element(document, path, element)
+    return document unless document.is_a?(Hash)
+
+    key, *rest = path
+    return document unless document.key?(key)
+
+    value = document[key]
+    document.merge(key => rest.empty? ? Array(value) - [element] : drop_element(value, rest, element))
   end
 
   # Every member of a Hash or an Array, replaced by the block's answer.
