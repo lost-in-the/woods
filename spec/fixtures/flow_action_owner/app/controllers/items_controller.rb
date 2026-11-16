@@ -5,6 +5,7 @@ class ItemsController < ApplicationController
   include IncludedShow
   prepend ReplacedCreate
   prepend SuperUpdate
+
   before_action :load_item
 
   def show
