@@ -51,8 +51,10 @@ module Woods
     STATUS = { 'A' => 'added', 'M' => 'modified', 'D' => 'deleted', 'T' => 'type_changed' }.freeze
 
     # The fields that decide the table's content; equal fields mean equal tables.
+    # `history_rewrites` is written only for a repository whose replace refs or
+    # grafts change the walk, so an absent field reads as "none".
     KEY_FIELDS = %w[schema_version head since window_days max_commits max_files_per_commit line_stats
-                    hunk_budget indexed_paths_sha256].freeze
+                    hunk_budget indexed_paths_sha256 history_rewrites].freeze
 
     FORMAT = '%x00%H%x00%P%x00%an%x00%cI%x00%s%x00%b%x00'
     private_constant :FORMAT
@@ -126,14 +128,17 @@ module Woods
     #
     # @param paths [Array<String>] indexed, application-relative paths
     # @param head [String] the resolved HEAD sha
+    # @param history_rewrites [String, nil] the digest of the replace refs and
+    #   grafts the walk honours, nil when there are none
     # @return [Hash{String => Object}]
-    def key(paths, head:)
-      { 'schema_version' => SCHEMA_VERSION, 'head' => head, 'since' => @since,
-        'window_days' => @settings.fetch('window_days'), 'max_commits' => @settings.fetch('max_commits'),
-        'max_files_per_commit' => @settings.fetch('max_files_per_commit'),
-        'line_stats' => @settings.fetch('line_stats', true),
-        'hunk_budget' => @settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET),
-        'indexed_paths_sha256' => Digest::SHA256.hexdigest(paths.uniq.sort.join("\n")) }
+    def key(paths, head:, history_rewrites: nil)
+      key = { 'schema_version' => SCHEMA_VERSION, 'head' => head, 'since' => @since,
+              'window_days' => @settings.fetch('window_days'), 'max_commits' => @settings.fetch('max_commits'),
+              'max_files_per_commit' => @settings.fetch('max_files_per_commit'),
+              'line_stats' => @settings.fetch('line_stats', true),
+              'hunk_budget' => @settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET),
+              'indexed_paths_sha256' => Digest::SHA256.hexdigest(paths.uniq.sort.join("\n")) }
+      history_rewrites ? key.merge('history_rewrites' => history_rewrites) : key
     end
 
     # Walk +head+ and build the table.
@@ -141,13 +146,14 @@ module Woods
     # @param paths [Array<String>] indexed, application-relative paths
     # @param head [String] the resolved HEAD sha; walked instead of `HEAD`
     #   so the table matches the head it records
+    # @param history_rewrites [String, nil] see {#key}
     # @return [Hash, nil] the table, or nil when the history could not be read completely
-    def build(paths, head:)
+    def build(paths, head:, history_rewrites: nil)
       parser = Parser.new(prefix: @log.repository_prefix, indexed: paths.to_set, settings: @settings)
       @log.stream(format: FORMAT, since: "#{@since}T00:00:00Z", revision: head) { |io| parser.parse(io) }
       result = parser.result
       LineStats.new(@log, @settings).attach(result['commits']) if @settings.fetch('line_stats', true)
-      key(paths, head: head).merge(result)
+      key(paths, head: head, history_rewrites: history_rewrites).merge(result)
     rescue StandardError => e
       @logger.warn('[Woods] Git commit table omitted: history could not be read completely. ' \
                    'Git 2.31 or newer is required; check the application repository and git installation. ' \

@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'digest'
 require 'open3'
 require 'set'
 
@@ -131,11 +132,16 @@ module Woods
 
       # The `git_commits.json` table (W-3) this run publishes, nil for none.
       #
-      # The table is a pure function of HEAD, the indexed path set and the
-      # bounds ({GitCommitTable}), all recorded in it. Every run, full or
-      # incremental, keeps the seeded table when it records the same inputs
-      # and otherwise walks the whole history again, so both modes publish the
-      # same bytes. Without a readable history there is no table.
+      # The table is a pure function of HEAD, the indexed path set, the
+      # bounds and the history rewrites the walk honours ({GitCommitTable}),
+      # all recorded in it. Every run, full or incremental, keeps the seeded
+      # table when it records the same inputs and otherwise walks the whole
+      # history again, so both modes publish the same bytes. Without a
+      # readable history there is no table.
+      #
+      # Replace refs and grafts change the commits git walks without moving
+      # HEAD, so their state is part of the key ({#history_rewrites}). A run
+      # that cannot read that state always walks.
       #
       # @param published [Hash, nil] the table the payload was seeded with
       # @param graph [DependencyGraph] the run's final graph
@@ -148,9 +154,28 @@ module Woods
 
         paths = commit_table_paths(graph)
         builder = GitCommitTable.new(root: @root, logger: @logger, settings: GitCommitTable.settings)
-        return published if GitCommitTable.current?(published, builder.key(paths, head: sha))
+        rewrites = history_rewrites
+        key = builder.key(paths, head: sha, history_rewrites: rewrites)
+        return published if rewrites != REWRITES_UNKNOWN && GitCommitTable.current?(published, key)
 
-        builder.build(paths, head: sha)
+        builder.build(paths, head: sha, history_rewrites: rewrites)
+      end
+
+      # Recorded for a table walked while the rewrite state could not be read,
+      # so no later run mistakes it for a table of the plain history.
+      REWRITES_UNKNOWN = 'unknown'
+
+      # The digest of the replace refs and the grafts file this repository's
+      # walks honour, nil when there are none, {REWRITES_UNKNOWN} when git
+      # could not say. Replace refs count only while replacement is on
+      # (`GIT_NO_REPLACE_OBJECTS` unset and `core.useReplaceRefs` not false);
+      # grafts count either way. Read once per capture.
+      #
+      # @return [String, nil]
+      def history_rewrites
+        return @history_rewrites if defined?(@history_rewrites)
+
+        @history_rewrites = read_history_rewrites
       end
 
       # The published account of whether this generation's Git facts can be
@@ -270,6 +295,43 @@ module Woods
           'the relocated complete layout. Derive <id> from the worktree Git metadata, not its branch name; ' \
           "selecting /mounted-common itself uses the primary checkout's HEAD."
         )
+      end
+
+      # @return [String, nil] see {#history_rewrites}
+      def read_history_rewrites
+        refs = replacement_refs
+        grafts = grafts_content
+        return REWRITES_UNKNOWN if refs.nil? || grafts.nil?
+        return nil if refs.empty? && grafts.empty?
+
+        Digest::SHA256.hexdigest("replace\n#{refs}\ngrafts\n#{grafts}")
+      end
+
+      # @return [String, nil] `<ref> <object>` lines of the replace refs in
+      #   force, empty when replacement is off; nil when git could not say
+      def replacement_refs
+        return '' if ENV.key?('GIT_NO_REPLACE_OBJECTS')
+
+        enabled, _error, status = Open3.capture3(*git_argv('config', '--bool', 'core.useReplaceRefs'))
+        return '' if status.success? && enabled.strip == 'false'
+
+        base = ENV.fetch('GIT_REPLACE_REF_BASE', '').empty? ? 'refs/replace/' : ENV.fetch('GIT_REPLACE_REF_BASE')
+        output, _error, status = Open3.capture3(
+          *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)', base)
+        )
+        status.success? ? output : nil
+      end
+
+      # @return [String, nil] the grafts file's bytes, empty without one; nil
+      #   when git could not name it
+      def grafts_content
+        output, _error, status = Open3.capture3(*git_argv('rev-parse', '--git-path', 'info/grafts'))
+        return nil unless status.success?
+
+        path = File.expand_path(output.strip, @root.to_s)
+        File.file?(path) ? File.binread(path) : ''
+      rescue SystemCallError
+        nil
       end
 
       # `-C <root>` keeps the result independent of the process working

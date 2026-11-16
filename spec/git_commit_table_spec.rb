@@ -218,6 +218,23 @@ RSpec.describe Woods::GitCommitTable do
     end
   end
 
+  describe 'history_rewrites' do
+    it 'records the rewrite digest after the path digest, only when there is one' do
+      commit('root', { 'app/a.rb' => 'a' })
+
+      plain = table.build(%w[app/a.rb], head: head)
+      rewritten = table.build(%w[app/a.rb], head: head, history_rewrites: 'd' * 64)
+
+      expect(plain).not_to have_key('history_rewrites')
+      expect(rewritten.keys.take(rewritten.keys.index('truncated')).last(2))
+        .to eq(%w[indexed_paths_sha256 history_rewrites])
+      expect(described_class.current?(plain, table.key(%w[app/a.rb], head: head))).to be(true)
+      expect(described_class.current?(plain, table.key(%w[app/a.rb], head: head, history_rewrites: 'd' * 64)))
+        .to be(false)
+      expect(described_class.current?(rewritten, table.key(%w[app/a.rb], head: head))).to be(false)
+    end
+  end
+
   describe '#key and .current?' do
     it 'matches a table built from the same head, paths and settings, and nothing else' do
       commit('root', { 'app/a.rb' => 'a', 'app/b.rb' => 'b' })
