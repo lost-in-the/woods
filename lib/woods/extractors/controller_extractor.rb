@@ -663,7 +663,9 @@ module Woods
       #
       # @param controller [Class] The controller class
       # @return [Hash{String => Hash}] action name to
-      #   +{ owner:, defined_in:, file:, line: }+, sorted by action name.
+      #   +{ owner:, defined_in:, file:, line:, column: }+, sorted by action
+      #   name. +column+ is {#compiled_column}'s, absent when the runtime
+      #   does not report it.
       #   +file+ is relative to Rails.root; +defined_in+ is the indexed unit
       #   whose source holds the method body, or nil when no unit does.
       #   +super_source+, present when Ruby has a next definition of the
@@ -684,7 +686,8 @@ module Woods
             owner: method.owner.name,
             defined_in: defining_unit(method.owner, file),
             file: relative_to_root(file),
-            line: line
+            line: line,
+            **compiled_column(method)
           }
           following = super_source(method)
           sources[name][:super_source] = following if following
@@ -697,8 +700,8 @@ module Woods
       # application source; a request flow then stops at the `super` call.
       #
       # @param method [UnboundMethod] the action Ruby dispatches
-      # @return [Hash, nil] +{ owner:, defined_in:, file:, line: }+, or nil
-      #   when Ruby has no next definition
+      # @return [Hash, nil] +{ owner:, defined_in:, file:, line:, column: }+,
+      #   or nil when Ruby has no next definition
       def super_source(method)
         following = method.super_method
         return nil unless following
@@ -707,7 +710,30 @@ module Woods
         return { owner: following.owner.name, defined_in: nil, file: nil, line: nil } unless app_action_source?(file)
 
         { owner: following.owner.name, defined_in: defining_unit(following.owner, file),
-          file: relative_to_root(file), line: line }
+          file: relative_to_root(file), line: line, **compiled_column(following) }
+      end
+
+      # Where on its line Ruby compiled +method+'s body, read from its
+      # instruction sequence: of definitions sharing that line (exclusive
+      # branches of one `if`, or a redefinition), the one Ruby installed.
+      # The same reading as `CallbackAnalyzer#compiled_body`.
+      #
+      # @param method [UnboundMethod]
+      # @return [Hash] +{ column: }+, the byte column of the line its source
+      #   location names at which the compiled `def` starts, or nil when no
+      #   `def` compiled the body (a `define_method` block); empty when the
+      #   runtime does not say
+      def compiled_column(method)
+        return {} unless defined?(RubyVM::InstructionSequence) && RubyVM::InstructionSequence.respond_to?(:of)
+
+        compiled = RubyVM::InstructionSequence.of(method)&.to_a
+        return {} unless compiled.is_a?(Array) && compiled[4].is_a?(Hash)
+        return { column: nil } unless compiled[9] == :method
+
+        location = compiled[4][:code_location]
+        location.is_a?(Array) && location[0] == method.source_location&.last ? { column: location[1] } : {}
+      rescue StandardError
+        {}
       end
 
       # Routed actions Rails can dispatch whose body is gem code: inherited

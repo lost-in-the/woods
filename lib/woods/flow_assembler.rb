@@ -34,6 +34,10 @@ module Woods
     # index in memory.
     MEMO_LIMIT = 1_000
 
+    # Node types whose children are statements run in turn.
+    STATEMENT_LISTS = %i[program begin class module].freeze
+    private_constant :STATEMENT_LISTS
+
     # A call target that can name a unit: a constant, or a `::`-joined
     # constant chain. A lowercase receiver is a local, a method, or an ivar;
     # resolving it by name matched FactoryBot factories (`widget`, `order`),
@@ -151,6 +155,7 @@ module Woods
       @ast_cache = {}
       @method_node_cache = {}
       @definitions_cache = {}
+      @line_starts_cache = {}
     end
 
     # Assemble an execution flow from the given entry point.
@@ -423,8 +428,7 @@ module Woods
       holder_source = defined_in == unit_id ? source_code : holder && holder[:source_code]
       return nil if holder.nil? || holder_source.nil? || holder_source.empty?
 
-      line = source[:line] || source['line']
-      node = recorded_node(defined_in, holder_source, holder, method_name, line, source[:owner] || source['owner'])
+      node = recorded_node(defined_in, holder_source, holder, method_name, source)
       node && [node, holder]
     end
 
@@ -461,31 +465,64 @@ module Woods
       { type: :dynamic_dispatch, target: nil, method: 'super', args_hint: [], line: line, file: holder[:file_path] }
     end
 
-    # The definition of +method_name+ Ruby recorded at +line+ of the holder's
-    # file for +owner+: the last one there that +owner+'s body holds, since
-    # a later definition of a name in one owner replaces an earlier one, even
-    # on the same line, where +source_location+ cannot tell them apart. A
-    # definition another owner (a nested module) holds on that line is not
-    # it; when the recorded owner names no body there, the last definition
-    # on the line. Without a recorded line, or with one definition only,
-    # that one.
+    # The definition of +method_name+ Ruby compiled for +source+, an
+    # `action_sources` entry naming the holder's +line+ and the +owner+:
+    #
+    # - With a recorded +column+, the byte column at which the compiled
+    #   `def` starts on that line: the definition on the line starting
+    #   there, even a lone one. None when no definition starts there, or
+    #   when the column is nil (no `def` compiled the body).
+    # - Without one (an index written before it), a lone definition on the
+    #   line. Of several, those +owner+'s body holds (all of them when it
+    #   holds none), and of those the last only when they are statements of
+    #   one list, since a later definition replaces an earlier one, even on
+    #   one line. In any other arrangement, as in exclusive branches of an
+    #   `if`, none: which one Ruby installed depends on the branch taken.
+    # - Without a recorded line, or with one definition only and no column,
+    #   that one.
     #
     # @return [Ast::Node, nil]
-    def recorded_node(unit_id, source_code, holder, method_name, line, owner)
+    def recorded_node(unit_id, source_code, holder, method_name, source)
+      line = source[:line] || source['line']
+      column_recorded = source.key?(:column) || source.key?('column')
       definitions = definitions(unit_id, source_code, method_name)
-      return definitions.first&.first if line.nil? || definitions.one?
+      return definitions.first&.first if line.nil? || (definitions.one? && !column_recorded)
 
       map = (holder[:metadata] || {})[:source_line_map]
       on_line = definitions.select { |(node, _)| SourceLineMap.translate(map, node.line) == line }
-      owned = on_line.select { |(_, holder_owner)| holder_owner == owner.to_s }
-      (owned.empty? ? on_line : owned).last&.first
+      if column_recorded && on_line.all? { |(node, _)| node.start_byte }
+        column = source.key?(:column) ? source[:column] : source['column']
+        return column && on_line.find { |(node, _)| line_column(unit_id, source_code, node) == column }&.first
+      end
+
+      owned = on_line.select { |(_, holder_owner)| holder_owner == (source[:owner] || source['owner']).to_s }
+      candidates = owned.empty? ? on_line : owned
+      candidates.last.first if candidates.one? || one_statement_list?(candidates)
+    end
+
+    # @param candidates [Array<Array(Ast::Node, String, Ast::Node)>] definitions with their parent nodes
+    # @return [Boolean] true when every definition is a statement of one
+    #   list, so each runs and the later replaces the earlier
+    def one_statement_list?(candidates)
+      list = candidates.first&.last
+      !list.nil? && STATEMENT_LISTS.include?(list.type) && candidates.all? { |(_, _, parent)| parent.equal?(list) }
+    end
+
+    # @param node [Ast::Node] a definition with a start byte
+    # @return [Integer] the byte column of its line at which it starts
+    def line_column(unit_id, source_code, node)
+      starts = memoize(@line_starts_cache, unit_id) do
+        source_code.each_line.with_object([0]) { |text, offsets| offsets << (offsets.last + text.bytesize) }
+      end
+      node.start_byte - starts[node.line - 1]
     end
 
     # Instance-method definitions of +method_name+ in the unit, in source
     # order, each with the qualified name of the class or module whose body
-    # holds it. A `class << self` body holds no instance methods.
+    # holds it and the node that holds it. A `class << self` body holds no
+    # instance methods.
     #
-    # @return [Array<Array(Ast::Node, String)>]
+    # @return [Array<Array(Ast::Node, String, Ast::Node)>]
     def definitions(unit_id, source_code, method_name)
       index = memoize(@definitions_cache, unit_id) do
         collect_definitions(parsed_source(unit_id, source_code), [], []).group_by { |(node, _)| node.method_name }
@@ -493,16 +530,19 @@ module Woods
       index.fetch(method_name.to_s, [])
     end
 
-    # Walks +node+ in source order. A definition's own body is not entered.
+    # Walks +node+ (held by +parent+) in source order. A definition's own
+    # body is not entered.
     #
-    # @return [Array<Array(Ast::Node, String)>] +found+
-    def collect_definitions(node, namespace, found)
+    # @return [Array<Array(Ast::Node, String, Ast::Node)>] +found+
+    def collect_definitions(node, namespace, found, parent = nil)
       case node.type
-      when :def then return found << [node, namespace.join('::')]
+      when :def then return found << [node, namespace.join('::'), parent]
       when :sclass then return found
       when :class, :module then namespace += [node.method_name]
       end
-      Array(node.children).each { |child| collect_definitions(child, namespace, found) if child.is_a?(Ast::Node) }
+      Array(node.children).each do |child|
+        collect_definitions(child, namespace, found, node) if child.is_a?(Ast::Node)
+      end
       found
     end
 

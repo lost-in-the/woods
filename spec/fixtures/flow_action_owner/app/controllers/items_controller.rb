@@ -76,6 +76,22 @@ class ItemsController < ApplicationController
     LocalHandedJob.perform_later
   end
 
+  # Each line defines an action twice in exclusive branches; Ruby installs one.
+  # rubocop:disable all
+  if on? then def if_on; Flip::A.perform_later; end else def if_on; Flip::B.perform_later; end end
+  if off? then def if_off; Flip::A.perform_later; end else def if_off; Flip::B.perform_later; end end
+  on? ? (def tern_on; Flip::A.perform_later; end) : (def tern_on; Flip::B.perform_later; end)
+  off? ? (def tern_off; Flip::A.perform_later; end) : (def tern_off; Flip::B.perform_later; end)
+  case on? when true then def case_on; Flip::A.perform_later; end else def case_on; Flip::B.perform_later; end end
+  case off? when true then def case_off; Flip::A.perform_later; end else def case_off; Flip::B.perform_later; end end
+  on? && (def andor_on; Flip::A.perform_later; end) || (def andor_on; Flip::B.perform_later; end)
+  off? && (def andor_off; Flip::A.perform_later; end) || (def andor_off; Flip::B.perform_later; end)
+  def mod_on; Flip::A.perform_later; end if on?; def mod_on; Flip::B.perform_later; end unless on?
+  def mod_off; Flip::A.perform_later; end if off?; def mod_off; Flip::B.perform_later; end unless off?
+  begin; on? && raise; def resc_on; Flip::A.perform_later; end; rescue; def resc_on; Flip::B.perform_later; end; end
+  begin; off? && raise; def resc_off; Flip::A.perform_later; end; rescue; def resc_off; Flip::B.perform_later; end; end
+  # rubocop:enable all
+
   private
 
   def gate_open?

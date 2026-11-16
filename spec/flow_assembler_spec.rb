@@ -450,6 +450,7 @@ RSpec.describe Woods::FlowAssembler do
             def compact; LocalCompact.run!; end
             def gated; LocalGated.run!; end
             def locked; LocalLocked.run!; end
+            if on? then def flip; FirstFlip.run!; end else def flip; SecondFlip.run!; end end
           end
         RUBY
       end
@@ -653,6 +654,46 @@ RSpec.describe Woods::FlowAssembler do
 
         expect(operations).to include(a_hash_including(type: :dynamic_dispatch, target: nil, method: 'super', line: 8,
                                                        file: 'app/concerns/replacedreport.rb'))
+      end
+
+      # The byte column the compiled definition starts at tells apart
+      # definitions in exclusive branches of one line.
+      describe 'with the recorded column of the compiled definition' do
+        let(:flip_line) { receiver_source.lines[29] }
+
+        def flip(column)
+          write_receiver('flip' => source('ReportsController', 30).merge('column' => column))
+          targets_for('ReportsController#flip')
+        end
+
+        it 'reads the definition that starts at the column, first branch or second' do
+          expect(flip(flip_line.index('def flip'))).to eq(%w[load_report FirstFlip])
+          expect(flip(flip_line.rindex('def flip'))).to eq(%w[load_report SecondFlip])
+        end
+
+        it 'reads no body when no definition starts at the column, even a lone one' do
+          expect(flip(0)).to eq(%w[load_report])
+          write_receiver('show' => source('ReportsController', 5).merge('column' => 0))
+
+          expect(targets_for('ReportsController#show')).to eq(%w[load_report])
+        end
+
+        it 'reads no body when no def compiled it' do
+          expect(flip(nil)).to eq(%w[load_report])
+        end
+
+        it 'continues a super call into the definition at the recorded column' do
+          local = source('ReportsController', 26).merge('column' => 2)
+          write_receiver('twice' => source('ReplacedReport', 22, super_source: local).merge('column' => 2))
+
+          expect(targets_for('ReportsController#twice')).to eq(%w[load_report LocalTwice Between LocalTwice])
+        end
+      end
+
+      it 'reads no body for definitions in exclusive branches of the line when no column was recorded' do
+        write_receiver('flip' => source('ReportsController', 30))
+
+        expect(targets_for('ReportsController#flip')).to eq(%w[load_report])
       end
 
       it 'reads the later of two local definitions, on the line Ruby recorded' do

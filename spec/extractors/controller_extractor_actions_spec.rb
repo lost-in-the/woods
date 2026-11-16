@@ -334,7 +334,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         owner: 'ActionFixtures::SsoBehavior',
         defined_in: 'ActionFixtures::SsoBehavior',
         file: 'app/controllers/concerns/action_fixtures/sso_behavior.rb',
-        line: 4
+        line: 4,
+        column: 2
       )
     end
 
@@ -359,7 +360,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         owner: 'ActionFixtures::Modern::ConfirmationsController::Behavior',
         defined_in: 'ActionFixtures::Modern::ConfirmationsController',
         file: 'app/controllers/action_fixtures/modern/confirmations_controller.rb',
-        line: 9
+        line: 9,
+        column: 4
       )
     end
 
@@ -410,8 +412,9 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         defined_in: 'ActionFixtures::OuterStamping',
         file: 'app/controllers/concerns/action_fixtures/outer_stamping.rb',
         line: 2,
+        column: 2,
         super_source: { owner: 'ActionFixtures::InnerStamping', defined_in: 'ActionFixtures::InnerStamping',
-                        file: 'app/controllers/concerns/action_fixtures/inner_stamping.rb', line: 2 }
+                        file: 'app/controllers/concerns/action_fixtures/inner_stamping.rb', line: 2, column: 2 }
       )
     end
 
@@ -471,6 +474,14 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     it 'are actions only when routed, while methods in the controller’s own file are actions regardless' do
       expect(unit_for('LedgersController').metadata[:actions]).to contain_exactly('index', 'totals')
     end
+
+    # No `def` compiled a `define_method` body, so no definition's column
+    # can name it; a `def` records where it starts on its line.
+    it 'record a nil column for a define_method body and the def column for a def' do
+      sources = unit_for('LedgersController').metadata[:action_sources]
+
+      expect(sources.transform_values { |source| source.fetch(:column) }).to eq('index' => 2, 'totals' => nil)
+    end
   end
 
   describe 'methods a gem DSL defines on the controller' do
@@ -485,7 +496,8 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
         owner: 'ActionFixtures::WidgetsController',
         defined_in: 'ActionFixtures::WidgetsController',
         file: 'app/controllers/action_fixtures/widgets_controller.rb',
-        line: 5
+        line: 5,
+        column: 2
       )
     end
 
