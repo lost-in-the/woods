@@ -29,6 +29,30 @@ module Woods
       # Keys of an operation that hold the operations nested inside it.
       NESTED_KEYS = %i[nested then_ops else_ops].freeze
 
+      # Node types whose children do not run where they are written: a
+      # lambda body (Prism), the operand of `defined?` (Prism, parser gem).
+      UNEVALUATED_TYPES = %i[lambda defined defined?].freeze
+
+      # Receiverless calls whose block becomes a callable instead of running.
+      DEFERRING_CALLS = %w[lambda proc].freeze
+
+      # Whether a :block node builds a lambda or proc, so that its body runs
+      # only when something calls it: `-> {}` (a :block over :lambda in the
+      # parser gem), `lambda {}`, `proc {}` and `Proc.new {}`.
+      #
+      # @param node [Ast::Node]
+      # @return [Boolean]
+      def self.deferred_block?(node)
+        call = node.type == :block && node.children&.first
+        return false unless call.is_a?(Ast::Node)
+        return true if call.type == :lambda
+        return false unless call.type == :send
+
+        return DEFERRING_CALLS.include?(call.method_name) if call.receiver.nil?
+
+        call.method_name == 'new' && call.receiver.delete_prefix('::') == 'Proc'
+      end
+
       # Rewrite each operation's +line+, +statement_line+ and +file+, nested
       # operations included, from the lines its AST was parsed at.
       #
@@ -62,6 +86,7 @@ module Woods
       # Recursively walk the AST and extract operations.
       def walk(node, operations)
         return unless node.is_a?(Ast::Node)
+        return if UNEVALUATED_TYPES.include?(node.type)
 
         case node.type
         when :block
@@ -72,9 +97,20 @@ module Woods
           handle_conditional(node, operations)
         when :case
           handle_case(node, operations)
+        when :def, :defs
+          walk_definition(node, operations)
         else
           walk_children(node, operations)
         end
+      end
+
+      # Default parameter values run before the body, though the parser
+      # places them after it. The receiver of `def (expr).name` ran when the
+      # method was defined, not when it is called.
+      def walk_definition(node, operations)
+        children = Array(node.children).reject { |child| child.is_a?(Ast::Node) && child.type == :definition_receiver }
+        defaults, body = children.partition { |child| child.is_a?(Ast::Node) && child.type == :parameter_defaults }
+        (defaults + body).each { |child| walk(child, operations) }
       end
 
       # Walk all children of a node.
@@ -87,7 +123,9 @@ module Woods
       # Handle :block nodes - check for transaction/with_lock wrappers.
       def handle_block(node, operations)
         send_child = node.children&.first
-        if send_child.is_a?(Ast::Node) && send_child.type == :send && transaction_call?(send_child)
+        if self.class.deferred_block?(node)
+          handle_send(send_child, operations)
+        elsif send_child.is_a?(Ast::Node) && send_child.type == :send && transaction_call?(send_child)
           nested = []
           # Walk block body (children after the send node)
           node.children&.drop(1)&.each { |child| walk(child, nested) }

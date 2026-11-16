@@ -35,6 +35,57 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
             [[:async, 'ExportJob', 'perform_later', ['1']], [:async, 'ExportJob', 'perform_later', ['2']]]
           )
         end
+
+        def async_ops(body, params: nil)
+          signature = params ? "call(#{params})" : 'call'
+          extract_method_ops("def #{signature}\n#{body}\nend\n", 'call')
+            .select { |op| op[:type] == :async }.map { |op| "#{op[:target]}.#{op[:method]}" }
+        end
+
+        {
+          'a hash value' => 'x = { job: HashJob.perform_later }',
+          'a string interpolation' => "x = \"a\#{StrJob.perform_later}\"",
+          'a heredoc interpolation' => "x = <<~TXT\n  a \#{DocJob.perform_later}\nTXT",
+          'a yield argument' => 'yield YieldJob.perform_later',
+          'a later rescue branch' => "Work.call\nrescue ArgumentError\nA.call\nrescue TypeError\nLateJob.perform_later",
+          'the else of a rescue' => "Work.call\nrescue ArgumentError\nA.call\nelse\nElseJob.perform_later"
+        }.each do |form, body|
+          it "extracts an enqueue in #{form}" do
+            expect(async_ops(body)).to eq(["#{body[/\w+Job/]}.perform_later"])
+          end
+        end
+
+        it 'extracts an enqueue in a default parameter value ahead of the body' do
+          operations = extract_method_ops("def call(job: DefJob.perform_later)\n  Body.run\nend\n", 'call')
+
+          expect(operations.map { |op| [op[:type], op[:target], op[:method]] }).to eq(
+            [[:async, 'DefJob', 'perform_later'], [:call, 'Body', 'run']]
+          )
+        end
+
+        {
+          'a lambda in a hash value' => 'x = { cb: -> { HashJob.perform_later } }',
+          'a stabby lambda' => 'cb = -> { LamJob.perform_later }',
+          'a lambda block' => 'cb = lambda { LamJob.perform_later }',
+          'a proc block' => 'cb = proc { ProcJob.perform_later }',
+          'a Proc.new block' => 'cb = Proc.new { ProcJob.perform_later }',
+          'a defined? operand' => 'x = defined?(DefJob.perform_later)',
+          'a lambda default parameter value' => ['Body.run', 'cb: -> { LamJob.perform_later }']
+        }.each do |form, (body, params)|
+          it "extracts no enqueue from #{form}, which runs only when called" do
+            expect(async_ops(body, params: params)).to eq([])
+          end
+        end
+
+        it 'leaves the receiver of a singleton definition out of its operations' do
+          method_node = parser.parse("def (Registry.build).hook\n  Body.run\nend\n").find_first(:defs)
+
+          expect(extractor.extract(method_node).map { |op| [op[:target], op[:method]] }).to eq([%w[Body run]])
+        end
+
+        it 'still extracts an enqueue in a block body' do
+          expect(async_ops('items.each { EachJob.perform_later }')).to eq(['EachJob.perform_later'])
+        end
       end
     end
 
