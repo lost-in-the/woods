@@ -211,14 +211,18 @@ module Woods
 
       # @param method [UnboundMethod]
       # @return [Ast::Node, nil] the definition of +method+ starting on the
-      #   line its source location maps to; the later of two on one line,
-      #   as Ruby keeps
+      #   line its source location maps to. When several start there, only
+      #   those whose lexical owner is spelled as Ruby names +method.owner+
+      #   qualify, and the later one is what Ruby keeps; nil when none does.
       def dispatched_node(method)
         line = composite_line(*method.source_location)
         return nil unless line
 
         name = method.original_name.to_s
-        @parsed_root.find_all(:def).select { |node| node.line == line && node.method_name == name }.last
+        candidates = @parsed_root.find_all(:def).select { |node| node.line == line && node.method_name == name }
+        return candidates.first if candidates.one?
+
+        candidates.select { |node| nesting_for(node).first == method.owner.name }.last
       end
 
       # @param path [String, nil] an absolute source path

@@ -916,6 +916,49 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(result[:side_effects][:columns_written]).to eq(['c'])
     end
 
+    # Two class bodies on one physical line: the line alone cannot say
+    # which definition Ruby dispatches to, so the owner has to.
+    describe 'two owners defining the method on one line' do
+      let(:code) do
+        "module DispatchForms\n  " \
+          "class Left < Record; def stamp; self.a = 'a'; end; end; " \
+          "class Right < Record; def stamp; self.b = 'b'; end; end\nend\n"
+      end
+
+      it 'analyzes the earlier owner’s definition when Ruby dispatches to it' do
+        result = analysis(analyzer_for('Left', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Left')).to eq(['a'])
+        expect(result[:side_effects][:columns_written]).to eq(['a'])
+      end
+
+      it 'analyzes the later owner’s definition when Ruby dispatches to it' do
+        result = analysis(analyzer_for('Right', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Right')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      it 'analyzes the later of two definitions one owner makes on one line' do
+        twice = "module DispatchForms\n  class Twice < Record; def stamp; self.a = 'a'; end; " \
+                "def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Twice', [['twice.rb', twice]], composite: ['twice.rb']))
+
+        expect(written_by_ruby('Twice')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      it 'reports unsupported when neither definition’s owner is spelled as Ruby names it' do
+        compact = "module DispatchForms\n  " \
+                  "class DispatchForms::Up < Record; def stamp; self.c = 'c'; end; end; " \
+                  "class DispatchForms::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
+        result = analysis(analyzer_for('Up', [['compact.rb', compact]], composite: ['compact.rb']))
+
+        expect(written_by_ruby('Up')).to eq(['c'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+    end
+
     it 'places a method defined in a differently named file without resolving real paths' do
       code = "module DispatchForms\n  class Elsewhere < Record\n  end\nend\n"
       patch = "module DispatchForms\n  class Elsewhere\n    #{stamping('stamp', 'a')}  end\nend\n"
