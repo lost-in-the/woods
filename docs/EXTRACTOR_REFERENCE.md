@@ -124,13 +124,15 @@ model lookup through ancestors, and neither confidence adds a dependency edge.
 **Declaration spans (#751).** The literal symbol of a class-body association
 (`belongs_to`, `has_many`, `has_one`, `has_and_belongs_to_many`), callback
 (model callbacks and controller `*_action` filters) or `scope` macro publishes a
-span only when the unit's runtime metadata confirms the declaration:
+span only when the unit's metadata lists the declaration:
 - `kind: "association"` points at the reflected target class through the typed
   registry. A polymorphic association publishes nothing.
 - `kind: "callback_method"` and `kind: "scope"` point at the declaring unit,
   with `method` naming the method or scope. The method must appear in the
   resolved `callbacks` or `filters` chain, or in `scopes`.
+  Runtime reflection confirms an association or a callback.
   A scope span is `verified` only when its `scopes` entry is; otherwise it is `static`.
+  A scope under `if false` is listed, so its span is published, `static`.
 
 Coordinates cover the whole `:name` literal. These spans add no edge: the
 extractors already publish association relationships. Route helpers, partials and
