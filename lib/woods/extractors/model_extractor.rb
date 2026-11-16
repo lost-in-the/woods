@@ -790,28 +790,54 @@ module Woods
       # @param name [String]
       # @return [Boolean]
       def live_scope?(model, name)
+        scope_site?(model, name) && !enum_scope?(model, name)
+      end
+
+      # @param model [Class]
+      # @param name [String]
+      # @return [Boolean] true when +name+ is a scope Active Record defined on +model+ itself
+      def scope_site?(model, name)
         method = model.method(name)
-        method.owner == model.singleton_class &&
-          SCOPE_DEFINITION_SITE.match?(method.source_location&.first.to_s) && !enum_scope?(model, name)
+        method.owner == model.singleton_class && SCOPE_DEFINITION_SITE.match?(method.source_location&.first.to_s)
       rescue NameError
         false
       end
 
-      # An enum value +active+ defines the scopes +active+ and +not_active+,
-      # with the predicate +active?+ in the enum methods module unless the
-      # enum declines instance methods; then only the bare label is known.
+      # Whether an enum generated the scope +name+. An enum defines the
+      # scopes +V+ and +not_V+ for every value, +V+ carrying its prefix and
+      # suffix, or none of them (+scopes: false+). So +name+ is the enum's
+      # only when the whole family it belongs to answers as scopes; an
+      # explicit scope beside a scopeless enum leaves the family incomplete.
       #
       # @param model [Class]
       # @param name [String]
       # @return [Boolean]
       def enum_scope?(model, name)
-        values = [name, name.delete_prefix('not_')]
-        labels = model.respond_to?(:defined_enums) ? model.defined_enums.values.flat_map(&:keys).map(&:to_s) : []
-        return true if (values & labels).any?
-        return false unless model.respond_to?(:_enum_methods_module, true)
+        return false unless model.respond_to?(:defined_enums)
 
-        enum_methods = model.send(:_enum_methods_module)
-        values.any? { |value| enum_methods.method_defined?("#{value}?") }
+        values = [name, name.delete_prefix('not_')].uniq
+        model.defined_enums.each_value.any? do |mapping|
+          labels = mapping.keys.map(&:to_s)
+          enum_families(values, labels).any? do |family|
+            family.all? { |value| scope_site?(model, value) && scope_site?(model, "not_#{value}") }
+          end
+        end
+      end
+
+      # The value names an enum with +labels+ would give its scopes, for
+      # each prefix and suffix under which one of +values+ is such a name.
+      #
+      # @param values [Array<String>]
+      # @param labels [Array<String>]
+      # @return [Array<Array<String>>]
+      def enum_families(values, labels)
+        values.product(labels).flat_map do |value, label|
+          (0..(value.length - label.length)).select { |at| value[at, label.length] == label }.map do |at|
+            prefix = value[0, at]
+            suffix = value[(at + label.length)..]
+            labels.map { |other| "#{prefix}#{other}#{suffix}" }
+          end
+        end.uniq
       end
 
       # Fallback: extract scopes by regex when AST parsing fails. A line scan

@@ -367,6 +367,11 @@ publish the same values.
   `confidence` is `verified` when the live class answers the name as an Active Record scope of its own.
   That means a class method on the model's singleton class, defined at Active Record's scope definition site.
   It must also not be a scope an enum generates; nothing is called.
+  An enum defines `V` and `not_V` for every value or, with `scopes: false`, for none.
+  So a name counts as the enum's only when its whole family answers as scopes.
+  An explicit `scope :basic` beside `enum ..., scopes: false` is `verified`.
+  It reads `static` when every value and its `not_` form are declared explicitly too.
+  It also reads `static` when it overrides the scope an enum defined.
   Every other entry is `static`: dead code, a call inside a method, a class method of the same name, or a regex read.
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time

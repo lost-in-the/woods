@@ -62,6 +62,13 @@ module PendingPolicy
      'Booted-app extraction keeps a model that declares delegated_type with inverse_of',
      'delegated_type needs Rails 6.1',
      -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('6.1') }],
+    # `enum ..., instance_methods: false` arrived in Rails 7.1; the 6.0, 6.1
+    # and 7.0 booted rows cannot declare one.
+    ['spec/integration/scope_owner_forms_spec.rb',
+     'Scopes a model unit publishes, against the live class does not verify a dead scope whose name an enum ' \
+     'without instance methods answers',
+     'instance_methods: false needs Rails 7.1',
+     -> { (spec = Gem.loaded_specs['railties']) && spec.version < Gem::Version.new('7.1') }],
     # `draw(:name)` for config/routes/*.rb arrived in Rails 6.1; the 6.0 booted
     # row cannot write a draw file.
     *['tracks draw files, their routes and route lines through edits and removal',

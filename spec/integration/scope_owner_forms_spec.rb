@@ -62,6 +62,19 @@ RSpec.describe 'Scopes a model unit publishes, against the live class', :booted_
     expect(outer.dig('spans', 'active')).to eq('static')
   end
 
+  it 'does not verify a dead scope whose name a prefixed enum scope answers' do
+    expect(outer.dig('answers', 'tone_warm')).to eq('site' => 'named.rb', 'own' => true)
+    expect(outer.dig('scopes', 'tone_warm')).to eq('static')
+    expect(outer.dig('spans', 'tone_warm')).to eq('static')
+  end
+
+  it 'verifies an explicit scope named for a value of an enum that declines scopes' do
+    expect(outer.dig('answers', 'basic')).to eq('site' => 'named.rb', 'own' => true)
+    expect(outer['answers']).not_to have_key('not_basic')
+    expect(outer.dig('scopes', 'basic')).to eq('verified')
+    expect(outer.dig('spans', 'basic')).to eq('verified')
+  end
+
   it 'does not verify a dead scope whose name an enum without instance methods answers' do
     skip 'instance_methods: false needs Rails 7.1' if @rails < Gem::Version.new('7.1')
 

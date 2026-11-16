@@ -20,6 +20,18 @@ ENUM = if ActiveRecord::VERSION::MAJOR >= 7
        else
          'enum status: { active: 0, archived: 1 }'
        end
+# An enum that declines its scopes beside an explicit scope named for a value.
+# Rails 7.0 added the positional form; 8.0 removed the `_scopes:` keyword one.
+SCOPELESS_ENUM = if ActiveRecord::VERSION::MAJOR >= 7
+                   'enum :plan, { basic: 0, premium: 1 }, scopes: false'
+                 else
+                   'enum plan: { basic: 0, premium: 1 }, _scopes: false'
+                 end
+PREFIXED_ENUM = if ActiveRecord::VERSION::MAJOR >= 7
+                  'enum :tone, { warm: 0, cool: 1 }, prefix: true'
+                else
+                  'enum tone: { warm: 0, cool: 1 }, _prefix: true'
+                end
 # Rails 7.1 added `instance_methods: false`: the value scopes without the predicates.
 BARE_ENUM = if ActiveRecord.version >= Gem::Version.new('7.1')
               "enum :tier, { gold: 0 }, instance_methods: false\n  if false\n    scope :gold, -> { none }\n  end"
@@ -59,11 +71,18 @@ FILES = {
 
       #{ENUM}
       #{BARE_ENUM}
+      #{SCOPELESS_ENUM}
+      #{PREFIXED_ENUM}
+      if false
+        scope :tone_warm, -> { none }
+      end
+      scope :basic, -> { where(label: 'explicit') }
     end
   RUBY
 }.freeze
 
-NAMES = %w[own_scope nested_scope dead_scope dead_twin active gold deferred_scope bare_scope].freeze
+NAMES = %w[own_scope nested_scope dead_scope dead_twin active gold basic not_basic tone_warm deferred_scope
+           bare_scope].freeze
 MODELS = %w[ScopeOwner ScopeOwner::NestedScoped].freeze
 
 Dir.mktmpdir('woods_scope_owner_forms') do |root|
@@ -89,6 +108,8 @@ Dir.mktmpdir('woods_scope_owner_forms') do |root|
       t.string :label
       t.integer :status
       t.integer :tier
+      t.integer :plan
+      t.integer :tone
     end
   end
   Rails.application.eager_load!
