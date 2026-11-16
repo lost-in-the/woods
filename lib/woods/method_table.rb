@@ -336,18 +336,24 @@ module Woods
       include VisibilityCalls
       include Wrappers
 
-      def initialize
+      # @param offsets [Boolean] keep each entry's definition offset under
+      #   {Marks::OFFSET}, for a reader that joins entries to syntax nodes
+      def initialize(offsets: false)
         @entries = []
         @names = DeclarationName.new
         @nesting = []
         @candidate = nil
+        @offsets = offsets
       end
 
       # @param root [Prism::Node]
       # @return [Array<Hash>]
       def call(root)
         visit_body(root, nil, scope: 'instance')
-        @entries.each { |entry| entry.delete(Marks::SCOPE) }
+        @entries.each do |entry|
+          entry.delete(Marks::SCOPE)
+          entry.delete(Marks::OFFSET) unless @offsets
+        end
       end
 
       private
@@ -466,7 +472,8 @@ module Woods
         landing = definition_scope(receiver, scope)
         entry = { 'name' => node.name.to_s, 'kind' => definition_kind(landing, module_function),
                   'line' => node.location.start_line, 'end_line' => node.location.end_line,
-                  'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing }
+                  'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing,
+                  Marks::OFFSET => node.location.start_offset }
         @candidate ? entry.merge(CANDIDATE => @candidate) : entry
       end
     end
@@ -478,6 +485,11 @@ module Woods
       # The internal key naming where an entry was defined; removed before
       # the table is returned.
       SCOPE = 'scope'
+
+      # The internal key holding the byte offset where an entry's `def`
+      # starts, the one position no other definition shares; removed before
+      # the table is returned unless the walker is asked to keep it.
+      OFFSET = 'offset'
 
       module_function
 

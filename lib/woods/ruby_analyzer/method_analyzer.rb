@@ -43,19 +43,37 @@ module Woods
       # @raise [Woods::ExtractionError] if the source does not parse
       def analyze(source:, file_path:)
         nodes = definition_nodes(@parser.parse(source))
-        entries = MethodTable::Walker.new.call(Woods::ParseCache.parse(source).value)
-        entries.sort_by { |entry| entry.values_at('line', 'name', 'kind') }.flat_map do |entry|
+        shared = shared_lines(nodes.values)
+        entries = MethodTable::Walker.new(offsets: true).call(Woods::ParseCache.parse(source).value)
+        entries.sort_by { |entry| entry.values_at(MethodTable::Marks::OFFSET, 'kind') }.flat_map do |entry|
+          node = nodes[entry[MethodTable::Marks::OFFSET]]
+          text = node && definition_source(node, source, shared)
           sides(entry).map do |separator, visibility|
-            build_method_unit(entry, separator, visibility, nodes[[entry['line'], entry['name']]], file_path)
+            build_method_unit(entry, separator, visibility, node, text, file_path)
           end
         end
       end
 
       private
 
-      # Each definition node of the normalized tree by its first line and name.
+      # Each definition node of the normalized tree by the byte offset where
+      # its `def` starts: two definitions can share a line and a name (`def
+      # a; end; def self.a; end`), never a starting position.
       def definition_nodes(root)
-        (root.find_all(:def) + root.find_all(:defs)).to_h { |node| [[node.line, node.method_name], node] }
+        (root.find_all(:def) + root.find_all(:defs)).to_h { |node| [node.start_byte, node] }
+      end
+
+      # Lines on which more than one definition starts or ends.
+      def shared_lines(nodes)
+        nodes.flat_map { |node| [node.line, node.end_line].uniq }.tally.filter_map { |line, count| line if count > 1 }
+      end
+
+      # A definition's whole lines, or exactly its own text when another
+      # definition starts or ends on one of those lines.
+      def definition_source(node, source, shared)
+        return node.source unless shared.include?(node.line) || shared.include?(node.end_line)
+
+        source.byteslice(node.start_byte, node.end_byte - node.start_byte)
       end
 
       # The methods a table entry stands for: a module function is a private
@@ -70,13 +88,13 @@ module Woods
         end
       end
 
-      def build_method_unit(entry, separator, visibility, method_node, file_path)
+      def build_method_unit(entry, separator, visibility, method_node, text, file_path)
         owner = entry['owner']
         call_graph = method_node ? extract_call_graph(method_node) : []
         unit = ExtractedUnit.new(type: :ruby_method, identifier: "#{owner}#{separator}#{entry['name']}",
                                  file_path: file_path)
         unit.namespace = owner
-        unit.source_code = method_node&.source
+        unit.source_code = text
         unit.metadata = { visibility: visibility.to_sym, call_graph: call_graph }
         unit.metadata[:candidate] = entry[MethodTable::CANDIDATE] if entry[MethodTable::CANDIDATE]
         unit.dependencies = build_dependencies(call_graph)
