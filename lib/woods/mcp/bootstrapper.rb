@@ -812,9 +812,21 @@ module Woods
       # hand-edited woods.json, or a snapshot written before unset stores were
       # defaulted), not a programming bug: surface it as the one-line operator
       # message the exes print for BootstrapError instead of a backtrace. Every
-      # other ArgumentError keeps propagating.
+      # other ArgumentError keeps propagating. A store the Builder cannot open
+      # (pgvector schema setup against a database that refuses the
+      # connection, a durable graph store) raises a {Woods::Error}, which gets
+      # the same message.
       def self.build_stores_or_fail(config, resolved, artifact, state)
         build_retriever_from_config(config, resolved, artifact, state)
+      rescue BootstrapError, Woods::ConfigurationError
+        raise
+      rescue Woods::Error => e
+        # One line: a PostgreSQL refusal carries a line per host it tried.
+        raise BootstrapError.new(
+          "index stores could not be opened: #{e.message.gsub(/\s*\n\s*/, ' ').strip}",
+          details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
+                               graph_store: config.graph_store } }
+        )
       rescue ArgumentError => e
         raise unless e.message.match?(UNKNOWN_STORE_MESSAGE)
 

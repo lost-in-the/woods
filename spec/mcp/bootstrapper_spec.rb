@@ -489,6 +489,48 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    def write_fake_snapshot(dir)
+      stores = { 'vector_store' => 'in_memory', 'metadata_store' => 'in_memory', 'graph_store' => 'in_memory' }
+      File.write(File.join(dir, 'woods.json'), JSON.generate(
+                                                 'schema_version' => 1, 'gem_version' => Woods::VERSION,
+                                                 'created_at' => '2026-11-16T00:00:00Z', 'stores' => stores,
+                                                 'embedding_provider' => {
+                                                   'class' => 'Woods::Embedding::Provider::Fake',
+                                                   'model' => 'fake', 'dimension' => 4
+                                                 }
+                                               ))
+    end
+
+    it 'reports a store the Builder cannot open as a BootstrapError, not a backtrace' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::Error, 'pgvector schema setup failed (ActiveRecord::ConnectionNotEstablished: refused)')
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to eq('index stores could not be opened: pgvector schema setup failed ' \
+                                  '(ActiveRecord::ConnectionNotEstablished: refused)')
+          expect(e.details).to eq(stores: { vector_store: :in_memory, metadata_store: :in_memory,
+                                            graph_store: :in_memory })
+        end
+      end
+    end
+
+    it 'keeps a ConfigurationError from the Builder as it is, for the exes to print' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::ConfigurationError, 'dimensions disagree')
+
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to raise_error(Woods::ConfigurationError, 'dimensions disagree')
+      end
+    end
+
     it 'propagates ArgumentError from vector hydration (not swallowed)' do
       Dir.mktmpdir do |dir|
         allow(Woods::Storage::Snapshotter::Vector).to receive(:load_or_empty).and_raise(

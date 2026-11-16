@@ -21,7 +21,9 @@
 require 'spec_helper'
 require 'tmpdir'
 require 'fileutils'
+require 'json'
 require 'net/http'
+require 'open3'
 require 'securerandom'
 require 'uri'
 require 'woods/embedding/fake'
@@ -33,6 +35,7 @@ require 'woods/storage/pgvector'
 require 'woods/storage/qdrant'
 require 'woods/retrieval/scope'
 require 'woods/retrieval/scoped_vector_store'
+require 'woods/version'
 
 # Also tagged :integration so IntegrationHelpers (build_extracted_unit) is
 # included — see spec/support/integration_helpers.rb.
@@ -682,6 +685,82 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       store.store_batch(entries)
 
       expect(store.each_id.to_a.size).to eq(25)
+    end
+  end
+
+  # The packaged server opens its own connection from WOODS_PG_URL. On
+  # Active Record 8.0 and later a pool has lease_connection only, which a
+  # booted host application never exercises.
+  describe 'woods-mcp serving a pgvector index' do
+    let(:pg_url) { ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test') }
+    let(:table) { "woods_vectors_#{SecureRandom.hex(8)}" }
+    let(:index_dir) { Dir.mktmpdir('woods-live-mcp') }
+    let(:connection) do
+      require 'active_record'
+      ActiveRecord::Base.establish_connection(pg_url)
+      ActiveRecord::Base.connection
+    end
+
+    before do
+      reset_pg_schema!(connection, Woods::Storage::VectorStore::Pgvector.new(connection: connection,
+                                                                             dimensions: 8, table: table))
+      FileUtils.cp(File.expand_path('../fixtures/woods/manifest.json', __dir__), index_dir)
+      File.write(File.join(index_dir, 'woods.json'), JSON.generate(
+                                                       schema_version: 1, gem_version: Woods::VERSION,
+                                                       created_at: '2026-11-16T00:00:00Z',
+                                                       embedding_provider: {
+                                                         class: 'Woods::Embedding::Provider::Fake',
+                                                         model: 'live', dimension: 8
+                                                       },
+                                                       stores: { vector_store: 'pgvector', metadata_store: 'in_memory',
+                                                                 graph_store: 'in_memory' },
+                                                       store_options: { vector_store: { dimensions: 8, table: table } }
+                                                     ))
+    end
+
+    after { FileUtils.rm_rf(index_dir) }
+
+    def serve(*requests)
+      exe = File.expand_path('../../exe/woods-mcp', __dir__)
+      Open3.popen3({ 'WOODS_PG_URL' => pg_url, 'OPENAI_API_KEY' => nil }, 'bundle', 'exec', 'ruby', exe,
+                   index_dir) do |stdin, stdout, stderr, wait|
+        errors = Thread.new { stderr.read }
+        responses = requests.map do |request|
+          stdin.puts(JSON.generate(request))
+          JSON.parse(stdout.gets || raise("woods-mcp exited: #{errors.value}"))
+        end
+        stdin.close
+        wait.join(30) || Process.kill('KILL', wait.pid)
+        [responses, errors.value.force_encoding(Encoding::UTF_8).scrub]
+      end
+    end
+
+    it 'boots, and answers a semantic query from the real database' do
+      responses, errors = serve(
+        { jsonrpc: '2.0', id: 1, method: 'initialize',
+          params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'live', version: '1' } } },
+        { jsonrpc: '2.0', id: 2, method: 'tools/call',
+          params: { name: 'codebase_retrieve', arguments: { query: 'User model' } } }
+      )
+
+      expect(errors).to include('[woods-mcp] semantic search:')
+      expect(errors).not_to include('BootstrapError', 'NoMethodError')
+      expect(responses.first.fetch('result').fetch('protocolVersion')).to eq('2025-06-18')
+      expect(responses.last).to include('result')
+      expect(responses.last.dig('result', 'isError')).not_to be(true), responses.last.to_s
+    end
+
+    it 'exits 2 with one BootstrapError line when the database refuses the connection' do
+      exe = File.expand_path('../../exe/woods-mcp', __dir__)
+      refused = URI.parse(pg_url).tap { |uri| uri.port = 1 }.to_s
+      _out, err, status = Open3.capture3({ 'WOODS_PG_URL' => refused, 'OPENAI_API_KEY' => nil },
+                                         'bundle', 'exec', 'ruby', exe, index_dir, stdin_data: '')
+      err = err.force_encoding(Encoding::UTF_8).scrub
+
+      expect(status.exitstatus).to eq(2), err
+      expect(err).to match(/^\[woods-mcp\] BootstrapError: index stores could not be opened: pgvector schema .*refused/)
+      expect(err.lines.grep(/BootstrapError/).size).to eq(1)
+      expect(err).not_to match(/from .+\.rb:\d+:in/)
     end
   end
 end
