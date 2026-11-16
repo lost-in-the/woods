@@ -131,7 +131,7 @@ RSpec.describe 'Watch daemon: the first index' do
     watch.send(:catch_up)
 
     expect(status['reason']).not_to match(/newest|second/i)
-    expect(status['reason']).to include('independently known to have been published', 'fresh output directory')
+    expect(status['reason']).to include('the payloads/gen-<n> it names', 'fresh output directory')
   end
 
   it 'retries a first full extraction that failed, as a full extraction' do

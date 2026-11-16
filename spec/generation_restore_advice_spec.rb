@@ -29,9 +29,16 @@ RSpec.describe 'Restore advice for an unreadable generation marker' do
     expect(Woods::Generation::RESTORE_ADVICE).not_to match(/newest|oldest|latest|second|previous|highest/i)
   end
 
-  it 'restores only to independent evidence of publication, and otherwise extracts into a fresh directory' do
+  # A saved marker proves what was published then, not what the directory
+  # holds now: after the number goes backward, a writer replaces the unpinned
+  # gen-<n> it names before its own marker write, and may fail in between.
+  it 'restores only from a backup of the marker together with the payload it names' do
     expect(Woods::Generation::RESTORE_ADVICE)
-      .to include('independently known to have been published', 'backup of generation.json',
+      .to include('complete backup of generation.json and the payloads/gen-<n> it names',
                   'keep the old output directory as it is', 'fresh output directory')
+  end
+
+  it 'does not accept a saved marker or a served identity on its own' do
+    expect(Woods::Generation::RESTORE_ADVICE).not_to match(/served identity|independently known/)
   end
 end
