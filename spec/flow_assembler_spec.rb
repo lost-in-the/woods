@@ -399,6 +399,118 @@ RSpec.describe Woods::FlowAssembler do
       end
     end
 
+    # Ruby dispatches the body `action_sources` records, which is not always
+    # the first local definition of that name.
+    describe 'an action whose recorded body is not the first local definition' do
+      let(:receiver_source) do
+        <<~RUBY
+          class ReportsController < ApplicationController
+            include IncludedReport
+            prepend ReplacedReport
+
+            def show
+              LocalShow.run!
+            end
+
+            def create
+              ShadowedCreate.run!
+            end
+
+            def update
+              LocalUpdate.run!
+            end
+
+            def destroy
+              FirstDestroy.run!
+            end
+
+            def destroy
+              SecondDestroy.run!
+            end
+          end
+        RUBY
+      end
+
+      def write_receiver(sources)
+        write_unit('ReportsController', source_code: receiver_source, metadata: {
+                     'actions' => %w[create destroy show update],
+                     'action_sources' => sources,
+                     'filters' => [{ 'kind' => 'before', 'filter' => 'load_report' }]
+                   })
+      end
+
+      def source(owner, line, defined_in = owner)
+        { 'owner' => owner, 'defined_in' => defined_in, 'line' => line }
+      end
+
+      before do
+        write_unit('ReplacedReport', type: 'concern', source_code: <<~RUBY)
+          module ReplacedReport
+            def create
+              ReplacedCreate.run!
+            end
+
+            def update
+              PrependedUpdate.run!
+              super
+              AfterSuper.run!
+            end
+          end
+        RUBY
+        write_unit('IncludedReport', type: 'concern', source_code: <<~RUBY)
+          module IncludedReport
+            def show
+              IncludedShow.run!
+            end
+          end
+        RUBY
+        stub_graph_defaults
+      end
+
+      def targets_for(entry_point)
+        described_class.new(graph: graph, extracted_dir: extracted_dir).assemble(entry_point)
+                       .steps[0][:operations].map { |op| op[:target] || op[:method] }
+      end
+
+      it 'reads a prepended override, not the local definition it shadows' do
+        write_receiver('create' => source('ReplacedReport', 2))
+
+        expect(targets_for('ReportsController#create')).to eq(%w[load_report ReplacedCreate])
+      end
+
+      it 'continues a prepended override that calls super into the local definition, at the super call' do
+        write_receiver('update' => source('ReplacedReport', 6))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate LocalUpdate AfterSuper])
+      end
+
+      it 'reads the later of two local definitions, on the line Ruby recorded' do
+        write_receiver('destroy' => source('ReportsController', 21))
+
+        expect(targets_for('ReportsController#destroy')).to eq(%w[load_report SecondDestroy])
+      end
+
+      it 'keeps the local definition when it wins over an included concern' do
+        write_receiver('show' => source('ReportsController', 5))
+
+        expect(targets_for('ReportsController#show')).to eq(%w[load_report LocalShow])
+      end
+
+      it 'reads no body, not the shadowed local one, when no indexed unit holds the recorded body' do
+        write_receiver('create' => source('ReplacedReport', 2, nil))
+
+        expect(targets_for('ReportsController#create')).to eq(%w[load_report])
+      end
+
+      it 'reports the recorded body at its own file and line' do
+        write_receiver('create' => source('ReplacedReport', 2))
+        operations = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                    .assemble('ReportsController#create').steps[0][:operations]
+
+        expect(operations.last).to include(target: 'ReplacedCreate', line: 3, file: 'app/concerns/replacedreport.rb')
+      end
+    end
+
     it 'extracts route information from metadata' do
       write_unit('PostsController',
                  type: 'controller',

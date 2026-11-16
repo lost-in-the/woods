@@ -34,6 +34,9 @@ module Woods
     # index in memory.
     MEMO_LIMIT = 1_000
 
+    # Node types of a `super` call: explicit arguments, bare (Prism), and bare (parser gem).
+    SUPER_TYPES = %i[super forwarding_super zsuper].freeze
+
     # A call target that can name a unit: a constant, or a `::`-joined
     # constant chain. A lowercase receiver is a local, a method, or an ivar;
     # resolving it by name matched FactoryBot factories (`widget`, `order`),
@@ -149,6 +152,7 @@ module Woods
       @unit_cache = {}
       @ast_cache = {}
       @method_node_cache = {}
+      @definitions_cache = {}
     end
 
     # Assemble an execution flow from the given entry point.
@@ -354,45 +358,99 @@ module Woods
     # called method's; a flow that says nothing is honest, one that lists
     # unrelated side effects is not (F5).
     #
-    # The exception is a method the unit records in
-    # `metadata[:action_sources]` as defined in another indexed unit (a
-    # controller action from a concern, a prepended module, or a base
-    # controller): its body is read from that unit's source, while the
-    # before filters still come from this unit.
+    # A method the unit records in `metadata[:action_sources]` (a controller
+    # action) runs the body Ruby dispatches, read by {#recorded_operations}.
+    # The before filters still come from this unit.
     def extract_operations(unit_id, source_code, method_name, metadata, unit_type)
       operations = []
 
       # For controllers, prepend before_action callbacks
       prepend_callbacks(operations, metadata, method_name) if unit_type == 'controller'
 
+      source = method_name && action_source(metadata, method_name)
+      return operations.concat(recorded_operations(unit_id, source_code, method_name, source)) if source
+
       scope_node = method_name ? method_node(unit_id, source_code, method_name) : parsed_source(unit_id, source_code)
-      holder = load_unit(unit_id)
-      scope_node, holder = defining_method_node(unit_id, method_name, metadata) if scope_node.nil? && method_name
-      operations.concat(locate(@operation_extractor.extract(scope_node), holder)) if scope_node
+      operations.concat(locate(@operation_extractor.extract(scope_node), load_unit(unit_id))) if scope_node
 
       operations
     end
 
-    # The `def` node for +method_name+ in the unit its action source names.
-    #
-    # @param unit_id [String] the unit that lacks a local definition
-    # @param method_name [String]
-    # @param metadata [Hash] that unit's metadata
-    # @return [Array(Ast::Node, Hash), nil] the node and the unit holding it
-    def defining_method_node(unit_id, method_name, metadata)
+    # @return [Hash, nil] the action source the unit records for +method_name+
+    def action_source(metadata, method_name)
       sources = metadata[:action_sources]
       return nil unless sources.is_a?(Hash)
 
       source = sources[method_name.to_sym] || sources[method_name.to_s]
-      defined_in = source.is_a?(Hash) ? source[:defined_in] || source['defined_in'] : nil
-      return nil if defined_in.nil? || defined_in == unit_id
+      source.is_a?(Hash) ? source : nil
+    end
 
+    # The operations of the body Ruby dispatches for a recorded action, read
+    # from the unit the extractor resolved it to (+defined_in+):
+    #
+    # - another unit (a concern, a prepended module, a base controller): that
+    #   unit's definition, even when this unit defines the action too;
+    # - this unit: the definition on the recorded line, so the later of two
+    #   definitions of one name wins, as it does in Ruby;
+    # - no indexed unit: no body, rather than a local definition Ruby skips.
+    #
+    # A body from another unit that calls `super` continues into this unit's
+    # own (last) definition, whose operations are placed at the `super` call.
+    #
+    # @param unit_id [String] the entry unit
+    # @param source_code [String] its source
+    # @param method_name [String]
+    # @param source [Hash] its `action_sources` entry
+    # @return [Array<Hash>] located operations
+    def recorded_operations(unit_id, source_code, method_name, source)
+      defined_in = source[:defined_in] || source['defined_in']
+      return [] if defined_in.nil?
+
+      local = defined_in == unit_id
       holder = load_unit(defined_in)
-      holder_source = holder && holder[:source_code]
-      return nil if holder_source.nil? || holder_source.empty?
+      holder_source = local ? source_code : holder && holder[:source_code]
+      return [] if holder.nil? || holder_source.nil? || holder_source.empty?
 
-      node = method_node(defined_in, holder_source, method_name)
-      node && [node, holder]
+      node = recorded_node(defined_in, holder_source, holder, method_name, source[:line] || source['line'])
+      return [] unless node
+
+      operations = locate(@operation_extractor.extract(node), holder)
+      super_line = !local && super_call_line(node, holder)
+      own = super_line && definitions(unit_id, source_code, method_name).last
+      return operations unless own
+
+      before, after = operations.partition { |op| op[:line].nil? || op[:line] <= super_line }
+      before + locate(@operation_extractor.extract(own), load_unit(unit_id)) + after
+    end
+
+    # The definition of +method_name+ that starts on +line+ of the holder's
+    # file. Without a recorded line, or with one definition only, that one.
+    #
+    # @return [Ast::Node, nil]
+    def recorded_node(unit_id, source_code, holder, method_name, line)
+      nodes = definitions(unit_id, source_code, method_name)
+      return nodes.first if line.nil? || nodes.one?
+
+      map = (holder[:metadata] || {})[:source_line_map]
+      nodes.find { |node| SourceLineMap.translate(map, node.line) == line }
+    end
+
+    # Instance-method definitions of +method_name+ in the unit, in source order.
+    #
+    # @return [Array<Ast::Node>]
+    def definitions(unit_id, source_code, method_name)
+      index = memoize(@definitions_cache, unit_id) do
+        parsed_source(unit_id, source_code).find_all(:def).sort_by { |node| node.line.to_i }.group_by(&:method_name)
+      end
+      index.fetch(method_name.to_s, [])
+    end
+
+    # @return [Integer, nil] the holder's file line of the first `super` in
+    #   +node+, or nil when it calls none
+    def super_call_line(node, holder)
+      calls = SUPER_TYPES.flat_map { |type| node.find_all(type) }
+      first = calls.filter_map(&:line).min
+      first && SourceLineMap.translate((holder[:metadata] || {})[:source_line_map], first)
     end
 
     # Report each operation at its line in the file +unit_data+ was read
