@@ -188,18 +188,24 @@ RSpec.describe Woods::GemMapper do
     expect(entries.map { |entry| entry['file_path'] }).to include('lib/tasks/woods.rake', 'exe/woods-mcp')
   end
 
+  # The manifest is written once per map whatever the root holds, so a one-file
+  # root reaches the same write as the whole checkout in a fraction of the time.
   it 'records its writer version when loaded as a standalone mapper (#323)' do
     standalone_dir = Dir.mktmpdir('woods_self_map_standalone')
+    standalone_root = Dir.mktmpdir('woods_self_map_standalone_root')
+    FileUtils.mkdir_p(File.join(standalone_root, 'lib'))
+    File.write(File.join(standalone_root, 'lib', 'tiny.rb'), "module Tiny\n  def self.call; end\nend\n")
     script = <<~RUBY
       require 'woods/gem_mapper'
       Woods::GemMapper.new(root: ARGV[0], output_dir: ARGV[1]).map!
       payload = Woods::Generation.new(output_dir: ARGV[1]).payload_dir
       puts JSON.parse(File.read(payload.join('manifest.json'))).fetch('woods_version')
     RUBY
-    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, root, standalone_dir)
+    out, err, status = Open3.capture3(RbConfig.ruby, '-I', File.join(root, 'lib'), '-e', script, standalone_root,
+                                      standalone_dir)
     expect(status).to be_success, err
     expect(out.strip).to eq(Woods::VERSION)
   ensure
-    FileUtils.rm_rf(standalone_dir)
+    FileUtils.rm_rf([standalone_dir, standalone_root].compact)
   end
 end
