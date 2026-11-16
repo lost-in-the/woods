@@ -182,9 +182,7 @@ RSpec.describe 'Git version notice', :booted_app do
 
   it 'says so with the real git of a machine older than 2.31' do
     found = Woods::GitVersion.parse(Open3.capture2('git', '--version').first)
-    unless Woods::GitVersion.too_old?(found)
-      skip "needs git older than 2.31 (found #{found || 'an unreadable version'})"
-    end
+    skip 'needs a git older than 2.31' unless Woods::GitVersion.too_old?(found)
 
     full = rake('woods:extract')
     expect(full.fetch(:stderr).lines.grep(/\[Woods\] Git /).size).to eq(1)
