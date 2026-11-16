@@ -134,10 +134,8 @@ module Woods
             return text(File.binread(loose, 128)) if File.file?(loose)
 
             packed = File.join(base, 'packed-refs')
-            next unless File.file?(packed)
-
-            line = File.foreach(packed).find { |entry| entry.split(' ', 2)[1].to_s.strip == ref }
-            return line.split(' ', 2).first if line
+            sha = packed_ref(packed, ref) if File.file?(packed)
+            return sha if sha
           end
           nil
         rescue SystemCallError, IOError
@@ -289,6 +287,19 @@ module Woods
         # Git metadata bytes as stripped UTF-8, independent of the locale.
         def text(bytes)
           bytes.to_s.dup.force_encoding(Encoding::UTF_8).scrub('').strip
+        end
+
+        # The sha packed-refs records for +ref+, streamed as bytes like the
+        # other git files here.
+        def packed_ref(packed, ref)
+          wanted = ref.b
+          File.open(packed, 'rb') do |file|
+            file.each_line do |entry|
+              sha, name = entry.split(' ', 2)
+              return text(sha) if name&.strip == wanted
+            end
+          end
+          nil
         end
 
         def common_dir(dir)

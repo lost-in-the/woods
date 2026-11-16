@@ -729,6 +729,21 @@ RSpec.describe 'Served index identity' do
       expect(identity(detached, "main:#{sha}:topic").match_reason).to eq('client_root_unresolved')
     end
 
+    it 'reads a packed ref under a POSIX locale, past a multibyte branch name and at one' do
+      other = 'b' * 40
+      packed = "# pack-refs with: peeled fully-peeled sorted\n#{other} refs/heads/café\n^#{'d' * 40}\n" \
+               "#{sha} refs/heads/main\n"
+      plain = checkout('checkout-plain')
+      accented = checkout('checkout-accented', branch: 'café')
+      [plain, accented].each { |root| File.binwrite(File.join(root, '.git', 'packed-refs'), packed) }
+
+      heads = with_posix_default_external do
+        [plain, accented].map { |root| Woods::MCP::ServedIdentity.checkout_head(root) }
+      end
+
+      expect(heads).to eq([sha, other])
+    end
+
     {
       'a linked worktree against the main checkout' => ->(sha) { "linked:#{sha}:main" },
       'another HEAD' => ->(_sha) { "main:#{'b' * 40}:main" },
