@@ -26,6 +26,8 @@ require 'net/http'
 require 'open3'
 require 'securerandom'
 require 'uri'
+require 'woods'
+require 'woods/tasks'
 require 'woods/embedding/fake'
 require 'woods/embedding/indexer'
 require 'woods/embedding/text_preparer'
@@ -64,6 +66,22 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     uri = URI.parse("#{url}/collections/#{collection}")
     Net::HTTP.start(uri.host, uri.port) { |http| http.request(Net::HTTP::Delete.new(uri.request_uri)) }
     store.ensure_collection!(dimensions: dimensions)
+  end
+
+  # Drive the packaged stdio server: one JSON-RPC line out, one back, per request.
+  def serve_stdio(env, index_dir, *requests)
+    exe = File.expand_path('../../exe/woods-mcp', __dir__)
+    Open3.popen3(env.merge('OPENAI_API_KEY' => nil), 'bundle', 'exec', 'ruby', exe,
+                 index_dir) do |stdin, stdout, stderr, wait|
+      errors = Thread.new { stderr.read }
+      responses = requests.map do |request|
+        stdin.puts(JSON.generate(request))
+        JSON.parse(stdout.gets || raise("woods-mcp exited: #{errors.value}"))
+      end
+      stdin.close
+      wait.join(30) || Process.kill('KILL', wait.pid)
+      [responses, errors.value.force_encoding(Encoding::UTF_8).scrub]
+    end
   end
 
   after do
@@ -721,18 +739,7 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
     after { FileUtils.rm_rf(index_dir) }
 
     def serve(*requests)
-      exe = File.expand_path('../../exe/woods-mcp', __dir__)
-      Open3.popen3({ 'WOODS_PG_URL' => pg_url, 'OPENAI_API_KEY' => nil }, 'bundle', 'exec', 'ruby', exe,
-                   index_dir) do |stdin, stdout, stderr, wait|
-        errors = Thread.new { stderr.read }
-        responses = requests.map do |request|
-          stdin.puts(JSON.generate(request))
-          JSON.parse(stdout.gets || raise("woods-mcp exited: #{errors.value}"))
-        end
-        stdin.close
-        wait.join(30) || Process.kill('KILL', wait.pid)
-        [responses, errors.value.force_encoding(Encoding::UTF_8).scrub]
-      end
+      serve_stdio({ 'WOODS_PG_URL' => pg_url }, index_dir, *requests)
     end
 
     it 'boots, and answers a semantic query from the real database' do
@@ -781,6 +788,82 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       expect(err).to match(/^\[woods-mcp\] BootstrapError: (?:#{opened}).*refused/)
       expect(err.lines.grep(/BootstrapError/).size).to eq(1)
       expect(err).not_to match(/from .+\.rb:\d+:in/)
+    end
+  end
+
+  # woods:embed against a durable store must leave an index directory the
+  # packaged server boots in semantic mode with only the serve-time settings
+  # in its environment: no hand-written woods.json, no host initializer.
+  describe 'woods:embed into a durable store, then woods-mcp' do
+    let(:index_dir) { Dir.mktmpdir('woods-live-embed-serve') }
+    let(:pg_url) { ENV.fetch('WOODS_PG_URL', 'postgres://postgres:postgres@localhost:5432/woods_test') }
+    let(:qdrant_url) { ENV.fetch('WOODS_QDRANT_URL', 'http://localhost:6333') }
+    let(:dims) { 8 }
+
+    around do |example|
+      previous = Woods.configuration
+      example.run
+    ensure
+      Woods.configuration = previous
+    end
+
+    before { FileUtils.cp_r("#{File.expand_path('../fixtures/woods', __dir__)}/.", index_dir) }
+
+    after { FileUtils.rm_rf(index_dir) }
+
+    def embed_with(vector_store, vector_store_options, metadata_store)
+      Woods.configuration = Woods::Configuration.new.tap do |config|
+        config.output_dir = index_dir
+        config.embedding_provider = :fake
+        config.embedding_options = { dims: dims }
+        config.vector_store = vector_store
+        config.vector_store_options = vector_store_options
+        config.metadata_store = metadata_store
+      end
+      Woods::Tasks.build_embed_indexer(output_dir: index_dir).index_all
+    end
+
+    def query_server(env)
+      serve_stdio(env, index_dir,
+                  { jsonrpc: '2.0', id: 1, method: 'initialize',
+                    params: { protocolVersion: '2025-06-18', capabilities: {},
+                              clientInfo: { name: 'live', version: '1' } } },
+                  { jsonrpc: '2.0', id: 2, method: 'tools/call',
+                    params: { name: 'codebase_retrieve', arguments: { query: 'Post model' } } })
+    end
+
+    def expect_semantic_answer(responses, errors)
+      expect(errors).to include('[woods-mcp] config_source: loaded from woods.json')
+      expect(errors).to include('[woods-mcp] semantic search: hydrated (fake)')
+      expect(errors).not_to include('pattern/structural tools only', 'BootstrapError')
+      answer = responses.last.fetch('result')
+      expect(answer['isError']).not_to be(true), answer.to_s
+      expect(answer.fetch('content').map { |part| part['text'] }.join).to match(/Post|Comment/)
+    end
+
+    %i[in_memory sqlite].each do |metadata_store|
+      it "serves pgvector with #{metadata_store} metadata given only WOODS_PG_URL" do
+        require 'active_record'
+        ActiveRecord::Base.establish_connection(pg_url)
+        connection = ActiveRecord::Base.connection
+        table = "woods_vectors_#{SecureRandom.hex(8)}"
+        (@pg_cleanup ||= []) << [connection, table]
+
+        embed_with(:pgvector, { connection: connection, table: table }, metadata_store)
+
+        expect(File.read(File.join(index_dir, 'woods.json'))).not_to include(pg_url)
+        expect_semantic_answer(*query_server('WOODS_PG_URL' => pg_url))
+      end
+
+      it "serves Qdrant with #{metadata_store} metadata given only WOODS_QDRANT_URL" do
+        collection = "woods_live_#{SecureRandom.hex(8)}"
+        (@qdrant_cleanup ||= []) << [qdrant_url, collection]
+
+        embed_with(:qdrant, { url: qdrant_url, collection: collection, allow_private_hosts: true }, metadata_store)
+
+        expect(File.read(File.join(index_dir, 'woods.json'))).not_to include(qdrant_url)
+        expect_semantic_answer(*query_server('WOODS_QDRANT_URL' => qdrant_url))
+      end
     end
   end
 end

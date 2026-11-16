@@ -995,19 +995,19 @@ RSpec.describe Woods::Embedding::Indexer do
         allow(non_persistable_store).to receive(:store_batch)
       end
 
-      it 'does not attempt persistence' do
+      it 'does not dump the vectors' do
         stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
         expect(vector_snapshotter).not_to receive(:dump)
 
         non_persistent_indexer.index_all
       end
 
-      it 'does not write woods.json' do
+      it 'still writes woods.json, which the packaged server reopens the store from' do
         stub_const('Woods::Storage::Snapshotter::Vector', vector_snapshotter)
 
         non_persistent_indexer.index_all
 
-        expect(File.exist?(File.join(output_dir, 'woods.json'))).to be false
+        expect(File.exist?(File.join(output_dir, 'woods.json'))).to be true
       end
     end
 

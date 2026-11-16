@@ -31,8 +31,9 @@ module Woods
     # incremental — persists the stores to disk via the Snapshotter pair and
     # atomically flips the +dumps/latest+ pointer. An incremental run hydrates
     # the store from the previous dump first, so the dump it writes is
-    # cumulative. Persistent backends (pgvector, Qdrant) see zero behaviour
-    # change — no Snapshotter is invoked.
+    # cumulative. Durable backends (pgvector, Qdrant) keep their vectors in
+    # the store, so their dump holds only +woods.json+ and any in-memory
+    # metadata: what the packaged server reopens the index from.
     #
     # For that in-memory path the dump is the *only* durable copy of a vector,
     # which is why +checkpoint.json+ is written last, after the dump is
@@ -101,7 +102,8 @@ module Woods
       # When the vector store is an in-memory adapter, persists the embedded
       # vectors (and metadata, if a metadata store was provided) to disk under
       # +output_dir/dumps/<timestamp>/+ and atomically flips the +latest+
-      # pointer. Writes +woods.json+ when +resolved_config+ was supplied.
+      # pointer. Writes +woods.json+ when +resolved_config+ was supplied,
+      # for a durable vector store too, whose dump then holds no vectors.
       #
       # @return [Hash] Stats with :processed, :skipped, :errors counts
       def index_all
@@ -143,7 +145,8 @@ module Woods
       #    it anyway is the #148 data loss in miniature. Durable backends
       #    (pgvector, Qdrant) keep the interval saves — for them each
       #    +store_batch+ *is* the durable write, so a mid-run crash really
-      #    has persisted those batches.
+      #    has persisted those batches. Their final checkpoint still waits
+      #    for the config-and-metadata dump to be promoted.
       #
       # 2. Trust, verified. {#checkpoint_satisfied?} honours a checkpoint hit
       #    only when the durable artifact actually holds a vector for that
@@ -164,14 +167,24 @@ module Woods
         retire_legacy_identities
         report_checkpoint_misses
         vanished = persistable? ? drop_vanished_units(incremental: incremental) : 0
-        persist_snapshot if persistable? && snapshot_worth_writing?(stats, vanished, incremental: incremental)
         # Durable backends have no dump to rewrite, so staleness has to be
         # removed from the store itself — on full runs too, since pgvector/
         # Qdrant retain rows instead of replacing a published dump (#211).
-        reconcile_durable_store if reconcilable?
+        deleted = reconcilable? ? reconcile_durable_store : 0
+        publish_snapshot(stats, vanished, deleted, incremental: incremental)
         save_checkpoint(checkpoint)
 
         stats
+      end
+
+      # A dumpable store publishes its vectors with the config; a durable
+      # one publishes the config and any in-memory metadata only.
+      def publish_snapshot(stats, vanished, deleted, incremental:)
+        if persistable?
+          persist_snapshot if snapshot_worth_writing?(stats, vanished, incremental: incremental)
+        elsif durable_snapshot? && durable_snapshot_worth_writing?(stats, deleted, incremental: incremental)
+          persist_snapshot(vectors: false)
+        end
       end
 
       # Reject deterministic input failures before metadata or durable writes.
@@ -499,6 +512,9 @@ module Woods
       end
 
       def prepare_snapshot_stores(incremental:)
+        # The durable store keeps its own vectors. An in-memory metadata
+        # store has only the dump, so an incremental run starts from it.
+        return hydrate_persisted_metadata if incremental && durable_snapshot?
         return unless persistable?
 
         if incremental
@@ -1177,9 +1193,42 @@ module Woods
         !interfaces.include?(object.method(method_name).owner)
       end
 
+      # Does this run publish a snapshot for a vector store that keeps its
+      # own vectors (pgvector, Qdrant)? The packaged server reopens such an
+      # index from +woods.json+ alone, so it is written whenever there is a
+      # config to write, though the vectors cannot be dumped.
+      def durable_snapshot?
+        !persistable? && !@output_dir.nil? && !@resolved_config.nil?
+      end
+
+      # Full runs always publish. An incremental run publishes when the
+      # metadata or the store changed, or when no promoted config describes
+      # this run's config (an index an earlier gem embedded).
+      def durable_snapshot_worth_writing?(stats, deleted, incremental:)
+        return true unless incremental
+
+        stats[:processed].positive? || deleted.positive? || @metadata_changed || !promoted_config_current?
+      end
+
+      # +created_at+ moves on every run; everything else describes the index.
+      def promoted_config_current?
+        require_relative '../index_artifact'
+
+        promoted = IndexArtifact.new(@output_dir).read_config
+        return false unless promoted
+
+        current = JSON.parse(JSON.generate(@resolved_config.to_snapshot_json))
+        promoted.except('created_at') == current.except('created_at')
+      rescue JSON::ParserError, SystemCallError
+        false
+      end
+
       # Persist stores to a timestamped dump directory, write +woods.json+,
       # flip the +latest+ pointer, then prune old dumps.
-      def persist_snapshot
+      #
+      # @param vectors [Boolean] false for a durable vector store: the dump
+      #   then carries the config and any in-memory metadata only.
+      def persist_snapshot(vectors: true)
         require_relative '../index_artifact'
         require_relative '../storage/snapshotter'
 
@@ -1195,7 +1244,9 @@ module Woods
         # omitting it wrote an empty string into every dump — so the artifact
         # could not say which model produced it, and any check that wants to
         # compare a dump against the configured provider has nothing to read.
-        Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir, resolved_config: @resolved_config)
+        if vectors
+          Storage::Snapshotter::Vector.dump(@vector_store, artifact, dump_dir, resolved_config: @resolved_config)
+        end
 
         if @metadata_store.respond_to?(:each_entry) && @metadata_store.respond_to?(:bulk_load)
           Storage::Snapshotter::Metadata.dump(@metadata_store, artifact, dump_dir)
