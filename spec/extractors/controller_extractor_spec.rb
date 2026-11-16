@@ -62,7 +62,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
       only, except, if_labels, unless_labels = extractor.send(:extract_callback_conditions, callback)
 
-      expect(only).to be_empty
+      expect(only).to be_nil
       expect(except).to match_array(%w[index show])
       expect(if_labels).to be_empty
       expect(unless_labels).to be_empty
@@ -89,7 +89,7 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
 
       only, except, if_labels, unless_labels = extractor.send(:extract_callback_conditions, callback)
 
-      expect(only).to be_empty
+      expect(only).to be_nil
       expect(except).to be_empty
       expect(if_labels).to be_empty
       expect(unless_labels).to be_empty
@@ -101,6 +101,38 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       _only, _except, if_labels, _unless_labels = extractor.send(:extract_callback_conditions, callback)
 
       expect(if_labels).to eq([':admin?'])
+    end
+
+    # skip_before_action :warm_cache, except: :index over an inherited
+    # only: %i[index show] adds a second only scope; Rails runs the filter
+    # where every only scope names the action.
+    it 'intersects stacked only scopes' do
+      scopes = [build_action_filter(%w[index show]), build_action_filter(%w[index])]
+      callback = build_callback(kind: :before, filter: :warm_cache, if_conditions: scopes)
+
+      only, = extractor.send(:extract_callback_conditions, callback)
+
+      expect(only).to eq(%w[index])
+    end
+
+    it 'keeps an empty only list when stacked only scopes share no action' do
+      scopes = [build_action_filter(%w[show]), build_action_filter(%w[index])]
+      callback = build_callback(kind: :before, filter: :warm_cache, if_conditions: scopes)
+
+      only, = extractor.send(:extract_callback_conditions, callback)
+
+      expect(only).to eq([])
+    end
+
+    # skip_before_action :require_session, only: :show over an inherited
+    # except: :edit adds a second except scope; any one excludes the action.
+    it 'unions stacked except scopes' do
+      scopes = [build_action_filter(%w[edit]), build_action_filter(%w[show])]
+      callback = build_callback(kind: :before, filter: :require_session, unless_conditions: scopes)
+
+      _only, except, = extractor.send(:extract_callback_conditions, callback)
+
+      expect(except).to contain_exactly('edit', 'show')
     end
   end
 
@@ -615,6 +647,19 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(chain.first).to eq(kind: :before, filter: :verify_authenticity_token, origin: 'unknown')
     end
 
+    # Declaring a filter again moves it, and the chain keeps the later declaration's scope.
+    it 'locates the later of two declarations of one filter, the one Rails keeps' do
+      write('app/controllers/ledgers_controller.rb', <<~RUBY)
+        class LedgersController < ApplicationController
+          before_action :load_ledger
+          prepend_before_action :load_ledger, only: :show
+        end
+      RUBY
+      chain = chain_for([build_callback(kind: :before, filter: :load_ledger)])
+
+      expect(chain.first).to include(line: 3, file: 'app/controllers/ledgers_controller.rb')
+    end
+
     it 'records no site for a filter declared under another kind' do
       chain = chain_for([build_callback(kind: :after, filter: :load_ledger)])
 
@@ -654,6 +699,14 @@ RSpec.describe Woods::Extractors::ControllerExtractor do
       expect(chain[2][:kind]).to eq(:after)
       expect(chain[2][:filter]).to eq(:track_action)
       expect(chain[2][:except]).to eq(%w[index])
+    end
+
+    it 'publishes an empty only list for a filter whose stacked only scopes share no action' do
+      scopes = [build_action_filter(%w[show]), build_action_filter(%w[index])]
+      callbacks = [build_callback(kind: :before, filter: :warm_cache, if_conditions: scopes)]
+      controller = double('Controller', _process_action_callbacks: callbacks)
+
+      expect(extractor.send(:extract_filter_chain, controller).first[:only]).to eq([])
     end
   end
 

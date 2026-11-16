@@ -268,15 +268,21 @@ module Woods
       #
       # Modern Rails (4.2+) stores conditions in @if/@unless ivar arrays.
       # ActionFilter objects hold action Sets; other conditions are procs/symbols.
+      # A +skip_before_action+ with a scope stacks another set on the callback,
+      # and Rails runs it where every only set names the action and no except
+      # set does: the only list is the actions all only sets share, and the
+      # except list joins the except sets.
       #
       # @param callback [ActiveSupport::Callbacks::Callback]
       # @return [Array(Array<String>, Array<String>, Array<String>, Array<String>)]
-      #   [only_actions, except_actions, if_labels, unless_labels]
+      #   [only_actions, except_actions, if_labels, unless_labels]; only_actions
+      #   is nil when no only set scopes the callback, and empty when the sets
+      #   share no action
       def extract_callback_conditions(callback)
         if_conditions = callback.instance_variable_get(:@if) || []
         unless_conditions = callback.instance_variable_get(:@unless) || []
 
-        only = []
+        only = nil
         except = []
         if_labels = []
         unless_labels = []
@@ -284,7 +290,7 @@ module Woods
         if_conditions.each do |cond|
           actions = extract_action_filter_actions(cond)
           if actions
-            only.concat(actions)
+            only = only ? only & actions : actions
           else
             if_labels << condition_label(cond)
           end
