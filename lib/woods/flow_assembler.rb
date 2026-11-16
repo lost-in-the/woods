@@ -425,7 +425,8 @@ module Woods
       holder_source = defined_in == unit_id ? source_code : holder && holder[:source_code]
       return nil if holder.nil? || holder_source.nil? || holder_source.empty?
 
-      node = recorded_node(defined_in, holder_source, holder, method_name, source[:line] || source['line'])
+      line = source[:line] || source['line']
+      node = recorded_node(defined_in, holder_source, holder, method_name, line, source[:owner] || source['owner'])
       node && [node, holder]
     end
 
@@ -452,26 +453,49 @@ module Woods
       { type: :dynamic_dispatch, target: nil, method: 'super', args_hint: [], line: line, file: holder[:file_path] }
     end
 
-    # The definition of +method_name+ that starts on +line+ of the holder's
-    # file. Without a recorded line, or with one definition only, that one.
+    # The definition of +method_name+ Ruby recorded at +line+ of the holder's
+    # file for +owner+: the last one there that +owner+'s body holds, since
+    # a later definition of a name in one owner replaces an earlier one, even
+    # on the same line, where +source_location+ cannot tell them apart. A
+    # definition another owner (a nested module) holds on that line is not
+    # it; when the recorded owner names no body there, the last definition
+    # on the line. Without a recorded line, or with one definition only,
+    # that one.
     #
     # @return [Ast::Node, nil]
-    def recorded_node(unit_id, source_code, holder, method_name, line)
-      nodes = definitions(unit_id, source_code, method_name)
-      return nodes.first if line.nil? || nodes.one?
+    def recorded_node(unit_id, source_code, holder, method_name, line, owner)
+      definitions = definitions(unit_id, source_code, method_name)
+      return definitions.first&.first if line.nil? || definitions.one?
 
       map = (holder[:metadata] || {})[:source_line_map]
-      nodes.find { |node| SourceLineMap.translate(map, node.line) == line }
+      on_line = definitions.select { |(node, _)| SourceLineMap.translate(map, node.line) == line }
+      owned = on_line.select { |(_, holder_owner)| holder_owner == owner.to_s }
+      (owned.empty? ? on_line : owned).last&.first
     end
 
-    # Instance-method definitions of +method_name+ in the unit, in source order.
+    # Instance-method definitions of +method_name+ in the unit, in source
+    # order, each with the qualified name of the class or module whose body
+    # holds it. A `class << self` body holds no instance methods.
     #
-    # @return [Array<Ast::Node>]
+    # @return [Array<Array(Ast::Node, String)>]
     def definitions(unit_id, source_code, method_name)
       index = memoize(@definitions_cache, unit_id) do
-        parsed_source(unit_id, source_code).find_all(:def).sort_by { |node| node.line.to_i }.group_by(&:method_name)
+        collect_definitions(parsed_source(unit_id, source_code), [], []).group_by { |(node, _)| node.method_name }
       end
       index.fetch(method_name.to_s, [])
+    end
+
+    # Walks +node+ in source order. A definition's own body is not entered.
+    #
+    # @return [Array<Array(Ast::Node, String)>] +found+
+    def collect_definitions(node, namespace, found)
+      case node.type
+      when :def then return found << [node, namespace.join('::')]
+      when :sclass then return found
+      when :class, :module then namespace += [node.method_name]
+      end
+      Array(node.children).each { |child| collect_definitions(child, namespace, found) if child.is_a?(Ast::Node) }
+      found
     end
 
     # Report each operation at its line in the file +unit_data+ was read

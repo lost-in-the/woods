@@ -14,6 +14,8 @@ require 'yaml'
 # against a real dispatch and the action's `UnboundMethod` owner, and the
 # precomputed flow against the on-demand one. The flow follows one recorded
 # `super` hop: past it (#index) it shows the call unresolved, never a guess.
+# Of two definitions on one line in one owner, the later is read (#summary,
+# #export); another owner's definition on that line is not (#preview).
 RSpec.describe 'Request flow of the dispatched action body', :booted_app do
   actions = {
     'create' => { owner: 'ReplacedCreate', jobs: %w[ReplacedCreateJob] },
@@ -23,7 +25,10 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
     'edit' => { owner: 'OuterEdit', jobs: %w[OuterEditJob InnerEditJob] },
     'archive' => { owner: 'PrependedArchive', jobs: %w[PrependedArchiveJob BaseArchiveJob] },
     'index' => { owner: 'OuterIndex', jobs: %w[OuterIndexJob InnerIndexJob LocalIndexJob],
-                 flow_jobs: %w[OuterIndexJob InnerIndexJob], unfollowed_super: true }
+                 flow_jobs: %w[OuterIndexJob InnerIndexJob], unfollowed_super: true },
+    'summary' => { owner: 'ItemsController', jobs: %w[SecondSummaryJob] },
+    'export' => { owner: 'ExportOverride', jobs: %w[SecondExportJob] },
+    'preview' => { owner: 'ItemsController', jobs: %w[LocalPreviewJob] }
   }
 
   before(:all) do

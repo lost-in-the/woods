@@ -427,6 +427,8 @@ RSpec.describe Woods::FlowAssembler do
             def destroy
               SecondDestroy.run!
             end
+            def summary; FirstSummary.run!; end; def summary; SecondSummary.run!; end
+            def preview; LocalPreview.run!; end; module Extra; def preview; ExtraPreview.run!; end; end
           end
         RUBY
       end
@@ -468,6 +470,7 @@ RSpec.describe Woods::FlowAssembler do
               OuterIndex.run!
               super
             end
+            def export; FirstExport.run!; end; def export; SecondExport.run!; end
           end
         RUBY
         write_unit('InnerReport', type: 'concern', source_code: <<~RUBY)
@@ -563,6 +566,26 @@ RSpec.describe Woods::FlowAssembler do
         write_receiver('destroy' => source('ReportsController', 21))
 
         expect(targets_for('ReportsController#destroy')).to eq(%w[load_report SecondDestroy])
+      end
+
+      # Ruby keeps the last definition of a name in one owner, even on one line,
+      # where source_location cannot tell the two apart.
+      it 'reads the later of two definitions on the recorded line in the controller' do
+        write_receiver('summary' => source('ReportsController', 24))
+
+        expect(targets_for('ReportsController#summary')).to eq(%w[load_report SecondSummary])
+      end
+
+      it 'reads the later of two definitions on the recorded line in a prepended concern' do
+        write_receiver('export' => source('ReplacedReport', 21))
+
+        expect(targets_for('ReportsController#export')).to eq(%w[load_report SecondExport])
+      end
+
+      it 'reads the recorded owner’s definition when another owner defines the name later on that line' do
+        write_receiver('preview' => source('ReportsController', 25))
+
+        expect(targets_for('ReportsController#preview')).to eq(%w[load_report LocalPreview])
       end
 
       it 'keeps the local definition when it wins over an included concern' do

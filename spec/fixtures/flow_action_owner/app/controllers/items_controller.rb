@@ -11,6 +11,7 @@ class ItemsController < ApplicationController
   prepend InnerIndex
   prepend OuterIndex
   prepend PrependedArchive
+  prepend ExportOverride
 
   before_action :load_item
 
@@ -41,6 +42,18 @@ class ItemsController < ApplicationController
   def destroy # rubocop:disable Lint/DuplicateMethods
     SecondDestroyJob.perform_later
   end
+
+  # Two definitions on one line: Ruby keeps the later.
+  # rubocop:disable-next Style/SingleLineMethods, Style/Semicolon, Lint/DuplicateMethods
+  def summary; FirstSummaryJob.perform_later; end; def summary; SecondSummaryJob.perform_later; end
+
+  def export
+    LocalExportJob.perform_later
+  end
+
+  # The controller's definition, then a nested module's, on one line.
+  # rubocop:disable-next Style/SingleLineMethods, Style/Semicolon
+  def preview; LocalPreviewJob.perform_later; end; module Extra; def preview; ExtraPreviewJob.perform_later; end; end
 
   private
 
