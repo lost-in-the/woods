@@ -14,9 +14,10 @@
   `SystemCallError`, `JSON::ParserError` and `Woods::PublishedIndex::CorruptPointerError`.
   A full `woods:extract` replaces a generation with damaged unit files.
   It does not repair a corrupt `generation.json`: every writer refuses one and asks you to restore it.
-  Restore it only from a marker or generation known independently to be published, such as a saved `generation.json`.
+  Restore it only from a complete backup of `generation.json` and the `payloads/gen-<n>` it names.
+  A saved `generation.json` alone is not enough: a later failed publication can replace the directory it names.
   The order of the `payloads/gen-<n>` directories does not show which generation was published.
   A run that moved its payload into place and then failed to write the pointer leaves an unpublished `gen-<n>`, and
   reports `Could not publish generation for <index> (...); the previous generation remains active`.
-  Without such evidence, keep the old output directory as it is, then extract and validate into a fresh one:
+  Without such a backup, keep the old output directory as it is, then extract and validate into a fresh one:
   point `config.output_dir` at a new directory and run `woods:extract` and `woods:validate`.
