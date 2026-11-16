@@ -226,7 +226,8 @@ module Woods
     # any call (`memoize def total`) runs as the argument is evaluated. A
     # `def` Ruby runs only on one path is a candidate, its entry marked with
     # the reason: `conditional` for an `if`, `unless`, `elsif` or `else`
-    # branch, a modifier, or a `rescue` or `else` of a `begin`; `block` for
+    # branch, a modifier, a `when` or `in` branch of a `case` and its `else`,
+    # or a `rescue` or `else` of a `begin`; `block` for
     # a block of a call in the body, whose receiver decides whether and
     # where it runs. A candidate sits beside what is already held; a later
     # definite `def` replaces it. A visibility call on such a path acts on
@@ -246,6 +247,13 @@ module Woods
         when Prism::IfNode then found.concat(branches(other))
         end
         found.compact
+      end
+
+      # The bodies of a `case`: each `when` or `in`, and its `else`.
+      #
+      # @return [Array<Prism::Node>]
+      def case_branches(node)
+        (node.conditions.map(&:statements) << following(node)&.statements).compact
       end
 
       # The clause after an `if`, `unless` or `rescue`, by the name the
@@ -394,6 +402,8 @@ module Woods
           call_entries(node, owner, scope, state)
         when Prism::IfNode, Prism::UnlessNode
           branch_entries(branches(node), 'conditional', owner, scope, state)
+        when Prism::CaseNode, Prism::CaseMatchNode
+          branch_entries(case_branches(node), 'conditional', owner, scope, state)
         when Prism::BeginNode
           begin_entries(node, owner, scope, state)
         else

@@ -77,6 +77,14 @@ module Woods
         attr_reader :overridden
         # @return [Array<String>] what the index could not establish
         attr_reader :caveats
+        # @return [Symbol, nil] :paths when {#ambiguous} holds definitions of
+        #   one body that a static reading cannot order ({Alternatives}),
+        #   nil when it holds concerns whose include order is not published
+        attr_reader :ambiguity
+        # @return [Hash, nil] the extractor's runtime record of where Ruby
+        #   defines the member (`action_sources`), when it picked {#chosen}
+        #   among such definitions
+        attr_reader :installed
         # @return [Candidate, nil] a call Woods does not know that names the
         #   member when nothing else on that side defines it (the answer is
         #   then not found)
@@ -121,9 +129,12 @@ module Woods
         def settled?(groups, index)
           group = groups[index]
           later = groups.drop(index + 1).flat_map { |other| other.candidates + other.extras }
+          alternatives = Alternatives.of(group.candidates)
           if !group.ordered && group.candidates.size > 1
             @ambiguous = group.candidates
             @overridden = definite(group.extras + later)
+          elsif alternatives.size > 1
+            settle_alternatives(alternatives, group.candidates + group.extras + later)
           else
             @chosen = group.candidates.first
             rest = group.candidates.drop(1) + group.extras + later
@@ -152,6 +163,20 @@ module Woods
 
         def definite(candidates)
           candidates.reject { |candidate| candidate.origin == :possible_macro }
+        end
+
+        # Definitions of one body that no static reading orders are the
+        # answer only where the extractor recorded the one Ruby defines;
+        # otherwise each is a candidate, in source order.
+        def settle_alternatives(alternatives, all)
+          @installed, @chosen = Alternatives.installed(alternatives, @unit, @reference)
+          if @chosen
+            @overridden = definite(all - [@chosen])
+          else
+            @ambiguity = :paths
+            @ambiguous = alternatives.sort_by { |candidate| candidate.entry['line'].to_i }
+            @overridden = definite(all - alternatives)
+          end
         end
 
         # [level, groups] for each unit of the chain, nearest first.
@@ -401,6 +426,17 @@ module Woods
             end
           end
           chain_caveat(answer_level)
+          path_caveat
+        end
+
+        # An answer defined only on a path Ruby may not run, with no other
+        # definition in that body to fall back to.
+        def path_caveat
+          reason = chosen && !installed && chosen.entry[MethodTable::CANDIDATE]
+          return unless reason
+
+          @caveats << "The definition at line #{chosen.entry['line']} of the published source is " \
+                      "#{Alternatives.where(reason)}, so Ruby may not define #{@reference.name} there."
         end
 
         # A concern answer from the last unit read, when the chain stops short
@@ -425,6 +461,60 @@ module Woods
 
         def stop_why
           @stop == :unrecorded ? "#{@chain.last['identifier']} records no parent class" : @stop_reason
+        end
+
+        # Definitions of one member in one body that a static reading cannot
+        # order: the bodies of an `if` and its `else`, the branches of a
+        # `case`, a modifier `def`, a `def` in a block of a call. The method
+        # table marks each with {MethodTable::CANDIDATE}; it drops one that a
+        # later plain `def` replaces, so sequential redefinition never
+        # reaches here.
+        module Alternatives
+          WHERE = { 'conditional' => 'under a condition', 'block' => 'in a block of a call in the body' }.freeze
+
+          module_function
+
+          # The latest definitions of a body (+candidates+, latest first),
+          # each on a path Ruby may not run, and the definition they would
+          # replace in that body, which Ruby keeps when none of them runs.
+          #
+          # @param candidates [Array<Candidate>] one group, latest first
+          # @return [Array<Candidate>] more than one when they cannot be ordered
+          def of(candidates)
+            run = candidates.take_while { |candidate| candidate.entry.key?(MethodTable::CANDIDATE) }
+            return run if run.empty?
+
+            following = candidates[run.size]
+            following && following.origin != :possible_macro ? run + [following] : run
+          end
+
+          # The alternative Ruby defines, as the controller extractor recorded
+          # it from `instance_method(name).source_location` in the running
+          # application, when that line is exactly one alternative's.
+          #
+          # @param alternatives [Array<Candidate>]
+          # @param unit [Hash] the asked owner's published unit
+          # @param reference [Reference]
+          # @return [Array(Hash, Candidate), nil] the record and the alternative
+          def installed(alternatives, unit, reference)
+            return unless reference.separator == '#'
+
+            sources = unit.dig('metadata', 'action_sources')
+            record = sources.is_a?(Hash) && sources[reference.name]
+            return unless record.is_a?(Hash) && record['line'].is_a?(Integer)
+
+            matched = alternatives.select do |candidate|
+              !candidate.entry['file_unit'] && candidate.unit['file_path'] == record['file'] &&
+                candidate.entry['file_line'] == record['line']
+            end
+            [record, matched.first] if matched.one?
+          end
+
+          # @param reason [String] a {MethodTable::CANDIDATE} value
+          # @return [String] where such a definition is written
+          def where(reason)
+            WHERE.fetch(reason, 'on a path Ruby may not run')
+          end
         end
 
         # The name a unit's own class or module declaration has in its

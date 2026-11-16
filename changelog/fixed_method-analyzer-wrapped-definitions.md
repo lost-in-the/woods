@@ -13,3 +13,8 @@
   defining it) as its own unit, `Alt#pick [lib/alt.rb, occurrence 2]`, instead of writing them to one artifact
   and listing the shared identifier twice, which the index reader refused.
   The self-map writer now refuses two units that would share an artifact.
+- A member `lookup` no longer answers one of several definitions of a method that the source does not order,
+  such as the bodies of an `if` and its `else` or the branches of a `case`, as the method Ruby calls.
+  It lists them under `candidates` with a statement that Woods cannot tell which one Ruby calls,
+  unless a controller's `action_sources` names the one Ruby installed.
+  The method table now also reads definitions in the branches of a `case` as `candidate: "conditional"`.

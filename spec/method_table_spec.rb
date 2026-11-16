@@ -347,6 +347,23 @@ RSpec.describe Woods::MethodTable do
                                        ])
     end
 
+    it 'lists a definition in a when, in or else branch of a case as a conditional candidate' do
+      source = <<~RUBY
+        class Post
+          case FLAG
+          when 1 then def a; end
+          else def b; end
+          end
+          case FLAG
+          in Integer then def c; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([%w[a instance Post conditional], %w[b instance Post conditional],
+                                        %w[c instance Post conditional]])
+    end
+
     it 'keeps both alternatives of a conditional, and the definite definition beside a later candidate' do
       source = <<~RUBY
         class Post

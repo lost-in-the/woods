@@ -161,8 +161,8 @@ published `source_code` coordinates, sorted by line.
 - A `def` passed to any other call (`memoize def total`, `memoize private def total`) is read as a plain `def` at
   that point. A `begin` body and its `ensure` are read as run.
 - An entry for a `def` Ruby runs only on one path carries `candidate`; entries without the key are definite.
-  - `conditional`: an `if`, `unless`, `elsif` or `else` branch, a modifier (`def x if flag`), or a `begin`'s
-    `rescue` or `else`.
+  - `conditional`: an `if`, `unless`, `elsif` or `else` branch, a modifier (`def x if flag`), a `when` or `in`
+    branch of a `case` or its `else`, or a `begin`'s `rescue` or `else`.
   - `block`: a block of a call in the body (`included do`, `Plugin.create do`), which may run elsewhere or never.
   - A candidate sits beside what is already held, and a later definite `def` replaces it.
   - A visibility call on such a path acts on that path's candidates only; a bare `private` there lasts to the
