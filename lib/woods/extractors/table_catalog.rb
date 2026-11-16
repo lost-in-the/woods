@@ -97,12 +97,13 @@ module Woods
         # `table_exists: false`, not an unreadable schema.
         #
         # @param connection_classes [Array<Class>, nil] Active Record classes;
-        #   defaults to `ActiveRecord::Base` and its descendants
+        #   defaults to the descendants of `ActiveRecord::Base`, which is never a model
         # @return [Array<Hash>] one `{name:, state:, error:}` per database,
         #   sorted by name; `error` names the failure for the log and is nil
         #   unless the database is unreachable
         def schema_readability(connection_classes: nil)
-          claims = (connection_classes || runtime_classes).filter_map { |klass| schema_claim(klass) }
+          classes = connection_classes || (defined?(ActiveRecord::Base) ? ActiveRecord::Base.descendants : [])
+          claims = classes.filter_map { |klass| schema_claim(klass) }
           databases = claims.group_by { |claim| claim[:database] }.map do |database, database_claims|
             states = database_claims.map { |claim| claim[:pool] }.uniq.map { |pool| listing_state(pool) }
             state, error = states.min_by { |(candidate, _)| SCHEMA_STATES.index(candidate) }

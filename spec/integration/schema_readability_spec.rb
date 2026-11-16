@@ -39,6 +39,13 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     BootedAppRoot.assert!(@app_root)
     Rails.application.eager_load!
 
+    # The second database of the multi-database example, defined for the whole
+    # file: a model class stays in ActiveRecord::Base.descendants after its
+    # constant is removed, and every later extraction would fail on it. It
+    # shares the primary connection except inside that example.
+    Object.const_set(:SchemaProbeRecord, Class.new(ActiveRecord::Base) { self.abstract_class = true })
+    Object.const_set(:SchemaProbeLedger, Class.new(SchemaProbeRecord) { self.table_name = 'ledgers' })
+
     require 'woods'
     require 'woods/extractor'
     require 'woods/resilience/index_validator'
@@ -102,6 +109,11 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     Dir[payload(output_dir).join('models', '*.json').to_s].reject { |path| path.end_with?('_index.json') }
                                                           .map { |path| JSON.parse(File.read(path)) }
                                                           .find { |unit| unit['identifier'] == identifier }
+  end
+
+  def file_bytes(directory)
+    paths = Dir[File.join(directory, '**', '*')].select { |path| File.file?(path) }
+    paths.sort.to_h { |path| [path, File.binread(path)] }
   end
 
   def validation(output_dir)
@@ -181,9 +193,6 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
 
   it 'reports one unreachable database of two while reading the other' do
     connect(fresh_database('primary'), tables: %i[posts comments])
-    ledger_base = Class.new(ActiveRecord::Base) { self.abstract_class = true }
-    stub_const('SchemaProbeRecord', ledger_base)
-    stub_const('SchemaProbeLedger', Class.new(SchemaProbeRecord) { self.table_name = 'ledgers' })
     settings = { adapter: 'sqlite3', database: missing_database }
     # Rails 6.0 pools name no configuration, so only 6.1+ can name the ledger database.
     named = ActiveRecord::ConnectionAdapters::ConnectionPool.method_defined?(:db_config)
@@ -200,8 +209,7 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
                                                      a_hash_including('name' => 'primary', 'state' => 'readable'))
     end
   ensure
-    SchemaProbeRecord.remove_connection if defined?(SchemaProbeRecord)
-    SchemaProbeLedger.table_name = nil if defined?(SchemaProbeLedger)
+    SchemaProbeRecord.remove_connection
   end
 
   describe 'incremental runs' do
@@ -243,7 +251,7 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
       expect(manifest(index).fetch('schema_readability')).to eq(recorded)
     end
 
-    it 'still refuses an incremental run that re-extracts a model after the database went away' do
+    it 'refuses an incremental run that re-extracts a model after the database went away' do
       connect(fresh_database('vanishing'), tables: %i[posts comments])
       index = extract
       connect(missing_database)
@@ -251,7 +259,7 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
       post = touch(File.join(@app_root, 'app/models/post.rb'))
 
       expect { Woods::Extractor.new(output_dir: index).extract_changed([post]) }
-        .to raise_error(Woods::ExtractionError, /Extraction failed for models/)
+        .to raise_error(Woods::ExtractionError, /cannot be read now \(primary: could not connect\)/)
     end
 
     it 'refuses an incremental run that re-extracts a model while the database holds no tables' do
@@ -272,9 +280,18 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
       connect(fresh_database('refreshed'), tables: %i[posts comments])
       index = extract
       connect(fresh_database('refreshed-now'))
+      allow(Woods::Extractors::ModelExtractor).to receive(:new).and_call_original
+      marker = File.binread(File.join(index, Woods::Generation::FILENAME))
+      published = payload(index)
+      payload_files = file_bytes(published)
 
       expect { Woods::Extractor.new(output_dir: index).refresh(:models) }
-        .to raise_error(Woods::ExtractionError, /cannot be read now/)
+        .to raise_error(Woods::ExtractionError,
+                        %r{cannot be read now \(primary: holds no tables\).*bin/rails db:prepare})
+      expect(Woods::Extractors::ModelExtractor).not_to have_received(:new)
+      expect(File.binread(File.join(index, Woods::Generation::FILENAME))).to eq(marker)
+      expect(payload(index)).to eq(published)
+      expect(file_bytes(published)).to eq(payload_files)
     end
 
     it 'refuses a refresh over an unreadable baseline' do
