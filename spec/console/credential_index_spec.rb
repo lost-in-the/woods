@@ -77,6 +77,7 @@ RSpec.describe Woods::Console::CredentialIndex do
       app = build_app(raise_with: missing_key.new('no key'))
       index = described_class.build(rails_app: app)
       expect(index).to be_empty
+      expect(index).to be_unavailable
     end
 
     it 'returns an empty index when the credentials file is corrupt' do
@@ -84,6 +85,17 @@ RSpec.describe Woods::Console::CredentialIndex do
       app = build_app(raise_with: bad_message.new('garbled'))
       index = described_class.build(rails_app: app)
       expect(index).to be_empty
+      expect(index).to be_unavailable
+    end
+
+    it 'keeps a successfully read empty credentials mapping available' do
+      index = described_class.build(rails_app: build_app({}))
+      expect(index).to be_empty
+      expect(index).not_to be_unavailable
+    end
+
+    it 'keeps a successfully read populated mapping available' do
+      expect(described_class.build(rails_app: build_app({ key: 'long_enough_secret_value' }))).not_to be_unavailable
     end
 
     it 're-raises unrelated errors so they surface to the caller' do

@@ -5,3 +5,5 @@
   A field over 8 KiB is replaced whole by a `DIAGNOSTIC_OMITTED` marker, and an unscannable one by `REDACTION_FAILED`.
   A scanning failure never ends the request, and client error wording is unchanged.
   A skipped model during HTTP startup is now logged at `warn` instead of `debug`.
+  When the Rails credentials cannot be read at boot, dynamic diagnostic text is replaced by a fixed marker until a
+  successful credential rebuild.

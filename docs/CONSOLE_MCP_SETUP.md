@@ -669,8 +669,14 @@ failed eager load, on stdio and HTTP.
 
 `Server.rebuild_credential_index` refreshes the diagnostic scanners as well as the response scanners.
 
+When the Rails credentials cannot be read at boot (for example a missing master key), the server still starts.
+Every dynamic diagnostic field is then logged as `[DIAGNOSTIC_OMITTED: credential index unavailable]`.
+Credentials that are read and hold no values are not this state: their diagnostics are scanned as usual.
+A successful `rebuild_credential_index` restores scanned diagnostic text; a failed one keeps the marker.
+
 Diagnostic pattern scanning stays on when response patterns are disabled.
 Turning off `console_credential_defense_enabled` also turns off the credential index for diagnostics.
+Diagnostics then use the credential patterns only, and the credentials are not read.
 
 This protects the logs Woods writes, not application loggers, Active Record SQL logging, database logs or
 third-party middleware. Those need their own logging policy.

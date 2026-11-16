@@ -121,6 +121,16 @@ module Woods
                         else
                           new_index
                         end
+        # Cleared only after the new index is in place.
+        @index_unavailable = unavailable_index?(new_index)
+      end
+
+      # True when this scanner was given an index whose credentials could not
+      # be read ({CredentialIndex#unavailable?}). Response scanning is
+      # unchanged; diagnostic logging uses it to omit dynamic text.
+      # @return [Boolean]
+      def credential_index_unavailable?
+        @index_unavailable
       end
 
       # Counter key emitted when {CredentialIndex} substring-matches a value
@@ -141,6 +151,7 @@ module Woods
         disabled = Array(disabled_patterns).to_set(&:to_sym)
         @active_patterns = PATTERNS.except(*disabled)
         @secret_index = secret_index unless secret_index.respond_to?(:empty?) && secret_index.empty?
+        @index_unavailable = unavailable_index?(secret_index)
       end
 
       # Scan a value (String, Hash, Array, or any other object) for credentials.
@@ -160,6 +171,10 @@ module Woods
       end
 
       private
+
+      def unavailable_index?(index)
+        index.respond_to?(:unavailable?) && index.unavailable? == true
+      end
 
       def walk(value, counts, index)
         case value

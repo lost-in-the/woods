@@ -38,7 +38,9 @@ module Woods
     # `ActiveSupport::MessageEncryptor::InvalidMessage`. {.build} catches
     # both *by name* (no constant reference, so the class load order is
     # irrelevant) and returns an empty index — the server still boots, the
-    # other defense layers still apply.
+    # other defense layers still apply. That index also reports
+    # {#unavailable?}, which tells it apart from credentials that were read
+    # and hold no values.
     #
     # @example
     #   index = CredentialIndex.build(rails_app: Rails.application)
@@ -88,14 +90,14 @@ module Woods
         # full restart guidance.
         #
         # @param rails_app [#credentials] usually `Rails.application`.
-        # @return [CredentialIndex] populated index, or an empty index when
-        #   the credentials store can't be opened.
+        # @return [CredentialIndex] populated index, or an empty, unavailable
+        #   index when the credentials store can't be opened.
         def build(rails_app:)
           refresh(rails_app: rails_app)
         rescue StandardError => e
           raise unless missing_key_error?(e)
 
-          new(secrets: [])
+          new(secrets: [], unavailable: true)
         end
 
         # Strict refresh: construct the replacement completely before a caller
@@ -184,7 +186,10 @@ module Woods
       # @param secrets [Enumerable<String>] string leaves harvested from
       #   credentials. Duplicates are collapsed; strings shorter than
       #   {MIN_LENGTH} are dropped.
-      def initialize(secrets:)
+      # @param unavailable [Boolean] true when the credentials could not be
+      #   read, as opposed to read and empty.
+      def initialize(secrets:, unavailable: false)
+        @unavailable = unavailable ? true : false
         filtered = Array(secrets).select { |s| s.is_a?(String) && s.length >= MIN_LENGTH }
         @secrets = filtered.to_set.freeze
         # Regexp alternatives match in order: a shorter prefix must not consume
@@ -197,6 +202,12 @@ module Woods
       #   empty credentials file, or every leaf below MIN_LENGTH).
       def empty?
         @secrets.empty?
+      end
+
+      # @return [Boolean] true when {.build} could not read the credentials.
+      #   Such an index is also {#empty?}.
+      def unavailable?
+        @unavailable
       end
 
       # @param str [String]
