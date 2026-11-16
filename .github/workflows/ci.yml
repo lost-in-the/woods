@@ -287,52 +287,7 @@ jobs:
           WOODS_DIFF_SEEDS: ${{ github.event_name == 'pull_request' && matrix.pr_diff_seeds || '1,2,3' }}
         run: bundle exec ruby script/parallel-booted spec/integration/incremental_equivalence_spec.rb
 
-      # Optional AMS stays outside the base bundle. This fixture boots fresh
-      # processes and performs no network I/O after dependency installation.
-      - name: Install optional serializer fixture bundle
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
-        env:
-          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-      - name: Run hybrid runtime and fresh schema task equivalence
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        env:
-          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
-        run: bundle exec rspec spec/integration/incremental_runtime_spec.rb
-
-      # Actual optional state-machine registries, kept out of the base bundle.
-      - name: Install optional state-machine fixture bundle
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
-        env:
-          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-      - name: Run literal state-machine forms against loaded registries
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        env:
-          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
-        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
-
-      - name: Install optional component fixture bundle
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
-        env:
-          BUNDLE_GEMFILE: gemfiles/components.gemfile
-        with:
-          ruby-version: ${{ matrix.ruby }}
-          bundler-cache: true
-      - name: Run component ownership, mailer coverage and schedule identity contracts
-        if: ${{ env.WOODS_CI_ROW_ACTIVE == 'true' && (matrix.rails == '7.2') }}
-        env:
-          BUNDLE_GEMFILE: gemfiles/components.gemfile
-        run: bundle exec rspec spec/integration/component_ownership_spec.rb
-
-  # Optional fixture bundles must finish even if another Rails row fails.
+  # The Rails 7.2 row's fixture contracts must finish even if another Rails row fails.
   rails-required:
     name: Booted extraction (Ruby ${{ matrix.ruby }} / Rails ${{ matrix.rails }})
     runs-on: ubuntu-latest
@@ -348,6 +303,57 @@ jobs:
         ${{ github.event_name != 'pull_request' || matrix.pr ||
         contains(github.event.pull_request.labels.*.name, 'full-matrix') }}
     steps: *rails-steps
+
+  # The Rails 7.2 row's optional fixture bundles (serializers, state machines,
+  # components), each kept out of the base bundle. They ran after that row's
+  # booted steps and made it the slowest job of a pull request run by about
+  # 70-90 s; in their own job they run beside it. The name keeps the
+  # "Booted extraction (Ruby " prefix the release validator requires.
+  rails-fixtures:
+    name: Booted extraction (Ruby 3.3 / Rails 7.2, optional fixture bundles)
+    runs-on: ubuntu-latest
+    env:
+      WOODS_RUN_BOOTED_APP: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # Optional AMS stays outside the base bundle. This fixture boots fresh
+      # processes and performs no network I/O after dependency installation.
+      - name: Install optional serializer fixture bundle
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run hybrid runtime and fresh schema task equivalence
+        env:
+          BUNDLE_GEMFILE: gemfiles/serializers.gemfile
+        run: bundle exec rspec spec/integration/incremental_runtime_spec.rb
+
+      # Actual optional state-machine registries, kept out of the base bundle.
+      - name: Install optional state-machine fixture bundle
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run literal state-machine forms against loaded registries
+        env:
+          BUNDLE_GEMFILE: gemfiles/state_machines.gemfile
+        run: bundle exec rspec spec/integration/state_machine_forms_spec.rb
+
+      - name: Install optional component fixture bundle
+        uses: ruby/setup-ruby@de492cf36cbab201753d720ce4f4e336cd688c94 # v1
+        env:
+          BUNDLE_GEMFILE: gemfiles/components.gemfile
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - name: Run component ownership, mailer coverage and schedule identity contracts
+        env:
+          BUNDLE_GEMFILE: gemfiles/components.gemfile
+        run: bundle exec rspec spec/integration/component_ownership_spec.rb
 
   # Storage adapters against real servers (#220), plus the session tracer
   # against the real Solid Cache API. Unit doubles verify requests and SQL but
@@ -685,6 +691,7 @@ jobs:
       - minimum-dependencies
       - rails-matrix
       - rails-required
+      - rails-fixtures
       - live-backends
       - lint
       - c-locale
