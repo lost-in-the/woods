@@ -628,10 +628,14 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         expect(scopes_of('Shop::Order').values).to all(eq('static'))
       end
 
+      # `class Ledger::Order` inside `module Shop` names Ledger from another
+      # file, so no declaration here is known to be the model, and no scope
+      # can be ruled another class's either.
       it 'keeps every scope, static, when no declaration in the file spells the model’s name' do
-        compact = "module Shop\n  class Shop::Order < ApplicationRecord\n    scope :placed, -> { all }\n  end\nend\n"
+        qualified = "module Shop\n  class Ledger::Order < ApplicationRecord\n    scope :placed, -> { all }\n\n    " \
+                    "class Line < ApplicationRecord\n      scope :priced, -> { all }\n    end\n  end\nend\n"
 
-        expect(scopes_of('Shop::Order', compact)).to eq('placed' => 'static')
+        expect(scopes_of('Ledger::Order', qualified)).to eq('placed' => 'static', 'priced' => 'static')
       end
 
       it 'marks every scope the regex fallback finds static, since it cannot see an owner' do
