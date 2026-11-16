@@ -463,6 +463,19 @@ RSpec.describe 'The generated MCP entry' do
 
       expect(status.success?).to be(false), output
       expect(output).to include("working directory, #{other}", "--container-root #{@app}", 'working_dir')
+      expect(output).to include("preflight failed: The launch starts in #{other} and resolves the application at " \
+                                "#{other}, not #{@app}\n")
+    end
+
+    it 'refuses a service in the application root whose bundle binstub resolves another application' do
+      other = File.join(@base, 'other')
+      indexed_application(other)
+
+      output, status = compose_setup(@app, image: bundle_binstub_image(File.join(other, 'Gemfile')))
+
+      expect(status.success?).to be(false), output
+      expect(output).to include("preflight failed: The launch resolves the application at #{other}, not #{@app}\n")
+      expect(output).not_to include('working directory,')
     end
 
     it 'refuses a service that starts where no Gemfile is found, naming both directories' do
@@ -483,6 +496,7 @@ RSpec.describe 'The generated MCP entry' do
 
       expect(status.success?).to be(false), output
       expect(output).to include("working directory, #{outside}", "--container-root #{@app}", 'working_dir')
+      expect(output).to include("preflight failed: The launch starts in #{outside}, not #{@app}\n")
     end
 
     it 'accepts the application root reached through a symlink, and a container root with a trailing slash' do
