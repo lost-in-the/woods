@@ -174,7 +174,7 @@ module IndexComparison
     # ── Unmasked ─────────────────────────────────────────────────────────
 
     def unmasked_probes
-      sampled_files.flat_map do |relative|
+      scope_membership_probes + sampled_files.flat_map do |relative|
         artifact = artifact_of(relative)
         next summary_probe(relative) if artifact == :summary
 
@@ -185,6 +185,25 @@ module IndexComparison
 
           probe(:unmasked, artifact, relative, path, nil) { write(relative, mutate_at(document, path)) }
         end
+      end
+    end
+
+    # A consumer scope added empty, and an empty one removed: a scope's
+    # presence is compared, not only the paths it records.
+    def scope_membership_probes
+      relative = SINGLE_FILES.key(:source_inputs)
+      return [] unless payload_files.include?(relative)
+
+      document = read(relative)
+      scopes = document.fetch('scopes', {})
+      added = replace_at(document, ['scopes'], scopes.merge('whole:self_check' => {}))
+      probes = [probe(:unmasked, :source_inputs, relative, %w[scopes whole:self_check], nil) { write(relative, added) }]
+      empty = scopes.keys.sort.find { |scope| scope != 'runtime' && scopes[scope] == {} }
+      return probes unless empty
+
+      removed = replace_at(document, ['scopes'], scopes.except(empty))
+      probes << probe(:unmasked, :source_inputs, relative, ['scopes', empty, 'removed'], nil) do
+        write(relative, removed)
       end
     end
 
@@ -284,7 +303,8 @@ module IndexComparison
     # A value under the mask changed; its key stays.
     def value_probes(mask)
       relative, document, path = documents(mask.artifact).sort_by(&:first).flat_map do |name, parsed|
-        concrete_paths(parsed, mask.path).map { |found| [name, parsed, found] }
+        concrete_paths(parsed, mask.path).reject { |found| masked_path?(mask.artifact, found, mask) }
+                                         .map { |found| [name, parsed, found] }
       end.sample(random: @random)
       return [] unless relative
 

@@ -461,9 +461,13 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     exact + full_only.select { |path| patterns.any? { |pattern| pattern.match?(path) } }
   end
 
-  # One line per consumer scope whose recorded paths differ.
+  # One line per consumer scope one side lacks, empty or not, or whose
+  # recorded paths differ.
   def scope_differences(incremental, full)
     (incremental.keys | full.keys).sort.filter_map do |scope|
+      next "source_inputs.json scope #{scope}: only in full" unless incremental.key?(scope)
+      next "source_inputs.json scope #{scope}: only in incremental" unless full.key?(scope)
+
       left = incremental.fetch(scope, {})
       right = full.fetch(scope, {})
       next if left == right

@@ -174,6 +174,17 @@ RSpec.describe IndexComparison do
         dirs
       end
 
+      it 'reports a scope one side has and the other lacks, even when it is empty' do
+        Dir.mktmpdir('woods-index-comparison') do |root|
+          left = inputs({ 'file:services' => { 'a.rb' => 0 }, 'whole:events' => {} })
+          right = inputs({ 'file:services' => { 'a.rb' => 0 } })
+          expect(described_class.compare(*pair(root, left, right)))
+            .to eq(['source_inputs.json scope whole:events: only in incremental'])
+          expect(described_class.compare(*pair(File.join(root, 'reverse'), right, left)))
+            .to eq(['source_inputs.json scope whole:events: only in full'])
+        end
+      end
+
       it 'compares recorded paths and uncertainties, not keyed positions or the runtime case' do
         Dir.mktmpdir('woods-index-comparison') do |root|
           left = inputs({ 'file:services' => { 'a.rb' => 0 }, 'runtime' => { 'a.rb' => 0 } },
@@ -255,6 +266,19 @@ RSpec.describe IndexComparison do
       dir = File.join(root, 'reference')
       write_index(dir, note: 'reference')
       dir
+    end
+
+    it 'never lifts one mask over a value another mask still hides' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        dir = reference(root)
+        inputs = { 'generation' => 1, 'key_id' => 'k', 'identities' => %w[d0], 'unverified_scopes' => [],
+                   'scopes' => { 'runtime' => { 'app/a.rb' => 0 }, 'whole:events' => {} } }
+        File.write(File.join(dir, 'source_inputs.json'), JSON.generate(inputs))
+        check = described_class.new(dir, File.join(root, 'scratch').tap { |path| FileUtils.mkdir_p(path) }, seed: 1)
+
+        expect(check.failures).to be_empty, check.failures.join("\n")
+        expect(check.probes.map(&:path)).to include(%w[scopes whole:events removed], %w[scopes whole:self_check])
+      end
     end
 
     it 'answers every probe as required on a small index' do
