@@ -142,6 +142,15 @@ RSpec.describe 'Partial-run source scopes', :booted_app do
     expect_edit_reported(task)
   end
 
+  it 'reruns no other family for a file that family already records, edited or not' do
+    task = write('lib/tasks/audit.rake', "namespace :audit do\n  task :run do\n  end\nend\n")
+    extractor.extract_all
+    File.write(File.join(@app_root, task), "namespace :audit do\n  task :check do\n  end\nend\n")
+
+    expect(extractor.refresh(:rake_tasks).fetch(:types)).to eq([:rake_tasks])
+    expect(changes.fetch('changed')).to include(task)
+  end
+
   it 'reports no change after refresh(:factories) adds a factory file, and reports its later edit' do
     extractor.extract_all
     factory = write('spec/factories/posts.rb',

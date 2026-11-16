@@ -139,6 +139,15 @@ module Woods
         @snapshot.fetch('scope_paths').fetch(scope, [])
       end
 
+      # Captured paths a scope's rule matches that the scope does not record yet.
+      #
+      # @param scope [String]
+      # @return [Array<String>]
+      def unrecorded_paths(scope)
+        recorded = @identities.fetch(scope, {})
+        scope_paths(scope).reject { |path| recorded.key?(path) }
+      end
+
       # Record in a whole-app family's scope the captured paths its rule now
       # matches and the scope lacks, without re-running the family. Only for a
       # family whose output the caller has proved unchanged: recording an
@@ -149,9 +158,8 @@ module Woods
       # @return [void]
       def adopt_new_paths(key)
         scope = "whole:#{key}"
-        recorded = @identities.fetch(scope, {})
-        scope_paths(scope).each do |path|
-          record_identity(scope, path, @snapshot.fetch('files').fetch(path)) unless recorded.key?(path)
+        unrecorded_paths(scope).each do |path|
+          record_identity(scope, path, @snapshot.fetch('files').fetch(path))
         end
       end
 

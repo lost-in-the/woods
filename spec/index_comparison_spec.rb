@@ -242,8 +242,9 @@ RSpec.describe IndexComparison do
         right = File.join(root, 'full')
         write_index(right, note: 'same')
 
-        expect { described_class.differences(left, right) }.not_to output.to_stderr
         allow(ENV).to receive(:[]).and_call_original
+        allow(ENV).to receive(:[]).with('WOODS_DIFF_MASKS').and_return(nil)
+        expect { described_class.differences(left, right) }.not_to output.to_stderr
         allow(ENV).to receive(:[]).with('WOODS_DIFF_MASKS').and_return('1')
         expect { described_class.differences(left, right) }.to output(/masks in effect/).to_stderr
       end
@@ -274,6 +275,33 @@ RSpec.describe IndexComparison do
 
         expect(check.failures).to be_empty, check.failures.join("\n")
         expect(check.probes.map(&:path)).to include(%w[scopes whole:events removed], %w[scopes whole:self_check])
+      end
+    end
+
+    it 'counts the key name and its punctuation in what a key mask removes' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        dir = reference(root)
+        check = described_class.new(dir, File.join(root, 'scratch').tap { |path| FileUtils.mkdir_p(path) }, seed: 1)
+        unit = JSON.parse(File.read(File.join(dir, 'models', 'Widget.json')))
+        removed = JSON.generate(unit).bytesize - JSON.generate(unit.except('extracted_at')).bytesize
+
+        expect(removed).to be > JSON.generate(unit['extracted_at']).bytesize
+        expect(check.key_mask_shares.fetch(:unit_extracted_at)).to eq(removed.fdiv(JSON.generate(unit).bytesize))
+      end
+    end
+
+    it 'renames a recorded path when every value of a slot is masked, and never inserts a scalar scope' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        dir = reference(root)
+        inputs = { 'generation' => 1, 'key_id' => 'k', 'identities' => %w[d0 d1], 'unverified_scopes' => [],
+                   'scopes' => { 'file:services' => { 'app/a.rb' => 0 }, 'runtime' => { 'app/b.rb' => 1 } } }
+        File.write(File.join(dir, 'source_inputs.json'), JSON.generate(inputs))
+        check = described_class.new(dir, File.join(root, 'scratch').tap { |path| FileUtils.mkdir_p(path) }, seed: 1)
+        scope_probes = check.probes.select { |probe| probe.artifact == :source_inputs && probe.path.first == 'scopes' }
+
+        expect(check.failures).to be_empty, check.failures.join("\n")
+        expect(scope_probes.map(&:path)).to include(%w[scopes file:services app/a.rb renamed])
+        expect(scope_probes.map(&:path)).not_to include(%w[scopes])
       end
     end
 

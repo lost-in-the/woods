@@ -99,15 +99,15 @@ module IndexComparison
       payload_files.reject { |relative| artifact_of(relative) }
     end
 
-    # The share of its artifact's JSON bytes each `:key` mask removes, over
-    # every document of the artifact. Summed rather than per document: a
-    # fixed-size stamp is a large share of a small flow document without
-    # hiding anything more, and which documents exist depends on the tree.
+    # The share of its artifact's JSON bytes each `:key` and `:value` mask
+    # removes, over every document of the artifact. Summed rather than per
+    # document: a fixed-size stamp is a large share of a small flow document
+    # without hiding anything more, and which documents exist depends on the tree.
     #
     # @return [Hash{Symbol => Float}]
     def key_mask_shares
       @masks.select { |mask| %i[key value].include?(mask.width) }.to_h do |mask|
-        sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask.path) }
+        sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask) }
         [mask.name, sizes.sum(&:first).fdiv([sizes.sum(&:last), 1].max)]
       end
     end
@@ -132,12 +132,22 @@ module IndexComparison
     MISSING = Object.new.freeze
     private_constant :MISSING
 
-    # @return [(Integer, Integer), nil] bytes under +pattern+ and in the document, nil when nothing matches
-    def masked_bytes(document, pattern)
-      paths = concrete_paths(document, pattern)
+    # A key mask removes the key, its value and their punctuation, so it is
+    # measured as the document's size before and after the drop. A value mask
+    # keeps the key and hides the value, so it is measured by the values.
+    #
+    # @return [(Integer, Integer), nil] bytes the mask hides and the document's
+    #   bytes, nil when the mask matches nothing in it
+    def masked_bytes(document, mask)
+      paths = concrete_paths(document, mask.path)
       return nil if paths.empty?
 
-      [paths.sum { |path| JSON.generate(dig(document, path)).bytesize }, JSON.generate(document).bytesize]
+      whole = JSON.generate(document).bytesize
+      if mask.width == :key
+        return [whole - JSON.generate(IndexComparison.drop_path(document, mask.path)).bytesize, whole]
+      end
+
+      [paths.sum { |path| JSON.generate(dig(document, path)).bytesize }, whole]
     end
 
     def shape_violations
@@ -182,6 +192,7 @@ module IndexComparison
         top_level_slots(document).filter_map do |slot|
           path = unmasked_leaf(artifact, document, slot)
           next unless path
+          next rename_probe(artifact, relative, document, path.last) if path.first == :rename
 
           probe(:unmasked, artifact, relative, path, nil) { write(relative, mutate_at(document, path)) }
         end
@@ -228,11 +239,32 @@ module IndexComparison
 
     # A leaf under +slot+ outside every mask, or the slot itself when it holds
     # an empty container. nil when the whole slot is masked.
+    #
+    # An empty container is filled. A container whose every value a `:value`
+    # mask hides still has keys that are compared, so one is renamed instead,
+    # returned as `[:rename, path]`; nil when key masks hide all of it too.
     def unmasked_leaf(artifact, document, slot)
       return nil if masked_path?(artifact, slot)
 
-      leaves = leaf_paths(dig(document, slot), slot).reject { |path| masked_path?(artifact, path) }
-      leaves.empty? ? slot : leaves.sample(random: @random)
+      leaves = leaf_paths(dig(document, slot), slot)
+      open = leaves.reject { |path| masked_path?(artifact, path) }
+      return open.sample(random: @random) unless open.empty?
+
+      renamable = leaves.reject { |path| key_masked?(artifact, path) }
+      renamable.empty? ? nil : [:rename, renamable.sample(random: @random)]
+    end
+
+    # The last key of +path+ renamed in a copy of the document.
+    def rename_probe(artifact, relative, document, path)
+      parent = path[0...-1]
+      renamed = dig(document, parent).to_h { |key, value| [key == path.last ? "#{key}.self_check" : key, value] }
+      probe(:unmasked, artifact, relative, path + ['renamed'], nil) do
+        write(relative, replace_at(document, parent, renamed))
+      end
+    end
+
+    def key_masked?(artifact, path)
+      @masks.any? { |mask| mask.artifact == artifact && mask.width == :key && within?(path, mask.path) }
     end
 
     def summary_probe(relative)

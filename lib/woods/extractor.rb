@@ -914,12 +914,18 @@ module Woods
       log_profile_total('refresh', profile_started)
     end
 
-    # The whole-app families whose rule matches a file of a named family. A
-    # refresh re-runs them with it (#1124), as an incremental run re-runs every
-    # family whose rule matches a changed path: their units read those files,
-    # and their `whole:` source scopes must list a file the refresh found new.
-    # Read off this run's capture, so every rule in
-    # {PathDispatcher.whole_app_rules} is covered, today's and a future one's.
+    # The whole-app families a refresh re-runs with the named ones (#1124): each
+    # family whose rule ({PathDispatcher.whole_app_rules}) matches a file of a
+    # named family that the family's own `whole:` scope does not record yet.
+    # Without the re-run that new file stays missing from the scope, which the
+    # freshness check reads as drift, though nothing is stale.
+    #
+    # Only a file the family has never recorded: a file it already records,
+    # edited or not, keeps the identity of the bytes that family last read.
+    # Re-running a family because a refresh of another one read the same file
+    # would certify that file for a family nobody asked to refresh
+    # (docs/SOURCE_FRESHNESS.md: a named refresh does not certify unrelated
+    # application inputs).
     #
     # @param keys [Array<Symbol>] the named families
     # @return [Array<Symbol>] the families to re-run with them
@@ -934,7 +940,8 @@ module Woods
         key = rule.extractor_key
         next if keys.include?(key) || !EXTRACTORS.key?(key) || skip_by_configuration?(key)
 
-        key if paths.any? { |path| rule.matches?(path) }
+        unrecorded = paths & @source_inputs.unrecorded_paths("whole:#{key}")
+        key if unrecorded.any? { |path| rule.matches?(path) }
       end.uniq
     end
 
