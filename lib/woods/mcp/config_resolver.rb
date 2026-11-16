@@ -278,7 +278,7 @@ module Woods
       rescue StandardError, LoadError => e
         raise BootstrapError.new(
           'pgvector index could not open a database connection through WOODS_PG_URL: ' \
-          "#{DiagnosticRedaction.describe(e).gsub(/\s*\n\s*/, ' ').strip}",
+          "#{DiagnosticRedaction.describe(e).split("\n").map(&:strip).reject(&:empty?).join(' ')}",
           details: { vector_store: 'pgvector', env_var: 'WOODS_PG_URL' }
         ), cause: nil
       end
