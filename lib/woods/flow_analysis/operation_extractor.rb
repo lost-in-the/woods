@@ -130,18 +130,61 @@ module Woods
       # @param node [Ast::Node] the `super` node
       # @param block [Array<Ast::Node>, nil] the block body, when the parser
       #   holds it outside +node+; otherwise read from +node+'s children
-      def handle_super(node, block, operations)
+      # @param nested [Boolean] whether the call is part of an expression
+      #   (another call's receiver or argument), where only `super` calls
+      #   are marked, as only enqueues are collected there
+      def handle_super(node, block, operations, nested: false)
         children = Array(node.children).grep(Ast::Node)
         block ||= children.select { |child| child.type == :block_body }
-        (children - block).each { |child| walk(child, operations) }
+        visit = nested ? method(:collect_nested_super) : method(:walk)
+        (children - block).each { |child| visit.call(child, operations) }
         operations << { type: :super_call, line: node.line }
-        block.each { |child| walk(child, operations) }
+        block.each { |child| visit.call(child, operations) }
+      end
+
+      # Mark each `super` call in the expression +node+, a call's receiver or
+      # argument, where Ruby makes it: before that call, and inside the
+      # conditional expression (`ok? ? super : {}`) that holds it.
+      def collect_nested_super(node, operations)
+        return unless node.is_a?(Ast::Node)
+        return handle_super(node, nil, operations, nested: true) if super_call?(node)
+        return if deferred_expression?(node)
+
+        case node.type
+        when :if then collect_conditional_super(node, operations, 'if')
+        when :case then collect_conditional_super(node, operations, 'case')
+        else Array(node.children).each { |child| collect_nested_super(child, operations) }
+        end
+      end
+
+      # An expression whose code runs only when something calls it.
+      def deferred_expression?(node)
+        %i[def defs lambda].include?(node.type)
+      end
+
+      # The `super` calls of an `if` or `case` expression: its predicate's
+      # first, then each branch's inside a conditional, as
+      # {#handle_conditional} and {#handle_case} lay out statements.
+      def collect_conditional_super(node, operations, kind)
+        children = node.children || []
+        collect_nested_super(children[0], operations)
+        branches = kind == 'if' ? [[children[1]], [children[2]]] : [children.drop(1), []]
+        then_ops, else_ops = branches.map do |branch|
+          branch.each_with_object([]) { |child, ops| collect_nested_super(child, ops) }
+        end
+        return if then_ops.empty? && else_ops.empty?
+
+        operations << { type: :conditional, kind: kind, condition: condition_source(children[0]) || node.source,
+                        line: node.line, then_ops: then_ops, else_ops: else_ops }
       end
 
       # Handle :send nodes - classify into operation types.
       def handle_send(node, operations)
         return unless node.is_a?(Ast::Node) && node.type == :send
         return walk_negated(node, operations) if negation?(node)
+
+        # Ruby evaluates a call's receiver and arguments before the call.
+        (node.children || []).each { |child| collect_nested_super(child, operations) } if @super_calls
 
         if async_call?(node)
           operations << {

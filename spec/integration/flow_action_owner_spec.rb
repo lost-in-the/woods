@@ -18,7 +18,8 @@ require 'yaml'
 # #export); another owner's definition on that line is not (#preview).
 # Every super call continues where Ruby makes it: twice (#twice), before a
 # later statement on its line (#compact), and inside the branch or
-# transaction that holds it (#gated, #locked).
+# transaction that holds it (#gated, #locked), and as another call's
+# receiver or argument (#handed).
 RSpec.describe 'Request flow of the dispatched action body', :booted_app do
   actions = {
     'create' => { owner: 'ReplacedCreate', jobs: %w[ReplacedCreateJob] },
@@ -35,7 +36,9 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
     'twice' => { owner: 'SuperCalls', jobs: %w[LocalTwiceJob BetweenJob LocalTwiceJob] },
     'compact' => { owner: 'SuperCalls', jobs: %w[LocalCompactJob AfterCompactJob] },
     'gated' => { owner: 'SuperCalls', jobs: %w[LocalGatedJob AfterGatedJob], held_by: 'conditional' },
-    'locked' => { owner: 'SuperCalls', jobs: %w[LocalLockedJob AfterLockedJob], held_by: 'transaction' }
+    'locked' => { owner: 'SuperCalls', jobs: %w[LocalLockedJob AfterLockedJob], held_by: 'transaction' },
+    'handed' => { owner: 'SuperCalls', jobs: %w[LocalHandedJob LocalHandedJob LocalHandedJob LocalHandedJob
+                                                AfterHandedJob] }
   }
 
   before(:all) do

@@ -10,5 +10,6 @@ Rails.application.routes.draw do
     get :compact, on: :collection
     get :gated, on: :collection
     get :locked, on: :collection
+    get :handed, on: :collection
   end
 end

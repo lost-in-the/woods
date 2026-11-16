@@ -72,11 +72,21 @@ class ItemsController < ApplicationController
     LocalLockedJob.perform_later
   end
 
+  def handed
+    LocalHandedJob.perform_later
+  end
+
   private
 
   def gate_open?
     true
   end
+
+  def handed?
+    true
+  end
+
+  def record(value); end
 
   def load_item; end
 end

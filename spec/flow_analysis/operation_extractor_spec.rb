@@ -604,6 +604,27 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
               ['BeforeJob', 'AfterJob', 'Gate', ['transaction', ['YieldedJob']]]
             )
           end
+
+          # A call's receiver and arguments run before the call, so a `super`
+          # among them is made first; one in a conditional expression only on
+          # that branch.
+          it 'marks a super call that is a receiver or argument of another call, before that call' do
+            method_node = method_extractor.extract_method(<<~RUBY, 'show')
+              def show
+                Log.write(super)
+                Log.write(value: super)
+                handed = Wrapper.wrap(super)
+                super.merge(1).then { AfterJob.perform_later }
+                Log.write(ready? ? super : nil)
+                Audit.record(super())
+              end
+            RUBY
+
+            expect(shape(described_class.new(super_calls: true).extract(method_node))).to eq(
+              ['super_call', 'Log', 'super_call', 'Log', 'super_call', 'Wrapper', 'super_call', 'AfterJob',
+               ['conditional', ['super_call'], []], 'Log', 'super_call', 'Audit']
+            )
+          end
         end
       end
     end

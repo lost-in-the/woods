@@ -18,6 +18,14 @@ module SuperCalls
     end
   end
 
+  # Ruby makes a super call in an operand before the call that receives it.
+  def handed
+    record(super)
+    record(value: super)
+    record(handed? ? super : nil)
+    super.then { AfterHandedJob.perform_later }
+  end
+
   def locked
     ActiveRecord::Base.transaction do
       super
