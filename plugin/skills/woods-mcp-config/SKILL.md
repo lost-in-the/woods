@@ -84,8 +84,9 @@ every machine:
 {
   "mcpServers": {
     "woods": {
-      "command": "bundle",
-      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
     }
   }
 }
@@ -93,8 +94,10 @@ every machine:
 
 `--checkout` serves `tmp/woods` in the checkout the client starts the server
 in; `--await-index` starts the server before the first index exists, with a
-retryable `building` answer until then. It relies on the client starting
-project servers in the project directory. Before `2.2.0`, `--checkout` is read
+retryable `building` answer until then. The `sh` line changes into
+`CLAUDE_PROJECT_DIR`, which Claude Code sets only in the server's environment;
+keep `$NAME`, never `${NAME}`, which Claude Code rewrites from its own
+environment. Before `2.2.0`, `--checkout` is read
 as an index path and the launch fails: use the explicit form below, which names
 one machine's path and must not be committed.
 
@@ -140,8 +143,9 @@ generator write the path-free container entry:
 {
   "mcpServers": {
     "woods": {
+      "type": "stdio",
       "command": "sh",
-      "args": ["-c", "exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"${WOODS_MCP_CLIENT_ROOT_MAP:-}\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     }
   }
 }

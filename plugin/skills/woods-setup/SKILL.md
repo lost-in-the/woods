@@ -134,8 +134,9 @@ checkout and worktree:
 {
   "mcpServers": {
     "woods": {
-      "command": "bundle",
-      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
     }
   }
 }

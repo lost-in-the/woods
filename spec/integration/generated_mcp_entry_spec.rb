@@ -74,8 +74,10 @@ RSpec.describe 'The generated MCP entry' do
               'WOODS_DIR' => nil, 'WOODS_OUTPUT' => nil, 'WOODS_RETRIEVAL_MODE' => nil).merge(extra)
   end
 
+  # The entry runs as a client runs it: its own `env` over the client's.
   def start(entry, cwd, env = {})
-    @stdin, @stdout, @stderr, @wait = Open3.popen3(client_env(env), entry['command'], *entry['args'],
+    @stdin, @stdout, @stderr, @wait = Open3.popen3(client_env(env).merge(entry.fetch('env', {})),
+                                                   entry['command'], *entry['args'],
                                                    chdir: cwd, unsetenv_others: true)
     @errors = Thread.new { @stderr.read }
     @id = 0
@@ -171,5 +173,54 @@ RSpec.describe 'The generated MCP entry' do
     expect(File.read(log).lines(chomp: true))
       .to eq(['compose', 'exec', '-T', '-e', 'WOODS_MCP_CLIENT_ROOT_MAP=', 'web', 'bundle', 'exec',
               'woods-mcp-start', '--checkout', '--await-index', '--client-root', subdirectory])
+  end
+
+  it 'starts in CLAUDE_PROJECT_DIR whatever directory the client starts it in' do
+    entry = application
+    worktree = File.join(@base, 'shop-topic')
+    git(@app, 'worktree', 'add', '-q', '-b', 'topic', worktree)
+    publish(@app)
+    publish(worktree)
+
+    [@app, worktree].each do |project|
+      start(entry, @base, 'CLAUDE_PROJECT_DIR' => project)
+      begin
+        expect_found(lookup)
+        report = JSON.parse(request('tools/call', name: 'woods_status', arguments: { worktrees: 'none' })
+                              .dig('result', 'content', 0, 'text'))
+        expect(report.dig('server', 'index_dir')).to eq(File.join(project, 'tmp', 'woods'))
+      ensure
+        stop
+      end
+    end
+  end
+
+  # Bundler looks for the Gemfile up from the working directory, never down:
+  # the entry must reach an application below its checkout root from anywhere
+  # the client may start it.
+  it 'reaches an application below its checkout root from the checkout root, the app, a sibling and the project dir' do
+    checkout = File.join(@base, 'mono repo')
+    git(@base, 'init', '-q', '-b', 'main', checkout)
+    @app = File.join(checkout, 'apps', 'my web')
+    FileUtils.mkdir_p(@app)
+    File.write(File.join(@app, 'Gemfile'), "source 'https://rubygems.org'\ngem 'woods', path: #{repo.inspect}\n")
+    generate(@app, '--mcp-config')
+    entry = JSON.parse(File.read(File.join(@app, '.mcp.json'))).dig('mcpServers', 'woods')
+    publish(@app)
+    sibling = File.join(checkout, 'apps', 'other')
+    FileUtils.mkdir_p(sibling)
+
+    [[checkout, {}], [@app, {}], [sibling, {}],
+     [@base, { 'CLAUDE_PROJECT_DIR' => checkout }], [@base, { 'CLAUDE_PROJECT_DIR' => @app }]].each do |cwd, env|
+      start(entry, cwd, env)
+      begin
+        expect_found(lookup)
+        report = JSON.parse(request('tools/call', name: 'woods_status', arguments: { worktrees: 'none' })
+                              .dig('result', 'content', 0, 'text'))
+        expect(report.dig('server', 'index_dir')).to eq(File.join(@app, 'tmp', 'woods')), "#{cwd} #{env}"
+      ensure
+        stop
+      end
+    end
   end
 end

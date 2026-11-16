@@ -155,8 +155,9 @@ Add `--skip` in an application installed earlier, so an edited initializer is ke
 {
   "mcpServers": {
     "woods": {
+      "type": "stdio",
       "command": "sh",
-      "args": ["-c", "exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"${WOODS_MCP_CLIENT_ROOT_MAP:-}\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     }
   }
 }
@@ -225,8 +226,9 @@ From Woods `2.2.0`, `rails generate woods:install --mcp-config` writes the path-
 {
   "mcpServers": {
     "woods": {
-      "command": "bundle",
-      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
     }
   }
 }

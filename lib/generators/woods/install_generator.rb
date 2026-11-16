@@ -4,7 +4,6 @@ require 'rails/generators'
 require 'rails/generators/migration'
 require 'json'
 require 'woods/version'
-require 'woods/mcp/served_identity'
 require_relative 'mcp_configuration'
 
 module Woods
@@ -125,26 +124,35 @@ module Woods
       private
 
       def mcp_entry
-        output = output_below_checkout
-        if output && options[:mcp_service]
-          say_status :note, 'the container launch serves tmp/woods at the checkout root inside the container; ' \
-                            "set WOODS_OUTPUT=#{output} in the #{options[:mcp_service]} service", :yellow
+        service = options[:mcp_service]
+        Woods::MCP::ClientEntry.for_root(destination_root, service: service, index: configured_index)
+      rescue ArgumentError
+        say_status :note, 'the application is not inside a git checkout yet; woods-mcp-start --checkout needs one',
+                   :yellow
+        McpConfiguration.entry(service: service)
+      end
+
+      # The index directory relative to the application root: Woods'
+      # configured `output_dir` when this run loaded it (a Rails application
+      # boots its initializers before generating), else `tmp/woods`. An
+      # output_dir outside the checkout cannot be reached by `--checkout`,
+      # which only serves an index inside the checkout it runs in.
+      def configured_index
+        return 'tmp/woods' unless Woods.respond_to?(:configuration)
+
+        configured = File.expand_path(Woods.configuration.output_dir.to_s, destination_root)
+        checkout = Woods::MCP::ServedIdentity.checkout_root(destination_root)
+        if checkout && !configured.start_with?("#{File.expand_path(checkout)}/")
+          say_status :note, "output_dir #{configured} is outside the checkout, where woods-mcp-start --checkout " \
+                            'cannot serve it; the entry serves tmp/woods', :yellow
+          return 'tmp/woods'
         end
-        McpConfiguration.entry(service: options[:mcp_service], output: output)
+
+        Pathname.new(configured).relative_path_from(Pathname.new(File.expand_path(destination_root))).to_s
       end
 
       def mcp_snippet(entry)
         McpConfiguration.snippet(entry)
-      end
-
-      # `--checkout` serves `tmp/woods` at the checkout root; an application
-      # below that root names its own, relative to the checkout.
-      def output_below_checkout
-        checkout = Woods::MCP::ServedIdentity.checkout_root(destination_root)
-        return unless checkout
-
-        below = Pathname.new(File.realpath(destination_root)).relative_path_from(Pathname.new(checkout)).to_s
-        below == '.' ? nil : File.join(below, 'tmp', 'woods')
       end
 
       def write_mcp_config(entry)

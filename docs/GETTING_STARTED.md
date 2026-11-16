@@ -101,8 +101,9 @@ For clients that support `.mcp.json`, `bin/rails generate woods:install --mcp-co
 {
   "mcpServers": {
     "woods": {
-      "command": "bundle",
-      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec bundle exec woods-mcp-start --checkout --await-index"]
     }
   }
 }
@@ -114,7 +115,12 @@ and `--await-index` lets the server start before the first index exists.
 The generator adds the entry only when `.mcp.json` has no `woods` entry, and says so when it skips one.
 In an application installed earlier, run `bin/rails generate woods:install --mcp-config --skip`:
 without `--skip` a non-interactive run overwrites an edited initializer.
-It relies on the client starting project servers in the project directory; check your client's documentation.
+The `sh` line changes into `CLAUDE_PROJECT_DIR`, which Claude Code sets in the server's environment to the project root;
+a client that does not set it starts the server where it starts it.
+The variables are written `$NAME`, not `${NAME}`: Claude Code rewrites `${NAME}` in `args` from its own environment.
+For an application below its checkout root, the entry also changes into the application directory from the checkout
+root (`git rev-parse --show-toplevel`): Bundler looks for the Gemfile up from the working directory, never down.
+The entry needs `sh` on the machine that runs the client; without one, use the explicit form below.
 
 Before Woods `2.2.0`, or for a client that starts servers elsewhere, name the application root explicitly:
 

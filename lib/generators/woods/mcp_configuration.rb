@@ -1,16 +1,13 @@
 # frozen_string_literal: true
 
 require 'json'
-require 'woods/mcp/served_identity'
+require 'woods/mcp/client_entry'
 
 module Woods
   module Generators
     # The Index Server entry the install generator prints or adds to an MCP
-    # client's `.mcp.json`, and the rules for adding it to an existing file.
-    #
-    # The entry names no absolute path and no `cwd`: `woods-mcp-start
-    # --checkout` finds the checkout the client starts it in, and
-    # `--await-index` starts it before that checkout's first index exists.
+    # client's `.mcp.json` ({Woods::MCP::ClientEntry}, shared with
+    # `woods-agent-config`), and the rules for adding it to an existing file.
     module McpConfiguration
       # A Compose service name: what `docker compose exec` takes, and safe to
       # place in the shell command the container entry runs.
@@ -19,26 +16,13 @@ module Woods
       # A file `woods-agent-config` writes beside a `.mcp.json` it manages.
       AGENT_CONFIG_RECEIPT = '.woods-agent-config.json'
 
-      LAUNCH = %w[bundle exec woods-mcp-start --checkout --await-index].freeze
-
       module_function
 
-      # A container launch runs through `sh -c` so `$PWD` becomes the session
-      # directory, handed over as the client root. The developer's own mount
-      # map, when exported, goes in through the environment, so the committed
-      # entry holds no host path.
-      #
       # @param service [String, nil] the Compose service; nil for a host launch
-      # @param output [String, nil] the index relative to the checkout root,
-      #   for an application below it (host launch only)
-      # @return [Hash]
-      def entry(service: nil, output: nil)
-        return { 'command' => LAUNCH.first, 'args' => LAUNCH.drop(1) }.merge(output_env(output)) unless service
-
-        map = Woods::MCP::ServedIdentity::CLIENT_ROOT_MAP_ENV
-        { 'command' => 'sh',
-          'args' => ['-c', "exec docker compose exec -T -e #{map}=\"${#{map}:-}\" #{service} " \
-                           "#{LAUNCH.join(' ')} --client-root \"$PWD\""] }
+      # @return [Hash] the entry for an application at its checkout root with
+      #   its index at `tmp/woods` ({Woods::MCP::ClientEntry.checkout})
+      def entry(service: nil)
+        Woods::MCP::ClientEntry.checkout(service: service)
       end
 
       # @param entry [Hash]
@@ -83,11 +67,6 @@ module Woods
         'it already has a different "woods" entry'
       end
       private_class_method :servers_reason
-
-      def output_env(output)
-        output ? { 'env' => { 'WOODS_OUTPUT' => output } } : {}
-      end
-      private_class_method :output_env
     end
   end
 end

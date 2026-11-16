@@ -239,7 +239,11 @@ RSpec.describe 'Install generator' do
       end
     end
 
-    let(:host_entry) { { 'command' => 'bundle', 'args' => %w[exec woods-mcp-start --checkout --await-index] } }
+    # Claude Code sets CLAUDE_PROJECT_DIR only in the server's environment
+    # and rewrites `${...}` in args from its own, so the entry reads it in sh.
+    let(:project_dir) { 'if [ -n "$CLAUDE_PROJECT_DIR" ]; then cd "$CLAUDE_PROJECT_DIR" || exit 1; fi; ' }
+    let(:launch) { 'bundle exec woods-mcp-start --checkout --await-index' }
+    let(:host_entry) { { 'type' => 'stdio', 'command' => 'sh', 'args' => ['-c', "#{project_dir}exec #{launch}"] } }
 
     it 'prints the host entry and writes no .mcp.json by default' do
       stdout, stderr, status = generate
@@ -258,6 +262,7 @@ RSpec.describe 'Install generator' do
       entry = mcp_json.dig('mcpServers', 'woods')
       expect(entry).to eq(host_entry)
       expect(strings_in(entry).grep(%r{\A/})).to be_empty
+      expect(strings_in(entry).join).not_to include('${', @root)
     end
 
     it 'writes the container entry for --mcp-service, handing over the session directory and any mount map' do
@@ -266,12 +271,13 @@ RSpec.describe 'Install generator' do
       expect(status.success?).to be(true), stderr
       entry = mcp_json.dig('mcpServers', 'woods')
       expect(entry).to eq(
-        'command' => 'sh',
-        'args' => ['-c', 'exec docker compose exec -T ' \
-                         '-e WOODS_MCP_CLIENT_ROOT_MAP="${WOODS_MCP_CLIENT_ROOT_MAP:-}" web ' \
-                         'bundle exec woods-mcp-start --checkout --await-index --client-root "$PWD"']
+        'type' => 'stdio', 'command' => 'sh',
+        'args' => ['-c', "#{project_dir}exec docker compose exec -T " \
+                         '-e WOODS_MCP_CLIENT_ROOT_MAP="$WOODS_MCP_CLIENT_ROOT_MAP" web ' \
+                         "#{launch} --client-root \"$PWD\""]
       )
       expect(entry).not_to have_key('cwd')
+      expect(strings_in(entry).join).not_to include('${')
     end
 
     it 'refuses a service name that is not a plain Compose service name' do
@@ -315,7 +321,7 @@ RSpec.describe 'Install generator' do
 
         expect(status.success?).to be(true), stderr
         expect(stdout).to match(/skip\s+\.mcp\.json/)
-        expect(stdout).to include('"woods-mcp-start"', '"--checkout"')
+        expect(stdout).to include('woods-mcp-start --checkout --await-index')
         expect(File.read(mcp_path)).to eq(content)
       end
     end
@@ -356,17 +362,26 @@ RSpec.describe 'Install generator' do
       expect(File.exist?(mcp_path)).to be(false)
     end
 
-    it 'says where a container launch must find the index of an application below its checkout root' do
+    it 'hands the index location of an application below its checkout root to a container launch' do
       checkout = @root
       FileUtils.mkdir_p(File.join(checkout, '.git'))
-      @root = File.join(checkout, 'apps', 'web')
+      @root = File.join(checkout, 'apps', 'my web')
       FileUtils.mkdir_p(@root)
 
-      stdout, stderr, status = generate('--mcp-config', '--mcp-service', 'web')
+      _, stderr, status = generate('--mcp-config', '--mcp-service', 'web')
 
       expect(status.success?).to be(true), stderr
-      expect(stdout).to include('WOODS_OUTPUT=apps/web/tmp/woods')
-      expect(mcp_json.dig('mcpServers', 'woods')).not_to have_key('env')
+      entry = mcp_json.dig('mcpServers', 'woods')
+      expect(entry.dig('args', 1)).to include('-e WOODS_OUTPUT=apps/my\\ web/tmp/woods web ')
+      expect(entry.dig('args', 1)).to include('cd "$(git rev-parse --show-toplevel)"/apps/my\\ web || exit 1; ')
+      expect(entry).not_to have_key('env')
+    end
+
+    it 'notes that --checkout needs a git checkout when the application is not in one yet' do
+      stdout, stderr, status = generate
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to include('not inside a git checkout')
     end
 
     it 'writes nothing under --pretend, and nothing on destroy' do
@@ -391,8 +406,43 @@ RSpec.describe 'Install generator' do
       _, stderr, status = generate('--mcp-config')
 
       expect(status.success?).to be(true), stderr
+      # Bundler looks for the Gemfile up from the working directory, never
+      # down, so the launch changes into the application from the checkout root.
+      into_application = 'cd "$(git rev-parse --show-toplevel)"/apps/web || exit 1; '
       expect(mcp_json.dig('mcpServers', 'woods'))
-        .to eq(host_entry.merge('env' => { 'WOODS_OUTPUT' => 'apps/web/tmp/woods' }))
+        .to eq('type' => 'stdio', 'command' => 'sh',
+               'args' => ['-c', "#{project_dir}#{into_application}exec #{launch}"],
+               'env' => { 'WOODS_OUTPUT' => 'apps/web/tmp/woods' })
+    end
+
+    def generate_with_output_dir(output_dir, *arguments)
+      repo = File.expand_path('../..', __dir__)
+      gemfile = File.expand_path(ENV.fetch('BUNDLE_GEMFILE', 'Gemfile'), repo)
+      environment = Bundler.unbundled_env.merge('BUNDLE_GEMFILE' => gemfile, 'BUNDLE_LOCKFILE' => "#{gemfile}.lock")
+      script = <<~SCRIPT
+        require 'bundler/setup'
+        require 'woods'
+        require 'generators/woods/install_generator'
+        root, output_dir = ARGV.shift(2)
+        Woods.configuration.output_dir = output_dir
+        Woods::Generators::InstallGenerator.start(ARGV, destination_root: root)
+      SCRIPT
+      Open3.capture3(environment, Gem.ruby, '-I', File.join(repo, 'lib'), '-e', script,
+                     @root, output_dir, *arguments, unsetenv_others: true)
+    end
+
+    it 'follows a configured output_dir inside the application, and says why it cannot outside it' do
+      FileUtils.mkdir_p(File.join(@root, '.git'))
+
+      _, stderr, status = generate_with_output_dir(File.join(@root, 'var', 'index'), '--mcp-config')
+      expect(status.success?).to be(true), stderr
+      expect(mcp_json.dig('mcpServers', 'woods', 'env')).to eq('WOODS_OUTPUT' => 'var/index')
+
+      FileUtils.rm(mcp_path)
+      stdout, stderr, status = generate_with_output_dir('/srv/shared-index', '--mcp-config')
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to include('output_dir /srv/shared-index is outside the checkout')
+      expect(mcp_json.dig('mcpServers', 'woods')).not_to have_key('env')
     end
 
     it 'writes the same bytes in two checkouts and a linked worktree' do
