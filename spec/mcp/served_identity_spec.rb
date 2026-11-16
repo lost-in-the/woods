@@ -662,6 +662,62 @@ RSpec.describe 'Served index identity' do
                                                                                branch: 'main' })
     end
 
+    it 'says the identity agreed, in the warning and in woods_status, keeping the reason' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+
+      result = identity(alpha, "main:#{sha}:main")
+      report = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/checkout-x', 'WOODS_MCP_CLIENT_ROOT_MAP' => nil,
+                        'WOODS_MCP_CLIENT_IDENTITY' => "main:#{sha}:main") do
+        status(build_server(index_of(alpha))).fetch('identity')
+      end
+
+      expect(result.client_identity_agrees).to be(true)
+      expect(result.warnings.first).to include('/host-only/checkout-x', 'agrees', 'a main checkout on main at aaaaaaa')
+      expect(result.warnings.first).not_to include('is unknown', 'does not resolve')
+      expect(report).to include('client_match_reason' => 'client_root_unresolved', 'client_matches' => nil,
+                                'client_identity_agrees' => true)
+    end
+
+    it 'says the client checkout is unknown when no identity was sent' do
+      alpha = checkout('checkout-alpha')
+      at_head(alpha, sha)
+
+      result = identity(alpha, nil)
+
+      expect([result.match_reason, result.client_identity_agrees]).to eq(['client_root_unresolved', nil])
+      expect(result.to_h).to include(client_identity: nil, client_identity_agrees: nil)
+      expect(result.warnings.first).to include("the client's checkout is unknown", 'does not resolve')
+    end
+
+    it 'agrees with nothing when the served checkout has neither HEAD nor branch to compare' do
+      unreadable = checkout('checkout-unreadable')
+      File.delete(File.join(unreadable, '.git', 'HEAD'))
+
+      result = identity(unreadable, "main:#{sha}:main")
+
+      expect([result.match_reason, result.client_identity_agrees]).to eq(['client_root_unresolved', nil])
+    end
+
+    # Outside any git checkout the wrapper's git calls print nothing, so it
+    # sends a kind with neither HEAD nor branch. That identifies nothing.
+    it 'reads an identity with neither HEAD nor branch as no identity, never as agreement or a mismatch' do
+      linked = checkout('checkout-linked')
+      gitdir = File.join(@base, 'common', 'worktrees', 'linked')
+      FileUtils.mkdir_p(gitdir)
+      File.write(File.join(gitdir, 'HEAD'), "#{sha}\n")
+      FileUtils.rm_rf(File.join(linked, '.git'))
+      File.write(File.join(linked, '.git'), "gitdir: #{gitdir}\n")
+
+      %w[main:: linked::].each do |declared|
+        expect(Woods::MCP::ServedIdentity.parse_client_identity(declared)).to be_nil
+        result = identity(linked, declared)
+        expect([result.client_matches, result.match_reason, result.client_identity_agrees])
+          .to eq([nil, 'client_root_unresolved', nil])
+        expect(result.to_h).to include(client_identity: nil)
+      end
+    end
+
     it 'agrees through a packed ref, a detached client and a detached served checkout' do
       packed = checkout('checkout-packed')
       at_head(packed, sha, packed: true)
@@ -742,6 +798,18 @@ RSpec.describe 'Served index identity' do
         expect(refusal).to include('WOODS_MCP_CLIENT_ROOT_MAP', '--allow-mismatch')
         expect(served).to eq(42), warning
         expect(allowed).to eq(42)
+      end
+
+      it 'serves a client outside any git checkout, which sends neither HEAD nor branch' do
+        alpha = checkout('checkout-alpha')
+        at_head(alpha, sha)
+
+        client = ['--client-root', '/host-only/x', '--client-identity', 'main::']
+
+        served, warning = launch(index_of(alpha), cwd: alpha, args: client)
+
+        expect(served).to eq(42), warning
+        expect(warning).to include("the client's checkout is unknown")
       end
 
       it 'refuses a malformed identity and one without a client root' do

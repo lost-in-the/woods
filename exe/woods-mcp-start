@@ -91,7 +91,7 @@ ENV[client_identity_env] = client_identity if client_identity
 declared_identity = ENV.fetch(client_identity_env, '').strip
 unless declared_identity.empty?
   usage_error("--client-identity needs --client-root (#{client_root_env})") if declared_client_root.empty?
-  unless Woods::MCP::ServedIdentity.parse_client_identity(declared_identity)
+  unless declared_identity.match?(Woods::MCP::ServedIdentity::CLIENT_IDENTITY)
     usage_error("--client-identity must be main|linked:HEAD:branch, got #{declared_identity}")
   end
 end

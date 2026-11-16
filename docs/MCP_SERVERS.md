@@ -290,8 +290,11 @@ When the client root cannot be read, the server compares that with the checkout 
 - A different worktree kind, a different HEAD, or a different branch (each when both sides know it) is a mismatch,
   `client_match_reason: "client_identity_differs"`. The launch is refused, naming `WOODS_MCP_CLIENT_ROOT_MAP` and
   the override, `--allow-mismatch`.
-- Agreement serves as before, with the warning that the client's checkout cannot be read. Uncommitted changes and
-  a detached HEAD at the same commit agree.
+- Agreement serves as before. The warning says the client root is not visible but the identity agreed, and
+  `woods_status` reports `client_identity_agrees: true` beside `client_identity`; the reason stays
+  `client_root_unresolved`. Uncommitted changes and a detached HEAD at the same commit agree.
+- A session outside any git checkout sends a kind with neither HEAD nor branch (`main::`). That is no identity:
+  it is neither agreement nor a mismatch, and the warning says the client's checkout is unknown.
 - Limits: two linked worktrees with no branch at the same commit look the same, and so do two clones on the same
   branch and commit. A map tells them apart. A Woods version in the container without `--client-identity` refuses
   the entry at startup rather than serving the wrong checkout. It reads the flag as an index path and exits with
@@ -347,7 +350,8 @@ index it serves. The Index Server says so itself:
   `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
   `woods_version`, `woods_revision`, `woods_revision_dirty`, then
   `client_matches`, `client_match_reason`, `client_root`, `client_root_declared`,
-  `client_root_mapped_to`, `client_identity`, `client_branch`, `branch_matches`, `mismatch_allowed`,
+  `client_root_mapped_to`, `client_identity`, `client_identity_agrees`, `client_branch`, `branch_matches`,
+  `mismatch_allowed`,
   `warnings` (the same lines the instructions carry) and `build` (writer versus reader).
   For a call routed with [`root`](MCP_WORKTREE_SETUP.md#one-server-several-worktrees-root),
   the client is that worktree.

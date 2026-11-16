@@ -300,6 +300,43 @@ RSpec.describe 'The generated MCP entry' do
     end
   end
 
+  # The application's own lock, as an application commits it: resolved from
+  # the installed gems, with its checksums. Bundler 4 leaves every CHECKSUMS
+  # entry empty in a lock resolved locally, and the setup preflight runs
+  # frozen, which refuses an empty entry. The entries are filled from the
+  # cached archives, as spec/ci/ci_local_environment_spec.rb finalizes its
+  # fixture locks.
+  def lock_application(root)
+    env = client_env('BUNDLE_GEMFILE' => File.join(root, 'Gemfile'))
+    commands = [%w[bundle lock --local]]
+    commands << [Gem.ruby, '-e', finalize_lock] if Gem::Version.new(Bundler::VERSION) >= Gem::Version.new('4')
+    commands.each do |command|
+      output, status = Open3.capture2e(env, *command, chdir: root, unsetenv_others: true)
+      raise "#{command.first(2).join(' ')} failed: #{output}" unless status.success?
+    end
+  end
+
+  def finalize_lock
+    <<~'RUBY'
+      require 'bundler'
+      require 'rubygems/package'
+      definition = Bundler.definition
+      abort 'Bundler 4 lock must carry CHECKSUMS' unless definition.locked_checksums
+      definition.sources.local_only!
+      resolved = definition.resolve
+      specs = resolved.materialize(definition.requested_dependencies)
+      resolved.each do |locked|
+        next unless locked.source.is_a?(Bundler::Source::Rubygems)
+
+        spec = specs.find { |candidate| candidate.lock_name == locked.lock_name }
+        archive = spec && spec.source.cached_built_in_gem(spec, local: true)
+        abort "No cached archive for #{locked.full_name}" unless archive && File.file?(archive)
+        spec.source.checksum_store.register(spec, Bundler::Checksum.from_gem_package(Gem::Package.new(archive)))
+      end
+      definition.lock
+    RUBY
+  end
+
   def agent_config(cwd, *arguments)
     output, status = Open3.capture2e(client_env, 'bundle', 'exec', 'woods-agent-config', *arguments,
                                      '--client', 'claude', '--scope', 'project', '--root', '.', chdir: cwd,
@@ -311,6 +348,7 @@ RSpec.describe 'The generated MCP entry' do
     FileUtils.mkdir_p(@app)
     git(@base, 'init', '-q', '-b', 'main', @app)
     File.write(File.join(@app, 'Gemfile'), "source 'https://rubygems.org'\ngem 'woods', path: #{repo.inspect}\n")
+    lock_application(@app)
     # The setup preflight validates the index against the source it names, so
     # this checkout gets a real static map of its own one class.
     FileUtils.mkdir_p(File.join(@app, 'lib'))
@@ -326,7 +364,7 @@ RSpec.describe 'The generated MCP entry' do
     entry = JSON.parse(File.read(File.join(@app, '.mcp.json'))).dig('mcpServers', 'woods')
     expect(entry).to eq(Woods::MCP::ClientEntry.checkout)
     expect(File.read(File.join(@app, '.mcp.json'))).not_to include(@base, '${')
-    git(@app, 'add', 'Gemfile', '.mcp.json')
+    git(@app, 'add', 'Gemfile', 'Gemfile.lock', '.mcp.json')
     git(@app, '-c', 'user.name=Spec', '-c', 'user.email=spec@example.com', '-c', 'commit.gpgsign=false',
         'commit', '-q', '-m', 'Add Woods')
     worktree = File.join(@base, 'shop-topic')

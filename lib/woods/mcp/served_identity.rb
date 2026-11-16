@@ -93,12 +93,16 @@ module Woods
           { cwd: nil, declared_client_root: declared, client_root_map_error: e.message }
         end
 
+        # A value with neither HEAD nor branch identifies nothing: it is what
+        # the wrapper sends from outside any git checkout.
+        #
         # @param value [String, nil] a {CLIENT_IDENTITY_ENV} value
         # @return [Hash, nil] `worktree:`, `head:` and `branch:` (nil when
-        #   empty), or nil for a missing or malformed value
+        #   empty), or nil for a missing or malformed value, or one with
+        #   neither HEAD nor branch
         def parse_client_identity(value)
           match = CLIENT_IDENTITY.match(value.to_s.strip)
-          return unless match
+          return if match.nil? || (match[2].empty? && match[3].empty?)
 
           { worktree: match[1], head: (match[2] unless match[2].empty?), branch: (match[3] unless match[3].empty?) }
         end
@@ -448,6 +452,19 @@ module Woods
         @match_reason ||= compute_match_reason
       end
 
+      # Whether the declared client identity agrees with the served checkout's,
+      # for a client root that does not resolve here: the same worktree kind,
+      # and every HEAD and branch both sides know equal, at least one of them.
+      #
+      # @return [Boolean, nil] false for `client_identity_differs`; nil when
+      #   no identity was declared, nothing was compared, or the root resolves
+      def client_identity_agrees
+        case match_reason
+        when 'client_identity_differs' then false
+        when 'client_root_unresolved' then identity_compared? || nil
+        end
+      end
+
       # @return [Boolean, nil] nil when either side has no branch (detached HEAD)
       def branch_matches
         return nil unless client_matches && branch && client_branch
@@ -466,7 +483,7 @@ module Woods
           client_matches: client_matches, client_match_reason: match_reason,
           client_root: client_root, client_root_declared: @declared_client_root,
           client_root_map_entry: @client_root_map_entry&.join('='), client_root_mapped_to: @mapped_client_root,
-          client_identity: @client_identity,
+          client_identity: @client_identity, client_identity_agrees: client_identity_agrees,
           client_branch: client_branch, branch_matches: branch_matches,
           mismatch_allowed: client_matches == false ? self.class.allow_mismatch? : nil,
           warnings: warnings, build: compatibility.to_h
@@ -591,6 +608,12 @@ module Woods
                  "#{@mapped_client_root} through #{@client_root_map_entry.join('=')}, is not inside a git checkout here"
         end
 
+        if client_identity_agrees
+          return "the client root #{@declared_client_root} is not visible here, but the client's checkout agrees " \
+                 "with the one served (#{describe_identity(@client_identity)}), by kind, branch and HEAD only " \
+                 '(pass --client-root-map with the mount that makes it visible)'
+        end
+
         "the client's checkout is unknown: the client root #{@declared_client_root} does not resolve to a git " \
           'checkout here (pass --client-root-map with the mount that makes it visible)'
       end
@@ -657,8 +680,8 @@ module Woods
       end
 
       # The declared client identity against the served checkout's: a known
-      # field that differs on both sides. Agreement proves nothing more than
-      # the warning already says.
+      # field that differs on both sides. Agreement is reported
+      # ({#client_identity_agrees}), never a match: two checkouts can agree.
       def identity_differs?
         served = served_identity
         return false unless @client_identity && served
@@ -667,6 +690,15 @@ module Woods
         %i[head branch].any? do |field|
           @client_identity[field] && served[field] && @client_identity[field] != served[field]
         end
+      end
+
+      # At least one HEAD or branch known on both sides, with the same kind;
+      # only consulted where {#identity_differs?} found no difference.
+      def identity_compared?
+        served = served_identity
+        return false unless @client_identity && served && @client_identity[:worktree] == served[:worktree]
+
+        %i[head branch].any? { |field| @client_identity[field] && served[field] }
       end
 
       def served_identity
