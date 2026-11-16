@@ -200,18 +200,13 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   # Source-input scope differences seen between an incremental and a full
   # run, by cause. An example names the ones it shows in its
-  # `known_source_inputs:` metadata, as `{ cause => { scope => paths } }`. A
-  # path is a String, dropped from both sides, or an anchored Regexp where the
-  # paths vary (the randomized sequences): a path only the full run lists is
-  # then tolerated when it matches, and any other difference in that scope
-  # stays a difference. Nothing else uses them.
+  # `known_source_inputs:` metadata, as `{ cause => { scope => paths } }`; each
+  # path is dropped from that scope on both sides and nothing else is.
+  # Nothing else uses them.
   KNOWN_SOURCE_INPUT_DIFFERENCES = {
-    unrun_family_scope: 'A whole-app family the run did not re-execute keeps its baseline scope, so a path the ' \
-                        'tree gained since is missing from it (docs/SOURCE_FRESHNESS.md documents the table-family ' \
-                        "case). #{OPEN_QUESTION}",
-    refresh_family_scope: 'A targeted refresh replaces only the scopes of the families it names; another family ' \
-                          'whose rule also matches a new file (test mappings for a rake file, test support for a ' \
-                          "factory file) keeps its baseline scope without that file. #{OPEN_QUESTION}",
+    unlisted_change: 'The example edits a file without listing it in the run\'s change set, so no family is told ' \
+                     'to read it and no scope records it; a full run lists it. The freshness verifier reports it ' \
+                     'as added, which is true: the run never consumed it.',
     unconsumed_file_scope: 'A full run lists every path a family rule matches; an incremental run lists only the ' \
                            'paths an extractor of that family read, so a file none produced a unit from is missing. ' \
                            "#{OPEN_QUESTION}",
@@ -448,17 +443,11 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       scopes.each_with_object([left.dup, right.dup]) do |(scope, paths), (kept_left, kept_right)|
         mine = kept_left.fetch(scope, {})
         theirs = kept_right.fetch(scope, {})
-        dropped = known_paths(paths, theirs.keys - mine.keys)
+        dropped = Array(paths)
         kept_left[scope] = mine.except(*dropped) if kept_left.key?(scope)
         kept_right[scope] = theirs.except(*dropped) if kept_right.key?(scope)
       end
     end
-  end
-
-  # Exact declared paths, and the full-only paths a declared pattern matches.
-  def known_paths(paths, full_only)
-    patterns, exact = Array(paths).partition { |path| path.is_a?(Regexp) }
-    exact + full_only.select { |path| patterns.any? { |pattern| pattern.match?(path) } }
   end
 
   # One line per consumer scope one side lacks, empty or not, or whose

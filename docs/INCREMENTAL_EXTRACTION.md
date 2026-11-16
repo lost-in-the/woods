@@ -901,7 +901,12 @@ run.
 
 Any extractor key works, not only the whole-app ones, `refresh(:models)` is a
 legitimate way to re-derive every model after a schema change. A routes refresh
-cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above. Like an
+cascades to `ROUTE_CONSUMER_EXTRACTORS` for the reason given above.
+A refresh also re-runs each whole-app family whose rule matches a file of a named family.
+An incremental run does the same for a changed path, and the rules are `PathDispatcher.whole_app_rules`.
+So `refresh(:rake_tasks)` re-runs `test_mappings`, and `refresh(:factories)` re-runs `test_support`.
+`refresh(:routes)` now also re-runs `engines`, and `refresh(:services)` re-runs `events`.
+Like an
 incremental run, `refresh` rewrites the graph, `graph_analysis.json`, the
 affected type indexes and the manifest, so the result is durable.
 

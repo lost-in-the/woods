@@ -887,12 +887,13 @@ module Woods
       known, unknown = keys.partition { |key| EXTRACTORS.key?(key) }
       raise ArgumentError, "No known extractor in #{keys.inspect}" if known.empty?
 
+      prepare_incremental_run(operation: 'refresh')
+      known += dependent_families(known)
       known += ROUTE_CONSUMER_EXTRACTORS if known.include?(:routes)
       known += TABLE_CONSUMER_EXTRACTORS if known.include?(:database_tables)
       known += JS_NAME_CONSUMER_EXTRACTORS if known.include?(:js_modules)
       known.uniq!
 
-      prepare_incremental_run(operation: 'refresh')
       affected_types = Set.new
       touched = known.each_with_object(Set.new) do |key, acc|
         acc.merge(replace_type_wholesale(key, affected_types))
@@ -911,6 +912,30 @@ module Woods
     ensure
       discard_unpromoted_stage
       log_profile_total('refresh', profile_started)
+    end
+
+    # The whole-app families whose rule matches a file of a named family. A
+    # refresh re-runs them with it (#1124), as an incremental run re-runs every
+    # family whose rule matches a changed path: their units read those files,
+    # and their `whole:` source scopes must list a file the refresh found new.
+    # Read off this run's capture, so every rule in
+    # {PathDispatcher.whole_app_rules} is covered, today's and a future one's.
+    #
+    # @param keys [Array<Symbol>] the named families
+    # @return [Array<Symbol>] the families to re-run with them
+    def dependent_families(keys)
+      return [] unless @source_inputs
+
+      scopes = keys.flat_map { |key| %W[file:#{key} whole:#{key}] }
+      paths = scopes.flat_map { |scope| @source_inputs.scope_paths(scope) }.uniq
+      return [] if paths.empty?
+
+      PathDispatcher.whole_app_rules.filter_map do |rule|
+        key = rule.extractor_key
+        next if keys.include?(key) || !EXTRACTORS.key?(key) || skip_by_configuration?(key)
+
+        key if paths.any? { |path| rule.matches?(path) }
+      end.uniq
     end
 
     # Raise when the most recent extraction run wrote a payload but could not
@@ -4350,7 +4375,15 @@ module Woods
       return table_family unless published
 
       current = Extractors::TableCatalog.from_runtime.ownership_facts
-      return keys - [:database_tables] if current == published
+      if current == published
+        # No schema trigger changed (checked above) and the live ownership
+        # equals the published one, and table units are a function of exactly
+        # those two. A re-run over today's files would write the units already
+        # published, so recording today's files as the family's inputs is the
+        # claim that re-run would make, not a guess (#1124).
+        @source_inputs&.adopt_new_paths(:database_tables)
+        return keys - [:database_tables]
+      end
       return table_family if current.keys.sort != published.keys.sort
 
       keys + (TABLE_CONSUMER_EXTRACTORS - [:external_consumers])

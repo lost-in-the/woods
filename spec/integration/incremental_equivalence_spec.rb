@@ -220,9 +220,6 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     previous_sha.nil? ? ENV.delete('GIT_SHA') : ENV['GIT_SHA'] = previous_sha
   end
 
-  # A top-level example header stays on one line: Ruby 3.4 and later record a
-  # multi-line call at its last line, which script/parallel-booted's line
-  # filters would not select.
   pinnable_scope = { retained_unit_scope: { 'unit:concerns' => %w[app/models/pinned_record/pinnable.rb] } }
   it 'tracks nested model mixins through body and callback edits', known_source_inputs: pinnable_scope do
     model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
@@ -368,23 +365,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # An example that shows a known source-input difference declares it in its
   # `known_source_inputs:` metadata; see IndexComparison::KNOWN_SOURCE_INPUT_DIFFERENCES.
   def differences(incremental_dir, full_dir, **options)
-    known = RSpec.current_example.metadata.fetch(:known_source_inputs, {}).transform_values do |scopes|
-      scopes.to_h { |scope, paths| [scope, paths == :randomized_artifacts ? randomized_artifacts(scope) : paths] }
-    end
+    known = RSpec.current_example.metadata.fetch(:known_source_inputs, {})
     IndexComparison.differences(incremental_dir, full_dir, known: known, **options)
-  end
-
-  # The paths the randomized operations can create in one whole-app family's
-  # scope: an anchored pattern for each ARTIFACT_TEMPLATES entry the family's
-  # own rule matches, allowing the `r<n>_` prefixes {#renamed_path} adds.
-  def randomized_artifacts(scope)
-    rules = Woods::PathDispatcher.whole_app_rules.select { |rule| "whole:#{rule.extractor_key}" == scope }
-    ARTIFACT_TEMPLATES.filter_map do |template|
-      next unless rules.any? { |rule| rule.matches?(template.call(0)) }
-
-      dir, base = File.split(template.call('{N}'))
-      %r{\A#{Regexp.escape(dir)}/(?:r\d+_)*#{Regexp.escape(base).gsub('\\{N\\}') { '\\d+' }}\z}
-    end
   end
 
   # Every example below trusts the comparison. These prove, on a real index
@@ -530,15 +512,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
          known_source_inputs: {
            deleted_path_kept: {
              'file:caching' => %w[app/models/collision_original.rb],
-             'file:concerns' => %w[app/models/collision_original.rb],
-             'whole:database_tables' => %w[app/models/collision_original.rb],
-             'whole:events' => %w[app/models/collision_original.rb],
-             'whole:state_machines' => %w[app/models/collision_original.rb]
-           },
-           unrun_family_scope: {
-             'whole:database_tables' => %w[app/models/relocated/collision_original.rb],
-             'whole:events' => %w[app/models/relocated/collision_original.rb],
-             'whole:state_machines' => %w[app/models/relocated/collision_original.rb]
+             'file:concerns' => %w[app/models/collision_original.rb]
            },
            unconsumed_file_scope: {
              'file:caching' => %w[app/models/relocated/collision_original.rb],
@@ -1933,10 +1907,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                    ])
     end
 
-    it 'indexes a nested concern created after the baseline',
-       known_source_inputs: {
-         unrun_family_scope: { 'whole:database_tables' => %w[app/models/concerns/auditable.rb] }
-       } do
+    it 'indexes a nested concern created after the baseline' do
       run_sequence([
                      lambda {
                        write_file('app/models/concerns/auditable.rb',
@@ -2376,7 +2347,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     it 'publishes a lib module a model includes as a concern only, as the include comes and goes',
        known_source_inputs: {
          retained_unit_scope: {
-           'unit:concerns' => %w[lib/ownership_storage.rb], 'unit:libs' => %w[lib/ownership_storage.rb]
+           'unit:concerns' => %w[lib/ownership_storage.rb],
+           'unit:libs' => %w[lib/ownership_storage.rb]
          }
        } do
       load app_path(write_file('lib/ownership_storage.rb', "module OwnershipStorage\n  def upload; end\nend\n"))
@@ -2528,10 +2500,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'publishes a descendant of an application serializer base as a serializer only',
-       known_source_inputs: {
-         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_summary.rb] }
-       } do
+    it 'publishes a descendant of an application serializer base as a serializer only' do
       load app_path(write_file('app/serializers/ownership_base_serializer.rb', "class OwnershipBaseSerializer\nend\n"))
       summary = 'app/models/ownership_summary.rb'
       body = ->(extra) { "class OwnershipSummary < OwnershipBaseSerializer\n  def call = #{extra}\nend\n" }
@@ -2545,10 +2514,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(types.fetch('poro', [])).not_to include('OwnershipSummary')
     end
 
-    it 'gives a nested job only the edges written in its own class body',
-       known_source_inputs: {
-         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_account.rb] }
-       } do
+    it 'gives a nested job only the edges written in its own class body' do
       path = 'app/models/ownership_account.rb'
       body = lambda do |note|
         <<~RUBY
@@ -2701,12 +2667,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       document.dig('metadata', 'references').map { |span| span.values_at('target', 'mixin', 'kind', 'confidence') }
     end
 
-    it 'follows an include, extend and prepend as they are added, moved into an included block and removed',
-       known_source_inputs: {
-         unrun_family_scope: {
-           'whole:database_tables' => %w[app/models/mixin_tag_concern.rb app/models/mixin_tag_host.rb]
-         }
-       } do
+    it 'follows an include, extend and prepend as they are added, moved into an included block and removed' do
       host = 'app/models/mixin_tag_host.rb'
       concern = 'app/models/mixin_tag_concern.rb'
       load app_path(write_file('app/models/mixin_tag_shared.rb', "module MixinTagShared\n  def shared = 1\nend\n"))
@@ -3220,8 +3181,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(File.read(File.join(Woods::Generation.new(output_dir: index).payload_dir, 'manifest.json'))).to eq(before)
     end
 
-    it 're-resolves documents on a targeted refresh',
-       known_source_inputs: { refresh_family_scope: { 'whole:test_mappings' => %w[lib/tasks/audit.rake] } } do
+    it 're-resolves documents on a targeted refresh' do
       write_file('docs/tasks.md', guide('`rake audit:run`'))
       index = full_extraction
       write_file('lib/tasks/audit.rake', rake_source('audit', %w[run]))
@@ -4495,8 +4455,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   end
 
   describe 'class-based additions' do
-    it 'indexes a service class the file dispatcher and the descendant scan both see',
-       known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => %w[app/models/tag.rb] } } do
+    it 'indexes a service class the file dispatcher and the descendant scan both see' do
       # The reconciliation path keys on live descendants, so the class has to
       # be loaded — which is what a reloading daemon would do after the write.
       run_sequence([
@@ -5136,12 +5095,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
                           .map { |unit| unit['identifier'] }
     end
 
-    it 'adds, edits, and prunes swept files equivalently to a full extraction',
-       known_source_inputs: {
-         unrun_family_scope: {
-           'whole:database_tables' => %w[app/models/sweep_namespace.rb app/models/sweep_pattern.rb]
-         }
-       } do
+    it 'adds, edits, and prunes swept files equivalently to a full extraction' do
       run_sequence([
                      lambda do
                        write_and_load('app/helpers/sweep_date_helper.rb', <<~RUBY)
@@ -5367,12 +5321,10 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     it 'publishes skip-reason changes that touch no unit, and only those',
        known_source_inputs: {
-         unconsumed_file_scope: {
+         unlisted_change: {
            'file:caching' => %w[app/models/sweep_empty.rb],
            'file:concerns' => %w[app/models/sweep_empty.rb],
-           'file:poros' => %w[app/models/sweep_empty.rb]
-         },
-         unrun_family_scope: {
+           'file:poros' => %w[app/models/sweep_empty.rb],
            'whole:database_tables' => %w[app/models/sweep_empty.rb],
            'whole:events' => %w[app/models/sweep_empty.rb],
            'whole:state_machines' => %w[app/models/sweep_empty.rb]
@@ -5769,10 +5721,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
     [false, true].each do |new_first|
       it "keeps a nested STI model split equivalent and stable after another old-file edit, new first=#{new_first}",
-         known_source_inputs: {
-           unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_fleet/car.rb] },
-           baseline_error_carried: { 'errors' => %w[app/models/ownership_fleet/car.rb] }
-         } do
+         known_source_inputs: { baseline_error_carried: { 'errors' => %w[app/models/ownership_fleet/car.rb] } } do
         require 'woods/mcp/index_reader'
         index = prepare_ownership_split
         reader = Woods::MCP::IndexReader.new(index)
@@ -5898,10 +5847,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       end
     end
 
-    it 'makes a worker that is the primary class of an app/models file one job unit with its references',
-       known_source_inputs: {
-         unrun_family_scope: { 'whole:database_tables' => %w[app/models/ledger_import_manager.rb] }
-       } do
+    it 'makes a worker that is the primary class of an app/models file one job unit with its references' do
       load_sidekiq_stand_in
       load app_path(write_file('app/models/ledger_rate.rb', "class LedgerRate\n  def self.for(*) = nil\nend\n"))
       index = full_extraction
@@ -6583,8 +6529,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
       expect(differences(index_dir, full_extraction)).to be_empty
     end
 
-    it 'refreshes a file-scanning whole-app extractor without a change set',
-       known_source_inputs: { refresh_family_scope: { 'whole:test_support' => %w[spec/factories/posts.rb] } } do
+    it 'refreshes a file-scanning whole-app extractor without a change set' do
       index_dir = Dir.mktmpdir('woods_refresh_factories')
       (@scratch_dirs ||= []) << index_dir
       Woods::Extractor.new(output_dir: index_dir).extract_all
@@ -7568,8 +7513,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
 
   describe 'randomized operation sequences' do
     DIFF_SEEDS.each do |seed|
-      it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})",
-         known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => :randomized_artifacts } } do
+      it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})" do
         random = Random.new(seed)
         live = []
 
