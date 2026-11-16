@@ -4,10 +4,10 @@ module Woods
   module MCP
     # Short, client-neutral instructions for initialize and modern discovery.
     #
-    # The text leads with the identity of the served index (checkout, branch,
-    # generation, writer build) and any mismatch with the launch checkout or
-    # this build, read once at startup from `generation.json` and the
-    # manifest. Otherwise only tool registration shapes it: readiness and
+    # The text leads with any warning about the served index (a mismatch
+    # with the client's checkout or this build), then its identity
+    # (checkout, branch, generation, writer build), read once at startup
+    # from `generation.json` and the manifest. Otherwise only tool registration shapes it: readiness and
     # retrieval can change after startup, so clients must consult live status
     # before use.
     module InitializationGuidance
@@ -48,22 +48,23 @@ module Woods
       # Bytes a shortened line keeps before {TRUNCATED}.
       MIN_KEPT_BYTES = 60
 
-      # Lines in display order, each with the rank it is shortened in when
-      # over budget: the generation note first (dropped), then the summary,
-      # then the awaiting line, and warnings last, the final one first.
+      # Lines in display order: identity warnings first, then the summary,
+      # the awaiting line and the generation note. Each carries the rank it
+      # is shortened in when over budget: the generation note first
+      # (dropped), then the summary, then the awaiting line, and warnings
+      # last, the final one first.
       #
       # @param identity [ServedIdentity, nil]
       # @param awaiting [String, nil]
       # @return [Array<Array(String, Integer)>]
       def self.identity_parts(identity, awaiting)
         parts = []
-        parts << [awaiting_line(awaiting), 2] if awaiting
-        return parts unless identity
-
-        parts << ["#{identity.summary}\n", 1]
-        warnings = identity.warnings
+        warnings = identity ? identity.warnings : []
         warnings.each_with_index { |warning, index| parts << ["WARNING: #{warning}\n", 3 + warnings.size - index] }
-        parts << ["The generation can advance while connected; woods_status reports the current one.\n", 0]
+        parts << ["#{identity.summary}\n", 1] if identity
+        parts << [awaiting_line(awaiting), 2] if awaiting
+        parts << ["The generation can advance while connected; woods_status reports the current one.\n", 0] if identity
+        parts
       end
 
       # @param parts [Array<Array(String, Integer)>] from {.identity_parts}

@@ -69,6 +69,26 @@ RSpec.describe 'woods-mcp-start --checkout --await-index over stdio' do
                JSON.generate(number: 1, token: 't1', updated_at: '2026-11-15T10:00:00Z', payload: 'payloads/gen-1'))
   end
 
+  it 'refuses a generation published later that records another checkout' do
+    other = File.join(File.dirname(@checkout), 'other-worktree')
+    FileUtils.mkdir_p(File.join(other, '.git'))
+    start(nil)
+    begin
+      request('initialize', protocolVersion: '2025-06-18', capabilities: {},
+                            clientInfo: { name: 'await-cli', version: '1' })
+      publish
+      manifest = File.join(@index, 'payloads', 'gen-1', 'manifest.json')
+      File.write(manifest, JSON.generate(JSON.parse(File.read(manifest)).merge('root' => other)))
+
+      refused = call('lookup', identifier: 'Post')
+      expect(refused['isError']).to be(true)
+      expect(refused.dig('_meta', 'error_code')).to eq('index_checkout_mismatch')
+      expect(refused.dig('content', 0, 'text')).to include(other, @checkout)
+    ensure
+      stop
+    end
+  end
+
   { 'semantic' => nil, 'lexical' => 'lexical' }.each do |label, mode|
     it "serves the index published after the handshake, in #{label} retrieval mode" do
       start(mode)

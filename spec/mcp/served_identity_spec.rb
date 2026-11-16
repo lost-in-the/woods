@@ -117,7 +117,8 @@ RSpec.describe 'Served index identity' do
 
       text = Dir.chdir(beta) { instructions(build_server(index_of(alpha))) }
 
-      expect(text.lines[1]).to start_with("WARNING: This index describes #{alpha}, not the launch checkout #{beta}")
+      expect(text.lines[0]).to start_with("WARNING: This index describes #{alpha}, not the launch checkout #{beta}")
+      expect(text.lines[1]).to start_with('Serving the index of checkout-alpha')
     end
 
     it 'matches an application in a subdirectory of its checkout, and not a worktree nested inside it' do

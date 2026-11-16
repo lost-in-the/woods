@@ -193,13 +193,25 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
   end
 
   describe 'capabilities a restart adds' do
-    it 'registers the same tools as a restarted server, with collaborators wired as exe/woods-mcp wires them' do
+    it 'registers the same tools as a restarted server when the extraction adds no snapshot database' do
       awaiting = build_like_exe(@index, await_index: true)
       publish(1)
       restarted = build_like_exe(@index, await_index: false)
 
       expect(rpc(awaiting, 'tools/list').dig('result', 'tools'))
         .to eq(rpc(restarted, 'tools/list').dig('result', 'tools'))
+    end
+
+    it 'lacks the snapshot tools a restarted server registers once a snapshot database exists, and says so' do
+      awaiting = build_like_exe(@index, await_index: true)
+      publish(1)
+      FileUtils.touch(File.join(@index, 'woods.sqlite3'))
+      restarted = build_like_exe(@index, await_index: false)
+
+      snapshot_tools = %w[change_impact list_snapshots snapshot_detail snapshot_diff unit_history]
+      expect(restarted.tools.keys).to include(*snapshot_tools)
+      expect(awaiting.tools.keys).not_to include(*snapshot_tools)
+      expect(status(awaiting).fetch('restart_recommended').map { |entry| entry['feature'] }).to eq(['snapshots'])
     end
 
     it 'recommends a restart once the extraction leaves a snapshot database or an embedding config' do
@@ -266,10 +278,13 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
                'extensions' => { Woods::MCP::Tasks::Extension::EXTENSION_ID => {} }
              } }
 
-    %w[tasks/get tasks/update tasks/cancel].each do |method|
-      rpc(server, method, taskId: 'a' * 32, _meta: meta)
+    answers = %w[tasks/get tasks/update tasks/cancel].to_h do |method|
+      [method, rpc(server, method, taskId: 'a' * 32, _meta: meta).fetch('error')]
     end
 
+    expect(answers['tasks/get']['data']).to eq('Unknown or expired taskId.')
+    expect(answers['tasks/update']['data']).to eq('Unknown or expired taskId.')
+    expect(answers['tasks/cancel']['code']).to eq(JsonRpcHandler::ErrorCode::METHOD_NOT_FOUND)
     expect(File.exist?(@index)).to be(false)
   end
 end

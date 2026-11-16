@@ -299,12 +299,13 @@ Included in Woods `2.1.1`: both stdio servers run the SDK transport through `Woo
 With several checkouts of one repository, a server's name does not say which
 index it serves. The Index Server says so itself:
 
-- **At connect.** `instructions` lead with one line naming the checkout
+- **At connect.** `instructions` lead with any warnings, each prefixed `WARNING:`,
+  then one line naming the checkout
   (directory name and path), the branch the index was extracted on, the
   generation number and its `updated_at`, and the Woods version (and git
-  revision, for a git-loaded build) that wrote the index. Mismatch warnings
-  follow it, each prefixed `WARNING:`. The identity is read once, at startup;
-  the generation can advance while connected.
+  revision, for a git-loaded build) that wrote the index.
+  At the 2,048-byte cap the warnings are kept whole and the other lines are shortened first.
+  The identity is read once, at startup; the generation can advance while connected.
 - **In `woods_status`.** The report leads with `identity`: `root` (recorded
   application root), `repository_root` and `root_name` (the checkout),
   `root_source`, `branch`, `git_sha`, `generation`, `generation_updated_at`,
@@ -346,7 +347,9 @@ Earlier releases started silently in these cases.
 `false`, naming both checkouts. Pass `--allow-mismatch`, or set
 `WOODS_MCP_ALLOW_MISMATCH=1`, to serve another checkout's index on purpose: the
 launcher then connects with a warning on stderr, and the instructions and
-`woods_status` carry the warning. `woods-mcp` itself never refuses; it reports.
+`woods_status` carry the warning. `woods-mcp` itself never refuses at startup; it reports.
+Started with `--await-index`, it refuses each later generation that records another checkout
+(see [starting before the index exists](#starting-before-the-index-exists---await-index)).
 
 **Branch differences warn.** A branch that differs from the client checkout's is
 a warning, not a refusal: detached HEADs and one worktree per branch are
