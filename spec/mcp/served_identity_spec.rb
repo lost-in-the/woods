@@ -247,6 +247,16 @@ RSpec.describe 'Served index identity' do
       end
     end
 
+    it 'hands --allow-mismatch to an awaiting server, which judges a generation published later' do
+      alpha = checkout('checkout-alpha')
+      FileUtils.rm_r(index_of(alpha))
+
+      code, errors = launch(index_of(alpha), cwd: alpha, args: ['--await-index', '--allow-mismatch'])
+
+      expect(code).to eq(42), errors
+      expect(errors).to include('ALLOW=1')
+    end
+
     it 'warns on a branch difference but connects' do
       alpha = checkout('checkout-alpha', branch: 'main')
       File.write(File.join(alpha, '.git', 'HEAD'), "ref: refs/heads/topic\n")

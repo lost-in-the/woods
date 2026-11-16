@@ -3,6 +3,9 @@
 require 'json'
 require 'mcp'
 require 'time'
+require_relative '../generation'
+require_relative '../index_artifact'
+require_relative 'index_reader_pinning'
 require_relative 'served_identity'
 
 module Woods
@@ -21,7 +24,14 @@ module Woods
     # The first readable generation ends the wait: the next call goes through
     # to the reader, whose freshness check adopts it as it adopts any newly
     # published generation. The wait is a latch, so damage to a later
-    # generation is reported as damage, never as `building`.
+    # generation is reported as damage, never as `building`. A marker that
+    # exists but cannot identify a generation is damage already
+    # (`corrupt_artifact`), as it is to a strict launch.
+    #
+    # A strict launch refuses an index another checkout recorded before the
+    # server starts; an awaiting one could not, since nothing was recorded
+    # yet. So every generation it serves is checked the same way, with the
+    # same override ({#mismatch}).
     class IndexWait
       ENV_NAME = 'WOODS_MCP_AWAIT_INDEX'
 
@@ -52,18 +62,81 @@ module Woods
 
       # @param index_dir [String, Pathname] the directory an index is awaited in
       # @param reader [#manifest_present?] the server's launch reader
-      def initialize(index_dir:, reader:)
+      # @param boot [Hash] what startup wired: `snapshots:` and `retriever:`
+      #   (booleans), for {#restart_recommended}
+      def initialize(index_dir:, reader:, boot: {})
         @index_dir = index_dir.to_s
         @reader = reader
+        @boot = boot
         @since = Time.now.utc.iso8601
         @ready = false
+        @mutex = Mutex.new
+        @mismatch_key = :unchecked
+        @mismatch = nil
       end
 
-      # Whether a published index is readable now. True once it has been.
-      #
+      # @return [Symbol] `:ready` once a published index has been readable
+      #   (a latch), `:unusable` for a marker that exists but cannot identify
+      #   a generation, else `:building`
+      def phase
+        return :ready if @ready
+        return :unusable if unusable_marker?
+
+        @ready = @reader.manifest_present?
+        @ready ? :ready : :building
+      end
+
       # @return [Boolean]
       def ready?
-        @ready ||= @reader.manifest_present?
+        phase == :ready
+      end
+
+      # Why the published generation is refused: it records another checkout
+      # than the client's, and the mismatch is not allowed. Evaluated once per
+      # published generation.
+      #
+      # @return [String, nil] the refusal message, or nil to serve it
+      def mismatch
+        return unless ready?
+
+        key = generation_key
+        @mutex.synchronize do
+          unless key == @mismatch_key
+            identity = ServedIdentity.read(@index_dir)
+            refused = identity.client_matches == false && !ServedIdentity.allow_mismatch?
+            @mismatch = refused ? identity.refusal_message : nil
+            @mismatch_key = key
+          end
+          @mismatch
+        end
+      end
+
+      # Capabilities startup could not wire that the index directory now
+      # supports. Startup chooses the snapshot store and the semantic
+      # retriever once, so only a restart adds them.
+      #
+      # @return [Array<Hash>]
+      def restart_recommended
+        list = []
+        if !@boot[:snapshots] && snapshots_available?
+          list << { feature: 'snapshots', reason: 'snapshot tools become available after a restart' }
+        end
+        if !@boot[:retriever] && embedding_config?
+          list << { feature: 'semantic_retrieval', reason: 'semantic retrieval becomes available after a restart' }
+        end
+        list
+      end
+
+      # @param tool [String]
+      # @param message [String] from {#mismatch}
+      # @return [Hash] a serialized, non-retryable tool result
+      def mismatch_response(tool, message)
+        ::MCP::Tool::Response.new(
+          [{ type: 'text', text: message }], error: true,
+                                             structured_content: { text: message },
+                                             meta: { error_code: :index_checkout_mismatch, retryable: false,
+                                                     tool: tool }
+        ).to_h
       end
 
       # The `index` section of `woods_status` while waiting.
@@ -103,11 +176,9 @@ module Woods
       #
       # @return [Hash, nil]
       def bootstrap
-        path = File.join(@index_dir, BOOTSTRAP_FILE)
-        return unless File.file?(path)
-
-        bytes = File.open(path, 'rb') { |file| file.read(MAX_BOOTSTRAP_BYTES + 1) }
-        return { readable: false, reason: 'malformed' } if bytes.nil?
+        bytes = read_bootstrap_bytes
+        return if bytes.nil?
+        return { readable: false, reason: 'malformed' } if bytes.empty?
         return { readable: false, reason: 'too_large' } if bytes.bytesize > MAX_BOOTSTRAP_BYTES
 
         data = JSON.parse(bytes.force_encoding(Encoding::UTF_8).scrub)
@@ -118,7 +189,7 @@ module Woods
           fields[field.to_sym] = value.dup.force_encoding(Encoding::UTF_8).scrub[0, MAX_BOOTSTRAP_FIELD_CHARS] if
             value.is_a?(String)
         end
-      rescue JSON::ParserError, SystemCallError, IOError
+      rescue JSON::ParserError
         { readable: false, reason: 'malformed' }
       end
 
@@ -130,21 +201,107 @@ module Woods
         def call_tool(request, **)
           wait = @woods_index_wait
           name = request[:name]
-          return super if wait.nil? || name == STATUS_TOOL || !tools.key?(name) || wait.ready?
+          return super if wait.nil? || name == STATUS_TOOL || !tools.key?(name)
 
-          wait.building_response(name)
+          case wait.phase
+          when :building then wait.building_response(name)
+          when :unusable then IndexReaderPinning.corrupt_marker_response(name)
+          else
+            refusal = wait.mismatch
+            refusal ? wait.mismatch_response(name, refusal) : super
+          end
         end
 
         def read_resource_contents(request, **)
           wait = @woods_index_wait
-          return super if wait.nil? || wait.ready?
+          return super if wait.nil?
+
+          phase = wait.phase
+          return super if phase == :unusable
+
+          error = if phase == :building
+                    ['No Woods index is published yet; call woods_status and retry.', 'index_building', true]
+                  elsif (refusal = wait.mismatch)
+                    [refusal, 'index_checkout_mismatch', false]
+                  end
+          return super unless error
 
           raise ::MCP::Server::RequestHandlerError.new(
-            'No Woods index is published yet; call woods_status and retry.', request,
+            error[0], request,
             error_type: :internal_error, error_code: ::JsonRpcHandler::ErrorCode::INTERNAL_ERROR,
-            error_data: { uri: request[:uri], error_code: 'index_building', retryable: true }
+            error_data: { uri: request[:uri], error_code: error[1], retryable: error[2] }
           )
         end
+      end
+
+      private
+
+      # Opens without following a symlink and without blocking on a FIFO,
+      # then reads only from a regular file, at most one byte past the cap.
+      #
+      # @return [String, nil] nil when there is no regular file to report
+      def read_bootstrap_bytes
+        flags = File::RDONLY | File::NONBLOCK
+        flags |= File::NOFOLLOW if defined?(File::NOFOLLOW)
+        File.open(File.join(@index_dir, BOOTSTRAP_FILE), flags) do |file|
+          next unless file.stat.file?
+
+          file.binmode
+          file.read(MAX_BOOTSTRAP_BYTES + 1) || +''
+        end
+      rescue SystemCallError, IOError
+        nil
+      end
+
+      # A marker that exists and cannot identify a generation: malformed, or
+      # naming a payload outside the index directory. A payload that is not
+      # there yet is a first generation still being written, not damage.
+      def unusable_marker?
+        generation = Woods::Generation.new(output_dir: @index_dir)
+        return false unless File.exist?(generation.path)
+
+        marker = generation.current!
+        name = marker.payload
+        return false if name.nil? || name.empty?
+
+        escapes_index?(generation.root, name)
+      rescue Woods::Generation::InvalidMarker
+        true
+      end
+
+      def escapes_index?(root, name)
+        lexical = File.expand_path(name, root.to_s)
+        return true unless lexical.start_with?("#{File.expand_path(root.to_s)}#{File::SEPARATOR}")
+
+        candidate = root.join(name)
+        return false unless candidate.exist? || candidate.symlink?
+
+        !candidate.realpath.to_s.start_with?("#{root.realpath}#{File::SEPARATOR}")
+      rescue SystemCallError
+        true
+      end
+
+      # Which generation {#mismatch} last judged: the marker's number and
+      # token, or the flat manifest's file identity.
+      def generation_key
+        marker = Woods::Generation.new(output_dir: @index_dir).current
+        return [marker.number, marker.token] unless marker.number.zero?
+
+        stat = File.stat(File.join(@index_dir, 'manifest.json'))
+        [stat.mtime.to_f, stat.size, stat.ino]
+      rescue SystemCallError
+        nil
+      end
+
+      def snapshots_available?
+        File.exist?(File.join(@index_dir, 'woods.sqlite3')) ||
+          (ENV['WOODS_SNAPSHOTS'] == 'true' && File.directory?(@index_dir))
+      end
+
+      def embedding_config?
+        !Woods::IndexArtifact.new(@index_dir).read_config.nil?
+      rescue StandardError
+        true
       end
     end
   end

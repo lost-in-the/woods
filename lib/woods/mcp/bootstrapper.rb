@@ -92,8 +92,12 @@ module Woods
       # unavailable or encounters errors.
       #
       # @param index_dir [String] Path to extraction output directory
+      # @param await_index [Boolean] the index directory may not exist yet
+      #   ({IndexWait}); no store is built then, so nothing creates it
       # @return [Woods::Temporal::SnapshotStore, Woods::Temporal::JsonSnapshotStore, nil]
-      def self.build_snapshot_store(index_dir)
+      def self.build_snapshot_store(index_dir, await_index: false)
+        return nil if await_index && !File.directory?(index_dir)
+
         db_path = File.join(index_dir, 'woods.sqlite3')
         enabled = ENV['WOODS_SNAPSHOTS'] == 'true' ||
                   Woods.configuration.enable_snapshots ||

@@ -140,9 +140,12 @@ module Woods
                   bootstrap_state: nil, response_format: nil, warmup: :after_handshake, retriever_reloader: nil,
                   await_index: false)
           launch_reader = await_index ? IndexReader.new(index_dir, require_index: false) : IndexReader.new(index_dir)
-          index_wait = IndexWait.new(index_dir: index_dir, reader: launch_reader) if await_index
-          index_wait = nil if index_wait&.ready?
-          warmup = :none if index_wait
+          if await_index
+            index_wait = IndexWait.new(index_dir: index_dir, reader: launch_reader,
+                                       boot: { snapshots: !snapshot_store.nil?, retriever: !retriever.nil? })
+            awaiting = !index_wait.ready?
+          end
+          warmup = :none if awaiting
           retriever.bind_reader(launch_reader) if retriever.respond_to?(:bind_reader)
           # Warm the lexical corpus against the reader just bound, once, so the
           # first codebase_retrieve does not build it (F17). bind_reader keeps
@@ -288,7 +291,7 @@ module Woods
           # exists answers at once (see IndexWait).
           install_index_wait(server, index_wait) if index_wait
           server.instructions = InitializationGuidance.for(
-            server.tools.keys, identity: ServedIdentity.read(index_dir), awaiting: index_wait && index_dir.to_s
+            server.tools.keys, identity: ServedIdentity.read(index_dir), awaiting: (index_dir.to_s if awaiting)
           )
 
           # Last, after every conditional registration above — the whole point is
@@ -2798,15 +2801,16 @@ module Woods
             } }
           ) do |server_context:, source_check: 'quick', worktrees: 'summary'|
             _ = server_context
-            status = if index_wait && !Thread.current[WorktreeRouting::THREAD_KEY] && !index_wait.ready?
-                       Woods::MCP::Server.awaiting_status(index_wait, retriever, router.current_index_dir,
-                                                          bootstrap_state)
+            wait = index_wait unless Thread.current[WorktreeRouting::THREAD_KEY]
+            status = if wait&.phase == :building
+                       Woods::MCP::Server.awaiting_status(wait, retriever, router.current_index_dir, bootstrap_state)
                      else
                        Woods::MCP::Server.build_status(
                          reader: reader, retriever: retriever, index_dir: router.current_index_dir,
                          bootstrap_state: bootstrap_state, source_check: source_check
                        )
                      end
+            Woods::MCP::Server.add_wait_findings(status, wait) if wait
             section = Woods::MCP::Server.worktrees_section(router, worktrees)
             status[:worktrees] = section if section
             status[:hydration] = hydration.to_h
@@ -2940,6 +2944,24 @@ module Woods
             retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
             bootstrap: bootstrap_state&.to_h
           }
+        end
+
+        # What an awaiting server adds to any `woods_status` report: the
+        # refusal of a generation another checkout recorded, and the
+        # capabilities only a restart adds.
+        #
+        # @param status [Hash]
+        # @param index_wait [IndexWait]
+        # @return [Hash] +status+
+        def add_wait_findings(status, index_wait)
+          refusal = index_wait.mismatch
+          if refusal
+            status[:ready] = false
+            status[:refusal] = { error_code: 'index_checkout_mismatch', retryable: false, message: refusal }
+          end
+          restart = index_wait.restart_recommended
+          status[:restart_recommended] = restart unless restart.empty?
+          status
         end
 
         def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)

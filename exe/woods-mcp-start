@@ -32,6 +32,8 @@ end
 # `--allow-mismatch` (or WOODS_MCP_ALLOW_MISMATCH=1) serves an index that
 # another checkout of the repository recorded; without it that is refused.
 allow_mismatch = !ARGV.delete('--allow-mismatch').nil?
+# Handed on at once: an awaiting woods-mcp judges each generation it serves.
+ENV[Woods::MCP::ServedIdentity::ALLOW_ENV] = '1' if allow_mismatch
 
 # `--await-index` (or WOODS_MCP_AWAIT_INDEX=1): a directory that holds no
 # published index yet, or does not exist, is not an error. woods-mcp starts,
