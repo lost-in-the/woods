@@ -916,6 +916,17 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(result[:side_effects][:columns_written]).to eq(['c'])
     end
 
+    it 'places a method defined in a differently named file without resolving real paths' do
+      code = "module DispatchForms\n  class Elsewhere < Record\n  end\nend\n"
+      patch = "module DispatchForms\n  class Elsewhere\n    #{stamping('stamp', 'a')}  end\nend\n"
+      analyzer = analyzer_for('Elsewhere', [['elsewhere.rb', code], ['other_file.rb', patch]],
+                              composite: ['elsewhere.rb'])
+      allow(File).to receive(:realpath).and_call_original
+
+      expect(analysis(analyzer)[:analysis_status]).to eq('unsupported')
+      expect(File).not_to have_received(:realpath)
+    end
+
     it 'reports a method Ruby does not define unsupported' do
       code = "module DispatchForms\n  class Bare < Record\n  end\nend\n"
 

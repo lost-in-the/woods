@@ -233,7 +233,9 @@ module Woods
 
       # @return [Boolean] true when both paths name one file
       def same_file?(one, other)
-        File.expand_path(one) == File.expand_path(other) || File.realpath(one) == File.realpath(other)
+        return true if File.expand_path(one) == File.expand_path(other)
+
+        File.basename(one) == File.basename(other) && File.realpath(one) == File.realpath(other)
       rescue SystemCallError
         false
       end
