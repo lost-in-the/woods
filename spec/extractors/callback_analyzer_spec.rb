@@ -948,13 +948,17 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
         expect(result[:side_effects][:columns_written]).to eq(['b'])
       end
 
-      it 'reports unsupported when neither definition’s owner is spelled as Ruby names it' do
-        compact = "module DispatchForms\n  " \
-                  "class DispatchForms::Up < Record; def stamp; self.c = 'c'; end; end; " \
-                  "class DispatchForms::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
-        result = analysis(analyzer_for('Up', [['compact.rb', compact]], composite: ['compact.rb']))
+      # `class Elsewhere::Up` names a constant the source never declares, so
+      # its first segment may come from another file: no owner can be read.
+      it 'reports unsupported when neither definition’s owner can be named from the source' do
+        stub_const('DispatchElsewhere', Module.new)
+        qualified = "module DispatchForms\n  " \
+                    "class DispatchElsewhere::Up < Record; def stamp; self.c = 'c'; end; end; " \
+                    "class DispatchElsewhere::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
+        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', qualified]],
+                                       composite: ['elsewhere.rb']))
 
-        expect(written_by_ruby('Up')).to eq(['c'])
+        expect(written_by_ruby('DispatchElsewhere::Up')).to eq(['c'])
         expect(result[:analysis_status]).to eq('unsupported')
       end
     end
