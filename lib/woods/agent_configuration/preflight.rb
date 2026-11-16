@@ -13,7 +13,8 @@ module Woods
       SCRIPT = <<~'RUBY'
         require 'timeout'
         Timeout.timeout(25) do
-          abort "The launch starts in #{Dir.pwd} and resolves the application at #{Bundler.root}, not #{ARGV[1]}" if ARGV[2] == 'relative' && [Dir.pwd, Bundler.root.to_s].any? { |dir| File.realpath(dir) != File.realpath(ARGV[1]) }
+          wrong = ARGV[2] == 'relative' ? { 'starts in' => Dir.pwd, 'resolves the application at' => Bundler.root.to_s }.reject { |_, dir| File.realpath(dir) == File.realpath(ARGV[1]) } : {}
+          abort "The launch #{wrong.map { |fact, dir| "#{fact} #{dir}" }.join(' and ')}, not #{ARGV[1]}" unless wrong.empty?
           require 'json'
           require 'woods'
           require 'woods/mcp/server'
@@ -86,9 +87,7 @@ module Woods
       # somewhere other than the requested application root.
       def working_directory_note(launcher, environment)
         command = launcher.respond_to?(:working_directory_command) && launcher.working_directory_command
-        return unless command
-
-        launcher.working_directory_mismatch(execute(command, environment, launcher.root).strip)
+        launcher.working_directory_mismatch(execute(command, environment, launcher.root).strip) if command
       rescue Conflict
         nil
       end
