@@ -141,7 +141,11 @@ module Woods
       #
       # Replace refs and grafts change the commits git walks without moving
       # HEAD, so their state is part of the key ({#history_rewrites}). A run
-      # that cannot read that state always walks.
+      # that cannot read that state always walks. Each walk process reads the
+      # refs again when it starts, so the state is read once more, uncached,
+      # after the walk: a table walked while it moved records
+      # {REWRITES_UNKNOWN} and is never kept. The same state before and after
+      # cannot rule out a change and its reversal inside the walk.
       #
       # @param published [Hash, nil] the table the payload was seeded with
       # @param graph [DependencyGraph] the run's final graph
@@ -158,7 +162,7 @@ module Woods
         key = builder.key(paths, head: sha, history_rewrites: rewrites)
         return published if rewrites != REWRITES_UNKNOWN && GitCommitTable.current?(published, key)
 
-        builder.build(paths, head: sha, history_rewrites: rewrites)
+        recheck_rewrites(builder.build(paths, head: sha, history_rewrites: rewrites), rewrites)
       end
 
       # Recorded for a table walked while the rewrite state could not be read,
@@ -167,9 +171,20 @@ module Woods
 
       # The digest of the replace refs and the grafts file this repository's
       # walks honour, nil when there are none, {REWRITES_UNKNOWN} when git
-      # could not say. Replace refs count only while replacement is on
-      # (`GIT_NO_REPLACE_OBJECTS` unset and `core.useReplaceRefs` not false);
-      # grafts count either way. Read once per capture.
+      # could not say. It follows git's own reading (environment.c,
+      # replace-object.c, from 2.31):
+      #
+      # * replace refs count only while replacement is on:
+      #   `GIT_NO_REPLACE_OBJECTS` unset (any value turns it off) and
+      #   `core.useReplaceRefs` not false (read with `git config --bool`);
+      # * a replace ref is any ref below `GIT_REPLACE_REF_BASE` taken as a raw
+      #   string prefix (`refs/replace/` only when the variable is absent; set
+      #   but empty selects every ref) whose last path component is an object id;
+      # * the grafts file is the one `git rev-parse --git-path info/grafts`
+      #   names, which honours `GIT_GRAFT_FILE`, and counts either way.
+      #
+      # A shallow repository has no table at all ({#available?}). Read once
+      # per capture.
       #
       # @return [String, nil]
       def history_rewrites
@@ -297,6 +312,16 @@ module Woods
         )
       end
 
+      # @param table [Hash, nil] a table just walked under +rewrites+
+      # @param rewrites [String, nil] the state read before the walk
+      # @return [Hash, nil] +table+, marked {REWRITES_UNKNOWN} when a fresh
+      #   read no longer agrees with +rewrites+
+      def recheck_rewrites(table, rewrites)
+        return table if table.nil? || rewrites == REWRITES_UNKNOWN || read_history_rewrites == rewrites
+
+        table.merge('history_rewrites' => REWRITES_UNKNOWN)
+      end
+
       # @return [String, nil] see {#history_rewrites}
       def read_history_rewrites
         refs = replacement_refs
@@ -308,18 +333,33 @@ module Woods
       end
 
       # @return [String, nil] `<ref> <object>` lines of the replace refs in
-      #   force, empty when replacement is off; nil when git could not say
+      #   force, by name, empty when replacement is off; nil when git could not say
       def replacement_refs
         return '' if ENV.key?('GIT_NO_REPLACE_OBJECTS')
 
         enabled, _error, status = Open3.capture3(*git_argv('config', '--bool', 'core.useReplaceRefs'))
         return '' if status.success? && enabled.strip == 'false'
 
-        base = ENV.fetch('GIT_REPLACE_REF_BASE', '').empty? ? 'refs/replace/' : ENV.fetch('GIT_REPLACE_REF_BASE')
+        base = ENV.fetch('GIT_REPLACE_REF_BASE', 'refs/replace/')
         output, _error, status = Open3.capture3(
-          *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)', base)
+          *git_argv('for-each-ref', '--sort=refname', '--format=%(refname) %(objectname)')
         )
-        status.success? ? output : nil
+        return nil unless status.success?
+
+        output.each_line.select { |line| replacement_ref?(line.split(' ', 2).first, base) }.join
+      end
+
+      # Git's test (register_replace_ref): below +base+ as a string prefix, and
+      # the last path component of the rest starts with an object id.
+      #
+      # @param name [String] full ref name
+      # @param base [String] the replace ref prefix
+      # @return [Boolean]
+      def replacement_ref?(name, base)
+        return false unless name.start_with?(base)
+
+        rest = name.delete_prefix(base)
+        rest[((rest.rindex('/') || -1) + 1)..].match?(/\A\h{40}/)
       end
 
       # @return [String, nil] the grafts file's bytes, empty without one; nil

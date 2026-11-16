@@ -313,14 +313,106 @@ RSpec.describe Woods::Extractor, 'commit table' do
         expect(File.binread(table_path)).to eq(@plain)
       end
 
-      it 'keeps the table under GIT_NO_REPLACE_OBJECTS' do
+      ['1', ''].each do |value|
+        it "keeps the table under GIT_NO_REPLACE_OBJECTS=#{value.inspect}, which git honours whatever its value" do
+          replace_root_commit
+          ENV['GIT_NO_REPLACE_OBJECTS'] = value
+
+          expect(refresh_noting_walk).to eq([false, nil])
+          expect(File.binread(table_path)).to eq(@plain)
+        ensure
+          ENV.delete('GIT_NO_REPLACE_OBJECTS')
+        end
+      end
+
+      it 'reads core.useReplaceRefs as git does, so off turns replacement off' do
         replace_root_commit
-        ENV['GIT_NO_REPLACE_OBJECTS'] = '1'
+        git('config', 'core.useReplaceRefs', 'off')
 
         expect(refresh_noting_walk).to eq([false, nil])
-        expect(File.binread(table_path)).to eq(@plain)
+      end
+
+      # Git takes the original's name from the ref's last path component
+      # (replace-object.c, register_replace_ref), below a raw string prefix.
+      def with_ref_base(value)
+        ENV['GIT_REPLACE_REF_BASE'] = value
+        yield
       ensure
-        ENV.delete('GIT_NO_REPLACE_OBJECTS')
+        ENV.delete('GIT_REPLACE_REF_BASE')
+      end
+
+      def stand_in(message)
+        git('commit-tree', "#{original_root}^{tree}", '-m', message)
+      end
+
+      # The spec's own git calls run under the same environment, and with an
+      # empty base git warns about every ref; make the objects first.
+      it 'counts a replacement anywhere in the refs when GIT_REPLACE_REF_BASE is set but empty' do
+        first = stand_in('Custom stand-in')
+        second = stand_in('Second custom stand-in')
+        ref = "refs/custom/#{original_root}"
+        with_ref_base('') do
+          git('update-ref', ref, first)
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+
+          git('update-ref', ref, second)
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Second custom stand-in'])
+        end
+      end
+
+      it 'reads replacements below a custom GIT_REPLACE_REF_BASE, and only there' do
+        git('update-ref', "refs/custom/#{original_root}", stand_in('Custom stand-in'))
+        expect(refresh_noting_walk).to eq([false, nil])
+
+        with_ref_base('refs/custom/') do
+          expect(refresh_noting_walk).to eq([true, :written])
+          expect(messages).to eq(['Edit post', 'Custom stand-in'])
+        end
+      end
+
+      it 'counts a replace ref nested below the base, and ignores one whose name is not an object id' do
+        git('update-ref', "refs/replace/nested/#{original_root}", stand_in('Nested stand-in'))
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Nested stand-in'])
+
+        git('update-ref', 'refs/replace/not-an-object-id', stand_in('Ignored'))
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'reads the grafts file GIT_GRAFT_FILE names' do
+        grafts = root.join('elsewhere-grafts')
+        File.write(grafts, "#{git('rev-parse', 'HEAD')}\n")
+        ENV['GIT_GRAFT_FILE'] = grafts.to_s
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post'])
+      ensure
+        ENV.delete('GIT_GRAFT_FILE')
+      end
+
+      # The rewrite state is read before the walk; git reads the refs again
+      # when each walk process starts. A replacement moved in between must not
+      # leave the walked history under the digest of the state read first.
+      it 'never reuses a table whose replacements changed while it was walked' do
+        original = stand_in('Stand-in A')
+        moved = stand_in('Stand-in B')
+        git('replace', original_root, original)
+        once = true
+        allow_any_instance_of(Woods::GitCommitTable).to receive(:build).and_wrap_original do |*arguments, **keywords|
+          git('replace', '-f', original_root, moved) if once
+          once = false
+          method, *rest = arguments
+          method.call(*rest, **keywords)
+        end
+        expect(refresh).to eq(:written)
+        expect(messages).to eq(['Edit post', 'Stand-in B'])
+
+        git('replace', '-f', original_root, original)
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Stand-in A'])
+        expect(refresh_noting_walk).to eq([false, nil])
       end
 
       it 'walks when the rewrite state cannot be read' do
