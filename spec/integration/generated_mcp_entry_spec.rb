@@ -223,4 +223,56 @@ RSpec.describe 'The generated MCP entry' do
       end
     end
   end
+
+  # A stand-in for `docker compose exec`: it runs the command after the
+  # service name with the -e settings, in the -w directory when one is
+  # given, else in the service's working directory (STAND_IN_WORKING_DIR),
+  # as a container that mounts the same paths would. Like Compose, it
+  # passes none of the caller's Bundler activation into the container.
+  # Real Compose is not run.
+  def stand_in_compose(working_dir)
+    stub_dir = File.join(@base, 'bin')
+    FileUtils.mkdir_p(stub_dir)
+    File.write(File.join(stub_dir, 'docker'), <<~SH)
+      #!/bin/sh
+      unset BUNDLE_GEMFILE BUNDLE_LOCKFILE BUNDLE_BIN_PATH BUNDLER_VERSION BUNDLER_SETUP RUBYOPT RUBYLIB
+      shift
+      if [ "$1" = "--project-directory" ]; then shift 2; fi
+      shift
+      dir="$STAND_IN_WORKING_DIR"
+      while :; do
+        case "$1" in -T) shift ;; -e) export "$2"; shift 2 ;; -w) dir="$2"; shift 2 ;; *) break ;; esac
+      done
+      shift
+      cd "$dir" || exit 1
+      exec "$@"
+    SH
+    File.chmod(0o755, File.join(stub_dir, 'docker'))
+    { 'PATH' => "#{stub_dir}:#{ENV.fetch('PATH')}", 'STAND_IN_WORKING_DIR' => working_dir }
+  end
+
+  # The container entry carries no -w: the server starts in the service's
+  # working directory, which must be the application, inside a mount of the
+  # whole checkout. Bundler finds no Gemfile from the checkout root above it.
+  it 'runs the container entry of an application below its checkout root in the service working directory' do
+    checkout = File.join(@base, 'mono repo')
+    git(@base, 'init', '-q', '-b', 'main', checkout)
+    @app = File.join(checkout, 'apps', 'my web')
+    FileUtils.mkdir_p(@app)
+    File.write(File.join(@app, 'Gemfile'), "source 'https://rubygems.org'\ngem 'woods', path: #{repo.inspect}\n")
+    generate(@app, '--mcp-config', '--mcp-service', 'web')
+    entry = JSON.parse(File.read(File.join(@app, '.mcp.json'))).dig('mcpServers', 'woods')
+    publish(@app)
+
+    start(entry, checkout, stand_in_compose(@app))
+    begin
+      report = JSON.parse(request('tools/call', name: 'woods_status', arguments: { worktrees: 'none' })
+                            .dig('result', 'content', 0, 'text'))
+      expect(report.dig('server', 'index_dir')).to eq(File.join(@app, 'tmp', 'woods'))
+    ensure
+      stop
+    end
+
+    expect { start(entry, checkout, stand_in_compose(checkout)) }.to raise_error(/Could not locate Gemfile/)
+  end
 end

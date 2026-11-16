@@ -10,3 +10,6 @@
   so and prints the entry instead. `--mcp-service <service>` gives the container form, which runs
   `docker compose exec` with the session directory as `--client-root` and passes a developer-exported
   `WOODS_MCP_CLIENT_ROOT_MAP` through. An application below its checkout root gets a relative `WOODS_OUTPUT`.
+  The container entry passes no `-w`: the service's `working_dir` must be the application root, in a mount of the
+  whole checkout. A `.mcp.json` that cannot be read is skipped with the reason, and an `output_dir` inside the
+  checkout is followed when the application is reached through a symlink.

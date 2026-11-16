@@ -140,15 +140,29 @@ module Woods
       def configured_index
         return 'tmp/woods' unless Woods.respond_to?(:configuration)
 
-        configured = File.expand_path(Woods.configuration.output_dir.to_s, destination_root)
-        checkout = Woods::MCP::ServedIdentity.checkout_root(destination_root)
-        if checkout && !configured.start_with?("#{File.expand_path(checkout)}/")
-          say_status :note, "output_dir #{configured} is outside the checkout, where woods-mcp-start --checkout " \
+        root = resolved(File.expand_path(destination_root))
+        given = File.expand_path(Woods.configuration.output_dir.to_s, root)
+        configured = resolved(given)
+        checkout = Woods::MCP::ServedIdentity.checkout_root(root)
+        if checkout && !configured.start_with?("#{checkout}/")
+          say_status :note, "output_dir #{given} is outside the checkout, where woods-mcp-start --checkout " \
                             'cannot serve it; the entry serves tmp/woods', :yellow
           return 'tmp/woods'
         end
 
-        Pathname.new(configured).relative_path_from(Pathname.new(File.expand_path(destination_root))).to_s
+        Pathname.new(configured).relative_path_from(Pathname.new(root)).to_s
+      end
+
+      # +path+ with symlinks resolved, as {Woods::MCP::ServedIdentity.checkout_root}
+      # resolves the checkout: through its nearest existing ancestor while the
+      # directory itself has not been created yet.
+      def resolved(path)
+        missing = []
+        until File.exist?(path)
+          missing.unshift(File.basename(path))
+          path = File.dirname(path)
+        end
+        File.join(File.realpath(path), *missing)
       end
 
       def mcp_snippet(entry)
