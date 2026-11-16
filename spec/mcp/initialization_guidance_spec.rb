@@ -86,6 +86,19 @@ RSpec.describe 'Index MCP initialization guidance' do
     expect(text.bytesize).to be <= Woods::MCP::InitializationGuidance::MAX_BYTES
   end
 
+  it 'keeps every identity warning whole at the byte cap, shortening the summary and the awaiting line first' do
+    warning = "This index describes /#{'w' * 200}, not the launch checkout /#{'c' * 200}; answers are for it."
+    identity = instance_double(Woods::MCP::ServedIdentity, summary: "Serving the index of /#{'s' * 1500}.",
+                                                           warnings: [warning])
+    text = Woods::MCP::InitializationGuidance.for(build.tools.keys, identity: identity,
+                                                                    awaiting: "/#{'a' * 1500}")
+
+    expect(text.bytesize).to be <= Woods::MCP::InitializationGuidance::MAX_BYTES
+    expect(text).to include("WARNING: #{warning}\n", 'Start with woods_status')
+    expect(text).to start_with('No index was published in /aaa')
+    expect(text.lines.grep(/\AServing the index of/).size).to eq(1)
+  end
+
   it 'is stable across builds and index configuration that does not change tool wiring' do
     original = initialize_result(build).fetch('instructions')
     Woods.configuration.context_format = :plain
