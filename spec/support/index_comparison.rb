@@ -218,7 +218,11 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
                          're-extraction adds paths, and only a deletion or a re-run of the whole family removes ' \
                          "them. #{OPEN_QUESTION}",
     deleted_path_kept: 'A renamed-away path stays in the scopes of families the run did not re-execute. ' \
-                       "#{OPEN_QUESTION}"
+                       "#{OPEN_QUESTION}",
+    baseline_error_carried: 'An incremental run keeps its baseline capture errors until a full run (session.rb ' \
+                            'preserve_baseline_coverage). Declared as `{ "errors" => paths }`: the baseline saw a ' \
+                            "file in this process's $LOADED_FEATURES, left by an earlier example, before the file " \
+                            'existed on disk. The verifier reads the carried error as an unknown state, never current.'
   }.freeze
 
   module_function
@@ -423,9 +427,18 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return [] if incremental == full
     return ["source_inputs.json: #{brief(hash_delta(incremental, full))}"] unless incremental && full
 
+    incremental, full = [incremental, full].map { |document| without_known_errors(document, known) }
     rest = hash_delta(incremental.except('scopes'), full.except('scopes'))
     scopes = tolerate_known(incremental.fetch('scopes', {}), full.fetch('scopes', {}), known)
     (rest.empty? ? [] : ["source_inputs.json: #{brief(rest)}"]) + scope_differences(*scopes)
+  end
+
+  # The document without the capture errors an example declared as known, by path.
+  def without_known_errors(document, known)
+    paths = known.values.flat_map { |scopes| Array(scopes['errors']) }
+    return document if paths.empty? || !document['errors'].is_a?(Array)
+
+    document.merge('errors' => document['errors'].reject { |error| paths.include?(error['path']) })
   end
 
   # Both sides' scopes without the paths an example declared as known.

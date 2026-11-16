@@ -220,8 +220,11 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     previous_sha.nil? ? ENV.delete('GIT_SHA') : ENV['GIT_SHA'] = previous_sha
   end
 
-  it 'tracks nested model mixins through body and callback edits',
-     known_source_inputs: { retained_unit_scope: { 'unit:concerns' => %w[app/models/pinned_record/pinnable.rb] } } do
+  # A top-level example header stays on one line: Ruby 3.4 and later record a
+  # multi-line call at its last line, which script/parallel-booted's line
+  # filters would not select.
+  pinnable_scope = { retained_unit_scope: { 'unit:concerns' => %w[app/models/pinned_record/pinnable.rb] } }
+  it 'tracks nested model mixins through body and callback edits', known_source_inputs: pinnable_scope do
     model_path = write_file('app/models/pinned_record.rb', <<~RUBY)
       class PinnedRecord < ApplicationRecord
         self.table_name = 'posts'
@@ -1581,8 +1584,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     end
   end
 
-  it 'omits ignored configuration YAML in both full and incremental extraction',
-     known_source_inputs: { unconsumed_file_scope: { 'file:config_files' => %w[config/settings.local.yml] } } do
+  yaml_scope = { unconsumed_file_scope: { 'file:config_files' => %w[config/settings.local.yml] } }
+  it 'omits ignored configuration YAML in both full and incremental extraction', known_source_inputs: yaml_scope do
     _out, err, status = Open3.capture3(*Woods::GitCommand.argv(@app_root, 'init', '--quiet'))
     raise err unless status.success?
 
@@ -4477,7 +4480,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   end
 
   describe 'class-based additions' do
-    it 'indexes a service class the file dispatcher and the descendant scan both see' do
+    it 'indexes a service class the file dispatcher and the descendant scan both see',
+       known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => %w[app/models/tag.rb] } } do
       # The reconciliation path keys on live descendants, so the class has to
       # be loaded — which is what a reloading daemon would do after the write.
       run_sequence([
@@ -5751,7 +5755,8 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
     [false, true].each do |new_first|
       it "keeps a nested STI model split equivalent and stable after another old-file edit, new first=#{new_first}",
          known_source_inputs: {
-           unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_fleet/car.rb] }
+           unrun_family_scope: { 'whole:database_tables' => %w[app/models/ownership_fleet/car.rb] },
+           baseline_error_carried: { 'errors' => %w[app/models/ownership_fleet/car.rb] }
          } do
         require 'woods/mcp/index_reader'
         index = prepare_ownership_split

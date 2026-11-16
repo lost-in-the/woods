@@ -207,6 +207,12 @@ RSpec.describe IndexComparison do
           expect(described_class.compare(*reordered)).to contain_exactly(a_string_including('errors'))
           ordered = described_class::DEFAULT_MASKS + %i[source_inputs_errors_order]
           expect(described_class.compare(*reordered, masks: ordered)).to eq([])
+          error = { 'reason' => 'loaded_source_outside_coverage', 'path' => 'x.rb' }
+          carried = pair(File.join(root, 'carried'), inputs({}).merge('errors' => [error]),
+                         inputs({}).merge('errors' => []))
+          expect(described_class.compare(*carried)).to contain_exactly(a_string_including('errors'))
+          carried_known = { baseline_error_carried: { 'errors' => %w[x.rb] } }
+          expect(described_class.compare(*carried, known: carried_known)).to eq([])
           expect { described_class.compare(*dirs, known: { invented: {} }) }
             .to raise_error(ArgumentError, /no known source-input difference named invented/)
         end
