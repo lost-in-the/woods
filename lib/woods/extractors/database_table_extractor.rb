@@ -4,6 +4,7 @@ require 'digest'
 require 'json'
 
 require_relative '../extracted_unit'
+require_relative '../extraction/schema_reads'
 require_relative '../source_inputs/consumer_errors'
 require_relative 'table_catalog'
 
@@ -138,8 +139,9 @@ module Woods
       # @return [Hash] `{ columns:, indexes:, foreign_keys:, primary_key: }`
       def read_schema(connection, name)
         {
-          columns: connection.columns(name).map { |column| column_facts(column) },
-          indexes: connection.indexes(name).map { |index| index_facts(index) }.sort_by { |index| index[:name] },
+          columns: read_columns(connection, name).map { |column| column_facts(column) },
+          indexes: Extraction::SchemaReads.read(connection, :indexes, name)
+                                          .map { |index| index_facts(index) }.sort_by { |index| index[:name] },
           foreign_keys: read_foreign_keys(connection, name),
           primary_key: primary_key_of(connection, name)
         }
@@ -174,7 +176,7 @@ module Woods
       def read_foreign_keys(connection, name)
         return [] if connection.respond_to?(:supports_foreign_keys?) && !connection.supports_foreign_keys?
 
-        keys = connection.foreign_keys(name).map do |key|
+        keys = Extraction::SchemaReads.read(connection, :foreign_keys, name).map do |key|
           { from_table: key.from_table.to_s, to_table: key.to_table.to_s, column: key.column.to_s,
             primary_key: key.primary_key&.to_s, name: key.name&.to_s }.merge(referential_actions(key))
         end
@@ -196,8 +198,17 @@ module Woods
 
       # @return [String, Array<String>, nil]
       def primary_key_of(connection, name)
-        keys = Array(connection.primary_keys(name)).map(&:to_s)
+        cache = Extraction::SchemaReads.runtime_cache(connection, name)
+        found = cache ? cache.primary_keys(name) : Extraction::SchemaReads.read(connection, :primary_keys, name)
+        keys = Array(found).map(&:to_s)
         keys.size > 1 ? keys : keys.first
+      end
+
+      # Columns as the connection reports them, through Active Record's cache
+      # when {Extraction::SchemaReads.runtime_cache} vouches for it.
+      def read_columns(connection, name)
+        cache = Extraction::SchemaReads.runtime_cache(connection, name)
+        cache ? cache.columns(name) : Extraction::SchemaReads.read(connection, :columns, name)
       end
 
       # ──────────────────────────────────────────────────────────────────────

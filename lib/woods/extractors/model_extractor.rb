@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative '../source_file'
+require_relative '../extraction/schema_reads'
 require_relative '../source_inputs/consumer_errors'
 
 require 'digest'
@@ -221,7 +222,7 @@ module Woods
       end
 
       def format_indexes_comment(model)
-        ActiveRecord::Base.connection.indexes(model.table_name).map do |idx|
+        Extraction::SchemaReads.read(ActiveRecord::Base.connection, :indexes, model.table_name).map do |idx|
           unique = idx.unique ? ' (unique)' : ''
           "#   #{idx.name}: [#{idx.columns.join(', ')}]#{unique}"
         end
@@ -230,7 +231,7 @@ module Woods
       end
 
       def format_foreign_keys_comment(model)
-        ActiveRecord::Base.connection.foreign_keys(model.table_name).map do |fk|
+        Extraction::SchemaReads.read(ActiveRecord::Base.connection, :foreign_keys, model.table_name).map do |fk|
           "#   #{fk.from_table}.#{fk.column} → #{fk.to_table}"
         end
       rescue StandardError
@@ -1021,7 +1022,7 @@ module Woods
       def extract_foreign_keys(model)
         return [] unless model.table_exists?
 
-        model.connection.foreign_keys(model.table_name).map do |fk|
+        Extraction::SchemaReads.read(model.connection, :foreign_keys, model.table_name).map do |fk|
           { from_table: fk.from_table.to_s, to_table: fk.to_table.to_s, column: fk.column.to_s }
         end
       rescue StandardError

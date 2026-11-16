@@ -93,6 +93,7 @@ require_relative 'extraction/manifest_facts'
 require_relative 'extraction/git_capture'
 require_relative 'extraction/extractor_timings'
 require_relative 'extraction/flow_reach'
+require_relative 'extraction/schema_reads'
 
 module Woods
   # Extractor is the main orchestrator for codebase extraction.
@@ -553,7 +554,11 @@ module Woods
     # One Prism parse per distinct source for the length of the run; see
     # {Woods::ParseCache}. The log line is the run's reuse ratio, which is what
     # a profile of a slow app needs before anything finer.
-    def with_parse_cache
+    def with_parse_cache(&block)
+      Extraction::SchemaReads.with { with_parse_cache_only(&block) }
+    end
+
+    def with_parse_cache_only
       Woods::ParseCache.with(budget: parse_cache_budget) do
         result = yield
         if profiling? && (store = Woods::ParseCache.active)
