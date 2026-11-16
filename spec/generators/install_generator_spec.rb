@@ -3,6 +3,7 @@
 require 'spec_helper'
 require 'bundler'
 require 'fileutils'
+require 'json'
 require 'open3'
 require 'tmpdir'
 require 'woods/version'
@@ -217,5 +218,204 @@ RSpec.describe 'Install generator' do
     _, stderr, status = generate
     expect(status.success?).to be(true), stderr
     expect(written_files.grep(%r{\Adb/migrate/}).size).to eq(1)
+  end
+
+  # A committed .mcp.json must work unchanged in every checkout and worktree,
+  # on every machine: no absolute path and no `cwd`.
+  describe 'the MCP client entry' do
+    def mcp_path
+      File.join(@root, '.mcp.json')
+    end
+
+    def mcp_json
+      JSON.parse(File.read(mcp_path))
+    end
+
+    def strings_in(value)
+      case value
+      when Hash then value.values.flat_map { |item| strings_in(item) }
+      when Array then value.flat_map { |item| strings_in(item) }
+      else [value]
+      end
+    end
+
+    let(:host_entry) { { 'command' => 'bundle', 'args' => %w[exec woods-mcp-start --checkout --await-index] } }
+
+    it 'prints the host entry and writes no .mcp.json by default' do
+      stdout, stderr, status = generate
+
+      expect(status.success?).to be(true), stderr
+      expect(File.exist?(mcp_path)).to be(false)
+      printed = JSON.parse(stdout[/^\{\n  "mcpServers".*?^\}$/m])
+      expect(printed.dig('mcpServers', 'woods')).to eq(host_entry)
+    end
+
+    it 'writes the host entry with --mcp-config, with no absolute path and no cwd' do
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/create\s+\.mcp\.json/)
+      entry = mcp_json.dig('mcpServers', 'woods')
+      expect(entry).to eq(host_entry)
+      expect(strings_in(entry).grep(%r{\A/})).to be_empty
+    end
+
+    it 'writes the container entry for --mcp-service, handing over the session directory and any mount map' do
+      _, stderr, status = generate('--mcp-config', '--mcp-service', 'web')
+
+      expect(status.success?).to be(true), stderr
+      entry = mcp_json.dig('mcpServers', 'woods')
+      expect(entry).to eq(
+        'command' => 'sh',
+        'args' => ['-c', 'exec docker compose exec -T ' \
+                         '-e WOODS_MCP_CLIENT_ROOT_MAP="${WOODS_MCP_CLIENT_ROOT_MAP:-}" web ' \
+                         'bundle exec woods-mcp-start --checkout --await-index --client-root "$PWD"']
+      )
+      expect(entry).not_to have_key('cwd')
+    end
+
+    it 'refuses a service name that is not a plain Compose service name' do
+      _, stderr, status = generate('--mcp-config', '--mcp-service', 'web; rm -r .')
+
+      expect(status.success?).to be(false)
+      expect(stderr).to include('--mcp-service')
+      expect(File.exist?(mcp_path)).to be(false)
+    end
+
+    it 'adds the woods entry to an existing .mcp.json and keeps every other server' do
+      File.write(mcp_path, JSON.pretty_generate('mcpServers' => { 'other' => { 'command' => 'other-server' } }))
+
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/merge\s+\.mcp\.json/)
+      expect(mcp_json['mcpServers']).to eq('other' => { 'command' => 'other-server' }, 'woods' => host_entry)
+    end
+
+    it 'leaves an identical entry alone' do
+      generate('--mcp-config')
+      before = File.read(mcp_path)
+
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/identical\s+\.mcp\.json/)
+      expect(File.read(mcp_path)).to eq(before)
+    end
+
+    {
+      'a different woods entry' => JSON.pretty_generate('mcpServers' => { 'woods' => { 'command' => 'custom' } }),
+      'malformed JSON' => '{"mcpServers": ',
+      'a non-object mcpServers' => JSON.generate('mcpServers' => [])
+    }.each do |label, content|
+      it "never overwrites #{label}, and says what to add" do
+        File.write(mcp_path, content)
+
+        stdout, stderr, status = generate('--mcp-config')
+
+        expect(status.success?).to be(true), stderr
+        expect(stdout).to match(/skip\s+\.mcp\.json/)
+        expect(stdout).to include('"woods-mcp-start"', '"--checkout"')
+        expect(File.read(mcp_path)).to eq(content)
+      end
+    end
+
+    it 'leaves a .mcp.json managed by woods-agent-config to that tool' do
+      content = JSON.pretty_generate('mcpServers' => {})
+      File.write(mcp_path, content)
+      File.write(File.join(@root, '.woods-agent-config.json'), '{}')
+
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/skip\s+\.mcp\.json/)
+      expect(stdout).to include('woods-agent-config')
+      expect(File.read(mcp_path)).to eq(content)
+    end
+
+    it 'adds .mcp.json on a re-run with --skip, leaving an edited initializer alone' do
+      generate
+      initializer = File.join(@root, 'config/initializers/woods.rb')
+      File.write(initializer, "# edited by the application\n")
+
+      stdout, stderr, status = generate('--mcp-config', '--skip')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(%r{skip\s+config/initializers/woods\.rb})
+      expect(File.read(initializer)).to eq("# edited by the application\n")
+      expect(mcp_json.dig('mcpServers', 'woods')).to eq(host_entry)
+    end
+
+    it 'leaves .mcp.json to woods-agent-config when its receipt exists, even with no .mcp.json yet' do
+      File.write(File.join(@root, '.woods-agent-config.json'), '{}')
+
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/skip\s+\.mcp\.json/)
+      expect(File.exist?(mcp_path)).to be(false)
+    end
+
+    it 'says where a container launch must find the index of an application below its checkout root' do
+      checkout = @root
+      FileUtils.mkdir_p(File.join(checkout, '.git'))
+      @root = File.join(checkout, 'apps', 'web')
+      FileUtils.mkdir_p(@root)
+
+      stdout, stderr, status = generate('--mcp-config', '--mcp-service', 'web')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to include('WOODS_OUTPUT=apps/web/tmp/woods')
+      expect(mcp_json.dig('mcpServers', 'woods')).not_to have_key('env')
+    end
+
+    it 'writes nothing under --pretend, and nothing on destroy' do
+      _, stderr, status = generate('--mcp-config', '--pretend')
+      expect(status.success?).to be(true), stderr
+      expect(File.exist?(mcp_path)).to be(false)
+
+      File.write(mcp_path, JSON.pretty_generate('mcpServers' => { 'other' => { 'command' => 'x' } }))
+      before = File.read(mcp_path)
+      _, stderr, status = generate('--mcp-config', behavior: 'revoke')
+
+      expect(status.success?).to be(true), stderr
+      expect(File.read(mcp_path)).to eq(before)
+    end
+
+    it 'names the index of an application below its checkout root without an absolute path' do
+      checkout = @root
+      FileUtils.mkdir_p(File.join(checkout, '.git'))
+      @root = File.join(checkout, 'apps', 'web')
+      FileUtils.mkdir_p(@root)
+
+      _, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(mcp_json.dig('mcpServers', 'woods'))
+        .to eq(host_entry.merge('env' => { 'WOODS_OUTPUT' => 'apps/web/tmp/woods' }))
+    end
+
+    it 'writes the same bytes in two checkouts and a linked worktree' do
+      roots = [File.join(@root, 'one'), File.join(@root, 'two')]
+      roots.each do |root|
+        FileUtils.mkdir_p(root)
+        _, status = Open3.capture2e('git', 'init', '-q', root)
+        expect(status.success?).to be(true)
+      end
+      Open3.capture2e('git', '-C', roots.first, '-c', 'user.name=Spec', '-c', 'user.email=spec@example.com',
+                      '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'init')
+      worktree = File.join(@root, 'one-topic')
+      _, status = Open3.capture2e('git', '-C', roots.first, 'worktree', 'add', '-q', '-b', 'topic', worktree)
+      expect(status.success?).to be(true)
+
+      outputs = [*roots, worktree].map do |root|
+        @root = root
+        _, stderr, status = generate('--mcp-config')
+        expect(status.success?).to be(true), stderr
+        File.read(mcp_path)
+      end
+
+      expect(outputs.uniq.size).to eq(1)
+    end
   end
 end

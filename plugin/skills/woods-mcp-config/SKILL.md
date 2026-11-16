@@ -72,6 +72,32 @@ before Railtie initialization and restart. See the
 
 ## Shape 1: Index-only
 
+From Woods `2.2.0` (check the installed version's release notes), prefer the
+path-free entry. `bin/rails generate woods:install --mcp-config` adds it to
+`.mcp.json` at the application root, never replacing an existing `woods` entry;
+without the option the generator prints it. In an application installed
+earlier, add `--skip`: a non-interactive run otherwise overwrites an edited
+initializer. One committed file then works in every checkout and worktree, on
+every machine:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "bundle",
+      "args": ["exec", "woods-mcp-start", "--checkout", "--await-index"]
+    }
+  }
+}
+```
+
+`--checkout` serves `tmp/woods` in the checkout the client starts the server
+in; `--await-index` starts the server before the first index exists, with a
+retryable `building` answer until then. It relies on the client starting
+project servers in the project directory. Before `2.2.0`, `--checkout` is read
+as an index path and the launch fails: use the explicit form below, which names
+one machine's path and must not be committed.
+
 ```json
 {
   "mcpServers": {
@@ -106,7 +132,26 @@ known-empty diagnostics; absent or unknown counts require checking embedding
 artifacts. These fields do not certify embedding coverage. See the
 [readiness distinction](https://github.com/lost-in-the/woods/blob/v2.1.0/docs/RETRIEVAL_GUIDE.md#semantic-corpus-diagnostics).
 
-When Woods is installed only in Docker, prefer running the server through the application container:
+When Woods is installed only in Docker, prefer running the server through the
+application container. From Woods `2.2.0`, `--mcp-service app` makes the
+generator write the path-free container entry:
+
+```json
+{
+  "mcpServers": {
+    "woods": {
+      "command": "sh",
+      "args": ["-c", "exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"${WOODS_MCP_CLIENT_ROOT_MAP:-}\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
+    }
+  }
+}
+```
+
+`--client-root "$PWD"` hands the session's directory to the server, which
+refuses another checkout's index. Without a developer-exported
+`WOODS_MCP_CLIENT_ROOT_MAP` it warns that the client's checkout cannot be
+determined. A linked worktree reaches the running service only with a pinned
+Compose project name. Before `2.2.0`, use the explicit form:
 
 ```json
 {
