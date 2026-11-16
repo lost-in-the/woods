@@ -59,7 +59,7 @@ RSpec.describe 'CI matrix cancellation' do
     expect(job).not_to have_key('strategy')
     expect(job).not_to have_key('needs')
     expect(job).not_to have_key('if')
-    expect(job.fetch('name')).to start_with('Booted extraction (Ruby 3.3 / Rails 7.2')
+    expect(job.fetch('name')).to eq('Rails fixture bundles (Ruby 3.3 / Rails 7.2)')
     expect(job.fetch('env')).to eq('WOODS_RUN_BOOTED_APP' => '1')
     gemfiles = job.fetch('steps').filter_map { |step| step.dig('env', 'BUNDLE_GEMFILE') }.uniq
     expect(gemfiles).to contain_exactly('gemfiles/serializers.gemfile', 'gemfiles/state_machines.gemfile',

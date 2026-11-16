@@ -38,6 +38,7 @@ RSpec.describe 'release artifact identity resolution' do
       'jobs' => [
         { 'name' => 'Unit specs (Ruby 4.0)', 'conclusion' => 'success' },
         { 'name' => 'Booted extraction (Ruby 4.0 / Rails 8.1)', 'conclusion' => 'success' },
+        { 'name' => 'Rails fixture bundles (Ruby 3.3 / Rails 7.2)', 'conclusion' => 'success' },
         { 'name' => 'Live backends (pgvector + Qdrant + Solid Cache + Redis)', 'conclusion' => 'success' },
         { 'name' => 'MCP transports (official clients)', 'conclusion' => 'success' },
         { 'name' => 'Minimum runtime dependencies (Ruby 3.0)', 'conclusion' => 'success' },

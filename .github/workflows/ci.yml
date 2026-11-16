@@ -307,10 +307,11 @@ jobs:
   # The Rails 7.2 row's optional fixture bundles (serializers, state machines,
   # components), each kept out of the base bundle. They ran after that row's
   # booted steps and made it the slowest job of a pull request run by about
-  # 70-90 s; in their own job they run beside it. The name keeps the
-  # "Booted extraction (Ruby " prefix the release validator requires.
+  # 70-90 s; in their own job they run beside it. The release validator
+  # requires this job by its own name, apart from the booted extraction rows,
+  # so a tag run missing either group fails on that group.
   rails-fixtures:
-    name: Booted extraction (Ruby 3.3 / Rails 7.2, optional fixture bundles)
+    name: Rails fixture bundles (Ruby 3.3 / Rails 7.2)
     runs-on: ubuntu-latest
     env:
       WOODS_RUN_BOOTED_APP: '1'
