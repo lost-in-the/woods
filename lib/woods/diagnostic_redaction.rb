@@ -23,7 +23,7 @@ module Woods
   #   connection Woods opened, wherever they appear. Host, user and database
   #   names are left to the forms: a database named +woods+ must not turn
   #   +woods.json+ into +[REDACTED].json+.
-  module DiagnosticRedaction
+  module DiagnosticRedaction # rubocop:disable Metrics/ModuleLength -- one redaction policy for every diagnostic site
     # @return [String] what a removed value is replaced with
     MARK = '[REDACTED]'
 
@@ -41,6 +41,16 @@ module Woods
     QUOTED = %q{"(?:[^"\\\\]|\\\\.)*"|'(?:[^'\\\\]|\\\\.)*'}
     private_constant :QUOTED
 
+    # Phrases a database client puts before a quoted host, socket, user or
+    # database name.
+    QUOTING_PHRASES = 'server at|server on socket|server on|through socket|for user|user|database|role|' \
+                      'host name|network address|socket path|host|db'
+    private_constant :QUOTING_PHRASES
+
+    # Encodings whose text is read as UTF-8, as error messages usually are.
+    UTF8_READ = [Encoding::BINARY, Encoding::US_ASCII].freeze
+    private_constant :UTF8_READ
+
     FORMS = [
       # a database URL, whole: postgres://user:password@host:5432/name
       [%r{\b((?:postgres(?:ql)?|mysql2?|trilogy|sqlserver|oracle-enhanced)://)[^\s'"]+}i, "\\1#{MARK}"],
@@ -48,14 +58,16 @@ module Woods
       [%r{\b([a-z][a-z0-9+.-]*://)[^\s/?#@'"]*@}i, "\\1#{MARK}@"],
       # {:password=>"x"}, {password: "x"}, {"password" => "x"}
       [/(["':]?\b(?:#{KEY_PATTERN})["']?\s*(?:=>|:)\s*)(?:#{QUOTED}|:\w+)/i, "\\1\"#{MARK}\""],
-      # Active Record: "with your hostname: h." and "username: u."
-      [/\b((?:hostname|username|host|user|database|password)\s*:\s+)(?!#{Regexp.escape(MARK)})
-        [^\s"'(),;]+?(?=[.,;]?(?:\s|$))/xi, "\\1#{MARK}"],
-      # conninfo: password=x host='y'
-      [/\b((?:#{KEY_PATTERN})\s*=\s*)(?:#{QUOTED}|[^\s'",;&)]+)/i, "\\1#{MARK}"],
-      # PostgreSQL and MySQL: server at "h" (10.0.0.1), for user "u", database 'd', 'u'@'h'
-      [/\b((?:server at|server on socket|for user|user|database|role|host|db)\s+)(?:#{QUOTED})(@(?:#{QUOTED}))?/i,
-       "\\1\"#{MARK}\""],
+      # Active Record: "with your hostname: h." and "username: u."; the value
+      # runs to whitespace, less one closing [.,;]
+      [/\b((?:hostname|username|host|user|database|password)\s*:\s+)(?!"?#{Regexp.escape(MARK)})
+        \S+?(?=[.,;]?(?:\s|$))/xi, "\\1#{MARK}"],
+      # conninfo: password=x host='y'; an unquoted value runs to whitespace,
+      # a backslash escaping the next character, as libpq reads it
+      [/\b((?:#{KEY_PATTERN})\s*=\s*)(?:#{QUOTED}|(?:\\.|[^\s\\])+)/i, "\\1#{MARK}"],
+      # PostgreSQL, MySQL and MariaDB: server at "h" (10.0.0.1), for user "u",
+      # database 'd', 'u'@'h', host name "h", server on 'h', through socket 's'
+      [/\b((?:#{QUOTING_PHRASES})\s+)(?:#{QUOTED})(@(?:#{QUOTED}))?/i, "\\1\"#{MARK}\""],
       [/(server at "#{Regexp.escape(MARK)}"\s+)\([^)]*\)/, "\\1(#{MARK})"]
     ].freeze
     private_constant :FORMS
@@ -64,12 +76,15 @@ module Woods
     @lock = Mutex.new
 
     class << self
-      # @param text [#to_s, nil]
-      # @return [String] +text+ without connection details
+      # Registered values go first, whole, so a form cannot split one; then
+      # the forms.
+      #
+      # @param text [#to_s, nil] in any encoding, valid or not
+      # @return [String] +text+ as valid UTF-8, without connection details
       def redact(text)
-        result = text.to_s.dup
+        result = remove_registered(utf8(text))
         FORMS.each { |pattern, replacement| result = result.gsub(pattern, replacement) }
-        values.reduce(result) { |redacted, value| redacted.gsub(value_pattern(value), MARK) }
+        result
       end
 
       # @param error [Exception]
@@ -129,16 +144,41 @@ module Woods
         end
       end
 
+      # Any text as valid UTF-8; bytes that are not valid UTF-8 become U+FFFD.
+      def utf8(text)
+        string = text.to_s
+        return string.dup.force_encoding(Encoding::UTF_8).scrub if UTF8_READ.include?(string.encoding)
+
+        string.encode(Encoding::UTF_8, invalid: :replace, undef: :replace).scrub
+      end
+
+      # Every character inside an occurrence of any registered value is
+      # removed, so values that overlap or contain one another leave no part.
+      def remove_registered(text)
+        spans = values.flat_map do |value|
+          text.enum_for(:scan, value_pattern(value)).map { Regexp.last_match.offset(0) }
+        end
+        merge_spans(spans).reverse_each.with_object(text.dup) { |(from, to), result| result[from...to] = MARK }
+      end
+
+      def merge_spans(spans)
+        spans.sort.each_with_object([]) do |(from, to), merged|
+          next merged << [from, to] if merged.empty? || from > merged.last[1]
+
+          merged.last[1] = [merged.last[1], to].max
+        end
+      end
+
       def value_pattern(value)
         /(?<![A-Za-z0-9_])#{Regexp.escape(value)}(?![A-Za-z0-9_])/
       end
 
       def connection_values(source)
         case source
-        when String then url_values(source)
+        when String then url_values(utf8(source))
         when Hash then hash_values(source)
         else hash_values(configuration_hash(source) || {})
-        end.compact.map(&:to_s).reject(&:empty?).uniq
+        end.compact.map { |value| utf8(value) }.reject(&:empty?).uniq
       end
 
       def url_values(url)
@@ -151,7 +191,7 @@ module Woods
 
       def hash_values(config)
         config = config.transform_keys(&:to_s)
-        config['url'].is_a?(String) ? [config['password'], *url_values(config['url'])] : [config['password']]
+        config['url'].is_a?(String) ? [config['password'], *url_values(utf8(config['url']))] : [config['password']]
       end
 
       def configuration_hash(source)

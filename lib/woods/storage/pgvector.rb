@@ -276,7 +276,8 @@ module Woods
         #
         # @param sql [String] The INSERT ... ON CONFLICT statement
         # @param entries [Array<Hash>] The batch, used for the error message
-        # @raise [Woods::Error] on a cardinality or uniqueness violation
+        # @raise [Woods::Error] on a cardinality or uniqueness violation, with
+        #   the adapter's error redacted into its message and not kept as its cause
         def execute_upsert(sql, entries)
           @connection.execute(sql)
         rescue StandardError => e
@@ -285,7 +286,8 @@ module Woods
           ids = entries.map { |entry| entry[:id] }
           raise Woods::Error,
                 "pgvector batch upsert hit a duplicate-row conflict (#{DiagnosticRedaction.describe(e).strip}). " \
-                "Batch ids: #{ids.join(', ')}"
+                "Batch ids: #{ids.join(', ')}",
+                cause: nil
         end
 
         # Duck-typed detection of PostgreSQL cardinality/uniqueness

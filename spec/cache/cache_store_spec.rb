@@ -1175,6 +1175,20 @@ RSpec.describe Woods::Cache::SolidCacheStore do
       expect(logger).to have_received(:warn)
         .with(satisfy { |line| line.include?('[REDACTED]') && !line.include?('fakesecretmarker') })
     end
+
+    it 'falls back and warns, redacted, when the failure message is not valid UTF-8' do
+      logger = double('Logger', warn: nil)
+      allow(store).to receive(:logger).and_return(logger)
+      message = "\xFF password=pw-fakesecretmarker".dup.force_encoding(Encoding::UTF_8)
+      %i[read write delete exist? delete_matched].each do |call|
+        allow(cache_double).to receive(call).and_raise(StandardError, message)
+      end
+
+      expect([store.read('k'), store.write('k', 1), store.delete('k'), store.exist?('k'), store.clear])
+        .to eq([nil, nil, nil, false, nil])
+      redacted = satisfy { |line| line.include?('[REDACTED]') && !line.include?('fakesecretmarker') }
+      expect(logger).to have_received(:warn).with(redacted).exactly(5).times
+    end
   end
 
   describe 'corrupted JSON handling' do

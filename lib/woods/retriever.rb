@@ -170,7 +170,7 @@ module Woods
       rescue StoreError
         raise
       rescue StandardError => e
-        raise StoreError.new("#{@name} store call #{name} failed: #{e.class}: #{e.message}", store: @name)
+        raise StoreError.new("#{@name} store call #{name} failed: #{e.class}: #{e.message}", store: @name), cause: nil
       end
     end
 
@@ -603,7 +603,8 @@ module Woods
       # M8: a failed lookup must not read as "type is ''" — that silently
       # disables exclusion filtering. Raise the shared typed store error.
       raise StoreError,
-            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}"
+            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}",
+            cause: nil
     end
 
     def type_from_hash(hash)
@@ -779,7 +780,8 @@ module Woods
       # M8: a failed count must not read as zero — that reports :absent for
       # a type that may exist and short-circuits the within-type fallback.
       raise StoreError,
-            "metadata store count failed for type #{type.inspect}: #{e.class}: #{e.message}"
+            "metadata store count failed for type #{type.inspect}: #{e.class}: #{e.message}",
+            cause: nil
     end
 
     # Chunk-suffix-stripping candidate-type probe against an explicit
@@ -794,7 +796,8 @@ module Woods
       type_from_hash(metadata_store.find(lookup_id)) || ''
     rescue StandardError => e
       raise StoreError,
-            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}"
+            "metadata store lookup failed while resolving a candidate type: #{e.class}: #{e.message}",
+            cause: nil
     end
 
     # Append a compact markdown summary of +type_rank_context+ to the
@@ -853,7 +856,7 @@ module Woods
       raise StoreError.new(
         "metadata store failed while building the structural overview: #{e.class}: #{e.message}",
         store: :metadata
-      )
+      ), cause: nil
     end
   end
 end

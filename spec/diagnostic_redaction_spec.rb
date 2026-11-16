@@ -35,6 +35,21 @@ RSpec.describe Woods::DiagnosticRedaction do
       'Active Record connection error text' => lambda { |s|
         "There is an issue connecting with your hostname: #{s[:host]}.\n\nThere is an issue connecting to your " \
           "database with your username/password, username: #{s[:user]}.\n\nPlease check your database configuration."
+      },
+      'unquoted conninfo values that start with or hold punctuation' => lambda { |s|
+        "password=;#{s[:password]} user=x,#{s[:user]} host=db&#{s[:host]} dbname=d)#{s[:database]}"
+      },
+      'colon values that start with or hold punctuation' => lambda { |s|
+        "password: ;#{s[:password]} username: x,#{s[:user]}. hostname: (#{s[:host]})."
+      },
+      'libpq name resolution text' => lambda { |s|
+        %(could not translate host name "#{s[:host]}" to address: Name or service not known\n) +
+          %(could not parse network address "#{s[:host]}": bad\n) +
+          %(could not translate Unix-domain socket path "/run/#{s[:database]}/.s.PGSQL.5432" to address: bad)
+      },
+      'MariaDB connection text' => lambda { |s|
+        "Can't connect to server on '#{s[:host]}' (111); " \
+          "Can't connect to local server through socket '/run/#{s[:database]}.sock' (2)"
       }
     }.each do |form, build|
       it "removes every connection detail from #{form}" do
@@ -54,6 +69,38 @@ RSpec.describe Woods::DiagnosticRedaction do
       expect(described_class.redact(text))
         .to eq('connection to server at "[REDACTED]" ([REDACTED]), port 5432 failed: Connection refused')
     end
+
+    it 'ends an unquoted value at whitespace, and keeps the sentence and the keys that name no database' do
+      text = "host=db port=5432 sslmode=require; username: u.\nhostname: h, then retry"
+
+      expect(described_class.redact(text))
+        .to eq("host=[REDACTED] port=5432 sslmode=require; username: [REDACTED].\nhostname: [REDACTED], then retry")
+    end
+
+    it 'keeps host name, network address and socket wording that quotes nothing' do
+      text = 'host name resolution failed; the network address and socket path come from woods.json'
+
+      expect(described_class.redact(text)).to eq(text)
+    end
+
+    it 'redacts text that is not valid UTF-8, and text in another encoding, without raising' do
+      [
+        "\xFFpassword=#{password}".force_encoding(Encoding::UTF_8),
+        "host=#{host} café".b,
+        "host=#{host} café".encode(Encoding::UTF_16LE)
+      ].each do |text|
+        redacted = described_class.redact(text)
+
+        expect(redacted).not_to include(marker)
+        expect(redacted).to be_valid_encoding
+      end
+    end
+
+    it 'keeps valid UTF-8 text unchanged' do
+      text = 'Résumé of the index: woods.json names no database'
+
+      expect(described_class.redact(text)).to eq(text)
+    end
   end
 
   describe '.register' do
@@ -71,6 +118,41 @@ RSpec.describe Woods::DiagnosticRedaction do
       described_class.register('url' => "postgres://u:other-#{marker}@db/x")
 
       expect(described_class.redact("got #{password} and other-#{marker}")).not_to include(marker)
+    end
+
+    it 'removes a registered URL the URI parser rejected, as its error message quotes it' do
+      url = "postgres://app #{user}:#{password}@#{host}/#{database}"
+      described_class.register(url)
+      message = begin
+        URI.parse(url)
+      rescue URI::InvalidURIError => e
+        e.message
+      end
+      expect(message).to include(marker)
+
+      expect(described_class.redact(message)).not_to include(marker)
+    end
+
+    it 'removes every part of registered values that overlap or contain one another' do
+      described_class.register(password: 'rotate')
+      described_class.register(password: "rotate-#{marker}")
+      described_class.register(password: 'a-long-registered-prefix-shared')
+      described_class.register(password: "shared-#{marker}")
+
+      text = "used rotate-#{marker} and rotate, then a-long-registered-prefix-shared-#{marker}"
+
+      redacted = described_class.redact(text)
+
+      expect(redacted).to eq('used [REDACTED] and [REDACTED], then [REDACTED]')
+    end
+
+    it 'removes a registered non-ASCII password, however it and the text are encoded' do
+      described_class.register("postgres://u:p%C3%A4ss-#{marker}@db/x")
+      described_class.register(password: "über-#{marker}".b.force_encoding(Encoding::US_ASCII))
+
+      redacted = described_class.redact("auth failed with päss-#{marker} and über-#{marker}".b)
+
+      expect(redacted).to eq('auth failed with [REDACTED] and [REDACTED]')
     end
 
     it 'leaves a word that only contains a registered value, and the names it was not given' do

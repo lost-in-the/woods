@@ -956,4 +956,37 @@ RSpec.describe Woods::Retriever do
         end
     end
   end
+
+  # A store error's message is redacted; the adapter error it translates
+  # carries the same text unredacted, so it is not kept as the cause.
+  describe 'store errors without the adapter error as their cause' do
+    let(:leak) { 'connection to server at "db-fakesecretmarker" failed: password=pw-fakesecretmarker' }
+    let(:bare_candidate) do
+      Woods::Retrieval::SearchExecutor::Candidate.new(identifier: 'Orphan', score: 0.5, source: :graph_expansion,
+                                                      metadata: {})
+    end
+
+    before do
+      %i[find find_by_type count].each { |call| allow(metadata_store).to receive(call).and_raise(RuntimeError, leak) }
+      allow(vector_store).to receive(:search).and_raise(RuntimeError, leak)
+    end
+
+    {
+      'a translated store call' => lambda { |r, _s, _c|
+        described_class::TranslatedStore.new(r.vector_store, :vector).search
+      },
+      'a candidate type lookup' => ->(r, _s, c) { r.send(:candidate_type, r.send(:pipeline), c) },
+      'a type count' => ->(r, s, _c) { r.send(:total_of_type, s, 'model') },
+      'a candidate type lookup on a snapshot' => ->(r, s, c) { r.send(:candidate_type_from, s, c) },
+      'the structural overview' => ->(r, s, _c) { r.send(:build_structural_context, s) }
+    }.each do |site, call|
+      it "raises from #{site} with no connection detail anywhere in the cause chain" do
+        expect { call.call(retriever, metadata_store, bare_candidate) }
+          .to raise_error(Woods::Retriever::StoreError) do |error|
+            expect(error.message).to include('[REDACTED]')
+            expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+          end
+      end
+    end
+  end
 end

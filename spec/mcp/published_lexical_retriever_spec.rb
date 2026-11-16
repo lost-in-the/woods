@@ -322,4 +322,42 @@ RSpec.describe Woods::MCP::PublishedLexicalRetriever do
     expect { Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir) }
       .to raise_error(Woods::MCP::BootstrapError, /lexical index could not be loaded/)
   end
+
+  # A lexical error's message is redacted; the error it translates carries
+  # the same text unredacted, so it is not kept as the cause.
+  describe 'errors without the failure they translate as their cause' do
+    let(:leak) { 'failed: host=db-fakesecretmarker password=pw-fakesecretmarker' }
+
+    it 'raises a read failure as a store error with no connection detail in the cause chain' do
+      allow(retriever).to receive(:validate_publication!).and_raise(RuntimeError, leak)
+
+      expect { retriever.retrieve('Post') }.to raise_error(Woods::Retriever::StoreError) do |error|
+        expect(error.message).to include('host=[REDACTED]')
+        expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+      end
+    end
+
+    it 'raises a failed lexical bootstrap with no connection detail in the cause chain' do
+      Woods.configuration.retrieval_mode = :lexical
+      allow(described_class).to receive(:new).and_raise(RuntimeError, leak)
+
+      expect { Woods::MCP::Bootstrapper.build_retriever(index_dir: index_dir) }
+        .to raise_error(Woods::MCP::BootstrapError) do |error|
+          expect(error.message).to include('host=[REDACTED]')
+          expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+        end
+    end
+
+    it 'degrades a failed lexical reload with no connection detail in the cause chain' do
+      publish_payload('one', 'oldword')
+      retriever.warmup!
+      allow(retriever.reader).to receive(:reload!).and_raise(IOError, leak)
+
+      expect { Woods::MCP::Bootstrapper.reload_stores!(retriever, index_dir: index_dir) }
+        .to raise_error(Woods::MCP::ReloadDegraded) do |error|
+          expect(error.message).to include('host=[REDACTED]')
+          expect(cause_chain_text(error)).not_to include('fakesecretmarker')
+        end
+    end
+  end
 end
