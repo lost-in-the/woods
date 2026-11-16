@@ -210,6 +210,21 @@ RSpec.describe 'woods-agent-config relative project entries' do
   end
 
   describe 'setup and update' do
+    # apply keeps a lock beside every file it manages (it serializes on their
+    # inodes), so the notes name .gitignore lines that cover every one.
+    it 'names .gitignore lines covering the receipt and every file apply leaves beside its targets' do
+      code, path = plan('setup', 'setup.json')
+      notes = JSON.parse(output.string).fetch('notes').join
+      apply(path)
+      left = Dir.children(root) - %w[.git Gemfile .mcp.json CLAUDE.md AGENTS.md]
+      patterns = %w[.woods-agent-config.json* *.woods.lock]
+
+      expect(code).to eq(0)
+      expect(notes).to include(*patterns)
+      expect(left).not_to be_empty
+      expect(left.reject { |name| patterns.any? { |glob| File.fnmatch?(glob, name, File::FNM_DOTMATCH) } }).to eq([])
+    end
+
     it 'writes a relative project entry by default, records the form, and says so' do
       code, path = plan('setup', 'setup.json')
 

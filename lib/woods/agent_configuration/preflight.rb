@@ -13,7 +13,7 @@ module Woods
       SCRIPT = <<~'RUBY'
         require 'timeout'
         Timeout.timeout(25) do
-          abort "The launch resolves the application at #{Bundler.root}, not #{ARGV[1]}" if ARGV[2] == 'relative' && Bundler.root.realpath.to_s != File.realpath(ARGV[1])
+          abort "The launch starts in #{Dir.pwd} and resolves the application at #{Bundler.root}, not #{ARGV[1]}" if ARGV[2] == 'relative' && [Dir.pwd, Bundler.root.to_s].any? { |dir| File.realpath(dir) != File.realpath(ARGV[1]) }
           require 'json'
           require 'woods'
           require 'woods/mcp/server'

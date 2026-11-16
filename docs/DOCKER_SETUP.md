@@ -197,9 +197,19 @@ machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configur
   That must be the application root inside the container, in a mount of the whole checkout.
   For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
   the checkout at `/app`), not the checkout root: Bundler looks for the Gemfile up from there, never down.
-  `woods-agent-config setup` runs its preflight the same way, and refuses a service whose working directory does not
-  resolve the `--container-root` application, naming both directories.
+  `woods-agent-config setup` runs its preflight the same way, and refuses a service whose working directory is not
+  the `--container-root` application, or where Bundler resolves another application, naming both directories.
   The generator only prints the entry and does not check the service.
+
+**A `BUNDLE_BIN` directory on the image's `PATH`.**
+With `BUNDLE_BIN` set, `bundle install` writes a binstub for every executable, `bundle` itself included.
+Each binstub fixes the Gemfile at its install-time path (`ENV["BUNDLE_GEMFILE"] ||= ...`).
+With that directory first on `PATH`, `bundle exec` uses that one Gemfile from any working directory.
+The setup preflight compares the service's working directory itself, so a wrong `working_dir` is still refused.
+A bundle volume installed for another application path makes every `bundle exec` fail with
+`Bundler::GemfileNotFound`, naming the install-time Gemfile path.
+Either remedy works: remove the `BUNDLE_BIN` directory from `PATH` in the service's environment,
+or use one bundle volume per application layout.
 
 Checked with Claude Code 2.1.325 and Docker Compose: see
 [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule) for what each case does.

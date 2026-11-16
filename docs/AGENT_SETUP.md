@@ -234,7 +234,17 @@ From Woods `2.2.0`, `--entry-form relative|absolute` chooses what the MCP entry 
   the service's working directory and the container root.
 
 Commit `.mcp.json`. The receipt `.woods-agent-config.json` records this machine's root and target paths:
-keep it out of version control. The tool does not edit `.gitignore`; the plan's `notes` name the line to add.
+keep it out of version control. The tool does not edit `.gitignore`; the plan's `notes` name the lines to add.
+Apply also keeps a lock file beside each file it manages (`.woods-agent-config.json.lock`, `.mcp.json.woods.lock`,
+`CLAUDE.md.woods.lock`, `AGENTS.md.woods.lock`).
+They are kept on purpose: apply serializes on them, and removing one while another apply holds it would let two
+run at once.
+These two `.gitignore` lines cover the receipt, its lock and recovery journal, and every lock:
+
+```gitignore
+.woods-agent-config.json*
+*.woods.lock
+```
 Run setup in one checkout and commit the entry. In any other checkout, or on a teammate's machine, setup finds the
 committed relative entry, identical to what it would write, and adopts it: it writes only that checkout's own
 receipt, and the result says `"adopted": true`. A different unowned entry, or an identical absolute one, is still
