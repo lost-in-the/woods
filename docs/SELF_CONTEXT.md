@@ -62,6 +62,12 @@ definitions; pure namespace wrappers remain excluded from definition seeds.
 Retained maps with an older, incorrect wrapper flag can still seed a module
 when its published graph records an `include` or `extend` relationship.
 
+A shared identifier names its first definition, by file path.
+Each later one is named by its file (`Example::Target [lib/woods/target_constants.rb]`).
+A file's second and later definitions of one identifier and type, such as a method's `if` and `else` bodies,
+add their source order there (`Example::Target#call [lib/woods/target.rb, occurrence 2]`).
+Each keeps the shared identifier as `canonical_identifier` and a `definition_of` edge to it.
+
 ### Deletions and an explicit baseline
 
 Refresh the map before making a change if you need before/after evidence. Record

@@ -201,6 +201,21 @@ module Woods
     end
   end
 
+  # Names a self-map unit whose identifier an earlier unit already holds.
+  module GemMapOccurrence
+    # @param canonical [String] the shared identifier
+    # @param unit [ExtractedUnit] the unit to name
+    # @param earlier [Array<ExtractedUnit>] the units sharing +canonical+ sorted before +unit+
+    # @return [String] `canonical [file]`, or `canonical [file, occurrence n]` for the file's nth unit of its type
+    def self.identifier(canonical, unit, earlier)
+      same_file = earlier.count { |other| [other.file_path, other.type] == [unit.file_path, unit.type] }
+      return "#{canonical} [#{unit.file_path}]" if same_file.zero?
+
+      "#{canonical} [#{unit.file_path}, occurrence #{same_file + 1}]"
+    end
+  end
+  private_constant :GemMapOccurrence
+
   # Turns a pre-read Woods source snapshot into typed static analysis units.
   class GemMapSource
     def initialize(root:)
@@ -293,14 +308,20 @@ module Woods
       []
     end
 
+    # One identifier per unit. The first unit of a shared identifier keeps
+    # it; every other one is named by its file, and a file's second and later
+    # units of one type (alternative bodies of a method under an `if`, a
+    # reopening) also by their source order there:
+    # `Alt#pick [lib/alt.rb, occurrence 2]`. Each keeps the shared name as
+    # its canonical identifier and an edge to it.
     def disambiguate!(units)
       units.group_by(&:identifier).each do |canonical, colliding|
-        colliding.sort_by! { |unit| [unit.file_path, unit.type.to_s] }
+        colliding.sort_by!.with_index { |unit, position| [unit.file_path, unit.type.to_s, position] }
         colliding.each_with_index do |unit, index|
           unit.metadata[:canonical_identifier] = canonical
           next if index.zero?
 
-          unit.identifier = "#{canonical} [#{unit.file_path}]"
+          unit.identifier = GemMapOccurrence.identifier(canonical, unit, colliding.take(index))
           unit.dependencies << { type: unit.type, target: canonical, via: :definition_of }
         end
       end
@@ -356,12 +377,26 @@ module Woods
     end
 
     def write_type(directory, units)
+      refuse_shared_artifacts!(directory, units)
       FileUtils.mkdir_p(directory)
       units.each do |unit|
         write_file(directory.join(collision_safe_filename(unit.identifier)), JSON.pretty_generate(unit.to_h))
       end
       index = units.map { |unit| index_entry(unit) }
       write_file(directory.join('_index.json'), JSON.pretty_generate(index))
+    end
+
+    # Two units written to one file would leave one artifact and a type
+    # index listing it twice, so the payload is refused before any write.
+    def refuse_shared_artifacts!(directory, units)
+      units.group_by { |unit| collision_safe_filename(unit.identifier) }.each_value do |sharing|
+        next if sharing.one?
+
+        sources = sharing.map { |unit| "'#{unit.identifier}' from '#{unit.file_path || 'no file'}'" }.join(', ')
+        raise Woods::ExtractionError,
+              "self-map identifier collision: #{sources} would share one artifact in #{directory.basename}; " \
+              'nothing was published'
+      end
     end
 
     def index_entry(unit)
