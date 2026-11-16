@@ -51,10 +51,13 @@ module Woods
     STATUS = { 'A' => 'added', 'M' => 'modified', 'D' => 'deleted', 'T' => 'type_changed' }.freeze
 
     # The fields that decide the table's content; equal fields mean equal tables.
-    # `history_rewrites` is written only for a repository whose replace refs or
-    # grafts change the walk, so an absent field reads as "none".
+    # A table without `history_rewrites` predates it and cannot say whether a
+    # replace ref shaped it, so it never matches and is rebuilt once.
     KEY_FIELDS = %w[schema_version head since window_days max_commits max_files_per_commit line_stats
                     hunk_budget indexed_paths_sha256 history_rewrites].freeze
+
+    # The recorded rewrite state of a history no replace ref or graft changes.
+    REWRITES_NONE = 'none'
 
     FORMAT = '%x00%H%x00%P%x00%an%x00%cI%x00%s%x00%b%x00'
     private_constant :FORMAT
@@ -129,16 +132,16 @@ module Woods
     # @param paths [Array<String>] indexed, application-relative paths
     # @param head [String] the resolved HEAD sha
     # @param history_rewrites [String, nil] the digest of the replace refs and
-    #   grafts the walk honours, nil when there are none
+    #   grafts the walk honours; nil records {REWRITES_NONE}
     # @return [Hash{String => Object}]
     def key(paths, head:, history_rewrites: nil)
-      key = { 'schema_version' => SCHEMA_VERSION, 'head' => head, 'since' => @since,
-              'window_days' => @settings.fetch('window_days'), 'max_commits' => @settings.fetch('max_commits'),
-              'max_files_per_commit' => @settings.fetch('max_files_per_commit'),
-              'line_stats' => @settings.fetch('line_stats', true),
-              'hunk_budget' => @settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET),
-              'indexed_paths_sha256' => Digest::SHA256.hexdigest(paths.uniq.sort.join("\n")) }
-      history_rewrites ? key.merge('history_rewrites' => history_rewrites) : key
+      { 'schema_version' => SCHEMA_VERSION, 'head' => head, 'since' => @since,
+        'window_days' => @settings.fetch('window_days'), 'max_commits' => @settings.fetch('max_commits'),
+        'max_files_per_commit' => @settings.fetch('max_files_per_commit'),
+        'line_stats' => @settings.fetch('line_stats', true),
+        'hunk_budget' => @settings.fetch('hunk_budget', DEFAULT_HUNK_BUDGET),
+        'indexed_paths_sha256' => Digest::SHA256.hexdigest(paths.uniq.sort.join("\n")),
+        'history_rewrites' => history_rewrites || REWRITES_NONE }
     end
 
     # Walk +head+ and build the table.

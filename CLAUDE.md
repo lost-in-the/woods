@@ -376,10 +376,11 @@ Grouped by layer. Each bullet is one claim; the linked file is the source of tru
   - `capture_snapshot` treats `"unknown"` as no-sha (#137). Per-file enrichment and manifest provenance both use `GitCommand`, rooted at the application directory with the same `WOODS_GIT_DIR` override. Per-file history is scoped to the selected `HEAD`.
 - `git_commits.json` (`GitCommitTable`, W-3) is rebuilt whole, never patched: it is a pure function of the resolved
   HEAD sha, the indexed path set read off the final graph, the window's first UTC day, the bounds and the replace-ref
-  and graft state (`history_rewrites`, written only when present), all recorded in the file (including `line_stats`
-  and `hunk_budget`).
+  and graft state (`history_rewrites`: `none`, a digest, or `unknown`), all recorded in the file (including
+  `line_stats` and `hunk_budget`).
   Every run, full, incremental or refresh, keeps the seeded table only when every one matches
-  (`GitCommitTable.current?`); unreadable rewrite state always walks, and so does a clean extraction.
+  (`GitCommitTable.current?`); `unknown`, a table without the field (written before it existed) and a clean
+  extraction always walk.
   A changed table alone publishes a generation.
   Per-file line counts and hunks (#804) come from a second `-U0` patch walk over only the table's commits
   (`GitLineStats`, `GitLog#patch_stream`).

@@ -62,7 +62,8 @@ RSpec.describe Woods::GitCommitTable do
       result = table.build(%w[app/controllers/posts_controller.rb app/models/post.rb], head: head)
 
       expect(result.keys).to eq(%w[schema_version head since window_days max_commits max_files_per_commit
-                                   line_stats hunk_budget indexed_paths_sha256 truncated commits paths])
+                                   line_stats hunk_budget indexed_paths_sha256 history_rewrites truncated commits
+                                   paths])
       expect(result).to include('schema_version' => 1, 'head' => second, 'window_days' => 365,
                                 'since' => (today - 365).iso8601, 'truncated' => false)
       expect(result['commits'].map { |row| row['sha'] }).to eq([second, first])
@@ -219,19 +220,26 @@ RSpec.describe Woods::GitCommitTable do
   end
 
   describe 'history_rewrites' do
-    it 'records the rewrite digest after the path digest, only when there is one' do
+    it 'records the rewrite state after the path digest, explicitly none for a plain history' do
       commit('root', { 'app/a.rb' => 'a' })
 
       plain = table.build(%w[app/a.rb], head: head)
       rewritten = table.build(%w[app/a.rb], head: head, history_rewrites: 'd' * 64)
 
-      expect(plain).not_to have_key('history_rewrites')
+      expect(plain['history_rewrites']).to eq(described_class::REWRITES_NONE)
       expect(rewritten.keys.take(rewritten.keys.index('truncated')).last(2))
         .to eq(%w[indexed_paths_sha256 history_rewrites])
       expect(described_class.current?(plain, table.key(%w[app/a.rb], head: head))).to be(true)
       expect(described_class.current?(plain, table.key(%w[app/a.rb], head: head, history_rewrites: 'd' * 64)))
         .to be(false)
       expect(described_class.current?(rewritten, table.key(%w[app/a.rb], head: head))).to be(false)
+    end
+
+    it 'never counts a table without the field as current' do
+      commit('root', { 'app/a.rb' => 'a' })
+      legacy = table.build(%w[app/a.rb], head: head).except('history_rewrites')
+
+      expect(described_class.current?(legacy, table.key(%w[app/a.rb], head: head))).to be(false)
     end
   end
 

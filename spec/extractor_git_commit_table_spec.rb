@@ -230,8 +230,9 @@ RSpec.describe Woods::Extractor, 'commit table' do
         git('replace', original_root, stand_in)
       end
 
-      it 'records no rewrite state for a plain history, so its bytes are as before' do
-        expect(Woods::GitCommitTable.read(output)).not_to have_key('history_rewrites')
+      it 'records the explicit no-rewrites state for a plain history, and keeps that table' do
+        expect(Woods::GitCommitTable.read(output)['history_rewrites']).to eq(Woods::GitCommitTable::REWRITES_NONE)
+        expect(refresh_noting_walk).to eq([false, nil])
       end
 
       it 'walks again while a replace ref is added, kept or removed, and reuses once it is unchanged' do
@@ -256,13 +257,28 @@ RSpec.describe Woods::Extractor, 'commit table' do
         expect(messages).to eq(['Edit post', 'Another stand-in'])
       end
 
-      it 'treats a table written before the field existed as current only while nothing rewrites history' do
-        before = Woods::GitCommitTable.read(output)
-        expect(before).not_to have_key('history_rewrites')
-        expect(refresh_noting_walk).to eq([false, nil])
-
+      # A table written before the field existed cannot say whether a replace
+      # ref shaped it, even when none is left now: it is rebuilt once.
+      it 'rebuilds a legacy table without the field once, after a replacement it recorded was removed' do
         replace_root_commit
+        refresh
+        legacy = Woods::GitCommitTable.read(output).except('history_rewrites')
+        Woods::GitCommitTable.write(output, legacy, durable: false)
+        git('replace', '-d', original_root)
+
         expect(refresh_noting_walk).to eq([true, :written])
+        expect(messages).to eq(['Edit post', 'Add post'])
+        expect(Woods::GitCommitTable.read(output)['history_rewrites']).to eq(Woods::GitCommitTable::REWRITES_NONE)
+        expect(File.binread(table_path)).to eq(@plain)
+        expect(refresh_noting_walk).to eq([false, nil])
+      end
+
+      it 'rebuilds a legacy plain table once on the upgrade, with the same HEAD and paths' do
+        Woods::GitCommitTable.write(output, Woods::GitCommitTable.read(output).except('history_rewrites'),
+                                    durable: false)
+
+        expect(refresh_noting_walk).to eq([true, :written])
+        expect(File.binread(table_path)).to eq(@plain)
       end
 
       it 'digests the refs in name order, whatever order they were made in' do

@@ -1123,7 +1123,9 @@ edit does not establish that a day of commits is below the crossover.
   `history_rewrites` (replace refs and grafts) with its own and rebuilds the
   whole table from one history walk when any differs, so it matches a full
   extraction of the same tree and HEAD even when no indexed file changed.
-  A run that cannot read the replace-ref and graft state always walks.
+  A run that cannot read the replace-ref and graft state always walks, and a
+  table written before `history_rewrites` existed is rebuilt once, so the
+  first run after upgrading walks history.
   A normal `woods:extract` keeps a table that still matches; a clean
   extraction (`woods:clean` first, or a fresh output directory) forces the
   walk. A changed table alone publishes a generation. A run without readable
