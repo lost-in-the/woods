@@ -368,8 +368,23 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   # An example that shows a known source-input difference declares it in its
   # `known_source_inputs:` metadata; see IndexComparison::KNOWN_SOURCE_INPUT_DIFFERENCES.
   def differences(incremental_dir, full_dir, **options)
-    known = RSpec.current_example.metadata.fetch(:known_source_inputs, {})
+    known = RSpec.current_example.metadata.fetch(:known_source_inputs, {}).transform_values do |scopes|
+      scopes.to_h { |scope, paths| [scope, paths == :randomized_artifacts ? randomized_artifacts(scope) : paths] }
+    end
     IndexComparison.differences(incremental_dir, full_dir, known: known, **options)
+  end
+
+  # The paths the randomized operations can create in one whole-app family's
+  # scope: an anchored pattern for each ARTIFACT_TEMPLATES entry the family's
+  # own rule matches, allowing the `r<n>_` prefixes {#renamed_path} adds.
+  def randomized_artifacts(scope)
+    rules = Woods::PathDispatcher.whole_app_rules.select { |rule| "whole:#{rule.extractor_key}" == scope }
+    ARTIFACT_TEMPLATES.filter_map do |template|
+      next unless rules.any? { |rule| rule.matches?(template.call(0)) }
+
+      dir, base = File.split(template.call('{N}'))
+      %r{\A#{Regexp.escape(dir)}/(?:r\d+_)*#{Regexp.escape(base).gsub('\\{N\\}') { '\\d+' }}\z}
+    end
   end
 
   # Every example below trusts the comparison. These prove, on a real index
@@ -7554,7 +7569,7 @@ RSpec.describe 'Incremental extraction equivalence', :booted_app do
   describe 'randomized operation sequences' do
     DIFF_SEEDS.each do |seed|
       it "stays equivalent to a full extraction over #{DIFF_OPERATION_COUNT} random operations (seed #{seed})",
-         known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => :missing } } do
+         known_source_inputs: { unrun_family_scope: { 'whole:database_tables' => :randomized_artifacts } } do
         random = Random.new(seed)
         live = []
 

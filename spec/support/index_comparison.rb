@@ -200,10 +200,11 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
 
   # Source-input scope differences seen between an incremental and a full
   # run, by cause. An example names the ones it shows in its
-  # `known_source_inputs:` metadata, as `{ cause => { scope => paths } }`, or
-  # `{ scope => :missing }` where the paths vary (the randomized sequences):
-  # paths only the full run lists are then tolerated in that scope, and no
-  # others. Nothing else uses them.
+  # `known_source_inputs:` metadata, as `{ cause => { scope => paths } }`. A
+  # path is a String, dropped from both sides, or an anchored Regexp where the
+  # paths vary (the randomized sequences): a path only the full run lists is
+  # then tolerated when it matches, and any other difference in that scope
+  # stays a difference. Nothing else uses them.
   KNOWN_SOURCE_INPUT_DIFFERENCES = {
     unrun_family_scope: 'A whole-app family the run did not re-execute keeps its baseline scope, so a path the ' \
                         'tree gained since is missing from it (docs/SOURCE_FRESHNESS.md documents the table-family ' \
@@ -447,11 +448,17 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       scopes.each_with_object([left.dup, right.dup]) do |(scope, paths), (kept_left, kept_right)|
         mine = kept_left.fetch(scope, {})
         theirs = kept_right.fetch(scope, {})
-        dropped = paths == :missing ? theirs.keys - mine.keys : Array(paths)
+        dropped = known_paths(paths, theirs.keys - mine.keys)
         kept_left[scope] = mine.except(*dropped) if kept_left.key?(scope)
         kept_right[scope] = theirs.except(*dropped) if kept_right.key?(scope)
       end
     end
+  end
+
+  # Exact declared paths, and the full-only paths a declared pattern matches.
+  def known_paths(paths, full_only)
+    patterns, exact = Array(paths).partition { |path| path.is_a?(Regexp) }
+    exact + full_only.select { |path| patterns.any? { |pattern| pattern.match?(path) } }
   end
 
   # One line per consumer scope whose recorded paths differ.

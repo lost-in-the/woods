@@ -195,7 +195,7 @@ RSpec.describe IndexComparison do
         Dir.mktmpdir('woods-index-comparison') do |root|
           dirs = pair(root, inputs({ 'whole:events' => {}, 'unit:poros' => { 'c.rb' => 0 } }),
                       inputs({ 'whole:events' => { 'b.rb' => 1 }, 'unit:poros' => {} }))
-          missing = { unrun_family_scope: { 'whole:events' => :missing } }
+          missing = { unrun_family_scope: { 'whole:events' => [%r{\Aapp/b\.rb\z}, /\Ab\.rb\z/] } }
           exact = missing.merge(retained_unit_scope: { 'unit:poros' => %w[c.rb] })
 
           expect(described_class.compare(*dirs, known: missing))
@@ -213,6 +213,15 @@ RSpec.describe IndexComparison do
           expect(described_class.compare(*carried)).to contain_exactly(a_string_including('errors'))
           carried_known = { baseline_error_carried: { 'errors' => %w[x.rb] } }
           expect(described_class.compare(*carried, known: carried_known)).to eq([])
+          # A pattern tolerates only the full-only paths it matches, never the scope.
+          unexpected = pair(File.join(root, 'unexpected'), inputs({ 'whole:events' => {} }),
+                            inputs({ 'whole:events' => { 'b.rb' => 1, 'other.rb' => 2 } }))
+          expect(described_class.compare(*unexpected, known: missing))
+            .to eq(['source_inputs.json scope whole:events: only incremental [], only full ["other.rb"]'])
+          extra = pair(File.join(root, 'extra'), inputs({ 'whole:events' => { 'b.rb' => 1 } }),
+                       inputs({ 'whole:events' => {} }))
+          expect(described_class.compare(*extra, known: missing))
+            .to eq(['source_inputs.json scope whole:events: only incremental ["b.rb"], only full []'])
           expect { described_class.compare(*dirs, known: { invented: {} }) }
             .to raise_error(ArgumentError, /no known source-input difference named invented/)
         end
