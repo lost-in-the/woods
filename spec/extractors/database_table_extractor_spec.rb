@@ -248,13 +248,19 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
       let(:connection) { double('Connection', supports_foreign_keys?: true, indexes: [], foreign_keys: []) }
       # A run's own reads: SchemaReads vouches for the cache only inside one.
       let(:run) { ->(extractor) { Woods::Extraction::SchemaReads.with { extractor.extract_all } } }
+      # The handler lists the pool, so a run empties its cache and may read it.
+      let(:db_config) { double('DbConfig', env_name: 'test', name: 'primary', schema_cache_path: nil) }
+      let(:pool) { double('Pool', db_config: db_config, schema_reflection: double('SchemaReflection', clear!: nil)) }
       let(:catalog) do
-        pool = double('Pool')
         allow(pool).to receive(:with_connection).and_yield(connection)
         catalog_class.new([catalog_class::Table.new(name: 'widgets', models: ['Widget'], pool: pool)])
       end
 
       before do
+        handler = double('ConnectionHandler')
+        allow(handler).to receive(:connection_pool_list) { |*_role| [pool] }
+        stub_const('ActiveRecord::Base', double('Base', connection_handler: handler))
+        allow(connection).to receive(:pool).and_return(pool)
         allow(connection).to receive(:schema_cache).and_return(cache)
         allow(cache).to receive(:data_source_exists?).with('widgets').and_return(true)
         allow(cache).to receive(:primary_keys).with('widgets').and_return(%w[region_id id])
@@ -286,6 +292,29 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
 
         expect(metadata[:primary_key]).to eq('live_id')
         expect(cache).not_to have_received(:primary_keys)
+      end
+
+      it 'reads live a pool whose cache could not be emptied, and still uses the next pool emptied' do
+        stale_cache = double('SchemaCache', data_source_exists?: true, primary_keys: 'stale_id', columns: [])
+        stale = double('Connection', supports_foreign_keys?: true, indexes: [], foreign_keys: [],
+                                     schema_cache: stale_cache, primary_keys: ['live_id'], columns: [])
+        failing = double('SchemaReflection')
+        allow(failing).to receive(:clear!).and_raise(StandardError, 'clear failed')
+        animals = double('DbConfig', env_name: 'test', name: 'animals', schema_cache_path: nil)
+        broken = double('Pool', db_config: animals, schema_reflection: failing)
+        allow(broken).to receive(:with_connection).and_yield(stale)
+        allow(stale).to receive(:pool).and_return(broken)
+        handler = double('ConnectionHandler')
+        allow(handler).to receive(:connection_pool_list) { |*_role| [broken, pool] }
+        stub_const('ActiveRecord::Base', double('Base', connection_handler: handler))
+        allow(pool).to receive(:with_connection).and_yield(connection)
+        tables = [catalog_class::Table.new(name: 'gadgets', database: 'animals', models: [], pool: broken),
+                  catalog_class::Table.new(name: 'widgets', models: ['Widget'], pool: pool)]
+        units = run.call(described_class.new(table_catalog: catalog_class.new(tables)))
+
+        keys = units.to_h { |unit| [unit.identifier, unit.metadata[:primary_key]] }
+        expect(keys).to include('table:gadgets' => 'live_id', 'table:widgets' => %w[region_id id])
+        expect(stale_cache).not_to have_received(:primary_keys)
       end
 
       it 'reads the connection when SCHEMA_CACHE names a dump' do
