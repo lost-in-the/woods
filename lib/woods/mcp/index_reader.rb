@@ -80,11 +80,15 @@ module Woods
       # @param auto_refresh [Boolean] re-read the index when its published
       #   generation moves. On by default; specs that assert caching behaviour
       #   turn it off.
-      # @raise [ArgumentError] if directory doesn't exist or no published index resolves
-      def initialize(index_dir, auto_refresh: true)
+      # @param require_index [Boolean] refuse a directory that holds no
+      #   published index. False for a server awaiting its first index: the
+      #   reader then adopts the first generation through {#ensure_fresh!}.
+      # @raise [ArgumentError] if directory doesn't exist or no published index
+      #   resolves, unless +require_index+ is false
+      def initialize(index_dir, auto_refresh: true, require_index: true)
         @index_dir = Pathname.new(index_dir)
-        raise ArgumentError, "Index directory does not exist: #{index_dir}" unless @index_dir.directory?
-        unless manifest_present?
+        raise ArgumentError, "Index directory does not exist: #{index_dir}" if require_index && !@index_dir.directory?
+        if require_index && !manifest_present?
           raise ArgumentError, "Could not resolve a published Woods index in: #{@index_dir.expand_path}\n" \
                                'Expected generation.json pointing to a payload manifest.json, ' \
                                'or a legacy flat manifest.json. ' \
@@ -1591,6 +1595,7 @@ module Woods
         # Keep this local: errors during later generation refresh still surface.
         false
       end
+      public :manifest_present?
 
       # The loaded generation's payload directory, without a freshness check.
       #

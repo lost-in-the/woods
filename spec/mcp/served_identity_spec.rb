@@ -117,7 +117,8 @@ RSpec.describe 'Served index identity' do
 
       text = Dir.chdir(beta) { instructions(build_server(index_of(alpha))) }
 
-      expect(text.lines[1]).to start_with("WARNING: This index describes #{alpha}, not the launch checkout #{beta}")
+      expect(text.lines[0]).to start_with("WARNING: This index describes #{alpha}, not the launch checkout #{beta}")
+      expect(text.lines[1]).to start_with('Serving the index of checkout-alpha')
     end
 
     it 'matches an application in a subdirectory of its checkout, and not a worktree nested inside it' do
@@ -159,7 +160,7 @@ RSpec.describe 'Served index identity' do
 
       expect([unreachable.client_matches, unreachable.match_reason]).to eq([nil, 'recorded_root_unreachable'])
       expect([unrecorded.client_matches, unrecorded.match_reason]).to eq([nil, 'root_not_recorded'])
-      expect(unreachable.warnings).to be_empty
+      expect(unreachable.warnings.size).to eq(1)
     end
 
     it 'identifies an index written before roots were recorded by the checkout that holds it' do
@@ -209,7 +210,8 @@ RSpec.describe 'Served index identity' do
         end
         load wrapper
       RUBY
-      env = { 'WOODS_MCP_ALLOW_MISMATCH' => nil }.merge(env)
+      env = { 'WOODS_MCP_ALLOW_MISMATCH' => nil, 'WOODS_MCP_CLIENT_ROOT' => nil,
+              'WOODS_MCP_CLIENT_ROOT_MAP' => nil }.merge(env)
       _out, errors, status = Open3.capture3(env, RbConfig.ruby, '-e', harness, wrapper, *args, index_dir, chdir: cwd)
       [status.exitstatus, errors]
     end
@@ -246,6 +248,16 @@ RSpec.describe 'Served index identity' do
       end
     end
 
+    it 'hands --allow-mismatch to an awaiting server, which judges a generation published later' do
+      alpha = checkout('checkout-alpha')
+      FileUtils.rm_r(index_of(alpha))
+
+      code, errors = launch(index_of(alpha), cwd: alpha, args: ['--await-index', '--allow-mismatch'])
+
+      expect(code).to eq(42), errors
+      expect(errors).to include('ALLOW=1')
+    end
+
     it 'warns on a branch difference but connects' do
       alpha = checkout('checkout-alpha', branch: 'main')
       File.write(File.join(alpha, '.git', 'HEAD'), "ref: refs/heads/topic\n")
@@ -263,6 +275,342 @@ RSpec.describe 'Served index identity' do
 
       expect(code).to eq(42), errors
       expect(errors).to include("Index written by Woods 0.0.1, this reader is #{Woods::VERSION}")
+    end
+
+    # A launcher that crosses into a shared container runs in the checkout the
+    # container mounts, so its own directory always matches the index there.
+    # Only the client root the session hands over can tell the two apart.
+    describe 'with the client root of a session in another checkout' do
+      { 'the environment' => ->(root) { { env: { 'WOODS_MCP_CLIENT_ROOT' => root } } },
+        'the flag' => ->(root) { { args: ['--client-root', root] } },
+        'the flag with =' => ->(root) { { args: ["--client-root=#{root}"] } } }.each do |form, declare|
+        it "refuses when the launch directory matches the index but the client root, given by #{form}, does not" do
+          alpha = checkout('checkout-alpha')
+          beta = checkout('checkout-beta')
+
+          code, errors = launch(index_of(alpha), cwd: alpha, **declare.call(beta))
+
+          expect(code).to eq(1), errors
+          expect(errors).to include("written for the checkout at #{alpha}", "launched in #{beta}",
+                                    '--allow-mismatch')
+        end
+      end
+
+      it 'connects with one warning when there is no map and the client root does not exist here' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: alpha, args: ['--client-root', '/host-only/checkout-beta'])
+
+        expect(code).to eq(42), errors
+        expect(errors.lines.grep(/Warning/).size).to eq(1)
+        expect(errors).to include("the client's checkout is unknown", '/host-only/checkout-beta',
+                                  '--client-root-map')
+      end
+
+      it 'connects without a warning when the client root is the served checkout' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: File.join(alpha, 'tmp'), args: ['--client-root', alpha])
+
+        expect(code).to eq(42), errors
+        expect(errors).not_to include('Warning', 'Error')
+      end
+    end
+
+    # A map describes a bind mount, which is the same for every session; the
+    # client root is the session's own directory on the client's side.
+    describe 'with a client root map' do
+      it 'translates a client root under a mapped prefix and serves its own checkout without a warning' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/checkout-alpha',
+                                                      '--client-root-map', "/host/wts=#{@base}"])
+
+        expect(code).to eq(42), errors
+        expect(errors).not_to include('Warning', 'Error')
+      end
+
+      it 'refuses the index of the mounted checkout for a session in another mapped worktree' do
+        alpha = checkout('checkout-alpha')
+        checkout('checkout-beta')
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/checkout-beta',
+                                                      "--client-root-map=/host/wts=#{@base}"])
+
+        expect(code).to eq(1), errors
+        expect(errors).to include("written for the checkout at #{alpha}",
+                                  "launched in #{File.join(@base, 'checkout-beta')}")
+      end
+
+      it 'refuses a client root under no mapped prefix, naming it, and serves it under --allow-mismatch' do
+        alpha = checkout('checkout-alpha')
+        args = ['--client-root', '/host/checkout-beta', '--client-root-map', "/host/checkout-alpha=#{alpha}"]
+
+        refused, refusal = launch(index_of(alpha), cwd: alpha, args: args)
+        allowed, warning = launch(index_of(alpha), cwd: alpha, args: ['--allow-mismatch', *args])
+
+        expect(refused).to eq(1), refusal
+        expect(refusal).to include('/host/checkout-beta', 'no --client-root-map prefix', 'no mount covers it',
+                                   '--allow-mismatch', 'WOODS_MCP_ALLOW_MISMATCH=1')
+        expect(allowed).to eq(42), warning
+        expect(warning).to include("Warning: serving another checkout's index", '/host/checkout-beta', 'ALLOW=1')
+      end
+
+      it 'matches whole path segments only: /host/wt-a does not cover /host/wt-ab' do
+        alpha = checkout('checkout-alpha')
+
+        args = ['--client-root', '/host/wt-ab', '--client-root-map', "/host/wt-a=#{alpha}"]
+        code, errors = launch(index_of(alpha), cwd: alpha, args: args)
+
+        expect(code).to eq(1), errors
+        expect(errors).to include('/host/wt-ab', 'no --client-root-map prefix')
+      end
+
+      it 'takes the longest prefix, ignores trailing slashes, and reads entries from the environment' do
+        alpha = checkout('checkout-alpha')
+        map = "/host=#{@base}/nowhere:/host/wts/=#{@base}/"
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               env: { 'WOODS_MCP_CLIENT_ROOT' => '/host/wts/checkout-alpha/',
+                                                      'WOODS_MCP_CLIENT_ROOT_MAP' => map })
+
+        expect(code).to eq(42), errors
+        expect(errors).not_to include('Warning', 'Error')
+      end
+
+      it 'refuses a mapped client root that does not exist here: the mount does not hold that session' do
+        alpha = checkout('checkout-alpha')
+        args = ['--client-root', '/host/wts/checkout-gone', '--client-root-map', "/host/wts=#{@base}"]
+
+        refused, refusal = launch(index_of(alpha), cwd: alpha, args: args)
+        allowed, warning = launch(index_of(alpha), cwd: alpha, args: ['--allow-mismatch', *args])
+
+        expect(refused).to eq(1), refusal
+        expect(refusal).to include('/host/wts/checkout-gone', File.join(@base, 'checkout-gone'), 'does not exist here',
+                                   '--allow-mismatch')
+        expect(allowed).to eq(42), warning
+      end
+
+      it 'warns once for a mapped client root that exists here outside any checkout' do
+        alpha = checkout('checkout-alpha')
+        FileUtils.mkdir_p(File.join(@base, 'plain'))
+
+        code, errors = launch(index_of(alpha), cwd: alpha,
+                                               args: ['--client-root', '/host/wts/plain', '--client-root-map',
+                                                      "/host/wts=#{@base}"])
+
+        expect(code).to eq(42), errors
+        expect(errors.lines.grep(/Warning/).size).to eq(1)
+        expect(errors).to include('/host/wts/plain', 'is not inside a git checkout here')
+      end
+
+      it 'refuses a map flag without a client root, and a client root given twice' do
+        alpha = checkout('checkout-alpha')
+
+        map_only, map_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root-map', "/host=#{@base}"])
+        twice, twice_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root', '/a', '--client-root=/b'])
+
+        expect([map_only, twice]).to eq([1, 1])
+        expect(map_error).to include('--client-root-map needs --client-root')
+        expect(twice_error).to include('--client-root given more than once')
+      end
+
+      it 'ignores a map exported in the environment, with one warning, when no client root is given' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: alpha, env: { 'WOODS_MCP_CLIENT_ROOT_MAP' => "/host=#{@base}" })
+
+        expect(code).to eq(42), errors
+        expect(errors.lines.grep(/Warning/)).to eq(['Warning: WOODS_MCP_CLIENT_ROOT_MAP is set but no client root ' \
+                                                    "was given; ignoring the map.\n"])
+      end
+
+      it 'refuses a malformed map entry at startup' do
+        alpha = checkout('checkout-alpha')
+
+        ['nope', 'relative=/app', '/host=relative', '/host=', '/host=/app=/srv'].each do |entry|
+          code, errors = launch(index_of(alpha), cwd: alpha,
+                                                 args: ['--client-root', '/host/x', "--client-root-map=#{entry}"])
+
+          expect(code).to eq(1), entry
+          expect(errors).to include('--client-root-map', 'HOST_PREFIX=CONTAINER_PREFIX'), entry
+        end
+      end
+
+      it 'refuses a relative client root and an empty one' do
+        alpha = checkout('checkout-alpha')
+
+        relative, relative_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root', 'checkout-beta'])
+        empty, empty_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root='])
+
+        expect([relative, empty]).to eq([1, 1])
+        expect(relative_error).to include('--client-root must be an absolute path')
+        expect(empty_error).to include('--client-root needs a path')
+      end
+    end
+
+    describe 'ServedIdentity.map_client_root' do
+      let(:map) { Woods::MCP::ServedIdentity.parse_client_root_map('/host=/a:/host/wts=/b:/=/root-mount') }
+
+      it 'derives the path through the longest whole-segment prefix, and the root prefix last' do
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wts/topic', map))
+          .to eq(['/b/topic', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wtsx', map)).to eq(['/a/wtsx', ['/host', '/a']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wts', map)).to eq(['/b', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/elsewhere/x', map))
+          .to eq(['/root-mount/elsewhere/x', ['/', '/root-mount']])
+      end
+
+      it 'collapses repeated leading slashes and compares case-sensitively' do
+        map = Woods::MCP::ServedIdentity.parse_client_root_map('//host/wts=/b')
+
+        expect(Woods::MCP::ServedIdentity.map_client_root('//host/wts/topic', map))
+          .to eq(['/b/topic', ['/host/wts', '/b']])
+        expect(Woods::MCP::ServedIdentity.map_client_root('/Host/wts/topic', map)).to be_nil
+      end
+
+      it 'answers nil under no prefix' do
+        single = Woods::MCP::ServedIdentity.parse_client_root_map('/host/wt-a=/app')
+
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wt-ab', single)).to be_nil
+        expect(Woods::MCP::ServedIdentity.map_client_root('/host/wt-a/app/models', single))
+          .to eq(['/app/app/models', ['/host/wt-a', '/app']])
+      end
+    end
+  end
+
+  describe 'a client checkout that cannot be determined' do
+    def with_env(values)
+      saved = values.keys.to_h { |key| [key, ENV.fetch(key, nil)] }
+      values.each { |key, value| ENV[key] = value }
+      yield
+    ensure
+      saved.each { |key, value| ENV[key] = value }
+    end
+
+    it 'names the unknown side in one WARNING line of the instructions and of woods_status' do
+      alpha = checkout('checkout-alpha')
+      host = '/host-only/checkout-beta'
+
+      text, report = with_env('WOODS_MCP_CLIENT_ROOT' => host, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
+        Dir.chdir(alpha) { [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha)))] }
+      end
+
+      warning = text.lines.grep(/\AWARNING: /)
+      expect(warning.size).to eq(1)
+      expect(warning.first).to include("the client's checkout is unknown", host)
+      expect(report.fetch('identity')).to include('client_matches' => nil,
+                                                  'client_match_reason' => 'client_root_unresolved',
+                                                  'client_root' => nil, 'client_root_declared' => host,
+                                                  'warnings' => [warning.first.delete_prefix('WARNING: ').chomp])
+    end
+
+    it 'names the served checkout by the declared client root when it matches through a mapping' do
+      alpha = checkout('checkout-alpha')
+      host = '/host-only/checkout-alpha'
+
+      text, identity = with_env('WOODS_MCP_CLIENT_ROOT' => host,
+                                'WOODS_MCP_CLIENT_ROOT_MAP' => "/host-only=#{@base}") do
+        Dir.chdir(@base) do
+          [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha))).fetch('identity')]
+        end
+      end
+
+      expect(text.lines.first).to start_with("Serving the index of checkout-alpha (#{host}, mapped to #{alpha}), ")
+      expect(identity).to include('client_matches' => true, 'client_root' => alpha, 'client_root_declared' => host,
+                                  'client_root_map_entry' => "/host-only=#{@base}", 'client_root_mapped_to' => alpha,
+                                  'warnings' => [])
+    end
+
+    it 'names a session in a subdirectory by its checkout, not by the subdirectory' do
+      alpha = checkout('checkout-alpha')
+      FileUtils.mkdir_p(File.join(alpha, 'app', 'models'))
+
+      text = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/checkout-alpha/app/models',
+                      'WOODS_MCP_CLIENT_ROOT_MAP' => "/host-only=#{@base}") do
+        Dir.chdir(@base) { instructions(build_server(index_of(alpha))) }
+      end
+
+      expect(text.lines.first)
+        .to start_with("Serving the index of checkout-alpha (/host-only/checkout-alpha, mapped to #{alpha}), ")
+    end
+
+    it 'reports a client root under no mapped prefix as a mismatch with a warning' do
+      alpha = checkout('checkout-alpha')
+
+      text, identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host/checkout-beta',
+                                'WOODS_MCP_CLIENT_ROOT_MAP' => "/host/checkout-alpha=#{alpha}") do
+        Dir.chdir(alpha) do
+          [instructions(build_server(index_of(alpha))), status(build_server(index_of(alpha))).fetch('identity')]
+        end
+      end
+
+      expect(text.lines.grep(/\AWARNING: /).first).to include('/host/checkout-beta', 'no --client-root-map prefix')
+      expect(identity).to include('client_matches' => false, 'client_match_reason' => 'client_root_unmapped',
+                                  'client_root' => nil, 'client_root_mapped_to' => nil)
+    end
+
+    it 'warns, naming the variable, when the map in the environment is malformed' do
+      alpha = checkout('checkout-alpha')
+
+      identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host/x', 'WOODS_MCP_CLIENT_ROOT_MAP' => 'nope') do
+        Woods::MCP::ServedIdentity.read(index_of(alpha))
+      end
+
+      expect(identity.client_matches).to be_nil
+      expect(identity.warnings.first).to include('WOODS_MCP_CLIENT_ROOT_MAP is malformed')
+    end
+
+    it 'warns for a launch outside any checkout and for an index whose checkout is unreachable' do
+      alpha = checkout('checkout-alpha')
+      outside = File.join(@base, 'plain-directory')
+      FileUtils.mkdir_p(outside)
+      detached_index = File.join(@base, 'indexes', 'copy')
+      FileUtils.mkdir_p(File.dirname(detached_index))
+      FileUtils.cp_r(index_of(alpha), detached_index)
+
+      client = Woods::MCP::ServedIdentity.read(index_of(alpha), cwd: outside)
+      unreachable = Woods::MCP::ServedIdentity.read(detached_index, cwd: alpha,
+                                                                    manifest: { 'root' => '/nonexistent-root/app' })
+      unrecorded = Woods::MCP::ServedIdentity.read(detached_index, cwd: alpha, manifest: {})
+
+      expect(client.warnings).to eq(["The launch directory #{outside} is not inside a git checkout, so this " \
+                                     "index was not compared with the client's checkout (pass --client-root " \
+                                     'to compare them).'])
+      expect(unreachable.warnings.size).to eq(1)
+      expect(unreachable.warnings.first).to include("the index's checkout is unknown", '/nonexistent-root/app')
+      expect(unrecorded.warnings.size).to eq(1)
+      expect(unrecorded.warnings.first).to include("the index's checkout is unknown", 'records no root',
+                                                   detached_index)
+    end
+
+    it 'keeps the first instructions line unchanged when no client root is declared' do
+      alpha = checkout('checkout-alpha', branch: 'main', generation: 3)
+
+      text = with_env('WOODS_MCP_CLIENT_ROOT' => nil, 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
+        Dir.chdir(alpha) { instructions(build_server(index_of(alpha))) }
+      end
+
+      expect(text.lines.first).to eq(
+        "Serving the index of checkout-alpha (#{alpha}), branch main, generation 3, " \
+        "updated 2026-11-01T10:00:00Z, written by Woods #{Woods::VERSION}.\n"
+      )
+    end
+
+    it 'describes a routed worktree by its root, never by the declared client root' do
+      alpha = checkout('checkout-alpha')
+
+      identity = with_env('WOODS_MCP_CLIENT_ROOT' => '/host-only/elsewhere', 'WOODS_MCP_CLIENT_ROOT_MAP' => nil) do
+        route = Struct.new(:root).new(alpha)
+        Thread.current[Woods::MCP::WorktreeRouting::THREAD_KEY] = route
+        Woods::MCP::Server.identity_section(index_of(alpha), nil)
+      ensure
+        Thread.current[Woods::MCP::WorktreeRouting::THREAD_KEY] = nil
+      end
+
+      expect(identity).to include(client_matches: true, client_root: alpha, client_root_declared: nil)
     end
   end
 

@@ -31,6 +31,7 @@ require_relative 'errors'
 require_relative 'hydration'
 require_relative 'index_reader'
 require_relative 'index_reader_pinning'
+require_relative 'index_wait'
 require_relative 'initialization_guidance'
 require_relative 'lookup_member'
 require_relative 'lookup_pages'
@@ -131,10 +132,20 @@ module Woods
         #     exception propagates out of `build`.
         #   - `:none` (also `false`): never; every cache fills on first use.
         #   `woods_status` reports the state under `hydration`.
+        # @param await_index [Boolean] start when +index_dir+ holds no
+        #   published index yet, or does not exist (see {IndexWait}). Such a
+        #   server has nothing to warm, so its warm-up mode is `:none`.
         # @return [MCP::Server] Configured server ready for transport
         def build(index_dir:, retriever: nil, operator: nil, feedback_store: nil, snapshot_store: nil,
-                  bootstrap_state: nil, response_format: nil, warmup: :after_handshake, retriever_reloader: nil)
-          launch_reader = IndexReader.new(index_dir)
+                  bootstrap_state: nil, response_format: nil, warmup: :after_handshake, retriever_reloader: nil,
+                  await_index: false)
+          launch_reader = await_index ? IndexReader.new(index_dir, require_index: false) : IndexReader.new(index_dir)
+          if await_index
+            index_wait = IndexWait.new(index_dir: index_dir, reader: launch_reader,
+                                       boot: { snapshots: !snapshot_store.nil?, retriever: !retriever.nil? })
+            awaiting = !index_wait.ready?
+          end
+          warmup = :none if awaiting
           retriever.bind_reader(launch_reader) if retriever.respond_to?(:bind_reader)
           # Warm the lexical corpus against the reader just bound, once, so the
           # first codebase_retrieve does not build it (F17). bind_reader keeps
@@ -263,20 +274,27 @@ module Woods
           define_snapshot_tools(server, snapshot_store, respond, respond_err, snap_missing) if snapshot_store
           define_change_impact_tool(server, index_dir, respond, respond_err) if snapshot_store
           define_notion_sync_tool(server, launch_reader, index_dir, respond, respond_err) if notion_wired?
-          define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond)
+          define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond, index_wait)
           register_resource_handler(server, launch_reader)
           WorktreeRouting.declare_root!(server)
           ToolContract.apply!(server)
           # Innermost of the dispatch prepends: inside the pin and the route,
           # so it compares the manifest the call actually read.
           BuildGap.install(server, router: router)
+          # Inside the pin, so a call is judged on the generation it reads.
+          server.singleton_class.prepend(IndexWait::Judge) if index_wait
           IndexReaderPinning.install(server, reader: launch_reader)
           WorktreeRouting.install(server, router: router)
           # Outermost of the dispatch prepends: a call waits for the warm-up
           # before it takes a generation pin, so a waiting call never holds a
           # pin an exclusive reload would have to drain.
           install_hydration(server, hydration)
-          server.instructions = InitializationGuidance.for(server.tools.keys, identity: ServedIdentity.read(index_dir))
+          # Outside even the warm-up: a call made before the first index
+          # exists answers at once (see IndexWait).
+          install_index_wait(server, index_wait) if index_wait
+          server.instructions = InitializationGuidance.for(
+            server.tools.keys, identity: ServedIdentity.read(index_dir), awaiting: (index_dir.to_s if awaiting)
+          )
 
           # Last, after every conditional registration above — the whole point is
           # that a host with Notion wired advertises the same tool order as one
@@ -305,6 +323,15 @@ module Woods
         def install_hydration(server, hydration)
           server.instance_variable_set(:@woods_hydration, hydration)
           server.singleton_class.prepend(Hydration::Dispatch)
+          server
+        end
+
+        # @param server [MCP::Server]
+        # @param index_wait [IndexWait]
+        # @return [MCP::Server]
+        def install_index_wait(server, index_wait)
+          server.instance_variable_set(:@woods_index_wait, index_wait)
+          server.singleton_class.prepend(IndexWait::Dispatch)
           server
         end
 
@@ -1345,6 +1372,9 @@ module Woods
                          'the read-through state.',
             input_schema: { type: 'object', properties: {} }
           ) do |server_context:|
+            # An awaiting server judges the generation the reload adopted
+            # before the answer describes it (see IndexWait).
+            index_wait = server.instance_variable_get(:@woods_index_wait)
             if retriever_reloader
               counts = begin
                 retriever_reloader.call(reader)
@@ -1384,17 +1414,26 @@ module Woods
                 )
               end
 
-              manifest = reader.manifest
-              payload = {
-                reloaded: true,
-                extracted_at: manifest['extracted_at'],
-                total_units: manifest['total_units'],
-                counts: manifest['counts'],
-                retriever: counts
-              }
-              respond.call(JSON.pretty_generate(payload))
+              # Pinned, so the generation judged is the one the answer describes.
+              reader.with_pinned_generation do
+                manifest = reader.manifest
+                refusal = index_wait&.mismatch_in(reader, manifest)
+                next index_wait.mismatch_tool_response('reload', refusal) if refusal
+
+                payload = {
+                  reloaded: true,
+                  extracted_at: manifest['extracted_at'],
+                  total_units: manifest['total_units'],
+                  counts: manifest['counts'],
+                  retriever: counts
+                }
+                respond.call(JSON.pretty_generate(payload))
+              end
             else
               reader.with_exclusive_reload do |manifest|
+                refusal = index_wait&.mismatch_in(reader, manifest)
+                next index_wait.mismatch_tool_response('reload', refusal) if refusal
+
                 payload = {
                   reloaded: true,
                   extracted_at: manifest['extracted_at'],
@@ -2743,12 +2782,15 @@ module Woods
           ]
         end
 
-        def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond)
+        def define_woods_status_tool(server, reader, retriever, router, bootstrap_state, hydration, respond,
+                                     index_wait = nil)
           server.define_tool(
             name: 'woods_status',
             description: 'Diagnose whether the Woods index and server are healthy. Leads with identity: the ' \
                          "index's checkout root, branch, generation and writer build, client_matches (whether that " \
-                         'is the launch checkout) and any build mismatch with this server. ' \
+                         "is the client's checkout), identity.warnings and any build mismatch with this server. " \
+                         'Before the first index is published (--await-index) index.state is awaiting_index and ' \
+                         'every other tool answers a retryable building result. ' \
                          'Returns extraction metadata ' \
                          '(last run, unit counts, git SHA, staleness in seconds), retriever/embedding configuration, ' \
                          'bootstrap state (hydrated / degraded / not_configured / failed + reason), cache hydration ' \
@@ -2773,10 +2815,17 @@ module Woods
             } }
           ) do |server_context:, source_check: 'quick', worktrees: 'summary'|
             _ = server_context
-            status = Woods::MCP::Server.build_status(
-              reader: reader, retriever: retriever, index_dir: router.current_index_dir,
-              bootstrap_state: bootstrap_state, source_check: source_check
-            )
+            route = Thread.current[WorktreeRouting::THREAD_KEY]
+            wait = index_wait if index_wait && (route.nil? || index_wait.launch_reader?(route.reader))
+            status = if wait&.phase == :building
+                       Woods::MCP::Server.awaiting_status(wait, retriever, router.current_index_dir, bootstrap_state)
+                     else
+                       Woods::MCP::Server.build_status(
+                         reader: reader, retriever: retriever, index_dir: router.current_index_dir,
+                         bootstrap_state: bootstrap_state, source_check: source_check
+                       )
+                     end
+            Woods::MCP::Server.add_wait_findings(status, wait, router.current_reader) if wait
             section = Woods::MCP::Server.worktrees_section(router, worktrees)
             status[:worktrees] = section if section
             status[:hydration] = hydration.to_h
@@ -2894,6 +2943,47 @@ module Woods
           }
         end
 
+        # The report of a server waiting for its first index (see
+        # {IndexWait}): nothing is read from the index directory but the
+        # launcher's bootstrap file, so a half-written first generation reads
+        # as still building, never as a damaged publication.
+        #
+        # @return [Hash]
+        def awaiting_status(index_wait, retriever, index_dir, bootstrap_state)
+          {
+            identity: identity_section(index_dir, nil),
+            ready: false,
+            server: { name: 'woods', version: Woods::VERSION, index_dir: index_dir.to_s,
+                      update: Woods::UpdateCheck.status_hash(background: true) },
+            index: index_wait.status,
+            retriever: { configured: !retriever.nil?, class: retriever&.class&.name },
+            bootstrap: bootstrap_state&.to_h
+          }
+        end
+
+        # What an awaiting server adds to any `woods_status` report: the
+        # refusal of a generation another checkout recorded, and the
+        # capabilities only a restart adds.
+        #
+        # @param status [Hash]
+        # @param index_wait [IndexWait]
+        # @param reader [IndexReader] the launch reader, pinned by the caller
+        # @return [Hash] +status+
+        def add_wait_findings(status, index_wait, reader)
+          refusal = begin
+            index_wait.mismatch_for(reader) if index_wait.ready?
+          rescue Woods::Generation::InvalidMarker
+            nil
+          end
+          if refusal
+            status[:ready] = false
+            status[:refusal] = { error_code: 'index_checkout_mismatch', retryable: false, message: refusal }
+          end
+          restart = index_wait.restart_recommended
+          status[:restart_recommended] = restart unless restart.empty?
+          status
+        end
+
         def build_status_payload(reader, retriever, index_dir, bootstrap_state, source_check)
           manifest = safe_manifest(reader)
           extracted_at = manifest && manifest['extracted_at']
@@ -2927,8 +3017,9 @@ module Woods
         end
 
         # Which checkout, branch, generation and build the report describes,
-        # and whether that checkout is the client's: the launch directory, or
-        # the worktree a routed call named as `root`.
+        # and whether that checkout is the client's: the launch's client
+        # ({ServedIdentity.launch_client}), or the worktree a routed call
+        # named as `root`.
         #
         # With a pinned +reader+, the generation comes from the reader's loaded
         # marker beside the +manifest+ it read, so a publication landing after
@@ -2939,7 +3030,7 @@ module Woods
           return unless index_dir
 
           route = Thread.current[WorktreeRouting::THREAD_KEY]
-          cwd = route.respond_to?(:root) ? route.root.to_s : Dir.pwd
+          cwd = route.respond_to?(:root) ? route.root.to_s : nil
           if reader.respond_to?(:loaded_marker)
             ServedIdentity.pinned(index_dir, reader: reader, manifest: manifest, cwd: cwd).to_h
           else
