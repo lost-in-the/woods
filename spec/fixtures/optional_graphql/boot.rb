@@ -210,7 +210,8 @@ Dir.mktmpdir('woods_graphql_discovery') do |root|
   compare = lambda do |label|
     oracle = Dir.mktmpdir('graphql_oracle')
     Woods::Extractor.new(output_dir: oracle).extract_all
-    differences = IndexComparison.differences(output, oracle)
+    differences = IndexComparison.differences(output, oracle,
+                                              masks: IndexComparison::DEFAULT_MASKS + %i[source_reference_added_credit])
     raise "#{label}: #{differences.inspect}" unless differences.empty?
 
     report << label

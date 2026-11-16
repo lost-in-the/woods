@@ -52,7 +52,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     # @param artifact [Symbol] a key of {IndexComparison::ARTIFACTS}
     # @param width [Symbol] one of {WIDTHS}
     # @param reason [String] why a full and an incremental run may differ here
-    # @param path [Array<String>] keys from the document root to what is masked
+    # @param path [Array<String>] keys from the document root to what is masked; `*` matches every key
     # @param wide [String, nil] why this mask may hide more than {MAX_KEY_SHARE}
     # @param default [Boolean] false for a mask only an example names explicitly
     def initialize(name:, artifact:, width:, reason:, path: [], wide: nil, default: true)
@@ -143,10 +143,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
                      'the runtime and table-family cases, not every one measured.',
              wide: 'The whole file. Its identities cannot be compared across output directories, and its ' \
                    'scope lists are not held equal to a full run.'),
-    Mask.new(name: :source_references, artifact: :source_references, width: :artifact,
-             reason: "The source-reference cache: each file's identity is a digest keyed by the output " \
-                     "directory's private key. The edges it resolves are compared in the units and the graph.",
-             wide: 'The whole file, though only files.*.identity differed between runs when measured.'),
+    Mask.new(name: :source_reference_identity, artifact: :source_references, width: :key,
+             path: %w[files * identity],
+             reason: "Each cached file's identity is a digest keyed by the output directory's private key, so " \
+                     'two indexes never share it. The cached analysis beside it is compared.'),
+    Mask.new(name: :source_reference_added_credit, artifact: :source_references, width: :key,
+             path: %w[owners * added], default: false,
+             reason: 'Which edges each owner credits to the source-reference pass. Opt-in for one fixture, where ' \
+                     'an incremental run credits an edge that a full run reaches without the pass; the edges ' \
+                     'themselves are compared in the units and the graph. Not ruled legitimate: an open question ' \
+                     'for the maintainer, declared so it stays listed instead of hidden.'),
     Mask.new(name: :outside_payload, artifact: :outside_payload, width: :artifact,
              reason: 'generation.json, locks, the source-input key and the snapshot store record publication ' \
                      'history and process state. The published payload they point at is what is compared.',
@@ -210,6 +216,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       graph_differences(incremental_dir, full_dir, active) +
       manifest_differences(incremental_dir, full_dir, active) +
       skipped_files_differences(incremental_dir, full_dir) +
+      source_reference_differences(incremental_dir, full_dir, active) +
       commit_table_differences(incremental_dir, full_dir, active) +
       analysis_differences(incremental_dir, full_dir, active) +
       flow_differences(incremental_dir, full_dir, active) +
@@ -318,6 +325,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     return [] if incremental == full
 
     ["skipped_files.json: #{brief(hash_delta(incremental, full))}"]
+  end
+
+  # The source-reference cache carries the per-file analysis an incremental
+  # run reuses, so it must match a full run's apart from its keyed identities.
+  def source_reference_differences(incremental_dir, full_dir, active = default_masks)
+    incremental = drop_keys(:source_references, read_json(incremental_dir, 'source_references.json'), active)
+    full = drop_keys(:source_references, read_json(full_dir, 'source_references.json'), active)
+    return [] if incremental == full
+
+    ["source_references.json: #{brief(hash_delta(incremental, full))}"]
   end
 
   # The commit table (`git_commits.json`) is a pure function of HEAD, the
@@ -460,14 +477,19 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
           .reduce(document) { |masked, mask| drop_path(masked, mask.path) }
   end
 
-  # A copy of +document+ without the key at +path+; unchanged when a step is
-  # missing or is not a Hash.
-  def drop_path(document, path)
-    return document unless document.is_a?(Hash)
+  # Every member of a Hash or an Array, replaced by the block's answer.
+  def each_member(collection, &block)
+    collection.is_a?(Array) ? collection.map(&block) : collection.transform_values(&block)
+  end
 
+  # A copy of +document+ without the key at +path+; unchanged when a step is
+  # missing or is not a Hash. A `*` step stands for every member of a Hash or an Array.
+  def drop_path(document, path)
     key, *rest = path
+    return each_member(document) { |value| drop_path(value, rest) } if key == '*' && document.is_a?(Enumerable)
+    return document unless document.is_a?(Hash)
     return document.except(key) if rest.empty?
-    return document unless document[key].is_a?(Hash)
+    return document unless document[key].is_a?(Enumerable)
 
     document.merge(key => drop_path(document[key], rest))
   end

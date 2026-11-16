@@ -47,7 +47,8 @@ module IndexComparison
       commit_table: /\Agit_commits\.json: /,
       graph_analysis: /\Agraph_analysis\.json: /,
       flow: %r{\Aflow artifact flows/},
-      summary: /\ASUMMARY\.md /
+      summary: /\ASUMMARY\.md /,
+      source_references: /\Asource_references\.json: /
     }.freeze
 
     SINGLE_FILES = {
@@ -105,10 +106,7 @@ module IndexComparison
     # @return [Hash{Symbol => Float}]
     def key_mask_shares
       @masks.select { |mask| mask.width == :key }.to_h do |mask|
-        sizes = documents(mask.artifact).filter_map do |_relative, document|
-          value = dig(document, mask.path)
-          [JSON.generate(value).bytesize, JSON.generate(document).bytesize] unless value.equal?(MISSING)
-        end
+        sizes = documents(mask.artifact).filter_map { |_relative, document| masked_bytes(document, mask.path) }
         [mask.name, sizes.sum(&:first).fdiv([sizes.sum(&:last), 1].max)]
       end
     end
@@ -132,6 +130,14 @@ module IndexComparison
 
     MISSING = Object.new.freeze
     private_constant :MISSING
+
+    # @return [(Integer, Integer), nil] bytes under +pattern+ and in the document, nil when nothing matches
+    def masked_bytes(document, pattern)
+      paths = concrete_paths(document, pattern)
+      return nil if paths.empty?
+
+      [paths.sum { |path| JSON.generate(dig(document, path)).bytesize }, JSON.generate(document).bytesize]
+    end
 
     def shape_violations
       MASKS.filter_map do |mask|
@@ -224,12 +230,13 @@ module IndexComparison
     end
 
     def key_probes(mask)
-      candidates = documents(mask.artifact).reject { |_name, document| dig(document, mask.path).equal?(MISSING) }
+      candidates = documents(mask.artifact).reject { |_name, document| concrete_paths(document, mask.path).empty? }
       relative, document = candidates.sort_by(&:first).sample(random: @random)
       return [] unless relative
 
-      leaves = leaf_paths(dig(document, mask.path), mask.path)
-      path = leaves.empty? ? mask.path : leaves.sample(random: @random)
+      target = concrete_paths(document, mask.path).sample(random: @random)
+      leaves = leaf_paths(dig(document, target), target)
+      path = leaves.empty? ? target : leaves.sample(random: @random)
       changed = mutate_at(document, path)
       masked_and_lifted(mask, relative, path) { write(relative, changed) }
     end
@@ -361,8 +368,24 @@ module IndexComparison
 
     def masked_path?(artifact, path)
       @masks.any? do |mask|
-        mask.artifact == artifact && mask.width == :key && path.first(mask.path.size) == mask.path
+        mask.artifact == artifact && mask.width == :key && within?(path, mask.path)
       end
+    end
+
+    # Whether +path+ lies at or under +pattern+, a `*` step matching any key.
+    def within?(path, pattern)
+      path.size >= pattern.size && pattern.each_with_index.all? { |step, index| ['*', path[index]].include?(step) }
+    end
+
+    # Every existing path in +document+ that +pattern+ names, `*` expanded.
+    def concrete_paths(document, pattern, prefix = [])
+      return [prefix] if pattern.empty?
+
+      step, *rest = pattern
+      return [] unless document.is_a?(Hash)
+
+      keys = step == '*' ? document.keys : [step] & document.keys
+      keys.flat_map { |key| concrete_paths(document[key], rest, prefix + [key]) }
     end
 
     # Paths to every scalar under +value+, and to every empty container.

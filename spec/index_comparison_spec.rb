@@ -138,6 +138,27 @@ RSpec.describe IndexComparison do
       end
     end
 
+    it 'compares the source-reference cache except its keyed identities' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        left = File.join(root, 'incremental')
+        right = File.join(root, 'full')
+        write_index(left, note: 'same')
+        write_index(right, note: 'same')
+        cache = lambda do |identity, analysis|
+          { 'files' => { 'a.rb' => { 'identity' => identity, 'analysis' => analysis } } }
+        end
+        File.write(File.join(left, 'source_references.json'), JSON.generate(cache.call('a' * 64, ['Post'])))
+        File.write(File.join(right, 'source_references.json'), JSON.generate(cache.call('b' * 64, ['Post'])))
+
+        expect(described_class.compare(left, right)).to eq([])
+        File.write(File.join(right, 'source_references.json'), JSON.generate(cache.call('b' * 64, ['Comment'])))
+        expect(described_class.compare(left, right))
+          .to contain_exactly(a_string_starting_with('source_references.json: '))
+      end
+      owners = { 'owners' => [{ 'identifier' => 'A', 'added' => [{ 'target' => 'B' }] }] }
+      expect(described_class.mask(:source_reference_added_credit, owners)).to eq('owners' => [{ 'identifier' => 'A' }])
+    end
+
     it 'prints the masks on success only when asked' do
       Dir.mktmpdir('woods-index-comparison') do |root|
         left = File.join(root, 'incremental')
