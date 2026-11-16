@@ -7,6 +7,7 @@ require 'set'
 
 require_relative 'input_budget'
 require_relative '../atomic_file'
+require_relative '../diagnostic_redaction'
 require_relative '../storage_identity'
 require_relative '../generation'
 require_relative '../extracted_unit'
@@ -550,7 +551,7 @@ module Woods
         # with it. Reconciliation and the presence check both degrade to their
         # pre-#211 behaviour (skip, and trust the checkpoint).
         warn "[woods] could not read existing ids from #{@vector_store.class} " \
-             "(#{e.class}: #{e.message}) — skipping durable-store reconciliation this run."
+             "(#{DiagnosticRedaction.describe(e)}) — skipping durable-store reconciliation this run."
         @durable_ids = nil
       end
 

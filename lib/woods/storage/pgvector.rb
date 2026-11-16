@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'json'
+require_relative '../diagnostic_redaction'
 require_relative 'vector_store'
 
 module Woods
@@ -283,7 +284,7 @@ module Woods
 
           ids = entries.map { |entry| entry[:id] }
           raise Woods::Error,
-                "pgvector batch upsert hit a duplicate-row conflict (#{e.class}: #{e.message.strip}). " \
+                "pgvector batch upsert hit a duplicate-row conflict (#{DiagnosticRedaction.describe(e).strip}). " \
                 "Batch ids: #{ids.join(', ')}"
         end
 

@@ -4,6 +4,7 @@
 # explicit so +filter_by_type+ works on the whole supported range.
 require 'set'
 
+require_relative 'diagnostic_redaction'
 require_relative 'retrieval/query_classifier'
 require_relative 'retrieval/search_executor'
 require_relative 'retrieval/ranker'
@@ -121,10 +122,11 @@ module Woods
       # @return [String] which store failed (e.g. +"metadata"+)
       attr_reader :store
 
-      # @param message [String] includes the underlying error class and message
+      # @param message [String] includes the underlying error class and
+      #   message; stored with connection details redacted
       # @param store [Symbol, String] the failing store component
       def initialize(message, store: :metadata)
-        super(message)
+        super(DiagnosticRedaction.redact(message))
         @store = store.to_s
       end
     end

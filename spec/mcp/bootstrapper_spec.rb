@@ -447,6 +447,17 @@ RSpec.describe Woods::MCP::Bootstrapper do
       end
     end
 
+    it 'prints a hydration failure without connection details' do
+      Dir.mktmpdir do |dir|
+        allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
+          RuntimeError, 'unable to open database: dbname=d-fakesecretmarker password=pw-fakesecretmarker'
+        )
+        expect { described_class.build_retriever(index_dir: dir) }
+          .to output(satisfy { |err| err.include?('metadata hydration failed') && !err.include?('fakesecretmarker') })
+          .to_stderr
+      end
+    end
+
     it 'returns a non-nil retriever when metadata hydration raises a transient StandardError' do
       Dir.mktmpdir do |dir|
         allow(Woods::Storage::Snapshotter::Metadata).to receive(:load_or_empty).and_raise(
@@ -514,6 +525,21 @@ RSpec.describe Woods::MCP::Bootstrapper do
                                   '(ActiveRecord::ConnectionNotEstablished: refused)')
           expect(e.details).to eq(stores: { vector_store: :in_memory, metadata_store: :in_memory,
                                             graph_store: :in_memory })
+        end
+      end
+    end
+
+    it 'reports a store failure without connection details, and without it as the cause' do
+      Woods.configuration.embedding_provider = nil
+      Woods.configuration.embedding_options = nil
+      Dir.mktmpdir do |dir|
+        write_fake_snapshot(dir)
+        allow_any_instance_of(Woods::Builder).to receive(:build_retriever)
+          .and_raise(Woods::Error, "setup failed:\nhost=db-fakesecretmarker password='pw-fakesecretmarker'")
+
+        expect { described_class.build_retriever(index_dir: dir) }.to raise_error(Woods::MCP::BootstrapError) do |e|
+          expect(e.message).to eq('index stores could not be opened: setup failed: host=[REDACTED] password=[REDACTED]')
+          expect(e.cause).to be_nil
         end
       end
     end

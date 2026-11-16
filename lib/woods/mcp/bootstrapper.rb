@@ -826,7 +826,7 @@ module Woods
           "index stores could not be opened: #{e.message.gsub(/\s*\n\s*/, ' ').strip}",
           details: { stores: { vector_store: config.vector_store, metadata_store: config.metadata_store,
                                graph_store: config.graph_store } }
-        )
+        ), cause: nil
       rescue ArgumentError => e
         raise unless e.message.match?(UNKNOWN_STORE_MESSAGE)
 
@@ -939,7 +939,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] graph hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] graph hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:graph, e)
         nil
       end
@@ -1062,7 +1062,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] vector hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] vector hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:vector, e)
         nil
       end
@@ -1078,7 +1078,7 @@ module Woods
       rescue StandardError => e
         raise if strict
 
-        warn "[woods-mcp] metadata hydration failed (#{e.class}: #{e.message}); starting with empty store"
+        warn "[woods-mcp] metadata hydration failed (#{DiagnosticRedaction.describe(e)}); starting with empty store"
         state&.record_hydration_failure(:metadata, e)
         nil
       end

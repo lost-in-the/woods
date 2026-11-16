@@ -593,6 +593,17 @@ RSpec.describe Woods::Storage::VectorStore::Qdrant do
       expect(http).to have_received(:request).once
     end
 
+    it 'names a transport failure without connection details' do
+      allow(http).to receive(:request)
+        .and_raise(SocketError, 'getaddrinfo for https://key-fakesecretmarker@qdrant.example failed')
+      allow(http).to receive(:started?).and_return(true, false, true)
+
+      expect { store.count }.to raise_error(described_class::RequestError) do |error|
+        expect(error.message).to include('Qdrant transport error: SocketError: getaddrinfo for https://[REDACTED]@')
+        expect(error.message).not_to include('fakesecretmarker')
+      end
+    end
+
     it 'wraps the error when retry also fails' do
       allow(http).to receive(:request).and_raise(Errno::ECONNRESET)
       allow(http).to receive(:started?).and_return(true, false, true)

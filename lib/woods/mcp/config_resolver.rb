@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'errors'
+require_relative '../diagnostic_redaction'
 require_relative '../resolved_config'
 
 module Woods
@@ -263,34 +264,25 @@ module Woods
       # the running Active Record has: +lease_connection+ from 7.2, whose
       # pools dropped +connection+ in 8.0, and +connection+ before 7.2.
       # Any failure, a missing +activerecord+ or +pg+ gem included, becomes
-      # one {BootstrapError}; the URL and its credentials never reach the message.
+      # one {BootstrapError} with the connection details redacted
+      # ({DiagnosticRedaction}), and without the adapter's error as its cause.
       #
       # @param url [String]
       # @return [ActiveRecord::ConnectionAdapters::AbstractAdapter]
       # @raise [Woods::MCP::BootstrapError]
       def self.pgvector_connection(url)
+        DiagnosticRedaction.register(url)
         require 'active_record'
         pool = ActiveRecord::Base.establish_connection(url)
         pool.respond_to?(:lease_connection) ? pool.lease_connection : pool.connection
       rescue StandardError, LoadError => e
         raise BootstrapError.new(
           'pgvector index could not open a database connection through WOODS_PG_URL: ' \
-          "#{e.class}: #{redact_url(e.message, url).gsub(/\s*\n\s*/, ' ').strip}",
+          "#{DiagnosticRedaction.describe(e).gsub(/\s*\n\s*/, ' ').strip}",
           details: { vector_store: 'pgvector', env_var: 'WOODS_PG_URL' }
-        )
+        ), cause: nil
       end
       private_class_method :pgvector_connection
-
-      # The URL, and its user:password part wherever it appears on its own.
-      def self.redact_url(message, url)
-        userinfo = URI.parse(url).userinfo
-        [url, userinfo].compact.reject(&:empty?).reduce(message.to_s) do |text, secret|
-          text.gsub(secret, '[REDACTED]')
-        end
-      rescue URI::Error
-        message.to_s.gsub(url, '[REDACTED]')
-      end
-      private_class_method :redact_url
 
       def self.require_store_setting!(options, key, env_name, adapter)
         return unless options[key].to_s.empty?

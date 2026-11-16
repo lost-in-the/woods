@@ -750,6 +750,23 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       expect(responses.last.dig('result', 'isError')).not_to be(true), responses.last.to_s
     end
 
+    it 'exits 2 without connection details when the database rejects the credentials' do
+      exe = File.expand_path('../../exe/woods-mcp', __dir__)
+      rejected = URI.parse(pg_url).tap do |uri|
+        uri.user = 'u-fakesecretmarker'
+        uri.password = 'pw-fakesecretmarker'
+        uri.path = '/d-fakesecretmarker'
+      end.to_s
+      _out, err, status = Open3.capture3({ 'WOODS_PG_URL' => rejected, 'OPENAI_API_KEY' => nil },
+                                         'bundle', 'exec', 'ruby', exe, index_dir, stdin_data: '')
+      err = err.force_encoding(Encoding::UTF_8).scrub
+
+      expect(status.exitstatus).to eq(2), err.gsub('fakesecretmarker', 'MARKER')
+      expect(err).to include('[woods-mcp] BootstrapError:')
+      expect(err).not_to include('fakesecretmarker')
+      expect(err).not_to match(/from .+\.rb:\d+:in/)
+    end
+
     it 'exits 2 with one BootstrapError line when the database refuses the connection' do
       exe = File.expand_path('../../exe/woods-mcp', __dir__)
       refused = URI.parse(pg_url).tap { |uri| uri.port = 1 }.to_s
@@ -758,7 +775,10 @@ RSpec.describe 'Live storage backends', :live_backends, :integration do
       err = err.force_encoding(Encoding::UTF_8).scrub
 
       expect(status.exitstatus).to eq(2), err
-      expect(err).to match(/^\[woods-mcp\] BootstrapError: index stores could not be opened: pgvector schema .*refused/)
+      # Before Active Record 7.2 the resolver's checkout connects; later
+      # versions connect lazily, at the Builder's schema setup.
+      opened = /pgvector index could not open|index stores could not be opened/
+      expect(err).to match(/^\[woods-mcp\] BootstrapError: (?:#{opened}).*refused/)
       expect(err.lines.grep(/BootstrapError/).size).to eq(1)
       expect(err).not_to match(/from .+\.rb:\d+:in/)
     end

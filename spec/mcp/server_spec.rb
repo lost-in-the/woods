@@ -1183,6 +1183,36 @@ RSpec.describe Woods::MCP::Server do
         end
       end
 
+      context 'when a store failure carries database connection details' do
+        let(:leak) { 'PG::ConnectionBad: server at "db-fakesecretmarker" failed for user "u-fakesecretmarker"' }
+        let(:retriever) do
+          instance_double(Woods::Retriever).tap do |r|
+            allow(r).to receive(:retrieve)
+              .and_raise(Woods::Retriever::StoreError.new("vector store call search failed: #{leak}", store: :vector))
+          end
+        end
+        let(:bootstrap_state) do
+          Woods::MCP::BootstrapState.new.tap { |s| s.mark(:degraded, reason: RuntimeError.new(leak)) }
+        end
+        let(:server_with_state) do
+          described_class.build(
+            index_dir: fixture_dir, retriever: retriever,
+            bootstrap_state: bootstrap_state, response_format: :json
+          )
+        end
+
+        it 'answers codebase_retrieve and woods_status without them' do
+          retrieve = call_tool(server_with_state, 'codebase_retrieve', query: 'mailer')
+          status = call_tool(server_with_state, 'woods_status')
+
+          expect(retrieve.meta[:error_code]).to eq(:degraded_index)
+          [retrieve, status].each do |response|
+            expect(JSON.generate([response.content, response.meta])).not_to include('fakesecretmarker')
+          end
+          expect(response_text(retrieve)).to include('[REDACTED]')
+        end
+      end
+
       context 'when boot reported a hydration failure (M6)' do
         let(:bootstrap_state) do
           Woods::MCP::BootstrapState.new.tap do |s|

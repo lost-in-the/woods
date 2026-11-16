@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative '../diagnostic_redaction'
 require_relative '../storage/inapplicable_backend'
 
 module Woods
@@ -23,10 +24,11 @@ module Woods
       # @return [Hash] Structured context for operator diagnostics
       attr_reader :details
 
-      # @param message [String]
+      # @param message [String] stored with connection details redacted
+      #   ({DiagnosticRedaction})
       # @param details [Hash] Structured context (artifact paths, versions, etc.)
       def initialize(message = nil, details: {})
-        super(message)
+        super(message && DiagnosticRedaction.redact(message))
         @details = details
       end
     end
@@ -163,12 +165,12 @@ module Woods
       #   caused by one
       attr_reader :cause_error
 
-      # @param message [String]
+      # @param message [String] stored with connection details redacted
       # @param generation [Integer] generation still being served
       # @param stores [Array<Symbol, String>] failing store component(s)
       # @param error [Exception, nil] underlying cause
       def initialize(message, generation:, stores:, error: nil)
-        super(message)
+        super(DiagnosticRedaction.redact(message))
         @generation = generation
         @stores = Array(stores).map(&:to_s)
         @cause_error = error

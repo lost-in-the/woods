@@ -1163,6 +1163,18 @@ RSpec.describe Woods::Cache::SolidCacheStore do
       allow(cache_double).to receive(:exist?).and_raise(StandardError, 'connection lost')
       expect(store.exist?('k')).to be false
     end
+
+    it 'warns without the connection details of the failure' do
+      logger = double('Logger', warn: nil)
+      allow(store).to receive(:logger).and_return(logger)
+      allow(cache_double).to receive(:read)
+        .and_raise(StandardError, 'connection to server at "db-fakesecretmarker" failed: password=pw-fakesecretmarker')
+
+      store.read('k')
+
+      expect(logger).to have_received(:warn)
+        .with(satisfy { |line| line.include?('[REDACTED]') && !line.include?('fakesecretmarker') })
+    end
   end
 
   describe 'corrupted JSON handling' do

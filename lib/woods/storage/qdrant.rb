@@ -6,6 +6,7 @@ require 'json'
 require 'openssl'
 require 'socket'
 require 'uri'
+require_relative '../diagnostic_redaction'
 require_relative 'vector_store'
 require_relative '../util/host_guard'
 require_relative '../util/uuid5'
@@ -174,7 +175,7 @@ module Woods
           validate_host_visibility!(uri.host.to_s, allow_private_hosts: allow_private_hosts)
           uri
         rescue URI::InvalidURIError => e
-          raise ArgumentError, "Qdrant URL is not a valid URI: #{e.message}"
+          raise ArgumentError, "Qdrant URL is not a valid URI: #{DiagnosticRedaction.redact(e.message)}"
         end
 
         def self.validate_scheme!(uri)
@@ -621,7 +622,7 @@ module Woods
             parse_response(response, path)
           rescue OpenSSL::SSL::SSLError => e
             discard_http_client
-            raise RequestError, "Qdrant TLS error: #{e.message}"
+            raise RequestError, "Qdrant TLS error: #{DiagnosticRedaction.redact(e.message)}"
           rescue Errno::ECONNREFUSED, SocketError, Net::OpenTimeout => e
             discard_http_client
             retry if attempt == 1
@@ -658,7 +659,7 @@ module Woods
 
         def transport_error(error, ambiguous:)
           RequestError.new(
-            "Qdrant transport error: #{error.class}: #{error.message}",
+            "Qdrant transport error: #{DiagnosticRedaction.describe(error)}",
             retryable: true,
             ambiguous: ambiguous
           )

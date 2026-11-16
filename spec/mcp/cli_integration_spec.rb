@@ -407,7 +407,7 @@ RSpec.describe 'MCP CLI integration' do
                                                    ))
           env = {
             'BUNDLE_GEMFILE' => File.join(gem_root, 'Gemfile'),
-            'WOODS_PG_URL' => 'postgres://woods:cli-secret@127.0.0.1:1/woods',
+            'WOODS_PG_URL' => 'postgres://u-fakesecretmarker:pw-fakesecretmarker@127.0.0.1:1/d-fakesecretmarker',
             'OPENAI_API_KEY' => nil
           }
 
@@ -417,7 +417,7 @@ RSpec.describe 'MCP CLI integration' do
           expect(status.exitstatus).to eq(2)
           expect(err).to match(/^\[woods-mcp\] BootstrapError: pgvector index could not open a database connection/)
           expect(err).to include('details: {')
-          expect(err).not_to include('cli-secret')
+          expect(err).not_to include('fakesecretmarker')
           expect(err).not_to match(/from .+\.rb:\d+:in/) # backtrace frame
         end
       end

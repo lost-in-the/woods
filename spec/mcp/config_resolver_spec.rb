@@ -198,8 +198,10 @@ RSpec.describe Woods::MCP::ConfigResolver do
       end
 
       describe 'the pgvector connection' do
-        let(:pg_url) { 'postgres://woods:s3cr%40t@db.example:5432/woods' }
+        let(:pg_url) { 'postgres://u-fakesecretmarker:pw%40fakesecretmarker@db-fakesecretmarker:5432/woods' }
         let(:adapter) { double('Adapter') }
+
+        after { Woods::DiagnosticRedaction.clear! }
 
         def write_pgvector_snapshot(dir)
           write_woods_json(dir, woods_json_hash.merge(
@@ -248,12 +250,18 @@ RSpec.describe Woods::MCP::ConfigResolver do
         end
 
         it 'reports a failed connection as one BootstrapError line naming WOODS_PG_URL, without the credentials' do
-          error = StandardError.new("could not connect to #{pg_url}\n(tried woods:s3cr%40t at db.example)")
+          error = StandardError.new(
+            'connection to server at "db-fakesecretmarker" (10.1.2.3), port 5432 failed: FATAL:  password ' \
+            "authentication failed for user \"u-fakesecretmarker\"\n(conninfo: host=db-fakesecretmarker " \
+            "user=u-fakesecretmarker password=pw@fakesecretmarker, url #{pg_url}, pw@fakesecretmarker)"
+          )
 
           expect { resolve_with_pool(raises: error) }.to raise_error(Woods::MCP::BootstrapError) do |raised|
-            expect(raised.message).to end_with('through WOODS_PG_URL: StandardError: ' \
-                                               'could not connect to [REDACTED] (tried [REDACTED] at db.example)')
+            expect(raised.message).to start_with('pgvector index could not open a database connection through ' \
+                                                 'WOODS_PG_URL: StandardError: connection to server at "[REDACTED]"')
+            expect(raised.message).not_to include('fakesecretmarker', '10.1.2.3', "\n")
             expect(raised.details).to eq(vector_store: 'pgvector', env_var: 'WOODS_PG_URL')
+            expect(raised.cause).to be_nil
           end
         end
 

@@ -192,6 +192,20 @@ RSpec.describe Woods::MCP::BootstrapState do
     end
   end
 
+  describe 'connection details in reasons' do
+    let(:leak) { 'could not connect: host=db-fakesecretmarker user=u-fakesecretmarker password=pw-fakesecretmarker' }
+
+    it 'redacts them from the reason, the hydration failures and the reload failure' do
+      state.record_hydration_failure(:metadata, RuntimeError.new(leak))
+      state.mark(:degraded, reason: RuntimeError.new(leak))
+      state.record_reload_failure(generation: 7, stores: %w[vector], reason: "RuntimeError: #{leak}")
+
+      expect(JSON.generate(state.to_h)).not_to include('fakesecretmarker')
+      expect(state.to_h[:reason]).to eq('RuntimeError: could not connect: host=[REDACTED] user=[REDACTED] ' \
+                                        'password=[REDACTED]')
+    end
+  end
+
   # M7: the reload-phase degraded condition is deliberately separate from the
   # boot machinery — a failed reload leaves the previous aligned generation
   # served, so the boot status must not flip and hydration_failures must stay

@@ -9,6 +9,7 @@ require 'time'
 require 'set'
 require 'uri'
 require_relative '../atomic_file'
+require_relative '../diagnostic_redaction'
 require_relative '../deprecation'
 require_relative '../generation'
 require_relative '../generation_pins'
@@ -1398,7 +1399,7 @@ module Woods
                 # it maps to the same reload-phase degraded shape with best-
                 # effort fields.
                 generation = reader.loaded_generation || 0
-                reason = "#{e.class}: #{e.message}"
+                reason = DiagnosticRedaction.describe(e)
                 bootstrap_state&.record_reload_failure(generation: generation,
                                                        stores: %w[vector metadata graph], reason: reason)
                 next respond_err.call(
@@ -1551,7 +1552,7 @@ module Woods
               failures = bootstrap_state.hydration_failures
               next degraded_response.call(
                 respond_err,
-                reason: failures.values.map { |e| "#{e.class}: #{e.message}" }.join('; '),
+                reason: failures.values.map { |e| DiagnosticRedaction.describe(e) }.join('; '),
                 stores: failures.keys.map(&:to_s),
                 phase: 'boot'
               )
@@ -1827,7 +1828,7 @@ module Woods
                                         identifier: e.identifier, types: e.types)
           rescue StandardError => e
             respond_err.call(
-              "Session trace failed: #{e.message}",
+              "Session trace failed: #{DiagnosticRedaction.redact(e.message)}",
               code: :internal_error,
               tool: 'session_trace',
               session_id: session_id
@@ -2191,17 +2192,17 @@ module Woods
               # silently while the task record sits at "working" until pid-death
               # (see the "rescue ScriptError anywhere a reload can happen" rule).
               logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-              logger.error("[Woods] Pipeline #{kind} failed: #{e.message}")
+              logger.error("[Woods] Pipeline #{kind} failed: #{DiagnosticRedaction.redact(e.message)}")
               # Recording the failure is the half that was missing: previously the
               # error reached a log the agent cannot read, and the tool had
               # already reported success.
-              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+              task_store&.fail!(task.id, message: DiagnosticRedaction.describe(e)) if task
             rescue Exception => e # rubocop:disable Lint/RescueException -- record the terminal state, then let the thread die with it
               # Neither a StandardError nor a ScriptError (NoMemoryError, a
               # custom Exception subclass): the thread is going to die with it
               # either way, but an opted-in task record used to stay "working"
               # with its slot and lock already released (F11).
-              task_store&.fail!(task.id, message: "#{e.class}: #{e.message}") if task
+              task_store&.fail!(task.id, message: DiagnosticRedaction.describe(e)) if task
               raise
             ensure
               lock&.release
@@ -2246,10 +2247,10 @@ module Woods
         def abandon_pipeline_task(task_store, task, error)
           return unless task_store && task
 
-          task_store.fail!(task.id, message: "The pipeline did not start: #{error.class}: #{error.message}")
+          task_store.fail!(task.id, message: "The pipeline did not start: #{DiagnosticRedaction.describe(error)}")
         rescue StandardError => e
           logger = defined?(Rails) ? Rails.logger : Logger.new($stderr)
-          logger.error("[Woods] Could not record task #{task.id} as failed: #{e.class}: #{e.message}")
+          logger.error("[Woods] Could not record task #{task.id} as failed: #{DiagnosticRedaction.describe(e)}")
         end
 
         # Mint a task record, or return nil to take the legacy path.
