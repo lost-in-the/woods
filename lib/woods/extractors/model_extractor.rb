@@ -116,7 +116,8 @@ module Woods
         # Ruby, so it gets the raw analysis composite — the display composite
         # comments concern bodies out, which Prism cannot see.
         analysis_source, segments = build_analysis_source(model, source, source_path)
-        enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments)
+        enrich_callbacks_with_side_effects(unit, source, analysis_source: analysis_source, segments: segments,
+                                                         model: model)
         MethodEffects.apply(unit, source, column_names: unit.metadata[:column_names])
 
         # Build semantic chunks for all models (summary, associations, callbacks, validations)
@@ -1042,9 +1043,10 @@ module Woods
       # @param source [String, nil] The raw model source
       # @param source_path [String, nil] The model's absolute source path
       # @return [Array(String, Array<Hash>)] the concatenated raw sources and
-      #   the `{ start:, length:, file: }` segment each part occupies, so an
-      #   operation line can be reported in its own file; `[nil, nil]` when
-      #   there is no model source
+      #   the `{ start:, length:, file:, path: }` segment each part occupies,
+      #   so an operation line can be reported in its own file and a method's
+      #   source location placed in the composite; `[nil, nil]` when there is
+      #   no model source
       def build_analysis_source(model, source, source_path = nil)
         return [source, nil] unless source
 
@@ -1052,7 +1054,7 @@ module Woods
         start = 1
         segments = parts.map do |code, path|
           length = code.count("\n") + (code.end_with?("\n") ? 0 : 1)
-          segment = { start: start, length: length, file: app_relative_path(path) }
+          segment = { start: start, length: length, file: app_relative_path(path), path: path }
           # The "\n\n" join leaves two blank lines after a part ending in a
           # newline and one after a part that does not.
           start += length + (code.end_with?("\n") ? 2 : 1)
@@ -1072,7 +1074,9 @@ module Woods
       # Enrich callback metadata with side-effect analysis.
       #
       # Uses CallbackAnalyzer to find each callback's method body and
-      # classify its side effects (column writes, job enqueues, etc.).
+      # classify its side effects (column writes, job enqueues, etc.). With
+      # the model and an analysis source, the body read is the one the model
+      # dispatches to, never the first definition of the name.
       # The analyzer parses real Ruby, so callers should hand it a
       # parse-friendly +analysis_source+ (raw model + raw concern code, see
       # {#build_analysis_source}) rather than the display composite whose
@@ -1084,13 +1088,15 @@ module Woods
       # @param analysis_source [String, nil] Parse-friendly composite source
       # @param segments [Array<Hash>, nil] where each part of
       #   +analysis_source+ came from (see {#build_analysis_source})
-      def enrich_callbacks_with_side_effects(unit, source, analysis_source: nil, segments: nil)
+      # @param model [Class, nil] the model the callbacks run on
+      def enrich_callbacks_with_side_effects(unit, source, analysis_source: nil, segments: nil, model: nil)
         return unless source && unit.metadata[:callbacks]&.any?
 
         analyzer = CallbackAnalyzer.new(
           source_code: analysis_source || unit.source_code,
           column_names: unit.metadata[:column_names] || [],
-          segments: analysis_source ? segments : nil
+          segments: analysis_source ? segments : nil,
+          model: analysis_source ? model : nil
         )
 
         unit.metadata[:callbacks] = unit.metadata[:callbacks].map do |cb|
