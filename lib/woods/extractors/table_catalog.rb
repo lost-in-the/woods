@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative 'source_origin'
+
 module Woods
   module Extractors
     # The tables the running application can reach, and the models that own
@@ -116,6 +118,9 @@ module Woods
           return nil if name.nil? || name.split('::').last.start_with?('HABTM_')
           return nil if klass.respond_to?(:abstract_class?) && klass.abstract_class?
           return nil if klass.table_name.nil?
+          # The migration bookkeeping and engine models Rails defines exist in
+          # an app that has no schema of its own; db:prepare need not give them a table.
+          return nil if SourceOrigin.constant_origin(klass) == SourceOrigin::FRAMEWORK
 
           pool = pool_of(klass)
           return { database: nil, pool: nil } if pool.nil?

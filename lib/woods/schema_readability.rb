@@ -80,14 +80,14 @@ module Woods
       "an index extracted without a readable database schema (#{causes(summary)})"
     end
 
-    # @return [String] `primary: could not connect; billing: holds no tables`
+    # @param summary [Hash] a {.build} or {.from_manifest} result
+    # @return [String] each unreadable database and why, as
+    #   `primary: could not connect; billing: holds no tables`
     def causes(summary)
       Array(summary['databases']).filter_map do |database|
         cause = CAUSES[database['state']]
         "#{database['name'] || 'default'}: #{cause}" if cause
       end.join('; ')
     end
-
-    private_class_method :causes
   end
 end

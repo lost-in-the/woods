@@ -230,6 +230,16 @@ RSpec.describe Woods::Extractors::TableCatalog do
       expect(unused).not_to have_received(:with_connection)
     end
 
+    it "never asks a database that only the framework's own models read" do
+      unused = failing_pool('primary', StandardError.new('database not found'))
+      bookkeeping = model_double('ActiveRecord::SchemaMigration', 'schema_migrations', unused)
+      allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).and_call_original
+      allow(Woods::Extractors::SourceOrigin).to receive(:constant_origin).with(bookkeeping).and_return('framework')
+
+      expect(states([bookkeeping])).to eq([])
+      expect(unused).not_to have_received(:with_connection)
+    end
+
     it 'records nothing without Active Record classes' do
       expect(described_class.schema_readability(connection_classes: [])).to eq([])
     end

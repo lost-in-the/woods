@@ -125,6 +125,8 @@ so a slow field run can name the family to profile.
 
 A full extraction reads model columns, schema headers and table units from the live database.
 It records in `schema_readability` whether it could read the database each concrete model uses.
+Models Rails itself defines (the migration bookkeeping classes before Rails 7.1, Active Storage and the other engines)
+are not counted, so an app without models of its own records `not_applicable`.
 
 ```json
 "schema_readability": {
@@ -159,6 +161,8 @@ An unreadable schema is reported in three places:
 `woods:extract` prints a warning naming each database and the fix,
 `woods:validate` lists the same warning (the index stays valid),
 and [incremental readiness](INCREMENTAL_EXTRACTION.md#incremental-readiness) asks for a full extraction.
+An incremental run or refresh over a readable index makes the same check against the live database
+when it rewrites models, table units or view units, and refuses rather than publish them without columns.
 To fix it, prepare the database (`bin/rails db:prepare`) and run `woods:extract` again,
 or seed the index from a checkout whose database is ready (`rake "woods:seed[DIR]"`).
 

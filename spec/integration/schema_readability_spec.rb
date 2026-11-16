@@ -166,6 +166,19 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
     expect(model_unit(index, 'Comment').dig('metadata', 'table_exists')).to be(false)
   end
 
+  it "asks no database on behalf of the framework's own models, so an app without models is not warned" do
+    connect(fresh_database('framework-only'))
+    # Before Rails 7.1 the migration bookkeeping classes are Active Record models.
+    bookkeeping_models = ActiveRecord::SchemaMigration < ActiveRecord::Base
+    framework = ActiveRecord::Base.descendants.select do |klass|
+      Woods::Extractors::SourceOrigin.constant_origin(klass) == Woods::Extractors::SourceOrigin::FRAMEWORK
+    end
+    expect(framework).to include(ActiveRecord::SchemaMigration) if bookkeeping_models
+
+    expect(Woods::Extractors::TableCatalog.schema_readability(connection_classes: [ActiveRecord::Base, *framework]))
+      .to eq([])
+  end
+
   it 'reports one unreachable database of two while reading the other' do
     connect(fresh_database('primary'), tables: %i[posts comments])
     ledger_base = Class.new(ActiveRecord::Base) { self.abstract_class = true }
@@ -239,6 +252,49 @@ RSpec.describe 'Booted extraction over an unreadable database schema', :booted_a
 
       expect { Woods::Extractor.new(output_dir: index).extract_changed([post]) }
         .to raise_error(Woods::ExtractionError, /Extraction failed for models/)
+    end
+
+    it 'refuses an incremental run that re-extracts a model while the database holds no tables' do
+      connect(fresh_database('emptied'), tables: %i[posts comments])
+      index = extract
+      connect(fresh_database('emptied-now'))
+      published = Woods::Generation.new(output_dir: index).current.number
+
+      post = touch(File.join(@app_root, 'app/models/post.rb'))
+
+      expect { Woods::Extractor.new(output_dir: index).extract_changed([post]) }
+        .to raise_error(Woods::ExtractionError, /cannot be read now \(primary: holds no tables\)/)
+      expect(Woods::Generation.new(output_dir: index).current.number).to eq(published)
+      expect(model_unit(index, 'Post').dig('metadata', 'table_exists')).to be(true)
+    end
+
+    it 'refuses a refresh of the models while the database holds no tables' do
+      connect(fresh_database('refreshed'), tables: %i[posts comments])
+      index = extract
+      connect(fresh_database('refreshed-now'))
+
+      expect { Woods::Extractor.new(output_dir: index).refresh(:models) }
+        .to raise_error(Woods::ExtractionError, /cannot be read now/)
+    end
+
+    it 'refuses a refresh over an unreadable baseline' do
+      connect(fresh_database('unreadable-refresh'))
+      index = extract
+
+      expect { Woods::Extractor.new(output_dir: index).refresh(:models) }
+        .to raise_error(Woods::ExtractionError, /without a readable database schema.*full woods:extract/)
+    end
+
+    it 'keeps updating units that do not read the schema while the database holds no tables' do
+      connect(fresh_database('controller-only'), tables: %i[posts comments])
+      index = extract
+      connect(fresh_database('controller-only-now'))
+      published = Woods::Generation.new(output_dir: index).current.number
+
+      Woods::Extractor.new(output_dir: index).extract_changed([touch(controller)])
+
+      expect(Woods::Generation.new(output_dir: index).current.number).to be > published
+      expect(model_unit(index, 'Post').dig('metadata', 'table_exists')).to be(true)
     end
   end
 end

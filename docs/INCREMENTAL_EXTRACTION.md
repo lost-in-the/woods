@@ -1190,7 +1190,10 @@ could not read the database schema (`schema_readability` in the
 [manifest](PUBLISHED_INDEX.md#manifest-schema-readability)).
 An incremental run over that baseline would keep every model it does not
 re-extract without columns, so `woods:incremental` and `woods:refresh` refuse it
-until a full extraction runs with the database prepared. The cache is read through the same
+until a full extraction runs with the database prepared.
+The reverse is decided by the run: over a readable baseline, a run that rewrites
+models, table units or view units while the live database cannot be read
+refuses, and the active generation stays in place. The cache is read through the same
 reader the writer uses. A malformed cache stays reader-valid and reports not
 ready; restoring the bytes reports ready again.
 

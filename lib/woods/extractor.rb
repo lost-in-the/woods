@@ -471,6 +471,12 @@ module Woods
     # @return [Array<Symbol>] extractor keys
     TABLE_CONSUMER_EXTRACTORS = %i[migrations database_views external_consumers].freeze
 
+    # Extractors whose units are read from the live database schema. A partial
+    # run that rewrites one while that schema cannot be read refuses.
+    #
+    # @return [Array<Symbol>] extractor keys
+    SCHEMA_READING_TYPES = %i[models database_tables database_views].freeze
+
     # Payload artifacts that live at the top of a payload directory rather
     # than inside a per-type directory. Used when seeding a payload from a
     # flat index — the output root also holds `generation.json`, `dumps/`,
@@ -834,6 +840,7 @@ module Woods
       end
 
       raise_on_handled_extraction_failure!
+      raise_on_unreadable_schema!(affected_types)
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
       touched.merge(finalize_incremental_unit_json(affected_types).to_a)
@@ -903,6 +910,7 @@ module Woods
       touched.merge(reconcile_model_table_edges(affected_types)) if known.include?(:database_tables)
       touched.merge(reconcile_model_mixins(affected_types)) if (known & %i[models poros concerns libs]).any?
       raise_on_handled_extraction_failure!
+      raise_on_unreadable_schema!(affected_types)
       touched.merge(profile_phase('source references') { enrich_source_references_incremental(affected_types) })
       touched.merge(profile_phase('doc references') { enrich_doc_references_incremental(affected_types) })
       touched.merge(finalize_incremental_unit_json(affected_types).to_a)
@@ -1403,6 +1411,26 @@ module Woods
       raise Woods::ExtractionError,
             "Extraction failed for #{@failed_consumers.to_a.sort.join(', ')}; " \
             'the previous generation remains active. Fix the logged source errors and retry the complete batch.'
+    end
+
+    # A partial run that rewrote models or table units read them from the
+    # live database. When it cannot read that database now, publishing would
+    # empty those units under a manifest that carries the baseline's readable
+    # record; the run refuses instead. Runs that touch neither keep going.
+    #
+    # @param affected_types [Set<Symbol>] types this run wrote or removed
+    # @return [void]
+    # @raise [Woods::ExtractionError] when the live schema is unreadable
+    def raise_on_unreadable_schema!(affected_types)
+      return if (affected_types & SCHEMA_READING_TYPES).empty?
+
+      summary = SchemaReadability.build(Extractors::TableCatalog.schema_readability)
+      return unless summary['state'] == SchemaReadability::UNREADABLE
+
+      raise Woods::ExtractionError,
+            "The database schema cannot be read now (#{SchemaReadability.causes(summary)}); publishing would " \
+            'leave the models and table units this run re-extracted without columns. The previous generation ' \
+            'remains active. Prepare the database (bin/rails db:prepare) and retry.'
     end
 
     def write_source_inputs
