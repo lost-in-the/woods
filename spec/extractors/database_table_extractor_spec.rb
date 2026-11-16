@@ -243,6 +243,70 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
       expect(described_class.new(table_catalog: catalog).extract_all.first.metadata[:foreign_keys]).to eq([])
     end
 
+    context "when Active Record's schema cache can stand in for a live read" do
+      let(:cache) { double('SchemaCache') }
+      let(:connection) { double('Connection', supports_foreign_keys?: true, indexes: [], foreign_keys: []) }
+      # A run's own reads: SchemaReads vouches for the cache only inside one.
+      let(:run) { ->(extractor) { Woods::Extraction::SchemaReads.with { extractor.extract_all } } }
+      let(:catalog) do
+        pool = double('Pool')
+        allow(pool).to receive(:with_connection).and_yield(connection)
+        catalog_class.new([catalog_class::Table.new(name: 'widgets', models: ['Widget'], pool: pool)])
+      end
+
+      before do
+        allow(connection).to receive(:schema_cache).and_return(cache)
+        allow(cache).to receive(:data_source_exists?).with('widgets').and_return(true)
+        allow(cache).to receive(:primary_keys).with('widgets').and_return(%w[region_id id])
+        allow(cache).to receive(:columns).with('widgets').and_return(schema['widgets'][:columns])
+        allow(connection).to receive(:primary_keys).and_return(['live_id'])
+        allow(connection).to receive(:columns).and_return([])
+      end
+
+      it 'reads the primary key and columns from the cache, mapped as a live read would be' do
+        metadata = run.call(described_class.new(table_catalog: catalog)).first.metadata
+
+        expect(metadata[:primary_key]).to eq(%w[region_id id])
+        expect(metadata[:columns].map { |c| c[:name] }).to eq(%w[id name created_at])
+        expect(connection).not_to have_received(:primary_keys)
+        expect(connection).not_to have_received(:columns)
+      end
+
+      it 'maps a single cached key to a string and an absent one to nil' do
+        allow(cache).to receive(:primary_keys).with('widgets').and_return('id', nil)
+        extractor = described_class.new(table_catalog: catalog)
+
+        expect(run.call(extractor).first.metadata[:primary_key]).to eq('id')
+        expect(run.call(extractor).first.metadata[:primary_key]).to be_nil
+      end
+
+      it 'reads the connection when a schema cache dump could be loaded' do
+        create_file('db/schema_cache.yml', "--- {}\n")
+        metadata = run.call(described_class.new(table_catalog: catalog)).first.metadata
+
+        expect(metadata[:primary_key]).to eq('live_id')
+        expect(cache).not_to have_received(:primary_keys)
+      end
+
+      it 'reads the connection when SCHEMA_CACHE names a dump' do
+        stub_const('ENV', ENV.to_h.merge('SCHEMA_CACHE' => 'tmp/cache.yml'))
+
+        expect(run.call(described_class.new(table_catalog: catalog)).first.metadata[:primary_key]).to eq('live_id')
+      end
+
+      it 'reads the connection outside a run' do
+        expect(described_class.new(table_catalog: catalog).extract_all.first.metadata[:primary_key]).to eq('live_id')
+        expect(cache).not_to have_received(:primary_keys)
+      end
+
+      it 'reads the connection when the cache does not know the table' do
+        allow(cache).to receive(:data_source_exists?).with('widgets').and_return(false)
+
+        expect(run.call(described_class.new(table_catalog: catalog)).first.metadata[:primary_key]).to eq('live_id')
+        expect(cache).not_to have_received(:columns)
+      end
+    end
+
     it 'skips a table whose schema cannot be read and reports the failure' do
       schema['widgets'][:columns] = nil
       extractor = described_class.new(table_catalog: catalog_for(schema))
