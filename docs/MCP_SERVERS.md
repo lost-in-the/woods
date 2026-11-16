@@ -118,25 +118,55 @@ a directory with no published index, or no directory at all, is not an error:
 When a generation is published, the next call serves it, with no restart.
 The reader adopts the first generation as it adopts any new one.
 A `generation.json` that names a payload not yet on disk still reads as `building`.
-After the first generation, damage to a later one is reported as damage (`corrupt_artifact`), never as `building`.
+A `generation.json` that exists but is malformed, or names a payload outside the index directory,
+is damage, as it is to a strict launch.
+`woods_status` reports `index.state: "unusable_publication"`,
+and every other tool answers the non-retryable `corrupt_artifact` error.
+After the first generation, damage to a later one is reported the same way, never as `building`.
+
+**Each generation is checked against the client's checkout.**
+A strict launch refuses another checkout's index before the server starts.
+An awaiting server cannot, since nothing is recorded yet.
+So it runs the same check on every generation it serves, with the same inputs and the same override.
+When a generation records another checkout and the mismatch is not allowed:
+
+- every tool but `woods_status` answers a non-retryable error, `error_code: "index_checkout_mismatch"`,
+  whose text names both checkouts and the override;
+- a resource read is refused with the same `error_code`;
+- `woods_status` reports `ready: false` and a `refusal` (`error_code`, `retryable: false`, `message`).
+
+A later generation that records the client's checkout is served again.
+`--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`) serves it with the usual warning.
 
 `bootstrap` is what `<index dir>/.bootstrap.json` says, if a launcher that started the first extraction wrote one.
 The file is untrusted.
-The server reads at most 4 KiB of it and reports only `started_at`, `command` and `state`,
+The server opens it without following a symlink and without blocking, and reads it only if it is a regular file.
+It reads at most 4 KiB and reports only `started_at`, `command` and `state`,
 each as a string of at most 256 characters, with `readable: true`.
 An oversized or malformed file is `readable: false` with `reason` `too_large` or `malformed`.
+A symlink, a FIFO or any other kind of file is no report (`bootstrap: null`).
 Woods itself never writes this file, and `--await-index` starts no extraction.
 
-Limits of a server started before its index:
+**Restart to add what startup could not wire.**
+Startup chooses the snapshot store and the semantic retriever once.
+When the first extraction makes either possible, `woods_status` lists it under `restart_recommended`:
+
+| `feature` | When | `reason` |
+|---|---|---|
+| `snapshots` | `woods.sqlite3` now exists, or `WOODS_SNAPSHOTS=true` and the index directory now exists | snapshot tools become available after a restart |
+| `semantic_retrieval` | an embedding config (`woods.json`) now exists and no retriever was wired at startup | semantic retrieval becomes available after a restart |
+
+A restarted server registers the snapshot tools and builds the semantic retriever as any server does.
+`WOODS_RETRIEVAL_MODE=lexical` needs no restart: it reads the first generation as it appears.
+
+Other limits of a server started before its index:
 
 - It does no cache warm-up (`hydration.warmup` is `none`); caches fill on first use.
-- The semantic retriever is chosen at startup, so a `woods.json` written later needs a restart.
-  `WOODS_RETRIEVAL_MODE=lexical` reads the first generation as it appears.
-- Snapshot tools register only when `woods.sqlite3` existed at startup, as always.
-- Identity is checked once, at startup, against the index directory's checkout.
-  An index published later that records another checkout is reported in `woods_status`
-  (`client_matches: false` and a warning), not refused.
+- No request creates the index directory, `WOODS_SNAPSHOTS=true` included.
+- A call with `root` is refused (`no_repository`) while the index directory does not exist.
 - `woods-mcp-http` does not take the flag.
+- `woods-mcp --await-index` with no path awaits the current directory, the directory it would serve without the flag.
+- A file given as the index directory is refused at startup, with or without the flag.
 
 You can launch the server directly when the client already handles preflight:
 
@@ -203,6 +233,7 @@ The map is a fact about the mount, so it is the same for every session:
 | `/Users/you/src/shop-worktrees/shop` | `/worktrees/shop` | served, no warning |
 | `/Users/you/src/shop-worktrees/shop-topic` | `/worktrees/shop-topic` | refused: another checkout |
 | `/Users/you/elsewhere` | (no entry covers it) | refused: no mount covers it |
+| `/Users/you/src/shop-worktrees/not-mounted-yet` | `/worktrees/not-mounted-yet`, missing | refused: mapped path does not exist here |
 
 **A single-checkout map is valid, and refuses other worktrees by design.**
 With `--client-root-map /Users/you/src/shop=/app`, a session in `shop` is served
@@ -215,6 +246,13 @@ How the map works:
 - Prefixes match whole path segments: `/host/wt-a` covers `/host/wt-a/app` but not `/host/wt-ab`.
 - The longest matching prefix wins, and trailing slashes are ignored.
 - The host side is never resolved on the container's file system: it does not exist there.
+- Prefixes compare case-sensitively, as container file systems do.
+  On macOS, whose default file system ignores case, `/Users/you/Src` does not match a `/Users/you/src` entry:
+  write the entry with the case your shell reports for the session's directory.
+- A mapped path that does not exist in the container is refused like an unmapped one:
+  the mount does not hold that session's checkout.
+  A mapped path that exists but is not inside a git checkout is a warning.
+- `--client-root-map` needs `--client-root`, and `--client-root` may be given once.
 - A malformed entry is a usage error at startup.
 - A refusal takes the same override as any other mismatch: `--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`).
 
@@ -290,13 +328,13 @@ read through the longest matching `--client-root-map` entry when a map is given.
 and the derived path. A matching mapped root names the checkout in the instructions by the host path, for example
 `Serving the index of shop-topic (/host/shop-topic, mapped to /worktrees/shop-topic)`.
 A client root under no entry of a map is a mismatch (`client_match_reason: "client_root_unmapped"`), refused like
-any other.
+any other, and so is a mapped path missing here (`client_root_mapped_missing`).
 See [the Docker process and path rule](#docker-process-and-path-rule) for why a shared container needs it.
 
 `client_matches` is `true` or `false` when both checkouts are known, and `null`
 when either is not (`client_match_reason` says which: `root_not_recorded`,
-`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped` is a
-mismatch, so `client_matches` is `false` there.
+`recorded_root_unreachable`, `client_outside_checkout`, `client_root_unresolved`). `client_root_unmapped` and
+`client_root_mapped_missing` are mismatches, so `client_matches` is `false` there.
 
 **An unknown checkout warns.** When either checkout cannot be determined, the server starts,
 and the instructions and `woods_status.identity.warnings` carry one `WARNING:` line.
