@@ -406,18 +406,25 @@ RSpec.describe 'Served index identity' do
         expect(errors).to include('/host/wts/plain', 'is not inside a git checkout here')
       end
 
-      it 'refuses a map without a client root, and a client root given twice' do
+      it 'refuses a map flag without a client root, and a client root given twice' do
         alpha = checkout('checkout-alpha')
 
         map_only, map_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root-map', "/host=#{@base}"])
-        env_only, env_error = launch(index_of(alpha), cwd: alpha,
-                                                      env: { 'WOODS_MCP_CLIENT_ROOT_MAP' => "/host=#{@base}" })
         twice, twice_error = launch(index_of(alpha), cwd: alpha, args: ['--client-root', '/a', '--client-root=/b'])
 
-        expect([map_only, env_only, twice]).to eq([1, 1, 1])
+        expect([map_only, twice]).to eq([1, 1])
         expect(map_error).to include('--client-root-map needs --client-root')
-        expect(env_error).to include('--client-root-map needs --client-root')
         expect(twice_error).to include('--client-root given more than once')
+      end
+
+      it 'ignores a map exported in the environment, with one warning, when no client root is given' do
+        alpha = checkout('checkout-alpha')
+
+        code, errors = launch(index_of(alpha), cwd: alpha, env: { 'WOODS_MCP_CLIENT_ROOT_MAP' => "/host=#{@base}" })
+
+        expect(code).to eq(42), errors
+        expect(errors.lines.grep(/Warning/)).to eq(['Warning: WOODS_MCP_CLIENT_ROOT_MAP is set but no client root ' \
+                                                    "was given; ignoring the map.\n"])
       end
 
       it 'refuses a malformed map entry at startup' do

@@ -281,6 +281,8 @@ module Woods
           # Innermost of the dispatch prepends: inside the pin and the route,
           # so it compares the manifest the call actually read.
           BuildGap.install(server, router: router)
+          # Inside the pin, so a call is judged on the generation it reads.
+          server.singleton_class.prepend(IndexWait::Judge) if index_wait
           IndexReaderPinning.install(server, reader: launch_reader)
           WorktreeRouting.install(server, router: router)
           # Outermost of the dispatch prepends: a call waits for the warm-up
@@ -2810,7 +2812,7 @@ module Woods
                          bootstrap_state: bootstrap_state, source_check: source_check
                        )
                      end
-            Woods::MCP::Server.add_wait_findings(status, wait) if wait
+            Woods::MCP::Server.add_wait_findings(status, wait, router.current_reader) if wait
             section = Woods::MCP::Server.worktrees_section(router, worktrees)
             status[:worktrees] = section if section
             status[:hydration] = hydration.to_h
@@ -2952,9 +2954,14 @@ module Woods
         #
         # @param status [Hash]
         # @param index_wait [IndexWait]
+        # @param reader [IndexReader] the launch reader, pinned by the caller
         # @return [Hash] +status+
-        def add_wait_findings(status, index_wait)
-          refusal = index_wait.mismatch
+        def add_wait_findings(status, index_wait, reader)
+          refusal = begin
+            index_wait.mismatch_for(reader) if index_wait.ready?
+          rescue Woods::Generation::InvalidMarker
+            nil
+          end
           if refusal
             status[:ready] = false
             status[:refusal] = { error_code: 'index_checkout_mismatch', retryable: false, message: refusal }

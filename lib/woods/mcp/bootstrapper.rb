@@ -31,6 +31,11 @@ module Woods
       #   published index yet, or does not exist ({IndexWait})
       # @return [String] Validated index directory path
       def self.resolve_index_dir(argv, await_index: false)
+        if await_index && [argv[0], ENV.fetch('WOODS_DIR', nil), ENV.fetch('WOODS_OUTPUT', nil)].all?(&:nil?)
+          warn 'Error: --await-index needs an index path: pass it as an argument, WOODS_DIR or WOODS_OUTPUT. ' \
+               'woods-mcp-start --checkout serves the current checkout instead.'
+          exit 1
+        end
         dir = argv[0] || ENV['WOODS_DIR'] || ENV['WOODS_OUTPUT'] || Dir.pwd
         examined = dir.empty? ? '(empty path)' : File.expand_path(dir)
         if File.exist?(dir) && !File.directory?(dir)

@@ -56,22 +56,29 @@ if ARGV.count { |arg| arg == '--client-root' || arg.start_with?('--client-root='
 end
 client_root = take_option('--client-root')
 ENV[client_root_env] = client_root if client_root
-map_entries = [ENV.fetch(client_root_map_env, nil)]
+map_flags = []
 while (entry = take_option('--client-root-map'))
-  map_entries << entry
+  map_flags << entry
 end
-map_value = map_entries.compact.reject(&:empty?).join(Woods::MCP::ServedIdentity::MAP_SEPARATOR)
-begin
-  Woods::MCP::ServedIdentity.parse_client_root_map(map_value)
-rescue Woods::MCP::ServedIdentity::InvalidClientRootMap => e
-  usage_error("--client-root-map (#{client_root_map_env}): #{e.message}")
-end
-ENV[client_root_map_env] = map_value unless map_value.empty?
 declared_client_root = ENV.fetch(client_root_env, '').strip
 if declared_client_root.empty?
-  usage_error("--client-root-map needs --client-root (#{client_root_env})") unless map_value.empty?
+  usage_error("--client-root-map needs --client-root (#{client_root_env})") unless map_flags.empty?
+  # A map exported for every launch of a shared environment says nothing
+  # without a client root to read through it.
+  unless ENV.fetch(client_root_map_env, '').strip.empty?
+    warn "Warning: #{client_root_map_env} is set but no client root was given; ignoring the map."
+  end
 elsif !declared_client_root.start_with?('/')
   usage_error("--client-root must be an absolute path as the client sees it, got #{declared_client_root}")
+else
+  map_value = [ENV.fetch(client_root_map_env, nil), *map_flags].compact.reject(&:empty?)
+                                                               .join(Woods::MCP::ServedIdentity::MAP_SEPARATOR)
+  begin
+    Woods::MCP::ServedIdentity.parse_client_root_map(map_value)
+  rescue Woods::MCP::ServedIdentity::InvalidClientRootMap => e
+    usage_error("--client-root-map (#{client_root_map_env}): #{e.message}")
+  end
+  ENV[client_root_map_env] = map_value unless map_value.empty?
 end
 
 # `--checkout` (or WOODS_MCP_CHECKOUT=1) takes no index path: it serves the

@@ -134,6 +134,27 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
       expect(status(server)).not_to have_key('refusal')
     end
 
+    it 'reads the generation it judged, even when another is published between the check and the read' do
+      server = build
+      publish(4, root: @topic)
+      published = false
+      %i[read pinned].each do |builder|
+        allow(Woods::MCP::ServedIdentity).to receive(builder).and_wrap_original do |original, *args, **options|
+          original.call(*args, **options).tap do
+            publish(5, root: @main) unless published
+            published = true
+          end
+        end
+      end
+
+      answer = call(server, 'lookup', identifier: 'Post')
+
+      expect(published).to be(true)
+      expect(answer['isError']).to be(false)
+      expect(server.instance_variable_get(:@woods_index_reader).loaded_generation).to eq(4)
+      expect_refused(call(server, 'lookup', identifier: 'Post'))
+    end
+
     it 'applies to a server that found its index at startup, too' do
       publish(1, root: @topic)
       server = build
@@ -182,6 +203,15 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
       expect_corrupt(server)
     end
 
+    it 'answers a payload pointer that names a file as corrupt' do
+      server = build
+      FileUtils.mkdir_p(File.join(@index, 'payloads'))
+      File.write(File.join(@index, 'payloads', 'gen-1'), 'not a directory')
+      File.write(File.join(@index, 'generation.json'), JSON.generate(number: 1, token: 't', payload: 'payloads/gen-1'))
+
+      expect_corrupt(server)
+    end
+
     it 'still answers building for a payload that is not written yet' do
       server = build
       FileUtils.mkdir_p(@index)
@@ -220,7 +250,7 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
       expect(status(server)).not_to have_key('restart_recommended')
 
       FileUtils.touch(File.join(@index, 'woods.sqlite3'))
-      File.write(File.join(@index, 'woods.json'), '{}')
+      File.write(File.join(@index, 'woods.json'), JSON.generate(schema_version: 1))
 
       expect(status(server).fetch('restart_recommended')).to contain_exactly(
         { 'feature' => 'snapshots', 'reason' => 'snapshot tools become available after a restart' },
@@ -235,6 +265,17 @@ RSpec.describe 'Index MCP server awaiting its first index: guards' do
       expect(File.exist?(@index)).to be(false)
       publish(1)
       expect(status(server).fetch('restart_recommended').map { |entry| entry['feature'] }).to include('snapshots')
+    end
+
+    it 'does not recommend a restart for an embedding config the restarted server would refuse' do
+      server = build_like_exe(@index, await_index: true)
+      publish(1)
+
+      ['{not json', JSON.generate(schema_version: 99), JSON.generate(%w[not a hash])].each do |config|
+        File.write(File.join(@index, 'woods.json'), config)
+
+        expect(status(server)).not_to have_key('restart_recommended'), config
+      end
     end
 
     it 'recommends nothing for lexical retrieval, which reads the first generation itself' do

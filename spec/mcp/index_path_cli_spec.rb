@@ -46,14 +46,18 @@ RSpec.describe 'Index MCP startup guidance and path selection' do
     [output, errors.force_encoding(Encoding::UTF_8).scrub, status]
   end
 
-  it 'awaits the current directory under woods-mcp --await-index with no path, as it serves it without the flag' do
+  it 'refuses woods-mcp --await-index with no index path instead of waiting in the current directory' do
     _, strict_errors, strict_status = launch('woods-mcp')
     output, errors, status = launch('woods-mcp', '--await-index')
+    _, given_errors, given_status = launch('woods-mcp', '--await-index',
+                                           env: { 'WOODS_DIR' => File.join(@directory, 'later') })
 
     expect(strict_status.exitstatus).to eq(1)
     expect(strict_errors).to include("Could not resolve a published Woods index in: #{@cwd}")
-    expect(status).to be_success, errors
-    expect(JSON.parse(output).dig('result', 'instructions')).to include("No index was published in #{@cwd}")
+    expect(status.exitstatus).to eq(1)
+    expect(output).to be_empty
+    expect(errors).to include('--await-index needs an index path')
+    expect(given_status).to be_success, given_errors
   end
 
   %w[woods-mcp woods-mcp-start].each do |executable|
