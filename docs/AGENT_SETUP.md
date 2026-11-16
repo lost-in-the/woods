@@ -229,6 +229,9 @@ From Woods `2.2.0`, `--entry-form relative|absolute` chooses what the MCP entry 
   say so, with the pinned Compose project name a linked worktree needs. Without a mount map, the entry hands over
   what the session's checkout is (`--client-identity`), so a linked worktree is refused instead of being served
   the mounted checkout's index; see [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule).
+  The preflight runs the same `docker compose exec` as the entry, with no `-w`.
+  Setup refuses a service whose working directory does not resolve the `--container-root` application, and names
+  the service's working directory and the container root.
 
 Commit `.mcp.json`. The receipt `.woods-agent-config.json` records this machine's root and target paths:
 keep it out of version control. The tool does not edit `.gitignore`; the plan's `notes` name the line to add.

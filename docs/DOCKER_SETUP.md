@@ -193,8 +193,13 @@ machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configur
   `--checkout serves the current checkout's index, but /app is not inside a git checkout.`
   Use the explicit form below, which names the index path, or mount the checkout root, with its `.git`, and set
   `working_dir` to the application.
-- The service's `working_dir` must be the application root inside the container: `woods-mcp-start --checkout`
-  finds the checkout from there.
+- The entry passes no `-w`, so the server starts in the service's `working_dir`.
+  That must be the application root inside the container, in a mount of the whole checkout.
+  For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
+  the checkout at `/app`), not the checkout root: Bundler looks for the Gemfile up from there, never down.
+  `woods-agent-config setup` runs its preflight the same way, and refuses a service whose working directory does not
+  resolve the `--container-root` application, naming both directories.
+  The generator only prints the entry and does not check the service.
 
 Checked with Claude Code 2.1.325 and Docker Compose: see
 [the Docker process and path rule](MCP_SERVERS.md#docker-process-and-path-rule) for what each case does.

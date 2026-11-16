@@ -331,6 +331,17 @@ RSpec.describe 'Install generator' do
       end
     end
 
+    it 'skips a .mcp.json that exists but cannot be read, and says what to add' do
+      FileUtils.mkdir_p(mcp_path)
+
+      stdout, stderr, status = generate('--mcp-config')
+
+      expect(status.success?).to be(true), stderr
+      expect(stdout).to match(/skip\s+\.mcp\.json \(it cannot be read: /)
+      expect(stdout).to include('woods-mcp-start --checkout --await-index')
+      expect(File.directory?(mcp_path)).to be(true)
+    end
+
     it 'leaves a .mcp.json managed by woods-agent-config to that tool' do
       content = JSON.pretty_generate('mcpServers' => {})
       File.write(mcp_path, content)
@@ -450,6 +461,26 @@ RSpec.describe 'Install generator' do
       expect(mcp_json.dig('mcpServers', 'woods')).not_to have_key('env')
     end
 
+    # A checkout root resolves symlinks, so the application root and the
+    # output_dir are compared resolved too: reached through a link, an index
+    # inside the checkout is still inside it.
+    it 'follows an output_dir inside the checkout when the application is reached through a symlink' do
+      real = File.join(@root, 'real')
+      FileUtils.mkdir_p(File.join(real, '.git'))
+      link = File.join(@root, 'link')
+      File.symlink(real, link)
+      @root = link
+
+      ['var/index', File.join(link, 'var', 'index')].each do |output_dir|
+        FileUtils.rm_f(mcp_path)
+        stdout, stderr, status = generate_with_output_dir(output_dir, '--mcp-config')
+
+        expect(status.success?).to be(true), stderr
+        expect(stdout).not_to include('outside the checkout')
+        expect(mcp_json.dig('mcpServers', 'woods', 'env')).to eq('WOODS_OUTPUT' => 'var/index')
+      end
+    end
+
     it 'writes the same bytes in two checkouts and a linked worktree' do
       roots = [File.join(@root, 'one'), File.join(@root, 'two')]
       roots.each do |root|
@@ -471,6 +502,25 @@ RSpec.describe 'Install generator' do
       end
 
       expect(outputs.uniq.size).to eq(1)
+    end
+  end
+end
+
+# An unreadable file is not an absent one: the generator never creates over it.
+RSpec.describe 'Woods::Generators::McpConfiguration.skip_reason' do
+  it 'names a read the file system refuses, distinct from an absent file' do
+    require 'generators/woods/mcp_configuration'
+    Dir.mktmpdir('woods mcp configuration ') do |root|
+      path = File.join(root, '.mcp.json')
+      File.write(path, '{}')
+      allow(File).to receive(:read).and_call_original
+      allow(File).to receive(:read).with(path).and_raise(Errno::EACCES, path)
+
+      reason = Woods::Generators::McpConfiguration.skip_reason(root, path, {})
+
+      expect(reason).to start_with('it cannot be read: ').and include('Permission denied')
+      expect(Woods::Generators::McpConfiguration.skip_reason(root, File.join(root, 'absent.json'), {}))
+        .to eq(:absent)
     end
   end
 end
