@@ -167,7 +167,7 @@ RSpec.describe Woods::SourceReferences::Pass do
                          'associations' => [{ 'name' => 'ref_target', 'type' => 'belongs_to',
                                               'target' => 'RefTarget' }],
                          'callbacks' => [{ 'type' => 'before_save', 'filter' => 'set_slug' }],
-                         'scopes' => [{ 'name' => 'recent', 'source' => 'scope :recent' }]
+                         'scopes' => [{ 'name' => 'recent', 'source' => 'scope :recent', 'confidence' => 'verified' }]
                        })
     result = run_pass
     expect(result.dependencies.fetch(%w[model RefCaller])).to eq([])
@@ -180,6 +180,19 @@ RSpec.describe Woods::SourceReferences::Pass do
         'kind' => 'scope', 'confidence' => 'verified', 'method' => 'recent' }
     ]
     expect(result.references.fetch(%w[model RefCaller]).map { |span| span.except('file_path') }).to eq(expected)
+  end
+
+  it 'publishes a scope span static when the model did not confirm the scope live' do
+    sources['app/models/ref_caller.rb'] = "class RefCaller\n  scope :dormant, -> { none }\n  " \
+                                          "scope :unlisted, -> { all }\nend\n"
+    units.first.merge!('type' => 'model', 'metadata' => {
+                         'scopes' => [{ 'name' => 'dormant', 'source' => 'scope :dormant', 'confidence' => 'static' },
+                                      { 'name' => 'unlisted', 'source' => 'scope :unlisted' }]
+                       })
+
+    spans = run_pass.references.fetch(%w[model RefCaller]).map { |span| span.values_at('method', 'confidence') }
+
+    expect(spans).to eq([%w[dormant static], %w[unlisted static]])
   end
 
   it 'keeps an inherited selector on the resolved receiver without attributing a method-definition owner' do

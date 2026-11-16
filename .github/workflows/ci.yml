@@ -242,6 +242,7 @@ jobs:
           spec/integration/lazy_routes_equivalence_spec.rb
           spec/integration/mailer_determinism_spec.rb
           spec/integration/validation_options_spec.rb
+          spec/integration/scope_owner_forms_spec.rb
           spec/integration/concurrent_extraction_pool_spec.rb
           spec/integration/writer_fencing_booted_spec.rb
           spec/integration/declaration_identity_spec.rb
