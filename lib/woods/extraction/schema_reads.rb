@@ -2,7 +2,9 @@
 
 module Woods
   module Extraction
-    # One catalog read per (database, table, kind) for the length of a run.
+    # One catalog read per (connection pool, table, kind) for the length of
+    # a run. The pool, not its configuration's labels, names the database:
+    # a model's own +establish_connection+ hash is labelled "primary" too.
     #
     # The model extractor and the database table extractor each read the
     # same tables' indexes, foreign keys and primary keys, and the model
@@ -21,12 +23,16 @@ module Woods
     module SchemaReads
       KINDS = %i[columns indexes foreign_keys primary_keys].freeze
 
+      # One read's result, and the lock that lets concurrent workers that
+      # miss the same read wait for one query instead of each running it.
+      Entry = Struct.new(:lock, :value, :done)
+
       class << self
         # @yieldreturn the block's value
         def with
           return yield if @store
 
-          @store = {}
+          @store = {}.compare_by_identity
           @lock = Mutex.new
           begin
             @cleared = RuntimeCaches.clear
@@ -62,13 +68,14 @@ module Woods
           store = @store
           return connection.public_send(kind, table) unless store
 
-          key = [database_key(connection), kind, table.to_s]
-          hit = @lock.synchronize { store.fetch(key, nil) }
-          return hit if hit
-
-          value = connection.public_send(kind, table)
-          @lock.synchronize { store[key] = value }
-          value
+          entry = @lock.synchronize do
+            (store[database_key(connection)] ||= {})[[kind, table.to_s]] ||= Entry.new(Mutex.new)
+          end
+          entry.lock.synchronize do
+            entry.value = connection.public_send(kind, table) unless entry.done
+            entry.done = true
+            entry.value
+          end
         end
 
         private
@@ -81,9 +88,10 @@ module Woods
           !pool.nil? && cleared.key?(pool)
         end
 
+        # The pool, compared by identity: two pools never share an answer,
+        # whatever their configurations are called.
         def database_key(connection)
-          config = RuntimeCaches.db_config(RuntimeCaches.pool_of(connection))
-          config ? [config.env_name, config.name] : connection.object_id
+          RuntimeCaches.pool_of(connection) || connection
         end
       end
 
@@ -109,7 +117,7 @@ module Woods
           # @return [Hash{Object => true}] the pools emptied, by identity
           def clear
             cleared = {}.compare_by_identity
-            dumps = {}
+            dumps = {}.compare_by_identity
             each_pool do |pool|
               next if dump_possible?(pool, dumps)
 
@@ -176,17 +184,19 @@ module Woods
           # +SCHEMA_CACHE+ variable or any dump file under the application's
           # +db/+ (or the directory +config.paths["db"]+ names) counts, and
           # so does an application without a root.
+          # +memo+ holds each configuration's answer by identity, since two
+          # configurations can share labels and differ in +schema_cache_path+,
+          # and the directory scan once under +:files+.
           def dump_possible?(pool, memo)
             config = db_config(pool)
-            key = config ? [config.env_name, config.name] : :unknown
-            memo.fetch(key) { memo[key] = dump_configured?(config) }
+            memo.fetch(config) { memo[config] = dump_configured?(config, memo) }
           end
 
-          def dump_configured?(config)
+          def dump_configured?(config, memo)
             return true unless ENV['SCHEMA_CACHE'].to_s.empty?
             return true if config.respond_to?(:schema_cache_path) && config.schema_cache_path
 
-            dump_file_present?
+            memo.fetch(:files) { memo[:files] = dump_file_present? }
           end
 
           def dump_file_present?

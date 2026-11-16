@@ -62,6 +62,55 @@ RSpec.describe Woods::Extraction::SchemaReads do
         expect(described_class.read(other, :columns, 'items')).to eq([:code])
       end
     end
+    it 'keeps two pools apart when their configurations share a name, as establish_connection hashes do' do
+      same_labels = double('DbConfig', env_name: 'development', name: 'primary', schema_cache_path: nil)
+      other = double('Connection', pool: double('Pool', db_config: same_labels))
+      allow(connection).to receive(:columns).with('items').and_return([:id])
+      allow(other).to receive(:columns).with('items').and_return([:code])
+
+      described_class.with do
+        expect(described_class.read(connection, :columns, 'items')).to eq([:id])
+        expect(described_class.read(other, :columns, 'items')).to eq([:code])
+      end
+    end
+
+    it 'lets concurrent misses of one read wait for a single query' do
+      started = Queue.new
+      release = Queue.new
+      calls = 0
+      allow(connection).to receive(:foreign_keys).with('widgets') do
+        calls += 1
+        started << true
+        release.pop
+        [:fk]
+      end
+
+      described_class.with do
+        first = Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
+        started.pop
+        second = Thread.new { described_class.read(connection, :foreign_keys, 'widgets') }
+        sleep 0.05 until second.status == 'sleep'
+        release << true
+        expect([first.value, second.value]).to eq([[:fk], [:fk]])
+      end
+
+      expect(calls).to eq(1)
+    end
+
+    it 'reads again after a read that raised' do
+      attempts = 0
+      allow(connection).to receive(:indexes).with('widgets') do
+        attempts += 1
+        raise StandardError, 'lost connection' if attempts == 1
+
+        [:index]
+      end
+
+      described_class.with do
+        expect { described_class.read(connection, :indexes, 'widgets') }.to raise_error(StandardError)
+        expect(described_class.read(connection, :indexes, 'widgets')).to eq([:index])
+      end
+    end
   end
 
   describe '.runtime_cache' do
@@ -185,6 +234,20 @@ RSpec.describe Woods::Extraction::SchemaReads do
       described_class.with { nil }
 
       expect(reflection).not_to have_received(:clear!)
+    end
+
+    it 'judges each configuration on its own when two share a name but one names a dump' do
+      plain = double('Pool', db_config: config, schema_reflection: reflection)
+      dumped_config = double('DbConfig', env_name: 'development', name: 'primary',
+                                         schema_cache_path: '/elsewhere/legacy_cache.yml')
+      dumped_reflection = double('SchemaReflection', clear!: nil)
+      dumped = double('Pool', db_config: dumped_config, schema_reflection: dumped_reflection)
+      allow(handler).to receive(:connection_pool_list).and_return([plain, dumped])
+
+      described_class.with { nil }
+
+      expect(reflection).to have_received(:clear!).once
+      expect(dumped_reflection).not_to have_received(:clear!)
     end
 
     it 'leaves a cache alone when the dump sits in a db directory the application moved' do
