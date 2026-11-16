@@ -64,11 +64,10 @@ module Woods
       Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
         stdin.close
         stdout.binmode
-        # Drain stderr without retaining a potentially unbounded diagnostic.
-        drain = Thread.new { stderr.read(16_384) until stderr.eof? }
+        drain = drain_stderr(stderr)
         begin
           yield stdout
-          raise ReadError, "history command exited #{wait.value.exitstatus}" unless wait.value.success?
+          raise ReadError, failure('history', wait.value, drain) unless wait.value.success?
         ensure
           stdout.close
           drain.join
@@ -130,16 +129,32 @@ module Woods
       Open3.popen3(*argv) do |stdin, stdout, stderr, wait|
         writer = Thread.new { stdin.write(input.to_s).then { stdin.close } }
         stdout.binmode
-        drain = Thread.new { stderr.read(16_384) until stderr.eof? }
+        drain = drain_stderr(stderr)
         begin
           yield stdout
-          raise ReadError, "#{label} command exited #{wait.value.exitstatus}" unless wait.value.success?
+          raise ReadError, failure(label, wait.value, drain) unless wait.value.success?
         ensure
           stdout.close
           writer.join
           drain.join
         end
       end
+    end
+
+    # Drain stderr without retaining a potentially unbounded diagnostic; the
+    # thread's value is git's first line, so a failure can name itself.
+    def drain_stderr(stderr)
+      Thread.new do
+        first = stderr.read(16_384).to_s.b.lines.first
+        stderr.read(16_384) until stderr.eof?
+        first.to_s.strip.force_encoding(Encoding::UTF_8).scrub[0, 200]
+      end
+    end
+
+    # @return [String] the exit status and git's first stderr line, if any
+    def failure(label, status, drain)
+      cause = drain.value
+      "#{label} command exited #{status.exitstatus}#{": #{cause}" unless cause.empty?}"
     end
 
     # Calls the block with each commit name and each raw record's status and

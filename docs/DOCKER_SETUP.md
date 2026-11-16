@@ -85,6 +85,11 @@ docker compose exec app bundle exec rake woods:watch
 docker compose exec app bundle exec rake woods:extract_framework
 ```
 
+Git metadata needs Git 2.31 or newer in the container.
+Debian 11 (bullseye) images such as `ruby:3.0` and `ruby:3.1` ship Git 2.30.
+Install git from bullseye-backports (now on `archive.debian.org`), or use a bookworm-based image.
+On Git 2.30, extraction says so once and continues without git metadata.
+
 Run the watcher as its own development service or process-manager entry, not as a one-off terminal command. Docker Desktop bind mounts may not deliver reliable native filesystem events; set `WOODS_WATCH_POLL=1` for polling when needed. The watcher updates structural generations automatically, while semantic vectors still require `woods:embed_incremental`.
 
 Use the application's actual Rails task entrypoint. If its root `Rakefile` wraps

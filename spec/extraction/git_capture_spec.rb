@@ -40,6 +40,12 @@ RSpec.describe Woods::Extraction::GitCapture do
 
   after { FileUtils.rm_rf(root) }
 
+  # These read real history, which a git older than 2.31 cannot walk.
+  before(:each, :capable_git) do
+    found = Woods::GitVersion.parse(Open3.capture2('git', '--version').first)
+    skip "needs Git #{Woods::GitVersion::MINIMUM} or newer (found #{found})" if Woods::GitVersion.too_old?(found)
+  end
+
   describe 'HEAD capture' do
     it 'reads the commit and branch once, and later commits do not move it' do
       sha = init_repository
@@ -89,7 +95,7 @@ RSpec.describe Woods::Extraction::GitCapture do
   end
 
   describe '#available?' do
-    it 'probes once per capture' do
+    it 'probes once per capture', :capable_git do
       init_repository
       allow(Open3).to receive(:capture3).and_call_original
 
@@ -183,7 +189,7 @@ RSpec.describe Woods::Extraction::GitCapture do
   end
 
   describe '#enrichment_summary' do
-    it 'counts every unit with facts as refreshed on a full run, and only noted units otherwise' do
+    it 'counts every unit with facts as refreshed on a full run, and only noted units otherwise', :capable_git do
       sha = init_repository
       register(:model, 'Post', path)
       register(:model, 'Comment', path)
@@ -219,7 +225,7 @@ RSpec.describe Woods::Extraction::GitCapture do
       register(:rails_source, 'rails/base', path)
     end
 
-    it 'builds the table over the application paths of the graph on a full run' do
+    it 'builds the table over the application paths of the graph on a full run', :capable_git do
       table = capture.commit_table(nil, graph: graph, full: true)
 
       expect(table['head']).to eq(git('rev-parse', 'HEAD'))
@@ -237,6 +243,73 @@ RSpec.describe Woods::Extraction::GitCapture do
       FileUtils.rm_rf(root.join('.git'))
 
       expect(capture.commit_table({ 'head' => 'old' }, graph: graph, full: false)).to be_nil
+    end
+  end
+
+  describe 'a git too old for the history walk' do
+    let(:answered) { instance_double(Process::Status, success?: true) }
+    let(:notice) { /\A\[Woods\] Git 2\.30\.2 is older than 2\.31, which git enrichment and git_commits\.json need; / }
+
+    before { Woods::GitVersion.reset_announcements! }
+    after { Woods::GitVersion.reset_announcements! }
+
+    # Every git command spawned, by its arguments.
+    let(:spawned) { [] }
+
+    def answer_version(text)
+      allow(Open3).to receive(:capture3).and_call_original
+      allow(Open3).to receive(:capture3).with('git', '--version').and_return([text, '', answered])
+      allow(Open3).to receive(:popen3).and_wrap_original do |original, *args, **options, &block|
+        spawned << args
+        original.call(*args, **options, &block)
+      end
+    end
+
+    it 'spawns no history walk, says so once on stderr, and publishes git_too_old' do
+      init_repository
+      register(:model, 'Post', path)
+      answer_version("git version 2.30.2\n")
+
+      expect { expect(capture.available?).to be(false) }.to output(notice).to_stderr
+      expect(capture.commit_table(nil, graph: graph, full: true)).to be_nil
+      summary = capture.enrichment_summary(graph: graph, full: true)
+
+      expect(spawned).not_to be_empty
+      expect(spawned.select { |args| args.include?('log') }).to be_empty
+      expect(summary).to include('state' => 'unavailable', 'reason' => 'git_too_old', 'head_sha' => nil)
+      expect(Woods::GitEnrichmentSummary.line(summary)).to start_with('Git enrichment: unavailable, git_too_old (')
+      expect(logger).to have_received(:warn).with(notice)
+    end
+
+    it 'prints the notice once across two runs of one process' do
+      init_repository
+      answer_version("git version 2.30.2\n")
+
+      expect do
+        2.times { expect(described_class.new(root: root, logger: logger).available?).to be(false) }
+      end.to output(notice).to_stderr
+    end
+
+    it 'reads history as before on a git that is new enough', :capable_git do
+      init_repository
+      answer_version("git version 2.39.3 (Apple Git-145)\n")
+
+      expect { expect(capture.available?).to be(true) }.not_to output.to_stderr
+      expect(capture.file_facts([path.to_s]).fetch('app/models/post.rb')).to include(commit_count: 1)
+    end
+
+    it 'behaves as before when the version cannot be read', :capable_git do
+      init_repository
+      answer_version("git version unknown\n")
+
+      expect { expect(capture.available?).to be(true) }.not_to output.to_stderr
+      expect(capture.file_facts([path.to_s]).fetch('app/models/post.rb')).to include(commit_count: 1)
+    end
+
+    it 'stays quiet for a source archive, whatever the git version' do
+      answer_version("git version 2.30.2\n")
+
+      expect { expect(capture.availability).to eq(available: false, reason: 'no_repository') }.not_to output.to_stderr
     end
   end
 end

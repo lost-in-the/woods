@@ -2,6 +2,7 @@
 
 require 'open3'
 require_relative 'git_command'
+require_relative 'git_version'
 
 module Woods
   # Resolves git provenance (branch + commit SHA) for the extracted codebase,
@@ -86,6 +87,14 @@ module Woods
       @source_filter_available = git_working_tree? && git_available? && rev_parse('--is-inside-work-tree') == 'true'
     end
 
+    # The installed git's version, read from the same memoized `git --version`
+    # call that answers whether git can run at all.
+    #
+    # @return [Gem::Version, nil] nil when git is missing or its answer is not a version
+    def git_version
+      GitVersion.parse(@git_version_answer) if git_available?
+    end
+
     private
 
     def present?(value)
@@ -134,7 +143,8 @@ module Woods
       return @git_available if defined?(@git_available)
 
       @git_available = begin
-        _out, _err, status = Open3.capture3('git', '--version')
+        out, _err, status = Open3.capture3('git', '--version')
+        @git_version_answer = out
         status.success?
       rescue StandardError
         false
