@@ -51,8 +51,7 @@ module Woods
 
       class << self # rubocop:disable Metrics/ClassLength
         # Rebuild the boot-time credential index from fresh Rails credentials
-        # and retain the immediately preceding set in every live scanner.
-        # Only a changed snapshot advances this process-local rotation window.
+        # and hot-swap it into every live scanner without restarting the process.
         #
         # Refresh failures propagate without replacing any live index.
         # Host rotation jobs should call this immediately after `rails credentials:edit`

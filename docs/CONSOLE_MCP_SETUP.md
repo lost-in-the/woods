@@ -637,17 +637,7 @@ Woods::Console::Server.rebuild_credential_index(rails_app: Rails.application)
 
 This reads a fresh encrypted-file and key snapshot, without changing Rails' cached application credentials, and replaces the index in every live embedded Console server in this process. Each response scan keeps one complete index; a rotation cannot change its index halfway through a response. Servers released by their transports are not retained by this registry. A later server construction also reads fresh credentials.
 
-A refresh failure (including missing files or keys, failed decryption, and invalid YAML) raises and leaves every
-existing index intact.
-Treat a failed rebuild as an operational failure: resolve the credentials deployment and retry, or restart after
-verification.
-A successful rebuild with a changed snapshot keeps the current and the immediately preceding credential sets.
-The preceding set is discarded on the next changed snapshot.
-Refreshing an unchanged snapshot does not advance that window.
-An empty mapping is a new current set, and the preceding set is kept for one rotation.
-A restarted process starts with only the credentials available then.
-Custom `rails_app:` collaborators that expose `credentials.config` remain supported; those collaborators own
-freshness of their returned config.
+A refresh failure (including missing files or keys, failed decryption, and invalid YAML) raises and leaves every existing index intact. Treat a failed rebuild as an operational failure: resolve the credentials deployment and retry, or restart after verification. A valid empty credential mapping intentionally clears the index. A successful rebuild replaces the old set rather than retaining removed secret values. Custom `rails_app:` collaborators that expose `credentials.config` remain supported; those collaborators own freshness of their returned config.
 
 The method is a no-op (returns `nil`) when no live scanner remains or when `console_credential_defense_enabled` is `false`. Normal server boot still permits unavailable credentials and falls back to the other configured defenses; this permissive boot behavior does not apply to an explicit rebuild.
 
@@ -678,10 +668,6 @@ failed eager load, on stdio and HTTP.
 - Timeout and structured-logger failure warnings name the error class only, not its message.
 
 `Server.rebuild_credential_index` refreshes the diagnostic scanners as well as the response scanners.
-A removed credential stays protected for one rotation, until the next changed credential snapshot.
-A scanner created after a refresh joins that window when its freshly read credential set matches the current set.
-A different set advances the shared window only through an explicit, successful rebuild.
-Values two rotations back are no longer held; use column or key/value redaction where old records keep them.
 
 Diagnostic pattern scanning stays on when response patterns are disabled.
 Turning off `console_credential_defense_enabled` also turns off the credential index for diagnostics.

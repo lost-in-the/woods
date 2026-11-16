@@ -121,8 +121,6 @@ The Console can expose live data, including credentials, to the agent that uses 
 Woods-owned Console diagnostic logs are scanned with the active credential index and the credential patterns,
 and each logged field is bounded in size.
 Host application, Active Record and database logs are outside that protection.
-A credential refresh keeps the current and the immediately preceding credential sets until the next changed snapshot.
-Older stored secrets need column or key/value redaction.
 
 ### MCP Transport
 

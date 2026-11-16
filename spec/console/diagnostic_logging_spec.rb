@@ -33,21 +33,13 @@ RSpec.describe 'Console diagnostic credential protection' do
     Woods::Console::Server.rebuild_credential_index(rails_app: Object.new)
   end
 
-  def verify_retention_window(&block)
-    expect_masked(secret, replacement, &block)
-    rotate('fictional-third-credential-947201')
+  # A rebuild replaces the index: the rotated-out value is no longer an
+  # indexed credential, so only the current set is masked.
+  def verify_replaced_index
     stream.truncate(0)
     stream.rewind
     yield(secret)
     expect(stream.string).to include(secret)
-    expect_masked(replacement, &block)
-  end
-
-  def expect_masked(*values)
-    values.each do |value|
-      yield(value)
-      expect(stream.string).not_to include(value)
-    end
   end
 
   it 'scans unexpected dispatch failures and refreshes the same scanner' do
@@ -65,7 +57,7 @@ RSpec.describe 'Console diagnostic credential protection' do
     message = replacement
     pipeline.call({})
     expect(stream.string).not_to include(replacement)
-    verify_retention_window do |value|
+    verify_replaced_index do |value|
       message = value
       pipeline.call({})
     end
@@ -134,7 +126,7 @@ RSpec.describe 'Console diagnostic credential protection' do
     allow(bad).to receive(:table_exists?).and_raise(StandardError, replacement)
     middleware.send(:build_model_introspection)
     expect(stream.string).not_to include(replacement)
-    verify_retention_window do |value|
+    verify_replaced_index do |value|
       allow(bad).to receive(:table_exists?).and_raise(StandardError, value)
       middleware.send(:build_model_introspection)
     end
@@ -175,7 +167,7 @@ RSpec.describe 'Console diagnostic credential protection' do
     rotate
     executor.send(:log_execution_error, StandardError.new(replacement))
     expect(stream.string).not_to include(replacement)
-    verify_retention_window { |value| executor.send(:log_execution_error, StandardError.new(value)) }
+    verify_replaced_index { |value| executor.send(:log_execution_error, StandardError.new(value)) }
   end
   it 'keeps timeout and logging-failure warnings free of exception messages' do
     stub_const('Rails', double('Rails', logger: Logger.new(stream)))

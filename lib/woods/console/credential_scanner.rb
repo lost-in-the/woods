@@ -116,14 +116,11 @@ module Woods
       # @param new_index [CredentialIndex, nil] The replacement index.
       # @return [void]
       def replace_index!(new_index)
-        @secret_index = new_index
-      end
-
-      # Immutable indexed values for the process-local rotation coordinator.
-      # Nil distinguishes disabled indexing from an intentionally empty set.
-      # @return [Set<String>, nil]
-      def indexed_secrets
-        @secret_index&.secrets
+        @secret_index = if new_index.respond_to?(:empty?) && new_index.empty?
+                          nil
+                        else
+                          new_index
+                        end
       end
 
       # Counter key emitted when {CredentialIndex} substring-matches a value
@@ -143,7 +140,7 @@ module Woods
       def initialize(disabled_patterns: [], secret_index: nil)
         disabled = Array(disabled_patterns).to_set(&:to_sym)
         @active_patterns = PATTERNS.except(*disabled)
-        @secret_index = secret_index
+        @secret_index = secret_index unless secret_index.respond_to?(:empty?) && secret_index.empty?
       end
 
       # Scan a value (String, Hash, Array, or any other object) for credentials.

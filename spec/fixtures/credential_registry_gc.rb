@@ -12,10 +12,6 @@ end
 scanner_class = Class.new do
   attr_reader :index
 
-  def indexed_secrets
-    @index&.secrets
-  end
-
   def replace_index!(index)
     @index = index
   end
@@ -29,9 +25,9 @@ live = registry.register { scanner_class.new }
     nil
   end.join
   GC.stress = true
-  registry.rebuild { Woods::Console::CredentialIndex.new(secrets: ["synthetic-credential-#{index}"]) }
+  registry.rebuild { index }
   GC.stress = false
-  raise 'live scanner was not refreshed' unless live.index.secrets.include?("synthetic-credential-#{index}")
+  raise 'live scanner was not refreshed' unless live.index == index
 end
 
 puts 'live scanners refreshed'

@@ -62,24 +62,8 @@ RSpec.describe Woods::Console::Server, '.rebuild_credential_index' do
     described_class.rebuild_credential_index(rails_app: new_app)
 
     current_index = scanner.instance_variable_get(:@secret_index)
-    expect(current_index.secrets).to include('old_secret_value_for_testing')
+    expect(current_index.secrets).not_to include('old_secret_value_for_testing')
     expect(current_index.secrets).to include('new_secret_value_for_testing')
-  end
-
-  it 'preserves both retained sets when a strict refresh cannot read the key' do
-    old_secret = 'fictional-previous-secret'
-    new_secret = 'fictional-current-secret'
-    scanner = described_class.const_get(:SCANNERS).register do
-      Woods::Console::CredentialScanner.new(secret_index: Woods::Console::CredentialIndex.new(secrets: [old_secret]))
-    end
-    described_class.rebuild_credential_index(rails_app: build_app_stub({ key: new_secret }))
-    missing_key = Class.new(StandardError)
-    stub_const('ActiveSupport::EncryptedFile::MissingKeyError', missing_key)
-    failing = double('unreadable app', credentials: double('credentials'))
-    allow(failing.credentials).to receive(:config).and_raise(missing_key)
-    expect { described_class.rebuild_credential_index(rails_app: failing) }.to raise_error(missing_key)
-    expect(scanner.scan("#{old_secret} #{new_secret}").first)
-      .to eq('[REDACTED:credential] [REDACTED:credential]')
   end
 
   it 'returns the newly built CredentialIndex' do

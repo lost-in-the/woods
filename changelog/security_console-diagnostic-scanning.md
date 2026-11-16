@@ -5,4 +5,3 @@
   A field over 8 KiB is replaced whole by a `DIAGNOSTIC_OMITTED` marker, and an unscannable one by `REDACTION_FAILED`.
   A scanning failure never ends the request, and client error wording is unchanged.
   A skipped model during HTTP startup is now logged at `warn` instead of `debug`.
-  A credential refresh keeps the immediately preceding credential set for one rotation, in response and log scanners.

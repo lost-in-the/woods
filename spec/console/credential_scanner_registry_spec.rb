@@ -27,44 +27,6 @@ RSpec.describe Woods::Console::CredentialScannerRegistry do
     scanners.each { |scanner| expect(scanner.scan('new-synthetic-secret').first).to eq('[REDACTED:credential]') }
   end
 
-  it 'keeps exactly the current and preceding credential sets across rotations' do
-    scanner = registry.register { Woods::Console::CredentialScanner.new(secret_index: old_index) }
-    registry.rebuild { new_index }
-    expect(scanner.scan('old-synthetic-secret new-synthetic-secret').first)
-      .to eq('[REDACTED:credential] [REDACTED:credential]')
-
-    third = Woods::Console::CredentialIndex.new(secrets: ['third-synthetic-secret'])
-    registry.rebuild { third }
-    expect(scanner.scan('old-synthetic-secret new-synthetic-secret third-synthetic-secret').first)
-      .to eq('old-synthetic-secret [REDACTED:credential] [REDACTED:credential]')
-  end
-
-  it 'does not advance the retention window on unchanged or failed refreshes' do
-    scanner = registry.register { Woods::Console::CredentialScanner.new(secret_index: old_index) }
-    registry.rebuild { new_index }
-    registry.rebuild { new_index }
-    expect { registry.rebuild { raise IOError } }.to raise_error(IOError)
-    expect(scanner.scan('old-synthetic-secret').first).to eq('[REDACTED:credential]')
-  end
-
-  it 'applies the active window to scanners registered after a rotation' do
-    owner = registry.register { Woods::Console::CredentialScanner.new(secret_index: old_index) }
-    registry.rebuild { new_index }
-    later = registry.register { Woods::Console::CredentialScanner.new(secret_index: new_index) }
-    expect(later.scan('old-synthetic-secret').first).to eq('[REDACTED:credential]')
-    expect(owner.scan('old-synthetic-secret').first).to eq('[REDACTED:credential]')
-  end
-
-  it 'retains the preceding set after an empty rotation, including in a new scanner' do
-    owner = registry.register { Woods::Console::CredentialScanner.new(secret_index: old_index) }
-    empty = Woods::Console::CredentialIndex.new(secrets: [])
-    registry.rebuild { empty }
-    later = registry.register { Woods::Console::CredentialScanner.new(secret_index: empty) }
-    expect(later.scan('old-synthetic-secret').first).to eq('[REDACTED:credential]')
-    registry.rebuild { new_index }
-    expect(owner.scan('old-synthetic-secret').first).to eq('old-synthetic-secret')
-  end
-
   def register_unowned_scanner(registry)
     # A returned Ruby stack frame can still conservatively root the scanner
     # on older Rubies. End its owning thread before asking GC to collect it.
