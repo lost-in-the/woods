@@ -125,7 +125,8 @@ module Woods
         unit.dependencies = foreign_key_dependencies(table, schema[:foreign_keys], catalog)
         unit
       rescue StandardError => e
-        SourceInputs::ConsumerErrors.log(self, "Failed to extract database table #{table.name}: #{e.message}")
+        SourceInputs::ConsumerErrors.log(self, "Failed to extract database table #{table.name}: #{e.message}",
+                                         pool: table.pool)
         nil
       end
 

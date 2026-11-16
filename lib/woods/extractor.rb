@@ -1409,8 +1409,9 @@ module Woods
     # A full run publishes past an extractor's handled source errors, and past
     # a database no read can reach (it warns), but not past a schema read that
     # failed on a database the run could otherwise read: a checkout that timed
-    # out on a pool that answered another query in the run, or a refused
-    # statement ({SourceInputs::ConsumerErrors.schema_failed?}). What that
+    # out, or a connection that failed, on a pool that answered another of
+    # the run's queries, or a refused statement
+    # ({SourceInputs::ConsumerErrors.schema_failed?}). What that
     # extractor built would pass for a database without tables. The run
     # raises before any unit is written, and the previous generation stays
     # active. Incremental and refresh runs already refuse every handled
@@ -2092,7 +2093,7 @@ module Woods
         drain.call
       else
         Rails.logger.info "[Woods] Concurrent extraction: #{queue.size} extractors on #{workers} threads"
-        Array.new(workers) { Thread.new(&drain) }.each(&:join)
+        Array.new(workers) { Extraction::ServedPools.thread(&drain) }.each(&:join)
       end
 
       # Fail closed, matching sequential extraction: a raise there aborts

@@ -137,14 +137,23 @@ RSpec.describe Woods::Extractors::TableCatalog do
       expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(consumer, served([]))).to be(false)
     end
 
-    it 'marks only the consumer failure when a database cannot be connected at all' do
+    it 'marks only the consumer failure when a database that answered nothing in the run cannot be connected' do
       not_established = stub_const('ActiveRecord::ConnectionNotEstablished', Class.new(StandardError))
       stub_const('ActiveRecord::StatementInvalid', Class.new(StandardError))
 
-      consumer, broken = list_through_broken_pool(not_established.new('connection refused'))
+      consumer, = list_through_broken_pool(not_established.new('connection refused'))
 
       expect(Woods::SourceInputs::ConsumerErrors.failed?(consumer)).to be(true)
-      expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(consumer, served([broken]))).to be(false)
+      expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(consumer, served([]))).to be(false)
+    end
+
+    it 'refuses a listing whose connection failed on a pool that answered another read in the run' do
+      not_established = stub_const('ActiveRecord::ConnectionNotEstablished', Class.new(StandardError))
+      stub_const('ActiveRecord::StatementInvalid', Class.new(StandardError))
+
+      consumer, broken = list_through_broken_pool(not_established.new('too many connections'))
+
+      expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(consumer, served([broken]))).to be(true)
     end
 
     it 'leaves the consumer unmarked when a database answers with no tables' do

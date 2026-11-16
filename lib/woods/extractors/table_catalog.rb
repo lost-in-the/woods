@@ -134,8 +134,9 @@ module Woods
         # A listing that raises is a database nobody read, not one without
         # tables. The consumer is marked through
         # {SourceInputs::ConsumerErrors.record_read_failure} with this pool, so
-        # a full run refuses a timeout on a pool that answered other reads, or
-        # a refused statement, and publishes a database no read can reach.
+        # a full run refuses a timeout or failed connection on a pool that
+        # answered other reads, or a refused statement, and publishes a
+        # database no read can reach.
         # Without a consumer the failure is only logged.
         def table_names(pool, consumer = nil)
           names = pool.with_connection(&:tables)

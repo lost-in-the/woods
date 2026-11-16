@@ -9,10 +9,18 @@ module Woods
     # a database the run could read, so an empty result from it is a gap, not
     # a database without tables. A pool that answered nothing all run is one
     # the run could not reach, which a full run publishes and warns about.
+    #
+    # Only the run's own queries count: those of the calling thread and of
+    # threads started through {.thread}. The subscription also hears every
+    # other thread of the process, and an application thread that queries a
+    # pool, then holds its only connection, says nothing about whether the
+    # run could read it.
     class ServedPools
       EVENT = 'sql.active_record'
+      # The thread variable naming the tracker a thread's queries count for.
+      THREAD_KEY = :woods_served_pools
 
-      # Track the pools that answer queries while the block runs.
+      # Track the pools that answer the calling thread's queries while the block runs.
       #
       # @yieldparam served [ServedPools]
       # @return [Object] the block's value
@@ -22,10 +30,20 @@ module Woods
 
         subscriber = ActiveSupport::Notifications.subscribe(EVENT) { |*event| served.note(event.last) }
         begin
-          yield served
+          served.on_this_thread { yield served }
         ensure
           ActiveSupport::Notifications.unsubscribe(subscriber)
         end
+      end
+
+      # Start a thread whose queries count for the run tracking the calling
+      # thread, when one is.
+      #
+      # @yield the thread's work
+      # @return [Thread]
+      def self.thread(&work)
+        served = Thread.current.thread_variable_get(THREAD_KEY)
+        Thread.new { served ? served.on_this_thread(&work) : work.call }
       end
 
       def initialize
@@ -33,12 +51,28 @@ module Woods
         @lock = Mutex.new
       end
 
-      # Record the pool behind one finished query. A query that raised served nothing.
+      # Count the current thread's queries, in any of its fibers, while the block runs.
+      #
+      # @return [Object] the block's value
+      def on_this_thread
+        thread = Thread.current
+        previous = thread.thread_variable_get(THREAD_KEY)
+        thread.thread_variable_set(THREAD_KEY, self)
+        begin
+          yield
+        ensure
+          thread.thread_variable_set(THREAD_KEY, previous)
+        end
+      end
+
+      # Record the pool behind one finished query of the run. A query that
+      # raised served nothing, and another thread's query is not the run's.
       #
       # @param payload [Hash] the `sql.active_record` payload
       # @return [void]
       def note(payload)
         return unless payload.is_a?(Hash) && payload[:exception].nil?
+        return unless Thread.current.thread_variable_get(THREAD_KEY).equal?(self)
 
         pool = pool_for(payload)
         @lock.synchronize { @pools[pool] = true } if pool

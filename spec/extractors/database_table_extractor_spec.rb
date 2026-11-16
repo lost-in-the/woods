@@ -251,6 +251,22 @@ RSpec.describe Woods::Extractors::DatabaseTableExtractor do
       expect(Woods::SourceInputs::ConsumerErrors.failed?(extractor)).to be(true)
     end
 
+    # Before Rails 7.1 a checkout timeout carries no pool; the table's own is the one it waited for.
+    it 'refuses a schema read that timed out on the table pool, when that pool answered another read' do
+      stub_const('ActiveRecord::ConnectionNotEstablished', Class.new(StandardError))
+      stub_const('ActiveRecord::StatementInvalid', Class.new(StandardError))
+      timeout = stub_const('ActiveRecord::ConnectionTimeoutError', Class.new(ActiveRecord::ConnectionNotEstablished))
+      pool = double('Pool')
+      allow(pool).to receive(:with_connection).and_raise(timeout, 'could not obtain a connection')
+      table = catalog_class::Table.new(name: 'widgets', models: [], pool: pool)
+      extractor = described_class.new(table_catalog: catalog_class.new([table]))
+
+      expect(extractor.extract_all).to eq([])
+      expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(extractor, ->(candidate) { candidate.equal?(pool) }))
+        .to be(true)
+      expect(Woods::SourceInputs::ConsumerErrors.schema_failed?(extractor, ->(_candidate) { false })).to be(false)
+    end
+
     it 'returns nothing when no database is connected' do
       expect(described_class.new(table_catalog: catalog_class.new([])).extract_all).to eq([])
     end

@@ -4,7 +4,9 @@
   The worker count now follows the scarcest writable pool.
   With no free connection, the extractors run on the calling thread.
   A full run now refuses when a schema read fails on a database the same run could otherwise read.
-  That is a checkout timeout on a pool that answered another query in the run, or a refused statement.
+  That is a checkout timeout or a failed connection on a pool that answered another of the run's queries.
+  A refused statement counts too.
   It raises `Woods::ExtractionError` naming the extractors, and the previous generation stays active.
   A database no read in the run reaches is published and warned about, as before.
   That covers no connection, no database, and a pool held elsewhere for the whole run.
+  Queries of other application threads do not count as the run's reads.

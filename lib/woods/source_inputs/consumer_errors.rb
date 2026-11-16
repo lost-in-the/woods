@@ -10,12 +10,15 @@ module Woods
     module ConsumerErrors
       FLAG = :@woods_source_consumer_failed
       # Schema reads of the consumer that failed on a database that answers:
-      # `{ kind: :timeout | :statement, pool: }` each. A full run refuses
-      # them ({schema_failed?}); a database no read can reach is not listed,
-      # so such a run still publishes and warns.
+      # `{ kind: :timeout | :connection | :statement, pool: }` each. A full
+      # run refuses them ({schema_failed?}); a database no read can reach is
+      # not listed, so such a run still publishes and warns.
       READ_FAILURES = :@woods_schema_read_failures
       # A wait for a pool's connection that ran out.
       TIMEOUT_ERRORS = %w[ConnectionTimeoutError].freeze
+      # A connection that could not be made. {TIMEOUT_ERRORS} subclass it, so
+      # {#read_failure_kind} asks about them first.
+      CONNECTION_ERRORS = %w[ConnectionNotEstablished].freeze
       # A statement the database received and refused.
       STATEMENT_ERRORS = %w[StatementInvalid].freeze
       # Subclasses of {STATEMENT_ERRORS} that mean the database does not exist.
@@ -56,9 +59,10 @@ module Woods
 
       # Whether a schema read of the consumer failed on a database the run
       # could otherwise read: a refused statement, or a checkout that timed
-      # out on a pool +readable+ vouches for. A timeout whose pool is not
-      # known (Rails before 7.1 does not attach it, outside a table listing)
-      # cannot be shown to be such a pool, and does not count.
+      # out or a connection that failed on a pool +readable+ vouches for. A
+      # failure whose pool is not known (Rails before 7.1 does not attach it,
+      # and the handler did not name one) cannot be shown to be such a pool,
+      # and does not count.
       #
       # @param consumer [Object, nil]
       # @param readable [#call, nil] pool => whether the run could read it, for
@@ -74,18 +78,24 @@ module Woods
       # Called from a rescue clause, so +$ERROR_INFO+ is the error being
       # handled; {#record_read_failure} classifies it, so each of the many
       # handlers need not name the error classes.
-      def log(consumer, ...)
-        record_read_failure(consumer, $ERROR_INFO)
-        Rails.logger.error(...)
+      #
+      # @param consumer [Object]
+      # @param pool [Object, nil] the pool the handled read used, when the
+      #   handler knows it; see {#record_read_failure}
+      # @return [void]
+      def log(consumer, *message, pool: nil, &block)
+        record_read_failure(consumer, $ERROR_INFO, pool)
+        Rails.logger.error(*message, &block)
       end
 
       # @param error [Exception, nil]
-      # @return [Symbol, nil] +:timeout+, +:statement+, or nil when +error+ is
-      #   no schema read failure on a database that answers
+      # @return [Symbol, nil] +:timeout+, +:connection+, +:statement+, or nil
+      #   when +error+ is no schema read failure on a database that answers
       def read_failure_kind(error)
         return nil unless error && defined?(::ActiveRecord)
         return nil if active_record_error?(error, UNREACHABLE_ERRORS)
         return :timeout if active_record_error?(error, TIMEOUT_ERRORS)
+        return :connection if active_record_error?(error, CONNECTION_ERRORS)
 
         :statement if active_record_error?(error, STATEMENT_ERRORS)
       end

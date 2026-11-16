@@ -42,21 +42,49 @@ RSpec.describe Woods::SourceInputs::ConsumerErrors do
       no_database
     end
 
-    def log_while_handling(error)
+    def log_while_handling(error, **options)
       consumer = Object.new
       begin
         raise error
       rescue StandardError
-        described_class.log(consumer, 'handled')
+        described_class.log(consumer, 'handled', **options)
       end
       consumer
     end
 
     # Rails 7.1 and later attach the pool a checkout waited for to the error.
     def timeout_on(waited_for)
-      checkout_timeout.new('could not obtain a connection').tap do |error|
-        error.define_singleton_method(:connection_pool) { waited_for }
-      end
+      on_pool(checkout_timeout.new('could not obtain a connection'), waited_for)
+    end
+
+    def on_pool(error, pool)
+      error.tap { error.define_singleton_method(:connection_pool) { pool } }
+    end
+
+    it 'refuses a pool-less checkout timeout (Rails before 7.1) on the answering pool the handler names' do
+      consumer = log_while_handling(checkout_timeout.new('could not obtain a connection'), pool: pool)
+
+      expect(described_class.schema_failed?(consumer, served)).to be(true)
+      expect(described_class.schema_failed?(consumer, unserved)).to be(false)
+    end
+
+    it 'passes the message alone to the logger when the handler names a pool' do
+      expect(logger).to receive(:error).with('handled')
+
+      log_while_handling(checkout_timeout.new('could not obtain a connection'), pool: pool)
+    end
+
+    it 'refuses a connection that failed on a pool that answered another query in the run' do
+      consumer = log_while_handling(on_pool(not_established.new('too many connections'), pool))
+
+      expect(described_class.schema_failed?(consumer, served)).to be(true)
+    end
+
+    it 'lets a connection that failed on a pool that answered nothing in the run publish' do
+      consumer = log_while_handling(on_pool(not_established.new('refused'), pool))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, unserved)).to be(false)
     end
 
     it 'refuses a checkout that timed out on a pool that answered another query in the run' do

@@ -558,7 +558,8 @@ deleting it does not repair the failing extractor.
 ### Full extraction reports "Database reads failed for ..."
 
 An extractor could not read the schema of a database the same run read from.
-A checkout timed out on a pool that answered another query in the run, or the database refused a statement.
+A checkout timed out or a connection failed on a pool that answered another of the run's queries.
+Or the database refused a statement.
 Its result would pass for a database without tables, so the run published nothing and readers keep the prior generation.
 A database no read in the run reaches does not stop it: no connection, no database, or a pool held elsewhere all run.
 Such a run publishes, and `source_inputs.json` lists the extractor under `unverified_scopes`.

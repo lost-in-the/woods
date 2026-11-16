@@ -139,15 +139,17 @@ RSpec.describe 'Concurrent extraction across database pools', :booted_app do
       payloads: Dir.children(File.join(dir, 'payloads')).sort, files: files }
   end
 
-  # Another thread (an application thread, say) holds the second pool's only connection.
+  # Another thread (an application thread, say) holds the second pool's only connection,
+  # and, +querying+, keeps reading through it until released.
   # A run leaves its own leases on this thread, so they are released first.
-  def while_another_thread_holds_billing
+  def while_another_thread_holds_billing(querying: false)
     release_connections
     held = Queue.new
     release = Queue.new
     holder = Thread.new do
-      BillingRecord.connection_pool.with_connection do
+      BillingRecord.connection_pool.with_connection do |connection|
         held << :held
+        read_until(release, connection) if querying
         release.pop
       end
     rescue StandardError => e
@@ -160,6 +162,13 @@ RSpec.describe 'Concurrent extraction across database pools', :booted_app do
   ensure
     release << true
     holder&.join
+  end
+
+  def read_until(release, connection)
+    while release.empty?
+      connection.select_value('SELECT 1')
+      sleep 0.01
+    end
   end
 
   it 'publishes the sequential tables, foreign keys and table edges while this thread holds the second pool' do
@@ -223,6 +232,54 @@ RSpec.describe 'Concurrent extraction across database pools', :booted_app do
     expect(generation_state(dir)[:number]).to eq(before[:number] + 1)
     expect(schema_facts(dir)[:tables]).not_to include('table:billing.invoices')
     expect(read_json(dir, 'source_inputs.json')['unverified_scopes']).to include('extractor:database_tables')
+  end
+
+  it "publishes when the thread holding the second pool all run queries it, since that read is not the run's" do
+    dir = output_dir('held-and-read-elsewhere')
+    Woods::Extractor.new(output_dir: dir).extract_all
+    before = generation_state(dir)
+
+    while_another_thread_holds_billing(querying: true) { Woods::Extractor.new(output_dir: dir).extract_all }
+
+    expect(generation_state(dir)[:number]).to eq(before[:number] + 1)
+    expect(schema_facts(dir)[:tables]).not_to include('table:billing.invoices')
+  end
+
+  it 'refuses a sequential full run when a pool that answered a listing then fails to connect' do
+    Woods.configuration.concurrent_extraction = false
+    dir = output_dir('served-then-refused')
+    Woods::Extractor.new(output_dir: dir).extract_all
+    before = generation_state(dir)
+    connection = BillingRecord.connection_pool.with_connection { |held| held }
+    listings = 0
+    allow(connection).to receive(:tables).and_wrap_original do |original, *args|
+      listings += 1
+      raise ActiveRecord::ConnectionNotEstablished, 'too many connections' if listings > 1
+
+      original.call(*args)
+    end
+
+    expect { Woods::Extractor.new(output_dir: dir).extract_all }
+      .to raise_error(Woods::ExtractionError, /Database reads failed for /)
+    expect(generation_state(dir)).to eq(before)
+  end
+
+  # The error a stub raises carries no pool on any Rails, as a real checkout timeout before 7.1.
+  it "refuses a full run when one table's schema read times out on a pool that listed it" do
+    Woods.configuration.concurrent_extraction = false
+    dir = output_dir('table-read-timeout')
+    Woods::Extractor.new(output_dir: dir).extract_all
+    before = generation_state(dir)
+    connection = BillingRecord.connection_pool.with_connection { |held| held }
+    allow(connection).to receive(:columns).and_wrap_original do |original, name, *args|
+      raise ActiveRecord::ConnectionTimeoutError, 'could not obtain a connection' if name.to_s == 'invoices'
+
+      original.call(name, *args)
+    end
+
+    expect { Woods::Extractor.new(output_dir: dir).extract_all }
+      .to raise_error(Woods::ExtractionError, /Database reads failed for .*database_tables/)
+    expect(generation_state(dir)).to eq(before)
   end
 
   it 'refuses a full run when listing the second database raises' do
