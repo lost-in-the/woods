@@ -394,8 +394,12 @@ module Woods
     #   definitions of one name wins, as it does in Ruby;
     # - no indexed unit: no body, rather than a local definition Ruby skips.
     #
-    # A body from another unit that calls `super` continues into this unit's
-    # own (last) definition, whose operations are placed at the `super` call.
+    # A body that calls `super` continues, at the `super` call, into the
+    # definition the extractor recorded Ruby reaching from it (+super_source+,
+    # one hop, read by the same rules). Without that record (an index written
+    # before it, or a next definition no indexed unit holds) the flow stops
+    # at the call and shows it as an unresolved `super` ({#unfollowed_super}),
+    # never a guessed body.
     #
     # @param unit_id [String] the entry unit
     # @param source_code [String] its source
@@ -403,24 +407,49 @@ module Woods
     # @param source [Hash] its `action_sources` entry
     # @return [Array<Hash>] located operations
     def recorded_operations(unit_id, source_code, method_name, source)
-      defined_in = source[:defined_in] || source['defined_in']
-      return [] if defined_in.nil?
+      body = recorded_body(unit_id, source_code, method_name, source)
+      return [] unless body
 
-      local = defined_in == unit_id
+      next_source = source[:super_source] || source['super_source']
+      following = next_source.is_a?(Hash) && recorded_body(unit_id, source_code, method_name, next_source)
+      body_operations(*body, following ? body_operations(*following, nil) : nil)
+    end
+
+    # @return [Array(Ast::Node, Hash), nil] the definition an action source
+    #   names and the unit holding it, or nil when no indexed unit holds it
+    def recorded_body(unit_id, source_code, method_name, source)
+      defined_in = source[:defined_in] || source['defined_in']
+      return nil if defined_in.nil?
+
       holder = load_unit(defined_in)
-      holder_source = local ? source_code : holder && holder[:source_code]
-      return [] if holder.nil? || holder_source.nil? || holder_source.empty?
+      holder_source = defined_in == unit_id ? source_code : holder && holder[:source_code]
+      return nil if holder.nil? || holder_source.nil? || holder_source.empty?
 
       node = recorded_node(defined_in, holder_source, holder, method_name, source[:line] || source['line'])
-      return [] unless node
+      node && [node, holder]
+    end
 
+    # A body's operations with, at its first `super` call, +continuation+
+    # (the next body's operations) or, without one, {#unfollowed_super}.
+    #
+    # @return [Array<Hash>] located operations
+    def body_operations(node, holder, continuation)
       operations = locate(@operation_extractor.extract(node), holder)
-      super_line = !local && super_call_line(node, holder)
-      own = super_line && definitions(unit_id, source_code, method_name).last
-      return operations unless own
+      calls = SUPER_TYPES.flat_map { |type| node.find_all(type) }
+      return operations if calls.empty?
 
-      before, after = operations.partition { |op| op[:line].nil? || op[:line] <= super_line }
-      before + locate(@operation_extractor.extract(own), load_unit(unit_id)) + after
+      first = calls.filter_map(&:line).min
+      line = first && SourceLineMap.translate((holder[:metadata] || {})[:source_line_map], first)
+      before, after = line ? operations.partition { |op| op[:line].nil? || op[:line] <= line } : [operations, []]
+      before + (continuation || [unfollowed_super(line, holder)]) + after
+    end
+
+    # A `super` call the flow does not follow, in the vocabulary of a call it
+    # cannot resolve.
+    #
+    # @return [Hash]
+    def unfollowed_super(line, holder)
+      { type: :dynamic_dispatch, target: nil, method: 'super', args_hint: [], line: line, file: holder[:file_path] }
     end
 
     # The definition of +method_name+ that starts on +line+ of the holder's
@@ -443,14 +472,6 @@ module Woods
         parsed_source(unit_id, source_code).find_all(:def).sort_by { |node| node.line.to_i }.group_by(&:method_name)
       end
       index.fetch(method_name.to_s, [])
-    end
-
-    # @return [Integer, nil] the holder's file line of the first `super` in
-    #   +node+, or nil when it calls none
-    def super_call_line(node, holder)
-      calls = SUPER_TYPES.flat_map { |type| node.find_all(type) }
-      first = calls.filter_map(&:line).min
-      first && SourceLineMap.translate((holder[:metadata] || {})[:source_line_map], first)
     end
 
     # Report each operation at its line in the file +unit_data+ was read

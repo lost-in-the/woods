@@ -666,6 +666,8 @@ module Woods
       #   +{ owner:, defined_in:, file:, line: }+, sorted by action name.
       #   +file+ is relative to Rails.root; +defined_in+ is the indexed unit
       #   whose source holds the method body, or nil when no unit does.
+      #   +super_source+, present when Ruby has a next definition of the
+      #   action, is that definition: see {#super_source}.
       def resolve_action_sources(controller)
         routed = routed_actions(controller)
         own_file = source_file_for(controller)
@@ -684,7 +686,28 @@ module Woods
             file: relative_to_root(file),
             line: line
           }
+          following = super_source(method)
+          sources[name][:super_source] = following if following
         end
+      end
+
+      # The definition a `super` in the action's body reaches, one hop: the
+      # next method Ruby looks up past it (+UnboundMethod#super_method+). Its
+      # +defined_in+ is nil, and its site is left out, when that body is not
+      # application source; a request flow then stops at the `super` call.
+      #
+      # @param method [UnboundMethod] the action Ruby dispatches
+      # @return [Hash, nil] +{ owner:, defined_in:, file:, line: }+, or nil
+      #   when Ruby has no next definition
+      def super_source(method)
+        following = method.super_method
+        return nil unless following
+
+        file, line = following.source_location
+        return { owner: following.owner.name, defined_in: nil, file: nil, line: nil } unless app_action_source?(file)
+
+        { owner: following.owner.name, defined_in: defining_unit(following.owner, file),
+          file: relative_to_root(file), line: line }
       end
 
       # Routed actions Rails can dispatch whose body is gem code: inherited
@@ -1081,7 +1104,10 @@ module Woods
       # @param action_sources [Hash{String => Hash}]
       # @return [Array<Hash>]
       def action_source_dependencies(controller, action_sources)
-        holders = action_sources.values.filter_map { |source| source[:defined_in] }.uniq - [controller.name]
+        holders = action_sources.values.flat_map do |source|
+          [source[:defined_in], source.dig(:super_source, :defined_in)]
+        end
+        holders = holders.compact.uniq - [controller.name]
         deps = holders.map do |holder|
           type = constant_named(holder).is_a?(Class) ? :controller : :concern
           { type: type, target: holder, via: :action_source }

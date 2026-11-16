@@ -439,8 +439,11 @@ RSpec.describe Woods::FlowAssembler do
                    })
       end
 
-      def source(owner, line, defined_in = owner)
-        { 'owner' => owner, 'defined_in' => defined_in, 'line' => line }
+      # +next_hop+ is the `super_source` the extractor records: omitted for an
+      # index written before it was recorded.
+      def source(owner, line, defined_in = owner, **next_hop)
+        entry = { 'owner' => owner, 'defined_in' => defined_in, 'line' => line }
+        next_hop.key?(:super_source) ? entry.merge('super_source' => next_hop[:super_source]) : entry
       end
 
       before do
@@ -454,6 +457,35 @@ RSpec.describe Woods::FlowAssembler do
               PrependedUpdate.run!
               super
               AfterSuper.run!
+            end
+
+            def archive
+              ReplacedArchive.run!
+              super
+            end
+
+            def index
+              OuterIndex.run!
+              super
+            end
+          end
+        RUBY
+        write_unit('InnerReport', type: 'concern', source_code: <<~RUBY)
+          module InnerReport
+            def update
+              InnerUpdate.run!
+            end
+
+            def index
+              InnerIndex.run!
+              super
+            end
+          end
+        RUBY
+        write_unit('BaseReportsController', source_code: <<~RUBY)
+          class BaseReportsController < ApplicationController
+            def archive
+              BaseArchive.run!
             end
           end
         RUBY
@@ -479,9 +511,52 @@ RSpec.describe Woods::FlowAssembler do
       end
 
       it 'continues a prepended override that calls super into the local definition, at the super call' do
-        write_receiver('update' => source('ReplacedReport', 6))
+        local = source('ReportsController', 13)
+        write_receiver('update' => source('ReplacedReport', 6, super_source: local))
 
         expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate LocalUpdate AfterSuper])
+      end
+
+      it 'continues into the other prepended module that super reaches, not the local definition' do
+        inner = source('InnerReport', 2)
+        write_receiver('update' => source('ReplacedReport', 6, super_source: inner))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate InnerUpdate AfterSuper])
+      end
+
+      it 'follows the one recorded hop, and marks the super call of the body it reaches' do
+        inner = source('InnerReport', 6)
+        write_receiver('index' => source('ReplacedReport', 17, super_source: inner))
+
+        expect(targets_for('ReportsController#index')).to eq(%w[load_report OuterIndex InnerIndex super])
+      end
+
+      it 'continues into a base controller when the controller does not define the action' do
+        base = source('BaseReportsController', 2)
+        write_receiver('archive' => source('ReplacedReport', 12, super_source: base))
+
+        expect(targets_for('ReportsController#archive')).to eq(%w[load_report ReplacedArchive BaseArchive])
+      end
+
+      it 'stops at super and marks it when the index records no next definition' do
+        write_receiver('update' => source('ReplacedReport', 6))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate super AfterSuper])
+      end
+
+      it 'stops at super and marks it when no indexed unit holds the next definition' do
+        write_receiver('update' => source('ReplacedReport', 6, super_source: source('GemReports', 4, nil)))
+
+        expect(targets_for('ReportsController#update')).to eq(%w[load_report PrependedUpdate super AfterSuper])
+      end
+
+      it 'marks the unfollowed super as a call the flow does not resolve' do
+        write_receiver('update' => source('ReplacedReport', 6, super_source: nil))
+        operations = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                    .assemble('ReportsController#update').steps[0][:operations]
+
+        expect(operations).to include(a_hash_including(type: :dynamic_dispatch, target: nil, method: 'super', line: 8,
+                                                       file: 'app/concerns/replacedreport.rb'))
       end
 
       it 'reads the later of two local definitions, on the line Ruby recorded' do

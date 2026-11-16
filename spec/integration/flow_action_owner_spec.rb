@@ -9,15 +9,21 @@ require 'yaml'
 # A request flow follows the body Ruby dispatches for an action, which the
 # controller extractor records in `action_sources`: a prepended override, a
 # prepended override that calls `super`, the later of two local definitions,
-# and a local definition that wins over an included concern. Each is checked
+# a local definition that wins over an included concern, and `super` from one
+# prepended module into another or into a base controller. Each is checked
 # against a real dispatch and the action's `UnboundMethod` owner, and the
-# precomputed flow against the on-demand one.
+# precomputed flow against the on-demand one. The flow follows one recorded
+# `super` hop: past it (#index) it shows the call unresolved, never a guess.
 RSpec.describe 'Request flow of the dispatched action body', :booted_app do
   actions = {
     'create' => { owner: 'ReplacedCreate', jobs: %w[ReplacedCreateJob] },
     'update' => { owner: 'SuperUpdate', jobs: %w[PrependedUpdateJob LocalUpdateJob] },
     'destroy' => { owner: 'ItemsController', jobs: %w[SecondDestroyJob] },
-    'show' => { owner: 'ItemsController', jobs: %w[LocalShowJob] }
+    'show' => { owner: 'ItemsController', jobs: %w[LocalShowJob] },
+    'edit' => { owner: 'OuterEdit', jobs: %w[OuterEditJob InnerEditJob] },
+    'archive' => { owner: 'PrependedArchive', jobs: %w[PrependedArchiveJob BaseArchiveJob] },
+    'index' => { owner: 'OuterIndex', jobs: %w[OuterIndexJob InnerIndexJob LocalIndexJob],
+                 flow_jobs: %w[OuterIndexJob InnerIndexJob], unfollowed_super: true }
   }
 
   before(:all) do
@@ -83,6 +89,10 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
     flow.fetch(flow.key?('steps') ? 'steps' : :steps).first.then { |step| step['operations'] || step[:operations] }
   end
 
+  def unfollowed_super?(operations)
+    operations.any? { |op| op[:type] == :dynamic_dispatch && op[:method] == 'super' }
+  end
+
   def enqueued(operations)
     operations.select { |op| (op['type'] || op[:type]).to_s == 'async' }.map { |op| op['target'] || op[:target] }
   end
@@ -96,7 +106,8 @@ RSpec.describe 'Request flow of the dispatched action body', :booted_app do
       expect(dispatched_jobs(action)).to eq(expected[:jobs])
 
       operations = entry_operations(on_demand_flow(action))
-      expect(enqueued(operations)).to eq(expected[:jobs])
+      expect(enqueued(operations)).to eq(expected.fetch(:flow_jobs, expected[:jobs]))
+      expect(unfollowed_super?(operations)).to eq(expected.fetch(:unfollowed_super, false))
       expect(operations.first[:method]).to eq('load_item')
       expect(enqueued(entry_operations(precomputed_flow(action)))).to eq(enqueued(operations))
     end

@@ -376,6 +376,61 @@ RSpec.describe Woods::Extractors::ControllerExtractor, 'action selection' do
     end
   end
 
+  describe 'the definition a super in the action reaches' do
+    let(:routes) { super() + [route('action_fixtures/stamps', 'update')] }
+
+    before do
+      load_app('app/controllers/concerns/action_fixtures/inner_stamping.rb', <<~RUBY)
+        module ActionFixtures::InnerStamping
+          def update
+            super
+          end
+        end
+      RUBY
+      load_app('app/controllers/concerns/action_fixtures/outer_stamping.rb', <<~RUBY)
+        module ActionFixtures::OuterStamping
+          def update
+            super
+          end
+        end
+      RUBY
+      load_app('app/controllers/action_fixtures/stamps_controller.rb', <<~RUBY)
+        class ActionFixtures::StampsController < ActionFixtures::BaseController
+          prepend ActionFixtures::InnerStamping
+          prepend ActionFixtures::OuterStamping
+
+          def update = nil
+        end
+      RUBY
+    end
+
+    it 'records the next prepended module, not the controller, as the definition super reaches' do
+      expect(unit_for('StampsController').metadata[:action_sources]['update']).to eq(
+        owner: 'ActionFixtures::OuterStamping',
+        defined_in: 'ActionFixtures::OuterStamping',
+        file: 'app/controllers/concerns/action_fixtures/outer_stamping.rb',
+        line: 2,
+        super_source: { owner: 'ActionFixtures::InnerStamping', defined_in: 'ActionFixtures::InnerStamping',
+                        file: 'app/controllers/concerns/action_fixtures/inner_stamping.rb', line: 2 }
+      )
+    end
+
+    it 'depends on the unit holding that next definition' do
+      expect(unit_for('StampsController').dependencies).to include(
+        { type: :concern, target: 'ActionFixtures::InnerStamping', via: :action_source }
+      )
+    end
+
+    it 'records a next definition in a gem by its owner alone' do
+      expect(unit_for('Members::SessionsController').metadata[:action_sources]['new'][:super_source])
+        .to eq(owner: 'ActionFixtures::Vault::SessionsController', defined_in: nil, file: nil, line: nil)
+    end
+
+    it 'records nothing when Ruby has no next definition' do
+      expect(unit_for('SsoGoogleController').metadata[:action_sources]['create']).not_to have_key(:super_source)
+    end
+  end
+
   describe 'actions inherited from an app base controller' do
     subject(:unit) { unit_for('SalesReportsController') }
 

@@ -464,7 +464,12 @@ class PageView < AnalyticsRecord; end   # metadata[:database] => "analytics"
   - A flow reads the body `action_sources` names, even when the controller also defines the action.
   - A body in the controller is the definition on the recorded `line`, so the later of two definitions wins.
   - An action whose body no indexed unit holds has no body in its flow, only its filters.
-  - A body from another unit that calls `super` continues into the controller's own definition there.
+  - A body that calls `super` continues there into the definition `super_source` names.
+    That entry key records the next definition Ruby looks up (`super_method`, one hop): `owner`, `defined_in`,
+    `file` and `line`, with `defined_in`, `file` and `line` nil when its body is not application source.
+    The key is absent when Ruby has no next definition.
+  - Without a `super_source` an indexed unit holds, the flow stops at the call.
+    It shows a `dynamic_dispatch` operation with `method: "super"` and no `target`.
 - `inherited_gem_actions` records each routed action Rails dispatches to a gem-defined body (inherited from a gem superclass, mixed in from a gem module, or defined by a gem DSL) as `{ action => { owner: } }`. These are not admitted to `actions`, get no chunk and no flow, and add no edge; a route to one is not reported as `missing_action`
 - `action_missing: true` is present only when the controller responds to `action_missing` (defined on it, privately, or inherited). Rails dispatches every routed action to it, so none of that controller's routes is reported as `missing_action`
 - `routes_without_action` lists, sorted, the routed actions of the controller that nothing answers.
