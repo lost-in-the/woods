@@ -13,6 +13,10 @@ module Woods
       # Resolved filter applicability (W-8). A generation produced before W-8
       # lacks these keys, so they are compared only when both sides carry them.
       FILTER_APPLICABILITY_KEYS = %w[owner applies_to applicability].freeze
+      # Where a filter or a callback's operation sits in its file. Adding a
+      # line above moves them without changing behaviour (#1085), so they are
+      # left out of every comparison and kept in the evidence.
+      POSITION_KEYS = %w[line statement_line file].freeze
       # @param type [String] actual unit type
       def initialize(type, budget: RiskBudget.new(10_000))
         @type = type
@@ -39,7 +43,7 @@ module Woods
 
       def compare(before, after)
         if recorded?('filters', before, after)
-          old_filters, new_filters = comparable_filters(before['filters'], after['filters'])
+          old_filters, new_filters = without_positions(comparable_filters(before['filters'], after['filters']))
           changed_array({ 'filters' => old_filters }, { 'filters' => new_filters }, 'filters', 'filter_chain_change')
         end
         callbacks(before['callbacks'], after['callbacks']) if recorded?('callbacks', before, after)
@@ -80,10 +84,19 @@ module Woods
         old = effects(before)
         current = effects(after)
         return unknown('callback_side_effects_unavailable') unless old && current
-        return if Value.json(old) == Value.json(current)
+        return if Value.json(without_positions(old)) == Value.json(without_positions(current))
 
         risk('callback_side_effect_change', 'metadata_key' => 'callbacks.side_effects',
                                             'before' => old, 'after' => current)
+      end
+
+      # @param value [Object] published metadata
+      # @return [Object] +value+ with {POSITION_KEYS} removed at every level
+      def without_positions(value)
+        return value.map { |item| without_positions(item) } if value.is_a?(Array)
+        return value unless value.is_a?(Hash)
+
+        value.except(*POSITION_KEYS).transform_values { |item| without_positions(item) }
       end
 
       def effects(callbacks)
