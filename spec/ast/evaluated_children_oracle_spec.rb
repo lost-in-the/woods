@@ -160,7 +160,11 @@ RSpec.describe 'Parsed calls and enqueues against a real run' do
     'a lambda in a hash value' => 'x = { cb: -> { LamJob.perform_later } }',
     'a stabby lambda' => 'cb = -> { LamJob.perform_later }',
     'a proc' => 'cb = proc { ProcJob.perform_later }',
-    'a defined? operand' => 'x = defined?(DefJob.perform_later)'
+    'a defined? operand' => 'x = defined?(DefJob.perform_later)',
+    'a nested method default' => "def inner(job = InnerJob.perform_later)\n    end",
+    'a nested method body' => "def inner\n      InnerJob.perform_later\n    end",
+    'a nested def self.x' => "def self.inner(job = InnerJob.perform_later)\n      InnerJob.perform_later\n    end",
+    'a nested lambda default' => 'hook = ->(job = InnerJob.perform_later) { job }'
   }
 
   [true, false].each do |prism|

@@ -69,6 +69,13 @@ module Woods
         end
       end
 
+      # @param inside_definition [Boolean] @api private: true for the walker
+      #   of a definition's own statements, where a nested `def` only installs
+      #   a method
+      def initialize(inside_definition: false)
+        @inside_definition = inside_definition
+      end
+
       # Extract operations from a method definition node in source line order.
       #
       # @param method_node [Ast::Node] A :def or :defs node
@@ -98,7 +105,7 @@ module Woods
         when :case
           handle_case(node, operations)
         when :def, :defs
-          walk_definition(node, operations)
+          @inside_definition ? walk_nested_definition(node, operations) : walk_definition(node, operations)
         else
           walk_children(node, operations)
         end
@@ -110,7 +117,16 @@ module Woods
       def walk_definition(node, operations)
         children = Array(node.children).reject { |child| child.is_a?(Ast::Node) && child.type == :definition_receiver }
         defaults, body = children.partition { |child| child.is_a?(Ast::Node) && child.type == :parameter_defaults }
-        (defaults + body).each { |child| walk(child, operations) }
+        walker = (@definition_walker ||= self.class.new(inside_definition: true))
+        (defaults + body).each { |child| walker.send(:walk, child, operations) }
+      end
+
+      # A method defined while this one runs: its defaults and body run only
+      # when it is called, but the receiver of `def (expr).name` runs now.
+      def walk_nested_definition(node, operations)
+        Array(node.children).each do |child|
+          walk_children(child, operations) if child.is_a?(Ast::Node) && child.type == :definition_receiver
+        end
       end
 
       # Walk all children of a node.
@@ -122,10 +138,12 @@ module Woods
 
       # Handle :block nodes - check for transaction/with_lock wrappers.
       def handle_block(node, operations)
+        # A lambda or proc literal builds a callable; neither it nor its body
+        # is an operation here.
+        return if self.class.deferred_block?(node)
+
         send_child = node.children&.first
-        if self.class.deferred_block?(node)
-          handle_send(send_child, operations)
-        elsif send_child.is_a?(Ast::Node) && send_child.type == :send && transaction_call?(send_child)
+        if send_child.is_a?(Ast::Node) && send_child.type == :send && transaction_call?(send_child)
           nested = []
           # Walk block body (children after the send node)
           node.children&.drop(1)&.each { |child| walk(child, nested) }

@@ -10,6 +10,9 @@
   An over-claim is removed: code that does not run where it is written no longer counts as run.
   In flows and callback `operations`, `hook = -> { NotifyJob.perform_later }` used to list an enqueue and lists none.
   The same holds for `lambda {}`, `proc {}` and `Proc.new {}` bodies and for a `defined?` operand.
+  A lambda or proc literal no longer adds a `lambda` or `proc` call operation either.
+  A method defined inside another no longer adds its defaults or body to the enclosing flow: they run when it is called.
+  Only the receiver of a nested `def (expr).name`, which runs when the method is defined, stays in that flow.
   Method effects no longer read events, external calls or same-class calls there.
   Their job, mailer and service names still come from the method text, so a lambda body still adds those.
   An incremental run keeps the old operations, method effects and call graphs of every file it does not re-extract.

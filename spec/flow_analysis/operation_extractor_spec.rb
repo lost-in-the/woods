@@ -83,6 +83,46 @@ RSpec.describe Woods::FlowAnalysis::OperationExtractor do
           expect(extractor.extract(method_node).map { |op| [op[:target], op[:method]] }).to eq([%w[Body run]])
         end
 
+        describe 'a method defined inside the analyzed method' do
+          def flow(body)
+            extract_method_ops("def call\n#{body}\nend\n", 'call').map { |op| [op[:type], op[:target], op[:method]] }
+          end
+
+          {
+            'its default parameter values' => "def inner(job = InnerJob.perform_later)\nend",
+            'its body' => "def inner\n  InnerJob.perform_later\nend",
+            'the defaults and body of a nested def self.x' => "def self.inner(job = InnerJob.perform_later)\n  " \
+                                                              "InnerJob.perform_later\nend",
+            'the defaults of a nested lambda' => 'hook = ->(job = InnerJob.perform_later) { job }'
+          }.each do |form, nested|
+            it "leaves #{form} out of the enclosing flow, which runs none of it" do
+              expect(flow("#{nested}\nBody.run")).to eq([[:call, 'Body', 'run']])
+            end
+          end
+
+          it 'keeps the receiver expression of a nested singleton definition, which runs when it is defined' do
+            expect(flow("def (Hooks.build).inner(job = InnerJob.perform_later)\nend"))
+              .to eq([[:call, 'Hooks', 'build']])
+          end
+
+          it 'reports the nested method defaults when that method is analyzed' do
+            source = "def call\n  def inner(job = InnerJob.perform_later)\n    Body.run\n  end\nend\n"
+            inner = parser.parse(source).find_all(:def).find { |node| node.method_name == 'inner' }
+
+            expect(extractor.extract(inner).map { |op| [op[:type], op[:target], op[:method]] })
+              .to eq([[:async, 'InnerJob', 'perform_later'], [:call, 'Body', 'run']])
+          end
+
+          it 'still lists every method of a whole source' do
+            root = parser.parse("class Ledger\n  def a\n    First.run\n  end\n\n  " \
+                                "def b(job = SecondJob.perform_later)\n    Third.run\n  end\nend\n")
+
+            expect(extractor.extract(root).map { |op| [op[:type], op[:target], op[:method]] }).to eq(
+              [[:call, 'First', 'run'], [:async, 'SecondJob', 'perform_later'], [:call, 'Third', 'run']]
+            )
+          end
+        end
+
         it 'still extracts an enqueue in a block body' do
           expect(async_ops('items.each { EachJob.perform_later }')).to eq(['EachJob.perform_later'])
         end
