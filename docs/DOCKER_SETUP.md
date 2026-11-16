@@ -146,10 +146,22 @@ Use the path visible to the process that actually runs the command:
 
 ### Default: run it through the application container
 
-This path needs no Ruby, Bundler, Woods executable, or host-visible index on the host.
-From Woods `2.2.0`, `docker compose exec app bundle exec rails generate woods:install --mcp-config --mcp-service app`
-writes an entry with no absolute path, so one committed `.mcp.json` works in every checkout and on every machine.
-Add `--skip` in an application installed earlier, so an edited initializer is kept:
+The server process needs no Ruby, Bundler, Woods executable, or host-visible index on the host.
+From Woods `2.2.0`, Claude Code users write it with the managed setup, where the host can run the application bundle
+and reach Docker Compose:
+
+```bash
+bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" \
+  --mode compose --service app --container-root /app --plan "$woods_plan_dir/setup.json" --diff
+bundle exec woods-agent-config apply "$woods_plan_dir/setup.json" --client claude --scope project --root "$PWD"
+```
+
+When Woods is installed only in the container, the install generator prints the same entry:
+`docker compose exec app bundle exec rails generate woods:install --mcp-service app`
+(add `--mcp-config` to write `.mcp.json`, and `--skip` in an application installed earlier, so an edited
+initializer is kept).
+Either way the entry names no absolute path, so one committed `.mcp.json` works in every checkout and on every
+machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configuration) and its entry forms:
 
 ```json
 {
@@ -174,6 +186,8 @@ Add `--skip` in an application installed earlier, so an edited initializer is ke
   A session in a linked worktree reaches the running service only when the project name is pinned,
   with a top-level `name:` in the Compose file or `COMPOSE_PROJECT_NAME`.
 - `--checkout` needs the checkout's `.git` entry inside the container.
+- The service's `working_dir` must be the application root inside the container: `woods-mcp-start --checkout`
+  finds the checkout from there.
 
 The generated entry was run with a stand-in `docker` that runs the inner command in place
 (`spec/integration/generated_mcp_entry_spec.rb`). A real `docker compose exec` with this entry was not run.
@@ -220,7 +234,8 @@ Two persistence gotchas:
 
 Use this only when the application bundle, a supported Ruby, and the Woods executable are installed on the host
 **and** the index directory is host-visible.
-From Woods `2.2.0`, `rails generate woods:install --mcp-config` writes the path-free form:
+From Woods `2.2.0`, `woods-agent-config setup --scope project` (host mode) writes the path-free form, and
+`rails generate woods:install` prints it (`--mcp-config` writes it):
 
 ```json
 {
@@ -253,7 +268,8 @@ Before Woods `2.2.0`, name the host application root (machine-specific; do not c
 | | Container process (default) | Host process (optional) |
 |---|---|---|
 | **Index location** | Anywhere in the container | Host-visible bind mount |
-| **Path in `.mcp.json`** | Container path (`/app/tmp/woods`) | Host path (`./tmp/woods`) |
+| **Path in `.mcp.json`** | None from Woods `2.2.0` (`--checkout`); before that, the container path (`/app/tmp/woods`) | None from Woods `2.2.0`; before that, the host path (`./tmp/woods`) and an absolute `cwd` |
+| **Needs `sh` where the client runs** | Yes, for the path-free form | Yes, for the path-free form |
 | **Survives container replacement** | Only with a bind/named volume | Yes, on host disk |
 | **Needs Ruby/Woods bundle on host** | No | Yes |
 
@@ -398,15 +414,17 @@ The launcher reads `~/.woods/console.yml` by default. To use a different path:
 A new setup uses only the `woods` entry.
 The Console Server is deprecated in Woods 2.2.0 and removed in Woods 3.0.
 Existing setups keep working; new setups should not enable it.
-An existing Console setup, with `config.console_mcp_enabled = true` already set, configures both servers together:
+An existing Console setup, with `config.console_mcp_enabled = true` already set, configures both servers together.
+The `woods` entry is the path-free one from Woods `2.2.0` (before that, use the container form with `cwd` above);
+the deprecated Console entry still names the host application root, so this file stays per machine:
 
 ```json
 {
   "mcpServers": {
     "woods": {
-      "command": "docker",
-      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
-      "cwd": "/absolute/host/path/to/app"
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     },
     "woods-console": {
       "command": "docker",
@@ -427,9 +445,9 @@ launcher, replace the `woods-console` entry:
 {
   "mcpServers": {
     "woods": {
-      "command": "docker",
-      "args": ["compose", "exec", "-T", "app", "bundle", "exec", "woods-mcp", "/app/tmp/woods"],
-      "cwd": "/absolute/host/path/to/app"
+      "type": "stdio",
+      "command": "sh",
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     },
     "woods-console": {
       "command": "woods-console-mcp"

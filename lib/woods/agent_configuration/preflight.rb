@@ -27,8 +27,18 @@ module Woods
           report = Woods::Resilience::IndexValidator.new(index_dir: index, app_root: root).validate
           abort report.errors.join("\n") unless report.valid?
           tools = Woods::MCP::Server.build(index_dir: index, warmup: false).tools.keys
+          checkout = nil
+          if ARGV[2] == 'relative'
+            begin
+              require 'woods/mcp/index_wait'
+            rescue LoadError
+              abort 'Installed Woods cannot launch with --checkout --await-index; use --entry-form absolute'
+            end
+            checkout = Woods::MCP::ServedIdentity.checkout_root(root)
+            abort "No git checkout contains #{root} where the server runs; use --entry-form absolute" unless checkout
+          end
           puts JSON.generate(version: Woods::VERSION, tools: tools.sort, root: root, index: index,
-                             generation: reader.loaded_generation, warnings: report.warnings)
+                             generation: reader.loaded_generation, warnings: report.warnings, checkout: checkout)
         end
       RUBY
 

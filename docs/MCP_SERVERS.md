@@ -219,7 +219,10 @@ Compose resolves the project from `cwd`; `-T` disables its pseudo-TTY while stdi
 **A shared container serves the checkout it mounts.**
 Inside the container the launcher's directory and the index's recorded root are the same path,
 so the identity check passes for a session in any other worktree.
-Pass the session's own directory with `--client-root`, and describe the bind mount with `--client-root-map`.
+Pass the session's own directory with `--client-root`, and describe the bind mount with `--client-root-map`
+(or `WOODS_MCP_CLIENT_ROOT_MAP`). The committed entry below passes each developer's exported map through, so it
+holds no host path; for the mount below a developer exports
+`WOODS_MCP_CLIENT_ROOT_MAP=/host/src/shop-worktrees=/worktrees`.
 The server reads the client root through the mount and compares that checkout with the index:
 
 ```json
@@ -227,26 +230,26 @@ The server reads the client root through the mount and compares that checkout wi
   "mcpServers": {
     "woods": {
       "command": "sh",
-      "args": ["-c", "exec docker compose exec -T app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\" --client-root-map /Users/you/src/shop-worktrees=/worktrees"]
+      "args": ["-c", "if [ -n \"$CLAUDE_PROJECT_DIR\" ]; then cd \"$CLAUDE_PROJECT_DIR\" || exit 1; fi; exec docker compose exec -T -e WOODS_MCP_CLIENT_ROOT_MAP=\"$WOODS_MCP_CLIENT_ROOT_MAP\" app bundle exec woods-mcp-start --checkout --await-index --client-root \"$PWD\""]
     }
   }
 }
 ```
 
 **Recommended mount: the directory that holds every worktree.**
-Mount the worktrees' parent (here `/Users/you/src/shop-worktrees` at `/worktrees`),
+Mount the worktrees' parent (here `/host/src/shop-worktrees` at `/worktrees`),
 and run the container in its checkout under that mount (`working_dir: /worktrees/shop`).
 The map is a fact about the mount, so it is the same for every session:
 
 | Session directory | Read in the container as | Result |
 |---|---|---|
-| `/Users/you/src/shop-worktrees/shop` | `/worktrees/shop` | served, no warning |
-| `/Users/you/src/shop-worktrees/shop-topic` | `/worktrees/shop-topic` | refused: another checkout |
-| `/Users/you/elsewhere` | (no entry covers it) | refused: no mount covers it |
-| `/Users/you/src/shop-worktrees/not-mounted-yet` | `/worktrees/not-mounted-yet`, missing | refused: mapped path does not exist here |
+| `/host/src/shop-worktrees/shop` | `/worktrees/shop` | served, no warning |
+| `/host/src/shop-worktrees/shop-topic` | `/worktrees/shop-topic` | refused: another checkout |
+| `/host/elsewhere` | (no entry covers it) | refused: no mount covers it |
+| `/host/src/shop-worktrees/not-mounted-yet` | `/worktrees/not-mounted-yet`, missing | refused: mapped path does not exist here |
 
 **A single-checkout map is valid, and refuses other worktrees by design.**
-With `--client-root-map /Users/you/src/shop=/app`, a session in `shop` is served
+With `--client-root-map /host/src/shop=/app`, a session in `shop` is served
 and a session in `shop-topic` is refused: no mount covers it, so its checkout is not visible here.
 
 How the map works:
@@ -257,7 +260,7 @@ How the map works:
 - The longest matching prefix wins, and trailing slashes are ignored.
 - The host side is never resolved on the container's file system: it does not exist there.
 - Prefixes compare case-sensitively, as container file systems do.
-  On macOS, whose default file system ignores case, `/Users/you/Src` does not match a `/Users/you/src` entry:
+  On macOS, whose default file system ignores case, `/host/Src` does not match a `/host/src` entry:
   write the entry with the case your shell reports for the session's directory.
 - A mapped path that does not exist in the container is refused like an unmapped one:
   the mount does not hold that session's checkout.

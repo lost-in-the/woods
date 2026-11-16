@@ -212,10 +212,13 @@ bin/rails woods:extract
 bin/rails woods:validate
 bin/rails woods:stats
 
-# 5. Add to .mcp.json
-# { "mcpServers": { "woods": { "command": "bundle",
-#     "args": ["exec", "woods-mcp-start", "./tmp/woods"],
-#     "cwd": "/absolute/path/to/your-rails-app" } } }
+# 5. Add to .mcp.json (from Woods 2.2.0, path-free and committable; needs sh)
+bundle exec woods-agent-config setup --client claude --scope project --root "$PWD" --plan "$plan"
+bundle exec woods-agent-config apply "$plan" --client claude --scope project --root "$PWD"
+#    or print the entry: bin/rails generate woods:install
+#    before 2.2.0: { "mcpServers": { "woods": { "command": "bundle",
+#      "args": ["exec", "woods-mcp-start", "./tmp/woods"],
+#      "cwd": "/absolute/path/to/your-rails-app" } } }
 
 # 6. Ask your AI tool a question about your codebase
 ```

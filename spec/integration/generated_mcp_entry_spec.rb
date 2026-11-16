@@ -7,6 +7,8 @@ require 'json'
 require 'open3'
 require 'timeout'
 require 'tmpdir'
+require 'woods/gem_mapper'
+require 'woods/mcp/client_entry'
 
 # The `.mcp.json` entry `rails generate woods:install --mcp-config` writes,
 # committed once and launched exactly as written, from a subdirectory of the
@@ -222,5 +224,74 @@ RSpec.describe 'The generated MCP entry' do
         stop
       end
     end
+  end
+
+  def agent_config(cwd, *arguments)
+    output, status = Open3.capture2e(client_env, 'bundle', 'exec', 'woods-agent-config', *arguments,
+                                     '--client', 'claude', '--scope', 'project', '--root', '.', chdir: cwd,
+                                                                                                unsetenv_others: true)
+    [output, status]
+  end
+
+  it 'launches the project entry woods-agent-config writes from the root, a subdirectory and a linked worktree' do
+    FileUtils.mkdir_p(@app)
+    git(@base, 'init', '-q', '-b', 'main', @app)
+    File.write(File.join(@app, 'Gemfile'), "source 'https://rubygems.org'\ngem 'woods', path: #{repo.inspect}\n")
+    # The setup preflight validates the index against the source it names, so
+    # this checkout gets a real static map of its own one class.
+    FileUtils.mkdir_p(File.join(@app, 'lib'))
+    File.write(File.join(@app, 'lib', 'post.rb'), "class Post\n  def title; end\nend\n")
+    Woods::GemMapper.new(root: @app, output_dir: File.join(@app, 'tmp', 'woods')).map!
+    plans = File.join(@base, 'plans')
+    FileUtils.mkdir_p(plans)
+    output, status = agent_config(@app, 'setup', '--plan', File.join(plans, 'setup.json'))
+    expect(status.success?).to be(true), output
+    expect(JSON.parse(output[/^\{.*\}\s*\z/m])).to include('entry_form' => 'relative')
+    output, status = agent_config(@app, 'apply', File.join(plans, 'setup.json'))
+    expect(status.success?).to be(true), output
+    entry = JSON.parse(File.read(File.join(@app, '.mcp.json'))).dig('mcpServers', 'woods')
+    expect(entry).to eq(Woods::MCP::ClientEntry.checkout)
+    expect(File.read(File.join(@app, '.mcp.json'))).not_to include(@base, '${')
+    git(@app, 'add', 'Gemfile', '.mcp.json')
+    git(@app, '-c', 'user.name=Spec', '-c', 'user.email=spec@example.com', '-c', 'commit.gpgsign=false',
+        'commit', '-q', '-m', 'Add Woods')
+    worktree = File.join(@base, 'shop-topic')
+    git(@app, 'worktree', 'add', '-q', '-b', 'topic', worktree)
+    subdirectory = File.join(@app, 'app', 'models')
+    FileUtils.mkdir_p(subdirectory)
+
+    [[@app, {}], [subdirectory, {}], [@base, { 'CLAUDE_PROJECT_DIR' => @app }]].each do |cwd, env|
+      start(entry, cwd, env)
+      begin
+        report = JSON.parse(request('tools/call', name: 'woods_status', arguments: { worktrees: 'none' })
+                              .dig('result', 'content', 0, 'text'))
+        expect(report).to include('ready' => true)
+        expect(report.dig('server', 'index_dir')).to eq(File.join(@app, 'tmp', 'woods'))
+      ensure
+        stop
+      end
+    end
+    start(entry, @base, 'CLAUDE_PROJECT_DIR' => worktree)
+    begin
+      expect(lookup.dig('structuredContent', 'data', 'status')).to eq('building')
+      publish(worktree)
+      expect_found(lookup)
+    ensure
+      stop
+    end
+
+    # The receipt is per-machine and not committed: setup in another checkout
+    # adopts the committed, identical entry and records that checkout's own
+    # receipt. (Its own static map lets the preflight validate an index.)
+    FileUtils.rm_r(File.join(worktree, 'tmp', 'woods'))
+    Woods::GemMapper.new(root: worktree, output_dir: File.join(worktree, 'tmp', 'woods')).map!
+    output, status = agent_config(worktree, 'setup', '--plan', File.join(plans, 'worktree.json'))
+    expect(status.success?).to be(true), output
+    expect(JSON.parse(output[/^\{.*\}\s*\z/m])).to include('adopted' => true)
+    output, status = agent_config(worktree, 'apply', File.join(plans, 'worktree.json'))
+    expect(status.success?).to be(true), output
+    expect(JSON.parse(File.read(File.join(worktree, '.woods-agent-config.json'))).dig('layout', 'root'))
+      .to eq(worktree)
+    expect(git(worktree, 'status', '--porcelain', '.mcp.json')).to be_empty
   end
 end
