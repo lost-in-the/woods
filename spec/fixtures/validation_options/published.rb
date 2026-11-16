@@ -2,6 +2,7 @@
 
 require 'woods/extractor'
 require 'woods/mcp/server'
+require_relative '../../support/index_comparison'
 
 module ValidationPublicationProbe
   def self.lookup(directory)
@@ -11,7 +12,7 @@ module ValidationPublicationProbe
     result = JSON.parse(server.handle_json(JSON.generate(request))).fetch('result')
     raise 'model lookup failed' if result['isError']
 
-    result.fetch('structuredContent').fetch('data').except('file_path', 'extracted_at')
+    IndexComparison.mask(:unit_extracted_at, result.fetch('structuredContent').fetch('data'))
   end
 
   def self.call(root, model_path)
