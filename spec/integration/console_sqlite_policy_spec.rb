@@ -39,6 +39,39 @@ RSpec.describe 'Console SQLite read policy', :booted_app do
     expect(WoodsConsoleOutputPolicyContract.verify!(@connection)).to eq(:passed)
   end
 
+  describe 'repeated protected result headers' do
+    before do
+      @connection.create_table(:policy_notes) do |table|
+        table.string :title
+        table.string :private_note
+      end
+      @connection.execute("INSERT INTO policy_notes (title, private_note) VALUES ('public', 'fictional-private-note')")
+      @server = Woods::Console::Server.build_embedded(
+        model_validator: Woods::Console::ModelValidator.new(registry: {}),
+        safe_context: Woods::Console::SafeContext.new(connection: @connection),
+        connection: @connection, read_tools_enabled: true, redacted_columns: ['private_note']
+      )
+    end
+
+    ['SELECT private_note, private_note FROM policy_notes',
+     'SELECT a.private_note, b.private_note FROM policy_notes a JOIN policy_notes b ON a.id = b.id',
+     'SELECT * FROM policy_notes a JOIN policy_notes b ON a.id = b.id'].each do |sql|
+      it "refuses a protected column the row-cap subquery would rename: #{sql}" do
+        result = request(sql)
+        expect(result.fetch('isError')).to be(true)
+        expect(result.to_json).to include('protected column more than once')
+        expect(result.to_json).not_to include('fictional-private-note')
+      end
+    end
+
+    it 'keeps a self-join that selects the protected column once' do
+      result = request('SELECT a.title, b.private_note FROM policy_notes a JOIN policy_notes b ON a.id = b.id')
+      expect(result.fetch('isError')).to be(false)
+      expect(result.to_json).to include('[REDACTED]')
+      expect(result.to_json).not_to include('fictional-private-note')
+    end
+  end
+
   describe 'rollback of Console work' do
     let(:connection) { @connection }
 
