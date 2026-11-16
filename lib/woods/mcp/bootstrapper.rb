@@ -415,7 +415,7 @@ module Woods
             end
             counts = { vectors: 0, metadata: candidate.metadata_store.count, graph: 0 }
             reader.reload!
-            retriever.install_snapshot!(candidate.snapshot)
+            retriever.install_from!(candidate)
             state&.clear_reload_failure!
             counts
           end
