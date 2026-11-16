@@ -79,7 +79,7 @@ RSpec.describe IndexComparison do
       expect(described_class::DEFAULT_MASKS).not_to include(:impact_item_generation)
       expect(described_class.mask(:impact_item_generation, 'generation' => 3, 'path' => 'a'))
         .to eq('path' => 'a')
-      expect { described_class.mask(:pagerank_precision, {}) }.to raise_error(ArgumentError, /not a key mask/)
+      expect { described_class.mask(:type_index_order, {}) }.to raise_error(ArgumentError, /not a key mask/)
       # A missing document must not compare equal to another missing one.
       expect { described_class.mask(:unit_extracted_at, nil) }.to raise_error(ArgumentError, /masks a Hash, not nil/)
     end
@@ -119,6 +119,22 @@ RSpec.describe IndexComparison do
           .to contain_exactly(a_string_starting_with('unit models/Widget.json field extracted_at'))
         expect { described_class.compare(left, right, masks: described_class::DEFAULT_MASKS - [:summary_body]) }
           .to raise_error(ArgumentError, /summary_body: they cannot be lifted/)
+      end
+    end
+
+    it 'compares the graph file byte for byte, and names a section that moved' do
+      Dir.mktmpdir('woods-index-comparison') do |root|
+        left = File.join(root, 'incremental')
+        right = File.join(root, 'full')
+        write_index(left, note: 'same')
+        write_index(right, note: 'same')
+        graph = File.join(right, 'dependency_graph.json')
+        File.write(graph, JSON.pretty_generate(JSON.parse(File.read(graph))))
+
+        expect(described_class.compare(left, right))
+          .to eq(['graph bytes differ while every section parses equal (key order, spacing or number form)'])
+        File.write(graph, JSON.generate('nodes' => { 'Widget' => { 'note' => 'moved' } }))
+        expect(described_class.compare(left, right)).to contain_exactly(a_string_starting_with('graph nodes: '))
       end
     end
 

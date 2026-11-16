@@ -16,11 +16,10 @@ require 'woods/generation'
 # a full and an incremental run may legitimately differ there. Nothing else is
 # forgiven. Everything outside the table — unit sets, unit content (including
 # the order of `dependents`, which both paths serialize sorted), `_index.json`,
-# graph nodes, edges, reverse edges, file map, type index, stats, PageRank
-# scores, manifest counts, the skipped-files report, the commit table,
-# `graph_analysis.json` (including `graph_sha`, the digest of the graph file's
-# bytes), flow artifacts, and SUMMARY.md's totals against the manifest of the
-# same index — must match exactly.
+# `dependency_graph.json` byte for byte, manifest counts, the skipped-files
+# report, the commit table, `graph_analysis.json` (including `graph_sha`, the
+# digest of the graph file's bytes), flow artifacts, and SUMMARY.md's totals
+# against the manifest of the same index — must match exactly.
 #
 # A non-empty result ends with a line naming the masks in effect, and the full
 # report (every difference, every mask with its reason) goes to stderr, so a
@@ -38,18 +37,16 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   # Widths:
   # - `:key` drops one key (at `path`) from each document of the artifact.
   # - `:order` compares the array(s) at `path` as sorted lists.
-  # - `:precision` compares the numbers at `path` rounded to `digits`.
-  # - `:section` drops a whole top-level section of a compared document.
   # - `:artifact` leaves a whole file, or all of it but one checked span, uncompared.
   # - `:representation` covers byte layout: documents are compared as parsed values.
   #
-  # A `:section` or `:artifact` mask, a key mask over {MAX_KEY_SHARE} of its
+  # An `:artifact` mask, a key mask over {MAX_KEY_SHARE} of its
   # artifact's bytes, or one that empties a document, is *wide* and must say
   # so with its own `wide:` reason.
   class Mask
-    WIDTHS = %i[key order precision section artifact representation].freeze
+    WIDTHS = %i[key order artifact representation].freeze
 
-    attr_reader :name, :artifact, :path, :width, :reason, :wide, :digits
+    attr_reader :name, :artifact, :path, :width, :reason, :wide
 
     # @param name [Symbol] unique name, used to select the mask
     # @param artifact [Symbol] a key of {IndexComparison::ARTIFACTS}
@@ -58,8 +55,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     # @param path [Array<String>] keys from the document root to what is masked
     # @param wide [String, nil] why this mask may hide more than {MAX_KEY_SHARE}
     # @param default [Boolean] false for a mask only an example names explicitly
-    # @param digits [Integer, nil] decimal places kept by a `:precision` mask
-    def initialize(name:, artifact:, width:, reason:, path: [], wide: nil, default: true, digits: nil)
+    def initialize(name:, artifact:, width:, reason:, path: [], wide: nil, default: true)
       @name = name
       @artifact = artifact
       @width = width
@@ -67,7 +63,6 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       @path = path.freeze
       @wide = wide
       @default = default
-      @digits = digits
       freeze
     end
 
@@ -113,19 +108,6 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   # A key mask that removes more than this share of its artifact's bytes is wide.
   MAX_KEY_SHARE = 0.10
 
-  # PageRank is iterative floating point, so the two runs can accumulate in
-  # different orders and disagree in the last bits. Six decimal places is far
-  # tighter than any real divergence — a score carried over from a graph that
-  # has since changed differs in the first two or three — while leaving no room
-  # for float noise to produce a spurious failure.
-  PAGERANK_PRECISION = 6
-
-  GRAPH_ORDER_REASON = 'Each entry is compared as a sorted list: the members are a set, filled in whatever ' \
-                       'order each run registered nodes. The bytes as written are still compared through ' \
-                       'graph_analysis.json graph_sha.'
-  GRAPH_SECTION_WIDE = 'A whole section. Its bytes are still compared through graph_analysis.json graph_sha, ' \
-                       'which digests the graph file as written.'
-
   MASKS = [
     Mask.new(name: :unit_extracted_at, artifact: :unit, width: :key, path: %w[extracted_at],
              reason: 'Wall-clock stamp of the write. A unit an incremental run correctly left alone keeps ' \
@@ -147,26 +129,9 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     Mask.new(name: :commit_table_since, artifact: :commit_table, width: :key, path: %w[since],
              reason: "The history window's first UTC day: two runs either side of midnight UTC differ there " \
                      'and nowhere else unless a commit sits on the boundary.'),
-    Mask.new(name: :pagerank_precision, artifact: :dependency_graph, width: :precision, path: %w[pagerank],
-             digits: PAGERANK_PRECISION,
-             reason: "Iterative floating point, accumulated in each run's registration order. Scores are " \
-                     'compared as values; only digits past the sixth decimal place are forgiven.'),
-    Mask.new(name: :graph_edges_order, artifact: :dependency_graph, width: :order, path: %w[edges],
-             reason: GRAPH_ORDER_REASON),
-    Mask.new(name: :graph_reverse_order, artifact: :dependency_graph, width: :order, path: %w[reverse],
-             reason: GRAPH_ORDER_REASON),
-    Mask.new(name: :graph_file_map_order, artifact: :dependency_graph, width: :order, path: %w[file_map],
-             reason: GRAPH_ORDER_REASON),
-    Mask.new(name: :graph_type_index_order, artifact: :dependency_graph, width: :order, path: %w[type_index],
-             reason: GRAPH_ORDER_REASON),
     Mask.new(name: :type_index_order, artifact: :type_index, width: :order,
              reason: 'Entries are compared sorted by identifier: the index lists units in the order each run ' \
                      'wrote them.'),
-    Mask.new(name: :graph_reverse_via, artifact: :dependency_graph, width: :section, path: %w[reverse_via],
-             reason: 'Not read here: it is derived from edges, which are compared.', wide: GRAPH_SECTION_WIDE),
-    Mask.new(name: :graph_node_facts, artifact: :dependency_graph, width: :section, path: %w[node_facts],
-             reason: 'Not read here: per-node facts derived from the units, which are compared.',
-             wide: GRAPH_SECTION_WIDE),
     Mask.new(name: :summary_body, artifact: :summary, width: :artifact,
              reason: "Only the totals line is checked, against each index's own manifest (M4). The body " \
                      "carries a Generated: stamp, so the two runs' files never match byte for byte.",
@@ -187,8 +152,8 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
                      'history and process state. The published payload they point at is what is compared.',
              wide: 'Every file outside the published payload directory.'),
     Mask.new(name: :json_representation, artifact: :json, width: :representation,
-             reason: 'Documents are compared as parsed values: object key order, whitespace and number ' \
-                     'spelling are not. graph_sha covers the bytes of the graph file.'),
+             reason: 'Documents other than the graph file are compared as parsed values: object key order, ' \
+                     'whitespace and number spelling are not.'),
     Mask.new(name: :impact_item_generation, artifact: :impact_report, width: :key, path: %w[generation],
              default: false,
              reason: 'The generation number an impact report item was read from: publication history, not ' \
@@ -252,7 +217,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
       summary_differences(full_dir)
   end
 
-  # Resolve names to masks. A `:section`, `:artifact` or `:representation`
+  # Resolve names to masks. An `:artifact` or `:representation`
   # mask has no comparison behind it to fall back on, so it cannot be lifted.
   #
   # @return [Array<Mask>]
@@ -263,7 +228,7 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     names.map { |name| mask_named(name) }
   end
 
-  UNLIFTABLE = %i[section artifact representation].freeze
+  UNLIFTABLE = %i[artifact representation].freeze
 
   # @return [String] every mask in effect, with its reason
   def mask_report(active)
@@ -313,15 +278,24 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     end
   end
 
-  def graph_differences(incremental_dir, full_dir, active = default_masks)
-    incremental = graph_snapshot(incremental_dir, active)
-    full = graph_snapshot(full_dir, active)
+  # Compared byte for byte: both paths serialize the graph key-sorted
+  # (B-180), PageRank included, and `graph_sha` publishes a digest of exactly
+  # these bytes. The sections are parsed only to name the one that moved.
+  def graph_differences(incremental_dir, full_dir, _active = nil)
+    incremental, full = [incremental_dir, full_dir].map { |dir| read_text(dir, 'dependency_graph.json') }
+    return [] if incremental == full
 
-    (incremental.keys | full.keys).filter_map do |section|
-      next if incremental[section] == full[section]
+    left, right = [incremental, full].map { |text| text && JSON.parse(text) }
+    return ["graph: incremental=#{brief(left)} full=#{brief(right)}"] unless left.is_a?(Hash) && right.is_a?(Hash)
 
-      "graph #{section}: #{brief(hash_delta(incremental[section], full[section]))}"
-    end
+    graph_section_differences(left, right)
+  end
+
+  def graph_section_differences(left, right)
+    moved = (left.keys | right.keys).reject { |section| left[section] == right[section] }
+    return ['graph bytes differ while every section parses equal (key order, spacing or number form)'] if moved.empty?
+
+    moved.map { |section| "graph #{section}: #{brief(hash_delta(left[section], right[section]))}" }
   end
 
   def manifest_differences(incremental_dir, full_dir, active = default_masks)
@@ -462,44 +436,6 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
     end
   end
 
-  # Every section of the graph file except the `:section` masks, with the
-  # `:order` and `:precision` masks applied to theirs. A section the file
-  # lacks reads as empty where a mask normalizes it, and is left out
-  # otherwise.
-  def graph_snapshot(dir, active = default_masks)
-    graph = read_json(dir, 'dependency_graph.json')
-    return {} unless graph
-
-    masks = active.select { |mask| mask.artifact == :dependency_graph }
-    dropped = masks.select { |mask| mask.width == :section }.map { |mask| mask.path.first }
-    masks.reject { |mask| mask.width == :section }.each_with_object(graph.except(*dropped)) do |mask, snapshot|
-      snapshot[mask.path.first] = normalized_section(mask, graph[mask.path.first])
-    end
-  end
-
-  # PageRank must be recomputed by incremental runs too, not carried over
-  # from the last full extraction (#164 gap 5). Values, not just keys: a
-  # modified file re-weights the graph without adding or removing a node,
-  # so a carried-over score set has exactly the keys the oracle expects.
-  def normalized_section(mask, section)
-    case mask.width
-    when :order then sorted_values(section) { |members| sort_members(members) }
-    when :precision then rounded_pagerank(section, mask.digits)
-    end
-  end
-
-  def rounded_pagerank(pagerank, digits = PAGERANK_PRECISION)
-    (pagerank || {}).transform_values { |score| score.to_f.round(digits) }
-  end
-
-  def sorted_values(section, &block)
-    (section || {}).transform_values(&block)
-  end
-
-  def sort_members(members)
-    Array(members).sort_by { |member| member.is_a?(Hash) ? member.to_a : member }
-  end
-
   # Compared **exactly**, ordering included.
   #
   # This used to `deep_sort` both sides, which quietly made the oracle unable
@@ -547,8 +483,13 @@ module IndexComparison # rubocop:disable Metrics/ModuleLength
   end
 
   def read_json(dir, relative)
+    text = read_text(dir, relative)
+    text && JSON.parse(text)
+  end
+
+  def read_text(dir, relative)
     path = File.join(payload_dir(dir), relative)
-    File.exist?(path) ? JSON.parse(Woods::AtomicFile.read(path)) : nil
+    File.exist?(path) ? Woods::AtomicFile.read(path) : nil
   end
 
   def deep_sort(value)

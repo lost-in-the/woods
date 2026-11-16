@@ -41,7 +41,7 @@ module IndexComparison
     REPORTED_AS = {
       unit: /\A(unit |ghost units|missing units)/,
       type_index: /\A_index\.json /,
-      dependency_graph: /\Agraph /,
+      dependency_graph: /\Agraph[ :]/,
       manifest: /\Amanifest: /,
       skipped_files: /\Askipped_files\.json: /,
       commit_table: /\Agit_commits\.json: /,
@@ -259,36 +259,10 @@ module IndexComparison
       members.is_a?(Array) && members.reverse != members
     end
 
-    def precision_probes(mask)
-      relative, document = documents(mask.artifact).min_by(&:first)
-      scores = dig(document, mask.path)
-      return [] unless scores.is_a?(Hash) && scores.any?
-
-      path = mask.path + [scores.keys.sort.sample(random: @random)]
-      nudged = nudge(dig(document, path).to_f, mask.digits)
-      return [] unless nudged
-
-      masked_and_lifted(mask, relative, path) { write(relative, replace_at(document, path, nudged)) }
-    end
-
-    # A different number that still rounds to the same +digits+ places.
-    def nudge(score, digits)
-      [1, -1].map { |sign| score + (sign * (10**-(digits + 3))) }
-             .find { |value| value != score && value.round(digits) == score.round(digits) }
-    end
-
     def masked_and_lifted(mask, relative, path, &change)
       lifted = IndexComparison::DEFAULT_MASKS - [mask.name]
       [probe(:masked, mask.artifact, relative, path, mask.name, &change),
        probe(:lifted, mask.artifact, relative, path, mask.name, masks: lifted, &change)]
-    end
-
-    def section_probes(mask)
-      relative, document = documents(mask.artifact).min_by(&:first)
-      return nil if dig(document, mask.path).equal?(MISSING)
-
-      changed = mutate_at(document, leaf_paths(dig(document, mask.path), mask.path).sample(random: @random))
-      probe(:masked, mask.artifact, relative, mask.path, mask.name) { write(relative, changed) }
     end
 
     def artifact_probes(mask)
@@ -387,7 +361,7 @@ module IndexComparison
 
     def masked_path?(artifact, path)
       @masks.any? do |mask|
-        mask.artifact == artifact && %i[key section].include?(mask.width) && path.first(mask.path.size) == mask.path
+        mask.artifact == artifact && mask.width == :key && path.first(mask.path.size) == mask.path
       end
     end
 
