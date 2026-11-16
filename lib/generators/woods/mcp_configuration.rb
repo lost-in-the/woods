@@ -34,8 +34,9 @@ module Woods
       # @param root [String] the application root
       # @param path [String] its `.mcp.json`
       # @param entry [Hash]
-      # @return [String, Symbol, nil] why the file is left alone, `:absent`
-      #   to create it, `:identical`, or nil to add the entry
+      # @return [String, Symbol, nil] why the file is left alone (including
+      #   one that exists but cannot be read), `:absent` to create it,
+      #   `:identical`, or nil to add the entry
       def skip_reason(root, path, entry)
         if File.exist?(File.join(root, AGENT_CONFIG_RECEIPT))
           return 'it is managed by woods-agent-config; use `woods-agent-config update` to change it'
@@ -48,6 +49,8 @@ module Woods
         servers_reason(data.fetch('mcpServers', {}), entry)
       rescue JSON::ParserError
         'it is not valid JSON'
+      rescue SystemCallError => e
+        "it cannot be read: #{e.message}"
       end
 
       # @param path [String] an existing `.mcp.json` {.skip_reason} accepted

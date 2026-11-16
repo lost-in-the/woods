@@ -10,6 +10,9 @@
   so and prints the entry instead. `--mcp-service <service>` gives the container form, which runs
   `docker compose exec` with the session directory as `--client-root` and passes a developer-exported
   `WOODS_MCP_CLIENT_ROOT_MAP` through. An application below its checkout root gets a relative `WOODS_OUTPUT`.
+  The container entry passes no `-w`: the service's `working_dir` must be the application root, in a mount of the
+  whole checkout. A `.mcp.json` that cannot be read is skipped with the reason, and an `output_dir` inside the
+  checkout is followed when the application is reached through a symlink.
 - `woods-agent-config setup --scope project` writes the same checkout-aware entry, from one shared builder, for a
   new installation inside a git checkout: no absolute path, no `cwd` and no `BUNDLE_GEMFILE` (Bundler finds the
   Gemfile from the project directory). `--entry-form relative|absolute` chooses explicitly; the plan summary names
@@ -21,3 +24,5 @@
   writes only that checkout's own receipt (`"adopted": true`); a different or absolute unowned entry is still
   refused. The plan's `notes` say what the tool does not do itself: keep the receipt out of version control, and for
   Compose, run the service with the application root as its `working_dir` and pin the project name for worktrees.
+  For a relative Compose entry the preflight runs the same `docker compose exec` as the entry, with no `-w`, and
+  setup refuses a service whose working directory does not resolve the `--container-root` application, naming both.

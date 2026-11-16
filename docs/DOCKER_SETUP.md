@@ -186,11 +186,18 @@ machine. See [managed configuration](AGENT_SETUP.md#managed-claude-code-configur
   A session in a linked worktree reaches the running service only when the project name is pinned,
   with a top-level `name:` in the Compose file or `COMPOSE_PROJECT_NAME`.
 - `--checkout` needs the checkout's `.git` entry inside the container.
-- The service's `working_dir` must be the application root inside the container: `woods-mcp-start --checkout`
-  finds the checkout from there.
+  A service that mounts only the application directory has none, and the launch is refused.
+- The entry passes no `-w`, so the server starts in the service's `working_dir`.
+  That must be the application root inside the container, in a mount of the whole checkout.
+  For an application below its checkout root, it is the application directory (for example `/app/apps/web` with
+  the checkout at `/app`), not the checkout root: Bundler looks for the Gemfile up from there, never down.
+  `woods-agent-config setup` runs its preflight the same way, and refuses a service whose working directory does not
+  resolve the `--container-root` application, naming both directories.
+  The generator only prints the entry and does not check the service.
 
-The generated entry was run with a stand-in `docker` that runs the inner command in place
-(`spec/integration/generated_mcp_entry_spec.rb`). A real `docker compose exec` with this entry was not run.
+The generated entry was run with a stand-in `docker` that runs the inner command in place, or in a given service
+working directory (`spec/integration/generated_mcp_entry_spec.rb`).
+A real `docker compose exec` with this entry was not run.
 
 Before Woods `2.2.0`, or without the checkout's `.git` in the container, name the host application root.
 Compose must be able to resolve the project, so set `cwd` to the host application root.

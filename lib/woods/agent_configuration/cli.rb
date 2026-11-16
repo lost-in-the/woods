@@ -101,8 +101,9 @@ module Woods
         end
         if launcher.form == 'relative' && launcher.mode == 'compose'
           list << "the #{launcher.service} service's working_dir must be the application root inside the " \
-                  'container, and a linked worktree reaches the running service only when the Compose project ' \
-                  'name is pinned (a top-level `name:` or COMPOSE_PROJECT_NAME)'
+                  'container (the preflight ran there, as the entry will), and a linked worktree reaches the ' \
+                  'running service only when the Compose project name is pinned (a top-level `name:` or ' \
+                  'COMPOSE_PROJECT_NAME)'
         end
         list.compact
       end

@@ -53,6 +53,24 @@ module Woods
           (form == 'relative' ? ['relative'] : [])
       end
 
+      # The relative Compose entry starts in the service's working directory;
+      # this asks the service which directory that is.
+      #
+      # @return [Array<String>, nil] nil for any other launch
+      def working_directory_command
+        prefix + ['pwd'] if form == 'relative' && mode == 'compose'
+      end
+
+      # @param directory [String] where the service starts ({#working_directory_command})
+      # @return [String, nil] why the written entry would not start in the application root
+      def working_directory_mismatch(directory)
+        return if directory.empty? || File.expand_path(directory) == File.expand_path(container_root)
+
+        "The written entry starts in the #{service} service's working directory, #{directory}, not " \
+          "--container-root #{container_root}: set the service's working_dir to #{container_root}, or use " \
+          '--entry-form absolute.'
+      end
+
       def environment
         mode == 'host' ? { 'BUNDLE_GEMFILE' => File.join(root, 'Gemfile') } : {}
       end
@@ -76,11 +94,15 @@ module Woods
         File.join(process_root, index)
       end
 
+      # The relative entry ({MCP::ClientEntry.checkout}) names no project
+      # directory and no -w, so its probe runs where the entry will run.
       def prefix(frozen: false)
         return [] if mode == 'host'
 
-        ['docker', 'compose', '--project-directory', root, 'exec', '-T', '-w', container_root] +
-          (frozen ? ['-e', 'BUNDLE_FROZEN=true'] : []) + [service]
+        placed = form == 'relative' ? [] : ['--project-directory', root]
+        working = form == 'relative' ? [] : ['-w', container_root]
+        ['docker', 'compose', *placed, 'exec', '-T', *working] + (frozen ? ['-e', 'BUNDLE_FROZEN=true'] : []) +
+          [service]
       end
 
       def validate!

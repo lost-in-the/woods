@@ -225,6 +225,9 @@ From Woods `2.2.0`, `--entry-form relative|absolute` chooses what the MCP entry 
 - The relative entry needs `sh` on the machine that runs the client. Without one, use `--entry-form absolute`.
 - For Compose, the service's `working_dir` must be the application root inside the container. The plan's `notes`
   say so, with the pinned Compose project name a linked worktree needs.
+  The preflight runs the same `docker compose exec` as the entry, with no `-w`.
+  Setup refuses a service whose working directory does not resolve the `--container-root` application, and names
+  the service's working directory and the container root.
 
 Commit `.mcp.json`. The receipt `.woods-agent-config.json` records this machine's root and target paths:
 keep it out of version control. The tool does not edit `.gitignore`; the plan's `notes` name the line to add.
