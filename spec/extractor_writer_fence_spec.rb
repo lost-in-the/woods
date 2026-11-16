@@ -366,4 +366,86 @@ RSpec.describe Woods::Extractor, 'writer fence' do
   rescue Woods::ExtractionError => e
     { stage: stage, error: e.message }
   end
+
+  # A child forked in the middle of a run inherits the extractor, its open
+  # stage and the caller's lock, and unwinds the same ensure blocks the
+  # parent will: the run's stage cleanup and with_lock's release. Both belong
+  # to the parent. On the way out the child also tries to publish the
+  # inherited run, whose refusal cleans up the stage too.
+  describe 'a child forked while a run is staged', if: Process.respond_to?(:fork) do
+    { 'returns normally' => :return, 'raises' => :raise, 'calls exit!' => :exit! }.each do |exit_kind, mode|
+      it "leaves the parent's stage and lock alone when the child #{exit_kind}, and the parent still cleans up" do
+        lock = Woods::Coordination::PipelineLock.for_index(output)
+        extractor = described_class.new(output_dir: output)
+        seen = {}
+        allow(extractor).to receive(:perform_extract_all) do
+          seen.merge!(fork_during_stage(extractor, lock) { leave_child(extractor, mode) })
+        end
+
+        unwind_once_in_child { lock.with_lock { extractor.extract_all } }
+
+        expect(seen).to eq(stage_kept: true, lock_kept: true, fence: :ours, stages: 1)
+        expect(stages).to be_empty
+        expect(File.exist?(lock_path)).to be(false)
+      end
+    end
+
+    it "keeps the parent's stage when the child reopens the inherited run" do
+      lock = Woods::Coordination::PipelineLock.for_index(output)
+      extractor = described_class.new(output_dir: output)
+      seen = {}
+      allow(extractor).to receive(:perform_extract_all) do
+        seen.merge!(fork_during_stage(extractor, lock) { reopen_in_child(extractor) })
+      end
+
+      unwind_once_in_child { lock.with_lock { extractor.extract_all } }
+
+      expect(seen).to eq(stage_kept: true, lock_kept: true, fence: :ours, stages: 1)
+      expect(stages).to be_empty
+    end
+
+    # Stages a run, forks, and in the parent reports what the child left.
+    def fork_during_stage(extractor, lock)
+      extractor.send(:begin_payload!)
+      stage = extractor.payload_dir
+      Woods::AtomicFile.write(stage.join('parent.json'), '{}')
+      child = fork
+      if child.nil?
+        @forked_child = true
+        return yield
+      end
+
+      Process.wait(child)
+      { stage_kept: stage.join('parent.json').file?, lock_kept: File.exist?(lock_path),
+        fence: lock.fenced { :ours }, stages: stages.size }
+    end
+
+    def leave_child(extractor, mode)
+      ENV['WOODS_LOCK_WAIT'] = '0.3'
+      extractor.send(:publish_generation, 'full')
+      exit!(0) if mode == :exit!
+      raise 'the child failed' if mode == :raise
+
+      {}
+    end
+
+    # The child opens a stage of its own on the inherited instance, cannot
+    # publish it while the parent holds the lock, and removes it.
+    def reopen_in_child(extractor)
+      ENV['WOODS_LOCK_WAIT'] = '0.3'
+      extractor.send(:begin_payload!)
+      extractor.send(:publish_generation, 'full')
+      {}
+    end
+
+    # The child unwinds the run like the parent, then stops before RSpec's
+    # own cleanup can remove the output directory under the parent.
+    def unwind_once_in_child
+      yield
+    rescue RuntimeError
+      raise unless @forked_child
+    ensure
+      exit!(0) if @forked_child
+    end
+  end
 end

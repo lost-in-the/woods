@@ -12,3 +12,7 @@
   Ownership is now bound to the process that acquired the lock.
   In a child, the lock is not found for the index, its fence refuses, its heartbeat does nothing, and its release
   leaves the lock file alone.
+  A staging directory likewise belongs to the process that created it.
+  A child forked during an extraction or a self-map publication used to remove the parent's stage as it unwound
+  the run's cleanup or failed to publish, so the parent's own publish then failed.
+  The child now only forgets the inherited stage.
