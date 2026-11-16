@@ -245,7 +245,8 @@ module Woods
 
       # Nested definitions have their own execution scope. Ordinary blocks
       # keep self; eval/exec blocks on another receiver do not, although the
-      # call that obtains that receiver still runs in this method.
+      # call that obtains that receiver still runs in this method. Lambda and
+      # proc bodies and `defined?` operands do not run here at all.
       def method_sends(node, same_receiver: false)
         sends = []
         pending = Array(node.children).dup
@@ -253,9 +254,11 @@ module Woods
           next unless child.is_a?(Ast::Node)
           next if %i[def defs class module].include?(child.type)
           next if same_receiver && child.type == :sclass
+          next if FlowAnalysis::OperationExtractor::UNEVALUATED_TYPES.include?(child.type)
 
           sends << child if child.type == :send
           children = Array(child.children)
+          children = children.first(1) if FlowAnalysis::OperationExtractor.deferred_block?(child)
           if same_receiver && child.type == :block
             call = children.first
             if call&.type == :send && RECEIVER_CHANGING_METHODS.include?(call.method_name) &&
