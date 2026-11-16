@@ -575,7 +575,7 @@ An application with nothing to extract still gets an empty, valid first generati
 A `generation.json` that exists but cannot be read is not "no generation".
 The writer refuses to publish over it, so the watcher does not start a full extraction.
 It stays `degraded` and names the file.
-See [generation.json is unreadable](TROUBLESHOOTING.md#generationjson-is-unreadable) for how to restore it.
+See [generation.json is unreadable](TROUBLESHOOTING.md#generationjson-is-unreadable) for what to do.
 
 **The built-in watcher establishes detection before reconciliation runs.**
 Polling signals readiness after its baseline scan; native watching signals after

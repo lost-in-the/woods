@@ -24,7 +24,7 @@ This guide covers the most common problems encountered when installing, extracti
 | `JSON parse errors` (MCP) | Rails boot noise on stdout | Remove `puts` calls from initializers |
 | Query timeout | Large table, no scope | Add scope conditions to narrow results |
 | `Extraction failed for …; the previous generation remains active` | A consumer handled a source error during incremental extraction or refresh (included in Woods `2.0.0`) | Fix the logged source error and retry the [complete batch](INCREMENTAL_EXTRACTION.md#handled-source-errors-and-retry); watch keeps it pending |
-| `Published generation marker is unreadable or malformed` | `generation.json` exists but cannot be read | Restore it to name a published generation: [generation.json is unreadable](#generationjson-is-unreadable) |
+| `Published generation marker is unreadable or malformed` | `generation.json` exists but cannot be read | Restore it only from independent evidence, otherwise extract into a fresh output directory: [generation.json is unreadable](#generationjson-is-unreadable) |
 | Empty extraction output | `eager_load!` failure | Check for `NameError` in boot output |
 | Git metadata missing | Shallow clone in CI | Use `fetch-depth: 0` for complete history |
 | Parallel tool calls all fail | MCP client batches calls | Send calls sequentially, validate params first |
@@ -531,18 +531,20 @@ A resident `woods:watch` reports `degraded` with the same advice and does not ex
 **Cause:** the marker that names the published generation exists but cannot be read.
 A writer will not number from 0 over it: that would replace a retained `payloads/gen-1` and move the marker backward.
 
-**Fix:** restore the marker to name a generation known to have been published, in this shape:
+**Fix:** restore the marker only to a generation independently known to have been published.
+Evidence is a backup of `generation.json`, or a served identity recorded elsewhere.
+The restored marker has this shape:
 
 ```json
 {"number":3,"payload":"payloads/gen-3"}
 ```
 
-- Every retained `payloads/gen-<n>` was published, except possibly the newest.
-- A writer moves its stage to `gen-<n>` before it writes the marker.
-  A run that reported "Could not publish generation" leaves that newest directory behind, never published.
-- When unsure, name the second newest directory.
-- With only one retained directory, or no evidence either way, do not guess.
-  Extract afresh into a new output directory, or run `woods:clean` and then `woods:extract`.
+The retained `payloads/gen-<n>` directories are not evidence, and neither is their order.
+A writer moves its stage to `gen-<n>` before it writes the marker, so a failed publish leaves an unpublished directory.
+Several can be left behind, for example by a failed publish followed by a flat-fallback run and another failed one.
+
+Without independent evidence, keep the old output directory as it is.
+Extract into a fresh output directory, validate it with `woods:validate`, and point readers at it.
 
 ---
 
