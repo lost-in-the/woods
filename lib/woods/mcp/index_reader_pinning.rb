@@ -47,6 +47,23 @@ module Woods
       DIAGNOSTIC_TOOL_NAMES = Set.new(%w[woods_status]).freeze
 
       class << self
+        # The answer of a reader-backed tool when the published generation
+        # marker is unusable.
+        #
+        # @param tool [String]
+        # @return [Hash] a serialized tool result
+        def corrupt_marker_response(tool)
+          message = 'Published generation marker is unavailable or malformed; ' \
+                    'run woods:validate and restore or rebuild the index.'
+          meta = { error_code: :corrupt_artifact, tool: tool }
+          meta[:completeness] = SearchResults.unavailable if tool == 'search'
+          ::MCP::Tool::Response.new(
+            [{ type: 'text', text: message }], error: true,
+                                               structured_content: { text: message },
+                                               meta: meta
+          ).to_h
+        end
+
         # @param server [MCP::Server]
         # @param reader [Woods::MCP::IndexReader]
         # @return [MCP::Server]
@@ -80,15 +97,7 @@ module Woods
         rescue Woods::Generation::InvalidMarker
           return super if DIAGNOSTIC_TOOL_NAMES.include?(request[:name])
 
-          message = 'Published generation marker is unavailable or malformed; ' \
-                    'run woods:validate and restore or rebuild the index.'
-          meta = { error_code: :corrupt_artifact, tool: request[:name] }
-          meta[:completeness] = SearchResults.unavailable if request[:name] == 'search'
-          ::MCP::Tool::Response.new(
-            [{ type: 'text', text: message }], error: true,
-                                               structured_content: { text: message },
-                                               meta: meta
-          ).to_h
+          IndexReaderPinning.corrupt_marker_response(request[:name])
         end
 
         def read_resource_contents(request, **kwargs)

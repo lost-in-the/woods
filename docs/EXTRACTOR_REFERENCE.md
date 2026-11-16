@@ -216,6 +216,18 @@ File-based extractors derive an identifier in three steps, first match wins:
 
 1. **Zeitwerk-governed naming.** For a file under a managed autoload path, the expected constant path comes from its owning Rails loader (`main` or `once`), including that loader's inflections, root namespace, collapsed directories and ignored paths. Without loader information, the offline path convention applies. The source must declare exactly the expected constant: `app/services/domain/container/parser.rb` is expected to define `Domain::Container::Parser`. This is what lets a file whose namespaces are written as *classes* (`module Domain; class Container; class Parser`) name the file's own constant instead of the wrapper `Domain::Container`, which every sibling under the same wrapper would otherwise collide with.
 2. **Position-aware nesting scan** (`SourceNesting`, the supporting utility above). The first `class` declaration qualified by the namespaces actually open at that position. Compact declarations keep their segments; a helper module nested inside the class and sibling modules that closed earlier do not contribute.
+
+   A compact declaration's first constant is looked up as Ruby looks it up, as far as the source settles it:
+   the innermost module's own constant when the file declares it, else an enclosing module of that name.
+   `module Billing; class Billing::Invoice` names `Billing::Invoice`.
+   Otherwise the declaration stays nested, since a nearer constant may come from another file:
+   `class Invoice::Line` inside `module Billing` names `Billing::Invoice::Line`.
+   A prefix a superclass supplies also stays nested.
+   A leading `::` is absolute.
+   `module Billing; class Billing::Invoice` still names `Billing::Invoice`
+   when another file declares `Billing::Billing`,
+   which is safe on a Zeitwerk-managed path because `billing/invoice.rb` must define `Billing::Invoice`.
+   Method table owners, `lookup Owner#method` and the self-map name declarations by the same rule.
 3. **Path convention.** Camelize the path under `app/<kind>/` (details vary per extractor).
 
 Unmanaged paths (`lib/` unless configured for autoloading, and configured non-autoload roots) and sources that declare nothing matching the expected constant skip step 1 entirely: the source scan and path convention decide. A namespace file containing only `Acme::VERSION` does not acquire an invented `Acme::Version` declaration.
@@ -337,6 +349,8 @@ publish the same values.
 ### ModelExtractor
 
 **What it captures:** Every named, non-abstract `ActiveRecord::Base` descendant loaded in the process, except Rails-generated `HABTM_` join classes. A table is not required: a model whose table is missing is still extracted, with `table_exists: false` and empty column metadata. Models a gem or the framework defines are included too (an engine model, and on Rails before 7.1 `ActiveRecord::SchemaMigration` and `ActiveRecord::InternalMetadata`); `origin` says which (below). The source_code is the model's actual Ruby source *plus* all included concerns inlined below it as formatted comment blocks. When the table exists, schema information (columns, types, indexes, foreign keys) is prepended as a header comment.
+The indexes and foreign keys are read from the model's own database.
+A section whose read fails says `unknown (could not be read)` instead of being left out.
 A model whose database cannot be reached at all is not extracted.
 The manifest's [`schema_readability`](PUBLISHED_INDEX.md#manifest-schema-readability) records that database as `unreachable`,
 or as `empty` when it holds no tables.
