@@ -178,6 +178,7 @@ module Woods
                   :console_redacted_columns,
                   :console_redacted_key_values, :console_embedded_read_tools,
                   :console_sql_default_limit, :console_sql_max_limit,
+                  :console_max_value_bytes, :console_max_response_bytes,
                   :console_blocked_tables, :console_disabled_scanner_patterns,
                   :console_credential_defense_enabled,
                   :console_credential_rotation_warning, :console_unsafe_eval_enabled,
@@ -244,6 +245,8 @@ module Woods
       @console_embedded_read_tools = false
       @console_sql_default_limit = 100
       @console_sql_max_limit = 1_000
+      @console_max_value_bytes = 64 * 1024
+      @console_max_response_bytes = 4 * 1024 * 1024
       @console_blocked_tables = DEFAULT_CONSOLE_BLOCKED_TABLES.dup
       @console_disabled_scanner_patterns = []
       @console_credential_defense_enabled = true

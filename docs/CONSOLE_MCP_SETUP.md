@@ -804,6 +804,37 @@ end
 - The tool schema still rejects a `limit` above 10000, whatever the host maximum.
 - The row cap does not bound CPU or I/O. The [statement timeout](#statement-timeout) is unchanged.
 
+### Response budgets
+
+Every Console tool, the default nine and the optional `console_sql` and `console_query`, shares two byte budgets.
+
+| Setting | Default | Meaning |
+|---------|---------|---------|
+| `console_max_value_bytes` | `65536` (64 KiB) | Largest string or symbol value returned whole |
+| `console_max_response_bytes` | `4194304` (4 MiB) | Largest materialized result and encoded tool response |
+
+```ruby
+Woods.configure do |config|
+  config.console_max_value_bytes    = 16 * 1024
+  config.console_max_response_bytes = 1024 * 1024
+end
+```
+
+- Both settings must be positive integers. An invalid value refuses Console construction:
+  stdio does not start, and every HTTP Console request fails until the value is fixed. Restart after a change.
+- A value over `console_max_value_bytes` is replaced by
+  `{"type": "value_omitted", "reason": "max_value_bytes", "limit_bytes": n}`. No prefix of it is returned.
+- A field name or SQL column header over that size refuses the call instead, so a field never changes identity.
+- A result over `console_max_response_bytes`, nesting deeper than 100 levels, or a cycle is refused with
+  `response_budget_exceeded` (also the `error_code` in `_meta`). The refusal names no value or field.
+  Narrow the columns, the `limit` or the scope.
+- The refusal itself is exempt from the budget, so even a very small budget can report it.
+- Column and key/value redaction run before any value is omitted, and again after serialization.
+  A protected value is redacted, never omitted.
+- JSON escaping and the final encoded tool response count toward the budget. The JSON-RPC envelope does not.
+- This is not a process memory ceiling. Database drivers materialize cells before these checks,
+  and a custom serializer can allocate before its output is measured. Prefer narrow columns for large values.
+
 ---
 
 ## Safety model

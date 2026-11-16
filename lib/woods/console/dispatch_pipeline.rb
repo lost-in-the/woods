@@ -3,6 +3,7 @@
 require 'json'
 require_relative 'response_context'
 require_relative 'input_contract'
+require_relative 'response_budget'
 
 module Woods
   module Console
@@ -23,12 +24,15 @@ module Woods
     #   7. Render the result via the optional renderer or JSON, wrap in a
     #      response object.
     #
+    # {ResponseBudget} bounds every step from 5 on: whole oversized values are
+    # omitted, and an oversized result or final tool response is refused.
+    #
     # Previously this flow lived inline in `Server.register` with four
     # `method(:...)` captures closing over module-level methods. Pulling it
     # into a first-class object collapses that wiring, removes the need for
     # the captures, and makes the pipeline directly testable without going
     # through the full server build path.
-    class DispatchPipeline
+    class DispatchPipeline # rubocop:disable Metrics/ClassLength
       # @param tool_name [String]
       # @param handler [#call] Maps a Hash of tool args to a bridge request Hash.
       # @param properties [Hash] ToolSpec JSON Schema properties.
@@ -39,8 +43,10 @@ module Woods
       # @param logger [#warn, nil] Structured logger used for credential-scan
       #   and table-gate telemetry. Failures are swallowed so observability
       #   issues never break a tool response.
+      # @raise [ArgumentError] when a configured response budget is invalid
       def initialize(tool_name:, handler:, properties:, conn_mgr:, # rubocop:disable Metrics/ParameterLists
                      ctx: NullResponseContext.instance, renderer: nil, logger: nil)
+        @budget = ResponseBudget.new
         @tool_name = tool_name
         @handler = handler
         @properties = properties
@@ -59,6 +65,8 @@ module Woods
         @ctx.enforce!(args)
         request = @handler.call(args).transform_keys(&:to_s)
         send_to_bridge(request)
+      rescue ResponseBudget::Exceeded
+        budget_refusal
       rescue TableGateError => e
         log_table_gate_rejection(args, e)
         error_response(scan_early_error(e.message))
@@ -110,10 +118,12 @@ module Woods
         # Redact first so protected serializers never run; redact again after
         # normalization to cover fields introduced by a custom serializer.
         # Both renderers consume this same JSON-compatible data tree.
+        @budget.verify_shape!(response['result'])
         result = @ctx.redact(response['result'])
-        result = JSON.parse(JSON.generate(result))
+        result = @budget.apply(result)
+        result = JSON.parse(@budget.check_encoded!(JSON.generate(result)))
         result = @ctx.redact(result)
-        result = scan_for_credentials(result, request)
+        result = scan_for_credentials(@budget.apply(result), request)
         text = @renderer ? @renderer.render_default(result) : JSON.pretty_generate(result)
         success_response(text)
       rescue ConnectionError => e
@@ -129,13 +139,15 @@ module Woods
       end
 
       def scan_for_credentials(result, request)
-        scanned, counts = @ctx.scan(result)
+        scanned, counts = @ctx.scan(@budget.apply(result))
         log_credential_hits(request, counts) unless counts.empty?
         scanned
       end
 
       def scan_early_error(message)
         scan_for_credentials(message, 'tool' => @tool_name.delete_prefix('console_'))
+      rescue ResponseBudget::Exceeded
+        @budget.refusal
       end
 
       def log_credential_hits(request, counts)
@@ -166,14 +178,28 @@ module Woods
         nil
       end
 
+      def budget_refusal
+        meta = RefusalDetails.meta({ code: ResponseBudget::REFUSAL_CODE }, @tool_name)
+        ::MCP::Tool::Response.new([{ type: 'text', text: @budget.refusal }], error: true, meta: meta)
+      end
+
+      def bounded_response(response)
+        # Reserve the SDK's modern result discriminator even for legacy clients.
+        # Tools/call has no cache-hint fields; the JSON-RPC envelope is separate.
+        @budget.check_encoded!(JSON.generate(response.to_h.merge(resultType: 'complete')))
+        response
+      rescue ResponseBudget::Exceeded
+        budget_refusal
+      end
+
       def success_response(text)
-        ::MCP::Tool::Response.new([{ type: 'text', text: text }])
+        bounded_response(::MCP::Tool::Response.new([{ type: 'text', text: text }]))
       end
 
       # @param details [Hash] Optional `code`, `argument` and `hint`, served in `_meta`
       def error_response(text, details = {})
-        ::MCP::Tool::Response.new([{ type: 'text', text: text }], error: true,
-                                                                  meta: RefusalDetails.meta(details, @tool_name))
+        bounded_response(::MCP::Tool::Response.new([{ type: 'text', text: text }],
+                                                   error: true, meta: RefusalDetails.meta(details, @tool_name)))
       end
     end
   end

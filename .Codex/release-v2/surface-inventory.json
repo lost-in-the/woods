@@ -31,6 +31,10 @@
     "console_disabled_scanner_patterns=",
     "console_embedded_read_tools",
     "console_embedded_read_tools=",
+    "console_max_response_bytes",
+    "console_max_response_bytes=",
+    "console_max_value_bytes",
+    "console_max_value_bytes=",
     "console_mcp_allowed_origins",
     "console_mcp_allowed_origins=",
     "console_mcp_enabled",
@@ -1189,7 +1193,7 @@
     "retrieve"
   ],
   "counts": {
-    "configuration_attributes": 174,
+    "configuration_attributes": 178,
     "console_mcp_default_tools": 9,
     "console_mcp_read_tools": 11,
     "console_mcp_schemas": 31,

@@ -171,6 +171,11 @@ Woods.configure do |config|
   # config.console_sql_default_limit = 100
   # config.console_sql_max_limit = 1_000
 
+  # Byte budgets for every Console tool: the largest value returned whole, and
+  # the largest encoded tool response.
+  # config.console_max_value_bytes = 64 * 1024
+  # config.console_max_response_bytes = 4 * 1024 * 1024
+
   # ── Caching ─────────────────────────────────────────────────────────────
 
   # Cache embedding and retrieval responses to reduce API cost.

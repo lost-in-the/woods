@@ -65,6 +65,7 @@ BOOTED_STEPS = [
   %w[spec/generators/install_generator_spec.rb],
   %w[spec/integration/watch_startup_spec.rb spec/integration/managed_watch_spec.rb],
   %w[spec/integration/console_sqlite_policy_spec.rb],
+  %w[spec/integration/console_response_budget_spec.rb],
   %w[spec/integration/console_typed_eav_policy_spec.rb],
   %w[spec/integration/console_sqlite_keyword_functions_spec.rb],
   %w[spec/integration/console_resolved_relation_policy_spec.rb],

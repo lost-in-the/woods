@@ -1342,6 +1342,8 @@ They keep working through 2.x; a new setup should leave `console_mcp_enabled` of
 | `console_embedded_read_tools` | Boolean | `false` | Register `console_sql` and `console_query` in supported stdio and Rack modes. |
 | `console_sql_default_limit` | Integer | `100` | Rows `console_sql` returns when the caller passes no `limit`. |
 | `console_sql_max_limit` | Integer | `1000` | Ceiling applied to a requested `console_sql` `limit`. The tool schema still rejects a `limit` above 10000. |
+| `console_max_value_bytes` | Integer | `65536` | Largest string value a Console tool returns whole; a larger value is replaced by a `value_omitted` marker. See [response budgets](CONSOLE_MCP_SETUP.md#response-budgets). |
+| `console_max_response_bytes` | Integer | `4194304` | Largest Console tool result, encoded; a larger one is refused with `response_budget_exceeded`. |
 | `console_blocked_tables` | Array\<String\> | `Woods::DEFAULT_CONSOLE_BLOCKED_TABLES` | TableGate denylist (case-insensitive). Bare names match every schema; qualified names (`schema.table`) match exactly. |
 | `console_redacted_columns` | Array\<String\> | `Woods::DEFAULT_CONSOLE_REDACTED_COLUMNS` | Column names whose values are replaced with `[REDACTED]` in responses, and which are refused as aggregate, scope, find, and order inputs. |
 | `console_redacted_key_values` | Array\<Hash\> | `[]` | EAV-style redaction patterns. Each entry: `{ key_column:, value_column:, sensitive_keys: [] }`. |
