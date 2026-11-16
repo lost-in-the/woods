@@ -4,5 +4,6 @@
   A prepended module was not read at all, so its override reported the class's own body.
   The loaded class's `source_location` now picks the definition, and a `super` in it continues into the next body.
   A prepended `app/models` concern now joins the analysis source.
+  Same-name definitions on one line are told apart as model callbacks' are.
   A body outside the model file and its concerns gives `unanalysed: not defined in the model or its concerns`.
   A class that is not loaded gives the new reason `class not loaded`.

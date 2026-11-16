@@ -32,6 +32,13 @@ def stamp(job, extra = '')
   "  def stamp\n    #{job}.perform_later\n#{extra}  end\n"
 end
 
+# Two definitions of stamp on one line, in exclusive branches; +test+
+# decides which one Ruby installs.
+def branches(test)
+  "  if 2.#{test} then def stamp; FirstStampJob.perform_later; end " \
+    "else def stamp; SecondStampJob.perform_later; end end\n"
+end
+
 FILES = {
   'app/models/redefined_machine.rb' => machine('RedefinedMachine', stamp('FirstStampJob') + stamp('SecondStampJob')),
   'app/models/concerns/stamp_override.rb' => "module StampOverride\n#{stamp('OverrideStampJob')}end\n",
@@ -45,11 +52,13 @@ FILES = {
   'app/models/concerns/concern_stamp.rb' => "module ConcernStamp\n#{stamp('ConcernStampJob')}end\n",
   'app/models/concern_machine.rb' => machine('ConcernMachine', '', head: "  include ConcernStamp\n"),
   'app/models/block_machine.rb' => machine('BlockMachine', '',
-                                           callback: 'after_transition(on: :go) { BlockStampJob.perform_later }')
+                                           callback: 'after_transition(on: :go) { BlockStampJob.perform_later }'),
+  'app/models/branch_then_machine.rb' => machine('BranchThenMachine', branches('even?')),
+  'app/models/branch_else_machine.rb' => machine('BranchElseMachine', branches('odd?'))
 }.freeze
 
 MACHINES = %w[RedefinedMachine PrependedMachine ChainedMachine SiblingMachine PlainMachine ConcernMachine
-              BlockMachine].freeze
+              BlockMachine BranchThenMachine BranchElseMachine].freeze
 
 Dir.mktmpdir('woods_transition_callback_forms') do |root|
   FILES.each do |path, code|

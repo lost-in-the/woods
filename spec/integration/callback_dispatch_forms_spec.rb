@@ -54,6 +54,16 @@ RSpec.describe 'Callback side effects of the body Ruby dispatches', :booted_app 
     end
   end
 
+  # Both definitions of stamp share one line, in exclusive branches.
+  { 'BranchThenRecord' => %w[a], 'BranchElseRecord' => %w[b] }.each do |model, columns|
+    it "publishes what Ruby writes for the branch #{model} installs on a shared line" do
+      expect(form(model).fetch('saved')).to eq(columns)
+      expect(statuses(model)).to eq('stamp' => 'analyzed')
+      expect(published_columns(model)).to eq(columns)
+      expect(first_site(model)).to eq(form(model).dig('dispatched', 'stamp'))
+    end
+  end
+
   it 'reads the super body after the prepended one' do
     expect(form('ChainedRecord').dig('published', 'stamp', 'sites'))
       .to eq([['app/models/concerns/stamp_chain.rb', 3], ['app/models/chained_record.rb', 6]])

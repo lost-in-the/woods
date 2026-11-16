@@ -37,6 +37,18 @@ RSpec.describe 'Transition callback side effects of the body Ruby dispatches', :
     end
   end
 
+  # Both definitions of stamp share one line, in exclusive branches.
+  {
+    'BranchThenMachine' => ['FirstStampJob', 'app/models/branch_then_machine.rb'],
+    'BranchElseMachine' => ['SecondStampJob', 'app/models/branch_else_machine.rb']
+  }.each do |name, (job, file)|
+    it "publishes what Ruby enqueues for the branch #{name} installs on a shared line" do
+      expect(machine(name)['ran']).to eq([job])
+      expect(machine(name)['published']).to eq([job])
+      expect(machine(name)['sites']).to eq([file])
+    end
+  end
+
   it 'leaves a block callback unanalysed' do
     expect(machine('BlockMachine')['ran']).to eq(%w[BlockStampJob])
     expect(machine('BlockMachine')).to include('block' => true, 'unanalysed' => 'block', 'published' => nil)

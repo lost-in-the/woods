@@ -917,7 +917,7 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
     end
 
     # Two class bodies on one physical line: the line alone cannot say
-    # which definition Ruby dispatches to, so the owner has to.
+    # which definition Ruby dispatches to; the column Ruby compiled it at can.
     describe 'two owners defining the method on one line' do
       let(:code) do
         "module DispatchForms\n  " \
@@ -950,12 +950,119 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
 
       # `class Elsewhere::Up` names a constant the source never declares, so
       # its first segment may come from another file: no owner can be read.
+      it 'analyzes the definition Ruby compiled when neither owner can be named from the source' do
+        stub_const('DispatchElsewhere', Module.new)
+        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', unnamed_owners]],
+                                       composite: ['elsewhere.rb']))
+
+        expect(written_by_ruby('DispatchElsewhere::Up')).to eq(['c'])
+        expect(result[:side_effects][:columns_written]).to eq(['c'])
+      end
+    end
+
+    def unnamed_owners
+      "module DispatchForms\n  " \
+        "class DispatchElsewhere::Up < Record; def stamp; self.c = 'c'; end; end; " \
+        "class DispatchElsewhere::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
+    end
+
+    # One line of the Branches class body, with A and B standing for a
+    # definition of stamp writing a and one writing b.
+    def branches(template)
+      line = template.sub('A', "def stamp; self.a = 'a'; end").sub('B', "def stamp; self.b = 'b'; end")
+      code = "module DispatchForms\n  class Branches < Record; #{line}; end\nend\n"
+      analysis(analyzer_for('Branches', [['branches.rb', code]], composite: ['branches.rb']))
+    end
+
+    # Each form defines stamp twice on one line, where only one definition
+    # runs; the condition picks which. Expected: what Ruby writes when the
+    # condition is true, then when it is false.
+    exclusive_forms = {
+      'if and else' => ['if FLIP then A else B end', %w[a b]],
+      'a ternary' => ['FLIP ? (A) : (B)', %w[a b]],
+      'case and when' => ['case FLIP when true then A else B end', %w[a b]],
+      '&& and ||' => ['FLIP && (A) || (B)', %w[a b]],
+      'a modifier if' => ['A; B if FLIP', %w[b a]],
+      'begin and rescue' => ["begin; raise 'skip' unless FLIP; A; rescue; B; end", %w[a b]]
+    }
+
+    describe 'same-line definitions only one of which runs' do
+      exclusive_forms.each do |form, (template, written)|
+        [true, false].zip(written).each do |flip, column|
+          it "analyzes the body Ruby installs from #{form} when the condition is #{flip}" do
+            stub_const('DispatchForms::FLIP', flip)
+            result = branches(template)
+
+            expect(written_by_ruby('Branches')).to eq([column])
+            expect(result).to include(analysis_status: 'analyzed')
+            expect(result[:side_effects][:columns_written]).to eq([column])
+          end
+        end
+      end
+
+      it 'analyzes the later definition when an ensure clause redefines the method' do
+        result = branches('begin; A; ensure; B; end')
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      # The string's def reports this file and line, so the def beside it
+      # is the only candidate there.
+      it 'reports unsupported when Ruby installs a body the parsed source lacks, never its neighbour' do
+        result = branches("A; class_eval(\"def stamp; self.b = 'b'; end\", __FILE__, __LINE__)")
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+
+      it 'reports a define_method body unsupported, never a same-named def on its line' do
+        result = branches("A; define_method(:stamp) { self.b = 'b' }")
+
+        expect(written_by_ruby('Branches')).to eq(['b'])
+        expect(result[:analysis_status]).to eq('unsupported')
+      end
+    end
+
+    # Without the position Ruby compiled a body at, only a plain sequence
+    # of definitions says which one stays: the last.
+    describe 'without a compiled position from the runtime' do
+      before { allow(RubyVM::InstructionSequence).to receive(:of).and_return(nil) }
+
+      it 'analyzes the later of two definitions one statement list makes on one line' do
+        twice = "module DispatchForms\n  class Twice < Record; def stamp; self.a = 'a'; end; " \
+                "def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Twice', [['twice.rb', twice]], composite: ['twice.rb']))
+
+        expect(written_by_ruby('Twice')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      it 'tells two owners on one line apart by their names' do
+        code = "module DispatchForms\n  " \
+               "class Left < Record; def stamp; self.a = 'a'; end; end; " \
+               "class Right < Record; def stamp; self.b = 'b'; end; end\nend\n"
+        result = analysis(analyzer_for('Right', [['one_line.rb', code]], composite: ['one_line.rb']))
+
+        expect(written_by_ruby('Right')).to eq(['b'])
+        expect(result[:side_effects][:columns_written]).to eq(['b'])
+      end
+
+      exclusive_forms.each do |form, (template, written)|
+        [true, false].zip(written).each do |flip, column|
+          it "reports #{form} unsupported when the condition is #{flip}" do
+            stub_const('DispatchForms::FLIP', flip)
+            result = branches(template)
+
+            expect(written_by_ruby('Branches')).to eq([column])
+            expect(result[:analysis_status]).to eq('unsupported')
+          end
+        end
+      end
+
       it 'reports unsupported when neither definition’s owner can be named from the source' do
         stub_const('DispatchElsewhere', Module.new)
-        qualified = "module DispatchForms\n  " \
-                    "class DispatchElsewhere::Up < Record; def stamp; self.c = 'c'; end; end; " \
-                    "class DispatchElsewhere::Down < Record; def stamp; self.d = 'd'; end; end\nend\n"
-        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', qualified]],
+        result = analysis(analyzer_for('DispatchElsewhere::Up', [['elsewhere.rb', unnamed_owners]],
                                        composite: ['elsewhere.rb']))
 
         expect(written_by_ruby('DispatchElsewhere::Up')).to eq(['c'])

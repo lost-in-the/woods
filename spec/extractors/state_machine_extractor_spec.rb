@@ -1728,6 +1728,43 @@ RSpec.describe Woods::Extractors::StateMachineExtractor do
       expect(entries.first[:side_effects][:jobs_enqueued]).to eq(['SecondJob'])
     end
 
+    # Both definitions share one line, in exclusive branches; the constant
+    # the file reads as it loads decides which one Ruby installs.
+    def exclusive_branches
+      callbacks_for(<<~RUBY, load: true)
+        class Post < ApplicationRecord
+          state_machine :status do
+            after_transition on: :publish, do: :announce
+          end
+
+          if POST_FLIP then def announce; FirstJob.perform_later; end else def announce; SecondJob.perform_later; end end
+        end
+      RUBY
+    end
+
+    [[true, 'FirstJob'], [false, 'SecondJob']].each do |flip, job|
+      it "reads the one of two same-line definitions Ruby installs when the condition is #{flip}" do
+        stub_const('POST_FLIP', flip)
+        ran = []
+        %w[FirstJob SecondJob].each do |name|
+          stub_const(name, Class.new { define_singleton_method(:perform_later) { ran << name } })
+        end
+        entries = exclusive_branches
+        Post.new.announce
+
+        expect(ran).to eq([job])
+        expect(entries.first[:side_effects][:jobs_enqueued]).to eq([job])
+      end
+    end
+
+    it 'leaves same-line definitions in exclusive branches unanalysed without a compiled position' do
+      stub_const('POST_FLIP', true)
+      allow(RubyVM::InstructionSequence).to receive(:of).and_return(nil)
+
+      expect(exclusive_branches.first)
+        .to include(side_effects: nil, unanalysed: 'not defined in the model or its concerns')
+    end
+
     it 'says when the class is not loaded, rather than read a definition by name' do
       entries = callbacks_for(<<~RUBY)
         class Post < ApplicationRecord

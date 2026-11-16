@@ -355,7 +355,10 @@ publish the same values.
 - Each callback also carries `analysis_status`, saying whether its empty `side_effects` mean "none found" or "not read": `analyzed` (the method was found and scanned), `unsupported` (no method definition to read: a proc, a lambda, or a method the source does not define) or `source_unavailable` (the method was found but its text could not be read). The last two carry the same empty `side_effects` shape as before. Jobs, services and mailers in `side_effects` are named in the method's lexical scope, as the unit's dependency edges are. Readers that predate the field see no change to existing keys; treat a missing `analysis_status` as unknown.
 - The body read for a symbol callback is the one Ruby dispatches to for the model.
   Its `instance_method(name).source_location` is placed in the model file or an inlined concern; that def is read.
-  Several defs of the name on that line are told apart by the owner Ruby reports, or the callback is `unsupported`.
+  Several defs of the name on that line are told apart by the column Ruby compiled the method at.
+  That column is the `code_location` of the method's `RubyVM::InstructionSequence`.
+  A Ruby without one falls back to the owner Ruby reports, then to the last def of one statement list.
+  Defs of one owner in exclusive branches on one line (`if c then def a … else def a … end`) are then `unsupported`.
   So a method redefined later in the class, or overridden by a prepended module, is read where Ruby defines it.
   When that body calls `super`, the body `super` reaches is read as well, its operations after the first body's.
   A body outside the model file and its concerns is `unsupported`, such as an inherited STI method or a `define_method`.
@@ -1496,6 +1499,8 @@ namespace.
   The analysis source is the model file and the `app/models` concerns it includes or prepends by name.
   A body outside them, including one a `super` reaches, gives `unanalysed: not defined in the model or its concerns`.
   A class that is not loaded gives `unanalysed: class not loaded`; no definition is read by name.
+  Same-name definitions on one line are told apart as model callbacks' are.
+  When nothing tells them apart, the reason is also `not defined in the model or its concerns`.
 - Returns an array from the file method (like `ScheduledJobExtractor`), cannot be used in the incremental file-based dispatch map; incremental re-extraction re-runs it wholesale on any `.rb` change under the model directories it scans, and on a schema change (`db/schema.rb`, `db/structure.sql`, `db/migrate/**`), since a callback's columns written depend on the columns
 
 ---

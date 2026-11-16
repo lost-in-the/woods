@@ -21,6 +21,13 @@ def stamp(name, column, extra = '')
   "  def #{name}\n    self.#{column} = '#{column}'\n#{extra}  end\n"
 end
 
+# Two definitions of stamp on one line, in exclusive branches; +test+
+# decides which one Ruby installs.
+def branches(name, test)
+  "class #{name} < ApplicationRecord\n  self.table_name = 'stamps'\n  before_save :stamp\n  " \
+    "if 2.#{test} then def stamp; self.a = 'a'; end else def stamp; self.b = 'b'; end end\nend\n"
+end
+
 FILES = {
   'app/models/application_record.rb' => "class ApplicationRecord < ActiveRecord::Base\n  " \
                                         "self.abstract_class = true\nend\n",
@@ -49,11 +56,13 @@ FILES = {
                                               "included do\n    before_save :concern_stamp\n  end\n\n" \
                                               "#{stamp('concern_stamp', 'c')}end\n",
   'app/models/included_record.rb' => "class IncludedRecord < ApplicationRecord\n  self.table_name = 'stamps'\n  " \
-                                     "include ConcernStamped\n  before_save :stamp\n#{stamp('stamp', 'a')}end\n"
+                                     "include ConcernStamped\n  before_save :stamp\n#{stamp('stamp', 'a')}end\n",
+  'app/models/branch_then_record.rb' => branches('BranchThenRecord', 'even?'),
+  'app/models/branch_else_record.rb' => branches('BranchElseRecord', 'odd?')
 }.freeze
 
 MODELS = %w[RedefinedRecord PrependedRecord ChainedRecord SiblingRecord TwoConcernRecord NestedRecord
-            StiStamp StiOverrideStamp StiHeirStamp IncludedRecord].freeze
+            StiStamp StiOverrideStamp StiHeirStamp IncludedRecord BranchThenRecord BranchElseRecord].freeze
 
 Dir.mktmpdir('woods_callback_dispatch_forms') do |root|
   FILES.each do |path, code|
