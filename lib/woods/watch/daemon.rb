@@ -231,6 +231,7 @@ module Woods
         # the truth (up to {HEARTBEAT_INTERVAL}), `woods:watch_status` read
         # dead — a `watch_status || start` hook booted a third daemon and
         # `woods:incremental` stopped standing down.
+        @run_pid = Process.pid
         return :already_running if another_daemon_alive?
 
         # {#another_daemon_alive?} is a plain status READ — cheap, and gives
@@ -690,6 +691,8 @@ module Woods
       # Sequence: save `user.rb`; a hook sync holds the lock; the daemon's cycle
       # contends and carries it; the hook finishes and bumps; the daemon stops.
       def persist_pending
+        return if forked_from_run?
+
         paths = @pending_mutex.synchronize { @pending.to_a }
         return AtomicFile.write(pending_path, JSON.generate([])) if paths.empty?
 
@@ -1341,6 +1344,8 @@ module Woods
       end
 
       def publish_status(state, reason:, generation: nil, **details)
+        return if forked_from_run?
+
         record = { state: state, reason: reason,
                    generation: generation || @generation.current.number, **details }
         # Kept so the heartbeat can re-stamp exactly this record rather than
@@ -1636,6 +1641,20 @@ module Woods
         @claimed = false
       end
 
+      # Whether this process is a fork of the one running {#run}.
+      #
+      # A host callback that forks on the thread running {#run} (the
+      # extractor during start-up catch-up, for one) leaves a child that
+      # unwinds the same run, and its token, claim lease and status all look
+      # like the parent's. The status record, the pending paths and the claim
+      # belong to the process that started the run, so the child writes and
+      # removes none of them.
+      #
+      # @return [Boolean]
+      def forked_from_run?
+        !@run_pid.nil? && @run_pid != Process.pid
+      end
+
       # Whether a daemon in this process created the claim at this index and
       # has not released it.
       def claim_held_in_process?
@@ -1651,6 +1670,8 @@ module Woods
 
       # @return [Boolean] whether the claim on disk still records this process
       def own_claim?
+        return false if forked_from_run?
+
         record = JSON.parse(claim_bytes)
         return record.is_a?(Hash) && record['token'] == @claim_lease.token if @claim_lease
         return true unless record.is_a?(Hash)

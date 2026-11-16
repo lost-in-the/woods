@@ -98,18 +98,37 @@ module Woods
       raise Unverifiable, 'the seed is the target index' if @source.expand_path == @output.expand_path
 
       baseline = Verification.new(source: @source, root: @root).call
-      staging = Pathname.new("#{@output}.seed-#{Process.pid}")
+      @staging_pid = Process.pid
+      staging = Pathname.new("#{@output}.seed-#{@staging_pid}")
       begin
         build_staging(staging, baseline)
         changed = Changes.new(root: @root, index: staging).since(baseline.fetch('git_sha'))
         run_incremental(staging, changed)
+        return left_to_parent if forked_from_seed?
+
         promote(staging)
         Result.new(mode: :seeded, changed: changed)
       ensure
-        FileUtils.rm_rf(staging)
+        FileUtils.rm_rf(staging) unless forked_from_seed?
       end
     rescue Unverifiable, Woods::ExtractionError, SystemCallError, IOError, JSON::ParserError => e
-      e.message
+      forked_from_seed? ? left_to_parent : e.message
+    end
+
+    # Whether this process is a fork of the one building the seed. The
+    # incremental run executes application code in process, and a child forked
+    # there unwinds the rest of the seed. Promoting the staging directory,
+    # falling back to a full extraction and removing the staging directory
+    # all belong to the process that built it.
+    #
+    # @return [Boolean]
+    def forked_from_seed?
+      !@staging_pid.nil? && @staging_pid != Process.pid
+    end
+
+    # @return [Result] the child's answer: the seed is the parent's to finish
+    def left_to_parent
+      Result.new(mode: :skipped, reason: "the seed is being built by process #{@staging_pid}")
     end
 
     def full_extraction(reason)
