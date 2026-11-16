@@ -121,6 +121,21 @@ RSpec.describe Woods::RubyAnalyzer::MethodAnalyzer do
       )
     end
 
+    it 'keeps calls on absolute constants in the call graph' do
+      source = <<~RUBY
+        class Loader
+          def load
+            ::Parser::CurrentRuby.parse('')
+          end
+        end
+      RUBY
+
+      unit = analyzer.analyze(source: source, file_path: '/app/loader.rb').first
+
+      expect(unit.metadata[:call_graph]).to eq([{ target: '::Parser::CurrentRuby', method: 'parse', line: 3 }])
+      expect(unit.dependencies).to eq([{ type: :ruby_class, target: '::Parser::CurrentRuby', via: :method_call }])
+    end
+
     it 'generates dependencies from call graph receivers' do
       source = <<~RUBY
         class Processor

@@ -276,7 +276,7 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         end
       end
     RUBY
-    'class-method visibility around module functions' => <<~RUBY
+    'class-method visibility around module functions' => <<~RUBY,
       module Util
         module_function
         def a; end
@@ -289,6 +289,46 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         def self.c; end
         private_class_method :c
         module_function :c
+      end
+    RUBY
+    'definitions under conditional and begin wrappers' => <<~RUBY,
+      class Account
+        if true
+          def a; end
+        end
+        unless false
+          def b; end
+        end
+        begin
+          def c; end
+        end
+        def d; end if true
+        flag = true
+        def e; end unless flag.nil?
+        private
+        if true
+          def f; end
+        end
+      end
+    RUBY
+    'a definition passed to a method that is not a visibility call' => <<~RUBY,
+      class Account
+        def self.memoize(name)
+          name
+        end
+        memoize def total; end
+        private
+        memoize def hidden; end
+      end
+    RUBY
+    'a conditional inside class << self' => <<~RUBY
+      class Account
+        class << self
+          if true
+            def a; end
+          end
+          private def b; end
+        end
       end
     RUBY
   }.freeze

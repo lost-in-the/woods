@@ -290,4 +290,116 @@ RSpec.describe Woods::MethodTable do
     described_class.record(route)
     expect(route.metadata).not_to have_key(:methods)
   end
+
+  describe 'definitions Ruby runs only on one path' do
+    def candidates(source)
+      described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'owner', 'candidate') }
+    end
+
+    it 'lists a definition under if, unless, elsif, else or a modifier as a conditional candidate' do
+      source = <<~RUBY
+        class Post
+          def plain; end
+          if Feature.on?
+            def a; end
+          elsif Feature.half?
+            def b; end
+          else
+            def c; end
+          end
+          unless Feature.on?
+            def d; end
+          else
+            def e; end
+          end
+          def f; end if Feature.on?
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([
+                                         ['plain', 'instance', 'Post', nil], %w[a instance Post conditional],
+                                         %w[b instance Post conditional],
+                                         %w[c instance Post conditional],
+                                         %w[d instance Post conditional],
+                                         %w[e instance Post conditional],
+                                         %w[f instance Post conditional]
+                                       ])
+    end
+
+    it 'reads a begin body and its ensure as run, and its rescue and else as conditional' do
+      source = <<~RUBY
+        class Post
+          begin
+            def a; end
+          rescue LoadError
+            def b; end
+          else
+            def c; end
+          ensure
+            def d; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([
+                                         ['a', 'instance', 'Post', nil], %w[b instance Post conditional],
+                                         %w[c instance Post conditional], ['d', 'instance', 'Post', nil]
+                                       ])
+    end
+
+    it 'keeps both alternatives of a conditional, and the definite definition beside a later candidate' do
+      source = <<~RUBY
+        class Post
+          def a; end
+          if RUBY_VERSION >= '3'
+            def a; end
+          else
+            def a; end
+          end
+          if Feature.on?
+            def b; end
+          end
+          def b; end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, line| [name, line] }).to eq([['a', 2], ['a', 4], ['a', 6], ['b', 11]])
+    end
+
+    it 'leaves a visibility section inside a branch to that branch' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            private
+            def a; end
+          end
+          def b; end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, _, _, visibility| [name, visibility] }).to eq([%w[a private], %w[b public]])
+    end
+
+    it 'lists a definition in a block of the class body as a block candidate of the lexical owner' do
+      source = <<~RUBY
+        class Plugin
+          Registry.create do
+            def run; end
+          end
+          class_methods do
+            def build; end
+          end
+        end
+      RUBY
+
+      expect(candidates(source)).to eq([%w[run instance Plugin block], ['build', 'singleton', 'Plugin', nil]])
+    end
+
+    it 'lists a definition passed to a method that is not a visibility call as run' do
+      source = "class Post\n  memoize def total; end\n  private\n  cache def hidden; end\nend\n"
+
+      expect(table(source).map { |name, kind, _, _, visibility| [name, kind, visibility] })
+        .to eq([%w[total instance public], %w[hidden instance private]])
+    end
+  end
 end
