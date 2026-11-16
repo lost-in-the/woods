@@ -25,4 +25,6 @@
   refused. The plan's `notes` say what the tool does not do itself: keep the receipt out of version control, and for
   Compose, run the service with the application root as its `working_dir` and pin the project name for worktrees.
   For a relative Compose entry the preflight runs the same `docker compose exec` as the entry, with no `-w`, and
-  setup refuses a service whose working directory does not resolve the `--container-root` application, naming both.
+  setup refuses a service whose working directory is not the `--container-root` application, or where Bundler
+  resolves another application, naming both; a `BUNDLE_BIN` binstub that fixes the Gemfile no longer hides a wrong
+  working directory. The `.gitignore` note names lines covering the receipt and the lock files apply keeps.

@@ -96,8 +96,8 @@ module Woods
                   'this checkout now has its own receipt'
         end
         if layout.scope == 'project'
-          list << '.woods-agent-config.json records this machine\'s root and paths: add it to .gitignore ' \
-                  'and commit .mcp.json'
+          list << ".woods-agent-config.json is this machine's, and apply keeps a lock beside each file it manages: " \
+                  "add #{Layout::GITIGNORE.join(' and ')} to .gitignore and commit .mcp.json"
         end
         if launcher.form == 'relative' && launcher.mode == 'compose'
           list << "the #{launcher.service} service's working_dir must be the application root inside the " \

@@ -5,6 +5,7 @@ require 'bundler'
 require 'fileutils'
 require 'json'
 require 'open3'
+require 'shellwords'
 require 'timeout'
 require 'tmpdir'
 require 'woods/gem_mapper'
@@ -348,9 +349,28 @@ RSpec.describe 'The generated MCP entry' do
       Woods::GemMapper.new(root: root, output_dir: File.join(root, 'tmp', 'woods')).map!
     end
 
-    def compose_setup(working_dir)
+    def compose_setup(working_dir, container_root: @app, image: {})
       agent_config(@app, 'setup', '--plan', File.join(@base, 'compose.json'), '--mode', 'compose',
-                   '--service', 'web', '--container-root', @app, env: stand_in_compose(working_dir))
+                   '--service', 'web', '--container-root', container_root,
+                   env: stand_in_compose(working_dir).merge(image))
+    end
+
+    # An image whose BUNDLE_BIN is first on PATH: `bundle install` wrote a
+    # `bundle` binstub there that fixes the Gemfile at its install-time path,
+    # so Bundler resolves that application from any working directory.
+    def bundle_binstub_image(gemfile)
+      bin = File.join(@base, 'image-bin')
+      FileUtils.mkdir_p(bin)
+      bundle = ENV.fetch('PATH').split(File::PATH_SEPARATOR).map { |dir| File.join(dir, 'bundle') }
+                  .find { |path| File.executable?(path) }
+      File.write(File.join(bin, 'bundle'), <<~SH)
+        #!/bin/sh
+        : "${BUNDLE_GEMFILE:=#{gemfile}}"
+        export BUNDLE_GEMFILE
+        exec #{Shellwords.escape(bundle)} "$@"
+      SH
+      File.chmod(0o755, File.join(bin, 'bundle'))
+      { 'STAND_IN_IMAGE_PATH' => bin }
     end
 
     before { indexed_application(@app) }
@@ -381,13 +401,34 @@ RSpec.describe 'The generated MCP entry' do
       expect(status.success?).to be(false), output
       expect(output).to include("working directory, #{empty}", "--container-root #{@app}", 'working_dir')
     end
+
+    it 'refuses a service outside any checkout even when a bundle binstub resolves the application there' do
+      outside = File.join(@base, 'opt')
+      FileUtils.mkdir_p(outside)
+
+      output, status = compose_setup(outside, image: bundle_binstub_image(File.join(@app, 'Gemfile')))
+
+      expect(status.success?).to be(false), output
+      expect(output).to include("working directory, #{outside}", "--container-root #{@app}", 'working_dir')
+    end
+
+    it 'accepts the application root reached through a symlink, and a container root with a trailing slash' do
+      link = File.join(@base, 'shop-link')
+      File.symlink(@app, link)
+
+      output, status = compose_setup(link, container_root: "#{@app}/",
+                                           image: bundle_binstub_image(File.join(@app, 'Gemfile')))
+
+      expect(status.success?).to be(true), output
+    end
   end
 
   # A stand-in for `docker compose exec`: it runs the command after the
   # service name with the -e settings, in the -w directory when one is
   # given, else in the service's working directory (STAND_IN_WORKING_DIR),
-  # as a container that mounts the same paths would. Like Compose, it
-  # passes none of the caller's Bundler activation into the container.
+  # as a container that mounts the same paths would, with the image's own
+  # PATH entries first (STAND_IN_IMAGE_PATH). Like Compose, it passes none of
+  # the caller's Bundler activation into the container.
   # Real Compose is not run.
   def stand_in_compose(working_dir)
     stub_dir = File.join(@base, 'bin')
@@ -399,6 +440,7 @@ RSpec.describe 'The generated MCP entry' do
       if [ "$1" = "--project-directory" ]; then shift 2; fi
       shift
       dir="$STAND_IN_WORKING_DIR"
+      if [ -n "$STAND_IN_IMAGE_PATH" ]; then PATH="$STAND_IN_IMAGE_PATH:$PATH"; fi
       while :; do
         case "$1" in -T) shift ;; -e) export "$2"; shift 2 ;; -w) dir="$2"; shift 2 ;; *) break ;; esac
       done
