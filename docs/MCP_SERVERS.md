@@ -118,8 +118,8 @@ a directory with no published index, or no directory at all, is not an error:
 When a generation is published, the next call serves it, with no restart.
 The reader adopts the first generation as it adopts any new one.
 A `generation.json` that names a payload not yet on disk still reads as `building`.
-A `generation.json` that exists but is malformed, or names a payload outside the index directory,
-is damage, as it is to a strict launch.
+A `generation.json` that exists but is malformed, or names a payload outside the index directory
+or one that is not a directory, is damage, as it is to a strict launch.
 `woods_status` reports `index.state: "unusable_publication"`,
 and every other tool answers the non-retryable `corrupt_artifact` error.
 After the first generation, damage to a later one is reported the same way, never as `building`.
@@ -127,7 +127,9 @@ After the first generation, damage to a later one is reported the same way, neve
 **Each generation is checked against the client's checkout.**
 A strict launch refuses another checkout's index before the server starts.
 An awaiting server cannot, since nothing is recorded yet.
-So it runs the same check on every generation it serves, with the same inputs and the same override.
+So it runs the same check on every call, with the same inputs and the same override.
+The check reads the generation the call is pinned to, so the generation judged is the one the call reads,
+even when another is published meanwhile.
 When a generation records another checkout and the mismatch is not allowed:
 
 - every tool but `woods_status` answers a non-retryable error, `error_code: "index_checkout_mismatch"`,
@@ -154,7 +156,7 @@ When the first extraction makes either possible, `woods_status` lists it under `
 | `feature` | When | `reason` |
 |---|---|---|
 | `snapshots` | `woods.sqlite3` now exists, or `WOODS_SNAPSHOTS=true` and the index directory now exists | snapshot tools become available after a restart |
-| `semantic_retrieval` | an embedding config (`woods.json`) now exists and no retriever was wired at startup | semantic retrieval becomes available after a restart |
+| `semantic_retrieval` | an embedding config (`woods.json`) that a restarted server would accept now exists, and no retriever was wired at startup | semantic retrieval becomes available after a restart |
 
 A restarted server registers the snapshot tools and builds the semantic retriever as any server does.
 `WOODS_RETRIEVAL_MODE=lexical` needs no restart: it reads the first generation as it appears.
@@ -165,7 +167,8 @@ Other limits of a server started before its index:
 - No request creates the index directory, `WOODS_SNAPSHOTS=true` included.
 - A call with `root` is refused (`no_repository`) while the index directory does not exist.
 - `woods-mcp-http` does not take the flag.
-- `woods-mcp --await-index` with no path awaits the current directory, the directory it would serve without the flag.
+- `woods-mcp --await-index` needs an index path (an argument, `WOODS_DIR` or `WOODS_OUTPUT`): with none it exits 1
+  instead of waiting in the current directory. `woods-mcp-start --checkout` serves the current checkout.
 - A file given as the index directory is refused at startup, with or without the flag.
 
 You can launch the server directly when the client already handles preflight:
@@ -253,6 +256,8 @@ How the map works:
   the mount does not hold that session's checkout.
   A mapped path that exists but is not inside a git checkout is a warning.
 - `--client-root-map` needs `--client-root`, and `--client-root` may be given once.
+  A `WOODS_MCP_CLIENT_ROOT_MAP` exported for every launch is ignored, with one warning, by a launch that gives no
+  client root.
 - A malformed entry is a usage error at startup.
 - A refusal takes the same override as any other mismatch: `--allow-mismatch` (`WOODS_MCP_ALLOW_MISMATCH=1`).
 

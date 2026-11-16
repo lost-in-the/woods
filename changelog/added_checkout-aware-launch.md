@@ -11,7 +11,9 @@
   `--client-root` (`WOODS_MCP_CLIENT_ROOT`) compares the index with the client session's checkout instead of the
   launcher's directory. `--client-root-map HOST=CONTAINER` (repeatable, `WOODS_MCP_CLIENT_ROOT_MAP`) describes a
   bind mount, so a launcher inside a shared container reads the session's checkout through it and refuses a session
-  in another worktree, or in one no mount covers.
+  in another worktree, or in one no mount covers. A map exported in the environment of a launch that gives no client
+  root is ignored with one warning; the flag without a client root is a usage error. `woods-mcp --await-index`
+  needs an index path.
   When either checkout cannot be determined, the instructions and the new `woods_status.identity.warnings` now
   carry one `WARNING:` line; these launches used to start silently.
   Without the new flags, every launch starts or is refused exactly as before.
