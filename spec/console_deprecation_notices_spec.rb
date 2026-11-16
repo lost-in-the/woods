@@ -43,4 +43,53 @@ RSpec.describe 'Console MCP deprecation notices' do
     expect(section).to include('DEPRECATED', 'Woods 3.0', 'New setups')
     expect(section).to match(/^\s*#\s*config\.console_mcp_enabled\s*=\s*false/)
   end
+
+  describe 'turning the Console off' do
+    let(:guide) { read('docs/CONSOLE_MCP_SETUP.md') }
+    let(:section) { guide[/^## Turning the Console off$.*?(?=^## )/m] }
+    let(:skill) { read('plugin/skills/woods-console-disable/SKILL.md') }
+    let(:disabled_line) do
+      read('exe/woods-console')[/unless Woods\.configuration\.console_mcp_enabled\n\s*warn (.*?)\n\s*exit 1/m, 1]
+        .scan(/'([^']*)'/).join
+    end
+    let(:deprecated_line) do
+      require 'woods/console/deprecation_notice'
+      "[woods] DEPRECATED: #{Woods::Console::DEPRECATION_MESSAGE}"
+    end
+
+    it 'has a section in the Console guide that names the skill' do
+      expect(section).to include('woods-console-disable')
+    end
+
+    it 'quotes, in the guide and the skill, exactly the lines a disabled Console prints' do
+      expect(disabled_line).to start_with('Woods Console MCP is disabled.')
+      [section, skill].each { |text| expect(text).to include(disabled_line, deprecated_line) }
+    end
+
+    it 'covers every place the Console can be switched on or reached' do
+      %w[console_mcp_enabled .mcp.json Woods::Console::RackMiddleware WOODS_CONSOLE_MCP_TOKEN
+         WOODS_CONSOLE_CONFIG ~/.woods/console.yml woods:console woods-console-mcp].each do |place|
+        expect([section, skill]).to all(include(place))
+      end
+    end
+
+    it 'keeps the skill to its safety rules and the alternatives' do
+      expect(skill).to include('Never delete a file.', 'Never print a token value.', 'Leave the Index Server alone.',
+                               'Ask before every edit.', 'bin/rails runner', 'Woods 3.0',
+                               'CONSOLE_MCP_SETUP.md#turning-the-console-off')
+    end
+  end
+
+  describe 'plugin skill frontmatter' do
+    Dir[File.expand_path('../plugin/skills/*/SKILL.md', __dir__)].each do |path|
+      skill = File.basename(File.dirname(path))
+
+      it "names #{skill} after its directory and gives it a description" do
+        frontmatter = File.read(path, encoding: Encoding::UTF_8)[/\A---\n(.*?)\n---\n/m, 1]
+
+        expect(frontmatter).to match(/^name: #{Regexp.escape(skill)}$/)
+        expect(frontmatter).to match(/^description: \S/)
+      end
+    end
+  end
 end

@@ -1,0 +1,7 @@
+- The Console guide has a "Turning the Console off" section.
+  It covers the switch, the MCP client entry, a hand-written Rack mount, the token, the launcher file and processes.
+  It ends with a check that quotes what a disabled Console prints.
+  It also lists what differs on Woods 2.1 and 1.6.
+  A new plugin skill, `woods-console-disable` (plugin 2.3.93), finds each of those places in an application.
+  It shows the plan, asks before each edit, and verifies the Console is off.
+  It never deletes a file, never prints a token value and leaves the Index Server entry alone.
