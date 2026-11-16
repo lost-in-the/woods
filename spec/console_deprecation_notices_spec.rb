@@ -4,6 +4,7 @@ require 'spec_helper'
 require 'fileutils'
 require 'json'
 require 'open3'
+require 'shellwords'
 require 'tmpdir'
 
 RSpec.describe 'Console MCP deprecation notices' do
@@ -82,6 +83,36 @@ RSpec.describe 'Console MCP deprecation notices' do
                                'Ask before every edit.', 'Name keys, not values,', 'bin/rails runner', 'Woods 3.0',
                                'CONSOLE_MCP_SETUP.md#turning-the-console-off')
     end
+
+    it 'decides what the skill may open by the class of file, which a clean secret check never raises' do
+      expect(skill).to include('## File classes', 'A clean check never', 'config/initializers/*.rb',
+                               '.vscode/mcp.json', '.env.example', 'config/master.key')
+    end
+  end
+
+  describe 'a clean secret check grants no access' do
+    define_method(:granting_sentences) do |text|
+      text.split(/(?<=[.;!?])\s+|\n/).grep_v(/\b(?:never|not)\b|n't\b/i).select do |s|
+        s.match?(/\b(?:open|read|edit|print)/i) && s.match?(/\b(?:check|scan|output)\b/i) &&
+          s.match?(/\b(?:no output|no match(?:es)?|pass(?:es|ed)?|clean)\b/i)
+      end
+    end
+
+    it 'recognizes each way of granting access on a clean result' do
+      granting = ['Open a file only after the secret check passes for it.',
+                  'A file with no output may be opened and edited.',
+                  'For another client file, edit it only if the secret check passed for it.',
+                  'When the scan is clean, the file is safe to read.']
+
+      expect(granting.map { |sentence| granting_sentences(sentence) }).to all(be_any)
+    end
+
+    it 'has no such rule in the skill or the guide section' do
+      skill = read('plugin/skills/woods-console-disable/SKILL.md')
+      section = read('docs/CONSOLE_MCP_SETUP.md')[/^## Turning the Console off$.*?(?=^## )/m]
+
+      expect(granting_sentences(skill) + granting_sentences(section)).to eq([])
+    end
   end
 
   describe 'inventory commands print names and locations, never values' do
@@ -93,7 +124,8 @@ RSpec.describe 'Console MCP deprecation notices' do
       'Claude Code list or get' => /\bclaude mcp (?:list|get)\b/,
       'a diff with content' => /\bgit diff\b(?!\s+--stat)/,
       'grep that prints whole lines' => /\bgrep\b(?!\s+-[a-zA-Z]*[loc])/,
-      'jq that prints env or header values' => %r{\.(?:env|headers)\b(?!\s*//\s*\{\}\)\s*\|\s*keys)},
+      'jq that prints env or header values' =>
+        %r{\.(?:env|headers)\b(?!\*|\.(?:example|sample|template)\b|\s*//\s*\{\}\)\s*\|\s*keys)},
       'rails runner beyond the switch' => /\brails runner\b(?!\z| 'p Woods\.configuration\.console_mcp_enabled')/
     }
 
@@ -120,11 +152,26 @@ RSpec.describe 'Console MCP deprecation notices' do
       expect(flagged).to all(be_any)
     end
 
+    it 'does not take the names of skipped env files for a value-printing jq program' do
+      names_only = ["grep -rnoE NAME --exclude='.env*' .", 'grep -HnoE NAME .env.example .env.sample .env.template']
+
+      expect(value_printing_commands("```bash\n#{names_only.join("\n")}\n```\n")).to eq([])
+    end
+
     it 'gives no value-printing command in the skill or the guide section' do
       skill = read('plugin/skills/woods-console-disable/SKILL.md')
       section = read('docs/CONSOLE_MCP_SETUP.md')[/^## Turning the Console off$.*?(?=^## )/m]
 
       expect(value_printing_commands(skill) + value_printing_commands(section)).to eq([])
+    end
+
+    it 'runs jq only inside the key-only helpers that the fixture runs' do
+      skill = read('plugin/skills/woods-console-disable/SKILL.md')
+      section = read('docs/CONSOLE_MCP_SETUP.md')[/^## Turning the Console off$.*?(?=^## )/m]
+      helpers = /^(woods_mcp_(?:entries|remove))\(\) \{\n.*?^\}$/m
+
+      expect(skill.scan(helpers).flatten).to contain_exactly('woods_mcp_entries', 'woods_mcp_remove')
+      [skill, section].each { |text| expect(commands(text.gsub(helpers, '')).grep(/\bjq\b/)).to eq([]) }
     end
 
     context 'when run against an application holding fake secrets' do
@@ -165,6 +212,8 @@ RSpec.describe 'Console MCP deprecation notices' do
           'app/config/initializers/woods_env.rb' => "Woods.configuration.console_mcp_token = ENV.fetch('X')\n",
           'app/config/application.rb' => "config.middleware.use Woods::Console::RackMiddleware\n",
           'app/.env' => "WOODS_CONSOLE_MCP_TOKEN=#{marker}\n",
+          'app/.env.example' => "WOODS_CONSOLE_MCP_TOKEN=\n",
+          'app/config/credentials/production.key' => "console_mcp_token #{marker}\n",
           'app/Procfile.dev' => "console: WOODS_CONSOLE_MCP_TOKEN=#{marker} bin/rake woods:console\n",
           'app/compose.yml' => "services:\n  web:\n    environment:\n      WOODS_CONSOLE_MCP_TOKEN: #{marker}\n",
           'app/.mcp.json' => JSON.generate(mcpServers: mcp_servers),
@@ -214,6 +263,14 @@ RSpec.describe 'Console MCP deprecation notices' do
         expect(out).to match(%r{^local /srv/app\twoods-console\tconsole\t.*env=WOODS_CONSOLE_CONFIG})
       end
 
+      it 'lists key names in an env-file template, and never searches .env or credentials files' do
+        out, = run_inventory
+
+        expect(out).to include('.env.example:1:WOODS_CONSOLE_MCP_TOKEN')
+        expect(out).not_to match(%r{(?:\A|/|\n)\.env:})
+        expect(out).not_to include('credentials')
+      end
+
       it 'flags the lines that hold a credential, and not a token read from ENV' do
         out, = run_inventory
         flagged = out.lines.map(&:strip).grep(%r{\A[\w./]+:\d+\z})
@@ -222,6 +279,102 @@ RSpec.describe 'Console MCP deprecation notices' do
                                    'Procfile.dev:1', 'compose.yml:4')
         expect(flagged.grep(/\A\.mcp\.json:/)).not_to be_empty
         expect(flagged.grep(/woods_env\.rb/)).to be_empty
+      end
+    end
+
+    context 'when the helper removes a client entry by key' do
+      around do |example|
+        Dir.mktmpdir('woods-console-remove') do |dir|
+          @dir = dir
+          example.run
+        end
+      end
+
+      before { skip 'jq is not installed' unless system('jq --version', out: File::NULL, err: File::NULL) }
+
+      let(:client) do
+        { 'inputs' => [{ 'id' => 'key', 'type' => 'promptString' }],
+          'servers' => {
+            'woods' => { 'command' => 'bundle', 'args' => %w[exec woods-mcp-start],
+                         'env' => { 'OPENAI_API_KEY' => marker } },
+            'rails-console' => { 'type' => 'http', 'url' => "https://host/mcp/console?t=#{marker}",
+                                 'headers' => { 'Authorization' => "Bearer #{marker}" } }
+          } }
+      end
+      let(:pretty) { "#{JSON.pretty_generate(client)}\n" }
+
+      define_method(:write_client) do |name, content|
+        path = File.join(@dir, name)
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, content)
+        path
+      end
+
+      define_method(:remove) do |*args, env: {}|
+        helper = read('plugin/skills/woods-console-disable/SKILL.md')[/^woods_mcp_remove\(\) \{\n.*?^\}$/m]
+        script = "#{helper}\nwoods_mcp_remove #{args.map { |arg| Shellwords.escape(arg) }.join(' ')}"
+        Open3.capture3({ 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil }.merge(env), 'bash', '-c', script, chdir: @dir)
+      end
+
+      it 'removes only that entry, keeps the layout and the mode, and prints names only' do
+        path = write_client('.vscode/mcp.json', pretty)
+        File.chmod(0o644, path)
+
+        out, err, status = remove('.vscode/mcp.json', 'servers', 'rails-console')
+
+        expect(status).to be_success
+        expect(out + err).not_to include(marker)
+        expect(out).to include('servers.rails-console', 'woods')
+        kept = client.merge('servers' => client['servers'].except('rails-console'))
+        expect(File.read(path)).to eq("#{JSON.pretty_generate(kept)}\n")
+        expect(File.stat(path).mode & 0o777).to eq(0o644)
+        expect(Dir.children(File.dirname(path))).to eq(['mcp.json'])
+      end
+
+      it 'hands the edit off, changing nothing, when jq would reformat the file' do
+        compact = JSON.generate(client)
+        path = write_client('.mcp.json', compact)
+
+        out, err, status = remove('.mcp.json', 'servers', 'rails-console')
+
+        expect(status).not_to be_success
+        expect(out).to include('ask the user')
+        expect(out + err).not_to include(marker)
+        expect(File.read(path)).to eq(compact)
+        expect(Dir.children(@dir)).to eq(['.mcp.json'])
+      end
+
+      it 'reformats only after the user agrees' do
+        path = write_client('.mcp.json', JSON.generate(client))
+
+        out, err, status = remove('.mcp.json', 'servers', 'rails-console', env: { 'WOODS_REFORMAT_OK' => '1' })
+
+        expect(status).to be_success
+        expect(out + err).not_to include(marker)
+        expect(JSON.parse(File.read(path))['servers'].keys).to eq(['woods'])
+      end
+
+      {
+        'a file with comments' => [->(dir, json) { File.write(File.join(dir, 'c.json'), "// note\n#{json}") },
+                                   'c.json', 'rails-console'],
+        'a symbolic link' => [->(dir, _json) { File.symlink('real.json', File.join(dir, 'link.json')) },
+                              'link.json', 'rails-console'],
+        'an entry that is not there' => [->(_dir, _json) {}, 'real.json', 'missing']
+      }.each do |form, (setup, name, entry)|
+        it "hands the edit off, changing nothing, for #{form}" do
+          write_client('real.json', pretty)
+          setup.call(@dir, pretty)
+          before = Dir.children(@dir).sort.to_h { |child| [child, File.lstat(File.join(@dir, child)).size] }
+
+          out, err, status = remove(name, 'servers', entry)
+
+          expect(status).not_to be_success
+          expect(out).to include('make this a manual step')
+          expect(out + err).not_to include(marker)
+          expect(File.read(File.join(@dir, 'real.json'))).to eq(pretty)
+          expect(Dir.children(@dir).sort.to_h { |child| [child, File.lstat(File.join(@dir, child)).size] })
+            .to eq(before)
+        end
       end
     end
   end

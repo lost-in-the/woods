@@ -16,15 +16,21 @@
 
 ## Turning the Console off
 
-The `woods-console-disable` plugin skill makes these changes for you, and asks before each edit.
+The `woods-console-disable` plugin skill finds these places, asks before each edit, and makes the edits it safely can.
 Search first; `-o` prints file names, line numbers and key names, never values:
 
 ```bash
-grep -rnoE "console_mcp_[a-z_]+|Woods::Console|woods:console|woods-console|WOODS_CONSOLE_[A-Z_]+" config lib .mcp.json
+grep -rnoE "console_mcp_[a-z_]+|Woods::Console|woods:console|woods-console|WOODS_CONSOLE_[A-Z_]+" \
+  --exclude-dir=credentials --exclude='*.key' config lib .mcp.json
 ```
 
 Do not print `.env` files, `.mcp.json`, client configuration or `console.yml`: they can hold the token.
 Where a step below touches such a line, find it by its line number and key name.
+
+The skill decides what it may open by the kind of file, and a clean secret check never widens that.
+It opens only Ruby configuration files, and not one the check flags.
+It removes MCP client entries from plain JSON by key, and moves `console.yml` aside without opening it.
+It gives you every other change as a manual step, the token always among them.
 
 1. **Switch.** Remove `config.console_mcp_enabled = true` from `config/initializers/woods.rb`, or set it to `false`.
    Check `config/application.rb` and `config/environments/` too.
