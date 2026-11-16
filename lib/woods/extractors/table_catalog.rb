@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative '../source_inputs/consumer_errors'
+
 module Woods
   module Extractors
     # The tables the running application can reach, and the models that own
@@ -52,15 +54,18 @@ module Woods
         # @param connection_classes [Array<Class>, nil] Active Record classes to
         #   take connection pools and ownership from. Defaults to
         #   `ActiveRecord::Base` and its descendants.
+        # @param consumer [Object, nil] the extractor that builds on the
+        #   catalog, marked through {SourceInputs::ConsumerErrors} when a
+        #   database's tables cannot be listed
         # @return [TableCatalog]
-        def from_runtime(connection_classes: nil)
+        def from_runtime(connection_classes: nil, consumer: nil)
           classes = connection_classes || runtime_classes
           pools = writable_pools(classes)
           owners = owners_by_table(classes)
           qualified = pools.size > 1
 
           tables = pools.flat_map do |database, pool|
-            table_names(pool).map do |name|
+            table_names(pool, consumer).map do |name|
               Table.new(name: name, database: database, models: owners.fetch([database, name], []),
                         qualified: qualified, pool: pool)
             end
@@ -126,11 +131,23 @@ module Woods
           nil
         end
 
-        def table_names(pool)
+        # A listing that raises is a database nobody read, not one without
+        # tables. The consumer is marked through
+        # {SourceInputs::ConsumerErrors.record_read_failure} with this pool, so
+        # a full run refuses a timeout on a pool that answered other reads, or
+        # a refused statement, and publishes a database no read can reach.
+        # Without a consumer the failure is only logged.
+        def table_names(pool, consumer = nil)
           names = pool.with_connection(&:tables)
           (names.map(&:to_s) - INTERNAL_TABLES).sort
         rescue StandardError => e
-          Rails.logger.warn("[Woods] Could not list tables for a database connection: #{e.message}")
+          message = "[Woods] Could not list tables for a database connection: #{e.message}"
+          if consumer
+            SourceInputs::ConsumerErrors.record_read_failure(consumer, e, pool)
+            Rails.logger.error(message)
+          else
+            Rails.logger.warn(message)
+          end
           []
         end
 

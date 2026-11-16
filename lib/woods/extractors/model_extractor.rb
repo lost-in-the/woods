@@ -812,7 +812,7 @@ module Woods
         deps.concat(through_chain_dependencies(model, deps))
 
         # The table unit this model reads, when the live schema has it.
-        table = (@table_catalog ||= TableCatalog.from_runtime).for_model(model)
+        table = (@table_catalog ||= TableCatalog.from_runtime(consumer: self)).for_model(model)
         deps << { type: :database_table, target: table.identifier, via: :table } if table
 
         # Included concerns add instance-level behavior

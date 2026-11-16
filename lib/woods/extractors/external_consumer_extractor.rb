@@ -48,7 +48,7 @@ module Woods
       def extract_all
         from_file = file_declarations
         from_configuration = Woods.configuration&.external_table_consumers || {}
-        catalog = @table_catalog || TableCatalog.from_runtime
+        catalog = @table_catalog || TableCatalog.from_runtime(consumer: self)
 
         (from_file.keys | from_configuration.keys).sort.map do |name|
           extract_consumer(name, from_file[name], from_configuration[name], catalog)

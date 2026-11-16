@@ -28,6 +28,89 @@ RSpec.describe Woods::SourceInputs::ConsumerErrors do
     expect(described_class.failed?(unaffected)).to be(false)
   end
 
+  describe '.log' do
+    let(:not_established) { stub_const('ActiveRecord::ConnectionNotEstablished', Class.new(StandardError)) }
+    let(:checkout_timeout) { stub_const('ActiveRecord::ConnectionTimeoutError', Class.new(not_established)) }
+    let(:statement_invalid) { stub_const('ActiveRecord::StatementInvalid', Class.new(StandardError)) }
+    let(:no_database) { stub_const('ActiveRecord::NoDatabaseError', Class.new(statement_invalid)) }
+    let(:pool) { Object.new }
+    let(:served) { ->(candidate) { candidate.equal?(pool) } }
+    let(:unserved) { ->(_candidate) { false } }
+
+    before do
+      checkout_timeout
+      no_database
+    end
+
+    def log_while_handling(error)
+      consumer = Object.new
+      begin
+        raise error
+      rescue StandardError
+        described_class.log(consumer, 'handled')
+      end
+      consumer
+    end
+
+    # Rails 7.1 and later attach the pool a checkout waited for to the error.
+    def timeout_on(waited_for)
+      checkout_timeout.new('could not obtain a connection').tap do |error|
+        error.define_singleton_method(:connection_pool) { waited_for }
+      end
+    end
+
+    it 'refuses a checkout that timed out on a pool that answered another query in the run' do
+      expect(described_class.schema_failed?(log_while_handling(timeout_on(pool)), served)).to be(true)
+    end
+
+    it 'lets a checkout that timed out on a pool that answered nothing in the run publish' do
+      consumer = log_while_handling(timeout_on(pool))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, unserved)).to be(false)
+    end
+
+    it 'lets a checkout timeout whose pool is not known publish, since no read can be shown to have reached it' do
+      consumer = log_while_handling(checkout_timeout.new('pool'))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, served)).to be(false)
+    end
+
+    it 'refuses a statement the database refused, whatever the run read before' do
+      expect(described_class.schema_failed?(log_while_handling(statement_invalid.new('locked')), unserved)).to be(true)
+    end
+
+    it 'lets a connection that could not be made at all publish, recording the failure' do
+      consumer = log_while_handling(not_established.new('refused'))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, served)).to be(false)
+    end
+
+    it 'lets a database that does not exist publish, recording the failure' do
+      consumer = log_while_handling(no_database.new('missing'))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, served)).to be(false)
+    end
+
+    it 'marks only the consumer failure for an error that is not a database read' do
+      consumer = log_while_handling(NameError.new('uninitialized constant Missing'))
+
+      expect(described_class.failed?(consumer)).to be(true)
+      expect(described_class.schema_failed?(consumer, served)).to be(false)
+    end
+
+    it 'clears both marks on reset' do
+      consumer = log_while_handling(statement_invalid.new('locked'))
+      described_class.reset(consumer)
+
+      expect(described_class.failed?(consumer)).to be(false)
+      expect(described_class.schema_failed?(consumer, served)).to be(false)
+    end
+  end
+
   it 'propagates a nested behavioral profile failure without changing its result' do
     consumer = Woods::Extractors::ConfigurationExtractor.new
     profiler = Woods::Extractors::BehavioralProfile.new
