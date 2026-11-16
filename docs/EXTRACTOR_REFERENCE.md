@@ -361,18 +361,23 @@ publish the same values.
 - Reflects model class and instance methods after reading the schema, so Rails schema-loading optimizations produce the same method metadata in cold and warmed runs. Application-defined constructors remain visible; Rails versions that install an optimized singleton `new` during schema loading consistently include it in `class_methods`.
 - `metadata[:attribute_writers]` lists every attribute an instance accepts through a public writer, without the `=`. It is read from `public_instance_methods`, minus what `ActiveRecord::Base` itself defines, together with `attribute_names` and `attribute_aliases`. Unlike `instance_methods` (`instance_methods(false)`), it also covers writers from concerns and other modules: `has_secure_password`, nested attributes, store accessors, and association and collection-id writers. Attribute names count whether or not Rails has generated their methods yet, so cold and warmed runs agree.
 - Automatically skips HABTM join models and anonymous classes
-- `scopes` lists each `scope` call written in the model's own class body as `{ name, source, confidence }`.
+- `scopes` lists each `scope` call written inside the model's own class declaration as `{ name, source, confidence }`.
+  That includes a call inside one of its method bodies.
   A call in another class's body, such as a model nested in the same file, is that model's and appears on its unit.
   If no declaration in the file spells the model's name (`class Shop::Order` in `module Shop`), all stay `static`.
   `confidence` is `verified` when the live class answers the name as an Active Record scope of its own.
   That means a class method on the model's singleton class, defined at Active Record's scope definition site.
   It must also not be a scope an enum generates; nothing is called.
   An enum defines `V` and `not_V` for every value or, with `scopes: false`, for none.
-  So a name counts as the enum's only when its whole family answers as scopes.
+  From Rails 6.1 a value that is not a Ruby name (`in-progress`) also defines its alias (`in_progress`).
+  So a name counts as the enum's only when its whole family, of values or of aliases, answers as scopes.
   An explicit `scope :basic` beside `enum ..., scopes: false` is `verified`.
   It reads `static` when every value and its `not_` form are declared explicitly too.
   It also reads `static` when it overrides the scope an enum defined.
-  Every other entry is `static`: dead code, a call inside a method, a class method of the same name, or a regex read.
+  Every other entry is `static`: dead code, a method body that never ran, a same-named class method, or a regex read.
+  The live check asks whether the class answers the name, not which call defined it.
+  So a call in a class method that runs during boot is `verified`.
+  So is a dead declaration when a concern defines a live scope of the same name.
 - Chunks every model into semantic sections: `:summary`, `:associations`, `:callbacks`, `:validations`, `:scopes`, `:methods`
 - **Runtime-generated method detection:** Because extraction runs inside a booted Rails process, `instance_methods(false)` captures every method Rails generates dynamically, enum predicates (`status_active?`, `status_pending?`), association builders (`build_profile`, `create_line_item!`), attribute accessors, and dynamically registered scopes. Static analysis tools cannot see these methods because they only exist after Rails processes the DSL declarations at boot time
 - **Database partition (multi-DB apps).** `metadata[:database]` is `klass.connection_db_config.name` (Rails 6.1+; `nil` on 6.0). Because reflection climbs to the abstract class that declared `connects_to`, a concrete model that only inherits its connection still reports the right database. Each association entry carries `from_db`, `to_db`, `through_db` (the has_many :through join model's database, guarded the same way and nil for a plain association), and `disable_joins`; `metadata[:foreign_keys]` lists `{ from_table, to_table, column }`, the target table's owning database is resolved separately by the graph-level `cross_database_edges` report (see [Internals](INTERNALS.md#graphanalyzer-structural-metrics)), not stored per model. That report never picks an owner living in the foreign key's own source database, even when another database also claims the table; only when every owner sits elsewhere, across more than one database, does it come back ambiguous rather than guessing. The graph node carries `database`, `table`, and `foreign_key_tables`, and association edges carry `through`, `through_db`, and `disable_joins`. `consolidate_dependencies` keeps the first edge per `[type, target]`, so a model with two associations to the same target keeps only the first edge's `through`/`through_db`/`disable_joins`.

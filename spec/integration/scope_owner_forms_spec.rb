@@ -6,7 +6,8 @@ require 'json'
 
 # What the live class answers is the oracle: a scope verifies only when it is
 # declared in the model's own class body and the class answers it as an
-# Active Record scope. Every other declaration in that body stays, static.
+# Active Record scope. Every other declaration in that body stays, static,
+# unless a live scope of the same name answers for it.
 RSpec.describe 'Scopes a model unit publishes, against the live class', :booted_app do
   before(:all) do
     stdout, stderr, status = Open3.capture3(RbConfig.ruby, '-Ilib', 'spec/fixtures/scope_owner_forms/boot.rb')
@@ -73,6 +74,34 @@ RSpec.describe 'Scopes a model unit publishes, against the live class', :booted_
     expect(outer['answers']).not_to have_key('not_basic')
     expect(outer.dig('scopes', 'basic')).to eq('verified')
     expect(outer.dig('spans', 'basic')).to eq('verified')
+  end
+
+  it 'does not verify a dead scope whose name an enum’s method-friendly alias answers' do
+    alias_answer = ({ 'site' => 'named.rb', 'own' => true } if @rails >= Gem::Version.new('6.1'))
+    expect(outer.dig('answers', 'in_progress')).to eq(alias_answer)
+    expect(outer.dig('scopes', 'in_progress')).to eq('static')
+    expect(outer.dig('spans', 'in_progress')).to eq('static')
+  end
+
+  it 'verifies an explicit scope named for the alias of a value of an enum that declines scopes' do
+    expect(outer.dig('answers', 'in_review')).to eq('site' => 'named.rb', 'own' => true)
+    expect(outer['answers']).not_to have_key('not_in_review')
+    expect(outer.dig('scopes', 'in_review')).to eq('verified')
+    expect(outer.dig('spans', 'in_review')).to eq('verified')
+  end
+
+  # The live check asks only whether the class answers the name; it cannot
+  # tell which call defined it.
+  it 'verifies a scope declared in a class method that runs during boot' do
+    expect(outer.dig('answers', 'boot_scope')).to eq('site' => 'named.rb', 'own' => true)
+    expect(outer.dig('scopes', 'boot_scope')).to eq('verified')
+    expect(outer.dig('spans', 'boot_scope')).to eq('verified')
+  end
+
+  it 'verifies a dead scope whose name a concern’s live scope answers' do
+    expect(outer.dig('answers', 'archived_rows')).to eq('site' => 'named.rb', 'own' => true)
+    expect(outer.dig('scopes', 'archived_rows')).to eq('verified')
+    expect(outer.dig('spans', 'archived_rows')).to eq('verified')
   end
 
   it 'does not verify a dead scope whose name an enum without instance methods answers' do

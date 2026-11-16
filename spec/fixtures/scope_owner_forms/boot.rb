@@ -38,12 +38,35 @@ BARE_ENUM = if ActiveRecord.version >= Gem::Version.new('7.1')
             else
               ''
             end
+# Rails 6.1 added a method-friendly alias for a value that is not a Ruby
+# name: `in-progress` also defines `in_progress` and `not_in_progress`.
+DASHED_ENUM = if ActiveRecord::VERSION::MAJOR >= 7
+                "enum :stage, { 'in-progress' => 0, 'on hold' => 1 }"
+              else
+                "enum stage: { 'in-progress' => 0, 'on hold' => 1 }"
+              end
+SCOPELESS_DASHED_ENUM = if ActiveRecord::VERSION::MAJOR >= 7
+                          "enum :review, { 'in-review' => 0, 'signed-off' => 1 }, scopes: false"
+                        else
+                          "enum review: { 'in-review' => 0, 'signed-off' => 1 }, _scopes: false"
+                        end
 
 FILES = {
   'app/models/application_record.rb' => "class ApplicationRecord < ActiveRecord::Base\n  " \
                                         "self.abstract_class = true\nend\n",
+  'app/models/concerns/archivable.rb' => <<~RUBY,
+    module Archivable
+      extend ActiveSupport::Concern
+
+      included do
+        scope :archived_rows, -> { where(label: 'archived') }
+      end
+    end
+  RUBY
   'app/models/scope_owner.rb' => <<~RUBY
     class ScopeOwner < ApplicationRecord
+      include Archivable
+
       scope :own_scope, -> { where(label: 'own') }
 
       class NestedScoped < ApplicationRecord
@@ -55,6 +78,8 @@ FILES = {
         scope :dead_scope, -> { where(label: 'dead') }
         scope :dead_twin, -> { where(label: 'twin') }
         scope :active, -> { where(label: 'enum twin') }
+        scope :archived_rows, -> { where(label: 'concern twin') }
+        scope :in_progress, -> { where(label: 'alias twin') }
       end
 
       def self.dead_twin
@@ -69,6 +94,11 @@ FILES = {
         scope :bare_scope, -> { where(label: 'bare') }
       end
 
+      def self.install_boot_scope
+        scope :boot_scope, -> { where(label: 'boot') }
+      end
+      install_boot_scope
+
       #{ENUM}
       #{BARE_ENUM}
       #{SCOPELESS_ENUM}
@@ -77,12 +107,15 @@ FILES = {
         scope :tone_warm, -> { none }
       end
       scope :basic, -> { where(label: 'explicit') }
+      #{DASHED_ENUM}
+      #{SCOPELESS_DASHED_ENUM}
+      scope :in_review, -> { where(label: 'explicit') }
     end
   RUBY
 }.freeze
 
 NAMES = %w[own_scope nested_scope dead_scope dead_twin active gold basic not_basic tone_warm deferred_scope
-           bare_scope].freeze
+           bare_scope boot_scope archived_rows in_progress in_review not_in_review].freeze
 MODELS = %w[ScopeOwner ScopeOwner::NestedScoped].freeze
 
 Dir.mktmpdir('woods_scope_owner_forms') do |root|
@@ -110,6 +143,8 @@ Dir.mktmpdir('woods_scope_owner_forms') do |root|
       t.integer :tier
       t.integer :plan
       t.integer :tone
+      t.integer :stage
+      t.integer :review
     end
   end
   Rails.application.eager_load!

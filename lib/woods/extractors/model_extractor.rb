@@ -708,8 +708,9 @@ module Woods
       # uses the source-reference vocabulary: +verified+ when the scope is
       # declared in the model's own class body and the live class answers
       # its name as an Active Record scope ({#live_scope?}); +static+ for
-      # every other declaration: dead code, a call inside a method, an
-      # unknown owner, the regex fallback, or no model to ask.
+      # every other declaration: dead code, a method body that never ran,
+      # an unknown owner, the regex fallback, or no model to ask. The live
+      # check cannot tell which call defined the name.
       #
       # @param model [Class, nil]
       # @param source [String, nil]
@@ -808,6 +809,9 @@ module Woods
       # suffix, or none of them (+scopes: false+). So +name+ is the enum's
       # only when the whole family it belongs to answers as scopes; an
       # explicit scope beside a scopeless enum leaves the family incomplete.
+      # From Rails 6.1 a value that is not a Ruby name also defines its
+      # method-friendly alias (+in-progress+ defines +in_progress+), so the
+      # aliases form a family too.
       #
       # @param model [Class]
       # @param name [String]
@@ -818,11 +822,18 @@ module Woods
         values = [name, name.delete_prefix('not_')].uniq
         model.defined_enums.each_value.any? do |mapping|
           labels = mapping.keys.map(&:to_s)
-          enum_families(values, labels).any? do |family|
-            family.all? { |value| scope_site?(model, value) && scope_site?(model, "not_#{value}") }
+          [labels, labels.map { |label| label.gsub(ENUM_ALIAS_CHARACTERS, '_') }.uniq].uniq.any? do |spellings|
+            enum_families(values, spellings).any? do |family|
+              family.all? { |value| scope_site?(model, value) && scope_site?(model, "not_#{value}") }
+            end
           end
         end
       end
+
+      # The characters Active Record replaces with +_+ in an enum value's
+      # method-friendly alias.
+      ENUM_ALIAS_CHARACTERS = /[\W&&[:ascii:]]+/
+      private_constant :ENUM_ALIAS_CHARACTERS
 
       # The value names an enum with +labels+ would give its scopes, for
       # each prefix and suffix under which one of +values+ is such a name.
