@@ -222,6 +222,16 @@ RSpec.describe Woods::Extractors::CallbackAnalyzer do
       expect(result[:side_effects][:jobs_enqueued]).to eq(['Billing::SyncJob'])
     end
 
+    it 'lists no enqueue operation for a lambda the callback only builds' do
+      source = "class Order\n  def notify\n    hook = -> { NotifyJob.perform_later(id) }\n    register(hook)\n  end\n" \
+               "end\n"
+
+      result = described_class.new(source_code: source).analyze(make_callback(filter: 'notify'))
+      ops = result[:side_effects][:operations]
+
+      expect(ops.map { |op| [op[:type], op[:target], op[:method]] }).to eq([[:call, nil, 'register']])
+    end
+
     it 'reports nested operations in the file and line their segment came from' do
       source = "class User\nend\n\n\n" \
                "module Stamped\n  def stamp\n    if ready?\n      Clock.tick!\n    end\n  end\nend\n"

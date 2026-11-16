@@ -38,6 +38,16 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     model
   end
 
+  # The model's own pool hands out +connection+ for one block at a time.
+  # +model.connection+ raises: it would lease the connection to the thread.
+  def stub_pool_connection(model, connection)
+    pool = double('ConnectionPool')
+    allow(pool).to receive(:with_connection) { |&block| block.call(connection) }
+    allow(model).to receive(:connection_pool).and_return(pool)
+    allow(model).to receive(:connection).and_raise('a permanent checkout')
+    pool
+  end
+
   # Stub the extractor to see exactly one included concern with the given
   # name and source code (bypasses concern file discovery).
   def stub_inlined_concern(name, code, path: nil)
@@ -820,8 +830,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
                                 limit: nil, null: true, default: nil)
       allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug],
                                        attribute_names: %w[slug], attribute_aliases: {})
-      connection = double('Connection', foreign_keys: [])
-      allow(model).to receive(:connection).and_return(connection)
+      stub_pool_connection(model, double('Connection', indexes: [], foreign_keys: []))
       callback = double('Callback', filter: :set_slug, kind: :before)
       allow(model).to receive(:_save_callbacks).and_return([callback])
       stub_inlined_concern('Trackable', concern_code)
@@ -870,7 +879,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
                                   limit: nil, null: true, default: nil)
         allow(model).to receive_messages(table_exists?: true, columns: [column], column_names: %w[slug],
                                          attribute_names: %w[slug], attribute_aliases: {})
-        allow(model).to receive(:connection).and_return(double('Connection', foreign_keys: []))
+        stub_pool_connection(model, double('Connection', indexes: [], foreign_keys: []))
         callbacks = %i[set_slug stamp].map { |filter| double('Callback', filter: filter, kind: :before) }
         allow(model).to receive(:_save_callbacks).and_return(callbacks)
         model
@@ -1842,7 +1851,94 @@ RSpec.describe Woods::Extractors::ModelExtractor do
     end
   end
 
+  describe '#build_schema_comment' do
+    let(:column) do
+      double('Column', name: 'id', type: :integer, sql_type: 'integer', limit: nil, null: false, default: nil)
+    end
+    let(:index) { double('Index', name: 'index_invoices_on_account_id', columns: %w[account_id], unique: false) }
+    let(:foreign_key) { double('ForeignKey', from_table: 'invoices', column: 'account_id', to_table: 'accounts') }
+
+    def invoice_model
+      model = stub_bare_model('Invoice')
+      allow(model).to receive_messages(table_name: 'invoices', table_exists?: true, columns: [column])
+      model
+    end
+
+    def comment_lines(model)
+      extractor.send(:build_schema_comment, model).lines.map(&:chomp)
+    end
+
+    it "reads indexes and foreign keys through the model's own pool, not the default connection" do
+      stub_const('ActiveRecord::Base', double('Base', connection: double('DefaultConnection')))
+      model = invoice_model
+      stub_pool_connection(model, double('Connection', indexes: [index], foreign_keys: [foreign_key]))
+
+      expect(comment_lines(model)).to include('# Indexes:', '#   index_invoices_on_account_id: [account_id]',
+                                              '# Foreign Keys:', '#   invoices.account_id → accounts')
+    end
+
+    it 'gives the connection back to the pool after each read' do
+      model = invoice_model
+      pool = stub_pool_connection(model, double('Connection', indexes: [index], foreign_keys: []))
+
+      expect(comment_lines(model)).to include('#   index_invoices_on_account_id: [account_id]')
+      expect(pool).to have_received(:with_connection).twice
+    end
+
+    it 'reports a section whose read fails as unknown, not as absent' do
+      model = invoice_model
+      connection = double('Connection')
+      allow(connection).to receive(:indexes).and_raise(StandardError, 'database unreachable')
+      allow(connection).to receive(:foreign_keys).and_raise(StandardError, 'database unreachable')
+      stub_pool_connection(model, connection)
+
+      expect(comment_lines(model).last(3)).to eq(['# Indexes: unknown (could not be read)', '#',
+                                                  '# Foreign Keys: unknown (could not be read)'])
+    end
+
+    it 'prints neither section for a table that has no indexes or foreign keys' do
+      model = invoice_model
+      stub_pool_connection(model, double('Connection', indexes: [], foreign_keys: []))
+
+      lines = comment_lines(model)
+
+      expect(lines.last(2)).to eq(['#   id                        integer         NOT NULL PRIMARY KEY', '#'])
+      expect(lines.grep(/Indexes|Foreign Keys/)).to eq([])
+    end
+
+    it 'builds the header and metadata[:foreign_keys] from one foreign key read' do
+      model = invoice_model
+      allow(model).to receive_messages(column_names: %w[id], attribute_names: %w[id], attribute_aliases: {})
+      connection = double('Connection', indexes: [])
+      allow(connection).to receive(:foreign_keys).with('invoices').and_return([foreign_key], [])
+      stub_pool_connection(model, connection)
+      allow(extractor).to receive_messages(extract_included_modules: [], extract_extended_modules: [],
+                                           source_file_for: nil)
+
+      unit = extractor.extract_model(model)
+
+      expect(unit.source_code).to include("# Foreign Keys:\n#   invoices.account_id → accounts")
+      expect(unit.metadata[:foreign_keys]).to eq([{ from_table: 'invoices', to_table: 'accounts',
+                                                    column: 'account_id' }])
+      expect(connection).to have_received(:foreign_keys).once
+    end
+  end
+
   describe '#extract_metadata database fields' do
+    it "reads foreign keys through the model's own pool" do
+      model = stub_bare_model('Invoice')
+      allow(model).to receive_messages(table_name: 'invoices', table_exists?: true)
+      connection = double('Connection')
+      allow(connection).to receive(:foreign_keys).with('invoices').and_return(
+        [double('FK', from_table: 'invoices', column: 'account_id', to_table: 'accounts')]
+      )
+      pool = stub_pool_connection(model, connection)
+
+      expect(extractor.send(:extract_foreign_keys, model))
+        .to eq([{ from_table: 'invoices', to_table: 'accounts', column: 'account_id' }])
+      expect(pool).to have_received(:with_connection).once
+    end
+
     it 'records database and foreign keys with the target table resolved' do
       model = stub_bare_model('Invoice')
       allow(model).to receive_messages(
@@ -1855,7 +1951,7 @@ RSpec.describe Woods::Extractors::ModelExtractor do
         attribute_aliases: {}
       )
       connection = double('Connection')
-      allow(model).to receive(:connection).and_return(connection)
+      stub_pool_connection(model, connection)
       allow(connection).to receive(:foreign_keys).with('invoices').and_return(
         [double('FK', from_table: 'invoices', column: 'account_id', to_table: 'accounts')]
       )

@@ -72,6 +72,23 @@ RSpec.describe Woods::FlowAssembler do
       expect(flow.steps[0][:unit]).to eq('PostsController#create')
     end
 
+    it 'lists no enqueue for a lambda the method only builds' do
+      write_unit('PostsController', source_code: <<~RUBY)
+        class PostsController < ApplicationController
+          def create
+            hook = -> { NotifyJob.perform_later(1) }
+            Audit.record(hook)
+          end
+        end
+      RUBY
+      stub_graph_defaults
+
+      operations = described_class.new(graph: graph, extracted_dir: extracted_dir)
+                                  .assemble('PostsController#create').steps.first[:operations]
+
+      expect(operations.map { |op| [op[:type], op[:target], op[:method]] }).to eq([[:call, 'Audit', 'record']])
+    end
+
     it 'extracts operations from the specified method' do
       write_unit('PostsController', source_code: <<~RUBY)
         class PostsController < ApplicationController

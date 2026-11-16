@@ -32,12 +32,28 @@ module Woods
       # Node types of a `super` call: explicit arguments, bare (Prism), and bare (parser gem).
       SUPER_TYPES = %i[super forwarding_super zsuper].freeze
 
-      # @param super_calls [Boolean] mark each `super` call with a
-      #   `{ type: :super_call }` operation where Ruby makes it: after its
-      #   arguments, before its block, inside the branch or block that holds
-      #   it. Without it a `super` call is no operation.
-      def initialize(super_calls: false)
-        @super_calls = super_calls
+      # Node types whose children do not run where they are written: a
+      # lambda body (Prism), the operand of `defined?` (Prism, parser gem).
+      UNEVALUATED_TYPES = %i[lambda defined defined?].freeze
+
+      # Receiverless calls whose block becomes a callable instead of running.
+      DEFERRING_CALLS = %w[lambda proc].freeze
+
+      # Whether a :block node builds a lambda or proc, so that its body runs
+      # only when something calls it: `-> {}` (a :block over :lambda in the
+      # parser gem), `lambda {}`, `proc {}` and `Proc.new {}`.
+      #
+      # @param node [Ast::Node]
+      # @return [Boolean]
+      def self.deferred_block?(node)
+        call = node.type == :block && node.children&.first
+        return false unless call.is_a?(Ast::Node)
+        return true if call.type == :lambda
+        return false unless call.type == :send
+
+        return DEFERRING_CALLS.include?(call.method_name) if call.receiver.nil?
+
+        call.method_name == 'new' && call.receiver.delete_prefix('::') == 'Proc'
       end
 
       # Rewrite each operation's +line+, +statement_line+ and +file+, nested
@@ -54,6 +70,18 @@ module Woods
           operation[:line], operation[:file] = locate.call(operation[:line])
           NESTED_KEYS.each { |key| relocate(operation[key], &locate) if operation[key] }
         end
+      end
+
+      # @param super_calls [Boolean] mark each `super` call with a
+      #   `{ type: :super_call }` operation where Ruby makes it: after its
+      #   arguments, before its block, inside the branch or block that holds
+      #   it. Without it a `super` call is no operation.
+      # @param inside_definition [Boolean] @api private: true for the walker
+      #   of a definition's own statements, where a nested `def` only installs
+      #   a method
+      def initialize(super_calls: false, inside_definition: false)
+        @super_calls = super_calls
+        @inside_definition = inside_definition
       end
 
       # Extract operations from a method definition node in source line order.
@@ -73,6 +101,7 @@ module Woods
       # Recursively walk the AST and extract operations.
       def walk(node, operations)
         return unless node.is_a?(Ast::Node)
+        return if UNEVALUATED_TYPES.include?(node.type)
         return handle_super(node, nil, operations) if super_call?(node)
 
         case node.type
@@ -84,8 +113,28 @@ module Woods
           handle_conditional(node, operations)
         when :case
           handle_case(node, operations)
+        when :def, :defs
+          @inside_definition ? walk_nested_definition(node, operations) : walk_definition(node, operations)
         else
           walk_children(node, operations)
+        end
+      end
+
+      # Default parameter values run before the body, though the parser
+      # places them after it. The receiver of `def (expr).name` ran when the
+      # method was defined, not when it is called.
+      def walk_definition(node, operations)
+        children = Array(node.children).reject { |child| child.is_a?(Ast::Node) && child.type == :definition_receiver }
+        defaults, body = children.partition { |child| child.is_a?(Ast::Node) && child.type == :parameter_defaults }
+        walker = (@definition_walker ||= self.class.new(super_calls: @super_calls, inside_definition: true))
+        (defaults + body).each { |child| walker.send(:walk, child, operations) }
+      end
+
+      # A method defined while this one runs: its defaults and body run only
+      # when it is called, but the receiver of `def (expr).name` runs now.
+      def walk_nested_definition(node, operations)
+        Array(node.children).each do |child|
+          walk_children(child, operations) if child.is_a?(Ast::Node) && child.type == :definition_receiver
         end
       end
 
@@ -98,6 +147,10 @@ module Woods
 
       # Handle :block nodes - check for transaction/with_lock wrappers.
       def handle_block(node, operations)
+        # A lambda or proc literal builds a callable; neither it nor its body
+        # is an operation here.
+        return if self.class.deferred_block?(node)
+
         send_child = node.children&.first
         if send_child.is_a?(Ast::Node) && send_child.type == :send && transaction_call?(send_child)
           nested = []
@@ -159,7 +212,7 @@ module Woods
 
       # An expression whose code runs only when something calls it.
       def deferred_expression?(node)
-        %i[def defs lambda].include?(node.type)
+        UNEVALUATED_TYPES.include?(node.type) || %i[def defs].include?(node.type) || self.class.deferred_block?(node)
       end
 
       # The `super` calls of an `if` or `case` expression: its predicate's
@@ -221,10 +274,10 @@ module Woods
         # Do NOT recurse into send node children in general — the walker
         # handles children at the statement level, and recursing here would
         # double-count chained calls and pick up receiver lvars as spurious
-        # method calls. The one exception is an enqueue nested in an
-        # argument: `Audit.record(NotifyJob.perform_later(...))` still
-        # enqueues the job (F5).
-        collect_nested_async(node, operations)
+        # method calls. The one exception is an enqueue nested in the call's
+        # receiver chain or arguments: `Audit.record(job: NotifyJob.perform_later)`
+        # and `NotifyJob.perform_later.job_id` still enqueue the job (F5).
+        (node.children || []).each { |child| collect_nested_async(child, operations) }
       end
 
       # A call's +line+ is where it names its method, so a call laid out over
@@ -248,26 +301,20 @@ module Woods
         walk(node.children.first, operations)
       end
 
-      # Emit `:async` for enqueue calls nested anywhere inside +node+'s
-      # arguments. Only arguments are walked (the receiver chain is not), and
-      # only async calls are emitted, so no other nested call is counted.
+      # Emit `:async` for every enqueue call in the expression +node+, through
+      # any literal, operator, interpolation or nested call. Only async calls
+      # are emitted, so no other nested call is counted. A lambda or proc
+      # body, a `defined?` operand and a nested definition do not run here.
       def collect_nested_async(node, operations)
-        argument_nodes(node).each do |argument|
-          next unless argument.is_a?(Ast::Node) && argument.type == :send
+        return unless node.is_a?(Ast::Node)
+        return if UNEVALUATED_TYPES.include?(node.type) || %i[def defs].include?(node.type)
+        return if self.class.deferred_block?(node)
 
-          if async_call?(argument)
-            operations << { type: :async, target: argument.receiver, method: argument.method_name,
-                            args_hint: argument.arguments || [], **call_lines(argument) }
-          end
-          collect_nested_async(argument, operations)
+        if node.type == :send && async_call?(node)
+          operations << { type: :async, target: node.receiver, method: node.method_name,
+                          args_hint: node.arguments || [], **call_lines(node) }
         end
-      end
-
-      # A send's argument children: the parser stores the converted receiver
-      # first (when there is one), then the arguments.
-      def argument_nodes(node)
-        children = node.children || []
-        node.receiver && children.first.is_a?(Ast::Node) ? children.drop(1) : children
+        (node.children || []).each { |child| collect_nested_async(child, operations) }
       end
 
       # Handle :if nodes - extract conditional with then/else branches.

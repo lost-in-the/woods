@@ -76,6 +76,7 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     verify_limits!(server)
     verify_eav!(server)
     verify_ordering!(server)
+    verify_output_identity!(server)
     result = assert_request!(server, 'console_sql', { sql: "SELECT secret FROM #{TABLES[0]}", limit: 1 })
     raise 'Protected scalar was not masked' unless result.to_json.include?('[REDACTED]')
 
@@ -113,8 +114,21 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
     end
     sql = "SELECT id, secret FROM #{TABLES[0]} ORDER BY 1"
     assert_request!(server, 'console_sql', { sql: sql })
+    ["SELECT * FROM #{TABLES[0]} ORDER BY 3", "SELECT u.* FROM #{TABLES[0]} u ORDER BY 1, 3",
+     "SELECT id, * FROM #{TABLES[0]} ORDER BY 1"].each do |wildcard|
+      assert_request!(server, 'console_sql', { sql: wildcard }, refused: true)
+    end
+    assert_request!(server, 'console_sql', { sql: "SELECT name, id FROM #{TABLES[0]} ORDER BY 2" })
     sql = "SELECT u.* FROM #{TABLES[0]} u JOIN (SELECT 1 AS id) v ON u.id = v.id"
     assert_request!(server, 'console_sql', { sql: sql })
+  end
+
+  # The redactor matches result headers by exact name; a repeated protected
+  # name, or SQLite's `name:1` rename of one, must not reach it. Self-joins
+  # live in the SQLite spec: MySQL cannot reopen a temporary table.
+  def self.verify_output_identity!(server)
+    assert_request!(server, 'console_sql', { sql: "SELECT secret, secret FROM #{TABLES[0]}" }, refused: true)
+    assert_request!(server, 'console_sql', { sql: "SELECT secret, name, id FROM #{TABLES[0]}" })
   end
 
   def self.verify_limits!(server)
@@ -123,6 +137,9 @@ module WoodsConsoleOutputPolicyContract # rubocop:disable Metrics/ModuleLength
 
     sql = "SELECT 1 FROM #{TABLES[0]}) AS x, #{TABLES[2]} --"
     assert_request!(server, 'console_sql', { sql: sql, limit: 1 }, refused: true)
+    ["SELECT id FROM #{TABLES[0]} /* open", "SELECT id FROM #{TABLES[0]} LIMIT 1 /* open"].each do |open|
+      assert_request!(server, 'console_sql', { sql: open }, refused: true)
+    end
   end
 
   def self.verify_eav!(server)
