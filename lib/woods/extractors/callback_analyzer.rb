@@ -40,7 +40,9 @@ module Woods
       # Values of +analysis_status+. An empty +side_effects+ with ANALYZED
       # means no effects were found; the other two mean none were looked for.
       ANALYZED = 'analyzed'
-      # No method definition to read: a proc, a lambda, or a method the source does not define.
+      # No method definition to read: a proc, a lambda, a method the source
+      # does not define, or one the source defines more than once on the line
+      # Ruby reports when nothing tells which of those definitions ran.
       UNSUPPORTED = 'unsupported'
       # The method was found but its text could not be read.
       SOURCE_UNAVAILABLE = 'source_unavailable'
@@ -89,6 +91,9 @@ module Woods
       # Node types of a call to the same method in the next ancestor:
       # +super(...)+ and bare +super+ (Prism), +zsuper+ (the parser gem).
       SUPER_CALLS = %i[super forwarding_super zsuper].freeze
+
+      # Node types whose children are statements run one after another.
+      STATEMENT_LISTS = %i[program begin class module].freeze
 
       def initialize(source_code:, column_names: [], segments: nil, model: nil)
         @source_code = source_code
@@ -211,18 +216,77 @@ module Woods
 
       # @param method [UnboundMethod]
       # @return [Ast::Node, nil] the definition of +method+ starting on the
-      #   line its source location maps to. When several start there, only
-      #   those whose lexical owner is spelled as Ruby names +method.owner+
-      #   qualify, and the later one is what Ruby keeps; nil when none does.
+      #   line its source location maps to. Where the runtime reports how
+      #   Ruby compiled the body, the definition starting at its column, and
+      #   nil when none does or no +def+ compiled it. Otherwise a lone
+      #   definition on that line; of several, only those whose lexical owner
+      #   is spelled as Ruby names +method.owner+ qualify, and of those the
+      #   last, when they are statements of one list (the later one replaced
+      #   the earlier). In any other arrangement, as in exclusive branches of
+      #   an +if+, nil.
       def dispatched_node(method)
         line = composite_line(*method.source_location)
         return nil unless line
 
         name = method.original_name.to_s
         candidates = @parsed_root.find_all(:def).select { |node| node.line == line && node.method_name == name }
+        compiled = compiled_body(method)
+        return nil if compiled && !compiled[:def]
+        if compiled && candidates.all?(&:start_byte)
+          return candidates.find { |node| line_column(node) == compiled[:column] }
+        end
         return candidates.first if candidates.one?
 
-        candidates.select { |node| nesting_for(node).first == method.owner.name }.last
+        owned = candidates.select { |node| nesting_for(node).first == method.owner.name }
+        owned.last if owned.one? || one_statement_list?(owned)
+      end
+
+      # How Ruby compiled +method+, read from its instruction sequence.
+      #
+      # @param method [UnboundMethod]
+      # @return [Hash, nil] `{ def: true, column: }` with the byte column, of
+      #   the line its source location names, at which the compiled +def+
+      #   starts; `{ def: false }` for a body no +def+ compiled (the block of
+      #   a +define_method+); nil on a runtime that does not say
+      def compiled_body(method)
+        return nil unless defined?(RubyVM::InstructionSequence) && RubyVM::InstructionSequence.respond_to?(:of)
+
+        compiled = RubyVM::InstructionSequence.of(method)&.to_a
+        return nil unless compiled.is_a?(Array) && compiled[4].is_a?(Hash)
+        return { def: false } unless compiled[9] == :method
+
+        location = compiled[4][:code_location]
+        { def: true, column: location[1] } if location.is_a?(Array) && location[0] == method.source_location&.last
+      rescue StandardError
+        nil
+      end
+
+      # @param node [Ast::Node] a definition with a start byte
+      # @return [Integer] the byte column of its line at which it starts
+      def line_column(node)
+        node.start_byte - line_starts[node.line - 1]
+      end
+
+      # @param nodes [Array<Ast::Node>]
+      # @return [Boolean] true when every node is a statement of one list,
+      #   so each runs, and the later replaces the earlier
+      def one_statement_list?(nodes)
+        parents = nodes.map { |node| parent_of(node) }
+        list = parents.first
+        !list.nil? && STATEMENT_LISTS.include?(list.type) && parents.all? { |parent| parent.equal?(list) }
+      end
+
+      # @param target [Ast::Node] a node of {#parsed_root}
+      # @return [Ast::Node, nil] the node holding +target+ as a child
+      def parent_of(target)
+        pending = [@parsed_root]
+        while (node = pending.pop)
+          children = Array(node.children).grep(Ast::Node)
+          return node if children.any? { |child| child.equal?(target) }
+
+          pending.concat(children)
+        end
+        nil
       end
 
       # @param path [String, nil] an absolute source path
