@@ -54,8 +54,8 @@ module Woods
     FORMS = [
       # a database URL, whole: postgres://user:password@host:5432/name
       [%r{\b((?:postgres(?:ql)?|mysql2?|trilogy|sqlserver|oracle-enhanced)://)[^\s'"]+}i, "\\1#{MARK}"],
-      # any other URL's user:password@
-      [%r{\b([a-z][a-z0-9+.-]*://)[^\s/?#@'"]*@}i, "\\1#{MARK}@"],
+      # any other URL's user:password@, through the last @ before the host
+      [%r{\b([a-z][a-z0-9+.-]*://)[^\s/?#'"]*@}i, "\\1#{MARK}@"],
       # {:password=>"x"}, {password: "x"}, {"password" => "x"}
       [/(["':]?\b(?:#{KEY_PATTERN})["']?\s*(?:=>|:)\s*)(?:#{QUOTED}|:\w+)/i, "\\1\"#{MARK}\""],
       # Active Record: "with your hostname: h." and "username: u."; the value

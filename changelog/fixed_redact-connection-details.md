@@ -6,3 +6,4 @@
   Unquoted values that hold punctuation, host names in PostgreSQL and MariaDB errors and invalid UTF-8 are covered.
   Store, boot and reload errors with a redacted message no longer keep the error they translate as their cause.
   A Qdrant URL that the parser rejects is left out of its error message.
+  Any other URL loses its whole credential run, through the last @ before its host.

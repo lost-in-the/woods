@@ -188,6 +188,18 @@ RSpec.describe Woods::DiagnosticRedaction do
     end
   end
 
+  it "removes a non-database URL's whole credential run, through its last @ before the host" do
+    text = "redis://app:#{password}@after-#{marker}@cache/0 and https://#{user}@qdrant.example:6333/x"
+
+    expect(described_class.redact(text)).to eq('redis://[REDACTED]@cache/0 and https://[REDACTED]@qdrant.example:6333/x')
+  end
+
+  it "keeps an @ in a URL's path, query or fragment" do
+    text = 'https://example.com/users/a@b?ref=c@d#e@f and http://ollama.internal:11434/a@b'
+
+    expect(described_class.redact(text)).to eq(text)
+  end
+
   it 'keeps ordinary boot messages that name no database' do
     [
       'Host provider OpenAI/text-embedding-3-small does not match stored provider Ollama/nomic-embed-text.',
