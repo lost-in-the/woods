@@ -120,6 +120,7 @@ What it does:
 The task falls back to a full extraction when any check fails.
 It also falls back when a changed path needs a fresh Rails boot (`Gemfile.lock`, an initializer, `db/schema.rb`).
 So does a changed extraction configuration, or an incremental run that raises.
+A run that has lost its staging directory's writer lock is the exception: the task fails with the lock error.
 It then prints one line, `Not seeded, ran a full extraction instead: <reason>`.
 Paths in the reason are relative to the worktree; a path outside it shows only its last component.
 The task still exits 0, as the full extraction leaves a complete index.

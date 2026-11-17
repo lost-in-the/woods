@@ -49,7 +49,7 @@ module Woods
   # The change set is `git diff <seed sha>` against the working tree (committed
   # and uncommitted tracked changes) plus untracked files. Ignored files are not
   # part of it.
-  class WorktreeSeed
+  class WorktreeSeed # rubocop:disable Metrics/ClassLength
     # @!attribute [r] mode
     #   @return [Symbol] `:seeded`, `:full` (fell back), or `:skipped`
     # @!attribute [r] reason
@@ -106,10 +106,7 @@ module Woods
       begin
         build_staging(staging, baseline)
         changed = Changes.new(root: @root, index: staging).since(baseline.fetch('git_sha'))
-        # The staging directory is an index of its own. The target's lock,
-        # which `woods:seed` holds, does not cover it, and the extractor
-        # refuses to publish there under that lock.
-        Coordination::PipelineLock.for_index(staging).with_lock { run_incremental(staging, changed) }
+        run_incremental(staging, changed)
         return left_to_parent if forked_from_seed?
 
         promote(staging)
@@ -182,10 +179,20 @@ module Woods
       AtomicFile.write(path, original.include?("\n") ? JSON.pretty_generate(updated) : JSON.generate(updated))
     end
 
+    # The staging directory is an index of its own. The target's lock, which
+    # `woods:seed` holds, does not cover it, and the extractor refuses to
+    # publish there under that lock. Only this run writes the directory, so a
+    # lock it no longer owns fails the seed ({Coordination::LockLostError})
+    # instead of falling back.
     def run_incremental(staging, changed)
-      extractor = extractor_class.new(output_dir: staging)
-      extractor.extract_changed(changed)
-      extractor.raise_on_publication_failure!
+      lock = Coordination::PipelineLock.for_index(staging)
+      lock.with_lock do
+        extractor = extractor_class.new(output_dir: staging)
+        extractor.extract_changed(changed)
+        extractor.raise_on_publication_failure!
+      ensure
+        lock.fenced { nil } unless forked_from_seed?
+      end
     rescue Woods::ExtractionConfigChanged => e
       raise Unverifiable, e.message
     end
