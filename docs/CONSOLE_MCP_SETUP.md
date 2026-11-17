@@ -37,7 +37,9 @@ It gives you every other change as a manual step, the token always among them.
    With the switch off, every other `console_*` option is inert; you can remove those lines as well.
 2. **MCP client entry.** In `.mcp.json`, and in any user-level client configuration, remove the Console entry.
    It is the entry that runs `woods:console`, `woods-console-mcp` or `exe/woods-console`.
-   For HTTP, it is the entry whose URL path is exactly the Console path (default `/mcp/console`), query aside.
+   For HTTP, it is the entry whose URL is this application's Console endpoint, query aside:
+   the same scheme, host and port, and exactly the Console path (default `/mcp/console`).
+   An entry at that path on another host or port belongs to another application: keep it.
    A URL whose path only starts with it, such as `/mcp/console-metrics`, may be another server: confirm it first.
    Keep the Index Server entry (`woods-mcp`, `woods-mcp-start` or `woods-mcp-http`).
 3. **Rack mount.** The automatic mount passes every request through to Rails once the switch is off.

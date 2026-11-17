@@ -236,7 +236,7 @@ RSpec.describe 'Console MCP deprecation notices' do
         end
       end
 
-      define_method(:run_inventory) do
+      define_method(:run_inventory) do |console_url: 'https://host/mcp/console'|
         skill = read('plugin/skills/woods-console-disable/SKILL.md')
         find = skill[/^## 1\. Find every place$.*?(?=^## 2\.)/m]
         blocks = find.scan(/^```bash\n(.*?)^```/m).flatten + [<<~BASH]
@@ -245,8 +245,13 @@ RSpec.describe 'Console MCP deprecation notices' do
         BASH
         guide = read('docs/CONSOLE_MCP_SETUP.md')[/^## Turning the Console off$.*?(?=^## )/m]
         blocks += guide.scan(/^```bash\n(.*?)^```/m).flatten
-        env = { 'HOME' => @home, 'WOODS_CONSOLE_MCP_TOKEN' => marker, 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil }
+        env = { 'HOME' => @home, 'WOODS_CONSOLE_MCP_TOKEN' => marker, 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil,
+                'CONSOLE_URL' => console_url, 'CONSOLE_PATH' => nil }
         Open3.capture3(env, 'bash', '-c', blocks.join("\n"), chdir: @app)
+      end
+
+      define_method(:kinds) do |out, scope = 'mcpServers'|
+        out.lines.map { |line| line.split("\t") }.select { |row| row[0] == scope }.to_h { |row| row[1, 2] }
       end
 
       it 'keeps every fake secret out of the output' do
@@ -268,14 +273,28 @@ RSpec.describe 'Console MCP deprecation notices' do
         expect(out).to match(%r{^local /srv/app\twoods-console\tconsole\t.*env=WOODS_CONSOLE_CONFIG})
       end
 
-      it 'labels an entry console only for a Console launcher or the exact Console path' do
+      it 'labels an entry console only for a Console launcher or the complete confirmed endpoint' do
         out, = run_inventory
-        rows = out.lines.map { |line| line.split("\t") }
-        kinds = rows.select { |row| row[0] == 'mcpServers' }.to_h { |row| row[1, 2] }
 
-        expect(kinds).to eq('woods' => 'index', 'rails-console' => 'console', 'console-http' => 'console',
-                            'bridge' => 'console', 'console-metrics' => 'unclear', 'metrics' => 'other',
-                            'status-task' => 'unclear')
+        expect(kinds(out)).to eq('woods' => 'index', 'rails-console' => 'console', 'console-http' => 'console',
+                                 'bridge' => 'unclear', 'console-metrics' => 'unclear', 'metrics' => 'other',
+                                 'status-task' => 'unclear')
+      end
+
+      it 'labels the bridge console when its endpoint is the confirmed one, and the other host unclear' do
+        out, = run_inventory(console_url: 'http://LOCALHOST:3000/mcp/console')
+
+        expect(kinds(out)).to include('bridge' => 'console', 'console-http' => 'unclear')
+      end
+
+      it 'labels every HTTP entry unclear when only the Console path is known' do
+        [nil, '/mcp/console'].each do |path_only|
+          out, = run_inventory(console_url: path_only)
+
+          expect(kinds(out)).to include('console-http' => 'unclear', 'bridge' => 'unclear',
+                                        'rails-console' => 'console')
+          expect(kinds(out, 'local /srv/app')).to eq('woods-console' => 'console')
+        end
       end
 
       it 'lists key names in an env-file template, and never searches .env or credentials files' do
@@ -328,10 +347,11 @@ RSpec.describe 'Console MCP deprecation notices' do
         path
       end
 
-      define_method(:remove) do |*args, env: {}|
+      define_method(:remove) do |*args, env: { 'CONSOLE_URL' => 'https://host/mcp/console' }|
         helpers = read('plugin/skills/woods-console-disable/SKILL.md').scan(/^woods_mcp_\w+\(\) \{\n.*?^\}$/m)
         script = "#{helpers.join("\n")}\nwoods_mcp_remove #{args.map { |arg| Shellwords.escape(arg) }.join(' ')}"
-        Open3.capture3({ 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil }.merge(env), 'bash', '-c', script, chdir: @dir)
+        clean = { 'BUNDLE_GEMFILE' => nil, 'RUBYOPT' => nil, 'CONSOLE_URL' => nil, 'CONSOLE_PATH' => nil }
+        Open3.capture3(clean.merge(env), 'bash', '-c', script, chdir: @dir)
       end
 
       it 'removes only that entry, keeps the layout and the mode, and prints names only' do
@@ -365,7 +385,8 @@ RSpec.describe 'Console MCP deprecation notices' do
       it 'reformats only after the user agrees' do
         path = write_client('.mcp.json', JSON.generate(client))
 
-        out, err, status = remove('.mcp.json', 'servers', 'rails-console', env: { 'WOODS_REFORMAT_OK' => '1' })
+        out, err, status = remove('.mcp.json', 'servers', 'rails-console',
+                                  env: { 'CONSOLE_URL' => 'https://host/mcp/console', 'WOODS_REFORMAT_OK' => '1' })
 
         expect(status).to be_success
         expect(out + err).not_to include(marker)
@@ -396,6 +417,64 @@ RSpec.describe 'Console MCP deprecation notices' do
           expect(File.read(File.join(@dir, 'real.json'))).to eq(pretty)
           expect(Dir.children(@dir).sort.to_h { |child| [child, File.lstat(File.join(@dir, child)).size] })
             .to eq(before)
+        end
+      end
+
+      context 'when two applications serve the Console path on different hosts' do
+        let(:client) do
+          { 'servers' => {
+            'app-a' => { 'type' => 'http', 'url' => 'https://app-a.example/mcp/console' },
+            'app-b' => { 'type' => 'http', 'url' => 'https://app-b.example/mcp/console' }
+          } }
+        end
+        let(:app_a) { { 'CONSOLE_URL' => 'https://app-a.example/mcp/console' } }
+
+        it 'removes the confirmed application and keeps the other registered' do
+          path = write_client('.mcp.json', pretty)
+
+          out, _, status = remove('.mcp.json', 'servers', 'app-a', env: app_a)
+
+          expect(status).to be_success
+          expect(out).to include('keeps: app-b')
+          expect(JSON.parse(File.read(path))['servers']).to eq('app-b' => client['servers']['app-b'])
+        end
+
+        it 'refuses the other application, changing nothing' do
+          path = write_client('.mcp.json', pretty)
+
+          out, _, status = remove('.mcp.json', 'servers', 'app-b', env: app_a)
+
+          expect(status).not_to be_success
+          expect(out).to include('make this a manual step')
+          expect(File.read(path)).to eq(pretty)
+        end
+      end
+
+      {
+        'the confirmed endpoint' =>
+          ['https://app-a.example/mcp/console', 'https://app-a.example/mcp/console', true],
+        'the default port, host case and a trailing slash written out' =>
+          ['https://app-a.example/mcp/console', 'https://App-A.example:443/mcp/console/', true],
+        'a default port in the confirmed URL, and a query on the entry' =>
+          ['http://app-a.example:80/mcp/console', 'http://app-a.example/mcp/console?x=1', true],
+        'another host at the same path' =>
+          ['https://app-a.example/mcp/console', 'https://app-b.example/mcp/console', false],
+        'the same host on another port' =>
+          ['http://localhost:3000/mcp/console', 'http://localhost:3001/mcp/console', false],
+        'the same host over another scheme' =>
+          ['https://app-a.example/mcp/console', 'http://app-a.example/mcp/console', false],
+        'a confirmed Console path with no host' =>
+          ['/mcp/console', 'https://app-a.example/mcp/console', false],
+        'no confirmed Console URL' =>
+          [nil, 'https://app-a.example/mcp/console', false]
+      }.each do |form, (confirmed, url, removed)|
+        it "#{removed ? 'removes' : 'refuses'} an HTTP entry for #{form}" do
+          path = write_client('.mcp.json', "#{JSON.pretty_generate('servers' => { 'app' => { 'url' => url } })}\n")
+
+          _, _, status = remove('.mcp.json', 'servers', 'app', env: { 'CONSOLE_URL' => confirmed })
+
+          expect(status.success?).to be(removed)
+          expect(JSON.parse(File.read(path))['servers'].key?('app')).to be(!removed)
         end
       end
     end

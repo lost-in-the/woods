@@ -7,4 +7,5 @@
   It never deletes a file, never prints a token value and leaves the Index Server entry alone.
   It opens only Ruby configuration files and removes MCP client entries from plain JSON by key.
   Every other change, the token always among them, is a manual step for the user.
-  It removes a client entry only for a Console launcher or the exact Console path; it asks about any near match.
+  It removes a client entry only for a Console launcher or the Console URL the user confirms, host and port included.
+  It asks about any other entry at or near the Console path.

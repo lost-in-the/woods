@@ -114,17 +114,23 @@ List MCP client entries by name, kind and key names:
 
 ```bash
 woods_mcp_entries() {
-  jq -r --arg path "${CONSOLE_PATH:-/mcp/console}" '
-    def endpoint: sub("^[A-Za-z][A-Za-z0-9+.-]*://[^/?#]*"; "") | sub("[?#].*$"; "")
-      | rtrimstr("/") | if . == "" then "/" else . end;
-    def want: $path | endpoint;
+  jq -r --arg url "${CONSOLE_URL:-/mcp/console}" '
+    def path: sub("[?#].*$"; "") | rtrimstr("/") | if . == "" then "/" else . end;
+    def endpoint: (capture("^(?<s>[A-Za-z][A-Za-z0-9+.-]*)://(?<a>[^/?#]*)(?<p>.*)$") // {s: "", a: "", p: .}) as $u
+      | ($u.s | ascii_downcase) as $s
+      | ($u.a | sub("^.*@"; "") | ascii_downcase
+        | capture("^(?<h>\\[[^\\]]*\\]|[^:]*)(:(?<n>[0-9]+))?$") // {h: ., n: null}) as $a
+      | {path: ($u.p | path),
+         origin: (if $s == "" then null else [$s, $a.h, ($a.n // {http: "80", https: "443"}[$s] // "")] end)};
+    def want: $url | endpoint;
     def kind: ([.command // "", (.args // [])[]] | map(tostring) | join(" ")
         | [splits("[\\s\"\u0027;&|()]+")]) as $t
       | ([.url // empty] + ($t | map(select(test("^[A-Za-z][A-Za-z0-9+.-]*://")))) | map(endpoint)) as $u
       | if ($t | any(test("^(woods:console|(.*/)?woods-console-mcp|(.*/)?exe/woods-console)$")))
-           or ($u | any(. == want)) then "console"
+           or (want.origin != null and ($u | any(. == want))) then "console"
         elif ($t | any(test("woods-mcp"))) then "index"
-        elif (($t + $u) | any(test("console"; "i"))) then "unclear"
+        elif ($u | any(.path == want.path or (.path | test("console"; "i"))))
+           or ($t | any(test("console"; "i"))) then "unclear"
         else "other" end;
     def rows($scope): to_entries[] | [$scope, .key, (.value | kind),
       "fields=" + (.value | keys | join(",")),
@@ -141,15 +147,22 @@ Each row starts with the key that holds the entry (`mcpServers`, `servers`, or `
 The kind decides what happens to the entry:
 
 - `console`: a command word is a Console launcher (`woods:console`, `woods-console-mcp`, `exe/woods-console`),
-  or the path of a URL is exactly the Console path (the query and a trailing slash aside).
+  or a URL is the confirmed Console endpoint: the same scheme, host, port and path.
+  Host case, a default port, a trailing slash and the query do not count.
   This is the entry to remove.
 - `index`: the Index Server. It stays.
-- `unclear`: the entry mentions a console but is neither of the above, for example `/mcp/console-metrics`.
-  The Console answers every path that starts with its own, so only the user can tell what such an entry is.
+- `unclear`: the entry mentions a console or the Console path but is neither of the above.
+  Examples: `/mcp/console-metrics`, the Console path on another host or port, and every URL at the Console path
+  while no host is confirmed.
+  The Console answers every path that starts with its own, and another application can serve the same path,
+  so only the user can tell what such an entry is.
   Leave it untouched, and ask the user to confirm it; if it is the Console, its removal is a manual step.
 - `other`: anything else, which may be the Index Server over HTTP. It stays.
 
-Set `CONSOLE_PATH` first if `console_mcp_path` in `config/application.rb` names a custom path.
+Before you run it, ask the user for the Console URL of the application you are turning off, as clients reach it:
+scheme, host, port and path, for example `http://localhost:3000/mcp/console`.
+Set `CONSOLE_URL` to that URL; its path is `console_mcp_path` from `config/application.rb`, or `/mcp/console`.
+If the user does not know the host, set `CONSOLE_URL` to the path alone: no URL entry is then `console`.
 Entries can have any name (`woods-console`, `rails-console`, `codebase-console`), so trust the kind, not the name.
 
 Ask the user which other clients they use, and run `woods_mcp_entries` on each file they name.
@@ -216,7 +229,7 @@ Stop if they decline.
 - Remove a Claude Code entry with `claude mcp remove <name> -s project` (or `-s local`, `-s user`); it prints no values.
 - Remove an entry from another plain JSON client file by key, with the helper below.
   It names the file, the key path and the names left, never a value.
-  It reruns the kind check itself, and removes nothing that is not a `console` entry.
+  It reruns the kind check itself, with the same `CONSOLE_URL`, and removes nothing that is not a `console` entry.
 - Move `~/.woods/console.yml` aside with `mv`, without opening it.
 - Every other row is a manual step (see "Manual steps"): Compose files, Procfiles, scripts, env-file templates,
   client files in other formats, and any file the secret check flagged.
