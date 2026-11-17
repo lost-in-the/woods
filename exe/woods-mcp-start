@@ -7,14 +7,112 @@
 # same as when launched directly. RubyGems loads gem executables as Ruby, so
 # this wrapper must remain a Ruby program when packaged.
 
+require_relative '../lib/woods/mcp/served_identity'
+
+USAGE = 'Usage: woods-mcp-start [--allow-mismatch] [--await-index] [--client-root PATH] ' \
+        '[--client-root-map HOST=CONTAINER ...] (--checkout | /path/to/index_dir)'
+
+def usage_error(message)
+  warn "Error: #{message}"
+  warn USAGE
+  exit 1
+end
+
+# Removes `name VALUE` or `name=VALUE` from ARGV and returns the value.
+def take_option(name)
+  position = ARGV.index { |arg| arg == name || arg.start_with?("#{name}=") }
+  return unless position
+
+  argument = ARGV.delete_at(position)
+  value = argument == name ? ARGV.delete_at(position) : argument.delete_prefix("#{name}=")
+  usage_error("#{name} needs a path") if value.nil? || value.empty? || value.start_with?('--')
+  value
+end
+
 # `--allow-mismatch` (or WOODS_MCP_ALLOW_MISMATCH=1) serves an index that
 # another checkout of the repository recorded; without it that is refused.
 allow_mismatch = !ARGV.delete('--allow-mismatch').nil?
-index_dir = ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
+# Handed on at once: an awaiting woods-mcp judges each generation it serves.
+ENV[Woods::MCP::ServedIdentity::ALLOW_ENV] = '1' if allow_mismatch
+
+# `--await-index` (or WOODS_MCP_AWAIT_INDEX=1): a directory that holds no
+# published index yet, or does not exist, is not an error. woods-mcp starts,
+# answers `building` until an index is published there, then serves it.
+await_index_env = 'WOODS_MCP_AWAIT_INDEX'
+await_index = !ARGV.delete('--await-index').nil? || Woods::MCP::ServedIdentity.env_flag?(await_index_env)
+
+# `--client-root` (or WOODS_MCP_CLIENT_ROOT) is the directory the client
+# session runs in: the index is compared with that checkout instead of this
+# launcher's own directory, which a launcher inside a shared container always
+# shares with the index it mounts. `--client-root-map HOST=CONTAINER`
+# (repeatable, or WOODS_MCP_CLIENT_ROOT_MAP) describes a bind mount, so the
+# client root is read here through it; a client root under no mapped prefix
+# is a checkout this process cannot see, and is refused as a mismatch. Both
+# reach woods-mcp through the environment, as the mismatch override does.
+client_root_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_ENV
+client_root_map_env = Woods::MCP::ServedIdentity::CLIENT_ROOT_MAP_ENV
+if ARGV.count { |arg| arg == '--client-root' || arg.start_with?('--client-root=') } > 1
+  usage_error('--client-root given more than once')
+end
+client_root = take_option('--client-root')
+ENV[client_root_env] = client_root if client_root
+map_flags = []
+while (entry = take_option('--client-root-map'))
+  map_flags << entry
+end
+declared_client_root = ENV.fetch(client_root_env, '').strip
+if declared_client_root.empty?
+  usage_error("--client-root-map needs --client-root (#{client_root_env})") unless map_flags.empty?
+  # A map exported for every launch of a shared environment says nothing
+  # without a client root to read through it.
+  unless ENV.fetch(client_root_map_env, '').strip.empty?
+    warn "Warning: #{client_root_map_env} is set but no client root was given; ignoring the map."
+  end
+elsif !declared_client_root.start_with?('/')
+  usage_error("--client-root must be an absolute path as the client sees it, got #{declared_client_root}")
+else
+  map_value = [ENV.fetch(client_root_map_env, nil), *map_flags].compact.reject(&:empty?)
+                                                               .join(Woods::MCP::ServedIdentity::MAP_SEPARATOR)
+  begin
+    Woods::MCP::ServedIdentity.parse_client_root_map(map_value)
+  rescue Woods::MCP::ServedIdentity::InvalidClientRootMap => e
+    usage_error("--client-root-map (#{client_root_map_env}): #{e.message}")
+  end
+  ENV[client_root_map_env] = map_value unless map_value.empty?
+end
+
+# `--checkout` (or WOODS_MCP_CHECKOUT=1) takes no index path: it serves the
+# index of the checkout this launcher runs in (the nearest directory holding
+# `.git`, so a linked worktree is its own checkout), at WOODS_OUTPUT resolved
+# against that checkout, else `tmp/woods`. It never serves another tree's.
+checkout_mode = !ARGV.delete('--checkout').nil? || Woods::MCP::ServedIdentity.env_flag?('WOODS_MCP_CHECKOUT')
+if checkout_mode
+  given = ARGV[0] || ENV.fetch('WOODS_DIR', nil)
+  usage_error("--checkout takes no index path, got #{given}") unless given.nil? || given.empty?
+
+  checkout = Woods::MCP::ServedIdentity.checkout_root(Dir.pwd)
+  unless checkout
+    warn "Error: --checkout serves the current checkout's index, but #{Dir.pwd} is not inside a git checkout."
+    warn 'Run the server from inside the checkout, or pass the index directory as a path instead of --checkout.'
+    exit 1
+  end
+
+  output = ENV.fetch('WOODS_OUTPUT', '').strip
+  index_dir = File.expand_path(output.empty? ? 'tmp/woods' : output, checkout)
+  # The checkout is a real path. An index under a symlink inside it (a
+  # linked `tmp`) is inside it as written; an absolute WOODS_OUTPUT through
+  # another name for the checkout is inside it once resolved.
+  inside = ->(path) { path.start_with?("#{checkout}#{File::SEPARATOR}") }
+  unless inside.call(index_dir) || (File.exist?(index_dir) && inside.call(File.realpath(index_dir)))
+    usage_error("--checkout serves the checkout's own index, but WOODS_OUTPUT names #{index_dir}, " \
+                "outside the checkout #{checkout}")
+  end
+end
+index_dir ||= ARGV[0] || ENV.fetch('WOODS_DIR', nil) || ENV.fetch('WOODS_OUTPUT', nil)
 
 if index_dir.nil? || index_dir.empty?
   warn 'Error: No index directory specified.'
-  warn 'Usage: woods-mcp-start [--allow-mismatch] /path/to/index_dir'
+  warn USAGE
   exit 1
 end
 
@@ -22,8 +120,16 @@ index_dir = File.expand_path(index_dir)
 path_remedy = 'Point at the existing index with an explicit path, WOODS_DIR, or WOODS_OUTPUT. ' \
               'If no index exists, run `bundle exec rake woods:extract` in your Rails app.'
 
-unless File.directory?(index_dir)
+if File.exist?(index_dir) && !File.directory?(index_dir)
+  warn "Error: #{index_dir} is not a directory."
+  warn path_remedy
+  exit 1
+end
+
+unless await_index || File.directory?(index_dir)
   warn "Error: Index directory does not exist: #{index_dir}"
+  warn 'This process sees nothing at that path. A server run inside a container needs the container path ' \
+       '(for example /app/tmp/woods); a server on the host needs the host path.'
   warn path_remedy
   exit 1
 end
@@ -57,19 +163,22 @@ rescue JSON::ParserError, SystemCallError, TypeError, NoMethodError
   false
 end
 
-unless manifest_present?(index_dir)
+if await_index
+  ENV[await_index_env] = '1'
+  warn "Note: no published Woods index in #{index_dir} yet; serving it once one is." unless manifest_present?(index_dir)
+elsif !manifest_present?(index_dir)
   warn "Error: Could not resolve a published Woods index in: #{index_dir}"
   warn 'Expected generation.json pointing to a payload manifest.json, or a legacy flat manifest.json.'
   warn path_remedy
   exit 1
 end
 
-# Which checkout the index describes, against the directory this launcher
-# runs in. Reads generation.json, the manifest and the checkout's HEAD file
-# only, so the handshake stays fast. A root mismatch is refused unless
-# allowed; a branch difference or a writer from another Woods build is a
-# warning (the server repeats both to the client at connect).
-require_relative '../lib/woods/mcp/served_identity'
+# Which checkout the index describes, against the client's checkout (the
+# declared client root, else the directory this launcher runs in). Reads
+# generation.json, the manifest and the checkout's HEAD file only, so the
+# handshake stays fast. A root mismatch is refused unless allowed; a branch
+# difference, a checkout that cannot be determined or a writer from another
+# Woods build is a warning (the server repeats each to the client at connect).
 identity = Woods::MCP::ServedIdentity.read(index_dir)
 allow_mismatch ||= Woods::MCP::ServedIdentity.allow_mismatch?
 if identity.client_matches == false

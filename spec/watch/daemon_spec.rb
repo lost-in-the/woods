@@ -1264,7 +1264,12 @@ RSpec.describe Woods::Watch::Daemon do
     # nothing left to write and clobbered the durable file with []. #process
     # now guards the drained batch with its own ensure, independent of what
     # killed the thread running it.
+    #
+    # The kill goes through the daemon's own stop path, never a kill and join
+    # written here: Thread#kill only schedules that ensure, so a join in the
+    # example would supply the wait the daemon itself has to make.
     it 'survives the thread that drained it being killed mid-cycle' do
+      stub_const('Woods::Watch::Daemon::HEARTBEAT_SHUTDOWN_TIMEOUT', 0.05)
       entered = Queue.new
       release = Queue.new
       allow(extractor).to receive(:extract_changed) do |paths|
@@ -1279,9 +1284,7 @@ RSpec.describe Woods::Watch::Daemon do
       worker = Thread.new { daemon.send(:process, [relative]) }
       Timeout.timeout(5) { entered.pop } # wait until the batch is mid-extraction
 
-      worker.kill
-      raise 'worker thread did not exit after #kill' unless worker.join(5)
-
+      daemon.send(:stop_retry, worker)
       daemon.send(:persist_pending)
 
       expect(JSON.parse(File.read(pending_file)))
@@ -1305,6 +1308,98 @@ RSpec.describe Woods::Watch::Daemon do
 
       expect(JSON.parse(File.read(pending_file)))
         .to include(File.join(root, relative))
+    end
+
+    it 'persists paths recovered by retry cleanup after a forced stop, before releasing the claim' do
+      relative = touch('config/locales/en.yml')
+      daemon = build
+      steps = []
+      retry_thread = double('retry thread')
+      allow(retry_thread).to receive(:join).with(described_class::HEARTBEAT_SHUTDOWN_TIMEOUT).and_return(nil)
+      allow(retry_thread).to receive(:kill).and_return(retry_thread)
+      allow(retry_thread).to receive(:join).with(no_args) do
+        daemon.send(:carry_forward, Woods::ChangeSet.new(paths: [relative], root: root))
+        steps << :retry_cleanup
+        retry_thread
+      end
+      %i[persist_pending release_claim].each do |step|
+        allow(daemon).to receive(step).and_wrap_original do |original|
+          steps << step
+          original.call
+        end
+      end
+      daemon.instance_variable_set(:@retry_thread, retry_thread)
+
+      daemon.send(:shut_down, nil, nil)
+
+      expect(steps).to eq(%i[retry_cleanup persist_pending release_claim])
+      expect(JSON.parse(File.read(pending_file)))
+        .to include(File.join(root, relative))
+    end
+
+    # The whole loop: a cycle contends for the writer lock and carries its
+    # path, the heartbeat retries it, and the daemon is stopped while that
+    # retried extraction is still running. Nothing here kills or joins a
+    # thread itself; the extraction never returns, so only the daemon's own
+    # shutdown can end it.
+    def stop_during_retry(relative)
+      extracting = Queue.new
+      live_watcher = LiveWatcher.new
+      daemon = daemon_with_endless_retry(live_watcher, extracting)
+
+      runner = Thread.new { daemon.run }
+      live_watcher.wait_until_started
+      live_watcher.on_change.call([File.join(root, relative)])
+      worker = Timeout.timeout(5) { extracting.pop }
+      expect(worker).to equal(daemon.instance_variable_get(:@retry_thread))
+
+      daemon.stop
+      expect(Timeout.timeout(5) { runner.value }).to eq(:stopped)
+    ensure
+      daemon&.stop
+      worker&.kill
+    end
+
+    # The first acquire contends, so the cycle carries its path; the
+    # heartbeat's retry then takes the lock and extracts until killed.
+    # +extracting+ receives the thread running that extraction.
+    def daemon_with_endless_retry(watcher, extracting)
+      stub_const('Woods::Watch::Daemon::HEARTBEAT_SHUTDOWN_TIMEOUT', 0.05)
+      blocking = instance_spy('Woods::Extractor')
+      allow(blocking).to receive(:extract_changed) do
+        extracting << Thread.current
+        sleep
+      end
+      lock = instance_double(Woods::Coordination::PipelineLock, release: true, touch: true, stale_timeout: 600)
+      allow(lock).to receive(:acquire).and_return(false, true)
+      build(watcher: watcher, lock: lock, extractor_factory: -> { blocking }).tap do |daemon|
+        allow(daemon).to receive(:heartbeat_tick).and_return(0.01)
+      end
+    end
+
+    it 'keeps the path of a retried extraction the stop interrupted' do
+      relative = touch('config/locales/en.yml')
+
+      stop_during_retry(relative)
+
+      expect(JSON.parse(File.read(pending_file))).to eq([File.join(root, relative)])
+    end
+
+    # The interrupted state that matters: the contending writer published
+    # after the save, so the published source manifest already records the
+    # file's current digest and start-up catch-up reads it as unchanged. The
+    # pending file is the only record that the edit was never extracted.
+    it 'extracts that path at the next startup even when its digest matches the published index' do
+      relative = touch('config/locales/en.yml')
+      publish_generation('full')
+      expect(build.send(:catch_up_scan).paths).not_to include(File.join(root, relative))
+
+      stop_during_retry(relative)
+      build(watcher: FakeWatcher.new, catch_up: true).run
+
+      expect(extractor).to have_received(:extract_changed) do |paths|
+        expect(paths).to include(File.join(root, relative))
+      end
     end
   end
 
