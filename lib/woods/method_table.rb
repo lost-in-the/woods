@@ -159,9 +159,20 @@ module Woods
             end
           end
 
-          mark { |entries| Marks.visibility(entries, Names.symbol_names(argument), owner, scope, visibility) }
+          names = given_names(argument, owner, scope, state)
+          mark { |entries| Marks.visibility(entries, names, owner, scope, visibility) }
           []
         end
+      end
+
+      # The names an argument gives a visibility call: its literal names,
+      # or, for a wrapper call around a `def` (`private memoize def x`, at
+      # any depth), the name the `def` returns, once the definition is
+      # placed. A decorator returns the name it is given; the chain works
+      # only then.
+      def given_names(argument, owner, scope, state)
+        wrapped_argument(argument, owner, scope, state)
+        Names.symbol_names(argument) + Names.wrapped_names(argument)
       end
 
       # `module_function def x` and `module_function :x, 'y'` (symbols and
@@ -174,7 +185,7 @@ module Woods
             end
           end
 
-          names = Names.symbol_names(argument) unless argument.is_a?(Prism::ArrayNode)
+          names = given_names(argument, owner, scope, state) unless argument.is_a?(Prism::ArrayNode)
           mark { |entries| Marks.module_functions(entries, Array(names), owner) } if scope == 'instance'
           []
         end
@@ -187,7 +198,8 @@ module Woods
         visibility = CLASS_METHOD_VISIBILITY.fetch(node.name)
         node.arguments&.arguments.to_a.flat_map do |argument|
           unless argument.is_a?(Prism::DefNode)
-            mark { |entries| Marks.visibility(entries, Names.symbol_names(argument), owner, 'singleton', visibility) }
+            names = given_names(argument, owner, 'instance', state)
+            mark { |entries| Marks.visibility(entries, names, owner, 'singleton', visibility) }
             next []
           end
 
@@ -209,16 +221,24 @@ module Woods
       end
 
       # Apply a call's change to the entries it can reach. A call on a path
-      # Ruby may not run changes only the candidates on such paths, never a
-      # definition made outside them.
+      # Ruby may not run changes only the candidates of that path (made in
+      # the branches that enclose the call, or in branches nested in its
+      # own), never a definite definition or a candidate of another branch.
       #
       # @yieldparam entries [Array<Hash>]
       # @yieldreturn [Array<Hash>] those entries after the call
       def mark
         return @entries = yield(@entries) unless @candidate
 
-        candidates, definite = @entries.partition { |entry| entry.key?(CANDIDATE) }
-        @entries = definite + yield(candidates)
+        reached, others = @entries.partition { |entry| entry.key?(CANDIDATE) && on_path?(entry[Marks::PATH]) }
+        @entries = others + yield(reached)
+      end
+
+      # Whether a candidate made on +path+ can be held where the walk is:
+      # one of the two branch paths encloses the other.
+      def on_path?(path)
+        shared = [path.size, @path.size].min
+        path.first(shared) == @path.first(shared)
       end
     end
 
@@ -284,7 +304,12 @@ module Woods
       def branch_entries(bodies, reason, owner, scope, state)
         outer = @candidate
         @candidate ||= reason
-        bodies.each { |body| visit_statements(body_statements(body), owner, scope, state.dup) }
+        bodies.each do |body|
+          @path.push(body.object_id) # the branch, while the tree is walked
+          visit_statements(body_statements(body), owner, scope, state.dup)
+        ensure
+          @path.pop
+        end
         []
       ensure
         @candidate = outer
@@ -351,6 +376,7 @@ module Woods
         @names = DeclarationName.new
         @nesting = []
         @candidate = nil
+        @path = []
         @offsets = offsets
       end
 
@@ -359,7 +385,7 @@ module Woods
       def call(root)
         visit_body(root, nil, scope: 'instance')
         @entries.each do |entry|
-          entry.delete(Marks::SCOPE)
+          [Marks::SCOPE, Marks::PATH].each { |key| entry.delete(key) }
           entry.delete(Marks::OFFSET) unless @offsets
         end
       end
@@ -484,7 +510,7 @@ module Woods
                   'line' => node.location.start_line, 'end_line' => node.location.end_line,
                   'visibility' => visibility, 'owner' => owner, Marks::SCOPE => landing,
                   Marks::OFFSET => node.location.start_offset }
-        @candidate ? entry.merge(CANDIDATE => @candidate) : entry
+        @candidate ? entry.merge(CANDIDATE => @candidate, Marks::PATH => @path.dup) : entry
       end
     end
 
@@ -500,6 +526,11 @@ module Woods
       # starts, the one position no other definition shares; removed before
       # the table is returned unless the walker is asked to keep it.
       OFFSET = 'offset'
+
+      # The internal key holding the branches a candidate was defined in,
+      # outermost first, each by its body node's id; removed before the
+      # table is returned.
+      PATH = 'path'
 
       module_function
 
@@ -556,12 +587,18 @@ module Woods
       # @return [Array<Hash>]
       def module_functions(entries, names, owner)
         names.uniq.reduce(entries) do |held, name|
-          source = held.find { |entry| entry.values_at('owner', 'name', SCOPE) == [owner, name, 'instance'] }
-          next held unless source # neither an instance method nor a module function
-
-          copy = source.merge('kind' => 'module_function', 'visibility' => 'public')
-          replace(held, copy)
+          named = ->(entry) { entry.values_at('owner', 'name', SCOPE) == [owner, name, 'instance'] }
+          candidates, definite = held.partition { |entry| entry.key?(CANDIDATE) }
+          source = definite.find(&named)
+          definite = replace(definite, module_function_copy(source)) if source
+          definite + candidates.map { |entry| named.call(entry) ? module_function_copy(entry) : entry }
         end
+      end
+
+      # A candidate is copied where it stands: Ruby copies whichever
+      # alternative it holds, and a definite source replaces no candidate.
+      def module_function_copy(entry)
+        entry.merge('kind' => 'module_function', 'visibility' => 'public')
       end
 
       # +entries+ with +entry+ added and what it overwrites removed or narrowed.
@@ -600,6 +637,16 @@ module Woods
         when Prism::ConstantPathNode
           parent = node.parent ? constant_name(node.parent) : ''
           "#{parent}::#{node.name}" if parent
+        end
+      end
+
+      # The names the definitions inside a wrapper call return, at any
+      # depth of call arguments (`memoize cache def x`).
+      def wrapped_names(node)
+        return [] unless node.is_a?(Prism::CallNode)
+
+        node.arguments&.arguments.to_a.flat_map do |argument|
+          argument.is_a?(Prism::DefNode) ? [argument.name.to_s] : wrapped_names(argument)
         end
       end
 

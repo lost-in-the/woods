@@ -397,6 +397,55 @@ RSpec.describe Woods::MethodTable do
       expect(table(source).map { |name, _, _, _, visibility| [name, visibility] }).to eq([%w[a private], %w[b public]])
     end
 
+    it 'applies a visibility call in a branch to the candidates of that branch only' do
+      source = <<~RUBY
+        class Post
+          if Feature.on?
+            def x; end
+          else
+            private def x; end
+          end
+          if Feature.on?
+            def y; end
+          end
+          case Feature.mode
+          when :a then def y; end
+          else
+            def y; end
+            if Feature.strict?
+              protected :y
+            end
+          end
+        end
+      RUBY
+
+      expect(table(source).map { |name, _, line, _, visibility| [name, line, visibility] }).to eq(
+        [['x', 3, 'public'], ['x', 5, 'private'], ['y', 8, 'public'], ['y', 11, 'public'], ['y', 13, 'protected']]
+      )
+    end
+
+    it 'makes every alternative of a name a module function, and keeps candidates beside a definite source' do
+      source = <<~RUBY
+        module Util
+          if Feature.on?
+            def x; end
+          else
+            def x; end
+          end
+          def y; end
+          if Feature.on?
+            def y; end
+          end
+          module_function :x, :y
+        end
+      RUBY
+
+      expect(described_class.call(source).map { |entry| entry.values_at('name', 'kind', 'line', 'candidate') })
+        .to eq([['x', 'module_function', 3, 'conditional'], ['x', 'module_function', 5, 'conditional'],
+                ['y', 'module_function', 7, nil],
+                ['y', 'module_function', 9, 'conditional']])
+    end
+
     it 'lists a definition in a block of the class body as a block candidate of the lexical owner' do
       source = <<~RUBY
         class Plugin
@@ -417,6 +466,25 @@ RSpec.describe Woods::MethodTable do
 
       expect(table(source).map { |name, kind, _, _, visibility| [name, kind, visibility] })
         .to eq([%w[total instance public], %w[hidden instance private]])
+    end
+
+    # A decorator returns the name its `def` returns, so the visibility call
+    # receives that name.
+    it 'gives a definition inside a wrapper passed to a visibility call the visibility the call names' do
+      source = <<~RUBY
+        module Util
+          private memoize def total; end
+          private memoize cache def deep; end
+          module_function cache def tool; end
+          private_class_method memoize def self.build; end
+          protected
+          public(memoize(def shown; end))
+        end
+      RUBY
+
+      expect(table(source).map { |name, kind, _, _, visibility| [name, kind, visibility] })
+        .to eq([%w[total instance private], %w[deep instance private], %w[tool module_function public],
+                %w[build singleton private], %w[shown instance public]])
     end
   end
 end

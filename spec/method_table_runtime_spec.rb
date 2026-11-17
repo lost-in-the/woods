@@ -321,6 +321,23 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
         memoize def hidden; end
       end
     RUBY
+    'a definition in a wrapper that returns its name, passed to a visibility call' => <<~RUBY,
+      module Util
+        def self.memoize(name)
+          name
+        end
+
+        def self.cache(name)
+          name
+        end
+        private memoize def total; end
+        private memoize cache def deep; end
+        module_function cache def tool; end
+        private_class_method memoize def self.build; end
+        protected
+        public(memoize(def shown; end))
+      end
+    RUBY
     'a conditional inside class << self' => <<~RUBY
       class Account
         class << self
@@ -335,8 +352,10 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
 
   # [owner, side, name] => [visibility, definition line], from the table.
   # Two entries for one method (a dead definition beside the live one) fail.
-  def table_facts(source)
-    described_class.call(source).each_with_object({}) do |entry, facts|
+  def table_facts(source, lines: nil)
+    entries = described_class.call(source)
+    entries = entries.select { |entry| lines.include?(entry['line']) } if lines
+    entries.each_with_object({}) do |entry, facts|
       owner, name, visibility, line = entry.values_at('owner', 'name', 'visibility', 'line')
       sides = { 'instance' => { instance: visibility }, 'singleton' => { singleton: visibility },
                 'module_function' => { instance: 'private', singleton: visibility } }.fetch(entry['kind'])
@@ -428,6 +447,41 @@ RSpec.describe Woods::MethodTable, 'against the Ruby runtime' do
       namespace = Module.new
       expect { namespace.module_eval(source) }.to raise_error(NameError, /helper/)
       expect(table_facts(source)).to eq(defined_facts(namespace))
+    end
+  end
+
+  # Alternatives are two entries for one method, so each is compared with
+  # Ruby on the branch that defines it: FLAG chooses the branch.
+  {
+    'a visibility call in one branch of an if' => [<<~RUBY, { true => [3], false => [5] }],
+      class Post
+        if FLAG
+          def x; end
+        else
+          private def x; end
+        end
+      end
+    RUBY
+    'module_function after alternatives' => [<<~RUBY, { true => [3, 8], false => [5, 8] }]
+      module Util
+        if FLAG
+          def x; end
+        else
+          def x; end
+        end
+        module_function :x
+        def y; end
+      end
+    RUBY
+  }.each do |label, (source, taken)|
+    it "agrees with Ruby on each branch for #{label}" do
+      taken.each do |flag, lines|
+        namespace = Module.new
+        namespace.const_set(:FLAG, flag)
+        namespace.module_eval(source)
+
+        expect(table_facts(source, lines: lines)).to eq(defined_facts(namespace))
+      end
     end
   end
 end
